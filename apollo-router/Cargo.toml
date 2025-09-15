@@ -157,7 +157,8 @@ opentelemetry_sdk = { version = "0.30.0", default-features = false, features = [
     "spec_unstable_metrics_views",
     "experimental_trace_batch_span_processor_with_async_runtime",
     "metrics",
-    "experimental_metrics_custom_reader"
+    "experimental_metrics_custom_reader",
+    "experimental_metrics_periodicreader_with_async_runtime",
 ] }
 opentelemetry-aws = "0.18.0"
 opentelemetry-datadog = { version = "0.18.0", features = ["agent-sampling", "reqwest-client"] }
@@ -173,6 +174,7 @@ opentelemetry-otlp = { version = "0.30.0", default-features = false, features = 
     "metrics",
     "reqwest-client",
     "trace",
+    "tls"
 ] }
 opentelemetry-semantic-conventions = { version = "0.30.0", features = ["semconv_experimental"]}
 opentelemetry-zipkin = { version = "0.30.0", default-features = false, features = [

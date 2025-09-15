@@ -5,10 +5,14 @@ use std::time::Duration;
 
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::MetricExporterBuilder;
+use opentelemetry_otlp::{WithExportConfig, WithTonicConfig};
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::metrics::PeriodicReader;
+use opentelemetry_sdk::metrics::{Aggregation, Instrument, Stream};
+use opentelemetry_sdk::runtime;
+use prometheus::exponential_buckets;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
+use tonic::transport::ClientTlsConfig;
 use tower::BoxError;
 use url::Url;
 
@@ -21,10 +25,18 @@ use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::otlp::Protocol;
+use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::plugins::telemetry::otlp::process_endpoint;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
 pub(crate) mod histogram;
 pub(crate) mod studio;
+
+fn default_buckets() -> Vec<f64> {
+    vec![
+        0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
+    ]
+}
 
 impl MetricsConfigurator for Config {
     fn enabled(&self) -> bool {
@@ -103,26 +115,76 @@ impl Config {
         tracing::debug!(endpoint = %endpoint, "creating Apollo OTLP metrics exporter");
         let mut metadata = MetadataMap::new();
         metadata.insert("apollo.api.key", key.parse()?);
-        let exporter = match otlp_protocol {
-            Protocol::Grpc => MetricExporterBuilder::new().with_tonic().build()?,
+        let exporter: opentelemetry_otlp::MetricExporter = match otlp_protocol {
+            Protocol::Grpc => MetricExporterBuilder::new()
+                .with_tonic()
+                .with_tls_config(ClientTlsConfig::new().with_native_roots())
+                .with_endpoint(endpoint.as_str())
+                .with_timeout(batch_processor.max_export_timeout)
+                .with_metadata(metadata.clone())
+                .with_temporality(opentelemetry_sdk::metrics::Temporality::Delta)
+                .with_compression(opentelemetry_otlp::Compression::Gzip)
+                .build()?,
+
             // While Apollo doesn't use the HTTP protocol, we support it here for
             // use in tests to enable WireMock.
-            Protocol::Http => MetricExporterBuilder::new().with_http().build()?,
+            Protocol::Http => {
+                let maybe_endpoint = process_endpoint(
+                    &Some(endpoint.to_string()),
+                    &TelemetryDataKind::Metrics,
+                    &Protocol::Http,
+                )?;
+                let mut otlp_exporter = MetricExporterBuilder::new()
+                    .with_http()
+                    .with_protocol(opentelemetry_otlp::Protocol::Grpc)
+                    .with_temporality(opentelemetry_sdk::metrics::Temporality::Delta)
+                    .with_timeout(batch_processor.max_export_timeout);
+                if let Some(endpoint) = maybe_endpoint {
+                    otlp_exporter = otlp_exporter.with_endpoint(endpoint);
+                }
+                otlp_exporter.build()?
+            }
         };
         // MetricExporterBuilder does not implement Clone, so we need to create a new builder for the realtime exporter
-        let realtime_exporter = match otlp_protocol {
-            Protocol::Grpc => MetricExporterBuilder::new().with_tonic().build()?,
-            Protocol::Http => MetricExporterBuilder::new().with_http().build()?,
+        let realtime_exporter: opentelemetry_otlp::MetricExporter = match otlp_protocol {
+            Protocol::Grpc => opentelemetry_otlp::MetricExporterBuilder::new()
+                .with_tonic()
+                .with_tls_config(ClientTlsConfig::new().with_native_roots())
+                .with_endpoint(endpoint.as_str())
+                .with_timeout(batch_processor.max_export_timeout)
+                .with_metadata(metadata.clone())
+                .with_temporality(opentelemetry_sdk::metrics::Temporality::Delta)
+                .with_compression(opentelemetry_otlp::Compression::Gzip)
+                .build()?,
+            Protocol::Http => {
+                let maybe_endpoint = process_endpoint(
+                    &Some(endpoint.to_string()),
+                    &TelemetryDataKind::Metrics,
+                    &Protocol::Http,
+                )?;
+                let mut otlp_exporter = opentelemetry_otlp::MetricExporterBuilder::new()
+                    .with_http()
+                    .with_protocol(opentelemetry_otlp::Protocol::Grpc)
+                    .with_temporality(opentelemetry_sdk::metrics::Temporality::Delta)
+                    .with_timeout(batch_processor.max_export_timeout);
+                if let Some(endpoint) = maybe_endpoint {
+                    otlp_exporter = otlp_exporter.with_endpoint(endpoint);
+                }
+                otlp_exporter.build()?
+            }
         };
-        let default_reader = PeriodicReader::builder(exporter)
+        let default_reader = opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader::builder(exporter, runtime::Tokio)
             .with_interval(Duration::from_secs(60))
+            .with_timeout(batch_processor.max_export_timeout)
             .build();
 
-        let realtime_reader = PeriodicReader::builder(realtime_exporter)
+        let realtime_reader = opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader::builder(realtime_exporter, runtime::Tokio)
             .with_interval(batch_processor.scheduled_delay)
+            .with_timeout(batch_processor.max_export_timeout)
             .build();
 
-        let resource = Resource::builder().with_attributes([
+        let resource = Resource::builder().with_attributes
+        ([
             KeyValue::new("apollo.router.id", router_id()),
             KeyValue::new("apollo.graph.ref", reference.to_string()),
             KeyValue::new("apollo.schema.id", schema_id.to_string()),
@@ -136,17 +198,44 @@ impl Config {
             ),
             KeyValue::new("apollo.client.host", hostname()?),
             KeyValue::new("apollo.client.uname", get_uname()?),
-        ]).build();
+        ])
+        .build();
+
+        let view_default_aggregation = |_i: &Instrument| {
+            Some(
+                Stream::builder()
+                    .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                        boundaries: default_buckets(),
+                        record_min_max: true,
+                    })
+                    .build()
+                    .unwrap(),
+            )
+        };
+
+        let view_custom_aggregation = |_i: &Instrument| {
+            Some(
+                Stream::builder()
+                    .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                        boundaries: exponential_buckets(0.001399084909, 1.1, 129).unwrap(),
+                        record_min_max: true,
+                    })
+                    .build()
+                    .unwrap(),
+            )
+        };
 
         builder.apollo_meter_provider_builder = builder
             .apollo_meter_provider_builder
             .with_reader(default_reader)
-            .with_resource(resource.clone());
+            .with_resource(resource.clone())
+            .with_view(view_default_aggregation);
 
         builder.apollo_realtime_meter_provider_builder = builder
             .apollo_realtime_meter_provider_builder
             .with_reader(realtime_reader)
-            .with_resource(resource.clone());
+            .with_resource(resource.clone())
+            .with_view(view_custom_aggregation);
         Ok(builder)
     }
 
