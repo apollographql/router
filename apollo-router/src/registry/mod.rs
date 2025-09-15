@@ -120,16 +120,27 @@ async fn pull_oci(
     })
 }
 
+/// The oci reference may not contain the protocol, only hostname[:port]. As a result, 
+/// in order to test locally without SSL, either (1) protocol needs to be exposed as an
+/// env var or (2) protocol needs to be inferred from hostname. Rather than introduce a
+/// largely unused configuration option.
+async fn infer_oci_protocol(registry: &str) -> ClientProtocol {
+    let host = registry
+        .split(":")
+        .next()
+        .expect("host must be provided");
+    if host == "localhost" || host == "127.0.0.1" {
+        ClientProtocol::Http
+    } else {
+        ClientProtocol::Https
+    }
+}
+
 /// Fetch an OCI bundle
 pub(crate) async fn fetch_oci(oci_config: OciConfig) -> Result<OciContent, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
     let auth = build_auth(&reference, &oci_config.apollo_key);
-    let host = reference.registry().split(":").next().expect("host must be provided");
-    let protocol = if host == "localhost" || host == "127.0.0.1" {
-        ClientProtocol::Http
-    } else {
-        ClientProtocol::Https
-    };
+    let protocol = infer_oci_protocol(reference.registry()).await;
 
     tracing::debug!(
         "prepared to fetch schema from oci over {:?}, auth anonymous? {:?}",
