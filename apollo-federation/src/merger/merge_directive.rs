@@ -15,7 +15,6 @@ use crate::merger::merge::Sources;
 use crate::merger::merge::map_sources;
 use crate::schema::position::DirectiveArgumentDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
-use crate::schema::position::HasDescription;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
@@ -204,11 +203,10 @@ impl Merger {
         let Some(target) = self.merged.get_directive_definition(name) else {
             bail!("Directive definition not found in supergraph");
         };
-        target.set_description(&mut self.merged, def.description.clone())?;
-        target.set_repeatable(&mut self.merged, def.repeatable)?;
-        target.add_locations(&mut self.merged, &def.locations)?;
 
-        // TODO: add_arguments_shallow may or may not be the right choice since there is only one source
+        // This replaces the calls to target.set_description, target.set_repeatable, and target.add_locations in the JS implementation
+        target.insert(&mut self.merged, def.clone())?;
+
         let mut sources: Sources<Node<DirectiveDefinition>> = Default::default();
         sources.insert(0, Some(def.clone()));
         self.add_arguments_shallow_placeholder(&sources, &target);
@@ -259,11 +257,13 @@ impl Merger {
                 return Ok(());
             };
 
-            if repeatable.is_none() {
+            if let Some(val) = repeatable {
+                if val != source.repeatable {
+                    inconsistent_repeatable = true;
+                    repeatable = Some(false);
+                }
+            } else {
                 repeatable = Some(source.repeatable);
-            } else if repeatable.unwrap() != source.repeatable {
-                inconsistent_repeatable = true;
-                repeatable = Some(false);
             }
 
             let source_locations = extract_executable_locations(source);
