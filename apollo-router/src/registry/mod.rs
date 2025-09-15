@@ -124,7 +124,7 @@ async fn pull_oci(
 /// in order to test locally without SSL, either (1) protocol needs to be exposed as an
 /// env var or (2) protocol needs to be inferred from hostname. Rather than introduce a
 /// largely unused configuration option, this function checks the hostname for local
-/// development/testing and disables SSL.
+/// development/testing and disables SSL accordingly.
 async fn infer_oci_protocol(registry: &str) -> ClientProtocol {
     let host = registry.split(":").next().expect("host must be provided");
     if host == "localhost" || host == "127.0.0.1" {
