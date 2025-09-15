@@ -1,5 +1,5 @@
-### Split Apollo trace/metrics exporter configs ([PR #8258](https://github.com/apollographql/router/pull/8258))
-The config related to the exporting of Apollo metrics and traces has been separated so that the various configuration can be fine-tuned for each of the Apollo exporters. The config has changed from:
+### Split Apollo trace/metrics batch processor configs ([PR #8258](https://github.com/apollographql/router/pull/8258))
+The config related to the exporting of Apollo metrics and traces has been separated so that the various configuration can be fine-tuned for each of the Apollo batch processors. The config has changed from:
 
 ```yaml
 telemetry:

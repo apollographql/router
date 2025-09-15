@@ -1,4 +1,4 @@
-description: Split apollo telemetry batch_processor config into separate traces and metrics exporters
+description: Split apollo telemetry batch_processor config into separate traces and metrics configs
 actions:
   # Apollo usage reports metrics config
   - type: copy
