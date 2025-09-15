@@ -371,7 +371,7 @@ libtest-mimic = "0.8.0"
 rstest = "0.26.0"
 
 # Remove when `dependencies.jsonschema` is updated
-jsonschema_next = { package = "jsonschema", version = "0.30.0", default-features = false }
+jsonschema_next = { package = "jsonschema", version = "0.33.0", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 rstack = { version = "0.3.3", features = ["dw"], default-features = false }
