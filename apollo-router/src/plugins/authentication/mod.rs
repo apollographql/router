@@ -176,6 +176,7 @@ enum Source {
 /// Authentication
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(rename = "AuthenticationConfig")]
 struct Conf {
     /// Router configuration
     router: Option<RouterConf>,
@@ -190,6 +191,7 @@ struct Conf {
 // JWTConf structure.
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(rename = "AuthenticationRouterConfig")]
 struct RouterConf {
     /// The JWT configuration
     jwt: JWTConf,
