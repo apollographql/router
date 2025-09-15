@@ -245,6 +245,7 @@ impl RedisMetricsCollector {
         meter
             .u64_observable_gauge("apollo.router.cache.redis.clients")
             .with_description("Number of active Redis clients")
+            .with_unit("{client}")
             .with_callback(move |gauge| {
                 gauge.observe(ACTIVE_CLIENT_COUNT.load(Ordering::Relaxed), &[]);
             })
