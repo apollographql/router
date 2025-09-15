@@ -1,7 +1,7 @@
 ### Split Apollo trace/metrics exporter configs ([PR #8258](https://github.com/apollographql/router/pull/8258))
 The config related to the exporting of Apollo metrics and traces has been separated so that the various configuration can be fine-tuned for each of the Apollo exporters. The config has changed from:
 
-```
+```yaml
 telemetry:
   apollo:
     batch_processor:
@@ -14,7 +14,7 @@ telemetry:
 
 To:
 
-```
+```yaml
 telemetry:
   apollo:
     traces:
@@ -34,10 +34,10 @@ telemetry:
           max_queue_size: 2048
         
     metrics:
-      # Config for Apollo OTLP metrics. Note that some metrics like config values have a non-configurable scheduled_delay.
+      # Config for Apollo OTLP metrics. 
       otlp:
         exporter:
-          scheduled_delay: 13s # only applies to realtime metrics (not config metrics)
+          scheduled_delay: 13s # This does not apply config gauge metrics, which have a non-configurable scheduled_delay.
           max_export_timeout: 30s
       # Config for Apollo usage report metrics.
       usage_reports:

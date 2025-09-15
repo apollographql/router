@@ -53,7 +53,7 @@ impl TracingConfigurator for Config {
             .build()?;
         Ok(builder.with_span_processor(
             BatchSpanProcessor::builder(exporter, NamedTokioRuntime::new("apollo-tracing"))
-                .with_batch_config(self.traces.otlp.exporter.clone().into()) // todo?? which one to pick
+                .with_batch_config(self.traces.otlp.exporter.clone().into())
                 .build(),
         ))
     }
