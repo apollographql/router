@@ -881,8 +881,16 @@ mod test {
         assert!(super::RedisCacheStorage::preprocess_urls(urls).is_err());
     }
 
+    /// Tests that `insert_multiple` and `get_multiple` are successful when run against clustered Redis.
+    ///
+    /// Clustered Redis works by hashing each key to one of 16384 hash slots, and assigning each hash
+    /// slot to a node. Operations which interact with multiple keys (`MGET`, `MSET`) *cannot* be
+    /// used on keys which map to different hash slots, even if those hash slots are on the same node.
+    ///
+    /// This test inserts data that is guaranteed to hash to different slots to verify that
+    /// `RedisCacheStorage` is well-behaved when operating against a cluster.
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_redis_cluster_insert_get_mget() -> Result<(), BoxError> {
+    async fn test_redis_storage_avoids_common_cross_slot_errors() -> Result<(), BoxError> {
         let config_json = json!({
             "urls": ["redis-cluster://localhost:7000"],
             "namespace": "test_redis_cluster",
@@ -899,7 +907,7 @@ mod test {
         }
         let storage = storage?;
 
-        // insert values which reflect different cluster slots to properly test cluster behavior
+        // insert values which reflect different cluster slots
         let mut data = HashMap::default();
         let expected_value = rand::rng().next_u32() as usize;
         let unique_cluster_slot_count = |data: &HashMap<RedisKey<String>, _>| {
