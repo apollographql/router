@@ -1,7 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
-snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -6682,6 +6681,40 @@ snapshot_kind: text
       },
       "type": "object"
     },
+    "PrometheusMetricsConfig": {
+      "additionalProperties": false,
+      "description": "Prometheus configuration",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Set to true to enable",
+          "type": "boolean"
+        },
+        "listen": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ListenAddr"
+            }
+          ],
+          "default": "127.0.0.1:9090",
+          "description": "The listen address"
+        },
+        "path": {
+          "default": "/metrics",
+          "description": "The path where prometheus will be exposed",
+          "type": "string"
+        },
+        "resource_selector": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ResourceSelectorConfig"
+            }
+          ],
+          "description": "resource_selector is used to select which resource to export with every metrics."
+        }
+      },
+      "type": "object"
+    },
     "Propagate": {
       "anyOf": [
         {
@@ -6877,8 +6910,11 @@ snapshot_kind: text
           "type": "boolean"
         },
         "timeout": {
-          "default": null,
-          "description": "Redis request timeout (default: 2ms)",
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Redis request timeout (default: 500ms)",
           "type": [
             "string",
             "null"
@@ -7160,8 +7196,11 @@ snapshot_kind: text
           "type": "boolean"
         },
         "timeout": {
-          "default": null,
-          "description": "Redis request timeout (default: 2ms)",
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Redis request timeout (default: 500ms)",
           "type": [
             "string",
             "null"
@@ -8442,9 +8481,16 @@ snapshot_kind: text
           ]
         },
         "invalidation": {
-          "$ref": "#/definitions/SubgraphInvalidationConfig",
-          "description": "#/definitions/SubgraphInvalidationConfig",
-          "nullable": true
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SubgraphInvalidationConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Invalidation configuration"
         },
         "private_id": {
           "default": null,
@@ -8455,9 +8501,16 @@ snapshot_kind: text
           ]
         },
         "redis": {
-          "$ref": "#/definitions/RedisCache",
-          "description": "#/definitions/RedisCache",
-          "nullable": true
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RedisCache"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Redis configuration"
         },
         "ttl": {
           "anyOf": [
@@ -9636,8 +9689,8 @@ snapshot_kind: text
           "default": {
             "enabled": true,
             "invalidation": null,
-            "postgres": null,
             "private_id": null,
+            "redis": null,
             "ttl": null
           },
           "description": "options applying to all subgraphs"
