@@ -707,9 +707,12 @@ impl RedisCacheStorage {
         }
 
         let result: Result<Vec<()>, _> = pipeline.all().await;
-        if let Err(err) = result {
-            tracing::trace!("caught error during insert: {err:?}");
-            self.record_error(&err);
+        match result {
+            Ok(values) => tracing::trace!("successfully inserted {} values", values.len()),
+            Err(err) => {
+                tracing::trace!("caught error during insert: {err:?}");
+                self.record_error(&err);
+            }
         }
     }
 
