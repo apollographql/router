@@ -120,15 +120,12 @@ async fn pull_oci(
     })
 }
 
-/// The oci reference may not contain the protocol, only hostname[:port]. As a result, 
+/// The oci reference may not contain the protocol, only hostname[:port]. As a result,
 /// in order to test locally without SSL, either (1) protocol needs to be exposed as an
 /// env var or (2) protocol needs to be inferred from hostname. Rather than introduce a
 /// largely unused configuration option.
 async fn infer_oci_protocol(registry: &str) -> ClientProtocol {
-    let host = registry
-        .split(":")
-        .next()
-        .expect("host must be provided");
+    let host = registry.split(":").next().expect("host must be provided");
     if host == "localhost" || host == "127.0.0.1" {
         ClientProtocol::Http
     } else {
@@ -343,5 +340,75 @@ mod tests {
         } else {
             panic!("expected missing title error, got {result:?}");
         }
+    }
+
+    #[tokio::test]
+    async fn test_infer_oci_protocol_localhost() {
+        let result = infer_oci_protocol("localhost").await;
+        assert_eq!(result, ClientProtocol::Http);
+    }
+
+    #[tokio::test]
+    async fn test_infer_oci_protocol_localhost_with_port() {
+        let result = infer_oci_protocol("localhost:5000").await;
+        assert_eq!(result, ClientProtocol::Http);
+    }
+
+    #[tokio::test]
+    async fn test_infer_oci_protocol_127_0_0_1() {
+        let result = infer_oci_protocol("127.0.0.1").await;
+        assert_eq!(result, ClientProtocol::Http);
+    }
+
+    #[tokio::test]
+    async fn test_infer_oci_protocol_127_0_0_1_with_port() {
+        let result = infer_oci_protocol("127.0.0.1:5000").await;
+        assert_eq!(result, ClientProtocol::Http);
+    }
+
+    #[tokio::test]
+    async fn test_infer_oci_protocol_docker_io() {
+        let result = infer_oci_protocol("docker.io").await;
+        assert_eq!(result, ClientProtocol::Https);
+    }
+
+    #[tokio::test]
+    async fn test_infer_oci_protocol_docker_io_with_port() {
+        let result = infer_oci_protocol("docker.io:443").await;
+        assert_eq!(result, ClientProtocol::Https);
+    }
+
+    #[tokio::test]
+    async fn test_infer_oci_protocol_apollo_registry() {
+        let result = infer_oci_protocol("registry.apollographql.com").await;
+        assert_eq!(result, ClientProtocol::Https);
+    }
+
+    #[tokio::test]
+    async fn test_infer_oci_protocol_apollo_registry_with_port() {
+        let result = infer_oci_protocol("registry.apollographql.com:443").await;
+        assert_eq!(result, ClientProtocol::Https);
+    }
+
+    #[tokio::test]
+    async fn test_infer_oci_protocol_custom_registry() {
+        let result = infer_oci_protocol("localhost.example.com").await;
+        assert_eq!(result, ClientProtocol::Https);
+    }
+
+    #[tokio::test]
+    async fn test_infer_oci_protocol_port_only() {
+        // This case will never pass the initial reference validation, but is
+        // included here as a second layer of security.
+        let result = infer_oci_protocol(":8080").await;
+        assert_eq!(result, ClientProtocol::Https);
+    }
+
+    #[tokio::test]
+    async fn test_infer_oci_protocol_empty_string() {
+        // This case will never pass the initial reference validation, but is
+        // included here as a second layer of security.
+        let result = infer_oci_protocol("").await;
+        assert_eq!(result, ClientProtocol::Https);
     }
 }
