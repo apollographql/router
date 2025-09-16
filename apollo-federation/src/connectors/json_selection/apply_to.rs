@@ -688,16 +688,6 @@ impl ApplyToInternal for WithRange<PathList> {
         input_shape: Shape,
         dollar_shape: Shape,
     ) -> Shape {
-        if input_shape.is_none() {
-            // If the previous path prefix evaluated to None, path evaluation
-            // must terminate because there is no JSON value to pass as the
-            // input_shape to the rest of the path, so the output shape of the
-            // whole path must be None. Any errors that might explain an
-            // unexpected None value should already have been reported as
-            // Shape::error_with_partial errors at a higher level.
-            return input_shape;
-        }
-
         match input_shape.case() {
             ShapeCase::One(shapes) => {
                 return Shape::one(
@@ -754,6 +744,21 @@ impl ApplyToInternal for WithRange<PathList> {
             // ensuring that some.nested.path is equivalent to
             // $.some.nested.path.
             PathList::Key(key, tail) => {
+                if input_shape.is_none() {
+                    // If the previous path prefix evaluated to None, path
+                    // evaluation must terminate because we cannot select a key
+                    // from a missing input value.
+                    //
+                    // Any errors that might explain an unexpected None value
+                    // should have been reported as Shape::error_with_partial
+                    // errors at a higher level.
+                    //
+                    // Although PathList::Key selections always refer to $.key,
+                    // the input_shape here has already been set to $ in
+                    // PathSelection::compute_output_shape.
+                    return input_shape;
+                }
+
                 let child_shape = field(&input_shape, key, context.source_id());
 
                 // Here input_shape was not None, but input_shape.field(key) was
@@ -786,6 +791,17 @@ impl ApplyToInternal for WithRange<PathList> {
             ),
 
             PathList::Method(method_name, method_args, tail) => {
+                if input_shape.is_none() {
+                    // If the previous path prefix evaluated to None, path
+                    // evaluation must terminate because -> methods never
+                    // execute against a missing/None input value.
+                    //
+                    // Any errors that might explain an unexpected None value
+                    // should have been reported as Shape::error_with_partial
+                    // errors at a higher level.
+                    return input_shape;
+                }
+
                 if let Some(method) = ArrowMethod::lookup(method_name) {
                     // Before connect/v0.3, we did not consult method.shape at
                     // all, and instead returned Unknown. Since this behavior
@@ -4909,14 +4925,18 @@ mod tests {
 
         assert_eq!(
             nullish_selection
-                .compute_output_shape(&shape_context, Shape::unknown([]))
+                // Since we're not using the input shape $root here, it should
+                // not be a problem to pass Shape::none() as $root.
+                .compute_output_shape(&shape_context, Shape::none())
                 .pretty_print(),
             "String",
         );
 
         assert_eq!(
             wtf_selection
-                .compute_output_shape(&shape_context, Shape::unknown([]))
+                // Since we're not using the input shape $root here, it should
+                // not be a problem to pass Shape::none() as $root.
+                .compute_output_shape(&shape_context, Shape::none())
                 .pretty_print(),
             "One<String, null>",
         );
