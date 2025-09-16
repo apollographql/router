@@ -5,6 +5,8 @@ use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 
+use http::HeaderName;
+use http::HeaderValue;
 use http::Request;
 use http::Response;
 use http::header::ACCESS_CONTROL_ALLOW_CREDENTIALS;
@@ -319,6 +321,45 @@ impl<S> CorsService<S> {
                 http::HeaderValue::from_str(&max_age_secs.to_string())
                     .unwrap_or_else(|_| http::HeaderValue::from_static("")),
             );
+        }
+
+        // FIXME: Do we always want to do this, even for preflight requests?
+        if let Some(pna) = policy
+            .map(|policy| policy.private_network_access.as_ref())
+            .flatten()
+        {
+            const ACCESS_CONTROL_PRIVATE_NETWORK: HeaderName =
+                HeaderName::from_static("access_control_private_network");
+
+            const ACCESS_CONTROL_PRIVATE_NETWORK_VALUE: http::HeaderValue =
+                HeaderValue::from_static("true");
+
+            response.headers_mut().insert(
+                ACCESS_CONTROL_PRIVATE_NETWORK,
+                ACCESS_CONTROL_PRIVATE_NETWORK_VALUE,
+            );
+
+            if let Some(name) = &pna.access_name {
+                const PRIVATE_NETWORK_ACCESS_NAME: HeaderName =
+                    HeaderName::from_static("private_network_access_name");
+
+                response.headers_mut().insert(
+                    PRIVATE_NETWORK_ACCESS_NAME,
+                    http::HeaderValue::from_str(name)
+                        .unwrap_or_else(|_| http::HeaderValue::from_static("")),
+                );
+            }
+
+            if let Some(id) = &pna.access_id {
+                const PRIVATE_NETWORK_ACCESS_ID: HeaderName =
+                    HeaderName::from_static("private_network_access_id");
+
+                response.headers_mut().insert(
+                    PRIVATE_NETWORK_ACCESS_ID,
+                    http::HeaderValue::from_str(id)
+                        .unwrap_or_else(|_| http::HeaderValue::from_static("")),
+                );
+            }
         }
 
         // Set Vary header - append to existing values instead of overwriting

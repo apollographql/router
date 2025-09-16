@@ -54,7 +54,7 @@
 //!       # methods not specified - uses global default [POST]
 //!     - origins: [https://app2.com]
 //!       methods: []  # Explicitly disable all methods
-//!     - origins: [https://app3.com]  
+//!     - origins: [https://app3.com]
 //!       methods: [GET, DELETE]  # Use specific methods
 //!     - origins: [https://api.example.com]
 //!       match_origins: ["^https://.*\\.example\\.com$"]  # Regex pattern for subdomains
@@ -62,6 +62,7 @@
 //!       # Uses global methods [POST]
 //! ```
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use regex::Regex;
@@ -98,6 +99,25 @@ pub(crate) struct Policy {
 
     /// The origins to allow requests from.
     pub(crate) origins: Vec<String>,
+
+    /// When `Some`, the `Access-Control-Allow-Private-Network` header will be added as well as the
+    /// respective headers contained within the policy.
+    pub(crate) private_network_access: Option<PrivateNetworkAccessPolicy>,
+}
+
+#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[serde(default)]
+pub(crate) struct PrivateNetworkAccessPolicy {
+    /// When `Some`, the `Private-Network-Access-ID` header will be added with the given ID.
+    /// The ID must be a 48-bit value presented as 6 hexadecimal bytes separated by colons, e.g.
+    /// `01:23:45:67:89:0A`.
+    pub(crate) access_id: Option<Arc<str>>,
+
+    /// When `Some`, the `Private-Network-Access-Name` header will be added with the given name.
+    /// The name can be at most 248 UTF-8 code units and match a RegEx equivalent to the ECMAScript
+    /// RegEx `/^[a-z0-9_-.]+$/.`
+    pub(crate) access_name: Option<Arc<str>>,
 }
 
 impl Default for Policy {
@@ -110,6 +130,7 @@ impl Default for Policy {
             max_age: None,
             methods: None,
             origins: default_origins(),
+            private_network_access: None,
         }
     }
 }
@@ -135,6 +156,7 @@ impl Policy {
         max_age: Option<Duration>,
         methods: Option<Vec<String>>,
         origins: Vec<String>,
+        private_network_access: Option<PrivateNetworkAccessPolicy>,
     ) -> Self {
         Self {
             allow_credentials,
@@ -144,6 +166,7 @@ impl Policy {
             max_age,
             methods,
             origins,
+            private_network_access,
         }
     }
 }
@@ -335,6 +358,45 @@ impl Cors {
                         return Err(
                             "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
                             with `Access-Control-Expose-Headers: *` in policy",
+                        );
+                    }
+                }
+
+                if let Some(pna) = &policy.private_network_access {
+                    if let Some(name) = &pna.access_name {
+                        if name.is_empty() {
+                            return Err(
+                                "Invalid CORS configuration: `Private-Network-Access-Name` header value must not be empty.",
+                            );
+                        }
+                        // NOTE: Simply checking the number of bytes in the string will suffice
+                        // (rather than chars) since all chars in the name are only a byte wide.
+                        if name.len() > 248 {
+                            return Err(
+                                "Invalid CORS configuration: `Private-Network-Access-Name` header value must be \
+                                no longer than 248 characters.",
+                            );
+                        }
+                        if name
+                            .chars()
+                            .any(|c| !matches!(c, 'A'..='z' | '0'..='9' | ' ' | '-' | '.'))
+                        {
+                            return Err(
+                                "Invalid CORS configuration: `Private-Network-Access-Name` header value can only \
+                                contain the characters a-z0-9_-.",
+                            );
+                        }
+                    }
+                    if let Some(id) = &pna.access_id
+                        && (id.len() != 17
+                            || id
+                                .split(':')
+                                .flat_map(str::chars)
+                                .any(|c| !c.is_ascii_hexdigit()))
+                    {
+                        return Err(
+                            "Invalid CORS configuration: `Private-Network-Access-ID` header value must be \
+                            a 48-bit value presented as 6 hexadecimal bytes separated by colons",
                         );
                     }
                 }
