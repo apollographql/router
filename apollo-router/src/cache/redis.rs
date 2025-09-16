@@ -1,11 +1,9 @@
 use std::collections::HashMap;
 use std::fmt;
-use std::iter::repeat_n;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
-use std::time::Instant;
 
 use fred::clients::Client;
 use fred::clients::Pipeline;
@@ -642,8 +640,8 @@ impl RedisCacheStorage {
             self.inner
                 .mget(keys)
                 .await
-                .inspect_err(|err| self.record_error(&err))
-                .unwrap_or_else(|| vec![None; len])
+                .inspect_err(|err| self.record_error(err))
+                .unwrap_or_else(|_| vec![None; len])
         }
     }
 
