@@ -125,7 +125,10 @@ fn cors_single_origin_config() {
     let oc = &policies[0];
     assert_eq!(oc.origins, Arc::from(["https://trusted.com".into()]));
     assert!(oc.allow_credentials.unwrap());
-    assert_eq!(oc.allow_headers, Arc::from(["content-type".into(), "authorization".into()]));
+    assert_eq!(
+        oc.allow_headers,
+        Arc::from(["content-type".into(), "authorization".into()])
+    );
     assert_eq!(oc.expose_headers, Arc::from(["x-custom-header".into()]));
     assert_eq!(oc.methods, Some(Arc::from(["GET".into(), "POST".into()])));
 }
