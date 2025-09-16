@@ -20,7 +20,6 @@ use fred::prelude::HeartbeatInterface;
 use fred::prelude::KeysInterface;
 use fred::prelude::Pool as RedisPool;
 use fred::prelude::TcpConfig;
-// use fred::prelude::TracingConfig;
 use fred::types::Builder;
 use fred::types::Expiration;
 use fred::types::FromValue;
@@ -33,6 +32,7 @@ use fred::types::config::TlsHostMapping;
 use fred::types::config::UnresponsiveConfig;
 use fred::types::scan::ScanResult;
 use futures::Stream;
+use futures::future::join_all;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::task::AbortHandle;
 use tower::BoxError;
@@ -346,13 +346,6 @@ impl RedisCacheStorage {
             .with_performance_config(|config| {
                 config.default_command_timeout = timeout;
             })
-            // .with_config(|config| {
-            //     config.tracing = TracingConfig {
-            //         enabled: true,
-            //         default_tracing_level: tracing::Level::INFO,
-            //         full_tracing_level: tracing::Level::INFO,
-            //     };
-            // })
             .set_policy(ReconnectPolicy::new_exponential(0, 1, 2000, 5))
             .build_pool(pool_size)?;
 
@@ -612,9 +605,6 @@ impl RedisCacheStorage {
             }
 
             // then we query all the key groups at the same time
-
-            let now = Instant::now();
-            // let num_fetches = h.len();
             let mut tasks = Vec::new();
             for (_shard, (indexes, keys)) in h {
                 // NB: use replica for fetch
@@ -625,21 +615,11 @@ impl RedisCacheStorage {
                     (indexes, result)
                 });
             }
-            let results = futures::future::join_all(tasks).await;
-            f64_histogram_with_unit!(
-                "apollo.router.cache.fetch.duration",
-                "Duration of parallel clustered cache fetch",
-                "s",
-                now.elapsed().as_secs_f64(),
-                uses_replicas = true,
-                storage = "redis"
-            );
 
             // then we have to assemble the results, by making sure that the values are in the same order as
             // the keys argument's order
-            let now = Instant::now();
             let mut result = vec![None; len];
-            for (indexes, result_values) in results.into_iter() {
+            for (indexes, result_values) in join_all(tasks).await {
                 match result_values {
                     Ok(values) => {
                         for (index, value) in indexes.into_iter().zip(values.into_iter()) {
@@ -651,42 +631,19 @@ impl RedisCacheStorage {
                     }
                 }
             }
-
-            f64_histogram_with_unit!(
-                "apollo.router.cache.fetch_manipulation.duration",
-                "Duration of fetch manipulation",
-                "s",
-                now.elapsed().as_secs_f64(),
-                storage = "redis"
-            );
             result
-        } else if keys.len() == 1 {
-            let key = keys.into_iter().next().unwrap();
-            let res = self
-                .inner
-                .get::<RedisValue<V>, _>(self.make_key(key))
-                .await
-                .inspect_err(|e| self.record_error(e))
-                .ok();
-            vec![res]
         } else {
-            let num_elements = keys.len();
-            let result: Result<Vec<Option<RedisValue<V>>>, RedisError> = self
-                .inner
-                .mget(
-                    keys.into_iter()
-                        .map(|k| self.make_key(k))
-                        .collect::<Vec<_>>(),
-                )
-                .await;
+            let len = keys.len();
+            let keys = keys
+                .into_iter()
+                .map(|k| self.make_key(k))
+                .collect::<Vec<_>>();
 
-            match result {
-                Ok(values) => values,
-                Err(err) => {
-                    self.record_error(&err);
-                    repeat_n(None, num_elements).collect()
-                }
-            }
+            self.inner
+                .mget(keys)
+                .await
+                .inspect_err(|err| self.record_error(&err))
+                .unwrap_or_else(|| vec![None; len])
         }
     }
 
