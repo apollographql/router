@@ -317,7 +317,7 @@ impl Exporter {
         let memory_profiling_info = if cfg!(target_family = "unix") {
             "Memory Profiling: Enabled (jemalloc profiling available)"
         } else {
-            "Memory Profiling: Limited (requires Linux + jemalloc)"
+            "Memory Profiling: Not available - Heap dumps require Linux platform with jemalloc"
         };
 
         let manifest = format!(

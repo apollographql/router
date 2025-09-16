@@ -82,7 +82,7 @@ pub(crate) async fn collect() -> DiagnosticsResult<String> {
     {
         info.push_str("JEMALLOC MEMORY STATISTICS\n");
         info.push_str("-------------------------\n");
-        info.push_str("Jemalloc statistics: Not available on this platform\n");
+        info.push_str("Jemalloc statistics: not available on this platform\n");
         info.push('\n');
     }
 
@@ -172,7 +172,7 @@ fn collect_memory_info(info: &mut String, system: &System) {
 
     #[cfg(not(target_family = "unix"))]
     {
-        info.push_str("\nDetailed Memory Information: Not available on this platform\n");
+        info.push_str("\nDetailed Memory Information: not available on this platform\n");
     }
 }
 
@@ -579,7 +579,7 @@ fn collect_cpu_priority_info(info: &mut String) {
 
     #[cfg(not(target_os = "linux"))]
     {
-        info.push_str("CPU Priority Information: Not available on this platform\n");
+        info.push_str("CPU Priority Information: not available on this platform\n");
     }
 }
 
