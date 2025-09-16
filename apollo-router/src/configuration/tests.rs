@@ -91,12 +91,18 @@ fn cors_defaults() {
     let cors = Cors::builder().build();
     let policies = cors.policies.unwrap();
     assert_eq!(policies.len(), 1);
-    assert_eq!(policies[0].origins, ["https://studio.apollographql.com"]);
+    assert_eq!(
+        policies[0].origins,
+        Arc::from(["https://studio.apollographql.com".into()])
+    );
     assert!(
         !cors.allow_any_origin,
         "Allow any origin should be disabled by default"
     );
-    assert_eq!(cors.methods, ["GET", "POST", "OPTIONS"]);
+    assert_eq!(
+        cors.methods,
+        Arc::from(["GET".into(), "POST".into(), "OPTIONS".into()])
+    );
     assert!(cors.max_age.is_none());
 }
 
@@ -117,11 +123,11 @@ fn cors_single_origin_config() {
     let policies = cors.policies.unwrap();
     assert_eq!(policies.len(), 1);
     let oc = &policies[0];
-    assert_eq!(oc.origins, ["https://trusted.com"]);
+    assert_eq!(oc.origins, Arc::from(["https://trusted.com".into()]));
     assert!(oc.allow_credentials.unwrap());
-    assert_eq!(oc.allow_headers, ["content-type", "authorization"]);
-    assert_eq!(oc.expose_headers, ["x-custom-header"]);
-    assert_eq!(oc.methods, Some(vec!["GET".into(), "POST".into()]));
+    assert_eq!(oc.allow_headers, Arc::from(["content-type".into(), "authorization".into()]));
+    assert_eq!(oc.expose_headers, Arc::from(["x-custom-header".into()]));
+    assert_eq!(oc.methods, Some(Arc::from(["GET".into(), "POST".into()])));
 }
 
 #[test]

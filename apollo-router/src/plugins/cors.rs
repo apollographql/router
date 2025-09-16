@@ -2,6 +2,7 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
 
@@ -52,7 +53,7 @@ impl CorsLayer {
         if let Some(policies) = &config.policies {
             for policy in policies {
                 // Validate origin URLs
-                for origin in &policy.origins {
+                for origin in policy.origins.iter() {
                     http::HeaderValue::from_str(origin).map_err(|_| {
                         format!("origin '{origin}' is not valid: failed to parse header value")
                     })?;
@@ -175,14 +176,14 @@ impl<S> CorsService<S> {
 
         if let Some(policies) = &config.policies {
             for policy in policies.iter() {
-                for url in &policy.origins {
-                    if url == origin_str {
+                for url in policy.origins.iter() {
+                    if &**url == origin_str {
                         return Some(policy);
                     }
                 }
 
                 if !policy.match_origins.is_empty() {
-                    for regex in &policy.match_origins {
+                    for regex in policy.match_origins.iter() {
                         if regex.is_match(origin_str) {
                             return Some(policy);
                         }
@@ -401,7 +402,7 @@ impl<S> CorsService<S> {
     }
 }
 
-fn parse_values<T>(values_to_parse: &[String], error_description: &str) -> Result<Vec<T>, String>
+fn parse_values<T>(values_to_parse: &[Arc<str>], error_description: &str) -> Result<Vec<T>, String>
 where
     T: std::str::FromStr,
     <T as std::str::FromStr>::Err: std::fmt::Display,
@@ -651,9 +652,9 @@ mod tests {
         let cors = Cors {
             allow_any_origin: false,
             allow_credentials: false,
-            allow_headers: vec![],
+            allow_headers: Arc::new([]),
             expose_headers: None,
-            methods: vec!["GET".into(), "POST".into(), "PUT".into()],
+            methods: Arc::new(["GET".into(), "POST".into(), "PUT".into()]),
             max_age: None,
             policies: None,
         };

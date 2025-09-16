@@ -79,10 +79,10 @@ pub(crate) struct Policy {
     pub(crate) allow_credentials: Option<bool>,
 
     /// The headers to allow for these origins
-    pub(crate) allow_headers: Vec<String>,
+    pub(crate) allow_headers: Arc<[Arc<str>]>,
 
     /// Which response headers should be made available to scripts running in the browser
-    pub(crate) expose_headers: Vec<String>,
+    pub(crate) expose_headers: Arc<[Arc<str>]>,
 
     /// Regex patterns to match origins against.
     #[serde(with = "serde_regex")]
@@ -95,10 +95,10 @@ pub(crate) struct Policy {
     pub(crate) max_age: Option<Duration>,
 
     /// Allowed request methods for these origins.
-    pub(crate) methods: Option<Vec<String>>,
+    pub(crate) methods: Option<Arc<[Arc<str>]>>,
 
     /// The origins to allow requests from.
-    pub(crate) origins: Vec<String>,
+    pub(crate) origins: Arc<[Arc<str>]>,
 
     /// When `Some`, the `Access-Control-Allow-Private-Network` header will be added as well as the
     /// respective headers contained within the policy.
@@ -124,8 +124,8 @@ impl Default for Policy {
     fn default() -> Self {
         Self {
             allow_credentials: None,
-            allow_headers: Vec::new(),
-            expose_headers: Vec::new(),
+            allow_headers: Arc::new([]),
+            expose_headers: Arc::new([]),
             match_origins: Vec::new(),
             max_age: None,
             methods: None,
@@ -135,12 +135,12 @@ impl Default for Policy {
     }
 }
 
-fn default_origins() -> Vec<String> {
-    vec!["https://studio.apollographql.com".into()]
+fn default_origins() -> Arc<[Arc<str>]> {
+    Arc::new(["https://studio.apollographql.com".into()])
 }
 
-fn default_cors_methods() -> Vec<String> {
-    vec!["GET".into(), "POST".into(), "OPTIONS".into()]
+fn default_cors_methods() -> Arc<[Arc<str>]> {
+    Arc::new(["GET".into(), "POST".into(), "OPTIONS".into()])
 }
 
 // Currently, this is only used for testing.
@@ -160,12 +160,12 @@ impl Policy {
     ) -> Self {
         Self {
             allow_credentials,
-            allow_headers,
-            expose_headers,
+            allow_headers: allow_headers.into_iter().map(Arc::from).collect(),
+            expose_headers: expose_headers.into_iter().map(Arc::from).collect(),
             match_origins,
             max_age,
-            methods,
-            origins,
+            methods: methods.map(|methods| methods.into_iter().map(Arc::from).collect()),
+            origins: origins.into_iter().map(Arc::from).collect(),
             private_network_access,
         }
     }
@@ -192,14 +192,14 @@ pub(crate) struct Cors {
     /// - accept `x-apollo-operation-name` AND / OR `apollo-require-preflight`
     /// - defined `csrf` required headers in your yml configuration, as shown in the
     ///   `examples/cors-and-csrf/custom-headers.router.yaml` files.
-    pub(crate) allow_headers: Vec<String>,
+    pub(crate) allow_headers: Arc<[Arc<str>]>,
 
     /// Which response headers should be made available to scripts running in the browser,
     /// in response to a cross-origin request.
-    pub(crate) expose_headers: Option<Vec<String>>,
+    pub(crate) expose_headers: Option<Arc<[Arc<str>]>>,
 
     /// Allowed request methods. See module documentation for default behavior.
-    pub(crate) methods: Vec<String>,
+    pub(crate) methods: Arc<[Arc<str>]>,
 
     /// The `Access-Control-Max-Age` header value in time units
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
@@ -229,7 +229,9 @@ impl Cors {
         methods: Option<Vec<String>>,
         policies: Option<Vec<Policy>>,
     ) -> Self {
-        let global_methods = methods.unwrap_or_else(default_cors_methods);
+        let global_methods = methods.map_or_else(default_cors_methods, |methods| {
+            methods.into_iter().map(Arc::from).collect()
+        });
         let policies = policies.or_else(|| {
             let default_policy = Policy {
                 methods: Some(global_methods.clone()),
@@ -241,8 +243,11 @@ impl Cors {
         Self {
             allow_any_origin: allow_any_origin.unwrap_or_default(),
             allow_credentials: allow_credentials.unwrap_or_default(),
-            allow_headers: allow_headers.unwrap_or_default(),
-            expose_headers,
+            allow_headers: allow_headers.map_or_else(Default::default, |headers| {
+                headers.into_iter().map(Arc::from).collect()
+            }),
+            expose_headers: expose_headers
+                .map(|headers| headers.into_iter().map(Arc::from).collect()),
             max_age,
             methods: global_methods,
             policies,
@@ -281,15 +286,15 @@ impl Cors {
         // Check for wildcard origins in any Policy
         if let Some(policies) = &self.policies {
             for policy in policies {
-                if policy.origins.iter().any(|x| x == "*") {
+                if policy.origins.iter().any(|x| &**x == "*") {
                     return Err(
                         "Invalid CORS configuration: use `allow_any_origin: true` to set `Access-Control-Allow-Origin: *`",
                     );
                 }
 
                 // Validate that origins don't have trailing slashes (per CORS spec)
-                for origin in &policy.origins {
-                    if origin.ends_with('/') && origin != "/" {
+                for origin in policy.origins.iter() {
+                    if origin.ends_with('/') && &**origin != "/" {
                         return Err(
                             "Invalid CORS configuration: origins cannot have trailing slashes (a serialized origin has no trailing slash)",
                         );
@@ -300,14 +305,14 @@ impl Cors {
 
         if self.allow_credentials {
             // Check global fields for wildcards
-            if self.allow_headers.iter().any(|x| x == "*") {
+            if self.allow_headers.iter().any(|x| &**x == "*") {
                 return Err(
                     "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
                         with `Access-Control-Allow-Headers: *`",
                 );
             }
 
-            if self.methods.iter().any(|x| x == "*") {
+            if self.methods.iter().any(|x| &**x == "*") {
                 return Err(
                     "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
                     with `Access-Control-Allow-Methods: *`",
@@ -322,7 +327,7 @@ impl Cors {
             }
 
             if let Some(headers) = &self.expose_headers
-                && headers.iter().any(|x| x == "*")
+                && headers.iter().any(|x| &**x == "*")
             {
                 return Err(
                     "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
@@ -333,12 +338,12 @@ impl Cors {
 
         // Check per-policy fields for wildcards when policy-level credentials are enabled
         if let Some(policies) = &self.policies {
-            for policy in policies {
+            for policy in policies.iter() {
                 // Check if policy-level credentials override is enabled
                 let policy_credentials = policy.allow_credentials.unwrap_or(self.allow_credentials);
 
                 if policy_credentials {
-                    if policy.allow_headers.iter().any(|x| x == "*") {
+                    if policy.allow_headers.iter().any(|x| &**x == "*") {
                         return Err(
                             "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
                             with `Access-Control-Allow-Headers: *` in policy",
@@ -346,7 +351,7 @@ impl Cors {
                     }
 
                     if let Some(methods) = &policy.methods
-                        && methods.iter().any(|x| x == "*")
+                        && methods.iter().any(|x| &**x == "*")
                     {
                         return Err(
                             "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
@@ -354,7 +359,7 @@ impl Cors {
                         );
                     }
 
-                    if policy.expose_headers.iter().any(|x| x == "*") {
+                    if policy.expose_headers.iter().any(|x| &**x == "*") {
                         return Err(
                             "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
                             with `Access-Control-Expose-Headers: *` in policy",
@@ -913,7 +918,7 @@ policies:
         assert!(policies[0].methods.is_none());
 
         // Verify that the global methods are set correctly
-        assert_eq!(cors.methods, vec!["POST"]);
+        assert_eq!(cors.methods, Arc::from(["POST".into()]));
     }
 
     // Test that policy with Some([]) methods overrides global defaults
@@ -934,10 +939,10 @@ policies:
 
         // Verify that the policy has Some([]) methods (overrides global)
         let policies = cors.policies.unwrap();
-        assert_eq!(policies[0].methods, Some(vec![]));
+        assert_eq!(policies[0].methods, Some(Arc::from([])));
 
         // Verify that the global methods are set correctly
-        assert_eq!(cors.methods, vec!["POST", "PUT"]);
+        assert_eq!(cors.methods, Arc::from(["POST".into(), "PUT".into()]));
     }
 
     // Test that policy with Some([value]) methods uses those specific values
@@ -960,11 +965,11 @@ policies:
         let policies = cors.policies.unwrap();
         assert_eq!(
             policies[0].methods,
-            Some(vec!["GET".into(), "DELETE".into()])
+            Some(Arc::from(["GET".into(), "DELETE".into()]))
         );
 
         // Verify that the global methods are set correctly
-        assert_eq!(cors.methods, vec!["POST"]);
+        assert_eq!(cors.methods, Arc::from(["POST".into()]));
     }
 
     // Tests based on CORS specification table for credentials mode and Access-Control-Allow-Origin combinations
