@@ -688,16 +688,6 @@ impl ApplyToInternal for WithRange<PathList> {
         input_shape: Shape,
         dollar_shape: Shape,
     ) -> Shape {
-        if input_shape.is_none() {
-            // If the previous path prefix evaluated to None, path evaluation
-            // must terminate because there is no JSON value to pass as the
-            // input_shape to the rest of the path, so the output shape of the
-            // whole path must be None. Any errors that might explain an
-            // unexpected None value should already have been reported as
-            // Shape::error_with_partial errors at a higher level.
-            return input_shape;
-        }
-
         match input_shape.case() {
             ShapeCase::One(shapes) => {
                 return Shape::one(
@@ -754,6 +744,21 @@ impl ApplyToInternal for WithRange<PathList> {
             // ensuring that some.nested.path is equivalent to
             // $.some.nested.path.
             PathList::Key(key, tail) => {
+                if input_shape.is_none() {
+                    // If the previous path prefix evaluated to None, path
+                    // evaluation must terminate because we cannot select a key
+                    // from a missing input value.
+                    //
+                    // Any errors that might explain an unexpected None value
+                    // should have been reported as Shape::error_with_partial
+                    // errors at a higher level.
+                    //
+                    // Although PathList::Key selections always refer to $.key,
+                    // the input_shape here has already been set to $ in
+                    // PathSelection::compute_output_shape.
+                    return input_shape;
+                }
+
                 let child_shape = field(&input_shape, key, context.source_id());
 
                 // Here input_shape was not None, but input_shape.field(key) was
@@ -786,6 +791,17 @@ impl ApplyToInternal for WithRange<PathList> {
             ),
 
             PathList::Method(method_name, method_args, tail) => {
+                if input_shape.is_none() {
+                    // If the previous path prefix evaluated to None, path
+                    // evaluation must terminate because -> methods never
+                    // execute against a missing/None input value.
+                    //
+                    // Any errors that might explain an unexpected None value
+                    // should have been reported as Shape::error_with_partial
+                    // errors at a higher level.
+                    return input_shape;
+                }
+
                 if let Some(method) = ArrowMethod::lookup(method_name) {
                     // Before connect/v0.3, we did not consult method.shape at
                     // all, and instead returned Unknown. Since this behavior
@@ -1029,21 +1045,72 @@ impl ApplyToInternal for WithRange<LitExpr> {
             }
 
             LitExpr::OpChain(op, operands) => {
-                match op.as_ref() {
-                    LitOp::NullishCoalescing | LitOp::NoneCoalescing => {
-                        let shapes: Vec<Shape> = operands
-                            .iter()
-                            .map(|operand| {
-                                operand.compute_output_shape(
-                                    context,
-                                    input_shape.clone(),
-                                    dollar_shape.clone(),
-                                )
-                            })
-                            .collect();
+                let mut shapes: Vec<Shape> = operands
+                    .iter()
+                    .map(|operand| {
+                        operand.compute_output_shape(
+                            context,
+                            input_shape.clone(),
+                            dollar_shape.clone(),
+                        )
+                    })
+                    .collect();
 
-                        // Create a union of all possible shapes
-                        Shape::one(shapes, locations)
+                match op.as_ref() {
+                    LitOp::NullishCoalescing => {
+                        if let Some(last_shape) = shapes.pop() {
+                            if let Some(prefix) = match Shape::one(shapes.clone(), []).case() {
+                                ShapeCase::None => None,
+                                ShapeCase::Null => None,
+                                ShapeCase::One(shapes) => {
+                                    let filtered = shapes
+                                        .iter()
+                                        .filter(|shape| !shape.is_none() && !shape.is_null())
+                                        .cloned()
+                                        .collect::<Vec<_>>();
+                                    if filtered.is_empty() {
+                                        None
+                                    } else {
+                                        Some(Shape::one(filtered, locations.clone()))
+                                    }
+                                }
+                                _ => Some(Shape::one(shapes, locations.clone())),
+                            } {
+                                Shape::one([prefix, last_shape], locations)
+                            } else {
+                                last_shape
+                            }
+                        } else {
+                            Shape::one(shapes, locations)
+                        }
+                    }
+
+                    // Just like NullishCoalescing except null is not excluded.
+                    LitOp::NoneCoalescing => {
+                        if let Some(last_shape) = shapes.pop() {
+                            if let Some(prefix) = match Shape::one(shapes.clone(), []).case() {
+                                ShapeCase::None => None,
+                                ShapeCase::One(shapes) => {
+                                    let filtered = shapes
+                                        .iter()
+                                        .filter(|shape| !shape.is_none())
+                                        .cloned()
+                                        .collect::<Vec<_>>();
+                                    if filtered.is_empty() {
+                                        None
+                                    } else {
+                                        Some(Shape::one(filtered, locations.clone()))
+                                    }
+                                }
+                                _ => Some(Shape::one(shapes, locations.clone())),
+                            } {
+                                Shape::one([prefix, last_shape], locations)
+                            } else {
+                                last_shape
+                            }
+                        } else {
+                            Shape::one(shapes, locations)
+                        }
                     }
                 }
             }
@@ -4772,6 +4839,106 @@ mod tests {
             selection!("a ...$(b->match(['match', { b: 'world' }]) ?! null)", spec)
                 .apply_to(&json!({ "a": "hello", "b": "bogus" })),
             (Some(json!(null)), vec![]),
+        );
+    }
+
+    #[test]
+    fn nullish_coalescing_chains_should_have_predictable_shape() {
+        let spec = ConnectSpec::V0_3;
+
+        let chain = selection!("$(a ?? b ?? c)", spec);
+        assert_eq!(
+            chain.shape().pretty_print(),
+            "One<$root.a, $root.b, $root.c>",
+        );
+
+        let complex_chain = selection!(
+            r#"
+            ... $(
+                message?->echo({ __typename: "Good", message: @ }) ??
+                error?->echo({ __typename: "Bad", error: @ }) ??
+                null
+            )
+        "#,
+            spec
+        );
+        assert_eq!(
+            complex_chain.shape().pretty_print(),
+            "One<{ __typename: \"Good\", message: $root.*.message }, { __typename: \"Bad\", error: $root.*.error }, null>",
+        );
+
+        let complex_chain_no_fallback = selection!(
+            r#"
+            ... $(
+                message?->echo({ __typename: "Good", message: @ }) ??
+                error?->echo({ __typename: "Bad", error: @ })
+            )
+        "#,
+            spec
+        );
+        assert_eq!(
+            complex_chain_no_fallback.shape().pretty_print(),
+            "One<{ __typename: \"Good\", message: $root.*.message }, { __typename: \"Bad\", error: $root.*.error }, None>",
+        );
+    }
+
+    #[test]
+    fn wtf_operator_should_not_exclude_null_from_nullable_union_shape() {
+        let spec = ConnectSpec::V0_3;
+
+        // We're also testing the ?? operator here, to show the difference.
+        let nullish_selection = selection!("$($value ?? 'fallback')", spec);
+        let wtf_selection = selection!("$($value ?! 'fallback')", spec);
+
+        let mut vars = IndexMap::default();
+        vars.insert("$value".to_string(), json!(null));
+
+        assert_eq!(
+            nullish_selection.apply_with_vars(&json!({}), &vars),
+            (Some(json!("fallback")), vec![]),
+        );
+
+        assert_eq!(
+            wtf_selection.apply_with_vars(&json!({}), &vars),
+            (Some(json!(null)), vec![]),
+        );
+
+        let mut vars_with_string_value = IndexMap::default();
+        vars_with_string_value.insert("$value".to_string(), json!("fine"));
+
+        assert_eq!(
+            nullish_selection.apply_with_vars(&json!({}), &vars_with_string_value),
+            (Some(json!("fine")), vec![]),
+        );
+
+        assert_eq!(
+            wtf_selection.apply_with_vars(&json!({}), &vars_with_string_value),
+            (Some(json!("fine")), vec![]),
+        );
+
+        let shape_context = ShapeContext::new(SourceId::Other("JSONSelection".into()))
+            .with_spec(spec)
+            .with_named_shapes([(
+                "$value".to_string(),
+                Shape::one([Shape::string([]), Shape::null([]), Shape::none()], []),
+            )]);
+
+        assert_eq!(
+            nullish_selection
+                // Since we're not using the input shape $root here, it should
+                // not be a problem to pass Shape::none() as $root.
+                .compute_output_shape(&shape_context, Shape::none())
+                .pretty_print(),
+            "String",
+        );
+
+        assert_eq!(
+            wtf_selection
+                // Since we're not using the input shape $root here, it should
+                // not be a problem to pass Shape::none() as $root.
+                .compute_output_shape(&shape_context, Shape::none())
+                .pretty_print(),
+            "One<String, null>",
         );
     }
 }
