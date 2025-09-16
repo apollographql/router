@@ -98,10 +98,10 @@ pub(crate) mod test_utils {
     use opentelemetry::KeyValue;
     use opentelemetry::StringValue;
     use opentelemetry::Value;
-    use opentelemetry_sdk::metrics::Aggregation;
+    use opentelemetry_sdk::metrics::aggregation::Aggregation;
     use opentelemetry_sdk::metrics::AttributeSet;
     use opentelemetry_sdk::metrics::InstrumentKind;
-    use opentelemetry_sdk::metrics::ManualReader;
+    use opentelemetry_sdk::metrics::reader::ManualReader;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
     use opentelemetry_sdk::metrics::Pipeline;
     use opentelemetry_sdk::metrics::data::DataPoint;

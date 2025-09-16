@@ -7,6 +7,7 @@ use opentelemetry_otlp::TonicExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::metrics::InstrumentKind;
 use opentelemetry_sdk::metrics::reader::TemporalitySelector;
+use opentelemetry_sdk::metrics::data::Temporality as SdkTemporality;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -291,17 +292,17 @@ pub(crate) enum Temporality {
 }
 
 pub(crate) struct CustomTemporalitySelector(
-    pub(crate) opentelemetry_sdk::metrics::data::Temporality,
+    pub(crate) SdkTemporality,
 );
 
 impl TemporalitySelector for CustomTemporalitySelector {
-    fn temporality(&self, kind: InstrumentKind) -> opentelemetry_sdk::metrics::data::Temporality {
+    fn temporality(&self, kind: InstrumentKind) -> SdkTemporality {
         // Up/down counters should always use cumulative temporality to ensure they are sent as aggregates
         // rather than deltas, which prevents drift issues.
         // See https://github.com/open-telemetry/opentelemetry-specification/blob/a1c13d59bb7d0fb086df2b3e1eaec9df9efef6cc/specification/metrics/sdk_exporters/otlp.md#additional-configuration for mor information
         match kind {
             InstrumentKind::UpDownCounter | InstrumentKind::ObservableUpDownCounter => {
-                opentelemetry_sdk::metrics::data::Temporality::Cumulative
+                SdkTemporality::Cumulative
             }
             _ => self.0,
         }
@@ -312,10 +313,10 @@ impl From<&Temporality> for Box<dyn TemporalitySelector> {
     fn from(value: &Temporality) -> Self {
         Box::new(match value {
             Temporality::Cumulative => {
-                CustomTemporalitySelector(opentelemetry_sdk::metrics::data::Temporality::Cumulative)
+                CustomTemporalitySelector(SdkTemporality::Cumulative)
             }
             Temporality::Delta => {
-                CustomTemporalitySelector(opentelemetry_sdk::metrics::data::Temporality::Delta)
+                CustomTemporalitySelector(SdkTemporality::Delta)
             }
         })
     }

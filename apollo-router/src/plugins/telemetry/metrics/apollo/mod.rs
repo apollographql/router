@@ -8,6 +8,7 @@ use opentelemetry_otlp::MetricsExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::PeriodicReader;
+use opentelemetry_sdk::metrics::data::Temporality;
 use opentelemetry_sdk::runtime;
 use prometheus::exponential_buckets;
 use sys_info::hostname;
@@ -148,7 +149,7 @@ impl Config {
         }
         .build_metrics_exporter(
             Box::new(CustomTemporalitySelector(
-                opentelemetry_sdk::metrics::data::Temporality::Delta,
+                Temporality::Delta,
             )),
             Box::new(
                 CustomAggregationSelector::builder()
@@ -185,7 +186,7 @@ impl Config {
         }
         .build_metrics_exporter(
             Box::new(CustomTemporalitySelector(
-                opentelemetry_sdk::metrics::data::Temporality::Delta,
+                Temporality::Delta,
             )),
             // This aggregation uses the Apollo histogram format where a duration, x, in μs is
             // counted in the bucket of index max(0, min(ceil(ln(x)/ln(1.1)), 383)).

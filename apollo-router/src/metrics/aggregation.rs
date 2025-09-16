@@ -9,7 +9,6 @@ use itertools::Itertools;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::AsyncInstrument;
 use opentelemetry::metrics::Callback;
-use opentelemetry::metrics::CallbackRegistration;
 use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Gauge;
 use opentelemetry::metrics::Histogram;
@@ -263,7 +262,7 @@ impl<T: Copy> SyncCounter<T> for AggregateCounter<T> {
 }
 
 pub(crate) struct AggregateObservableCounter<T> {
-    delegates: Vec<(ObservableCounter<T>, Option<DroppingUnregister>)>,
+    delegates: Vec<(ObservableCounter<T>)>,
 }
 
 impl<T: Copy> AsyncInstrument<T> for AggregateObservableCounter<T> {
@@ -303,7 +302,7 @@ impl<T: Copy> SyncUpDownCounter<T> for AggregateUpDownCounter<T> {
 }
 
 pub(crate) struct AggregateObservableUpDownCounter<T> {
-    delegates: Vec<(ObservableUpDownCounter<T>, Option<DroppingUnregister>)>,
+    delegates: Vec<(ObservableUpDownCounter<T>)>,
 }
 
 impl<T: Copy> AsyncInstrument<T> for AggregateObservableUpDownCounter<T> {
@@ -331,7 +330,7 @@ impl<T: Copy> SyncGauge<T> for AggregateGauge<T> {
 }
 
 pub(crate) struct AggregateObservableGauge<T> {
-    delegates: Vec<(ObservableGauge<T>, Option<DroppingUnregister>)>,
+    delegates: Vec<(ObservableGauge<T>)>,
 }
 
 impl<T: Copy> AsyncInstrument<T> for AggregateObservableGauge<T> {
@@ -388,7 +387,7 @@ macro_rules! aggregate_observable_instrument_fn {
                         )
                     };
                     let result: opentelemetry::metrics::Result<_> =
-                        Ok((delegate, registration.map(DroppingUnregister)));
+                        Ok((delegate));
                     result
                 })
                 .try_collect()?;
@@ -396,8 +395,6 @@ macro_rules! aggregate_observable_instrument_fn {
         }
     };
 }
-
-struct DroppingUnregister(Box<dyn CallbackRegistration>);
 
 macro_rules! aggregate_instrument_fn {
     ($name:ident, $ty:ty, $wrapper:ident, $implementation:ident) => {
@@ -424,13 +421,6 @@ macro_rules! aggregate_instrument_fn {
             Ok($wrapper::new(Arc::new($implementation { delegates })))
         }
     };
-}
-impl Drop for DroppingUnregister {
-    fn drop(&mut self) {
-        if let Err(e) = self.0.unregister() {
-            ::tracing::error!(error = %e, "failed to unregister callback")
-        }
-    }
 }
 
 impl InstrumentProvider for AggregateInstrumentProvider {
@@ -500,15 +490,6 @@ impl InstrumentProvider for AggregateInstrumentProvider {
         ObservableGauge,
         AggregateObservableGauge
     );
-
-    fn register_callback(
-        &self,
-        _instruments: &[Arc<dyn Any>],
-        _callbacks: Box<dyn Fn(&dyn Observer) + Send + Sync>,
-    ) -> opentelemetry::metrics::Result<Box<dyn CallbackRegistration>> {
-        // We may implement this in future, but for now we don't need it and it's a pain to implement because we need to unwrap the aggregate instruments and pass them to the meter provider that owns them.
-        unimplemented!("register_callback is not supported on AggregateInstrumentProvider");
-    }
 }
 
 #[cfg(test)]
