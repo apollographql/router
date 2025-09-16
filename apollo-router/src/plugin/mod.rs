@@ -225,30 +225,17 @@ impl PluginInit<serde_json::Value> {
     where
         T: for<'de> Deserialize<'de>,
     {
-        // Use conditional building to avoid passing None to previous_config
-        match self.previous_config {
-            Some(prev_config) => PluginInit::try_builder()
-                .config(self.config)
-                .previous_config(prev_config)
-                .supergraph_schema(self.supergraph_schema)
-                .supergraph_schema_id(self.supergraph_schema_id)
-                .supergraph_sdl(self.supergraph_sdl)
-                .subgraph_schemas(self.subgraph_schemas)
-                .notify(self.notify.clone())
-                .license(self.license)
-                .and_full_config(self.full_config)
-                .build(),
-            None => PluginInit::try_builder()
-                .config(self.config)
-                .supergraph_schema(self.supergraph_schema)
-                .supergraph_schema_id(self.supergraph_schema_id)
-                .supergraph_sdl(self.supergraph_sdl)
-                .subgraph_schemas(self.subgraph_schemas)
-                .notify(self.notify.clone())
-                .license(self.license)
-                .and_full_config(self.full_config)
-                .build(),
-        }
+        PluginInit::try_builder()
+            .config(self.config)
+            .and_previous_config(self.previous_config)
+            .supergraph_schema(self.supergraph_schema)
+            .supergraph_schema_id(self.supergraph_schema_id)
+            .supergraph_sdl(self.supergraph_sdl)
+            .subgraph_schemas(self.subgraph_schemas)
+            .notify(self.notify.clone())
+            .license(self.license)
+            .and_full_config(self.full_config)
+            .build()
     }
 }
 
