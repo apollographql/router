@@ -1056,6 +1056,18 @@ impl ApplyToInternal for WithRange<LitExpr> {
                     })
                     .collect();
 
+                if shapes.iter().any(|shape| match shape.case() {
+                    ShapeCase::Name(..) => true,
+                    ShapeCase::One(one)
+                        if one.iter().any(|s| matches!(s.case(), ShapeCase::Name(..))) =>
+                    {
+                        true
+                    }
+                    _ => false,
+                }) {
+                    return Shape::unknown(locations);
+                }
+
                 match op.as_ref() {
                     LitOp::NullishCoalescing => {
                         if let Some(last_shape) = shapes.pop() {
@@ -4846,11 +4858,8 @@ mod tests {
     fn nullish_coalescing_chains_should_have_predictable_shape() {
         let spec = ConnectSpec::V0_3;
 
-        let chain = selection!("$(a ?? b ?? c)", spec);
-        assert_eq!(
-            chain.shape().pretty_print(),
-            "One<$root.a, $root.b, $root.c>",
-        );
+        let chain = selection!("$(1 ?? true ?? null)", spec);
+        assert_eq!(chain.shape().pretty_print(), "One<1, true, null>",);
 
         let complex_chain = selection!(
             r#"
