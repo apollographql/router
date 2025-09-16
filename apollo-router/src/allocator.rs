@@ -55,6 +55,8 @@ union U {
     y: &'static libc::c_char,
 }
 
+// Enable jemalloc profiling with default settings if using jemalloc as the global allocator, however
+// disable profiling by default to avoid overhead unless explicitly enabled at runtime.
 #[allow(non_upper_case_globals)]
 #[unsafe(export_name = "_rjem_malloc_conf")]
 static malloc_conf: Option<&'static libc::c_char> = Some(unsafe {
