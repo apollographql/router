@@ -78,6 +78,14 @@ pub(crate) async fn collect() -> DiagnosticsResult<String> {
         info.push('\n');
     }
 
+    #[cfg(not(all(feature = "global-allocator", not(feature = "dhat-heap"), unix)))]
+    {
+        info.push_str("JEMALLOC MEMORY STATISTICS\n");
+        info.push_str("-------------------------\n");
+        info.push_str("Jemalloc statistics: Not available on this platform\n");
+        info.push('\n');
+    }
+
     // CPU information
     info.push_str("CPU INFORMATION\n");
     info.push_str("---------------\n");
@@ -160,6 +168,11 @@ fn collect_memory_info(info: &mut String, system: &System) {
                 }
             }
         }
+    }
+
+    #[cfg(not(target_family = "unix"))]
+    {
+        info.push_str("\nDetailed Memory Information: Not available on this platform\n");
     }
 }
 
@@ -566,7 +579,7 @@ fn collect_cpu_priority_info(info: &mut String) {
 
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = info; // Suppress unused variable warning
+        info.push_str("CPU Priority Information: Not available on this platform\n");
     }
 }
 
