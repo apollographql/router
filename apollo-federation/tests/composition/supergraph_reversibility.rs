@@ -6,14 +6,17 @@ use super::ServiceDefinition;
 use super::compose_as_fed2_subgraphs;
 
 fn compose_and_test_reversibility(subgraphs: &[ServiceDefinition<'_>]) {
-    let result = compose_as_fed2_subgraphs(subgraphs).unwrap();
+    let result = compose_as_fed2_subgraphs(subgraphs)
+        .expect("Subgraph schemas unexpectedly failed to compose.");
 
     let actual_subgraphs = Supergraph::new(&result.schema().schema().to_string())
-        .unwrap()
+        .expect("Supergraph schema unexpectedly failed to validate.")
         .extract_subgraphs()
-        .unwrap();
+        .expect("Subgraph schemas unexpectedly unable to be extracted from supergraph schema.");
     for expected_subgraph in subgraphs {
-        let actual_subgraph = actual_subgraphs.get(expected_subgraph.name).unwrap();
+        let actual_subgraph = actual_subgraphs
+            .get(expected_subgraph.name)
+            .expect("Expected subgraph name unexpectedly missing from extracted subgraphs.");
 
         // PORT_NOTE: In the JS version of subgraph extraction, the extracted subgraphs are created
         // with their `@link` on the schema definition instead of a schema extension (there was no
@@ -22,7 +25,7 @@ fn compose_and_test_reversibility(subgraphs: &[ServiceDefinition<'_>]) {
         // we don't have to work around that here as we did in the JS code.
         let expected_subgraph =
             Subgraph::parse(expected_subgraph.name, "", expected_subgraph.type_defs)
-                .unwrap()
+                .expect("Expected subgraph schema unexpectedly failed to parse.")
                 .into_fed2_test_subgraph(
                     // PORT_NOTE: In the JS code, `asFed2SubgraphDocument()` would always add the
                     // latest federation spec, and the `includeAllImports` argument would just
@@ -42,7 +45,7 @@ fn compose_and_test_reversibility(subgraphs: &[ServiceDefinition<'_>]) {
                     // to omit all imports.
                     true, true,
                 )
-                .unwrap();
+                .expect("Expected subgraph schema unexpectedly failed to convert to Fed 2.");
         let actual_schema = actual_subgraph.schema.schema().clone().into_inner();
         // PORT_NOTE: In the JS code, only `asFed2SubgraphDocument()` is called for the expected
         // schema, so link/federation spec definitions are not expanded, nor are federation
@@ -56,10 +59,13 @@ fn compose_and_test_reversibility(subgraphs: &[ServiceDefinition<'_>]) {
         // since it both expands link/federation spec definitions and adds federation operation
         // fields/types.
         let expected_schema = apollo_compiler::Schema::parse(
-            expected_subgraph.expand_links().unwrap().schema_string(),
+            expected_subgraph
+                .expand_links()
+                .expect("Expected subgraph schema unexpectedly failed @link expansion.")
+                .schema_string(),
             "expanded.graphql",
         )
-        .unwrap();
+        .expect("Expanded expected subgraph schema unexpectedly failed to parse.");
         let actual_schema = normalize_schema(actual_schema);
         let expected_schema = normalize_schema(expected_schema);
         assert_eq!(actual_schema.to_string(), expected_schema.to_string())
