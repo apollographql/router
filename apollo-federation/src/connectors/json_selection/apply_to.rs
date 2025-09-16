@@ -674,16 +674,17 @@ impl ApplyToInternal for WithRange<PathList> {
                         // ArrowMethod::As returns Some(json_object) where the
                         // keys of json_object are variable names to update, and
                         // the values are the values of those named variables.
-                        if method == ArrowMethod::As {
+                        if let (ArrowMethod::As, Some(JSON::Object(bindings))) =
+                            (method, result_opt.as_ref())
+                        {
                             let mut updated_vars = vars.clone();
 
-                            if let Some(JSON::Object(bindings)) = result_opt.as_ref() {
-                                for (var_name, var_value) in bindings {
-                                    updated_vars.insert(
-                                        KnownVariable::Local(var_name.as_str().to_string()),
-                                        (var_value, InputPath::empty().append(json!(var_name))),
-                                    );
-                                }
+                            for (var_name, var_value) in bindings {
+                                updated_vars.insert(
+                                    KnownVariable::Local(var_name.as_str().to_string()),
+                                    // Should this InputPath include prior path information?
+                                    (var_value, InputPath::empty().append(json!(var_name))),
+                                );
                             }
 
                             return tail
