@@ -56,9 +56,9 @@ The Apollo Runtime container image provides a production-ready router with sensi
     # The Apollo Runtime container comes with sensible defaults
     # Only create this file if you need custom configuration
     supergraph:
-        listen: 0.0.0.0:4000
+      listen: 0.0.0.0:4000
     health_check:
-        listen: 0.0.0.0:8088
+      listen: 0.0.0.0:8088
     cors:
       # Development setting - replace for production
       allow_any_origin: true
@@ -104,7 +104,7 @@ The MCP server is disabled by default. To enable it, set the `MCP_ENABLE` enviro
 In Railway dashboard:
 1. Go to your service's **Variables** tab
 2. Add `MCP_ENABLE` with value `1`
-3. Railway will automatically redeploy your service
+3. Railway automatically redeploys your service
 
 ### Get help
 

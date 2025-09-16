@@ -39,7 +39,8 @@ The fastest way to deploy the Apollo Router on Render is using the official temp
 
 4. Deploy: Click **Create Web Service** to start the deployment.
 
-5. Verify deployment: Once deployed, visit your service URL to confirm the router is running. You should see the router's GraphQL Playground or health check endpoint.
+5. Verify deployment: After the deployment finishes, visit your service URL to confirm the router is running. You should see the router's GraphQL Playground or health check endpoint.
+
 
 ## Option 2: Custom deployment
 
@@ -49,7 +50,7 @@ If you need more control over your deployment, you can set up a custom deploymen
 
 The Apollo Runtime container image provides a production-ready router with sensible defaults, eliminating the need for complex configuration in most cases.
 
-1. Fork the [router-template](https://github.com/apollographql/router-template) for the following files:
+1. Fork the [router-template](https://github.com/apollographql/router-template) repository.
 
 2. (Optional) Create a `router.yaml` configuration file for custom settings:
     
@@ -57,9 +58,9 @@ The Apollo Runtime container image provides a production-ready router with sensi
     # The Apollo Runtime container comes with sensible defaults
     # Only create this file if you need custom configuration
     supergraph:
-        listen: 0.0.0.0:4000
+      listen: 0.0.0.0:4000
     health_check:
-        listen: 0.0.0.0:8088
+      listen: 0.0.0.0:8088
     cors:
       # Development setting - replace for production
       allow_any_origin: true
