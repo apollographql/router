@@ -30,7 +30,7 @@ use url::Url;
 use super::apollo::Report;
 use super::apollo::SingleReport;
 use super::config::ApolloMetricsReferenceMode;
-use crate::plugins::telemetry::tracing::BatchProcessorConfig;
+use crate::plugins::telemetry::apollo::ApolloUsageReportsBatchProcessorConfiguration;
 
 const BACKOFF_INCREMENT: Duration = Duration::from_millis(50);
 const ROUTER_REPORT_TYPE_METRICS: &str = "metrics";
@@ -86,7 +86,7 @@ impl Sender {
 /// Retrying when sending fails.
 /// Sending periodically (in the case of metrics).
 pub(crate) struct ApolloExporter {
-    batch_config: BatchProcessorConfig,
+    batch_config: ApolloUsageReportsBatchProcessorConfiguration,
     endpoint: Url,
     apollo_key: String,
     header: proto::reports::ReportHeader,
@@ -99,7 +99,7 @@ pub(crate) struct ApolloExporter {
 impl ApolloExporter {
     pub(crate) fn new(
         endpoint: &Url,
-        batch_config: &BatchProcessorConfig,
+        batch_config: &ApolloUsageReportsBatchProcessorConfiguration,
         apollo_key: &str,
         apollo_graph_ref: &str,
         schema_id: &str,
