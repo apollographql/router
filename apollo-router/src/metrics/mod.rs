@@ -111,7 +111,7 @@ pub(crate) mod test_utils {
     use opentelemetry_sdk::metrics::data::Metric;
     use opentelemetry_sdk::metrics::data::ResourceMetrics;
     use opentelemetry_sdk::metrics::data::Sum;
-    use opentelemetry_sdk::metrics::data::Temporality;
+    use opentelemetry_sdk::metrics::Temporality;
     use opentelemetry_sdk::metrics::reader::AggregationSelector;
     use opentelemetry_sdk::metrics::reader::MetricReader;
     use opentelemetry_sdk::metrics::reader::TemporalitySelector;
@@ -149,15 +149,15 @@ pub(crate) mod test_utils {
             self.reader.register_pipeline(pipeline)
         }
 
-        fn collect(&self, rm: &mut ResourceMetrics) -> opentelemetry::metrics::Result<()> {
+        fn collect(&self, rm: &mut ResourceMetrics) -> opentelemetry_sdk::metrics::MetricResult<()> {
             self.reader.collect(rm)
         }
 
-        fn force_flush(&self) -> opentelemetry::metrics::Result<()> {
+        fn force_flush(&self) -> opentelemetry_sdk::metrics::MetricResult<()> {
             self.reader.force_flush()
         }
 
-        fn shutdown(&self) -> opentelemetry::metrics::Result<()> {
+        fn shutdown(&self) -> opentelemetry_sdk::metrics::MetricResult<()> {
             self.reader.shutdown()
         }
     }

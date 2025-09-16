@@ -1,11 +1,8 @@
-use std::any::Any;
 use std::borrow::Cow;
 use std::sync::Arc;
 
 use buildstructor::buildstructor;
 use opentelemetry::KeyValue;
-use opentelemetry::metrics::Callback;
-use opentelemetry::metrics::CallbackRegistration;
 use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Gauge;
 use opentelemetry::metrics::Histogram;
@@ -15,15 +12,12 @@ use opentelemetry::metrics::MeterProvider as OtelMeterProvider;
 use opentelemetry::metrics::ObservableCounter;
 use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
-use opentelemetry::metrics::Observer;
 use opentelemetry::metrics::UpDownCounter;
-use opentelemetry::metrics::noop::NoopMeterProvider;
 use regex::Regex;
 
 #[derive(Clone)]
 pub(crate) enum MeterProvider {
     Regular(opentelemetry_sdk::metrics::SdkMeterProvider),
-    Global(opentelemetry::global::GlobalMeterProvider),
 }
 
 impl MeterProvider {
@@ -43,14 +37,14 @@ impl MeterProvider {
             }
         }
     }
-    fn shutdown(&self) -> opentelemetry::metrics::Result<()> {
+    fn shutdown(&self) -> opentelemetry_sdk::metrics::MetricResult<()> {
         match self {
             MeterProvider::Regular(provider) => provider.shutdown(),
             MeterProvider::Global(_provider) => Ok(()),
         }
     }
 
-    fn force_flush(&self) -> opentelemetry::metrics::Result<()> {
+    fn force_flush(&self) -> opentelemetry_sdk::metrics::MetricResult<()> {
         match self {
             MeterProvider::Regular(provider) => provider.force_flush(),
             MeterProvider::Global(_provider) => Ok(()),
@@ -61,12 +55,6 @@ impl MeterProvider {
 impl From<opentelemetry_sdk::metrics::SdkMeterProvider> for MeterProvider {
     fn from(provider: opentelemetry_sdk::metrics::SdkMeterProvider) -> Self {
         MeterProvider::Regular(provider)
-    }
-}
-
-impl From<opentelemetry::global::GlobalMeterProvider> for MeterProvider {
-    fn from(provider: opentelemetry::global::GlobalMeterProvider) -> Self {
-        MeterProvider::Global(provider)
     }
 }
 
@@ -128,12 +116,12 @@ impl FilterMeterProvider {
         FilterMeterProvider::builder().delegate(delegate).build()
     }
 
-    pub(crate) fn shutdown(&self) -> opentelemetry::metrics::Result<()> {
+    pub(crate) fn shutdown(&self) -> opentelemetry_sdk::metrics::MetricResult<()> {
         self.delegate.shutdown()
     }
 
     #[allow(dead_code)]
-    pub(crate) fn force_flush(&self) -> opentelemetry::metrics::Result<()> {
+    pub(crate) fn force_flush(&self) -> opentelemetry_sdk::metrics::MetricResult<()> {
         self.delegate.force_flush()
     }
 }
@@ -149,23 +137,50 @@ macro_rules! filter_instrument_fn {
     ($name:ident, $ty:ty, $wrapper:ident) => {
         fn $name(
             &self,
-            name: Cow<'static, str>,
-            description: Option<Cow<'static, str>>,
-            unit: Option<Cow<'static, str>>,
-        ) -> opentelemetry::metrics::Result<$wrapper<$ty>> {
-            let mut builder = match (&self.deny, &self.allow) {
+            builder: opentelemetry::metrics::InstrumentBuilder<'_, $wrapper<$ty>>,
+        ) -> $wrapper<$ty> {
+            let name = builder.name.to_string();
+            match (&self.deny, &self.allow) {
                 // Deny match takes precedence over allow match
-                (Some(deny), _) if deny.is_match(&name) => self.noop.$name(name),
-                (_, Some(allow)) if !allow.is_match(&name) => self.noop.$name(name),
-                (_, _) => self.delegate.$name(name),
-            };
-            if let Some(description) = &description {
-                builder = builder.with_description(description.clone())
+                (Some(deny), _) if deny.is_match(&name) => self.noop.$name(builder.name).build(),
+                (_, Some(allow)) if !allow.is_match(&name) => self.noop.$name(builder.name).build(),
+                (_, _) => {
+                    let mut instrument_builder = self.delegate.$name(builder.name);
+                    if let Some(ref description) = builder.description {
+                        instrument_builder = instrument_builder.with_description(description.clone());
+                    }
+                    if let Some(ref unit) = builder.unit {
+                        instrument_builder = instrument_builder.with_unit(unit.clone());
+                    }
+                    instrument_builder.build()
+                },
             }
-            if let Some(unit) = &unit {
-                builder = builder.with_unit(unit.clone());
+        }
+    };
+}
+
+macro_rules! filter_histogram_fn {
+    ($name:ident, $ty:ty, $wrapper:ident) => {
+        fn $name(
+            &self,
+            builder: opentelemetry::metrics::HistogramBuilder<'_, $wrapper<$ty>>,
+        ) -> $wrapper<$ty> {
+            let name = builder.name.to_string();
+            match (&self.deny, &self.allow) {
+                // Deny match takes precedence over allow match
+                (Some(deny), _) if deny.is_match(&name) => self.noop.$name(builder.name).build(),
+                (_, Some(allow)) if !allow.is_match(&name) => self.noop.$name(builder.name).build(),
+                (_, _) => {
+                    let mut instrument_builder = self.delegate.$name(builder.name);
+                    if let Some(ref description) = builder.description {
+                        instrument_builder = instrument_builder.with_description(description.clone());
+                    }
+                    if let Some(ref unit) = builder.unit {
+                        instrument_builder = instrument_builder.with_unit(unit.clone());
+                    }
+                    instrument_builder.build()
+                },
             }
-            builder.try_init()
         }
     };
 }
@@ -174,29 +189,27 @@ macro_rules! filter_observable_instrument_fn {
     ($name:ident, $ty:ty, $wrapper:ident) => {
         fn $name(
             &self,
-            name: Cow<'static, str>,
-            description: Option<Cow<'static, str>>,
-            unit: Option<Cow<'static, str>>,
-            callback: Vec<Callback<$ty>>,
-        ) -> opentelemetry::metrics::Result<$wrapper<$ty>> {
-            let mut builder = match (&self.deny, &self.allow) {
+            builder: opentelemetry::metrics::AsyncInstrumentBuilder<'_, $wrapper<$ty>, $ty>,
+        ) -> $wrapper<$ty> {
+            let name = builder.name.to_string();
+            match (&self.deny, &self.allow) {
                 // Deny match takes precedence over allow match
-                (Some(deny), _) if deny.is_match(&name) => self.noop.$name(name),
-                (_, Some(allow)) if !allow.is_match(&name) => self.noop.$name(name),
-                (_, _) => self.delegate.$name(name),
-            };
-            if let Some(description) = &description {
-                builder = builder.with_description(description.clone());
+                (Some(deny), _) if deny.is_match(&name) => self.noop.$name(builder.name).build(),
+                (_, Some(allow)) if !allow.is_match(&name) => self.noop.$name(builder.name).build(),
+                (_, _) => {
+                    let mut instrument_builder = self.delegate.$name(builder.name);
+                    for callback in builder.callbacks {
+                        instrument_builder = instrument_builder.with_callback(callback);
+                    }
+                    if let Some(ref description) = builder.description {
+                        instrument_builder = instrument_builder.with_description(description.clone());
+                    }
+                    if let Some(ref unit) = builder.unit {
+                        instrument_builder = instrument_builder.with_unit(unit.clone());
+                    }
+                    instrument_builder.build()
+                },
             }
-            if let Some(unit) = &unit {
-                builder = builder.with_unit(unit.clone());
-            }
-
-            for callback in callback {
-                builder = builder.with_callback(callback);
-            }
-
-            builder.try_init()
         }
     };
 }
@@ -212,8 +225,8 @@ impl InstrumentProvider for FilteredInstrumentProvider {
     filter_observable_instrument_fn!(f64_observable_counter, f64, ObservableCounter);
     filter_observable_instrument_fn!(u64_observable_counter, u64, ObservableCounter);
 
-    filter_instrument_fn!(u64_histogram, u64, Histogram);
-    filter_instrument_fn!(f64_histogram, f64, Histogram);
+    filter_histogram_fn!(u64_histogram, u64, Histogram);
+    filter_histogram_fn!(f64_histogram, f64, Histogram);
 
     filter_instrument_fn!(i64_up_down_counter, i64, UpDownCounter);
     filter_instrument_fn!(f64_up_down_counter, f64, UpDownCounter);
@@ -227,21 +240,19 @@ impl InstrumentProvider for FilteredInstrumentProvider {
 }
 
 impl opentelemetry::metrics::MeterProvider for FilterMeterProvider {
-    fn versioned_meter(
-        &self,
-        name: impl Into<Cow<'static, str>>,
-        version: Option<impl Into<Cow<'static, str>>>,
-        schema_url: Option<impl Into<Cow<'static, str>>>,
-        attributes: Option<Vec<KeyValue>>,
-    ) -> Meter {
+    fn meter(&self, name: &'static str) -> Meter {
         Meter::new(Arc::new(FilteredInstrumentProvider {
-            noop: NoopMeterProvider::default().meter(""),
+            noop: opentelemetry::global::meter_provider().meter(""),
             delegate: self
                 .delegate
-                .versioned_meter(name, version, schema_url, attributes),
+                .versioned_meter(name, None::<&str>, None::<&str>, None),
             deny: self.deny.clone(),
             allow: self.allow.clone(),
         }))
+    }
+    fn meter_with_scope(&self, scope: opentelemetry::InstrumentationScope) -> Meter {
+        let provider = MeterProvider::default();
+        provider.meter_with_scope(scope)
     }
 }
 
