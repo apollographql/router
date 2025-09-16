@@ -4865,4 +4865,60 @@ mod tests {
             "One<{ __typename: \"Good\", message: $root.*.message }, { __typename: \"Bad\", error: $root.*.error }, None>",
         );
     }
+
+    #[test]
+    fn wtf_operator_should_not_exclude_null_from_nullable_union_shape() {
+        let spec = ConnectSpec::V0_3;
+
+        // We're also testing the ?? operator here, to show the difference.
+        let nullish_selection = selection!("$($value ?? 'fallback')", spec);
+        let wtf_selection = selection!("$($value ?! 'fallback')", spec);
+
+        let mut vars = IndexMap::default();
+        vars.insert("$value".to_string(), json!(null));
+
+        assert_eq!(
+            nullish_selection.apply_with_vars(&json!({}), &vars),
+            (Some(json!("fallback")), vec![]),
+        );
+
+        assert_eq!(
+            wtf_selection.apply_with_vars(&json!({}), &vars),
+            (Some(json!(null)), vec![]),
+        );
+
+        let mut vars_with_string_value = IndexMap::default();
+        vars_with_string_value.insert("$value".to_string(), json!("fine"));
+
+        assert_eq!(
+            nullish_selection.apply_with_vars(&json!({}), &vars_with_string_value),
+            (Some(json!("fine")), vec![]),
+        );
+
+        assert_eq!(
+            wtf_selection.apply_with_vars(&json!({}), &vars_with_string_value),
+            (Some(json!("fine")), vec![]),
+        );
+
+        let shape_context = ShapeContext::new(SourceId::Other("JSONSelection".into()))
+            .with_spec(spec)
+            .with_named_shapes([(
+                "$value".to_string(),
+                Shape::one([Shape::string([]), Shape::null([]), Shape::none()], []),
+            )]);
+
+        assert_eq!(
+            nullish_selection
+                .compute_output_shape(&shape_context, Shape::unknown([]))
+                .pretty_print(),
+            "String",
+        );
+
+        assert_eq!(
+            wtf_selection
+                .compute_output_shape(&shape_context, Shape::unknown([]))
+                .pretty_print(),
+            "One<String, null>",
+        );
+    }
 }
