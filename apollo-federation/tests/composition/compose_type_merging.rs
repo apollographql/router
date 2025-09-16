@@ -104,7 +104,16 @@ fn field_types_merges_nullable_and_non_nullable() {
         .expect("Expected API schema generation to succeed");
     
     // We expect `f` to be nullable (String, not String!)
-    assert_snapshot!(print_sdl(api_schema.schema()));
+    assert_snapshot!(print_sdl(api_schema.schema()), @r###"
+    type Query {
+      T: T!
+    }
+
+    type T {
+      id: ID!
+      f: String
+    }
+    "###);
 }
 
 #[test]
@@ -626,7 +635,11 @@ fn arguments_merges_nullable_and_non_nullable() {
         .expect("Expected API schema generation to succeed");
     
     // Argument should merge to non-nullable (String!)
-    assert_snapshot!(print_sdl(api_schema.schema()));
+    assert_snapshot!(print_sdl(api_schema.schema()), @r###"
+    type Query {
+      field(arg: String!): String
+    }
+    "###);
 }
 
 #[test]

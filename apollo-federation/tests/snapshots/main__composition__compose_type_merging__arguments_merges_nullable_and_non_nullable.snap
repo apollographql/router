@@ -1,7 +1,0 @@
----
-source: apollo-federation/tests/composition/compose_type_merging.rs
-expression: print_sdl(api_schema.schema())
----
-type Query {
-  field(arg: String!): String
-}
