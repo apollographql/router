@@ -74,6 +74,7 @@ use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
 use crate::utils::human_readable::human_readable_subgraph_names;
+use crate::utils::human_readable::human_readable_types;
 use crate::utils::iter_into_single_item;
 
 static NON_MERGED_CORE_FEATURES: LazyLock<[Identity; 4]> = LazyLock::new(|| {
@@ -561,7 +562,7 @@ impl Merger {
             // leading to that type. But the error here is a bit more "direct"/user friendly than what post-merging
             // validation would return, so we make this a hard error, not just a warning.
             if !found_interface {
-                self.error_reporter.add_error(CompositionError::InterfaceObjectUsageError { message: format!(
+                self.error_reporter.add_error(CompositionError::InterfaceObjectUsageError {message: format!(
                     "Type \"{}\" is declared with @interfaceObject in all the subgraphs in which it is defined (it is defined in {} but should be defined as an interface in at least one subgraph)",
                     type_.type_name(),
                     human_readable_subgraph_names(subgraphs_with_type.iter())
@@ -1028,8 +1029,124 @@ impl Merger {
         Ok(!source_as_entity.is_empty())
     }
 
-    pub(crate) fn merge_interface(&mut self, _itf: InterfaceTypeDefinitionPosition) {
-        todo!("Implement merge_interface")
+    fn validate_interface_keys(
+        &mut self,
+        sources: &Sources<Subgraph<Validated>>,
+        dest: &InterfaceTypeDefinitionPosition,
+    ) -> Result<bool, FederationError> {
+        let supergraph_implementations = self.merged.possible_runtime_types(dest.clone().into())?;
+
+        let mut has_key = false;
+        for (idx, source) in sources.iter() {
+            if source.is_none()
+                || self.subgraphs[*idx].is_interface_object_type(&dest.clone().into())
+            {
+                continue;
+            }
+
+            let subgraph = source.as_ref().unwrap();
+            let source_metadata = self.subgraphs[*idx].metadata();
+            let interface_pos: TypeDefinitionPosition = dest.clone().into();
+            let key_directive_name = source_metadata
+                .federation_spec_definition()
+                .key_directive_definition(&self.merged)?
+                .name
+                .clone();
+            let keys = interface_pos.get_applied_directives(subgraph.schema(), &key_directive_name);
+
+            has_key = has_key || !keys.is_empty();
+            let resolvable_key = keys.iter().find(|key| !key.arguments.is_empty());
+            if resolvable_key.is_none() {
+                continue;
+            }
+
+            let implementations_in_subgraph = subgraph
+                .schema()
+                .possible_runtime_types(dest.clone().into())?;
+            if implementations_in_subgraph.len() > supergraph_implementations.len() {
+                let missing_implementations = supergraph_implementations
+                    .iter()
+                    .filter(|implementation| !implementations_in_subgraph.contains(*implementation))
+                    .collect::<IndexSet<_>>();
+
+                self.error_reporter.add_error(CompositionError::InterfaceObjectUsageError {
+                            message: format!("Interface type \"{}\" has a resolvable key \"{}\" in subgraph \"{}\" but is missing some of the supergraph implementation types of \"{}\". Subgraph \"{}\" should define {} (and have {} implement \"{}\").",
+                                &dest.type_name,
+                                "true",
+                                &self.subgraphs[*idx].name,
+                                &dest.type_name,
+                                &self.subgraphs[*idx].name,
+                                human_readable_types(missing_implementations.iter().map(|impl_type| &impl_type.type_name)),
+                                if missing_implementations.len() > 1 { "them" } else { "it" },
+                                &dest.type_name,
+                            )
+                        });
+            }
+        }
+        Ok(has_key)
+    }
+
+    fn validate_interface_objects(
+        &mut self,
+        sources: &Sources<Subgraph<Validated>>,
+        dest: &InterfaceTypeDefinitionPosition,
+    ) -> Result<bool, FederationError> {
+        let supergraph_implementations = self.merged.possible_runtime_types(dest.clone().into())?;
+
+        for (idx, source) in sources.iter() {
+            if source.is_none()
+                || self.subgraphs[*idx].is_interface_object_type(&dest.clone().into())
+            {
+                continue;
+            }
+
+            let subgraph_name = &self.subgraphs[*idx].name;
+            let schema = source.as_ref().unwrap().schema().schema();
+            let defined_implementations: IndexSet<_> = supergraph_implementations
+                .iter()
+                .filter(|implementation| implementation.get(schema).is_ok())
+                .collect::<IndexSet<_>>();
+            if !defined_implementations.is_empty() {
+                self.error_reporter.add_error(CompositionError::InterfaceObjectUsageError {
+                    message: format!("Interface type \"{}\" is defined as an @interfaceObject in subgraph \"{}\" so that subgraph should not define any of the implementation types of \"{}\", but it defines {}",
+                        &dest.type_name,
+                        &subgraph_name,
+                        &dest.type_name,
+                        human_readable_types(defined_implementations.iter().map(|impl_type| &impl_type.type_name)),
+                    )
+                });
+            }
+        }
+
+        Ok(true)
+    }
+
+    pub(crate) fn merge_interface(
+        &mut self,
+        itf: InterfaceTypeDefinitionPosition,
+    ) -> Result<(), FederationError> {
+        let sources: Sources<Subgraph<Validated>> = self
+            .subgraphs
+            .iter()
+            .enumerate()
+            .map(|(idx, subgraph)| (idx, Some(subgraph.clone())))
+            .collect();
+        let has_key = self.validate_interface_keys(&sources, &itf)?;
+
+        let added = self.add_fields_shallow(itf.clone())?;
+
+        for (dest_field, subgraph_fields) in added {
+            if !has_key {
+                let _ = self.hint_on_inconsistent_value_type_field(
+                    &sources,
+                    &ObjectOrInterfaceTypeDefinitionPosition::Interface(itf.clone()),
+                    &dest_field,
+                );
+            }
+            let merge_context = self.validate_override(&subgraph_fields, &dest_field)?;
+            let _ = self.merge_field(&subgraph_fields, &dest_field, &merge_context);
+        }
+        Ok(())
     }
 
     pub(crate) fn merge_input_object(&mut self, _io: InputObjectTypeDefinitionPosition) {

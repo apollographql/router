@@ -87,6 +87,7 @@ pub(crate) enum HintCode {
     InconsistentRuntimeTypesForShareableReturn,
     ImplicitlyUpgradedFederationVersion,
     ContextualArgumentNotContextualInAllSubgraphs,
+    InterfaceObjectUsageError,
 }
 
 #[allow(dead_code)]
@@ -151,6 +152,7 @@ impl HintCode {
             HintCode::ContextualArgumentNotContextualInAllSubgraphs => {
                 &CONTEXTUAL_ARGUMENT_NOT_CONTEXTUAL_IN_ALL_SUBGRAPHS
             }
+            HintCode::InterfaceObjectUsageError => &INTERFACE_OBJECT_USAGE_ERROR,
         }
     }
 
@@ -449,3 +451,13 @@ pub(crate) static CONTEXTUAL_ARGUMENT_NOT_CONTEXTUAL_IN_ALL_SUBGRAPHS: LazyLock<
         "Contextual argument is not contextual in all subgraphs",
     )
 });
+
+#[allow(dead_code)]
+pub(crate) static INTERFACE_OBJECT_USAGE_ERROR: LazyLock<HintCodeDefinition> =
+    LazyLock::new(|| {
+        HintCodeDefinition::new(
+            "INTERFACE_OBJECT_USAGE_ERROR",
+            HintLevel::Warn,
+            "Interface object usage error",
+        )
+    });
