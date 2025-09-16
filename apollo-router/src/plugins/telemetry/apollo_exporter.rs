@@ -30,7 +30,7 @@ use url::Url;
 use super::apollo::Report;
 use super::apollo::SingleReport;
 use super::config::ApolloMetricsReferenceMode;
-use crate::plugins::telemetry::apollo::ApolloUsageReportsExporterConfiguration;
+use crate::plugins::telemetry::apollo::ApolloUsageReportsBatchProcessorConfiguration;
 
 const BACKOFF_INCREMENT: Duration = Duration::from_millis(50);
 const ROUTER_REPORT_TYPE_METRICS: &str = "metrics";
@@ -86,7 +86,7 @@ impl Sender {
 /// Retrying when sending fails.
 /// Sending periodically (in the case of metrics).
 pub(crate) struct ApolloExporter {
-    exporter_config: ApolloUsageReportsExporterConfiguration,
+    batch_config: ApolloUsageReportsBatchProcessorConfiguration,
     endpoint: Url,
     apollo_key: String,
     header: proto::reports::ReportHeader,
@@ -99,7 +99,7 @@ pub(crate) struct ApolloExporter {
 impl ApolloExporter {
     pub(crate) fn new(
         endpoint: &Url,
-        exporter_config: &ApolloUsageReportsExporterConfiguration,
+        batch_config: &ApolloUsageReportsBatchProcessorConfiguration,
         apollo_key: &str,
         apollo_graph_ref: &str,
         schema_id: &str,
@@ -124,11 +124,11 @@ impl ApolloExporter {
         tracing::debug!("creating apollo exporter {}", endpoint);
         Ok(ApolloExporter {
             endpoint: endpoint.clone(),
-            exporter_config: exporter_config.clone(),
+            batch_config: batch_config.clone(),
             apollo_key: apollo_key.to_string(),
             client: reqwest::Client::builder()
                 .no_gzip()
-                .timeout(exporter_config.max_export_timeout)
+                .timeout(batch_config.max_export_timeout)
                 .build()
                 .map_err(BoxError::from)?,
             header,
@@ -139,9 +139,9 @@ impl ApolloExporter {
     }
 
     pub(crate) fn start(self) -> Sender {
-        let (tx, mut rx) = mpsc::channel::<SingleReport>(self.exporter_config.max_queue_size);
+        let (tx, mut rx) = mpsc::channel::<SingleReport>(self.batch_config.max_queue_size);
         tokio::spawn(async move {
-            let timeout = tokio::time::interval(self.exporter_config.scheduled_delay);
+            let timeout = tokio::time::interval(self.batch_config.scheduled_delay);
             let mut report = Report::default();
             let mut backoff_warn = true;
 

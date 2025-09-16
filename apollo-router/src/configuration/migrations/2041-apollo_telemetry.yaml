@@ -1,41 +1,28 @@
-description: Split apollo telemetry batch_processor config into separate traces and metrics exporters
+description: Split apollo telemetry batch_processor config into separate traces and metrics configs
 actions:
   # Apollo usage reports metrics config
   - type: copy
     from: telemetry.apollo.batch_processor.scheduled_delay
-    to: telemetry.apollo.metrics.usage_reports.exporter.scheduled_delay
+    to: telemetry.apollo.metrics.usage_reports.batch_processor.scheduled_delay
   
   - type: copy
     from: telemetry.apollo.batch_processor.max_export_timeout
-    to: telemetry.apollo.metrics.usage_reports.exporter.max_export_timeout
+    to: telemetry.apollo.metrics.usage_reports.batch_processor.max_export_timeout
   
   - type: copy
     from: telemetry.apollo.batch_processor.max_queue_size
-    to: telemetry.apollo.metrics.usage_reports.exporter.max_queue_size
-  
-  # Apollo usage reports traces config
-  - type: copy
-    from: telemetry.apollo.batch_processor.scheduled_delay
-    to: telemetry.apollo.traces.usage_reports.exporter.scheduled_delay
-  
-  - type: copy
-    from: telemetry.apollo.batch_processor.max_export_timeout
-    to: telemetry.apollo.traces.usage_reports.exporter.max_export_timeout
-  
-  - type: copy
-    from: telemetry.apollo.batch_processor.max_queue_size
-    to: telemetry.apollo.traces.usage_reports.exporter.max_queue_size
+    to: telemetry.apollo.metrics.usage_reports.batch_processor.max_queue_size
 
   # OTLP metrics config
   - type: copy
     from: telemetry.apollo.batch_processor.scheduled_delay
-    to: telemetry.apollo.metrics.otlp.exporter.scheduled_delay
+    to: telemetry.apollo.metrics.otlp.batch_processor.scheduled_delay
   
   - type: copy
     from: telemetry.apollo.batch_processor.max_export_timeout
-    to: telemetry.apollo.metrics.otlp.exporter.max_export_timeout
+    to: telemetry.apollo.metrics.otlp.batch_processor.max_export_timeout
 
-  # OTLP traces config
+  # Tracing config
   - type: move
     from: telemetry.apollo.batch_processor
-    to: telemetry.apollo.traces.otlp.exporter
+    to: telemetry.apollo.tracing.batch_processor
