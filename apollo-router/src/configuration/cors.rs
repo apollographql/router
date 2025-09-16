@@ -396,8 +396,7 @@ impl Cors {
                         && (id.len() != 17
                             || id
                                 .split(':')
-                                .flat_map(str::chars)
-                                .any(|c| !c.is_ascii_hexdigit()))
+                                .any(|s| s.len() != 2 || s.chars().any(|c| !c.is_ascii_hexdigit())))
                     {
                         return Err(
                             "Invalid CORS configuration: `Private-Network-Access-ID` header value must be \
