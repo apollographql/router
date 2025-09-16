@@ -89,22 +89,8 @@ impl MemoryService {
     ) -> DiagnosticsResult<()> {
         tracing::warn!("Memory diagnostic archiving not supported on this platform");
 
-        // Create empty memory directory in archive
-        let mut header = tokio_tar::Header::new_gnu();
-        header
-            .set_path("memory/")
-            .map_err(|e| format!("Failed to set memory directory path: {}", e))?;
-        header.set_entry_type(tokio_tar::EntryType::Directory);
-        header.set_size(0);
-        header.set_mode(0o755);
-        header.set_cksum();
-
-        let empty: &[u8] = &[];
-        tar.append(&header, empty)
-            .await
-            .map_err(|e| format!("Failed to add memory directory: {}", e))?;
-
         // Add README.txt explaining why memory profiling is not available
+        // The ArchiveUtils will automatically create the necessary parent directories
         let readme_content = format!(
             "MEMORY PROFILING NOT AVAILABLE\n\
             ==============================\n\n\
