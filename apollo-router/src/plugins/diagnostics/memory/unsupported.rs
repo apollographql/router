@@ -28,7 +28,12 @@ impl MemoryService {
         data: serde_json::Value,
         request: Request,
     ) -> DiagnosticsResult<Response> {
-        ResponseBuilder::json_response(status, &data, CacheControl::NoCache, request)
+        ResponseBuilder::json_response(
+            status,
+            &data,
+            CacheControl::NoCache,
+            request.context.clone(),
+        )
     }
 
     /// Helper for unsupported platform response
