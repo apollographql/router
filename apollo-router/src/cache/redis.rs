@@ -715,7 +715,7 @@ impl RedisCacheStorage {
 
         // then we query all the key groups at the same time
         let results: Vec<Result<u32, RedisError>> =
-            futures::future::join_all(h.into_values().map(|keys| self.inner.del(keys))).await;
+            join_all(h.into_values().map(|keys| self.inner.del(keys))).await;
 
         for r in &results {
             if let Err(err) = r.as_ref() {
@@ -740,15 +740,16 @@ impl RedisCacheStorage {
         }
     }
 
-    #[allow(dead_code)]
-    pub(crate) async fn truncate_namespace(&self) {
+    #[cfg(test)]
+    pub(crate) async fn truncate_namespace(&self) -> Result<(), RedisError> {
         use fred::prelude::Key;
         use futures::StreamExt;
 
         if self.namespace.is_none() {
-            return;
+            return Ok(());
         }
 
+        // find all members of this namespace via `SCAN`
         let pattern = self.make_key(RedisKey("*"));
         let client = self.client();
         let mut stream: Pin<Box<dyn Stream<Item = Result<Key, RedisError>>>> = if self.is_cluster {
@@ -758,13 +759,17 @@ impl RedisCacheStorage {
         };
 
         let mut keys = Vec::new();
-        while let Some(res) = stream.next().await {
-            if let Ok(key) = res {
-                keys.push(key)
-            }
+        while let Some(key) = stream.next().await {
+            keys.push(key?);
         }
 
-        self.delete_from_scan_result(keys).await;
+        // remove all members of this namespace
+        let results = self.delete_from_scan_result(keys).await;
+        results
+            .into_iter()
+            .find_map(|r| r.err())
+            .map(Err)
+            .unwrap_or(Ok(()))
     }
 }
 

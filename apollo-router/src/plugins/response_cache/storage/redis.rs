@@ -412,8 +412,8 @@ impl CacheStorage for Storage {
 
     #[cfg(test)]
     async fn truncate_namespace(&self) -> StorageResult<()> {
-        self.reader_storage.truncate_namespace().await;
-        self.writer_storage.truncate_namespace().await;
+        self.reader_storage.truncate_namespace().await?;
+        self.writer_storage.truncate_namespace().await?;
         Ok(())
     }
 }
