@@ -47,7 +47,7 @@ use itertools::kmerge_by;
 /// - Arguments of directive applications
 /// - Input fields in arguments of directive applications
 /// - Input fields in default values of argument/input field definitions
-pub(crate) fn normalize_schema(schema: &mut Schema) {
+pub(crate) fn normalize_schema(mut schema: Schema) -> Normalized<Schema> {
     sort_schema_definition(&mut schema.schema_definition);
     schema
         .types
@@ -59,16 +59,47 @@ pub(crate) fn normalize_schema(schema: &mut Schema) {
         .values_mut()
         .for_each(sort_directive_definition);
     schema.directive_definitions.sort_unstable_keys();
+    Normalized(schema)
 }
 
 /// The same as [normalize_schema], but for [Valid] [Schema]s. See that function's doc comment for
 /// details.
 #[allow(dead_code)]
-pub(crate) fn normalize_valid_schema(schema: Valid<Schema>) -> Valid<Schema> {
-    let mut schema = schema.into_inner();
-    normalize_schema(&mut schema);
+pub(crate) fn normalize_valid_schema(schema: Valid<Schema>) -> Normalized<Valid<Schema>> {
+    let schema = normalize_schema(schema.into_inner());
     // Schema normalization is just sorting, and does not affect GraphQL spec validity.
-    Valid::assume_valid(schema)
+    Normalized(Valid::assume_valid(schema.into_inner()))
+}
+
+/// A marker wrapper that indicates the contained schema has been normalized via [normalize_schema].
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[repr(transparent)]
+pub(crate) struct Normalized<T>(T);
+
+impl<T> Normalized<T> {
+    pub(crate) fn into_inner(self) -> T {
+        self.0
+    }
+}
+
+impl<T> std::ops::Deref for Normalized<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> AsRef<T> for Normalized<T> {
+    fn as_ref(&self) -> &T {
+        &self.0
+    }
+}
+
+impl<T: std::fmt::Display> std::fmt::Display for Normalized<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
 }
 
 fn sort_schema_definition(definition: &mut Node<apollo_compiler::schema::SchemaDefinition>) {
@@ -1172,7 +1203,8 @@ mod tests {
 
     #[test]
     fn test_round_trip_equality() {
-        let schema = Schema::parse_and_validate(TEST_SCHEMA, "schema.graphql").unwrap();
+        let schema = Schema::parse_and_validate(TEST_SCHEMA, "schema.graphql")
+            .expect("Test schema unexpectedly invalid.");
 
         // Snapshot what the normalized schema should look like.
         let normalized_schema = normalize_valid_schema(schema);
@@ -1189,8 +1221,8 @@ mod tests {
         //    populating component containers in order of encountered definitions/extensions, while
         //    normalizing reorders component containers by their content. Since this parsing
         //    behavior may similarly change in the future, we similarly don't check that here.
-        let reparsed_schema =
-            Schema::parse_and_validate(&normalized_sdl, "schema.graphql").unwrap();
+        let reparsed_schema = Schema::parse_and_validate(&normalized_sdl, "schema.graphql")
+            .expect("Reparsed test schema unexpectedly invalid.");
 
         // Renormalize the reparsed schema, and confirm it's fully equal.
         let normalized_reparsed_schema = normalize_valid_schema(reparsed_schema);
@@ -1200,7 +1232,8 @@ mod tests {
 
     #[test]
     fn test_extension_equality() {
-        let schema = Schema::parse_and_validate(TEST_SCHEMA, "schema.graphql").unwrap();
+        let schema = Schema::parse_and_validate(TEST_SCHEMA, "schema.graphql")
+            .expect("Test schema unexpectedly invalid.");
 
         // Normalize the schema with extensions.
         let normalized_schema = normalize_valid_schema(schema.clone());
@@ -1210,17 +1243,21 @@ mod tests {
         // not with Display.
         let mut schema_no_exts = schema.into_inner();
         remove_extensions(&mut schema_no_exts);
-        let schema_no_exts = schema_no_exts.validate().unwrap();
+        let schema_no_exts = schema_no_exts
+            .validate()
+            .expect("Test schema without extensions unexpectedly invalid.");
         let normalized_schema_no_exts = normalize_valid_schema(schema_no_exts);
         let normalized_sdl_no_exts = normalized_schema_no_exts.to_string();
         assert_eq!(normalized_schema_no_exts, normalized_schema);
         assert_ne!(normalized_sdl_no_exts, normalized_sdl);
 
         // Remove extensions from the original normalized schema, and confirm it's fully equal.
-        let mut normalized_schema = normalized_schema.into_inner();
+        let mut normalized_schema = normalized_schema.into_inner().into_inner();
         remove_extensions(&mut normalized_schema);
-        let normalized_schema = normalized_schema.validate().unwrap();
-        assert_eq!(normalized_schema, normalized_schema_no_exts);
+        let normalized_schema = normalized_schema
+            .validate()
+            .expect("Test schema without extensions unexpectedly invalid.");
+        assert_eq!(&normalized_schema, normalized_schema_no_exts.as_ref());
         assert_eq!(normalized_schema.to_string(), normalized_sdl_no_exts);
     }
 }
