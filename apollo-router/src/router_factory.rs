@@ -178,6 +178,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                             .notify(configuration.notify.clone())
                             .license(license.clone())
                             .full_config(configuration.validated_yaml.clone())
+                            .and_original_config_yaml(configuration.original_yaml.clone())
                             .build(),
                     )
                     .await
@@ -532,6 +533,7 @@ pub(crate) async fn add_plugin(
     errors: &mut Vec<ConfigurationError>,
     license: Arc<LicenseState>,
     full_config: Option<Value>,
+    original_config_yaml: Option<Arc<String>>,
 ) {
     match factory
         .create_instance(
@@ -545,6 +547,7 @@ pub(crate) async fn add_plugin(
                 .notify(notify.clone())
                 .license(license)
                 .and_full_config(full_config)
+                .and_original_config_yaml(original_config_yaml)
                 .build(),
         )
         .await
@@ -608,6 +611,7 @@ pub(crate) async fn create_plugins(
                 &mut errors,
                 license.clone(),
                 $maybe_full_config,
+                configuration.original_yaml.clone(),
             )
             .await;
         }};
@@ -782,6 +786,7 @@ pub(crate) async fn create_plugins(
     add_mandatory_apollo_plugin!("csrf");
     add_mandatory_apollo_plugin!("fleet_detector");
     add_mandatory_apollo_plugin!("enhanced_client_awareness");
+    add_mandatory_apollo_plugin!("experimental_diagnostics");
 
     add_oss_apollo_plugin!("forbid_mutations");
     add_optional_apollo_plugin!("subscription");

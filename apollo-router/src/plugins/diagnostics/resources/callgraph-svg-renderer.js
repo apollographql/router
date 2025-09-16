@@ -1,0 +1,264 @@
+
+// Control functions for SVG verification
+async function downloadSVG() {
+    const svgElement = document.querySelector('#svg-pan-zoom-container svg');
+    if (!svgElement) return;
+    
+    const svgData = new XMLSerializer().serializeToString(svgElement);
+    const blob = new Blob([svgData], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'call_graph_vizjs.svg';
+    a.click();
+    
+    URL.revokeObjectURL(url);
+}
+
+async function showDOTGraph() {
+    const data = window._currentCallGraphData;
+    if (!data) return;
+    
+    const dotGraph = data.layout.buildDOTGraphForSVG(
+        data.callGraphData.nodes,
+        data.callGraphData.reverseLinks || data.callGraphData.links
+    );
+    
+    // Create modal structure without innerHTML to avoid double-escaping
+    const modal = document.createElement('div');
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+    
+    const modalContent = document.createElement('div');
+    modalContent.className = 'bg-white rounded-lg p-6 max-w-4xl max-h-[80%] overflow-hidden flex flex-col';
+    
+    const header = document.createElement('div');
+    header.className = 'flex justify-between items-center mb-4';
+    header.innerHTML = `
+        <h3 class="text-lg font-semibold">Generated DOT Graph</h3>
+        <button onclick="this.parentElement.parentElement.parentElement.remove()" class="text-gray-500 hover:text-gray-700">✕</button>
+    `;
+    
+    const preElement = document.createElement('pre');
+    preElement.className = 'bg-gray-100 p-4 rounded text-sm overflow-auto flex-1 font-mono whitespace-pre-wrap break-words';
+    preElement.textContent = dotGraph; // Use textContent to avoid HTML escaping issues
+    
+    const footer = document.createElement('div');
+    footer.className = 'mt-4 flex gap-2';
+    
+    const copyButton = document.createElement('button');
+    copyButton.className = 'px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600';
+    copyButton.textContent = 'Copy to Clipboard';
+    copyButton.onclick = () => copyDotToClipboard(dotGraph); // Pass original content directly
+    
+    footer.appendChild(copyButton);
+    modalContent.appendChild(header);
+    modalContent.appendChild(preElement);
+    modalContent.appendChild(footer);
+    modal.appendChild(modalContent);
+    
+    document.body.appendChild(modal);
+}
+
+// Helper function to copy DOT content to clipboard
+function copyDotToClipboard(dotContent) {
+    // Content is already in original form, no unescaping needed
+    navigator.clipboard.writeText(dotContent).then(() => {
+        console.log('DOT content copied to clipboard');
+        // Show brief success feedback
+        const button = event.target;
+        const originalText = button.textContent;
+        button.textContent = 'Copied!';
+        button.classList.add('bg-green-500');
+        button.classList.remove('bg-blue-500');
+        setTimeout(() => {
+            button.textContent = originalText;
+            button.classList.remove('bg-green-500');
+            button.classList.add('bg-blue-500');
+        }, 2000);
+    }).catch(err => {
+        console.error('Failed to copy to clipboard:', err);
+        alert('Failed to copy to clipboard. Check console for details.');
+    });
+}
+
+// SVG Pan/Zoom functionality
+let svgPanZoomInstance = null;
+
+function initializeSVGPanZoom() {
+    // Wait for DOM to be ready, then initialize pan/zoom
+    setTimeout(() => {
+        const svgElement = document.querySelector('#svg-pan-zoom-container svg');
+        if (svgElement && window.svgPanZoom) {
+            try {
+                // Destroy existing instance if it exists
+                if (svgPanZoomInstance) {
+                    svgPanZoomInstance.destroy();
+                }
+                
+                // Initialize pan/zoom
+                svgPanZoomInstance = svgPanZoom(svgElement, {
+                    zoomEnabled: true,
+                    controlIconsEnabled: false, // We'll use custom controls
+                    fit: true,
+                    center: true,
+                    minZoom: 0.1,
+                    maxZoom: 10,
+                    zoomScaleSensitivity: 0.2,
+                    mouseWheelZoomEnabled: true,
+                    preventMouseEventsDefault: true,
+                    dblClickZoomEnabled: true,
+                    onZoom: function(zoom) {
+                        // Optional: Add zoom level indicator
+                        updateZoomIndicator(zoom);
+                    }
+                });
+                
+                console.log('SVG pan/zoom initialized successfully');
+                
+            } catch (error) {
+                console.error('Failed to initialize SVG pan/zoom:', error);
+            }
+        } else {
+            console.warn('SVG element or svgPanZoom library not found');
+        }
+    }, 100); // Small delay to ensure DOM is ready
+}
+
+function resetPanZoom() {
+    if (svgPanZoomInstance) {
+        svgPanZoomInstance.resetZoom();
+        svgPanZoomInstance.resetPan();
+    }
+}
+
+function zoomIn() {
+    if (svgPanZoomInstance) {
+        svgPanZoomInstance.zoomIn();
+    }
+}
+
+function zoomOut() {
+    if (svgPanZoomInstance) {
+        svgPanZoomInstance.zoomOut();
+    }
+}
+
+function updateZoomIndicator(zoom) {
+    // Optional: Update zoom level in the header
+    const zoomLevel = Math.round(zoom * 100);
+    const header = document.querySelector('#svg-pan-zoom-container').closest('.h-full').querySelector('.text-sm.font-semibold');
+    if (header && header.textContent) {
+        const baseText = header.textContent.replace(/ \(\d+%\)$/, '');
+        header.textContent = `${baseText} (${zoomLevel}%)`;
+    }
+}
+
+// Render call graph using pre-processed call graph data (supports both regular and differential)
+async function renderCallGraphWithVizJSData(container, callGraphData) {
+    try {
+        // Show loading indicator
+        const isDifferential = callGraphData.nodes.some(n => n.isDifferential);
+        const graphType = isDifferential ? 'differential call graph' : 'call graph';
+        container.innerHTML = `<div class="flex items-center justify-center h-full text-blue-600"><div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mr-3"></div>Generating ${graphType} with GraphViz (SVG)...</div>`;
+        
+        if (!callGraphData.nodes || callGraphData.nodes.length === 0) {
+            const message = isDifferential 
+                ? 'No differential call graph data available - no significant changes detected'
+                : 'No call graph data available';
+            container.innerHTML = `<div class="flex items-center justify-center h-full text-gray-500">${message}</div>`;
+            return;
+        }
+        
+        console.log(`${isDifferential ? 'Differential ' : ''}Call graph data:`, {
+            nodes: callGraphData.nodes.length,
+            links: callGraphData.links?.length || 0,
+            reverseLinks: callGraphData.reverseLinks?.length || 0
+        });
+        
+        // Generate SVG using the provided data
+        const layout = new VizJSCallGraphLayout();
+        const svgContent = await layout.generateSVG(
+            callGraphData.nodes, 
+            callGraphData.reverseLinks || callGraphData.links,
+            {
+                engine: 'dot',
+                rankdir: 'TB',
+                width: container.clientWidth || 1200,
+                height: container.clientHeight || 800
+            }
+        );
+        
+        // Create safe DOM structure without innerHTML for security
+        const headerTitle = isDifferential ? 'Differential Call Graph (SVG with Pan/Zoom)' : 'Call Graph (SVG with Pan/Zoom)';
+        container.textContent = ''; // Clear safely
+
+        // Create main container
+        const mainDiv = document.createElement('div');
+        mainDiv.className = 'h-full flex flex-col';
+
+        // Create header with controls
+        const header = document.createElement('div');
+        header.className = 'bg-gray-100 p-2 border-b flex justify-between items-center';
+
+        // Create title
+        const title = document.createElement('div');
+        title.className = 'text-sm font-semibold text-gray-700';
+        title.textContent = `${headerTitle} - ${callGraphData.nodes.length} nodes, ${(callGraphData.reverseLinks || callGraphData.links).length} edges`;
+
+        // Create controls container
+        const controlsContainer = document.createElement('div');
+        controlsContainer.className = 'flex gap-2';
+
+        // Create control buttons safely
+        const buttons = [
+            { text: 'Zoom In', onclick: 'zoomIn()', class: 'bg-gray-500 hover:bg-gray-600' },
+            { text: 'Zoom Out', onclick: 'zoomOut()', class: 'bg-gray-500 hover:bg-gray-600' },
+            { text: 'Reset View', onclick: 'resetPanZoom()', class: 'bg-indigo-500 hover:bg-indigo-600' },
+            { text: 'Download SVG', onclick: 'downloadSVG()', class: 'bg-blue-500 hover:bg-blue-600' },
+            { text: 'Show DOT', onclick: 'showDOTGraph()', class: 'bg-green-500 hover:bg-green-600' }
+        ];
+
+        buttons.forEach(btn => {
+            const button = document.createElement('button');
+            button.className = `px-3 py-1 text-white text-xs rounded ${btn.class}`;
+            button.textContent = btn.text;
+            button.setAttribute('onclick', btn.onclick);
+            controlsContainer.appendChild(button);
+        });
+
+        header.appendChild(title);
+        header.appendChild(controlsContainer);
+
+        // Create SVG container
+        const svgContainer = document.createElement('div');
+        svgContainer.className = 'flex-1 bg-white relative';
+
+        const svgWrapper = document.createElement('div');
+        svgWrapper.className = 'absolute inset-2 border border-gray-200 rounded';
+        svgWrapper.id = 'svg-pan-zoom-container';
+
+        // Insert trusted SVG content (from viz.js)
+        svgWrapper.innerHTML = svgContent; // This is safe - SVG comes from viz.js, not user input # nosemgrep
+
+        svgContainer.appendChild(svgWrapper);
+        mainDiv.appendChild(header);
+        mainDiv.appendChild(svgContainer);
+        container.appendChild(mainDiv);
+        
+        // Initialize pan/zoom functionality
+        initializeSVGPanZoom();
+        
+        // Store data for controls
+        window._currentCallGraphData = {
+            profile: null, // Not needed for pre-processed data
+            callGraphData: callGraphData,
+            container: container,
+            layout: layout
+        };
+        
+    } catch (error) {
+        console.error('Call graph rendering failed:', error);
+        container.innerHTML = '<div class="flex items-center justify-center h-full text-red-600">Call graph generation failed. Check console for details.</div>';
+    }
+}

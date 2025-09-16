@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt::Write;
+use std::sync::Arc;
 use std::sync::OnceLock;
 
 use itertools::Itertools;
@@ -256,6 +257,7 @@ pub(crate) fn validate_yaml_configuration(
 
     let mut config: Configuration = serde_json::from_value(expanded_yaml.clone())
         .map_err(ConfigurationError::DeserializeConfigError)?;
+    config.original_yaml = Some(Arc::new(raw_yaml.to_string()));
 
     // ------------- Check for unknown fields at runtime ----------------
     // We can't do it with the `deny_unknown_fields` property on serde because we are using `flatten`

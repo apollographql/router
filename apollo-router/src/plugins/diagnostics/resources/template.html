@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apollo Router Diagnostics</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@viz-js/viz@3.17.0/dist/viz-global.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
+    <script src="custom_elements.js"></script>
+    <script src="backtrace-processor.js"></script>
+    <script src="viz-js-integration.js"></script>
+    <script src="flamegraph-renderer.js"></script>
+    <script src="callgraph-svg-renderer.js"></script>
+    <script src="data-access.js"></script>
+    <script src="main.js"></script>
+    <!-- Note: In a real deployment, you would use: -->
+    <!-- <script type="module" src="https://cdn.jsdelivr.net/npm/@viz-js/viz@3.7.0/lib/viz-standalone.js"></script> -->
+    
+    <script>
+        // Embedded data (replaced by the HTML generator)
+        const EMBEDDED_DATA = {
+            systemInfo: '{{SYSTEM_INFO_BASE64}}',
+            routerConfig: '{{ROUTER_CONFIG_BASE64}}',
+            schema: '{{SCHEMA_BASE64}}',
+            memoryDumps: {{MEMORY_DUMPS_JSON}}
+        };
+
+        // Dashboard mode flag (replaced by the HTML generator)
+        const IS_DASHBOARD_MODE = {{DASHBOARD_MODE}};
+
+        // Utility functions
+        function base64Decode(str) {
+            if (!str) return '';
+            try {
+                return atob(str);
+            } catch (e) {
+                console.error('Failed to decode base64:', e);
+                return '';
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 h-screen flex flex-col overflow-hidden">
+    <!-- Top Bar -->
+    <header class="bg-slate-800 text-white px-6 py-4 shadow-lg">
+        <div>
+            <h1 class="text-xl font-semibold">Apollo Router Diagnostics</h1>
+            <p class="text-slate-300 text-sm">Generated {{TIMESTAMP}}</p>
+        </div>
+    </header>
+
+    <!-- Tabs Navigation -->
+    <nav class="bg-white border-b border-gray-200 px-6">
+        <div class="flex space-x-8">
+            <button class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-blue-500 text-blue-600" 
+                    onclick="showTab('summary')" data-tab="summary" id="dashboard-tab">
+                Dashboard
+            </button>
+            <button class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300" 
+                    onclick="showTab('system')" data-tab="system">
+                System
+            </button>
+            <button class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300" 
+                    onclick="showTab('config')" data-tab="config">
+                Config
+            </button>
+            <button class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300" 
+                    onclick="showTab('supergraph')" data-tab="supergraph">
+                Supergraph
+            </button>
+            <button class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300" 
+                    onclick="showTab('flamegraph')" data-tab="flamegraph">
+                Flamegraph
+            </button>
+            <button class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300" 
+                    onclick="showTab('callgraph')" data-tab="callgraph">
+                Callgraph
+            </button>
+        </div>
+    </nav>
+
+    <!-- Content Area -->
+    <main class="flex-1 overflow-y-auto">
+        <!-- Summary Tab -->
+        <div id="summary" class="tab-content p-6">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- Memory Profiling Control -->
+                <div class="bg-white rounded-lg shadow-sm border border-gray-200">
+                    <div class="px-6 py-4 border-b border-gray-200">
+                        <h2 class="text-lg font-semibold text-gray-900">Memory Profiling</h2>
+                    </div>
+                    <div class="p-6">
+                        <div class="mb-4">
+                            <div class="flex items-center space-x-3">
+                                <div class="flex items-center">
+                                    <div id="profiling-status-indicator" class="w-3 h-3 rounded-full bg-gray-400"></div>
+                                    <span id="profiling-status-text" class="ml-2 text-sm font-medium text-gray-600">Loading...</span>
+                                </div>
+                            </div>
+                            <p class="text-sm text-gray-500 mt-2" id="profiling-status-message">Checking profiling status...</p>
+                        </div>
+                        
+                        <div class="flex space-x-3">
+                            <button id="start-profiling-btn" onclick="handleStartProfiling()" 
+                                    class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    disabled>
+                                <span class="btn-text">Start</span>
+                                <div class="btn-spinner hidden inline-block w-4 h-4 ml-2 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                            </button>
+                            <button id="stop-profiling-btn" onclick="handleStopProfiling()" 
+                                    class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    disabled>
+                                <span class="btn-text">Stop</span>
+                                <div class="btn-spinner hidden inline-block w-4 h-4 ml-2 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                            </button>
+                            <button id="trigger-dump-btn" onclick="triggerDump()" 
+                                    class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    disabled>
+                                <span class="btn-text">Create Dump</span>
+                                <div class="btn-spinner hidden inline-block w-4 h-4 ml-2 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Memory Dumps List -->
+                <div class="bg-white rounded-lg shadow-sm border border-gray-200">
+                    <div class="px-6 py-4 border-b border-gray-200">
+                        <div class="flex justify-between items-center">
+                            <h2 class="text-lg font-semibold text-gray-900">Memory Dumps</h2>
+                            <div class="flex gap-2">
+                                <button onclick="clearAllDumps()" class="px-3 py-1 bg-red-500 text-white text-sm rounded hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2">
+                                    <span class="btn-text">Clear All</span>
+                                    <span class="btn-spinner hidden">
+                                        <svg class="animate-spin -ml-1 mr-2 h-3 w-3 text-white inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        </svg>
+                                        Clearing...
+                                    </span>
+                                </button>
+                                <button onclick="refreshDumpsDisplay()" class="px-3 py-1 bg-gray-500 text-white text-sm rounded hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2">
+                                    Refresh
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="p-6">
+                        <div id="dumps-list" class="space-y-3">
+                            <div class="text-center text-gray-500">Loading dumps...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Export Diagnostics -->
+                <div class="bg-white rounded-lg shadow-sm border border-gray-200">
+                    <div class="px-6 py-4 border-b border-gray-200">
+                        <h2 class="text-lg font-semibold text-gray-900">Export Diagnostics</h2>
+                    </div>
+                    <div class="p-6">
+                        <p class="text-sm text-gray-600 mb-4">
+                            Download a complete diagnostics package containing all system information, configuration, schema, and memory dumps in a single tar file.
+                        </p>
+                        <a href="/diagnostics/export" 
+                           class="w-full px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 inline-flex items-center justify-center text-decoration-none">
+                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                            </svg>
+                            Download Diagnostics Package
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- System Tab -->
+        <div id="system" class="tab-content p-6 hidden">
+            <div class="bg-white rounded-lg shadow-sm border border-gray-200">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-lg font-semibold text-gray-900">System Information</h2>
+                </div>
+                <div class="p-6">
+                    <pre id="system-info-content" class="bg-gray-50 p-4 rounded-md text-sm overflow-x-auto whitespace-pre-wrap">Loading...</pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- Config Tab -->
+        <div id="config" class="tab-content p-6 hidden">
+            <div class="bg-white rounded-lg shadow-sm border border-gray-200">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-lg font-semibold text-gray-900">Router Configuration</h2>
+                </div>
+                <div class="p-6">
+                    <pre id="router-config-content" class="bg-gray-50 p-4 rounded-md text-sm overflow-x-auto whitespace-pre-wrap">Loading...</pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- Supergraph Tab -->
+        <div id="supergraph" class="tab-content p-6 hidden">
+            <div class="bg-white rounded-lg shadow-sm border border-gray-200">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-lg font-semibold text-gray-900">Supergraph Schema</h2>
+                </div>
+                <div class="p-6">
+                    <pre id="schema-content" class="bg-gray-50 p-4 rounded-md text-sm overflow-x-auto whitespace-pre-wrap">Loading...</pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- Flamegraph Tab -->
+        <div id="flamegraph" class="tab-content p-6 hidden h-full flex flex-col">
+            <div class="bg-white rounded-lg shadow-sm border border-gray-200 h-full flex flex-col">
+                <div class="px-6 py-4 border-b border-gray-200 flex-shrink-0">
+                    <h2 class="text-lg font-semibold text-gray-900">Heap Flame Graph Analysis</h2>
+                </div>
+                <div class="p-6 flex-1 flex flex-col">
+                    <!-- Chart Controls -->
+                    <div class="bg-gray-50 rounded-lg p-4 mb-6 flex-shrink-0">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label for="flamegraph-base-select" class="block text-sm font-medium text-gray-700 mb-2">Base Profile:</label>
+                                <select id="flamegraph-base-select" onchange="updateFlameGraph()" 
+                                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                    <option value="">None</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="flamegraph-actual-select" class="block text-sm font-medium text-gray-700 mb-2">Actual Profile:</label>
+                                <select id="flamegraph-actual-select" onchange="updateFlameGraph()" 
+                                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                    <option value="">Select a memory dump...</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Chart Container -->
+                    <div class="w-full bg-white border border-gray-200 rounded-lg flex-1 overflow-hidden">
+                        <div id="flamegraph-fullscreen" class="w-full h-full overflow-auto">
+                            <div class="flex items-center justify-center h-full text-gray-500">
+                                Select a memory dump to generate flame graph...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Callgraph Tab -->
+        <div id="callgraph" class="tab-content p-6 hidden h-full flex flex-col">
+            <div class="bg-white rounded-lg shadow-sm border border-gray-200 h-full flex flex-col">
+                <div class="px-6 py-4 border-b border-gray-200 flex-shrink-0">
+                    <h2 class="text-lg font-semibold text-gray-900">Call Graph Analysis</h2>
+                </div>
+                <div class="p-6 flex-1 flex flex-col">
+                    <!-- Chart Controls -->
+                    <div class="bg-gray-50 rounded-lg p-4 mb-6 flex-shrink-0">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label for="callgraph-base-select" class="block text-sm font-medium text-gray-700 mb-2">Base Profile:</label>
+                                <select id="callgraph-base-select" onchange="updateCallGraph()" 
+                                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                    <option value="">None</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="callgraph-actual-select" class="block text-sm font-medium text-gray-700 mb-2">Actual Profile:</label>
+                                <select id="callgraph-actual-select" onchange="updateCallGraph()" 
+                                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                    <option value="">Select a memory dump...</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Chart Container -->
+                    <div class="w-full bg-white border border-gray-200 rounded-lg flex-1 overflow-hidden">
+                        <div id="callgraph-fullscreen" class="w-full h-full overflow-auto">
+                            <div class="flex items-center justify-center h-full text-gray-500">
+                                Select a memory dump to generate call graph...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Templates for Custom Elements -->
+    <template id="loading-message-template">
+        <style>
+            :host {
+                display: block;
+                padding: 1rem;
+                text-align: center;
+                color: #6b7280;
+            }
+            .spinner {
+                display: inline-block;
+                width: 1rem;
+                height: 1rem;
+                border: 2px solid #e5e7eb;
+                border-top: 2px solid #3b82f6;
+                border-radius: 50%;
+                animation: spin 1s linear infinite;
+                margin-right: 0.5rem;
+            }
+            @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+            }
+        </style>
+        <div>
+            <div class="spinner"></div>
+            <slot></slot>
+        </div>
+    </template>
+
+    <template id="error-message-template">
+        <style>
+            :host {
+                display: block;
+                padding: 1rem;
+                background-color: #fef2f2;
+                border: 1px solid #fecaca;
+                border-radius: 0.375rem;
+                color: #dc2626;
+            }
+            .icon {
+                display: inline-block;
+                width: 1rem;
+                height: 1rem;
+                margin-right: 0.5rem;
+                vertical-align: middle;
+            }
+        </style>
+        <div>
+            <svg class="icon" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+            </svg>
+            <slot></slot>
+        </div>
+    </template>
+
+    <template id="info-message-template">
+        <style>
+            :host {
+                display: block;
+                padding: 1rem;
+                background-color: #eff6ff;
+                border: 1px solid #bfdbfe;
+                border-radius: 0.375rem;
+                color: #1d4ed8;
+            }
+            .icon {
+                display: inline-block;
+                width: 1rem;
+                height: 1rem;
+                margin-right: 0.5rem;
+                vertical-align: middle;
+            }
+        </style>
+        <div>
+            <svg class="icon" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />
+            </svg>
+            <slot></slot>
+        </div>
+    </template>
+
+    <template id="callgraph-container-template">
+        <style>
+            :host {
+                display: block;
+                background-color: white;
+                border: 1px solid #e5e7eb;
+                border-radius: 0.5rem;
+                overflow: hidden;
+            }
+            .header {
+                padding: 1rem 1.5rem;
+                background-color: #f9fafb;
+                border-bottom: 1px solid #e5e7eb;
+                font-weight: 600;
+                color: #111827;
+            }
+            .content {
+                padding: 1rem;
+                overflow: auto;
+                max-height: 600px;
+            }
+        </style>
+        <div>
+            <div class="header">
+                <slot name="title">Call Graph</slot>
+            </div>
+            <div class="content">
+                <slot name="svg-content"></slot>
+            </div>
+        </div>
+    </template>
+
+    <template id="flamegraph-container-template">
+        <style>
+            :host {
+                display: block;
+                background-color: white;
+                border: 1px solid #e5e7eb;
+                border-radius: 0.5rem;
+                overflow: hidden;
+                height: 100%;
+                display: flex;
+                flex-direction: column;
+            }
+            .header {
+                padding: 1rem 1.5rem;
+                background-color: #f9fafb;
+                border-bottom: 1px solid #e5e7eb;
+                font-weight: 600;
+                color: #111827;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                flex-shrink: 0;
+            }
+            .controls {
+                display: flex;
+                gap: 0.5rem;
+            }
+            #reset-button {
+                padding: 0.25rem 0.75rem;
+                background-color: #6b7280;
+                color: white;
+                border: none;
+                border-radius: 0.25rem;
+                font-size: 0.875rem;
+                cursor: pointer;
+                transition: background-color 0.2s;
+            }
+            #reset-button:hover:not(:disabled) {
+                background-color: #4b5563;
+            }
+            #reset-button:disabled {
+                opacity: 0.5;
+                cursor: not-allowed;
+            }
+            .content {
+                flex: 1;
+                overflow: hidden;
+            }
+        </style>
+        <div>
+            <div class="header">
+                <slot name="title">Flame Graph</slot>
+                <div class="controls">
+                    <button id="reset-button" onclick="resetFlameGraph()">Reset Zoom</button>
+                </div>
+            </div>
+            <div class="content">
+                <slot name="chart-content"></slot>
+            </div>
+        </div>
+    </template>
+
+    <template id="dump-item-template">
+        <style>
+            :host {
+                display: block;
+                background-color: white;
+                border: 1px solid #e5e7eb;
+                border-radius: 0.375rem;
+                padding: 1rem;
+                transition: box-shadow 0.2s;
+            }
+            :host(:hover) {
+                box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+            }
+            .dump-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 0.5rem;
+            }
+            .dump-name {
+                font-weight: 600;
+                color: #111827;
+            }
+            .dump-actions {
+                display: flex;
+                gap: 0.5rem;
+            }
+            .dump-info {
+                display: flex;
+                gap: 1rem;
+                font-size: 0.875rem;
+                color: #6b7280;
+            }
+            .download-btn {
+                padding: 0.25rem 0.75rem;
+                background-color: #3b82f6;
+                color: white;
+                border: none;
+                border-radius: 0.25rem;
+                font-size: 0.875rem;
+                cursor: pointer;
+                transition: background-color 0.2s;
+            }
+            .download-btn:hover {
+                background-color: #2563eb;
+            }
+            .delete-btn {
+                padding: 0.25rem 0.75rem;
+                background-color: #dc2626;
+                color: white;
+                border: none;
+                border-radius: 0.25rem;
+                font-size: 0.875rem;
+                cursor: pointer;
+                transition: background-color 0.2s;
+            }
+            .delete-btn:hover {
+                background-color: #b91c1c;
+            }
+        </style>
+        <div>
+            <div class="dump-header">
+                <div class="dump-name">
+                    <slot name="name">Memory Dump</slot>
+                </div>
+                <div class="dump-actions">
+                    <button class="download-btn">Download</button>
+                    <button class="delete-btn">Delete</button>
+                </div>
+            </div>
+            <div class="dump-info">
+                <div>Size: <slot name="size">Unknown</slot></div>
+                <div>Created: <slot name="timestamp">Unknown</slot></div>
+            </div>
+        </div>
+    </template>
+</body>
+</html>

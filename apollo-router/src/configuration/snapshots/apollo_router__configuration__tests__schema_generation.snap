@@ -1682,6 +1682,32 @@ expression: "&schema"
     },
     "Config5": {
       "additionalProperties": false,
+      "description": "Configuration for the diagnostics plugin\n\n**Platform Requirements**: This plugin is supported on all platforms.\nHeap dump functionality is only available on Linux platforms due to\njemalloc requirements. Other diagnostic features work across platforms.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Enable the diagnostics plugin",
+          "type": "boolean"
+        },
+        "listen": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ListenAddr"
+            }
+          ],
+          "default": "127.0.0.1:8089",
+          "description": "The socket address and port to listen on\nDefaults to 127.0.0.1:8089"
+        },
+        "output_directory": {
+          "default": "/tmp/router-diagnostics",
+          "description": "Directory path for memory dump files\nDefaults to \"/tmp/router-diagnostics\" on Unix, or temp directory on other platforms\n\nThis directory will be created automatically if it doesn't exist.\nNote: Memory dumps are only generated on Linux platforms.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "Config6": {
+      "additionalProperties": false,
       "description": "Configuration for response caching",
       "properties": {
         "debug": {
@@ -1726,7 +1752,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config6": {
+    "Config7": {
       "additionalProperties": false,
       "description": "Configuration for entity caching",
       "properties": {
@@ -1773,7 +1799,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config7": {
+    "Config8": {
       "description": "Configuration for the progressive override plugin",
       "type": "object"
     },
@@ -11414,7 +11440,7 @@ expression: "&schema"
       "type": "object"
     },
     "^experimental_response_cache$": {
-      "$ref": "#/definitions/Config5"
+      "$ref": "#/definitions/Config6"
     }
   },
   "properties": {
@@ -11527,6 +11553,9 @@ expression: "&schema"
       },
       "description": "Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.\nYou probably don’t want this in production!"
     },
+    "experimental_diagnostics": {
+      "$ref": "#/definitions/Config5"
+    },
     "experimental_type_conditioned_fetching": {
       "default": false,
       "description": "Type conditioned fetching configuration.",
@@ -11600,13 +11629,13 @@ expression: "&schema"
       "description": "Plugin configuration"
     },
     "preview_entity_cache": {
-      "$ref": "#/definitions/Config6"
+      "$ref": "#/definitions/Config7"
     },
     "preview_file_uploads": {
       "$ref": "#/definitions/FileUploadsConfig"
     },
     "progressive_override": {
-      "$ref": "#/definitions/Config7"
+      "$ref": "#/definitions/Config8"
     },
     "rhai": {
       "$ref": "#/definitions/RhaiConfig"
