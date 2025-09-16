@@ -104,6 +104,26 @@ impl MemoryService {
             .await
             .map_err(|e| format!("Failed to add memory directory: {}", e))?;
 
+        // Add README.txt explaining why memory profiling is not available
+        let readme_content = format!(
+            "MEMORY PROFILING NOT AVAILABLE\n\
+            ==============================\n\n\
+            Memory profiling with heap dumps is only available on Linux platforms\n\
+            with jemalloc global allocator enabled.\n\n\
+            Current platform: {}\n\n\
+            To enable memory profiling:\n\
+            1. Use a Linux platform (Ubuntu, CentOS, etc.)\n\
+            2. Ensure jemalloc is compiled with the 'global-allocator' feature\n\
+            3. Build the router with memory profiling support\n\n\
+            For more information, see the Apollo Router documentation.\n",
+            std::env::consts::OS
+        );
+
+        use crate::plugins::diagnostics::archive_utils::ArchiveUtils;
+        ArchiveUtils::add_text_file(tar, "memory/README.txt", &readme_content)
+            .await
+            .map_err(|e| format!("Failed to add README.txt: {}", e))?;
+
         Ok(())
     }
 

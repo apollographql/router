@@ -156,7 +156,6 @@ async fn test_create_archive() {
     // Router binary no longer included - enhanced profiles have embedded symbols
 }
 
-#[cfg(target_family = "unix")]
 #[tokio::test]
 async fn test_create_main_manifest() {
     let config = Config {
