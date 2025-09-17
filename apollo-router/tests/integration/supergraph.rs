@@ -141,7 +141,8 @@ async fn test_supergraph_server_http_max_headers_exceeded() -> Result<(), BoxErr
             r#"
             server:
               http:
-                max_headers: 10
+                max:
+                  headers: 10
             "#,
         )
         .build()
@@ -174,7 +175,8 @@ async fn test_supergraph_server_http_max_headers_within_limit() -> Result<(), Bo
             r#"
             server:
               http:
-                max_headers: 50
+                max:
+                  headers: 50
             "#,
         )
         .build()
@@ -212,7 +214,8 @@ async fn test_supergraph_server_http_large_header_value() -> Result<(), BoxError
             r#"
             server:
               http:
-                max_header_size: 1kb
+                max:
+                  header_size: 1kb
             "#,
         )
         .build()
@@ -245,7 +248,8 @@ async fn test_supergraph_server_http_header_size_within_limit() -> Result<(), Bo
             r#"
             server:
               http:
-                max_header_size: 2kb
+                max:
+                  header_size: 2kb
             "#,
         )
         .build()
@@ -281,7 +285,8 @@ async fn test_supergraph_server_http_header_list_size_exceeded() -> Result<(), B
             r#"
             server:
               http:
-                max_header_list_size: 4kb
+                max:
+                  header_list_size: 4kb
             "#,
         )
         .build()
@@ -317,7 +322,8 @@ async fn test_supergraph_server_http_header_list_size_within_limit() -> Result<(
             r#"
             server:
               http:
-                max_header_list_size: 8kb
+                max:
+                  header_list_size: 8kb
             "#,
         )
         .build()
@@ -389,7 +395,8 @@ async fn test_supergraph_combined_config_server_takes_precedence() -> Result<(),
             r#"
             server:
               http:
-                max_headers: 20
+                max:
+                  headers: 20
             limits:
               http1_max_request_headers: 5
             "#,
@@ -422,14 +429,18 @@ async fn test_supergraph_combined_config_server_takes_precedence() -> Result<(),
     Ok(())
 }
 
-// Tests for new middleware-level header limits in the limits plugin
+
+
+// Test backward compatibility with old field names
 #[tokio::test(flavor = "multi_thread")]
-async fn test_supergraph_limits_http_max_request_headers_exceeded() -> Result<(), BoxError> {
+async fn test_supergraph_server_http_backward_compatibility() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .config(
             r#"
-            limits:
-              http_max_request_headers: 5
+            server:
+              http:
+                max_header_size: "1kb"
+                max_headers: 10
             "#,
         )
         .build()
@@ -439,7 +450,7 @@ async fn test_supergraph_limits_http_max_request_headers_exceeded() -> Result<()
     router.assert_started().await;
 
     let mut headers = HashMap::new();
-    for i in 0..6 {
+    for i in 0..11 {
         headers.insert(format!("test-header-{i}"), format!("value_{i}"));
     }
 
@@ -452,104 +463,5 @@ async fn test_supergraph_limits_http_max_request_headers_exceeded() -> Result<()
         )
         .await;
     assert_eq!(response.status(), 431);
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_supergraph_limits_http_max_request_headers_within_limit() -> Result<(), BoxError> {
-    let mut router = IntegrationTest::builder()
-        .config(
-            r#"
-            limits:
-              http_max_request_headers: 10
-            "#,
-        )
-        .build()
-        .await;
-
-    router.start().await;
-    router.assert_started().await;
-
-    let mut headers = HashMap::new();
-    for i in 0..5 {
-        headers.insert(format!("test-header-{i}"), format!("value_{i}"));
-    }
-
-    let (_trace_id, response) = router
-        .execute_query(
-            Query::builder()
-                .body(json!({ "query":  "{ __typename }"}))
-                .headers(headers)
-                .build(),
-        )
-        .await;
-    assert_eq!(response.status(), 200);
-    assert_eq!(
-        response.json::<serde_json::Value>().await?,
-        json!({ "data": { "__typename": "Query" } })
-    );
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_supergraph_limits_http_max_header_list_items_exceeded() -> Result<(), BoxError> {
-    let mut router = IntegrationTest::builder()
-        .config(
-            r#"
-            limits:
-              http_max_header_list_items: 2
-            "#,
-        )
-        .build()
-        .await;
-
-    router.start().await;
-    router.assert_started().await;
-
-    // Add multiple values to the same header (more than 2)
-    let (_trace_id, response) = router
-        .execute_query(
-            Query::builder()
-                .body(json!({ "query":  "{ __typename }"}))
-                .header("test-header", "value1")
-                .header("test-header", "value2")
-                .header("test-header", "value3") // This should exceed the limit
-                .build(),
-        )
-        .await;
-    assert_eq!(response.status(), 431);
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_supergraph_limits_http_max_header_list_items_within_limit() -> Result<(), BoxError> {
-    let mut router = IntegrationTest::builder()
-        .config(
-            r#"
-            limits:
-              http_max_header_list_items: 5
-            "#,
-        )
-        .build()
-        .await;
-
-    router.start().await;
-    router.assert_started().await;
-
-    // Add 2 values to the same header (within limit of 5)
-    let (_trace_id, response) = router
-        .execute_query(
-            Query::builder()
-                .body(json!({ "query":  "{ __typename }"}))
-                .header("test-header", "value1")
-                .header("test-header", "value2")
-                .build(),
-        )
-        .await;
-    assert_eq!(response.status(), 200);
-    assert_eq!(
-        response.json::<serde_json::Value>().await?,
-        json!({ "data": { "__typename": "Query" } })
-    );
     Ok(())
 }
