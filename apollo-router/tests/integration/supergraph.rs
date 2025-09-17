@@ -430,3 +430,38 @@ async fn test_supergraph_combined_config_server_takes_precedence() -> Result<(),
 }
 
 
+
+// Test backward compatibility with old field names
+#[tokio::test(flavor = "multi_thread")]
+async fn test_supergraph_server_http_backward_compatibility() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+            server:
+              http:
+                max_header_size: "1kb"
+                max_headers: 10
+            "#,
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let mut headers = HashMap::new();
+    for i in 0..11 {
+        headers.insert(format!("test-header-{i}"), format!("value_{i}"));
+    }
+
+    let (_trace_id, response) = router
+        .execute_query(
+            Query::builder()
+                .body(json!({ "query":  "{ __typename }"}))
+                .headers(headers)
+                .build(),
+        )
+        .await;
+    assert_eq!(response.status(), 431);
+    Ok(())
+}

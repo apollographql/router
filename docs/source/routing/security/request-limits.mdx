@@ -323,6 +323,25 @@ The `server.http` configuration takes precedence over the legacy `limits.http1_*
 - Set total header payload limits with `max.header_list_size` for HTTP/2
 - Configure header read timeouts consistently across all HTTP versions
 
+#### Deprecated Field Names
+
+For backward compatibility, the old flat field names are still supported but deprecated:
+
+```yaml title="router.yaml (deprecated)"
+server:
+  http:
+    # Deprecated: Use max.header_size instead
+    max_header_size: "32kb"
+    
+    # Deprecated: Use max.headers instead  
+    max_headers: 250
+    
+    # Deprecated: Use max.header_list_size instead
+    max_header_list_size: "64kb"
+```
+
+The new nested structure takes precedence when both are specified.
+
 If router receives requests exceeding these limits, it responds with `431 Request Header Fields Too Large`.
 
 #### Server-level Header Limits
