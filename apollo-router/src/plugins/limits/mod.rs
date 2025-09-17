@@ -486,7 +486,7 @@ mod test {
             .router_service(|_| async { panic!("should have rejected request") })
             .call(
                 router::Request::fake_builder()
-                    .header("very-long-header-name", "very-long-value")
+                    .header("very-very-very-very-very-long-header-name-that-exceeds-limit", "very-very-very-very-very-long-header-value-that-exceeds-limit")
                     .body(router::body::empty())
                     .build()
                     .unwrap(),

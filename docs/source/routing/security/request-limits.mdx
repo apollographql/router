@@ -17,6 +17,8 @@ limits:
   http_max_request_bytes: 2000000 # Default value: 2 MB
   http1_max_request_headers: 200 # Default value: 100
   http1_max_request_buf_size: 800kb # Default value: 400kib
+  http_max_header_size: 8192 # Default value: unlimited
+  http_max_header_list_items: 10 # Default value: unlimited
 
   # Parser-based limits
   parser_max_tokens: 15000 # Default value
@@ -290,6 +292,35 @@ If router receives more headers than the buffer size, it responds to the client 
 ### `http1_max_request_buf_size`
 
 Limit the maximum buffer size for the HTTP1 connection. Default is ~400kib.
+
+### `http_max_header_size`
+
+Limits the maximum size of individual HTTP headers (header name + header value combined).
+If a header exceeds this size limit, the router responds with `431 Request Header Fields Too Large`.
+
+Default: No limit (unlimited).
+
+Example:
+```yaml title="router.yaml"
+limits:
+  http_max_header_size: 8192  # 8KB per header
+```
+
+### `http_max_header_list_items`
+
+Limits the maximum number of items in comma-separated HTTP header values.
+For example, a header like `Accept: text/html, application/json, */*` contains 3 items.
+If a header value contains more items than this limit, the router responds with `431 Request Header Fields Too Large`.
+
+Default: No limit (unlimited).
+
+Example:
+```yaml title="router.yaml"
+limits:
+  http_max_header_list_items: 10  # Max 10 items per header value
+```
+
+This limit is useful for preventing abuse of headers that accept multiple values, such as `Accept`, `Accept-Encoding`, or custom headers that use comma-separated lists.
 
 ## Parser-based limits
 
