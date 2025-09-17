@@ -474,7 +474,7 @@ pub(super) fn serve_router_on_listen_addr(
                                             }
 
                                             // Apply individual header size limit for HTTP/2
-                                            if let Some(max_header_size) = effective_max_header_size {
+                                            if let Some(_max_header_size) = effective_max_header_size {
                                                 // For HTTP/2, individual header size is enforced via max_frame_size
                                                 // But hyper doesn't expose this directly, so we'll rely on max_header_list_size
                                                 // and validation at the application level if needed

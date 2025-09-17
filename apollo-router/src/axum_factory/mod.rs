@@ -2,6 +2,7 @@
 pub(crate) mod axum_http_server_factory;
 pub(crate) mod compression;
 pub(crate) mod connection_handle;
+mod header_size_middleware;
 mod listeners;
 pub(crate) mod metrics;
 #[cfg(test)]
