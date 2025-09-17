@@ -313,15 +313,17 @@ fn get_effective_http_config(
     legacy_max_headers: Option<usize>,
     legacy_max_buf_size: Option<ByteSize>,
 ) -> (Option<usize>, Option<ByteSize>, Option<ByteSize>, Option<ByteSize>) {
+    let effective_max = server_config.effective_max();
+    
     // For backward compatibility, prefer server config over legacy config
-    let effective_max_headers = server_config.max.headers.or(legacy_max_headers);
+    let effective_max_headers = effective_max.headers.or(legacy_max_headers);
     
     // Use legacy_max_buf_size for HTTP/1 buffer size (different from header size)
     let effective_max_buf_size = legacy_max_buf_size;
     
     // New server-specific configuration
-    let effective_max_header_size = server_config.max.header_size;
-    let effective_max_header_list_size = server_config.max.header_list_size;
+    let effective_max_header_size = effective_max.header_size;
+    let effective_max_header_list_size = effective_max.header_list_size;
     
     (effective_max_headers, effective_max_buf_size, effective_max_header_size, effective_max_header_list_size)
 }

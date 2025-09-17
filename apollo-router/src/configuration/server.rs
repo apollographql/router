@@ -35,7 +35,7 @@ pub(crate) struct ServerHttpMaxConfig {
 
 /// Configuration for HTTP
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
+#[serde(default)]
 pub(crate) struct ServerHttpConfig {
     /// Header read timeout in human-readable format; defaults to 10s
     #[serde(
@@ -47,6 +47,24 @@ pub(crate) struct ServerHttpConfig {
 
     /// Maximum limits for HTTP requests
     pub(crate) max: ServerHttpMaxConfig,
+
+    // Backward compatibility fields (deprecated, use max.* instead)
+    /// Maximum size of a single header field (name + value) in bytes.
+    /// Deprecated: Use max.header_size instead
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<String>")]
+    pub(crate) max_header_size: Option<ByteSize>,
+
+    /// Maximum number of headers allowed in a request.
+    /// Deprecated: Use max.headers instead
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) max_headers: Option<usize>,
+
+    /// Maximum total size of all headers combined in bytes.
+    /// Deprecated: Use max.header_list_size instead
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<String>")]
+    pub(crate) max_header_list_size: Option<ByteSize>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -71,6 +89,20 @@ impl Default for ServerHttpConfig {
         Self {
             header_read_timeout: Duration::from_secs(10),
             max: ServerHttpMaxConfig::default(),
+            max_header_size: None,
+            max_headers: None,
+            max_header_list_size: None,
+        }
+    }
+}
+
+impl ServerHttpConfig {
+    /// Get effective max configuration, merging backward compatibility fields
+    pub(crate) fn effective_max(&self) -> ServerHttpMaxConfig {
+        ServerHttpMaxConfig {
+            header_size: self.max.header_size.or(self.max_header_size),
+            headers: self.max.headers.or(self.max_headers),
+            header_list_size: self.max.header_list_size.or(self.max_header_list_size),
         }
     }
 }
@@ -97,10 +129,17 @@ impl ServerHttpConfig {
     pub(crate) fn new(
         header_read_timeout: Option<Duration>,
         max: Option<ServerHttpMaxConfig>,
+        // Backward compatibility parameters
+        max_header_size: Option<ByteSize>,
+        max_headers: Option<usize>,
+        max_header_list_size: Option<ByteSize>,
     ) -> Self {
         Self {
             header_read_timeout: header_read_timeout.unwrap_or_else(default_header_read_timeout),
             max: max.unwrap_or_default(),
+            max_header_size,
+            max_headers,
+            max_header_list_size,
         }
     }
 }
@@ -306,6 +345,69 @@ mod tests {
         assert_eq!(http_config.max.header_size, Some(ByteSize::kb(48)));
         assert_eq!(http_config.max.headers, Some(300));
         assert_eq!(http_config.max.header_list_size, Some(ByteSize::kb(96)));
+    }
+
+    #[test]
+    fn test_backward_compatibility_old_field_names() {
+        let json_config = json!({
+            "http": {
+                "max_header_size": "32kb",
+                "max_headers": 200,
+                "max_header_list_size": "64kb"
+            }
+        });
+
+        let config: Server = serde_json::from_value(json_config).unwrap();
+        let effective_max = config.http.effective_max();
+
+        assert_eq!(effective_max.header_size, Some(ByteSize::kb(32)));
+        assert_eq!(effective_max.headers, Some(200));
+        assert_eq!(effective_max.header_list_size, Some(ByteSize::kb(64)));
+    }
+
+    #[test]
+    fn test_new_max_structure_takes_precedence() {
+        let json_config = json!({
+            "http": {
+                "max": {
+                    "header_size": "64kb",
+                    "headers": 300,
+                    "header_list_size": "128kb"
+                },
+                "max_header_size": "32kb",
+                "max_headers": 200,
+                "max_header_list_size": "64kb"
+            }
+        });
+
+        let config: Server = serde_json::from_value(json_config).unwrap();
+        let effective_max = config.http.effective_max();
+
+        // New max structure should take precedence over old fields
+        assert_eq!(effective_max.header_size, Some(ByteSize::kb(64)));
+        assert_eq!(effective_max.headers, Some(300));
+        assert_eq!(effective_max.header_list_size, Some(ByteSize::kb(128)));
+    }
+
+    #[test]
+    fn test_mixed_old_and_new_configuration() {
+        let json_config = json!({
+            "http": {
+                "max": {
+                    "header_size": "64kb"
+                },
+                "max_headers": 200,
+                "max_header_list_size": "64kb"
+            }
+        });
+
+        let config: Server = serde_json::from_value(json_config).unwrap();
+        let effective_max = config.http.effective_max();
+
+        // Should use new max.header_size and fall back to old fields for others
+        assert_eq!(effective_max.header_size, Some(ByteSize::kb(64)));
+        assert_eq!(effective_max.headers, Some(200));
+        assert_eq!(effective_max.header_list_size, Some(ByteSize::kb(64)));
     }
 
     #[test]
