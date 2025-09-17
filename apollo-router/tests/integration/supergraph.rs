@@ -141,7 +141,8 @@ async fn test_supergraph_server_http_max_headers_exceeded() -> Result<(), BoxErr
             r#"
             server:
               http:
-                max_headers: 10
+                max:
+                  headers: 10
             "#,
         )
         .build()
@@ -174,7 +175,8 @@ async fn test_supergraph_server_http_max_headers_within_limit() -> Result<(), Bo
             r#"
             server:
               http:
-                max_headers: 50
+                max:
+                  headers: 50
             "#,
         )
         .build()
@@ -212,7 +214,8 @@ async fn test_supergraph_server_http_large_header_value() -> Result<(), BoxError
             r#"
             server:
               http:
-                max_header_size: 1kb
+                max:
+                  header_size: 1kb
             "#,
         )
         .build()
@@ -245,7 +248,8 @@ async fn test_supergraph_server_http_header_size_within_limit() -> Result<(), Bo
             r#"
             server:
               http:
-                max_header_size: 2kb
+                max:
+                  header_size: 2kb
             "#,
         )
         .build()
@@ -281,7 +285,8 @@ async fn test_supergraph_server_http_header_list_size_exceeded() -> Result<(), B
             r#"
             server:
               http:
-                max_header_list_size: 4kb
+                max:
+                  header_list_size: 4kb
             "#,
         )
         .build()
@@ -317,7 +322,8 @@ async fn test_supergraph_server_http_header_list_size_within_limit() -> Result<(
             r#"
             server:
               http:
-                max_header_list_size: 8kb
+                max:
+                  header_list_size: 8kb
             "#,
         )
         .build()
@@ -389,7 +395,8 @@ async fn test_supergraph_combined_config_server_takes_precedence() -> Result<(),
             r#"
             server:
               http:
-                max_headers: 20
+                max:
+                  headers: 20
             limits:
               http1_max_request_headers: 5
             "#,
