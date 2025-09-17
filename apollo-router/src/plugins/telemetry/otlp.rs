@@ -3,11 +3,12 @@ use std::collections::HashMap;
 
 use http::Uri;
 use opentelemetry_otlp::HttpExporterBuilder;
+use opentelemetry_otlp::SpanExporter;
 use opentelemetry_otlp::TonicExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::metrics::InstrumentKind;
-use opentelemetry_sdk::metrics::reader::TemporalitySelector;
-use opentelemetry_sdk::metrics::data::Temporality as SdkTemporality;
+use opentelemetry_otlp::WithHttpConfig;
+use opentelemetry_otlp::WithTonicConfig;
+use opentelemetry_sdk::metrics::Temporality as SdkTemporality;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -174,8 +175,8 @@ impl Config {
                     None
                 };
 
-                let mut exporter = opentelemetry_otlp::new_exporter()
-                    .tonic()
+                let mut exporter = SpanExporter::builder()
+                    .with_tonic()
                     .with_protocol(opentelemetry_otlp::Protocol::Grpc)
                     .with_timeout(self.batch_processor.max_export_timeout)
                     .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()));
@@ -190,11 +191,12 @@ impl Config {
             Protocol::Http => {
                 let endpoint_opt = process_endpoint(&self.endpoint, &kind, &self.protocol)?;
                 let headers = self.http.headers.clone();
-                let mut exporter: HttpExporterBuilder = opentelemetry_otlp::new_exporter()
-                    .http()
+                let mut exporter = SpanExporter::builder()
+                    .with_http()
                     .with_protocol(opentelemetry_otlp::Protocol::Grpc)
                     .with_timeout(self.batch_processor.max_export_timeout)
                     .with_headers(headers);
+
                 if let Some(endpoint) = endpoint_opt {
                     exporter = exporter.with_endpoint(endpoint);
                 }
@@ -291,40 +293,11 @@ pub(crate) enum Temporality {
     Delta,
 }
 
-pub(crate) struct CustomTemporalitySelector(
-    pub(crate) SdkTemporality,
-);
-
-impl TemporalitySelector for CustomTemporalitySelector {
-    fn temporality(&self, kind: InstrumentKind) -> SdkTemporality {
-        // Up/down counters should always use cumulative temporality to ensure they are sent as aggregates
-        // rather than deltas, which prevents drift issues.
-        // See https://github.com/open-telemetry/opentelemetry-specification/blob/a1c13d59bb7d0fb086df2b3e1eaec9df9efef6cc/specification/metrics/sdk_exporters/otlp.md#additional-configuration for mor information
-        match kind {
-            InstrumentKind::UpDownCounter | InstrumentKind::ObservableUpDownCounter => {
-                SdkTemporality::Cumulative
-            }
-            _ => self.0,
-        }
-    }
-}
-
-impl From<&Temporality> for Box<dyn TemporalitySelector> {
-    fn from(value: &Temporality) -> Self {
-        Box::new(match value {
-            Temporality::Cumulative => {
-                CustomTemporalitySelector(SdkTemporality::Cumulative)
-            }
-            Temporality::Delta => {
-                CustomTemporalitySelector(SdkTemporality::Delta)
-            }
-        })
-    }
-}
+pub(crate) struct CustomTemporalitySelector(pub(crate) SdkTemporality);
 
 #[cfg(test)]
 mod tests {
-    use opentelemetry_sdk::metrics::data::Temporality as SdkTemporality;
+    use opentelemetry_sdk::metrics::Temporality as SdkTemporality;
 
     use super::*;
 
