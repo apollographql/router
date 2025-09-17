@@ -243,6 +243,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 configuration.supergraph.connection_shutdown_timeout,
                 all_routers.main.1,
                 configuration.server.http.clone(),
+                configuration.limits.clone(),
                 configuration.limits.http1_max_request_headers,
                 configuration.limits.http1_max_request_buf_size,
                 all_connections_stopped_sender.clone(),
@@ -286,6 +287,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                             configuration.supergraph.connection_shutdown_timeout,
                             router,
                             configuration.server.http.clone(),
+                            configuration.limits.clone(),
                             configuration.limits.http1_max_request_headers,
                             configuration.limits.http1_max_request_buf_size,
                             all_connections_stopped_sender.clone(),
@@ -501,7 +503,7 @@ where
     }));
     
     // Add header size limit middleware
-    if let Some(max_header_size) = configuration.server.http.effective_max().header_size {
+    if let Some(max_header_size) = configuration.limits.http_max_header_size {
         tracing::debug!(?max_header_size, "Adding header size limit middleware");
         router = router.layer(HeaderSizeLimitLayer::new(Some(max_header_size)));
     }

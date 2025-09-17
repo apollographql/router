@@ -133,16 +133,14 @@ async fn test_supergraph_allow_to_change_http1_max_buf_size() -> Result<(), BoxE
     Ok(())
 }
 
-// New test cases for server.http configuration approach with max_headers
+// New test cases for limits configuration approach with max_headers
 #[tokio::test(flavor = "multi_thread")]
-async fn test_supergraph_server_http_max_headers_exceeded() -> Result<(), BoxError> {
+async fn test_supergraph_limits_max_headers_exceeded() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .config(
             r#"
-            server:
-              http:
-                max:
-                  headers: 10
+            limits:
+              http1_max_request_headers: 10
             "#,
         )
         .build()
@@ -169,14 +167,12 @@ async fn test_supergraph_server_http_max_headers_exceeded() -> Result<(), BoxErr
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_supergraph_server_http_max_headers_within_limit() -> Result<(), BoxError> {
+async fn test_supergraph_limits_max_headers_within_limit() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .config(
             r#"
-            server:
-              http:
-                max:
-                  headers: 50
+            limits:
+              http1_max_request_headers: 50
             "#,
         )
         .build()

@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use bytesize::ByteSize;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -11,31 +10,10 @@ fn default_header_read_timeout() -> Duration {
     DEFAULT_HEADER_READ_TIMEOUT
 }
 
-/// Configuration for HTTP limits
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
-pub(crate) struct ServerHttpMaxConfig {
-    /// Maximum size of a single header field (name + value) in bytes.
-    /// Applies to both HTTP/1.1 and HTTP/2.
-    /// If not specified, uses the underlying HTTP implementation's default.
-    #[schemars(with = "Option<String>")]
-    pub(crate) header_size: Option<ByteSize>,
-
-    /// Maximum number of headers allowed in a request.
-    /// Applies primarily to HTTP/1.1 connections.
-    /// If not specified, uses the underlying HTTP implementation's default.
-    pub(crate) headers: Option<usize>,
-
-    /// Maximum total size of all headers combined in bytes.
-    /// Applies primarily to HTTP/2 connections.
-    /// If not specified, uses the underlying HTTP implementation's default.
-    #[schemars(with = "Option<String>")]
-    pub(crate) header_list_size: Option<ByteSize>,
-}
 
 /// Configuration for HTTP
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(default)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct ServerHttpConfig {
     /// Header read timeout in human-readable format; defaults to 10s
     #[serde(
@@ -44,27 +22,6 @@ pub(crate) struct ServerHttpConfig {
     )]
     #[schemars(with = "String", default = "default_header_read_timeout")]
     pub(crate) header_read_timeout: Duration,
-
-    /// Maximum limits for HTTP requests
-    pub(crate) max: ServerHttpMaxConfig,
-
-    // Backward compatibility fields (deprecated, use max.* instead)
-    /// Maximum size of a single header field (name + value) in bytes.
-    /// Deprecated: Use max.header_size instead
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Option<String>")]
-    pub(crate) max_header_size: Option<ByteSize>,
-
-    /// Maximum number of headers allowed in a request.
-    /// Deprecated: Use max.headers instead
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) max_headers: Option<usize>,
-
-    /// Maximum total size of all headers combined in bytes.
-    /// Deprecated: Use max.header_list_size instead
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Option<String>")]
-    pub(crate) max_header_list_size: Option<ByteSize>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -74,75 +31,14 @@ pub(crate) struct Server {
     pub(crate) http: ServerHttpConfig,
 }
 
-impl Default for ServerHttpMaxConfig {
-    fn default() -> Self {
-        Self {
-            header_size: None,
-            headers: None,
-            header_list_size: None,
-        }
-    }
-}
-
 impl Default for ServerHttpConfig {
     fn default() -> Self {
         Self {
             header_read_timeout: Duration::from_secs(10),
-            max: ServerHttpMaxConfig::default(),
-            max_header_size: None,
-            max_headers: None,
-            max_header_list_size: None,
         }
     }
 }
 
-impl ServerHttpConfig {
-    /// Get effective max configuration, merging backward compatibility fields
-    pub(crate) fn effective_max(&self) -> ServerHttpMaxConfig {
-        ServerHttpMaxConfig {
-            header_size: self.max.header_size.or(self.max_header_size),
-            headers: self.max.headers.or(self.max_headers),
-            header_list_size: self.max.header_list_size.or(self.max_header_list_size),
-        }
-    }
-}
-
-#[buildstructor::buildstructor]
-impl ServerHttpMaxConfig {
-    #[builder]
-    pub(crate) fn new(
-        header_size: Option<ByteSize>,
-        headers: Option<usize>,
-        header_list_size: Option<ByteSize>,
-    ) -> Self {
-        Self {
-            header_size,
-            headers,
-            header_list_size,
-        }
-    }
-}
-
-#[buildstructor::buildstructor]
-impl ServerHttpConfig {
-    #[builder]
-    pub(crate) fn new(
-        header_read_timeout: Option<Duration>,
-        max: Option<ServerHttpMaxConfig>,
-        // Backward compatibility parameters
-        max_header_size: Option<ByteSize>,
-        max_headers: Option<usize>,
-        max_header_list_size: Option<ByteSize>,
-    ) -> Self {
-        Self {
-            header_read_timeout: header_read_timeout.unwrap_or_else(default_header_read_timeout),
-            max: max.unwrap_or_default(),
-            max_header_size,
-            max_headers,
-            max_header_list_size,
-        }
-    }
-}
 
 #[buildstructor::buildstructor]
 impl Server {
@@ -174,9 +70,6 @@ mod tests {
             server_config.http.header_read_timeout,
             default_duration_seconds
         );
-        assert_eq!(server_config.http.max.header_size, None);
-        assert_eq!(server_config.http.max.headers, None);
-        assert_eq!(server_config.http.max.header_list_size, None);
     }
 
     #[test]
@@ -186,9 +79,6 @@ mod tests {
         let config: Server = serde_json::from_value(json_server).unwrap();
 
         assert_eq!(config.http.header_read_timeout, Duration::from_secs(10));
-        assert_eq!(config.http.max.header_size, None);
-        assert_eq!(config.http.max.headers, None);
-        assert_eq!(config.http.max.header_list_size, None);
     }
 
     #[test]
@@ -200,9 +90,6 @@ mod tests {
         let config: Server = serde_json::from_value(json_config).unwrap();
 
         assert_eq!(config.http.header_read_timeout, Duration::from_secs(10));
-        assert_eq!(config.http.max.header_size, None);
-        assert_eq!(config.http.max.headers, None);
-        assert_eq!(config.http.max.header_list_size, None);
     }
 
     #[test]
@@ -231,184 +118,7 @@ mod tests {
         assert_eq!(config.http.header_read_timeout, Duration::from_secs(60));
     }
 
-    #[test]
-    fn it_json_parses_http_header_limits_correctly() {
-        let json_config = json!({
-            "http": {
-                "max": {
-                    "header_size": "32kb",
-                    "headers": 200,
-                    "header_list_size": "64kb"
-                }
-            }
-        });
 
-        let config: Server = serde_json::from_value(json_config).unwrap();
-
-        assert_eq!(config.http.max.header_size, Some(ByteSize::kb(32)));
-        assert_eq!(config.http.max.headers, Some(200));
-        assert_eq!(config.http.max.header_list_size, Some(ByteSize::kb(64)));
-    }
-
-    #[test]
-    fn it_json_parses_mixed_http_config_correctly() {
-        let json_config = json!({
-            "http": {
-                "header_read_timeout": "15s",
-                "max": {
-                    "header_size": "16kb",
-                    "headers": 150
-                }
-            }
-        });
-
-        let config: Server = serde_json::from_value(json_config).unwrap();
-
-        assert_eq!(config.http.header_read_timeout, Duration::from_secs(15));
-        assert_eq!(config.http.max.header_size, Some(ByteSize::kb(16)));
-        assert_eq!(config.http.max.headers, Some(150));
-        assert_eq!(config.http.max.header_list_size, None);
-    }
-
-    #[test]
-    fn test_server_http_config_with_all_header_limits() {
-        let json_config = json!({
-            "http": {
-                "header_read_timeout": "20s",
-                "max": {
-                    "header_size": "32kb", 
-                    "headers": 200,
-                    "header_list_size": "64kb"
-                }
-            }
-        });
-
-        let config: Server = serde_json::from_value(json_config).unwrap();
-
-        assert_eq!(config.http.header_read_timeout, Duration::from_secs(20));
-        assert_eq!(config.http.max.header_size, Some(ByteSize::kb(32)));
-        assert_eq!(config.http.max.headers, Some(200));
-        assert_eq!(config.http.max.header_list_size, Some(ByteSize::kb(64)));
-    }
-
-    #[test]
-    fn test_server_http_config_partial_header_config() {
-        let json_config = json!({
-            "http": {
-                "max": {
-                    "header_size": "64kb",
-                    "headers": 500
-                }
-            }
-        });
-
-        let config: Server = serde_json::from_value(json_config).unwrap();
-
-        // Default timeout should be preserved
-        assert_eq!(config.http.header_read_timeout, Duration::from_secs(10));
-        assert_eq!(config.http.max.header_size, Some(ByteSize::kb(64)));
-        assert_eq!(config.http.max.headers, Some(500));
-        assert_eq!(config.http.max.header_list_size, None);
-    }
-
-    #[test]
-    fn test_server_http_config_large_values() {
-        let json_config = json!({
-            "http": {
-                "max": {
-                    "header_size": "1mb",
-                    "headers": 1000,
-                    "header_list_size": "10mb"
-                }
-            }
-        });
-
-        let config: Server = serde_json::from_value(json_config).unwrap();
-
-        assert_eq!(config.http.max.header_size, Some(ByteSize::mb(1)));
-        assert_eq!(config.http.max.headers, Some(1000));
-        assert_eq!(config.http.max.header_list_size, Some(ByteSize::mb(10)));
-    }
-
-    #[test]
-    fn test_buildstructor_with_new_http_fields() {
-        let http_config = ServerHttpConfig::builder()
-            .header_read_timeout(Some(Duration::from_secs(30)))
-            .max(Some(ServerHttpMaxConfig::builder()
-                .header_size(Some(ByteSize::kb(48)))
-                .headers(Some(300))
-                .header_list_size(Some(ByteSize::kb(96)))
-                .build()))
-            .build();
-
-        assert_eq!(http_config.header_read_timeout, Duration::from_secs(30));
-        assert_eq!(http_config.max.header_size, Some(ByteSize::kb(48)));
-        assert_eq!(http_config.max.headers, Some(300));
-        assert_eq!(http_config.max.header_list_size, Some(ByteSize::kb(96)));
-    }
-
-    #[test]
-    fn test_backward_compatibility_old_field_names() {
-        let json_config = json!({
-            "http": {
-                "max_header_size": "32kb",
-                "max_headers": 200,
-                "max_header_list_size": "64kb"
-            }
-        });
-
-        let config: Server = serde_json::from_value(json_config).unwrap();
-        let effective_max = config.http.effective_max();
-
-        assert_eq!(effective_max.header_size, Some(ByteSize::kb(32)));
-        assert_eq!(effective_max.headers, Some(200));
-        assert_eq!(effective_max.header_list_size, Some(ByteSize::kb(64)));
-    }
-
-    #[test]
-    fn test_new_max_structure_takes_precedence() {
-        let json_config = json!({
-            "http": {
-                "max": {
-                    "header_size": "64kb",
-                    "headers": 300,
-                    "header_list_size": "128kb"
-                },
-                "max_header_size": "32kb",
-                "max_headers": 200,
-                "max_header_list_size": "64kb"
-            }
-        });
-
-        let config: Server = serde_json::from_value(json_config).unwrap();
-        let effective_max = config.http.effective_max();
-
-        // New max structure should take precedence over old fields
-        assert_eq!(effective_max.header_size, Some(ByteSize::kb(64)));
-        assert_eq!(effective_max.headers, Some(300));
-        assert_eq!(effective_max.header_list_size, Some(ByteSize::kb(128)));
-    }
-
-    #[test]
-    fn test_mixed_old_and_new_configuration() {
-        let json_config = json!({
-            "http": {
-                "max": {
-                    "header_size": "64kb"
-                },
-                "max_headers": 200,
-                "max_header_list_size": "64kb"
-            }
-        });
-
-        let config: Server = serde_json::from_value(json_config).unwrap();
-        let effective_max = config.http.effective_max();
-
-        // Should use new max.header_size and fall back to old fields for others
-        assert_eq!(effective_max.header_size, Some(ByteSize::kb(64)));
-        assert_eq!(effective_max.headers, Some(200));
-        assert_eq!(effective_max.header_list_size, Some(ByteSize::kb(64)));
-    }
 
     #[test]
     fn test_deny_unknown_fields() {
