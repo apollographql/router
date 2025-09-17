@@ -825,6 +825,17 @@ mod tests {
     }
 
     #[test]
+    fn coalescing() {
+        let spec = ConnectSpec::V0_3;
+        validate_with_context(
+            r#"$($args.string ?? "unknown error")"#,
+            Shape::string([]),
+            spec,
+        )
+        .expect("coalescing type checks in expressions");
+    }
+
+    #[test]
     fn bare_field_with_path() {
         let selection = "something.blah";
         let err = validate_with_context(selection, scalars(), ConnectSpec::latest())

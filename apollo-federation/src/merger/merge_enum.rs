@@ -431,6 +431,7 @@ pub(crate) mod tests {
             join_directive_identities: Default::default(),
             schema_to_import_to_feature_url: Default::default(),
             latest_federation_version_used: FEDERATION_VERSIONS.latest().version().clone(),
+            applied_directives_to_merge: Default::default(),
         })
     }
 
