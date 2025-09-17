@@ -2,6 +2,7 @@ mod compose_basic;
 mod compose_directive;
 mod compose_directive_sharing;
 mod compose_inaccessible;
+mod compose_interface_object;
 mod compose_tag;
 mod compose_type_merging;
 mod compose_validation;
