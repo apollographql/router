@@ -760,6 +760,7 @@ mod tests {
     #[case::first("$args.array->first.bool")]
     #[case::last("$args.array->last.bool")]
     #[case::multi_level_input("$args.multiLevel.inner.nested")]
+    #[case::methods_with_unknown_input(r#"$config->get("something")->slice(0, 1)"#)]
     fn valid_expressions(#[case] selection: &str) {
         // If this fails, another ConnectSpec version has probably been added,
         // and should be accounted for in the loop below.
