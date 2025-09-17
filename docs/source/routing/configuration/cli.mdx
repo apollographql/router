@@ -184,11 +184,12 @@ For default behavior and possible values, see [Apollo Uplink](/federation/manage
 </td>
 <td>
 
-An OCI reference to an image that contains the supergraph schema for the router.<br/>
+An OCI reference to a graph artifact that contains the supergraph schema for the router to run.<br/><br/>
 
-When this option is set, the router will fetch the schema from the specified OCI image instead of using Apollo Uplink. Note that Apollo Uplink will still be used for entitlements and persisted queries.<br/>
+When this option is set, the router will fetch the schema from the specified graph artifact instead of Apollo Uplink.
+Entitlements and persisted queries will still be fetched from Uplink.<br/><br/>
 
-⚠️ **This option does not support hot reloading schemas.**
+⚠️ **This option is in preview and does not support hot-reloading schemas.**
 
 </td>
 </tr>

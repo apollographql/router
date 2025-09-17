@@ -94,21 +94,25 @@ Both local and container paths must be specified as absolute paths.
 If you don't want to automatically update your supergraph via [Apollo Uplink](/federation/managed-federation/uplink/), or you don't have connectivity to access Apollo Uplink from your environment, you have two options:
 
 1. Using a local supergraph file, as documented in the [Configuring using local files](#configuring-using-local-files) section.
-1. Using an [OCI image reference](#using-an-oci-image-reference)
+1. Using an [OCI graph artifact reference](#using-an-oci-graph-artifact-reference)
 
-### Using an OCI image reference
+### Using an OCI graph artifact reference
 
-You can use the `APOLLO_GRAPH_ARTIFACT_REFERENCE` environment variable to fetch the supergraph schema from an OCI image:
+You can use the `APOLLO_GRAPH_ARTIFACT_REFERENCE` environment variable to fetch the supergraph schema from a graph artifact:
 
 ```bash
 docker run -p 4000:4000 \
   --env APOLLO_KEY="<your-graph-api-key>" \
-  --env APOLLO_GRAPH_ARTIFACT_REFERENCE="<your-oci-reference>" \
+  --env APOLLO_GRAPH_ARTIFACT_REFERENCE="<your-graph-artifact-reference>" \
   --rm \
   ghcr.io/apollographql/apollo-runtime:<runtime-image-version>
 ```
 
-When using this option, the router will fetch the schema from the specified OCI image instead of using Apollo Uplink. Additional information on graph artifacts is available in the [router CLI options documentation](/docs/graphos/routing/configuration/cli#command-line-options).
+When using this option, the router will fetch the schema from the specified graph artifact instead of Apollo Uplink.
+Entitlements and persisted queries will still be fetched from Uplink.
+Additional information on graph artifacts is available in the [router CLI options documentation](/docs/graphos/routing/configuration/cli#command-line-options).
+
+⚠️ **This option is in preview and does not support hot-reloading schemas.**
 
 ## Running a specific Router and MCP version
 
