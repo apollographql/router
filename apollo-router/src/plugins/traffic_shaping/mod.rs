@@ -720,6 +720,7 @@ mod test {
                 None,
                 Some(vec![(APOLLO_TRAFFIC_SHAPING.to_string(), plugin)]),
                 Default::default(),
+                None,
             )
             .await
             .expect("create plugins should work"),
