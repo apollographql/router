@@ -17,6 +17,10 @@ limits:
   http_max_request_bytes: 2000000 # Default value: 2 MB
   http1_max_request_headers: 200 # Default value: 100
   http1_max_request_buf_size: 800kb # Default value: 400kib
+  
+  # New middleware-level header limits
+  http_max_request_headers: 100    # Limit total number of headers in a request
+  http_max_header_list_items: 10   # Limit number of values per header field
 
   # Parser-based limits
   parser_max_tokens: 15000 # Default value
@@ -291,6 +295,61 @@ If router receives more headers than the buffer size, it responds to the client 
 
 Limit the maximum buffer size for the HTTP1 connection. Default is ~400kib.
 
+### `http_max_request_headers`
+
+**New in v2.6+** - Middleware-level limit for the maximum number of headers in an HTTP request.
+
+This limit is enforced at the application layer (middleware) and applies to all HTTP versions (HTTP/1.1, HTTP/2, etc.). Unlike `http1_max_request_headers` which is enforced at the HTTP server level, this middleware-level limit provides more consistent behavior across different HTTP protocols.
+
+When not specified, no limit is enforced at the middleware level.
+
+If a request contains more headers than this limit, the router responds with `431 Request Header Fields Too Large`:
+
+```json5
+{
+  "errors": [
+    {
+      "message": "Request header fields too many",
+      "extensions": {
+        "details": "Request header fields too many",
+        "code": "INVALID_GRAPHQL_REQUEST"
+      }
+    }
+  ]
+}
+```
+
+### `http_max_header_list_items`
+
+**New in v2.6+** - Middleware-level limit for the maximum number of values allowed per header field.
+
+This limit is enforced when a single header field contains multiple values (e.g., `Accept: application/json, text/html, application/xml`). If any header field contains more values than this limit, the router responds with `431 Request Header Fields Too Large`.
+
+When not specified, no limit is enforced at the middleware level.
+
+Example configuration:
+
+```yaml title="router.yaml"
+limits:
+  http_max_header_list_items: 5  # Allow up to 5 values per header
+```
+
+If a request contains a header with more values than this limit, the router responds with `431 Request Header Fields Too Large`:
+
+```json5
+{
+  "errors": [
+    {
+      "message": "Request header list too many items",
+      "extensions": {
+        "details": "Request header list too many items",
+        "code": "INVALID_GRAPHQL_REQUEST"
+      }
+    }
+  ]
+}
+```
+
 ### HTTP Header Configuration (server.http)
 
 As an alternative to the legacy `http1_*` limits above, you can configure HTTP header limits using the `server.http` section, which provides more comprehensive control over both HTTP/1.1 and HTTP/2 connections:
@@ -322,6 +381,16 @@ The `server.http` configuration takes precedence over the legacy `limits.http1_*
 - Configure header read timeouts consistently across all HTTP versions
 
 If router receives requests exceeding these limits, it responds with `431 Request Header Fields Too Large`.
+
+#### Middleware-level vs Server-level Header Limits
+
+The Apollo Router provides two approaches for limiting headers:
+
+1. **Server-level limits** (`server.http.*` and legacy `limits.http1_*`): Enforced by the underlying HTTP server implementation. These are protocol-specific and enforced early in the request processing pipeline.
+
+2. **Middleware-level limits** (`limits.http_max_request_headers` and `limits.http_max_header_list_items`): Enforced by Apollo Router middleware after the HTTP request is parsed but before GraphQL processing. These provide consistent behavior across all HTTP versions and can be dynamically configured.
+
+Choose server-level limits for maximum performance (earlier rejection) and choose middleware-level limits for consistent behavior across HTTP versions and more sophisticated routing logic.
 
 ## Parser-based limits
 
