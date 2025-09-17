@@ -307,18 +307,11 @@ fn inaccessible_uses_security_core_purpose_in_supergraph() {
         .directives
         .iter()
         .any(|d| {
-            if d.name != "link" {
-                return false;
-            }
-            d.arguments.iter().any(|arg| {
-                if arg.name != "for" {
-                    return false;
-                }
-                matches!(
-                    arg.value.as_ref(),
-                    apollo_compiler::ast::Value::Enum(enum_name) if enum_name == "SECURITY"
+            d.name == "link"
+                && matches!(
+                    d.argument_by_name("for", schema).map(|a| a.as_ref()),
+                    Ok(apollo_compiler::ast::Value::Enum(enum_name)) if enum_name == "SECURITY"
                 )
-            })
         });
     assert!(
         has_security_purpose_link,
