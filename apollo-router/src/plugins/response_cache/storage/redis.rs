@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -274,7 +273,7 @@ impl CacheStorage for Storage {
         for document in &mut batch_docs {
             document.cache_key = self.make_key(&document.cache_key);
             document.invalidation_keys =
-                self.namespaced_cache_tags(&document.invalidation_keys, &subgraph_name);
+                self.namespaced_cache_tags(&document.invalidation_keys, subgraph_name);
         }
 
         // phase 2
@@ -451,8 +450,8 @@ impl Storage {
     async fn mocked(
         config: &Config,
         is_cluster: bool,
-        reader_mock: Arc<dyn fred::mocks::Mocks>,
-        writer_mock: Arc<dyn fred::mocks::Mocks>,
+        reader_mock: std::sync::Arc<dyn fred::mocks::Mocks>,
+        writer_mock: std::sync::Arc<dyn fred::mocks::Mocks>,
     ) -> Result<Storage, BoxError> {
         let reader_storage = RedisCacheStorage::from_mocks_and_config(
             reader_mock,
@@ -530,41 +529,26 @@ pub(crate) fn default_redis_cache_config() -> Config {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::sync::Arc;
     use std::time::Duration;
 
-    use fred::error::Error;
-    use fred::mocks::MockCommand;
-    use fred::mocks::Mocks;
-    use fred::prelude::Value;
     use insta::assert_debug_snapshot;
     use itertools::Itertools;
-    use parking_lot::RwLock;
-    use tower::BoxError;
 
     use super::Config;
     use super::Storage;
-    use crate::plugins::response_cache::storage::CacheStorage;
     use crate::plugins::response_cache::storage::Document;
 
-    #[derive(Default, Debug, Clone)]
-    struct MockStorage(Arc<RwLock<HashMap<String, Value>>>);
-    impl Mocks for MockStorage {
-        fn process_command(&self, command: MockCommand) -> Result<Value, Error> {
-            eprintln!("mock received redis command: {command:?}");
-            Ok(Value::Null)
-        }
-    }
+    const SUBGRAPH_NAME: &str = "test";
 
-    fn common_config() -> Config {
+    fn redis_config(namespace: &str) -> Config {
         Config {
-            urls: vec![],
+            urls: vec!["redis://127.0.0.1:6379".parse().unwrap()],
             username: None,
             password: None,
             timeout: Duration::from_millis(200),
             ttl: Some(Duration::from_secs(60)),
-            namespace: None,
+            namespace: Some(namespace.to_string()),
             tls: None,
             required_to_start: false,
             reset_ttl: false,
@@ -587,8 +571,7 @@ mod tests {
     #[rstest::rstest]
     async fn test_invalidation_key_permutations(
         #[values(None, Some("test"))] namespace: Option<&str>,
-        #[values(vec![], vec!["invalidation_key"], vec!["invalidation_key1", "invalidation_key2", "invalidation_key3"]
-        )]
+        #[values(vec![], vec!["invalidation_key"], vec!["invalidation_key1", "invalidation_key2", "invalidation_key3"])]
         invalidation_keys: Vec<&str>,
     ) {
         // Set up insta snapshot to support test parameterization
@@ -600,10 +583,10 @@ mod tests {
         ));
         let _guard = settings.bind_to_scope();
 
-        let mock_storage = Arc::new(MockStorage::default());
+        let mock_storage = Arc::new(fred::mocks::Echo);
         let config = Config {
             namespace: namespace.map(ToString::to_string),
-            ..common_config()
+            ..redis_config("")
         };
         let storage = Storage::mocked(&config, false, mock_storage.clone(), mock_storage.clone())
             .await
@@ -619,24 +602,6 @@ mod tests {
         assert_debug_snapshot!(cache_tags);
     }
 
-    #[tokio::test]
-    async fn test_insert() -> Result<(), BoxError> {
-        // TODO: ttl stuff seems to be duplicated all over the place, figure that out / if it's needed
-        let is_cluster = true;
-        let mock_storage = Arc::new(MockStorage::default());
-        let storage = Storage::mocked(
-            &common_config(),
-            is_cluster,
-            mock_storage.clone(),
-            mock_storage.clone(),
-        )
-        .await?;
-
-        storage.insert(common_document(), "test").await?;
-
-        Ok(())
-    }
-
     /// Tests that validate the following TTL behaviors:
     /// * a document's TTL must be shorter than the TTL of all its related cache tags
     /// * a document's TTL will always be less than or equal to its score in all its related cache tags
@@ -648,38 +613,32 @@ mod tests {
         use itertools::Itertools;
         use tower::BoxError;
 
+        use super::SUBGRAPH_NAME;
         use super::common_document;
+        use super::redis_config;
         use crate::plugins::response_cache::storage::CacheStorage;
         use crate::plugins::response_cache::storage::Document;
-        use crate::plugins::response_cache::storage::redis::Config;
         use crate::plugins::response_cache::storage::redis::Storage;
-        use crate::plugins::response_cache::storage::redis::default_redis_cache_config;
 
         #[tokio::test]
         async fn single_document() -> Result<(), BoxError> {
-            let namespace = "single_document";
-            let subgraph_name = "test";
-
-            let config = Config {
-                namespace: Some(namespace.into()),
-                ..default_redis_cache_config()
-            };
+            let config = redis_config("single_document");
             let storage = Storage::new(&config).await?;
 
             // every element of this namespace must have a TTL associated with it, and the TTL of the
             // cache keys must be greater than the TTL of the document
             let document = common_document();
-            storage.insert(document.clone(), subgraph_name).await?;
+            storage.insert(document.clone(), SUBGRAPH_NAME).await?;
 
             let document_key = storage.make_key(document.cache_key.clone());
             let expected_cache_tag_keys =
-                storage.namespaced_cache_tags(&document.invalidation_keys, subgraph_name);
+                storage.namespaced_cache_tags(&document.invalidation_keys, SUBGRAPH_NAME);
 
             // iterate over all the keys in the namespace and make sure we have everything we'd expect
             let keys = storage.all_keys_in_namespace().await?;
             assert!(keys.contains(&document_key));
             for key in &expected_cache_tag_keys {
-                assert!(keys.contains(&key), "missing {key}");
+                assert!(keys.contains(key), "missing {key}");
             }
             assert_eq!(keys.len(), 4);
 
@@ -689,18 +648,18 @@ mod tests {
             assert!(document_ttl > 0);
 
             for cache_tag_key in &expected_cache_tag_keys {
-                let cache_tag_ttl = storage.ttl(&cache_tag_key).await?;
+                let cache_tag_ttl = storage.ttl(cache_tag_key).await?;
                 assert!(cache_tag_ttl > 0, "{cache_tag_key}");
                 assert!(document_ttl < cache_tag_ttl, "{cache_tag_key}")
             }
 
-            // extract the expire time for the document key. it should match the sorted set score in each
+            // extract the expiry time for the document key. it should match the sorted set score in each
             // of the cache tags.
             let document_expire_time = storage.expire_time(&document_key).await?;
             assert!(document_expire_time > 0);
 
             for cache_tag_key in &expected_cache_tag_keys {
-                let document_score = storage.score(&cache_tag_key, &document_key).await?;
+                let document_score = storage.score(cache_tag_key, &document_key).await?;
                 assert_eq!(document_expire_time, document_score);
             }
 
@@ -709,13 +668,7 @@ mod tests {
 
         #[tokio::test]
         async fn multiple_documents() -> Result<(), BoxError> {
-            let namespace = "multiple_documents";
-            let subgraph_name = "test";
-
-            let config = Config {
-                namespace: Some(namespace.into()),
-                ..default_redis_cache_config()
-            };
+            let config = redis_config("multiple_documents");
             let storage = Storage::new(&config).await?;
 
             // set up two documents with a shared key and different TTLs
@@ -740,7 +693,7 @@ mod tests {
                 },
             ];
             storage
-                .insert_in_batch(documents.clone(), subgraph_name)
+                .insert_in_batch(documents.clone(), SUBGRAPH_NAME)
                 .await?;
 
             // based on these documents, we expect:
@@ -755,7 +708,7 @@ mod tests {
             for document in &documents {
                 expected_document_keys.push(storage.make_key(&document.cache_key));
                 expected_cache_tag_keys.push(
-                    storage.namespaced_cache_tags(&document.invalidation_keys, subgraph_name),
+                    storage.namespaced_cache_tags(&document.invalidation_keys, SUBGRAPH_NAME),
                 );
             }
 
@@ -797,7 +750,7 @@ mod tests {
 
                 let document_ttl = ttls.get(document_key).unwrap();
 
-                // the document TTL should be close to the expire time on the document (within some range
+                // the document TTL should be close to the expiry time on the document (within some range
                 // of acceptable redis latency - 10s for now)
                 assert!(document.expire.as_secs() as i64 - *document_ttl < 10);
 
@@ -807,12 +760,12 @@ mod tests {
                 }
             }
 
-            // for each document, make sure the expire time matches its score in each cache tag set
+            // for each document, make sure the expiry time matches its score in each cache tag set
             for index in 0..documents.len() {
                 let document_key = &expected_document_keys[index];
                 let cache_tag_keys = &expected_cache_tag_keys[index];
 
-                let document_expire_time = storage.expire_time(&document_key).await?;
+                let document_expire_time = storage.expire_time(document_key).await?;
                 assert!(document_expire_time > 0);
 
                 for cache_tag_key in cache_tag_keys {
@@ -826,13 +779,7 @@ mod tests {
 
         #[tokio::test]
         async fn cache_tag_ttl_will_only_increase() -> Result<(), BoxError> {
-            let namespace = "cache_tag_ttl_will_only_increase";
-            let subgraph_name = "test";
-
-            let config = Config {
-                namespace: Some(namespace.into()),
-                ..default_redis_cache_config()
-            };
+            let config = redis_config("cache_tag_ttl_will_only_increase");
             let storage = Storage::new(&config).await?;
 
             let document = Document {
@@ -840,27 +787,27 @@ mod tests {
                 expire: Duration::from_secs(60),
                 ..common_document()
             };
-            storage.insert(document.clone(), subgraph_name).await?;
+            storage.insert(document.clone(), SUBGRAPH_NAME).await?;
 
             let keys = storage.all_keys_in_namespace().await?;
 
-            // save current expire times
+            // save current expiry times
             let mut expire_times: HashMap<String, i64> = HashMap::default();
             for key in &keys {
-                let expire_time = storage.expire_time(&key).await?;
+                let expire_time = storage.expire_time(key).await?;
                 assert!(expire_time > 0);
                 expire_times.insert(key.clone(), expire_time);
             }
 
-            // add another document with a very short expire time but the same cache tags
+            // add another document with a very short expiry time but the same cache tags
             let document = Document {
                 cache_key: "cache_key2".to_string(),
                 expire: Duration::from_secs(1),
                 ..common_document()
             };
-            storage.insert(document, subgraph_name).await?;
+            storage.insert(document, SUBGRAPH_NAME).await?;
 
-            // fetch new expire times; they should be the same
+            // fetch new expiry times; they should be the same
             for key in keys {
                 let new_expire_time = storage.expire_time(&key).await?;
                 assert!(new_expire_time > 0);
@@ -877,13 +824,7 @@ mod tests {
         /// through - we don't want to lower the cache tag score only to not change the TTL on the key.
         #[tokio::test]
         async fn cache_tag_score_will_not_decrease() -> Result<(), BoxError> {
-            let namespace = "cache_tag_score_will_not_decrease";
-            let subgraph_name = "test";
-
-            let config = Config {
-                namespace: Some(namespace.into()),
-                ..default_redis_cache_config()
-            };
+            let config = redis_config("cache_tag_score_will_not_decrease");
             let storage = Storage::new(&config).await?;
 
             let document = Document {
@@ -892,23 +833,23 @@ mod tests {
                 ..common_document()
             };
             let document_key = storage.make_key(document.cache_key.clone());
-            storage.insert(document.clone(), subgraph_name).await?;
+            storage.insert(document.clone(), SUBGRAPH_NAME).await?;
 
             // make sure the document was stored
             let stored_data = storage.get(&common_document().cache_key).await?;
             assert_eq!(stored_data.data, document.data);
 
-            let keys = storage.namespaced_cache_tags(&document.invalidation_keys, subgraph_name);
+            let keys = storage.namespaced_cache_tags(&document.invalidation_keys, SUBGRAPH_NAME);
 
             // save current scores
             let mut scores: HashMap<String, i64> = HashMap::default();
             let mut expire_times: HashMap<String, i64> = HashMap::default();
             for key in &keys {
-                let score = storage.score(&key, &document_key).await?;
+                let score = storage.score(key, &document_key).await?;
                 assert!(score > 0);
                 scores.insert(key.clone(), score);
 
-                let expire_time = storage.expire_time(&key).await?;
+                let expire_time = storage.expire_time(key).await?;
                 assert!(expire_time > 0);
                 expire_times.insert(key.clone(), expire_time);
             }
@@ -919,13 +860,13 @@ mod tests {
                 data: serde_json_bytes::Value::Number(2.into()),
                 ..common_document()
             };
-            storage.insert(document.clone(), subgraph_name).await?;
+            storage.insert(document.clone(), SUBGRAPH_NAME).await?;
 
             // make sure the document was updated
             let stored_data = storage.get(&document.cache_key).await?;
             assert_eq!(stored_data.data, document.data);
 
-            // the TTL on the document should be aligned with the new document expire time
+            // the TTL on the document should be aligned with the new document expiry time
             let ttl = storage.ttl(&document_key).await?;
             assert!(ttl <= document.expire.as_secs() as i64);
 
@@ -947,13 +888,7 @@ mod tests {
         /// increase.
         #[tokio::test]
         async fn cache_tag_score_will_increase() -> Result<(), BoxError> {
-            let namespace = "cache_tag_score_will_increase";
-            let subgraph_name = "test";
-
-            let config = Config {
-                namespace: Some(namespace.into()),
-                ..default_redis_cache_config()
-            };
+            let config = redis_config("cache_tag_score_will_increase");
             let storage = Storage::new(&config).await?;
 
             let document = Document {
@@ -962,13 +897,13 @@ mod tests {
                 ..common_document()
             };
             let document_key = storage.make_key(document.cache_key.clone());
-            storage.insert(document.clone(), subgraph_name).await?;
+            storage.insert(document.clone(), SUBGRAPH_NAME).await?;
 
             // make sure the document was stored
             let stored_data = storage.get(&common_document().cache_key).await?;
             assert_eq!(stored_data.data, document.data);
 
-            let keys = storage.namespaced_cache_tags(&document.invalidation_keys, subgraph_name);
+            let keys = storage.namespaced_cache_tags(&document.invalidation_keys, SUBGRAPH_NAME);
 
             // update the document with new data and a longer TTL
             let old_ttl = document.expire;
@@ -977,13 +912,13 @@ mod tests {
                 data: serde_json_bytes::Value::Number(2.into()),
                 ..common_document()
             };
-            storage.insert(document.clone(), subgraph_name).await?;
+            storage.insert(document.clone(), SUBGRAPH_NAME).await?;
 
             // make sure the document was updated
             let stored_data = storage.get(&document.cache_key).await?;
             assert_eq!(stored_data.data, document.data);
 
-            // the TTL on the document should be aligned with the new document expire time
+            // the TTL on the document should be aligned with the new document expiry time
             let ttl = storage.ttl(&document_key).await?;
             assert!(ttl <= document.expire.as_secs() as i64);
             assert!(ttl > old_ttl.as_secs() as i64);
@@ -1017,29 +952,23 @@ mod tests {
         use parking_lot::RwLock;
         use tower::BoxError;
 
+        use super::SUBGRAPH_NAME;
+        use super::common_document;
+        use super::redis_config;
         use crate::plugins::response_cache::storage::CacheStorage;
         use crate::plugins::response_cache::storage::Document;
-        use crate::plugins::response_cache::storage::redis::Config;
         use crate::plugins::response_cache::storage::redis::Storage;
-        use crate::plugins::response_cache::storage::redis::default_redis_cache_config;
-        use crate::plugins::response_cache::storage::redis::tests::common_document;
 
         /// Trigger failure by pre-setting the cache tag to an invalid type.
         #[tokio::test]
         async fn type_failure() -> Result<(), BoxError> {
-            let namespace = "type_failure";
-            let subgraph_name = "test";
-
-            let config = Config {
-                namespace: Some(namespace.into()),
-                ..default_redis_cache_config()
-            };
+            let config = redis_config("type_failure");
             let storage = Storage::new(&config).await?;
 
             let document = common_document();
             let document_key = storage.make_key(document.cache_key.clone());
             let cache_tag_keys =
-                storage.namespaced_cache_tags(&document.invalidation_keys, subgraph_name);
+                storage.namespaced_cache_tags(&document.invalidation_keys, SUBGRAPH_NAME);
 
             let insert_invalid_cache_tag = |key: String| async {
                 let expiration = config.ttl.map(|ttl| Expiration::EX(ttl.as_secs() as i64));
@@ -1064,7 +993,7 @@ mod tests {
                 insert_invalid_cache_tag(key.clone()).await?;
 
                 storage
-                    .insert(document.clone(), subgraph_name)
+                    .insert(document.clone(), SUBGRAPH_NAME)
                     .await
                     .expect_err(&format!(
                         "cache tag {key} should have caused insertion failure"
@@ -1089,13 +1018,13 @@ mod tests {
             ];
 
             let cache_tag_keys =
-                storage.namespaced_cache_tags(&documents[1].invalidation_keys, subgraph_name);
+                storage.namespaced_cache_tags(&documents[1].invalidation_keys, SUBGRAPH_NAME);
             for key in cache_tag_keys {
                 storage.truncate_namespace().await?;
                 insert_invalid_cache_tag(key.clone()).await?;
 
                 storage
-                    .insert_in_batch(documents.clone(), subgraph_name)
+                    .insert_in_batch(documents.clone(), SUBGRAPH_NAME)
                     .await
                     .expect_err(&format!(
                         "cache tag {key} should have caused insertion failure"
@@ -1111,23 +1040,17 @@ mod tests {
 
         #[tokio::test]
         async fn timeout_failure() -> Result<(), BoxError> {
+            // Mock the Redis connection to be able to simulate a timeout error
             #[derive(Default, Debug, Clone)]
             struct MockStorage(Arc<RwLock<Vec<MockCommand>>>);
             impl Mocks for MockStorage {
                 fn process_command(&self, command: MockCommand) -> Result<Value, Error> {
-                    eprintln!("mock received redis command: {command:?}");
                     self.0.write().push(command);
                     Err(Error::new(ErrorKind::Timeout, ""))
                 }
             }
 
-            let namespace = "timeout_failure";
-            let subgraph_name = "test";
-
-            let config = Config {
-                namespace: Some(namespace.into()),
-                ..default_redis_cache_config()
-            };
+            let config = redis_config("timeout_failure");
             let mock_redis = Arc::new(MockStorage::default());
             let storage =
                 Storage::mocked(&config, false, mock_redis.clone(), mock_redis.clone()).await?;
@@ -1136,7 +1059,7 @@ mod tests {
             let document_key = Value::from(storage.make_key(document.cache_key.clone()));
 
             storage
-                .insert(document, subgraph_name)
+                .insert(document, SUBGRAPH_NAME)
                 .await
                 .expect_err("should have timed out");
 
