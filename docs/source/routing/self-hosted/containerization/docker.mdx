@@ -98,7 +98,7 @@ If you don't want to automatically update your supergraph via [Apollo Uplink](/f
 
 ### Using an OCI graph artifact reference
 
-You can use the `APOLLO_GRAPH_ARTIFACT_REFERENCE` environment variable to fetch the supergraph schema from a graph artifact:
+You can set the `APOLLO_GRAPH_ARTIFACT_REFERENCE` environment variable to use the supergraph schema from a graph artifact:
 
 ```bash
 docker run -p 4000:4000 \
@@ -108,11 +108,11 @@ docker run -p 4000:4000 \
   ghcr.io/apollographql/apollo-runtime:<runtime-image-version>
 ```
 
-When using this option, the router will fetch the schema from the specified graph artifact instead of Apollo Uplink.
+When using this option, the router will use the schema from the specified graph artifact instead of Apollo Uplink.
 Entitlements and persisted queries will still be fetched from Uplink.
-Additional information on graph artifacts is available in the [router CLI options documentation](/docs/graphos/routing/configuration/cli#command-line-options).
+Additional information on graph artifacts is available in the [router CLI options documentation](/graphos/routing/configuration/cli#command-line-options).
 
-⚠️ **This option is in preview and does not support hot-reloading schemas.**
+⚠️ **This option is in preview and does not support hot-reloading of schemas.**
 
 ## Running a specific Router and MCP version
 
