@@ -208,6 +208,11 @@ pub enum CompositionError {
     #[error("{message}")]
     InconsistentInputObjectField { message: String },
     #[error("{message}")]
+    RequiredArgumentMissingInSomeSubgraph {
+        message: String,
+        locations: Locations,
+    },
+    #[error("{message}")]
     RequiredInputFieldMissingInSomeSubgraph {
         message: String,
         locations: Locations,
@@ -273,6 +278,9 @@ impl CompositionError {
             Self::LinkImportNameMismatch { .. } => ErrorCode::LinkImportNameMismatch,
             Self::InvalidFieldSharing { .. } => ErrorCode::InvalidFieldSharing,
             Self::InconsistentInputObjectField { .. } => ErrorCode::Internal, // This is for hints, not errors
+            Self::RequiredArgumentMissingInSomeSubgraph { .. } => {
+                ErrorCode::RequiredArgumentMissingInSomeSubgraph
+            }
             Self::RequiredInputFieldMissingInSomeSubgraph { .. } => {
                 ErrorCode::RequiredInputFieldMissingInSomeSubgraph
             }
@@ -367,6 +375,12 @@ impl CompositionError {
             Self::InconsistentInputObjectField { message } => Self::InconsistentInputObjectField {
                 message: format!("{message}{appendix}"),
             },
+            Self::RequiredArgumentMissingInSomeSubgraph { message, locations } => {
+                Self::RequiredArgumentMissingInSomeSubgraph {
+                    message: format!("{message}{appendix}"),
+                    locations,
+                }
+            }
             Self::RequiredInputFieldMissingInSomeSubgraph { message, locations } => {
                 Self::RequiredInputFieldMissingInSomeSubgraph {
                     message: format!("{message}{appendix}"),
@@ -407,6 +421,7 @@ impl CompositionError {
             | Self::EmptyMergedEnumType { locations, .. }
             | Self::InputFieldMergeFailed { locations, .. }
             | Self::ExtensionWithNoBase { locations, .. }
+            | Self::RequiredArgumentMissingInSomeSubgraph { locations, .. }
             | Self::RequiredInputFieldMissingInSomeSubgraph { locations, .. }
             | Self::EmptyMergedInputType { locations, .. }
             | Self::InvalidFieldSharing { locations, .. } => locations,
