@@ -3,8 +3,8 @@ use std::collections::HashSet;
 
 use derivative::Derivative;
 use indexmap::IndexMap;
-use jsonschema::paths::JSONPointer;
-use jsonschema::paths::PathChunk;
+use jsonschema::paths::Location;
+use jsonschema::paths::LocationSegment;
 use yaml_rust::Event;
 use yaml_rust::parser::MarkedEventReceiver;
 use yaml_rust::parser::Parser;
@@ -69,14 +69,17 @@ pub(crate) struct MarkedYaml {
 }
 
 impl MarkedYaml {
-    pub(crate) fn get_element(&self, pointer: &JSONPointer) -> Option<&Value> {
+    pub(crate) fn get_element(&self, pointer: &Location) -> Option<&Value> {
         let mut current = self.root();
-        for item in pointer.iter() {
+        for item in pointer {
             current = match (current, item) {
-                (Some(Value::Mapping(_current_label, mapping, _)), PathChunk::Property(value)) => {
-                    mapping.get(&Label::from(value.to_string()))
+                (
+                    Some(Value::Mapping(_current_label, mapping, _)),
+                    LocationSegment::Property(value),
+                ) => mapping.get(&Label::from(value.to_string())),
+                (Some(Value::Sequence(sequence, _)), LocationSegment::Index(idx)) => {
+                    sequence.get(idx)
                 }
-                (Some(Value::Sequence(sequence, _)), PathChunk::Index(idx)) => sequence.get(*idx),
                 _ => None,
             }
         }

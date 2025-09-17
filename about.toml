@@ -8,6 +8,7 @@ accepted = [
     "Elastic-2.0",
     "LicenseRef-ring",
     "MIT",
+    "MIT-0", # borrow-or-share
     "MPL-2.0",
     "Unicode-3.0",
     "OpenSSL", # required by aws-lc-sys
