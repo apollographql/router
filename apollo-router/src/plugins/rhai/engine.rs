@@ -1494,7 +1494,7 @@ macro_rules! register_rhai_router_interface {
                     if_subgraph! {
                         $base => {
                             let _unused = (obj, headers);
-                            Err("cannot mutate originating request on a subgraph".into())
+                            Err("cannot mutate response on a subgraph".into())
                         } else {
                             obj.with_mut(|response| *response.response.headers_mut() = headers);
                             Ok(())
@@ -1558,7 +1558,7 @@ macro_rules! register_rhai_router_interface {
                     if_subgraph! {
                         $base => {
                             let _unused = (obj, uri);
-                            Err("cannot mutate originating request on a subgraph".into())
+                            Err("cannot mutate response on a subgraph".into())
                         } else {
                             obj.with_mut(|request| *request.router_request.uri_mut() = uri);
                             Ok(())
