@@ -298,17 +298,19 @@ As an alternative to the legacy `http1_*` limits above, you can configure HTTP h
 ```yaml title="router.yaml"
 server:
   http:
-    # Maximum size of individual header field (name + value) in bytes
-    # Applies to both HTTP/1.1 and HTTP/2
-    max_header_size: "32kb"
-    
-    # Maximum number of headers allowed in a request
-    # Primarily affects HTTP/1.1 connections  
-    max_headers: 250
-    
-    # Maximum total size of all headers combined
-    # Primarily affects HTTP/2 connections
-    max_header_list_size: "64kb"
+    # Maximum limits for HTTP requests
+    max:
+      # Maximum size of individual header field (name + value) in bytes
+      # Applies to both HTTP/1.1 and HTTP/2
+      header_size: "32kb"
+      
+      # Maximum number of headers allowed in a request
+      # Primarily affects HTTP/1.1 connections  
+      headers: 250
+      
+      # Maximum total size of all headers combined
+      # Primarily affects HTTP/2 connections
+      header_list_size: "64kb"
     
     # Header read timeout (applies to all HTTP versions)
     header_read_timeout: "10s"
@@ -316,9 +318,9 @@ server:
 
 The `server.http` configuration takes precedence over the legacy `limits.http1_*` settings when both are specified. This allows you to:
 
-- Set per-header size limits with `max_header_size` (similar to Node.js `--max-http-header-size`)
-- Control header count limits with `max_headers` for HTTP/1.1
-- Set total header payload limits with `max_header_list_size` for HTTP/2
+- Set per-header size limits with `max.header_size` (similar to Node.js `--max-http-header-size`)
+- Control header count limits with `max.headers` for HTTP/1.1
+- Set total header payload limits with `max.header_list_size` for HTTP/2
 - Configure header read timeouts consistently across all HTTP versions
 
 If router receives requests exceeding these limits, it responds with `431 Request Header Fields Too Large`.
