@@ -85,6 +85,7 @@ impl<'schema> Context<'schema> {
             } => {
                 let mut var_lookup: IndexMap<Namespace, Shape> = [
                     (Namespace::Args, shape_for_arguments(field_def)),
+                    // TODO Should these be Dict<Unknown> instead of Unknown?
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Request, REQUEST_SHAPE.clone()),
