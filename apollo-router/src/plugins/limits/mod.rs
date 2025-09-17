@@ -1,5 +1,6 @@
 mod layer;
 mod limited;
+mod header_limits;
 
 use std::error::Error;
 
@@ -20,6 +21,8 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::limits::layer::BodyLimitError;
 use crate::plugins::limits::layer::RequestBodyLimitLayer;
+use crate::plugins::limits::header_limits::HeaderLimitError;
+use crate::plugins::limits::header_limits::HeaderLimitLayer;
 use crate::services::router;
 use crate::services::router::BoxService;
 
@@ -116,6 +119,17 @@ pub(crate) struct Config {
     #[schemars(with = "Option<String>", default)]
     pub(crate) http1_max_request_buf_size: Option<ByteSize>,
 
+    /// Limit the maximum size of individual HTTP headers (name + value).
+    /// If a header exceeds this size, the router responds with "431 Request Header Fields Too Large".
+    /// Default: None (unlimited)
+    pub(crate) http_max_header_size: Option<usize>,
+
+    /// Limit the maximum number of items in comma-separated HTTP header values.
+    /// For example, a header like "Accept: text/html, application/json, */*" has 3 items.
+    /// If a header value has more items than this limit, the router responds with "431 Request Header Fields Too Large".
+    /// Default: None (unlimited)
+    pub(crate) http_max_header_list_items: Option<usize>,
+
     /// Limit the depth of nested list fields in introspection queries
     /// to protect avoid generating huge responses. Returns a GraphQL
     /// error with `{ message: "Maximum introspection depth exceeded" }`
@@ -136,6 +150,8 @@ impl Default for Config {
             http_max_request_bytes: 2_000_000,
             http1_max_request_headers: None,
             http1_max_request_buf_size: None,
+            http_max_header_size: None,
+            http_max_header_list_items: None,
             parser_max_tokens: 15_000,
 
             // This is `apollo-parser`’s default, which protects against stack overflow
@@ -171,9 +187,16 @@ impl Plugin for LimitsPlugin {
                 |r: &router::Request| r.context.clone(),
                 |ctx, f| async { Self::map_error_to_graphql(f.await, ctx) },
             )
-            // Here we need to convert to and from the underlying http request types so that we can use existing middleware.
+            // Add header validation layer before body limit processing
             .map_request(Into::into)
             .map_response(Into::into)
+            .layer(HeaderLimitLayer::new(
+                self.config.http_max_header_size,
+                self.config.http_max_header_list_items,
+            ))
+            .map_request(Into::into)
+            .map_response(Into::into)
+            // Here we need to convert to and from the underlying http request types so that we can use existing middleware.
             .layer(RequestBodyLimitLayer::new(
                 self.config.http_max_request_bytes,
             ))
@@ -189,9 +212,10 @@ impl LimitsPlugin {
         resp: Result<router::Response, BoxError>,
         ctx: Context,
     ) -> Result<router::Response, BoxError> {
-        // There are two ways we can get a payload too large error:
+        // There are multiple ways we can get limit errors:
         // 1. The request body is too large and detected via content length header
         // 2. The request body is and it failed at some other point in the pipeline.
+        // 3. A header is too large or has too many list items
         // We expect that other pipeline errors will have wrapped the source error rather than throwing it away.
         match resp {
             Ok(r) => {
@@ -208,9 +232,12 @@ impl LimitsPlugin {
                     root_cause = cause;
                 }
 
-                match root_cause.downcast_ref::<BodyLimitError>() {
-                    None => Err(e),
-                    Some(_) => Ok(BodyLimitError::PayloadTooLarge.into_response(ctx)),
+                if let Some(body_error) = root_cause.downcast_ref::<BodyLimitError>() {
+                    Ok(body_error.clone().into_response(ctx))
+                } else if let Some(header_error) = root_cause.downcast_ref::<HeaderLimitError>() {
+                    Ok(header_error.clone().into_response(ctx))
+                } else {
+                    Err(e)
                 }
             }
         }
@@ -233,6 +260,28 @@ impl BodyLimitError {
                 .build()
                 .unwrap(),
         }
+    }
+}
+
+impl HeaderLimitError {
+    fn into_response(self, ctx: Context) -> router::Response {
+        let message = match self {
+            HeaderLimitError::HeaderTooLarge => "Request header too large",
+            HeaderLimitError::HeaderListTooLarge => "Request header has too many list items",
+        };
+        
+        router::Response::error_builder()
+            .error(
+                graphql::Error::builder()
+                    .message(message)
+                    .extension_code("INVALID_GRAPHQL_REQUEST")
+                    .extension("details", message)
+                    .build(),
+            )
+            .status_code(StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE)
+            .context(ctx)
+            .build()
+            .unwrap()
     }
 }
 
@@ -430,9 +479,90 @@ mod test {
         );
     }
 
+    #[tokio::test]
+    async fn test_header_size_limit_exceeded() {
+        let plugin = plugin_with_header_limits().await;
+        let resp = plugin
+            .router_service(|_| async { panic!("should have rejected request") })
+            .call(
+                router::Request::fake_builder()
+                    .header("very-long-header-name", "very-long-value")
+                    .body(router::body::empty())
+                    .build()
+                    .unwrap(),
+            )
+            .await;
+        assert!(resp.is_ok());
+        let resp = resp.unwrap();
+        assert_eq!(resp.response.status(), StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE);
+    }
+
+    #[tokio::test]
+    async fn test_header_size_limit_ok() {
+        let plugin = plugin_with_header_limits().await;
+        let resp = plugin
+            .router_service(|_| async { Ok(router::Response::fake_builder().build().unwrap()) })
+            .call(
+                router::Request::fake_builder()
+                    .header("short", "val")
+                    .body(router::body::empty())
+                    .build()
+                    .unwrap(),
+            )
+            .await;
+        assert!(resp.is_ok());
+        let resp = resp.unwrap();
+        assert_eq!(resp.response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_header_list_items_limit_exceeded() {
+        let plugin = plugin_with_header_limits().await;
+        let resp = plugin
+            .router_service(|_| async { panic!("should have rejected request") })
+            .call(
+                router::Request::fake_builder()
+                    .header("accept", "text/html, application/json, application/xml")
+                    .body(router::body::empty())
+                    .build()
+                    .unwrap(),
+            )
+            .await;
+        assert!(resp.is_ok());
+        let resp = resp.unwrap();
+        assert_eq!(resp.response.status(), StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE);
+    }
+
+    #[tokio::test]
+    async fn test_header_list_items_limit_ok() {
+        let plugin = plugin_with_header_limits().await;
+        let resp = plugin
+            .router_service(|_| async { Ok(router::Response::fake_builder().build().unwrap()) })
+            .call(
+                router::Request::fake_builder()
+                    .header("accept", "text/html, application/json")
+                    .body(router::body::empty())
+                    .build()
+                    .unwrap(),
+            )
+            .await;
+        assert!(resp.is_ok());
+        let resp = resp.unwrap();
+        assert_eq!(resp.response.status(), StatusCode::OK);
+    }
+
     async fn plugin() -> PluginTestHarness<LimitsPlugin> {
         let plugin: PluginTestHarness<LimitsPlugin> = PluginTestHarness::builder()
             .config(include_str!("fixtures/content_length_limit.router.yaml"))
+            .build()
+            .await
+            .expect("test harness");
+        plugin
+    }
+
+    async fn plugin_with_header_limits() -> PluginTestHarness<LimitsPlugin> {
+        let plugin: PluginTestHarness<LimitsPlugin> = PluginTestHarness::builder()
+            .config(include_str!("fixtures/header_limits.router.yaml"))
             .build()
             .await
             .expect("test harness");

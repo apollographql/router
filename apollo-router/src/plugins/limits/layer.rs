@@ -12,7 +12,7 @@ use tokio::sync::OwnedSemaphorePermit;
 use tower::Layer;
 use tower_service::Service;
 
-#[derive(thiserror::Error, Debug, Display)]
+#[derive(thiserror::Error, Debug, Display, Clone)]
 pub(super) enum BodyLimitError {
     /// Request body payload too large
     PayloadTooLarge,

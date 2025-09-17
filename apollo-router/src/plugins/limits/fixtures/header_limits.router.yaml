@@ -1,0 +1,4 @@
+limits:
+  http_max_header_size: 100
+  http_max_header_list_items: 2
+  http_max_request_bytes: 10
