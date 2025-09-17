@@ -368,6 +368,20 @@ impl PluginPrivate for Telemetry {
     type Config = config::Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        // Log whether we received previous configuration for testing
+        // In a followup PR we will be detecting if exporters need to be refreshed, and at this point
+        // this debug logging will disappear.
+        match &init.previous_config {
+            Some(_prev_config) => {
+                ::tracing::debug!("Telemetry plugin reload detected with previous configuration");
+            }
+            None => {
+                ::tracing::debug!(
+                    "Telemetry plugin initial startup without previous configuration"
+                );
+            }
+        }
+
         opentelemetry::global::set_error_handler(handle_error)
             .expect("otel error handler lock poisoned, fatal");
 
