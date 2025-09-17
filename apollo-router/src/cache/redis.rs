@@ -762,7 +762,10 @@ impl RedisCacheStorage {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(
+        test,
+        any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+    ))]
     pub(crate) async fn truncate_namespace(&self) -> Result<(), RedisError> {
         use fred::prelude::Key;
         use futures::StreamExt;

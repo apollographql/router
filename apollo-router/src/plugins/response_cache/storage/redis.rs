@@ -438,14 +438,20 @@ impl CacheStorage for Storage {
             .collect())
     }
 
-    #[cfg(test)]
+    #[cfg(all(
+        test,
+        any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+    ))]
     async fn truncate_namespace(&self) -> StorageResult<()> {
         self.writer_storage.truncate_namespace().await?;
         Ok(())
     }
 }
 
-#[cfg(test)]
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
 impl Storage {
     async fn mocked(
         config: &Config,
@@ -509,9 +515,11 @@ impl Storage {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
 pub(crate) fn default_redis_cache_config() -> Config {
-    use std::time::Duration;
     Config {
         urls: vec!["redis://127.0.0.1:6379".parse().unwrap()],
         username: None,
@@ -527,7 +535,10 @@ pub(crate) fn default_redis_cache_config() -> Config {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
 mod tests {
     use std::sync::Arc;
     use std::time::Duration;
@@ -537,23 +548,15 @@ mod tests {
 
     use super::Config;
     use super::Storage;
+    use super::default_redis_cache_config;
     use crate::plugins::response_cache::storage::Document;
 
     const SUBGRAPH_NAME: &str = "test";
 
     fn redis_config(namespace: &str) -> Config {
         Config {
-            urls: vec!["redis://127.0.0.1:6379".parse().unwrap()],
-            username: None,
-            password: None,
-            timeout: Duration::from_millis(200),
-            ttl: Some(Duration::from_secs(60)),
             namespace: Some(namespace.to_string()),
-            tls: None,
-            required_to_start: false,
-            reset_ttl: false,
-            pool_size: 1,
-            metrics_interval: Duration::from_millis(100),
+            ..default_redis_cache_config()
         }
     }
 

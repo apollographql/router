@@ -223,6 +223,9 @@ pub(super) trait CacheStorage {
         result?
     }
 
-    #[cfg(test)]
+    #[cfg(all(
+        test,
+        any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+    ))]
     async fn truncate_namespace(&self) -> StorageResult<()>;
 }
