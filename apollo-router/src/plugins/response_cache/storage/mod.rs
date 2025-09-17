@@ -88,6 +88,9 @@ pub(crate) struct CacheEntry {
     pub(crate) control: CacheControl,
 }
 
+// TODO: in theory, we could have `struct Storage<S: CacheStorage>`. But the types are a huge pain.
+//  Keeping this trait around for now as it provides clear expected cache behavior, but not sure if
+//  that's actually good practice.
 pub(super) trait CacheStorage {
     fn timeout_duration(&self) -> Duration;
 
@@ -221,6 +224,5 @@ pub(super) trait CacheStorage {
     }
 
     #[cfg(test)]
-    #[allow(dead_code)] // only used in very specific tests that don't match cfg(test)
     async fn truncate_namespace(&self) -> StorageResult<()>;
 }

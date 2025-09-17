@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -64,6 +65,24 @@ pub(crate) struct Storage {
 
 impl Storage {
     pub(crate) async fn new(config: &Config) -> Result<Self, BoxError> {
+        let pool_size = (config.pool_size / 2).max(1);
+        let config = Config {
+            pool_size,
+            ..config.clone()
+        };
+
+        let reader_storage =
+            RedisCacheStorage::new(config.clone(), "response-cache-reader").await?;
+        let writer_storage =
+            RedisCacheStorage::new(config.clone(), "response-cache-writer").await?;
+        Self::from_storage(reader_storage, writer_storage, config.timeout).await
+    }
+
+    async fn from_storage(
+        reader_storage: RedisCacheStorage,
+        writer_storage: RedisCacheStorage,
+        timeout: Duration,
+    ) -> Result<Self, BoxError> {
         // NB: sorted set cleanup happens via an async task, reading from `cache_tag_rx`.
         //  Items are added to it via `try_send` to avoid blocking, but this does mean that some items
         //  won't be added to the channel. This is probably acceptable given the limited number of options
@@ -76,23 +95,13 @@ impl Storage {
         //  consumers running at the same time.
         // TODO: make channel size configurable?
         let (cache_tag_tx, cache_tag_rx) = mpsc::channel(10000);
-
-        let pool_size = (config.pool_size / 2).max(1);
-        let config = Config {
-            pool_size,
-            ..config.clone()
-        };
-
-        // TODO: make the 'caller' parameter include the namespace? or subgraph name?
-        let s = Storage {
-            timeout: config.timeout,
-            reader_storage: RedisCacheStorage::new(config.clone(), "response-cache-reader").await?,
-            writer_storage: RedisCacheStorage::new(config, "response-cache-writer").await?,
+        let s = Self {
+            timeout,
+            reader_storage,
+            writer_storage,
             cache_tag_tx,
         };
-
         s.perform_periodic_maintenance(cache_tag_rx).await;
-
         Ok(s)
     }
 
@@ -199,6 +208,38 @@ impl Storage {
             }
         });
     }
+
+    /// Create a list of the cache tags that describe this document, with associated namespaces.
+    ///
+    /// For a given subgraph `s` and invalidation keys `i1`, `i2`, ..., we need to store the
+    /// following subgraph-invalidation-key permutations:
+    /// * `subgraph-{s}` (whole subgraph)
+    /// * `key-{i1}`, `key-{i2}`, ... (whole invalidation key)
+    /// * `subgraph-{s}:key-{i1}`, `subgraph-{s}:key-{i2}`, ... (invalidation key per subgraph)
+    ///
+    /// These are then turned into redis keys by adding the namespace and a `cache-tag:` prefix, ie:
+    /// * `{namespace}:cache-tag:subgraph-{s}`
+    /// * `{namespace}:cache-tag:key-{i1}`, ...
+    /// * `{namespace}:cache-tag:subgraph-{s}:key-{i1}`, ...
+    fn namespaced_cache_tags(
+        &self,
+        document_invalidation_keys: &[String],
+        subgraph_name: &str,
+    ) -> Vec<String> {
+        // TODO: test this
+        let mut cache_tags = Vec::new();
+        cache_tags.push(format!("subgraph-{subgraph_name}"));
+        for invalidation_key in document_invalidation_keys {
+            cache_tags.push(format!("key-{invalidation_key}"));
+            cache_tags.push(format!("subgraph-{subgraph_name}:key-{invalidation_key}"));
+        }
+
+        for cache_tag in cache_tags.iter_mut() {
+            *cache_tag = self.make_key(format!("cache-tag:{cache_tag}"));
+        }
+
+        cache_tags
+    }
 }
 
 impl CacheStorage for Storage {
@@ -231,21 +272,8 @@ impl CacheStorage for Storage {
         // phase 1
         for document in &mut batch_docs {
             document.cache_key = self.make_key(&document.cache_key);
-
-            let invalidation_keys = document.invalidation_keys.clone();
-            for invalidation_key in invalidation_keys {
-                document
-                    .invalidation_keys
-                    .push(format!("subgraph-{subgraph_name}:key-{invalidation_key}"));
-            }
-            document
-                .invalidation_keys
-                .push(format!("subgraph-{subgraph_name}"));
-            document.invalidation_keys = document
-                .invalidation_keys
-                .drain(..)
-                .map(|key| self.make_key(format!("cache-tag:{key}")))
-                .collect();
+            document.invalidation_keys =
+                self.namespaced_cache_tags(&document.invalidation_keys, &subgraph_name);
         }
 
         // phase 2
@@ -419,7 +447,32 @@ impl CacheStorage for Storage {
 }
 
 #[cfg(test)]
-#[allow(unused)]
+impl Storage {
+    async fn mocked(
+        config: Config,
+        is_cluster: bool,
+        reader_mock: Arc<dyn fred::mocks::Mocks>,
+        writer_mock: Arc<dyn fred::mocks::Mocks>,
+    ) -> Result<Storage, BoxError> {
+        let reader_storage = RedisCacheStorage::from_mocks_and_config(
+            reader_mock,
+            config.clone(),
+            "response-cache-reader",
+            is_cluster,
+        )
+        .await?;
+        let writer_storage = RedisCacheStorage::from_mocks_and_config(
+            writer_mock,
+            config.clone(),
+            "response-cache-writer",
+            is_cluster,
+        )
+        .await?;
+        Self::from_storage(reader_storage, writer_storage, config.timeout).await
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn default_redis_cache_config() -> Config {
     use std::time::Duration;
     Config {
@@ -434,5 +487,194 @@ pub(crate) fn default_redis_cache_config() -> Config {
         reset_ttl: false,
         pool_size: 1,
         metrics_interval: Duration::from_secs(1),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use fred::error::Error;
+    use fred::interfaces::KeysInterface;
+    use fred::mocks::MockCommand;
+    use fred::mocks::Mocks;
+    use fred::prelude::Value;
+    use fred::types::scan::Scanner;
+    use insta::assert_debug_snapshot;
+    use itertools::Itertools;
+    use parking_lot::RwLock;
+    use tokio_stream::StreamExt;
+    use tower::BoxError;
+
+    use super::Config;
+    use super::Storage;
+    use super::default_redis_cache_config;
+    use crate::plugins::response_cache::storage::CacheStorage;
+    use crate::plugins::response_cache::storage::Document;
+
+    #[derive(Default, Debug, Clone)]
+    struct MockStorage(Arc<RwLock<HashMap<String, Value>>>);
+    impl Mocks for MockStorage {
+        fn process_command(&self, command: MockCommand) -> Result<Value, Error> {
+            eprintln!("mock received redis command: {command:?}");
+            Ok(Value::Null)
+        }
+    }
+
+    fn common_config() -> Config {
+        Config {
+            urls: vec![],
+            username: None,
+            password: None,
+            timeout: Duration::from_millis(200),
+            ttl: Some(Duration::from_secs(60)),
+            namespace: None,
+            tls: None,
+            required_to_start: false,
+            reset_ttl: false,
+            pool_size: 1,
+            metrics_interval: Duration::from_millis(100),
+        }
+    }
+
+    fn common_document() -> Document {
+        Document {
+            cache_key: "cache_key".to_string(),
+            data: Default::default(),
+            cache_control: Default::default(),
+            invalidation_keys: vec!["invalidate".to_string()],
+            expire: Duration::from_secs(60),
+        }
+    }
+
+    #[tokio::test]
+    #[rstest::rstest]
+    async fn test_invalidation_key_permutations(
+        #[values(None, Some("test"))] namespace: Option<&str>,
+        #[values(vec![], vec!["invalidation_key"], vec!["invalidation_key1", "invalidation_key2", "invalidation_key3"]
+        )]
+        invalidation_keys: Vec<&str>,
+    ) {
+        // Set up insta snapshot to support test parameterization
+        let mut settings = insta::Settings::clone_current();
+        settings.set_snapshot_suffix(format!(
+            "input____{}____{}",
+            namespace.unwrap_or("None"),
+            invalidation_keys.iter().join("__")
+        ));
+        let _guard = settings.bind_to_scope();
+
+        let mock_storage = Arc::new(MockStorage::default());
+        let config = Config {
+            namespace: namespace.map(ToString::to_string),
+            ..common_config()
+        };
+        let storage = Storage::mocked(config, false, mock_storage.clone(), mock_storage.clone())
+            .await
+            .expect("could not build storage");
+
+        let invalidation_keys: Vec<String> = invalidation_keys
+            .into_iter()
+            .map(ToString::to_string)
+            .collect();
+
+        let mut cache_tags = storage.namespaced_cache_tags(&invalidation_keys, "products");
+        cache_tags.sort();
+        assert_debug_snapshot!(cache_tags);
+    }
+
+    #[tokio::test]
+    async fn test_insert() -> Result<(), BoxError> {
+        // TODO: ttl stuff seems to be duplicated all over the place, figure that out / if it's needed
+        let is_cluster = true;
+        let mock_storage = Arc::new(MockStorage::default());
+        let storage = Storage::mocked(
+            common_config(),
+            is_cluster,
+            mock_storage.clone(),
+            mock_storage.clone(),
+        )
+        .await?;
+
+        storage.insert(common_document(), "test").await?;
+
+        Ok(())
+    }
+
+    /// Tests a few
+    #[tokio::test]
+    async fn test_ttls_for_single_document() -> Result<(), BoxError> {
+        let namespace = "test_ttls_present";
+        let subgraph_name = "test";
+
+        let config = Config {
+            namespace: Some(namespace.into()),
+            ttl: Some(Duration::from_secs(30)),
+            ..default_redis_cache_config()
+        };
+        let storage = Storage::new(&config).await?;
+
+        // every element of this namespace must have a TTL associated with it, and the TTL of the
+        // cache keys must be greater than the TTL of the document
+        let document = common_document();
+        storage.insert(document.clone(), subgraph_name).await?;
+
+        // iterate over all the keys in the namespace and make sure we have everything we'd expect
+        let mut scan_stream = storage
+            .reader_storage
+            .scan_with_namespaced_results(String::from("*"), None);
+        let mut keys = Vec::default();
+        while let Some(Ok(mut result)) = scan_stream.next().await {
+            if let Some(page_keys) = result.take_results() {
+                let mut str_keys: Vec<String> = page_keys
+                    .into_iter()
+                    .map(|k| k.into_string().unwrap())
+                    .collect();
+                keys.append(&mut str_keys);
+            }
+        }
+
+        // we expect to have 4 keys in redis:
+        // 1) the document
+        // 2) a whole-subgraph cache-tag
+        // 3) a whole-invalidation-key cache-tag
+        // 4) a subgraph-invalidation-key cache-tag
+
+        let document_key = format!("{namespace}:{}", document.cache_key);
+        let subgraph_cache_tag = format!("{namespace}:cache-tag:subgraph-{subgraph_name}");
+
+        let invalidation_key = &document.invalidation_keys[0];
+        let invalidation_key_cache_tag = format!("{namespace}:cache-tag:key-{invalidation_key}");
+        let combined_cache_tag =
+            format!("{namespace}:cache-tag:subgraph-{subgraph_name}:key-{invalidation_key}",);
+
+        assert!(keys.contains(&document_key));
+        assert!(keys.contains(&subgraph_cache_tag));
+        assert!(keys.contains(&invalidation_key_cache_tag));
+        assert!(keys.contains(&combined_cache_tag));
+        assert_eq!(keys.len(), 4);
+
+        // extract the TTL for each key
+        let client = storage.reader_storage.client();
+        let mut ttls: HashMap<String, i64> = HashMap::default();
+        for key in &keys {
+            let ttl: i64 = client.ttl(key).await.expect(&format!("no ttl for {key}"));
+            // TTL will be negative if the key doesn't exist or if the key has no expire
+            assert!(ttl >= 0, "ttl ({ttl}) < 0 for key {key}");
+            ttls.insert(key.clone(), ttl);
+        }
+
+        // make sure the ttl for the document is less than the ttl for each of the invalidation keys
+        let document_ttl = ttls.remove(&document_key).expect("no document TTL");
+        for (_cache_tag, cache_tag_ttl) in &ttls {
+            assert!(
+                document_ttl < *cache_tag_ttl,
+                "document_ttl = {document_ttl}, cache_tag_ttl = {cache_tag_ttl}"
+            );
+        }
+
+        Ok(())
     }
 }

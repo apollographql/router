@@ -290,6 +290,30 @@ impl RedisCacheStorage {
 
     #[cfg(test)]
     pub(crate) async fn from_mocks(mocks: Arc<dyn Mocks>) -> Result<Self, BoxError> {
+        let config = RedisCache {
+            urls: vec![],
+            username: None,
+            password: None,
+            timeout: Duration::from_millis(2),
+            ttl: None,
+            namespace: None,
+            tls: None,
+            required_to_start: false,
+            reset_ttl: false,
+            pool_size: 1,
+            metrics_interval: Duration::from_millis(100),
+        };
+
+        Self::from_mocks_and_config(mocks, config, "test", false).await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn from_mocks_and_config(
+        mocks: Arc<dyn Mocks>,
+        config: RedisCache,
+        caller: &'static str,
+        is_cluster: bool,
+    ) -> Result<Self, BoxError> {
         let client_config = RedisConfig {
             mocks: Some(mocks),
             ..Default::default()
@@ -297,14 +321,14 @@ impl RedisCacheStorage {
 
         Self::create_client(
             client_config,
-            Duration::from_millis(2),
-            1,
-            None,
-            None,
-            false,
-            false,
-            "test",
-            Duration::from_millis(100),
+            config.timeout,
+            config.pool_size as usize,
+            config.namespace,
+            config.ttl,
+            config.reset_ttl,
+            is_cluster,
+            caller,
+            config.metrics_interval,
         )
         .await
     }
