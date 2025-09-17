@@ -6,6 +6,7 @@ mod compose_inaccessible;
 mod compose_interface_object;
 mod compose_tag;
 mod compose_type_merging;
+mod compose_types;
 mod compose_validation;
 mod demand_control;
 mod override_directive;
