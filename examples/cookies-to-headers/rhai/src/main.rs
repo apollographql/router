@@ -78,6 +78,9 @@ mod tests {
         });
 
         let config = serde_json::json!({
+            "include_subgraph_errors": {
+                "all": true,
+            },
             "rhai": {
                 "scripts": "src",
                 "main": "cookies_to_headers.rhai",
