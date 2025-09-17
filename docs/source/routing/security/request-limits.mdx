@@ -291,62 +291,33 @@ If router receives more headers than the buffer size, it responds to the client 
 
 Limit the maximum buffer size for the HTTP1 connection. Default is ~400kib.
 
-### HTTP Header Configuration (server.http)
+### Additional HTTP Header Configuration
 
-As an alternative to the legacy `http1_*` limits above, you can configure HTTP header limits using the `server.http` section, which provides more comprehensive control over both HTTP/1.1 and HTTP/2 connections:
+You can configure additional HTTP header limits using the `limits` section, which provides comprehensive control over both HTTP/1.1 and HTTP/2 connections:
 
 ```yaml title="router.yaml"
-server:
-  http:
-    # Maximum limits for HTTP requests
-    max:
-      # Maximum size of individual header field (name + value) in bytes
-      # Applies to both HTTP/1.1 and HTTP/2
-      header_size: "32kb"
-      
-      # Maximum number of headers allowed in a request
-      # Primarily affects HTTP/1.1 connections  
-      headers: 250
-      
-      # Maximum total size of all headers combined
-      # Primarily affects HTTP/2 connections
-      header_list_size: "64kb"
-    
-    # Header read timeout (applies to all HTTP versions)
-    header_read_timeout: "10s"
+limits:
+  # Maximum size of individual header field (name + value) in bytes
+  # Applies to both HTTP/1.1 and HTTP/2
+  http_max_header_size: "32kb"
+  
+  # Maximum total size of all headers combined
+  # Primarily affects HTTP/2 connections
+  http_max_header_list_size: "64kb"
 ```
 
-The `server.http` configuration takes precedence over the legacy `limits.http1_*` settings when both are specified. This allows you to:
+These limits work alongside the existing `http1_max_request_headers` and `http1_max_request_buf_size` settings to provide comprehensive HTTP request protection:
 
-- Set per-header size limits with `max.header_size` (similar to Node.js `--max-http-header-size`)
-- Control header count limits with `max.headers` for HTTP/1.1
-- Set total header payload limits with `max.header_list_size` for HTTP/2
-- Configure header read timeouts consistently across all HTTP versions
-
-#### Deprecated Field Names
-
-For backward compatibility, the old flat field names are still supported but deprecated:
-
-```yaml title="router.yaml (deprecated)"
-server:
-  http:
-    # Deprecated: Use max.header_size instead
-    max_header_size: "32kb"
-    
-    # Deprecated: Use max.headers instead  
-    max_headers: 250
-    
-    # Deprecated: Use max.header_list_size instead
-    max_header_list_size: "64kb"
-```
-
-The new nested structure takes precedence when both are specified.
+- Set per-header size limits with `http_max_header_size` (similar to Node.js `--max-http-header-size`)
+- Control header count limits with `http1_max_request_headers` for HTTP/1.1
+- Set total header payload limits with `http_max_header_list_size` for HTTP/2
+- Configure HTTP/1 buffer size with `http1_max_request_buf_size`
 
 If router receives requests exceeding these limits, it responds with `431 Request Header Fields Too Large`.
 
 #### Server-level Header Limits
 
-The Apollo Router enforces header limits at the HTTP server level using both the new `server.http.*` configuration and legacy `limits.http1_*` settings. These limits are protocol-specific and enforced early in the request processing pipeline for optimal performance.
+The Apollo Router enforces header limits at the HTTP server level using the `limits.*` configuration settings. These limits are protocol-specific and enforced early in the request processing pipeline for optimal performance.
 
 ## Parser-based limits
 

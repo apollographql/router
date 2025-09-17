@@ -6357,6 +6357,22 @@ expression: "&schema"
             "null"
           ]
         },
+        "http_max_header_list_size": {
+          "default": null,
+          "description": "Maximum total size of all headers combined in bytes.\nApplies primarily to HTTP/2 connections.\nIf not specified, uses the underlying HTTP implementation's default.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "http_max_header_size": {
+          "default": null,
+          "description": "Maximum size of a single header field (name + value) in bytes.\nApplies to both HTTP/1.1 and HTTP/2.\nIf not specified, uses the underlying HTTP implementation's default.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "http_max_request_bytes": {
           "default": 2000000,
           "description": "Limit the size of incoming HTTP requests read from the network,\nto protect against running out of memory. Default: 2000000 (2 MB)",

@@ -31,6 +31,7 @@ use crate::axum_factory::utils::ConnectionInfo;
 use crate::axum_factory::utils::InjectConnectionInfo;
 use crate::configuration::Configuration;
 use crate::configuration::server::ServerHttpConfig;
+use crate::plugins::limits::Config as LimitsConfig;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
 use crate::router::ApolloRouterError;
@@ -309,21 +310,20 @@ async fn process_error(io_error: std::io::Error) {
 
 // Helper function to determine effective HTTP configuration with backward compatibility
 fn get_effective_http_config(
-    server_config: &ServerHttpConfig,
+    limits_config: &LimitsConfig,
+    _server_config: &ServerHttpConfig,
     legacy_max_headers: Option<usize>,
     legacy_max_buf_size: Option<ByteSize>,
 ) -> (Option<usize>, Option<ByteSize>, Option<ByteSize>, Option<ByteSize>) {
-    let effective_max = server_config.effective_max();
-    
-    // For backward compatibility, prefer server config over legacy config
-    let effective_max_headers = effective_max.headers.or(legacy_max_headers);
+    // Use limits config for header configuration, with legacy fallback
+    let effective_max_headers = limits_config.http1_max_request_headers.or(legacy_max_headers);
     
     // Use legacy_max_buf_size for HTTP/1 buffer size (different from header size)
     let effective_max_buf_size = legacy_max_buf_size;
     
-    // New server-specific configuration
-    let effective_max_header_size = effective_max.header_size;
-    let effective_max_header_list_size = effective_max.header_list_size;
+    // Use limits config for new header configuration
+    let effective_max_header_size = limits_config.http_max_header_size;
+    let effective_max_header_list_size = limits_config.http_max_header_list_size;
     
     (effective_max_headers, effective_max_buf_size, effective_max_header_size, effective_max_header_list_size)
 }
@@ -336,6 +336,7 @@ pub(super) fn serve_router_on_listen_addr(
     connection_shutdown_timeout: Duration,
     router: axum::Router,
     server_http_config: ServerHttpConfig,
+    limits_config: LimitsConfig,
     // Legacy parameters for backward compatibility
     legacy_max_headers: Option<usize>,
     legacy_max_buf_size: Option<ByteSize>,
@@ -354,7 +355,7 @@ pub(super) fn serve_router_on_listen_addr(
         
         // Get effective configuration with backward compatibility
         let (effective_max_headers, effective_max_buf_size, effective_max_header_size, effective_max_header_list_size) = 
-            get_effective_http_config(&server_http_config, legacy_max_headers, legacy_max_buf_size);
+            get_effective_http_config(&limits_config, &server_http_config, legacy_max_headers, legacy_max_buf_size);
         
         // Note: individual header size limits (max_header_size) are enforced differently
         // depending on the HTTP version and implementation capabilities
