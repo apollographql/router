@@ -1,6 +1,8 @@
 mod compose_basic;
 mod compose_directive;
 mod compose_directive_sharing;
+mod compose_inaccessible;
+mod compose_tag;
 mod compose_type_merging;
 mod compose_validation;
 mod demand_control;
