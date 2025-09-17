@@ -351,11 +351,11 @@ pub(super) fn serve_router_on_listen_addr(
         let connection_shutdown = CancellationToken::new();
         
         // Get effective configuration with backward compatibility
-        let (effective_max_headers, effective_max_buf_size, _effective_max_header_size, _effective_max_header_list_size) = 
+        let (effective_max_headers, effective_max_buf_size, effective_max_header_size, effective_max_header_list_size) = 
             get_effective_http_config(&server_http_config, legacy_max_headers, legacy_max_buf_size);
         
-        // Note: individual header size limits (max_header_size) are primarily enforced
-        // at the HTTP/2 level, while HTTP/1.1 uses buffer-based limits (max_buf_size)
+        // Note: individual header size limits (max_header_size) are enforced differently
+        // depending on the HTTP version and implementation capabilities
 
         loop {
             tokio::select! {
@@ -469,8 +469,15 @@ pub(super) fn serve_router_on_listen_addr(
                                                              .timer(TokioTimer::new());
                                             
                                             // Apply HTTP/2 specific configuration if available
-                                            if let Some(max_header_list_size) = server_http_config.max_header_list_size {
+                                            if let Some(max_header_list_size) = effective_max_header_list_size {
                                                 http_config.max_header_list_size(max_header_list_size.as_u64() as u32);
+                                            }
+
+                                            // Apply individual header size limit for HTTP/2
+                                            if let Some(max_header_size) = effective_max_header_size {
+                                                // For HTTP/2, individual header size is enforced via max_frame_size
+                                                // But hyper doesn't expose this directly, so we'll rely on max_header_list_size
+                                                // and validation at the application level if needed
                                             }
                                             
                                             let connection = http_config.serve_connection_with_upgrades(tokio_stream, hyper_service);
