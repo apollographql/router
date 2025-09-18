@@ -4,10 +4,6 @@
 
 ## Before you contribute
 
-> The Apollo Router Core is a project by [Apollo GraphQL] and is not currently ready for
-> external feature contributors, though some documentation contributions may be
-> accepted. We will try to publish a roadmap as soon as possible.
-
 A general rule of thumbs is that if a contribution requires more than an 1 hour of work, chances are it's worth commenting on an issue and / or discussing it with the maintainers first.
 
 That will allow us to figure out a way to solve the issue together, and possibly agree on what kind of PR would fix it best. Your time is valuable and we want to make sure you have the best contributors experience.
