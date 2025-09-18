@@ -57,7 +57,6 @@ impl Merger {
         T: HasArguments + Display,
         <T as HasArguments>::ArgumentPosition: Display,
     {
-        // We collect the union of argument names across all subgraphs that have the field.
         let mut arg_names: IndexSet<Name> = IndexSet::new();
         for (idx, source) in sources.iter() {
             let Some(pos) = source else {
@@ -69,26 +68,9 @@ impl Merger {
             }
         }
 
-        // Collect arguments which come from context per subgraph.
-        let mut is_contextual_by_idx_arg: IndexMap<(usize, Name), bool> = Default::default();
-        for (idx, source) in sources.iter() {
-            let Some(pos) = source else {
-                continue;
-            };
-            let subgraph = &self.subgraphs[*idx];
-            let Ok(Some(from_context_name)) = subgraph.from_context_directive_name() else {
-                continue;
-            };
-            let schema = subgraph.schema();
-            for arg in pos.get_arguments(schema)? {
-                let contextual = arg.directives.get(&from_context_name).is_some();
-                is_contextual_by_idx_arg.insert((*idx, arg.name.clone()), contextual);
-            }
-        }
-
-        // Add each argument to destination, then possibly remove per rules.
         for arg_name in arg_names {
-            // We add the argument unconditionally even if we're going to remove it in some path. This enables consistent mismatch/hint reporting.
+            // We add the argument unconditionally even if we're going to remove it later on.
+            // This enables consistent mismatch/hint reporting.
             dest.insert_argument(
                 &mut self.merged,
                 Node::new(InputValueDefinition {
@@ -99,35 +81,34 @@ impl Merger {
                     directives: Default::default(),
                 }),
             )?;
-
-            // Build argument position for the destination for hint/error printing
             let dest_arg_pos = dest.argument_position(arg_name.clone());
 
-            // If the argument is contextual in some subgraph, other subgraphs must also treat it as contextual,
-            // unless it is nullable. Also, we remove it from the supergraph.
-            let mut saw_contextual = false;
-            let mut contextual_map: IndexMap<usize, bool> = Default::default();
+            // Record whether the argument comes from context in each subgraph.
+            let mut is_contextual_in_subgraph: IndexMap<usize, bool> = Default::default();
             for (idx, source) in sources.iter() {
                 let Some(pos) = source else {
                     continue;
                 };
-                let schema = self.subgraphs[*idx].schema();
-                let arg_opt = pos.get_argument(schema, &arg_name);
-                let mut contextual = false;
-                if arg_opt.is_some() {
-                    contextual = *is_contextual_by_idx_arg
-                        .get(&(*idx, arg_name.clone()))
-                        .unwrap_or(&false);
+                let subgraph = &self.subgraphs[*idx];
+                let arg_opt = pos.get_argument(subgraph.schema(), &arg_name);
+
+                if let Some(arg) = arg_opt
+                    && let Ok(Some(from_context)) = subgraph.from_context_directive_name()
+                    && arg.directives.iter().any(|d| d.name == from_context)
+                {
+                    is_contextual_in_subgraph.insert(*idx, true);
+                } else {
+                    is_contextual_in_subgraph.insert(*idx, false);
                 }
-                if contextual {
-                    saw_contextual = true;
-                }
-                contextual_map.insert(*idx, contextual);
             }
 
-            if saw_contextual {
-                // If contextual in some subgraph, ensure others either are contextual or optional; otherwise hint.
-                for (idx, is_contextual) in contextual_map.iter() {
+            if is_contextual_in_subgraph
+                .values()
+                .any(|&contextual| contextual)
+            {
+                // If the argument is contextual in some subgraph, other subgraphs must also treat
+                // it as contextual, unless it is nullable.
+                for (idx, is_contextual) in is_contextual_in_subgraph.iter() {
                     if *is_contextual {
                         continue;
                     }
@@ -159,13 +140,13 @@ impl Merger {
                         }
                     }
                 }
-                // Note: we remove the element after the hint/error because we access it in the hint message generation.
+                // Note: we remove the element after the hint/error because we access it in
+                // the hint message generation.
                 dest.remove_argument(&mut self.merged, &arg_name)?;
                 continue;
             }
 
             // If some subgraphs defining the field don’t define this argument, we cannot keep it in the supergraph.
-            let mut some_missing = false;
             let mut present_in: Vec<usize> = Vec::new();
             let mut missing_in: Vec<usize> = Vec::new();
             let mut required_in: Vec<usize> = Vec::new();
@@ -177,21 +158,19 @@ impl Merger {
                 let subgraph = &self.subgraphs[*idx];
                 if let Some(arg) = pos.get_argument(subgraph.schema(), &arg_name) {
                     present_in.push(*idx);
-                    // Determine if required in this source
                     if arg.is_required() {
                         required_in.push(*idx);
                         locations.extend(subgraph.node_locations(arg));
                     }
                 } else {
                     missing_in.push(*idx);
-                    some_missing = true;
                 }
             }
 
-            if some_missing {
-                // Optional vs required handling:
+            if !missing_in.is_empty() {
+                // If a required argument is missing in a subgraph, we fail composition. If it is
+                // not required, we remove it from the supergraph and add a hint.
                 if !required_in.is_empty() {
-                    // If the argument is mandatory in some subgraphs, fail composition.
                     let non_optional =
                         human_readable_subgraph_names(required_in.iter().map(|i| &self.names[*i]));
                     let missing =
@@ -203,7 +182,6 @@ impl Merger {
                         locations,
                     });
                 } else {
-                    // If the argument is optional in all sources, compose properly but issue a hint.
                     let arg_sources: Sources<_> = sources
                         .iter()
                         .map(|(idx, source)| {
@@ -231,7 +209,8 @@ impl Merger {
                     );
                 }
 
-                // Note that we remove the element after the hint/error because we access it in the hint message generation.
+                // Note that we remove the element after the hint/error because we
+                // access it in the hint message generation.
                 dest.remove_argument(&mut self.merged, &arg_name)?;
             }
         }
