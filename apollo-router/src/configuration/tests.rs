@@ -38,8 +38,7 @@ fn schema_generation() {
 #[test]
 fn schema_is_valid() {
     let schema = generate_config_schema();
-    jsonschema_next::draft7::meta::validate(schema.as_value())
-        .expect("generated schema must be valid");
+    jsonschema::draft7::meta::validate(schema.as_value()).expect("generated schema must be valid");
 }
 
 #[test]

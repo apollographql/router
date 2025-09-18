@@ -43,7 +43,7 @@ pub mod schema;
 pub mod subgraph;
 pub mod supergraph;
 
-pub(crate) mod utils;
+pub mod utils;
 
 use apollo_compiler::Schema;
 use apollo_compiler::ast::NamedType;

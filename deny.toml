@@ -53,6 +53,7 @@ allow = [
     "ISC",
     "LicenseRef-ring",
     "MIT",
+    "MIT-0", # borrow-or-share
     "MPL-2.0",
     "Elastic-2.0",
     "OpenSSL", # required by aws-lc-sys
