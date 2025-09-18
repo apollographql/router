@@ -32,7 +32,7 @@ executors:
           POSTGRES_USER: root
           POSTGRES_DB: root
       - image: openzipkin/zipkin:3.5.1
-      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.33.1
+      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.34.0
     resource_class: 2xlarge
     environment:
       MISE_ENV: ci
