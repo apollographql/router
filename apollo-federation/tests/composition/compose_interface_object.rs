@@ -357,3 +357,72 @@ fn interface_object_does_not_error_when_optimizing_unnecessary_loops() {
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
     let _supergraph = result.expect("Expected composition to succeed - should not error when optimizing unnecessary loops");
 }
+
+#[test]
+#[ignore = "until merge implementation completed"]
+fn interface_object_fed354_repro_failure() {
+    let subgraph1 = ServiceDefinition {
+        name: "Subgraph1",
+        type_defs: r#"
+        type Query {
+          error_query: TicketField!
+        }
+
+        type User @interfaceObject @key(fields: "id") {
+          id: ID!
+        }
+
+        interface TicketField {
+          id: ID!
+          createdBy: User
+        }
+
+        type TextTicketField implements TicketField @key(fields: "id") @shareable {
+          id: ID!
+          createdBy: User
+        }
+        "#,
+    };
+
+    let subgraph2 = ServiceDefinition {
+        name: "Subgraph2", 
+        type_defs: r#"
+        interface Ticket @key(fields: "id", resolvable: true) {
+          id: ID!
+        }
+
+        interface User @key(fields: "id", resolvable: true) {
+          id: ID!
+          requestedTickets: [Ticket!]!
+        }
+
+        interface TicketField {
+          createdBy: User
+          id: ID!
+        }
+
+        type TextTicketField implements TicketField @shareable {
+          createdBy: User
+          id: ID!
+        }
+
+        type Customer implements User @key(fields: "id", resolvable: true) @shareable {
+          id: ID!
+          requestedTickets: [Ticket!]!
+        }
+
+        type Agent implements User @key(fields: "id", resolvable: true) @shareable {
+          id: ID!
+          requestedTickets: [Ticket!]!
+        }
+
+        type Question implements Ticket @key(fields: "id", resolvable: true) {
+          fields: [TicketField!]!
+          id: ID!
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+    let _supergraph = result.expect("Expected composition to succeed - this is a repro test for issue FED-354");
+}
