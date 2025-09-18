@@ -535,8 +535,15 @@ mod tests {
 
     const SUBGRAPH_NAME: &str = "test";
 
-    fn redis_config(namespace: &str) -> Config {
+    fn redis_config(namespace: &str, clustered: bool) -> Config {
+        let url = if clustered {
+            "redis-cluster://127.0.0.1:7000"
+        } else {
+            "redis://127.0.0.1:6379"
+        };
+
         Config {
+            urls: vec![url.parse().unwrap()],
             namespace: Some(namespace.to_string()),
             ..default_redis_cache_config()
         }
@@ -571,7 +578,7 @@ mod tests {
         let mock_storage = Arc::new(fred::mocks::Echo);
         let config = Config {
             namespace: namespace.map(ToString::to_string),
-            ..redis_config("")
+            ..redis_config("", false)
         };
         let storage = Storage::mocked(&config, false, mock_storage.clone(), mock_storage.clone())
             .await
@@ -606,8 +613,9 @@ mod tests {
         use crate::plugins::response_cache::storage::redis::Storage;
 
         #[tokio::test]
-        async fn single_document() -> Result<(), BoxError> {
-            let config = redis_config("single_document");
+        #[rstest::rstest]
+        async fn single_document(#[values(true, false)] clustered: bool) -> Result<(), BoxError> {
+            let config = redis_config("single_document", clustered);
             let storage = Storage::new(&config).await?;
 
             // every element of this namespace must have a TTL associated with it, and the TTL of the
@@ -652,8 +660,11 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn multiple_documents() -> Result<(), BoxError> {
-            let config = redis_config("multiple_documents");
+        #[rstest::rstest]
+        async fn multiple_documents(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let config = redis_config("multiple_documents", clustered);
             let storage = Storage::new(&config).await?;
 
             // set up two documents with a shared key and different TTLs
@@ -763,8 +774,11 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn cache_tag_ttl_will_only_increase() -> Result<(), BoxError> {
-            let config = redis_config("cache_tag_ttl_will_only_increase");
+        #[rstest::rstest]
+        async fn cache_tag_ttl_will_only_increase(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let config = redis_config("cache_tag_ttl_will_only_increase", clustered);
             let storage = Storage::new(&config).await?;
 
             let document = Document {
@@ -808,8 +822,11 @@ mod tests {
         /// This might seem strange, but it's a defensive mechanism in case the insert fails midway
         /// through - we don't want to lower the cache tag score only to not change the TTL on the key.
         #[tokio::test]
-        async fn cache_tag_score_will_not_decrease() -> Result<(), BoxError> {
-            let config = redis_config("cache_tag_score_will_not_decrease");
+        #[rstest::rstest]
+        async fn cache_tag_score_will_not_decrease(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let config = redis_config("cache_tag_score_will_not_decrease", clustered);
             let storage = Storage::new(&config).await?;
 
             let document = Document {
@@ -872,8 +889,11 @@ mod tests {
         /// When re-inserting the same key with a later expiry time, the score in the sorted set will
         /// increase.
         #[tokio::test]
-        async fn cache_tag_score_will_increase() -> Result<(), BoxError> {
-            let config = redis_config("cache_tag_score_will_increase");
+        #[rstest::rstest]
+        async fn cache_tag_score_will_increase(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let config = redis_config("cache_tag_score_will_increase", clustered);
             let storage = Storage::new(&config).await?;
 
             let document = Document {
@@ -948,8 +968,9 @@ mod tests {
 
         /// Trigger failure by pre-setting the cache tag to an invalid type.
         #[tokio::test]
-        async fn type_failure() -> Result<(), BoxError> {
-            let config = redis_config("type_failure");
+        #[rstest::rstest]
+        async fn type_failure(#[values(true, false)] clustered: bool) -> Result<(), BoxError> {
+            let config = redis_config("type_failure", clustered);
             let storage = Storage::new(&config).await?;
 
             let document = common_document();
@@ -1024,7 +1045,8 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn timeout_failure() -> Result<(), BoxError> {
+        #[rstest::rstest]
+        async fn timeout_failure(#[values(true, false)] clustered: bool) -> Result<(), BoxError> {
             use crate::plugins::response_cache::storage::Error as StorageError;
 
             // Mock the Redis connection to be able to simulate a timeout error coming from within
@@ -1038,7 +1060,7 @@ mod tests {
                 }
             }
 
-            let config = redis_config("timeout_failure");
+            let config = redis_config("timeout_failure", clustered);
             let mock_redis = Arc::new(MockStorage::default());
             let storage =
                 Storage::mocked(&config, false, mock_redis.clone(), mock_redis.clone()).await?;
@@ -1061,7 +1083,10 @@ mod tests {
         }
 
         #[tokio::test(flavor = "multi_thread")]
-        async fn no_response_failure() -> Result<(), BoxError> {
+        #[rstest::rstest]
+        async fn no_response_failure(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
             use crate::plugins::response_cache::storage::Error as StorageError;
 
             // Mock the Redis connection to simulate the `fred` client not returning, despite the
@@ -1076,7 +1101,7 @@ mod tests {
                     // `CacheStorage::insert`
                     let runtime = tokio::runtime::Handle::try_current().unwrap();
                     let handle = runtime.spawn(async {
-                        tokio::time::sleep(Duration::from_secs(30)).await;
+                        tokio::time::sleep(Duration::from_secs(60)).await;
                     });
                     while !handle.is_finished() {
                         std::thread::sleep(Duration::from_millis(5));
@@ -1085,7 +1110,7 @@ mod tests {
                 }
             }
 
-            let config = redis_config("no_response_failure");
+            let config = redis_config("no_response_failure", clustered);
             let mock_redis = Arc::new(MockStorage::default());
             let storage =
                 Storage::mocked(&config, false, mock_redis.clone(), mock_redis.clone()).await?;
@@ -1096,7 +1121,10 @@ mod tests {
             let now = Instant::now();
             let result = storage.insert(document, SUBGRAPH_NAME).await;
             let error = result.expect_err("should have timed out via the tokio::timeout wrapper");
-            assert!(matches!(error, StorageError::Timeout));
+            assert!(
+                matches!(error, StorageError::Timeout)
+                    || matches!(error, StorageError::Redis(e) if e.kind() == &ErrorKind::Timeout)
+            );
 
             // elapsed time should be close to the configured timeout
             let elapsed = now.elapsed();
@@ -1114,7 +1142,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn maintenance_removes_expired_data() -> Result<(), BoxError> {
+    #[rstest::rstest]
+    async fn maintenance_removes_expired_data(
+        #[values(true, false)] _clustered: bool,
+    ) -> Result<(), BoxError> {
         Ok(())
     }
 
