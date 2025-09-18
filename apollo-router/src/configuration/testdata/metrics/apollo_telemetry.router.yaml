@@ -1,0 +1,35 @@
+supergraph:
+  listen: 1.2.3.4:5
+
+telemetry:
+  instrumentation:
+    spans:
+      mode: spec_compliant
+
+  apollo:
+    otlp_tracing_sampler: 1
+    errors:
+      preview_extended_error_metrics: enabled
+      subgraph:
+        all:
+          send: true
+          redact: false
+    field_level_instrumentation_sampler: 1
+    experimental_local_field_metrics: true
+    tracing:
+      batch_processor:
+        max_export_timeout: 30s
+        scheduled_delay: 5s
+        max_export_batch_size: 512
+        max_concurrent_exports: 1
+        max_queue_size: 2048
+    metrics:
+      otlp:
+        batch_processor:
+          scheduled_delay: 5s
+          max_export_timeout: 103s
+      usage_reports:
+        batch_processor:
+          max_export_timeout: 5s
+          scheduled_delay: 12ms
+          max_queue_size: 2048

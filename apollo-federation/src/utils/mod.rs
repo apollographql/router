@@ -4,6 +4,7 @@ mod fallible_iterator;
 pub(crate) mod human_readable;
 pub(crate) mod logging;
 pub(crate) mod multi_index_map;
+pub mod normalize_schema;
 pub(crate) mod serde_bridge;
 
 // Re-exports

@@ -1,9 +1,11 @@
 //! Configuration for apollo telemetry.
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::fmt::Formatter;
 use std::num::NonZeroUsize;
 use std::ops::AddAssign;
 use std::sync::OnceLock;
+use std::time::Duration;
 use std::time::SystemTime;
 
 use http::header::HeaderName;
@@ -32,6 +34,9 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
 use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
+use crate::plugins::telemetry::tracing::max_export_timeout_default;
+use crate::plugins::telemetry::tracing::max_queue_size_default;
+use crate::plugins::telemetry::tracing::scheduled_delay_default;
 use crate::query_planner::OperationKind;
 use crate::services::apollo_graph_reference;
 use crate::services::apollo_key;
@@ -51,6 +56,7 @@ pub(crate) fn router_id() -> String {
 
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
 #[serde(deny_unknown_fields, default)]
+#[schemars(rename = "ApolloTelemetryConfig")]
 pub(crate) struct Config {
     /// The Apollo Studio endpoint for exporting traces and metrics.
     #[schemars(with = "String", default = "endpoint_default")]
@@ -105,8 +111,11 @@ pub(crate) struct Config {
     #[schemars(skip)]
     pub(crate) schema_id: String,
 
-    /// Configuration for batch processing.
-    pub(crate) batch_processor: BatchProcessorConfig,
+    /// Configuration for tracing.
+    pub(crate) tracing: TracingConfiguration,
+
+    /// Configuration for metrics.
+    pub(crate) metrics: MetricsConfiguration,
 
     /// Configure the way errors are transmitted to Apollo Studio
     pub(crate) errors: ErrorsConfiguration,
@@ -122,6 +131,122 @@ pub(crate) struct Config {
 
     /// Enable sending additional subgraph metrics to Apollo Studio via OTLP
     pub(crate) preview_subgraph_metrics: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct TracingConfiguration {
+    /// Configuration for tracing batch processor.
+    pub(crate) batch_processor: BatchProcessorConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct MetricsConfiguration {
+    /// Configuration for exporting metrics via OTLP.
+    pub(crate) otlp: OtlpMetricsConfiguration,
+    /// Configuration for exporting metrics via Apollo usage reports.
+    pub(crate) usage_reports: UsageReportsMetricsConfiguration,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct OtlpMetricsConfiguration {
+    /// Batch processor config for OTLP metrics.
+    pub(crate) batch_processor: OtlpMetricsBatchProcessorConfiguration,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct UsageReportsMetricsConfiguration {
+    /// Batch processor config for Apollo usage report metrics.
+    pub(crate) batch_processor: ApolloUsageReportsBatchProcessorConfiguration,
+}
+
+// This config copies the relevant values from BatchProcessorConfig.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(default)]
+pub(crate) struct OtlpMetricsBatchProcessorConfiguration {
+    #[serde(deserialize_with = "humantime_serde::deserialize")]
+    #[schemars(with = "String")]
+    /// The delay interval in milliseconds between two consecutive processing
+    /// of batches. The default value is 5 seconds.
+    pub(crate) scheduled_delay: Duration,
+
+    /// The maximum duration to export a batch of data.
+    /// The default value is 30 seconds.
+    #[serde(deserialize_with = "humantime_serde::deserialize")]
+    #[schemars(with = "String")]
+    pub(crate) max_export_timeout: Duration,
+}
+
+impl Default for OtlpMetricsBatchProcessorConfiguration {
+    fn default() -> Self {
+        OtlpMetricsBatchProcessorConfiguration {
+            scheduled_delay: scheduled_delay_default(),
+            max_export_timeout: max_export_timeout_default(),
+        }
+    }
+}
+
+impl Display for OtlpMetricsBatchProcessorConfiguration {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&format!(
+            "OtlpMetricsBatchProcessorConfiguration {{ scheduled_delay={}, max_export_timeout={} }}",
+            humantime::format_duration(self.scheduled_delay),
+            humantime::format_duration(self.max_export_timeout)
+        ))
+    }
+}
+
+// This config copies the relevant values from BatchProcessorConfig.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(default)]
+pub(crate) struct ApolloUsageReportsBatchProcessorConfiguration {
+    /// The delay interval in milliseconds between two consecutive processing
+    /// of batches. The default value is 5 seconds.
+    #[serde(deserialize_with = "humantime_serde::deserialize")]
+    #[schemars(with = "String")]
+    pub(crate) scheduled_delay: Duration,
+
+    /// The maximum queue size to buffer spans for delayed processing. If the
+    /// queue gets full it drops the reports. The default value is 2048.
+    pub(crate) max_queue_size: usize,
+
+    /// The maximum duration to export a batch of data.
+    /// The default value is 30 seconds.
+    #[serde(deserialize_with = "humantime_serde::deserialize")]
+    #[schemars(with = "String")]
+    pub(crate) max_export_timeout: Duration,
+}
+
+impl Default for ApolloUsageReportsBatchProcessorConfiguration {
+    fn default() -> Self {
+        ApolloUsageReportsBatchProcessorConfiguration {
+            scheduled_delay: scheduled_delay_default(),
+            max_queue_size: max_queue_size_default(),
+            max_export_timeout: max_export_timeout_default(),
+        }
+    }
+}
+
+impl From<&BatchProcessorConfig> for ApolloUsageReportsBatchProcessorConfiguration {
+    fn from(value: &BatchProcessorConfig) -> Self {
+        ApolloUsageReportsBatchProcessorConfiguration {
+            scheduled_delay: value.scheduled_delay,
+            max_queue_size: value.max_queue_size,
+            max_export_timeout: value.max_export_timeout,
+        }
+    }
+}
+
+impl Display for ApolloUsageReportsBatchProcessorConfiguration {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&format!("ApolloUsageReportsBatchProcessorConfiguration {{ scheduled_delay={}, max_queue_size={}, max_export_timeout={} }}",
+                             humantime::format_duration(self.scheduled_delay),
+                             self.max_queue_size,
+                             humantime::format_duration(self.max_export_timeout)))
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
@@ -251,7 +376,8 @@ impl Default for Config {
             otlp_tracing_sampler: default_otlp_tracing_sampler(),
             send_headers: ForwardHeaders::None,
             send_variable_values: ForwardValues::None,
-            batch_processor: BatchProcessorConfig::default(),
+            tracing: TracingConfiguration::default(),
+            metrics: MetricsConfiguration::default(),
             errors: ErrorsConfiguration::default(),
             signature_normalization_algorithm: ApolloSignatureNormalizationAlgorithm::default(),
             experimental_local_field_metrics: false,

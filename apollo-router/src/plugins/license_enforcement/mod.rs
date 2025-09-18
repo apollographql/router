@@ -43,6 +43,7 @@ pub(crate) struct TpsLimitConf {
     pub(crate) interval: Duration,
 }
 
+/// The license enforcement plugin has no configuration.
 #[derive(Debug, Default, Deserialize, JsonSchema, Serialize)]
 pub(crate) struct LicenseEnforcementConfig {}
 

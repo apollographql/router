@@ -8,6 +8,7 @@ use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast;
 use apollo_compiler::ast::Argument;
+use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
@@ -6697,6 +6698,27 @@ impl DirectiveDefinitionPosition {
             self.argument(argument.name.clone())
                 .remove_references(argument, referencers)?;
         }
+        Ok(())
+    }
+
+    pub(crate) fn set_repeatable(
+        &self,
+        schema: &mut FederationSchema,
+        repeatable: bool,
+    ) -> Result<(), FederationError> {
+        self.make_mut(&mut schema.schema)?.make_mut().repeatable = repeatable;
+        Ok(())
+    }
+
+    pub(crate) fn add_locations(
+        &self,
+        schema: &mut FederationSchema,
+        locations: &Vec<DirectiveLocation>,
+    ) -> Result<(), FederationError> {
+        self.make_mut(&mut schema.schema)?
+            .make_mut()
+            .locations
+            .extend(locations);
         Ok(())
     }
 }
