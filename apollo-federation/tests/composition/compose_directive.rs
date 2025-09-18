@@ -76,7 +76,7 @@ mod simple_cases {
         }
     "#)
         .unwrap()
-        .into_fed2_test_subgraph(true)
+        .into_fed2_test_subgraph(true, false)
         .unwrap();
         let subgraph_b = generate_subgraph("subgraphB", "", "", "", "");
 
@@ -1034,7 +1034,7 @@ fn generate_subgraph(
 
     Subgraph::parse(name, "", schema.as_str())
         .unwrap()
-        .into_fed2_test_subgraph(true)
+        .into_fed2_test_subgraph(true, false)
         .unwrap()
 }
 

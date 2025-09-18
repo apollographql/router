@@ -15,7 +15,7 @@ use itertools::kmerge_by;
 /// For any two [Schema]s that are considered "equal", normalizing them with this function will make
 /// it such that:
 /// 1. They compare as equal via [PartialEq]/[Eq].
-/// 2. They serialize to the same string via [Display].
+/// 2. They serialize to the same string via [std::fmt::Display].
 ///
 /// Schema "equality" in this context is invariant to the order of:
 /// - Schema definitions/extensions, type definitions/extensions, and directive definitions
@@ -33,11 +33,11 @@ use itertools::kmerge_by;
 /// - Input fields in default values of argument/input field definitions
 ///
 /// Note that [PartialEq]/[Eq] ignores whether a component comes from a schema/type definition or a
-/// schema/type extension, while [Display] serializes components per-extension. Accordingly, it may
-/// be preferable to serialize via [Display] to check for equality if component origin is relevant.
-/// We support this by specifically sorting component containers (e.g. directive lists) by content
-/// first, and then by component origin (where component origin sort order is determined by the
-/// content with that origin).
+/// schema/type extension, while [std::fmt::Display] serializes components per-extension.
+/// Accordingly, it may be preferable to serialize via [std::fmt::Display] to check for equality if
+/// component origin is relevant. We support this by specifically sorting component containers (e.g.
+/// directive lists) by content first, and then by component origin (where component origin sort
+/// order is determined by the content with that origin).
 ///
 /// Also note that [Schema] uses vectors for (and accordingly [PartialEq]/[Eq] does not ignore the
 /// order of):
@@ -47,7 +47,7 @@ use itertools::kmerge_by;
 /// - Arguments of directive applications
 /// - Input fields in arguments of directive applications
 /// - Input fields in default values of argument/input field definitions
-pub(crate) fn normalize_schema(mut schema: Schema) -> Normalized<Schema> {
+pub fn normalize_schema(mut schema: Schema) -> Normalized<Schema> {
     sort_schema_definition(&mut schema.schema_definition);
     schema
         .types
@@ -64,8 +64,7 @@ pub(crate) fn normalize_schema(mut schema: Schema) -> Normalized<Schema> {
 
 /// The same as [normalize_schema], but for [Valid] [Schema]s. See that function's doc comment for
 /// details.
-#[allow(dead_code)]
-pub(crate) fn normalize_valid_schema(schema: Valid<Schema>) -> Normalized<Valid<Schema>> {
+pub fn normalize_valid_schema(schema: Valid<Schema>) -> Normalized<Valid<Schema>> {
     let schema = normalize_schema(schema.into_inner());
     // Schema normalization is just sorting, and does not affect GraphQL spec validity.
     Normalized(Valid::assume_valid(schema.into_inner()))
@@ -74,10 +73,10 @@ pub(crate) fn normalize_valid_schema(schema: Valid<Schema>) -> Normalized<Valid<
 /// A marker wrapper that indicates the contained schema has been normalized via [normalize_schema].
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[repr(transparent)]
-pub(crate) struct Normalized<T>(T);
+pub struct Normalized<T>(T);
 
 impl<T> Normalized<T> {
-    pub(crate) fn into_inner(self) -> T {
+    pub fn into_inner(self) -> T {
         self.0
     }
 }
