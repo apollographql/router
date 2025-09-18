@@ -9,6 +9,7 @@ use indexmap::IndexSet;
 
 use crate::error::CompositionError;
 use crate::error::FederationError;
+use crate::error::Locations;
 use crate::merger::hints::HintCode;
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
@@ -133,10 +134,9 @@ impl Merger {
                     let Some(Some(pos)) = sources.get(idx) else {
                         continue;
                     };
-                    let schema = self.subgraphs[*idx].schema();
-                    if let Some(arg) = pos.get_argument(schema, &arg_name) {
+                    let subgraph = &self.subgraphs[*idx];
+                    if let Some(arg) = pos.get_argument(subgraph.schema(), &arg_name) {
                         if arg.is_required() && arg.default_value.is_none() {
-                            // Hard error path in JS; we emit a hint for now to keep composition progressing
                             self.error_reporter.add_hint(CompositionHint {
                                 code: HintCode::ContextualArgumentNotContextualInAllSubgraphs
                                     .code()
@@ -144,10 +144,9 @@ impl Merger {
                                 message: format!(
                                     "Contextual argument \"{dest_arg_pos}\" is contextual in at least one subgraph but in \"{pos}\" it does not have @fromContext, is not nullable and has no default value.",
                                 ),
-                                locations: Default::default(),
+                                locations: subgraph.node_locations(arg),
                             });
                         } else {
-                            // Informational hint
                             self.error_reporter.add_hint(CompositionHint {
                                 code: HintCode::ContextualArgumentNotContextualInAllSubgraphs
                                     .code()
@@ -155,7 +154,7 @@ impl Merger {
                                 message: format!(
                                     "Contextual argument \"{pos}\" will not be included in the supergraph since it is contextual in at least one subgraph",
                                 ),
-                                locations: Default::default(),
+                                locations: subgraph.node_locations(arg),
                             });
                         }
                     }
@@ -170,16 +169,18 @@ impl Merger {
             let mut present_in: Vec<usize> = Vec::new();
             let mut missing_in: Vec<usize> = Vec::new();
             let mut required_in: Vec<usize> = Vec::new();
+            let mut locations: Locations = Vec::new();
             for (idx, source) in sources.iter() {
                 let Some(pos) = source else {
                     continue;
                 };
-                let schema = self.subgraphs[*idx].schema();
-                if let Some(arg) = pos.get_argument(schema, &arg_name) {
+                let subgraph = &self.subgraphs[*idx];
+                if let Some(arg) = pos.get_argument(subgraph.schema(), &arg_name) {
                     present_in.push(*idx);
                     // Determine if required in this source
                     if arg.is_required() {
                         required_in.push(*idx);
+                        locations.extend(subgraph.node_locations(arg));
                     }
                 } else {
                     missing_in.push(*idx);
@@ -199,7 +200,7 @@ impl Merger {
                         message: format!(
                             "Argument \"{dest_arg_pos}\" is required in some subgraphs but does not appear in all subgraphs: it is required in {non_optional} but does not appear in {missing}",
                         ),
-                        locations: vec![], // TODO: add locations
+                        locations,
                     });
                 } else {
                     // If the argument is optional in all sources, compose properly but issue a hint.
