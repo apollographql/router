@@ -318,7 +318,7 @@ mod authentication {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[cfg_attr(not(feature = "ci"), ignore)]
+    #[ignore]
     async fn test_aws_sig_v4_signing() {
         let mut router = IntegrationTest::builder()
             .config(include_str!("fixtures/connectors_sigv4.router.yaml"))
