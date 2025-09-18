@@ -217,23 +217,22 @@ impl ValidationTraversal {
             // conditions) that we've selected/assumed so far in our traversal (i.e. "foo" -> true).
             // There's no need to validate edges that share the same label with the opposite
             // condition since they're unreachable during query planning.
-            if let Some(override_condition) = &edge_weight.override_condition {
-                if state
+            if let Some(override_condition) = &edge_weight.override_condition
+                && state
                     .selected_override_conditions()
                     .contains_key(&override_condition.label)
-                    && !override_condition.check(state.selected_override_conditions())
-                {
-                    debug!(
-                        "Edge {} doesn't satisfy label condition: {}({}), no need to validate further",
-                        edge_weight,
-                        override_condition.label,
-                        state
-                            .selected_override_conditions()
-                            .get(&override_condition.label)
-                            .map_or("unset".to_owned(), |x| x.to_string()),
-                    );
-                    continue;
-                }
+                && !override_condition.check(state.selected_override_conditions())
+            {
+                debug!(
+                    "Edge {} doesn't satisfy label condition: {}({}), no need to validate further",
+                    edge_weight,
+                    override_condition.label,
+                    state
+                        .selected_override_conditions()
+                        .get(&override_condition.label)
+                        .map_or("unset".to_owned(), |x| x.to_string()),
+                );
+                continue;
             }
 
             let matching_contexts = edge_head_type_name
@@ -262,19 +261,18 @@ impl ValidationTraversal {
             // The check for `is_terminal()` is not strictly necessary, since if we add a terminal
             // state to the stack, then `handle_state()` will do nothing later. But it's worth
             // checking it now and saving some memory/cycles.
-            if let Some(new_state) = new_state {
-                if !new_state
+            if let Some(new_state) = new_state
+                && !new_state
                     .supergraph_path()
                     .graph()
                     .is_terminal(new_state.supergraph_path().tail())
-                {
-                    drop(guard);
-                    debug!("Reached new state {}", new_state);
-                    if let Some(error) = self.push_stack(new_state) {
-                        return Ok(Some(error));
-                    }
-                    continue;
+            {
+                drop(guard);
+                debug!("Reached new state {}", new_state);
+                if let Some(error) = self.push_stack(new_state) {
+                    return Ok(Some(error));
                 }
+                continue;
             }
             drop(guard);
             debug!("Reached terminal node/cycle")

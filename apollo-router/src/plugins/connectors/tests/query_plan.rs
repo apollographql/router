@@ -54,6 +54,7 @@ async fn basic_batch() {
                 .headers_mut()
                 .append("Apollo-Expose-Query-Plan", "true".parse().unwrap());
         },
+        None,
     )
     .await;
 
@@ -96,7 +97,7 @@ async fn basic_batch() {
                   "inputRewrites": null,
                   "outputRewrites": null,
                   "contextRewrites": null,
-                  "schemaAwareHash": "55f6e99ca6971bdc3e7540bf4504f4d0deffccc59de18697edeffffd2ba2f9d8",
+                  "schemaAwareHash": "5c1e1c8a20e92d662884d3af7337bf739d4c1ea700a43dd2eb09c361051d9acb",
                   "authorization": {
                     "is_authenticated": false,
                     "scopes": [],
@@ -136,7 +137,7 @@ async fn basic_batch() {
                     "inputRewrites": null,
                     "outputRewrites": null,
                     "contextRewrites": null,
-                    "schemaAwareHash": "959ef545ae98f0ac39aef5ea1548bbf86bbccd2455793e9209df1b1021ab511a",
+                    "schemaAwareHash": "c2135feb344973e4498126b00bedf66c1924d4ededee5ecae7e13edf08a52dc6",
                     "authorization": {
                       "is_authenticated": false,
                       "scopes": [],
@@ -214,6 +215,7 @@ async fn connect_on_type() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 

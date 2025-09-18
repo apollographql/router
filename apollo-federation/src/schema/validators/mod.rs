@@ -31,6 +31,7 @@ pub(crate) mod list_size;
 pub(crate) mod merged;
 pub(crate) mod provides;
 pub(crate) mod requires;
+pub(crate) mod root_fields;
 pub(crate) mod shareable;
 pub(crate) mod tag;
 
@@ -273,7 +274,12 @@ impl<D: DeniesNonExternalLeafFields> SchemaFieldSetValidator<D> for DenyNonExter
                 errors.errors.push(directive.error(parent_ty, field));
             }
         } else {
-            self.visit_selection_set(parent_ty, &field.selection_set, directive, errors);
+            self.visit_selection_set(
+                field.ty().inner_named_type(),
+                &field.selection_set,
+                directive,
+                errors,
+            );
         }
     }
 }

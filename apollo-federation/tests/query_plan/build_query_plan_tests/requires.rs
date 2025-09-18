@@ -1839,3 +1839,93 @@ fn handles_requires_from_supergraph() {
       "###
     );
 }
+
+#[test]
+fn allows_post_requires_input_with_typename_on_interface_object_type() {
+    // This used to panic with an `InternalRebaseError(InterfaceObjectTypename)` error.
+    let planner = planner!(
+        A: r#"
+          type I @key(fields: "id") @interfaceObject {
+            id: ID!
+          }
+
+          extend type Query {
+            start: I!
+          }
+        "#,
+        B: r#"
+          interface I @key(fields: "id") {
+            id: ID!
+            required: String
+          }
+
+          type P implements I @key(fields: "id") {
+            id: ID!
+            required: String
+          }
+        "#,
+        C: r#"
+          type I @key(fields: "id") @interfaceObject {
+            id: ID!
+            required: String @external
+            data: String! @requires(fields: "required")
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            start {
+              data
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "A") {
+          {
+            start {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "start") {
+          Fetch(service: "B") {
+            {
+              ... on I {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on I {
+                __typename
+                required
+              }
+            }
+          },
+        },
+        Flatten(path: "start") {
+          Fetch(service: "C") {
+            {
+              ... on I {
+                __typename
+                required
+                id
+              }
+            } =>
+            {
+              ... on I {
+                data
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}

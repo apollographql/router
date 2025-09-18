@@ -184,7 +184,7 @@ impl FederationBlueprint {
             return Self::on_unknown_directive_validation_error(schema, directive_name, &message);
         }
 
-        let did_you_mean = did_you_mean(suggestions.iter().map(|s| format!("@{}", s)));
+        let did_you_mean = did_you_mean(suggestions.iter().map(|s| format!("@{s}")));
         SingleFederationError::InvalidGraphQL {
             message: format!("{message}{did_you_mean}\n"),
         }
@@ -254,7 +254,7 @@ impl FederationBlueprint {
                 all_directive_names.iter().map(|name| name.to_string()),
             );
             if !suggestions.is_empty() {
-                let did_you_mean = did_you_mean(suggestions.iter().map(|s| format!("@{}", s)));
+                let did_you_mean = did_you_mean(suggestions.iter().map(|s| format!("@{s}")));
                 let note = if suggestions.len() == 1 {
                     "it is a federation 2 directive"
                 } else {

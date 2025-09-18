@@ -3,6 +3,7 @@ mod batching;
 pub(crate) mod common;
 pub(crate) use common::IntegrationTest;
 
+mod allowed_features;
 mod connectors;
 mod coprocessor;
 mod docs;
@@ -14,6 +15,7 @@ mod introspection;
 mod lifecycle;
 mod metrics;
 mod mock_subgraphs;
+mod oci;
 mod operation_limits;
 mod operation_name;
 mod query_planner;

@@ -1,4 +1,5 @@
 //! Logic for loading configuration in to an object model
+use std::collections::BTreeMap;
 use std::fmt;
 use std::hash::Hash;
 use std::io;
@@ -27,10 +28,8 @@ use rustls::ServerConfig;
 use rustls::pki_types::CertificateDer;
 use rustls::pki_types::PrivateKeyDer;
 use schemars::JsonSchema;
-use schemars::r#gen::SchemaGenerator;
-use schemars::schema::ObjectValidation;
-use schemars::schema::Schema;
-use schemars::schema::SchemaObject;
+use schemars::Schema;
+use schemars::SchemaGenerator;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
@@ -53,6 +52,8 @@ use crate::configuration::cooperative_cancellation::CooperativeCancellation;
 use crate::graphql;
 use crate::notification::Notify;
 use crate::plugin::plugins;
+use crate::plugins::chaos;
+use crate::plugins::chaos::Config;
 use crate::plugins::healthcheck::Config as HealthCheck;
 #[cfg(test)]
 use crate::plugins::healthcheck::test_listen;
@@ -190,7 +191,7 @@ pub struct Configuration {
     /// Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.
     /// You probably don’t want this in production!
     #[serde(default)]
-    pub(crate) experimental_chaos: Chaos,
+    pub(crate) experimental_chaos: Config,
 
     /// Plugin configuration
     #[serde(default)]
@@ -246,7 +247,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             apq: Apq,
             persisted_queries: PersistedQueries,
             limits: limits::Config,
-            experimental_chaos: Chaos,
+            experimental_chaos: chaos::Config,
             batching: Batching,
             experimental_type_conditioned_fetching: bool,
         }
@@ -316,7 +317,7 @@ impl Configuration {
         apq: Option<Apq>,
         persisted_query: Option<PersistedQueries>,
         operation_limits: Option<limits::Config>,
-        chaos: Option<Chaos>,
+        chaos: Option<chaos::Config>,
         uplink: Option<UplinkConfig>,
         experimental_type_conditioned_fetching: Option<bool>,
         batching: Option<Batching>,
@@ -453,7 +454,7 @@ impl Configuration {
         apq: Option<Apq>,
         persisted_query: Option<PersistedQueries>,
         operation_limits: Option<limits::Config>,
-        chaos: Option<Chaos>,
+        chaos: Option<chaos::Config>,
         uplink: Option<UplinkConfig>,
         batching: Option<Batching>,
         experimental_type_conditioned_fetching: Option<bool>,
@@ -581,25 +582,20 @@ impl FromStr for Configuration {
 }
 
 fn gen_schema(
-    plugins: schemars::Map<String, Schema>,
-    hidden_plugins: Option<schemars::Map<String, Schema>>,
+    plugins: BTreeMap<String, Schema>,
+    hidden_plugins: Option<BTreeMap<String, Schema>>,
 ) -> Schema {
-    let plugins_object = SchemaObject {
-        object: Some(Box::new(ObjectValidation {
-            properties: plugins,
-            additional_properties: Option::Some(Box::new(Schema::Bool(false))),
-            pattern_properties: hidden_plugins
-                .unwrap_or_default()
-                .into_iter()
-                // Wrap plugin name with regex start/end to enforce exact match
-                .map(|(k, v)| (format!("^{}$", k), v))
-                .collect(),
-            ..Default::default()
-        })),
-        ..Default::default()
-    };
-
-    Schema::Object(plugins_object)
+    schemars::json_schema!({
+        "type": "object",
+        "properties": plugins,
+        "additionalProperties": false,
+        "patternProperties": hidden_plugins
+            .unwrap_or_default()
+            .into_iter()
+            // Wrap plugin name with regex start/end to enforce exact match
+            .map(|(k, v)| (format!("^{}$", k), v))
+            .collect::<BTreeMap<_, _>>()
+    })
 }
 
 /// Plugins provided by Apollo.
@@ -614,8 +610,8 @@ pub(crate) struct ApolloPlugins {
 }
 
 impl JsonSchema for ApolloPlugins {
-    fn schema_name() -> String {
-        stringify!(Plugins).to_string()
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        stringify!(Plugins).into()
     }
 
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
@@ -653,8 +649,8 @@ pub(crate) struct UserPlugins {
 }
 
 impl JsonSchema for UserPlugins {
-    fn schema_name() -> String {
-        stringify!(Plugins).to_string()
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        stringify!(Plugins).into()
     }
 
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
@@ -665,7 +661,7 @@ impl JsonSchema for UserPlugins {
             .sorted_by_key(|factory| factory.name.clone())
             .filter(|factory| !factory.name.starts_with(APOLLO_PLUGIN_PREFIX))
             .map(|factory| (factory.name.to_string(), factory.create_schema(generator)))
-            .collect::<schemars::Map<String, Schema>>();
+            .collect();
         gen_schema(plugins, None)
     }
 }
@@ -1073,6 +1069,13 @@ pub(crate) struct RedisCache {
     #[serde(default = "default_pool_size")]
     /// The size of the Redis connection pool
     pub(crate) pool_size: u32,
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_metrics_interval"
+    )]
+    #[schemars(with = "Option<String>", default)]
+    /// Interval for collecting Redis metrics (default: 1s)
+    pub(crate) metrics_interval: Duration,
 }
 
 fn default_required_to_start() -> bool {
@@ -1081,6 +1084,10 @@ fn default_required_to_start() -> bool {
 
 fn default_pool_size() -> u32 {
     1
+}
+
+pub(crate) fn default_metrics_interval() -> Duration {
+    Duration::from_secs(1)
 }
 
 impl From<QueryPlanRedisCache> for RedisCache {
@@ -1096,6 +1103,7 @@ impl From<QueryPlanRedisCache> for RedisCache {
             required_to_start: value.required_to_start,
             reset_ttl: value.reset_ttl,
             pool_size: value.pool_size,
+            metrics_interval: default_metrics_interval(),
         }
     }
 }
@@ -1111,9 +1119,11 @@ fn default_reset_ttl() -> bool {
 pub(crate) struct Tls {
     /// TLS server configuration
     ///
-    /// this will affect the GraphQL endpoint and any other endpoint targeting the same listen address
+    /// This will affect the GraphQL endpoint and any other endpoint targeting the same listen address.
     pub(crate) supergraph: Option<Arc<TlsSupergraph>>,
+    /// Outgoing TLS configuration to subgraphs.
     pub(crate) subgraph: SubgraphConfiguration<TlsClient>,
+    /// Outgoing TLS configuration to Apollo Connectors.
     pub(crate) connector: ConnectorConfiguration<TlsClient>,
 }
 
@@ -1364,19 +1374,6 @@ impl Default for Homepage {
     fn default() -> Self {
         Self::builder().enabled(default_homepage()).build()
     }
-}
-
-/// Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.
-/// You probably don’t want this in production!
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[serde(default)]
-pub(crate) struct Chaos {
-    /// Force a hot reload of the Router (as if the schema or configuration had changed)
-    /// at a regular time interval.
-    #[serde(with = "humantime_serde")]
-    #[schemars(with = "Option<String>")]
-    pub(crate) force_reload: Option<std::time::Duration>,
 }
 
 /// Listening address.

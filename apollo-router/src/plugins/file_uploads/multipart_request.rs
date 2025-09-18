@@ -174,7 +174,7 @@ where
             let filename = field
                 .file_name()
                 .or_else(|| field.name())
-                .map(|name| format!("'{}'", name))
+                .map(|name| format!("'{name}'"))
                 .unwrap_or_else(|| "unknown".to_owned());
 
             let field = Pin::new(field);
@@ -226,10 +226,7 @@ where
 
                     let files = mem::take(&mut self.file_names);
                     return Poll::Ready(Some(Err(FileUploadError::MissingFiles(
-                        files
-                            .into_iter()
-                            .map(|file| format!("'{}'", file))
-                            .join(", "),
+                        files.into_iter().map(|file| format!("'{file}'")).join(", "),
                     ))));
                 }
                 Poll::Ready(Ok(Some(field))) => {
@@ -242,12 +239,12 @@ where
                     } else {
                         self.state.read_files_counter += 1;
 
-                        if let Some(name) = field.name() {
-                            if self.file_names.remove(name) {
-                                let prefix = (self.file_prefix_fn)(field.headers());
-                                self.current_field = Some(field);
-                                return Poll::Ready(Some(Ok(prefix)));
-                            }
+                        if let Some(name) = field.name()
+                            && self.file_names.remove(name)
+                        {
+                            let prefix = (self.file_prefix_fn)(field.headers());
+                            self.current_field = Some(field);
+                            return Poll::Ready(Some(Ok(prefix)));
                         }
 
                         // The file is extraneous, but the rest can still be processed.

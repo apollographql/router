@@ -523,12 +523,15 @@ mod tests {
     use apollo_federation::connectors::Connector;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::StringTemplate;
     use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
     use insta::assert_debug_snapshot;
 
     use crate::Context;
     use crate::graphql;
     use crate::query_planner::fetch::Variables;
+
+    const DEFAULT_CONNECT_SPEC: ConnectSpec = ConnectSpec::V0_2;
 
     #[test]
     fn test_root_fields_simple() {
@@ -2028,14 +2031,18 @@ mod tests {
             .build();
 
         let connector = Connector {
-            spec: ConnectSpec::V0_1,
+            spec: DEFAULT_CONNECT_SPEC,
             id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             transport: HttpJsonTransport {
                 source_template: "http://localhost/api".parse().ok(),
-                connect_template: "/path?id={$this.id}".parse().unwrap(),
+                connect_template: StringTemplate::parse_with_spec(
+                    "/path?id={$this.id}",
+                    DEFAULT_CONNECT_SPEC,
+                )
+                .unwrap(),
                 ..Default::default()
             },
-            selection: JSONSelection::parse("id field").unwrap(),
+            selection: JSONSelection::parse_with_spec("id field", DEFAULT_CONNECT_SPEC).unwrap(),
             entity_resolver: Some(super::EntityResolver::TypeSingle),
             config: Default::default(),
             max_requests: None,

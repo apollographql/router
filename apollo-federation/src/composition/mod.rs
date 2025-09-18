@@ -4,11 +4,13 @@ use std::vec;
 
 use apollo_compiler::Schema;
 use apollo_compiler::validation::Valid;
+use itertools::Itertools;
 
 pub use crate::composition::satisfiability::validate_satisfiability;
 use crate::error::CompositionError;
 use crate::merger::merge::Merger;
 pub use crate::schema::schema_upgrader::upgrade_subgraphs_if_necessary;
+use crate::schema::validators::root_fields::validate_consistent_root_fields;
 use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Initial;
 use crate::subgraph::typestate::Subgraph;
@@ -21,13 +23,26 @@ pub use crate::supergraph::Supergraph;
 pub fn compose(
     subgraphs: Vec<Subgraph<Initial>>,
 ) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
+    tracing::debug!("Expanding subgraphs...");
     let expanded_subgraphs = expand_subgraphs(subgraphs)?;
-    let upgraded_subgraphs = upgrade_subgraphs_if_necessary(expanded_subgraphs)?;
+    tracing::debug!("Upgrading subgraphs...");
+    let mut upgraded_subgraphs = upgrade_subgraphs_if_necessary(expanded_subgraphs)?;
+    tracing::debug!("Normalizing root types...");
+    for subgraph in upgraded_subgraphs.iter_mut() {
+        subgraph
+            .normalize_root_types()
+            .map_err(|e| e.to_composition_errors().collect_vec())?;
+    }
+    tracing::debug!("Validating subgraphs...");
     let validated_subgraphs = validate_subgraphs(upgraded_subgraphs)?;
 
+    tracing::debug!("Pre-merge validations...");
     pre_merge_validations(&validated_subgraphs)?;
+    tracing::debug!("Merging subgraphs...");
     let supergraph = merge_subgraphs(validated_subgraphs)?;
+    tracing::debug!("Post-merge validations...");
     post_merge_validations(&supergraph)?;
+    tracing::debug!("Validating satisfiability...");
     validate_satisfiability(supergraph)
 }
 
@@ -40,7 +55,7 @@ pub fn expand_subgraphs(
     let expanded: Vec<Subgraph<Expanded>> = subgraphs
         .into_iter()
         .map(|s| s.expand_links())
-        .filter_map(|r| r.map_err(|e| errors.push(e.into())).ok())
+        .filter_map(|r| r.map_err(|e| errors.extend(e.to_composition_errors())).ok())
         .collect();
     if errors.is_empty() {
         Ok(expanded)
@@ -58,7 +73,7 @@ pub fn validate_subgraphs(
     let validated: Vec<Subgraph<Validated>> = subgraphs
         .into_iter()
         .map(|s| s.validate())
-        .filter_map(|r| r.map_err(|e| errors.push(e.into())).ok())
+        .filter_map(|r| r.map_err(|e| errors.extend(e.to_composition_errors())).ok())
         .collect();
     if errors.is_empty() {
         Ok(validated)
@@ -69,8 +84,9 @@ pub fn validate_subgraphs(
 
 /// Perform validations that require information about all available subgraphs.
 pub fn pre_merge_validations(
-    _subgraphs: &[Subgraph<Validated>],
+    subgraphs: &[Subgraph<Validated>],
 ) -> Result<(), Vec<CompositionError>> {
+    validate_consistent_root_fields(subgraphs)?;
     // TODO: (FED-713) Implement any pre-merge validations that require knowledge of all subgraphs.
     Ok(())
 }
@@ -83,7 +99,11 @@ pub fn merge_subgraphs(
             message: e.to_string(),
         }]
     })?;
-    let result = merger.merge();
+    let result = merger.merge().map_err(|e| {
+        vec![CompositionError::InternalError {
+            message: e.to_string(),
+        }]
+    })?;
     if result.errors.is_empty() {
         let schema = result
             .supergraph

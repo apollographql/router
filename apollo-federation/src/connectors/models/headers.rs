@@ -13,6 +13,7 @@ use either::Either;
 use http::HeaderName;
 use http::header;
 
+use crate::connectors::ConnectSpec;
 use crate::connectors::JSONSelection;
 use crate::connectors::header::HeaderValue;
 use crate::connectors::spec::http::HEADERS_ARGUMENT_NAME;
@@ -41,6 +42,7 @@ impl Header {
     pub(crate) fn from_http_arg(
         http_arg: &[(Name, Node<Value>)],
         originating_directive: OriginatingDirective,
+        spec: ConnectSpec,
     ) -> Vec<Result<Self, HeaderParseError>> {
         let Some(headers_arg) = http_arg
             .iter()
@@ -51,10 +53,10 @@ impl Header {
         if let Some(values) = headers_arg.as_list() {
             values
                 .iter()
-                .map(|n| Self::from_single(n, originating_directive))
+                .map(|n| Self::from_single(n, originating_directive, spec))
                 .collect()
         } else if headers_arg.as_object().is_some() {
-            vec![Self::from_single(headers_arg, originating_directive)]
+            vec![Self::from_single(headers_arg, originating_directive, spec)]
         } else {
             vec![Err(HeaderParseError::Other {
                 message: format!("`{HEADERS_ARGUMENT_NAME}` must be an object or list of objects"),
@@ -82,6 +84,7 @@ impl Header {
     fn from_single(
         node: &Node<Value>,
         originating_directive: OriginatingDirective,
+        spec: ConnectSpec,
     ) -> Result<Self, HeaderParseError> {
         let mappings = node.as_object().ok_or_else(|| HeaderParseError::Other {
             message: "the HTTP header mapping is not an object".to_string(),
@@ -156,9 +159,11 @@ impl Header {
                         node: value_node.clone()
                     })
                     .and_then(|value_str| {
-                        value_str
-                            .parse::<HeaderValue>()
-                            .map_err(|err| HeaderParseError::ValueError {err, node: value_node.clone()})
+                        HeaderValue::parse_with_spec(
+                            value_str,
+                            spec,
+                        )
+                        .map_err(|err| HeaderParseError::ValueError {err, node: value_node.clone()})
                     })
                     .map(|value| Self {
                         name,

@@ -8,8 +8,8 @@ use apollo_compiler::collections::IndexSet;
 
 use super::JSONSelection;
 use super::Key;
-use super::NamedSelection;
 use super::PathList;
+use super::PathSelection;
 use super::Ranged;
 use super::SubSelection;
 use super::helpers::quote_if_necessary;
@@ -30,10 +30,11 @@ impl JSONSelection {
         // the shape library tracking the names of all shapes.
 
         use super::ExternalVarPaths;
+        use crate::connectors::json_selection::TopLevelSelection;
         for path in self.external_var_paths() {
             if let PathList::Var(known_var, tail) = path.path.as_ref() {
-                trie.add_str(known_var.as_str())
-                    .add_path_list(tail.as_ref());
+                trie.add_str_with_ranges(known_var.as_str(), path.range())
+                    .add_path_list(tail);
             } else {
                 // The self.external_var_paths() method should only return
                 // PathSelection elements whose path starts with PathList::Var.
@@ -41,11 +42,11 @@ impl JSONSelection {
         }
 
         let mut root_trie = SelectionTrie::new();
-        match self {
-            JSONSelection::Path(path) => {
-                root_trie.add_path_list(path.path.as_ref());
+        match &self.inner {
+            TopLevelSelection::Path(path) => {
+                root_trie.add_path_list(&path.path);
             }
-            JSONSelection::Named(selection) => {
+            TopLevelSelection::Named(selection) => {
                 root_trie.add_subselection(selection);
             }
         };
@@ -55,8 +56,8 @@ impl JSONSelection {
     }
 }
 
-impl PathList {
-    pub(crate) fn compute_selection_trie(&self) -> SelectionTrie {
+impl WithRange<PathList> {
+    pub(super) fn compute_selection_trie(&self) -> SelectionTrie {
         let mut trie = SelectionTrie::new();
         trie.add_path_list(self);
         trie
@@ -180,9 +181,13 @@ impl SelectionTrie {
             .set_leaf()
     }
 
-    pub(super) fn add_path_list(&mut self, path_list: &PathList) -> &mut Self {
-        match path_list {
-            PathList::Key(key, tail) => self.add_key(key).add_path_list(tail.as_ref()),
+    pub(crate) fn add_path_selection(&mut self, path: &PathSelection) -> &mut Self {
+        self.add_path_list(&path.path)
+    }
+
+    fn add_path_list(&mut self, path_list: &WithRange<PathList>) -> &mut Self {
+        match path_list.as_ref() {
+            PathList::Key(key, tail) => self.add_key(key).add_path_list(tail),
             PathList::Selection(sub) => self.add_subselection(sub),
             // If we get to the end of the PathList, mark the path used.
             PathList::Empty => self.set_leaf(),
@@ -195,22 +200,7 @@ impl SelectionTrie {
 
     pub(crate) fn add_subselection(&mut self, sub: &SubSelection) -> &mut Self {
         for selection in sub.selections_iter() {
-            match selection {
-                NamedSelection::Field(_, key, nested_selection) => {
-                    let result = self.add_key(key);
-                    if let Some(nested) = nested_selection {
-                        result.add_subselection(nested);
-                    } else {
-                        result.set_leaf();
-                    }
-                }
-                NamedSelection::Path { path, .. } => {
-                    self.add_path_list(path.path.as_ref());
-                }
-                NamedSelection::Group(_, sub) => {
-                    self.add_subselection(sub);
-                }
-            }
+            self.add_path_selection(&selection.path);
         }
         self
     }

@@ -15,7 +15,7 @@ impl FromStr for Namespace {
         match s {
             "$args" => Ok(Self::Args),
             "$this" => Ok(Self::This),
-            _ => Err(format!("Unknown variable namespace: {}", s)),
+            _ => Err(format!("Unknown variable namespace: {s}")),
         }
     }
 }

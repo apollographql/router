@@ -1,11 +1,14 @@
-use std::cell::LazyCell;
-use std::sync::Arc;
-
 use apollo_compiler::collections::HashMap;
+use apollo_compiler::collections::IndexMap;
+use encoding_rs::Encoding;
+use encoding_rs::UTF_8;
 use http::HeaderMap;
 use http::HeaderValue;
+use http::header::CONTENT_LENGTH;
+use http::header::CONTENT_TYPE;
+use http::response::Parts;
 use itertools::Itertools;
-use parking_lot::Mutex;
+use mime::Mime;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
@@ -13,14 +16,12 @@ use serde_json_bytes::Value;
 use crate::connectors::Connector;
 use crate::connectors::JSONSelection;
 use crate::connectors::ProblemLocation;
-use crate::connectors::runtime::debug::ConnectorContext;
-use crate::connectors::runtime::debug::ConnectorDebugHttpRequest;
-use crate::connectors::runtime::debug::SelectionData;
 use crate::connectors::runtime::errors::RuntimeError;
 use crate::connectors::runtime::inputs::ContextReader;
 use crate::connectors::runtime::key::ResponseKey;
 use crate::connectors::runtime::mapping::Problem;
 use crate::connectors::runtime::mapping::aggregate_apply_to_errors;
+use crate::connectors::runtime::responses::DeserializeError::ContentDecoding;
 
 const ENTITIES: &str = "_entities";
 const TYPENAME: &str = "__typename";
@@ -31,253 +32,230 @@ pub enum HandleResponseError {
     MergeError(String),
 }
 
+/// Converts a response body into a json Value based on the Content-Type header.
+pub fn deserialize_response(body: &[u8], headers: &HeaderMap) -> Result<Value, DeserializeError> {
+    // If the body is obviously empty, don't try to parse it
+    if headers
+        .get(CONTENT_LENGTH)
+        .and_then(|len| len.to_str().ok())
+        .and_then(|s| s.parse::<usize>().ok())
+        .is_some_and(|content_length| content_length == 0)
+    {
+        return Ok(Value::Null);
+    }
+
+    let content_type = headers
+        .get(CONTENT_TYPE)
+        .and_then(|h| h.to_str().ok()?.parse::<Mime>().ok());
+
+    if content_type.is_none()
+        || content_type
+            .as_ref()
+            .is_some_and(|ct| ct.subtype() == mime::JSON || ct.suffix() == Some(mime::JSON))
+    {
+        // Treat any JSON-y like content types as JSON
+        // Also, because the HTTP spec says we should effectively "guess" the content type if there is no content type (None), we're going to guess it is JSON if the server has not specified one
+        serde_json::from_slice::<Value>(body).map_err(DeserializeError::SerdeJson)
+    } else if content_type
+        .as_ref()
+        .is_some_and(|ct| ct.type_() == mime::TEXT && ct.subtype() == mime::PLAIN)
+    {
+        // Plain text we can't parse as JSON so we'll instead return it as a JSON string
+        // Before we can do that, we need to figure out the charset and attempt to decode the string
+        let encoding = content_type
+            .as_ref()
+            .and_then(|ct| Encoding::for_label(ct.get_param("charset")?.as_str().as_bytes()))
+            .unwrap_or(UTF_8);
+        let (decoded_body, _, had_errors) = encoding.decode(body);
+
+        if had_errors {
+            return Err(ContentDecoding(encoding.name()));
+        }
+
+        Ok(Value::String(decoded_body.into_owned().into()))
+    } else {
+        // For any other content types, all we can do is treat it as a JSON null cause we don't know what it is
+        Ok(Value::Null)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DeserializeError {
+    #[error("Could not parse JSON: {0}")]
+    SerdeJson(#[source] serde_json::Error),
+    #[error("Could not decode data with content encoding {0}")]
+    ContentDecoding(&'static str),
+}
+
 pub fn handle_raw_response(
-    raw: RawResponse,
+    data: &Value,
+    parts: &Parts,
+    key: ResponseKey,
     connector: &Connector,
     context: impl ContextReader,
-    debug_context: Option<&Arc<Mutex<ConnectorContext>>>,
     client_headers: &HeaderMap<HeaderValue>,
-) -> (MappedResponse, bool) {
-    let is_success = match &raw {
-        RawResponse::Error { .. } => false,
-        RawResponse::Data { parts, .. } => parts.status.is_success(),
-    };
-    if is_success {
-        (
-            raw.map_response(connector, context, debug_context, client_headers),
-            true,
-        )
+) -> MappedResponse {
+    let inputs = key
+        .inputs()
+        .clone()
+        .merger(&connector.response_variable_keys)
+        .config(connector.config.as_ref())
+        .context(context)
+        .status(parts.status.as_u16())
+        .request(&connector.response_headers, client_headers)
+        .response(&connector.response_headers, Some(parts))
+        .merge();
+    let warnings = Vec::new();
+    let (success, warnings) = is_success(connector, data, parts, &inputs, warnings);
+    if success {
+        map_response(data, key, inputs, warnings)
     } else {
-        (
-            raw.map_error(connector, context, debug_context, client_headers),
-            false,
-        )
+        map_error(connector, data, parts, key, inputs, warnings)
     }
 }
 
-// --- RAW RESPONSE ------------------------------------------------------------
-pub enum RawResponse {
-    /// This error type is used if:
-    /// 1. We didn't even make the request (we hit the request limit)
-    /// 2. We couldn't deserialize the response body
-    Error {
-        error: RuntimeError,
-        key: ResponseKey,
-    },
-    /// Contains the response data directly from the HTTP response. We'll apply
-    /// a selection to convert this into either `data` or `errors` based on
-    /// whether it's successful or not.
-    Data {
-        parts: http::response::Parts,
-        data: Value,
-        key: ResponseKey,
-        debug_request: (Option<Box<ConnectorDebugHttpRequest>>, Vec<Problem>),
-    },
+// If the user has set a custom success condition selector, resolve that expression,
+// otherwise default to checking status code is 2XX
+fn is_success(
+    connector: &Connector,
+    data: &Value,
+    parts: &Parts,
+    inputs: &IndexMap<String, Value>,
+    mut warnings: Vec<Problem>,
+) -> (bool, Vec<Problem>) {
+    let Some(is_success_selection) = &connector.error_settings.connect_is_success else {
+        return (parts.status.is_success(), warnings);
+    };
+    let (res, apply_to_errors) = is_success_selection.apply_with_vars(data, inputs);
+    warnings.extend(aggregate_apply_to_errors(
+        apply_to_errors,
+        ProblemLocation::IsSuccess,
+    ));
+
+    (
+        res.as_ref().and_then(Value::as_bool).unwrap_or_default(),
+        warnings,
+    )
 }
 
-impl RawResponse {
-    /// Returns a response with data transformed by the selection mapping.
-    ///
-    /// As a side effect, this will also write to the debug context.
-    pub fn map_response(
-        self,
-        connector: &Connector,
-        context: impl ContextReader,
-        debug_context: Option<&Arc<Mutex<ConnectorContext>>>,
-        client_headers: &HeaderMap<HeaderValue>,
-    ) -> MappedResponse {
-        match self {
-            RawResponse::Error { error, key } => MappedResponse::Error { error, key },
-            RawResponse::Data {
-                data,
-                key,
-                parts,
-                debug_request,
-            } => {
-                let inputs = key
-                    .inputs()
-                    .clone()
-                    .merger(&connector.response_variable_keys)
-                    .config(connector.config.as_ref())
-                    .context(context)
-                    .status(parts.status.as_u16())
-                    .request(&connector.response_headers, client_headers)
-                    .response(&connector.response_headers, Some(&parts))
-                    .merge();
+/// Returns a response with data transformed by the selection mapping.
+pub(super) fn map_response(
+    data: &Value,
+    key: ResponseKey,
+    inputs: IndexMap<String, Value>,
+    mut warnings: Vec<Problem>,
+) -> MappedResponse {
+    let (res, apply_to_errors) = key.selection().apply_with_vars(data, &inputs);
+    warnings.extend(aggregate_apply_to_errors(
+        apply_to_errors,
+        ProblemLocation::Selection,
+    ));
+    MappedResponse::Data {
+        key,
+        data: res.unwrap_or_else(|| Value::Null),
+        problems: warnings,
+    }
+}
 
-                let (res, apply_to_errors) = key.selection().apply_with_vars(&data, &inputs);
+/// Returns a `MappedResponse` with a GraphQL error.
+pub(super) fn map_error(
+    connector: &Connector,
+    data: &Value,
+    parts: &Parts,
+    key: ResponseKey,
+    inputs: IndexMap<String, Value>,
+    mut warnings: Vec<Problem>,
+) -> MappedResponse {
+    // Do we have an error message mapping set for this connector?
+    let message = if let Some(message_selection) = &connector.error_settings.message {
+        let (res, apply_to_errors) = message_selection.apply_with_vars(data, &inputs);
+        warnings.extend(aggregate_apply_to_errors(
+            apply_to_errors,
+            ProblemLocation::ErrorsMessage,
+        ));
+        res.as_ref()
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    } else {
+        "Request failed".to_string()
+    };
 
-                let mapping_problems: Vec<Problem> =
-                    aggregate_apply_to_errors(apply_to_errors, ProblemLocation::Selection)
-                        .collect();
+    // Now we can create the error object using either the default message or the message calculated by the JSONSelection
+    let mut error = RuntimeError::new(message, &key);
+    error.subgraph_name = Some(connector.id.subgraph_name.clone());
+    error.coordinate = Some(connector.id.coordinate());
 
-                if let Some(debug) = debug_context {
-                    let mut debug_problems = mapping_problems.clone();
-                    debug_problems.extend(debug_request.1);
+    // First, we will apply defaults... these may get overwritten below by user configured extensions
+    error = error.extension(
+        "http",
+        Value::Object(Map::from_iter([(
+            "status".into(),
+            Value::Number(parts.status.as_u16().into()),
+        )])),
+    );
 
-                    debug.lock().push_response(
-                        debug_request.0,
-                        &parts,
-                        &data,
-                        Some(SelectionData {
-                            source: connector.selection.to_string(),
-                            transformed: key.selection().to_string(),
-                            result: res.clone(),
-                        }),
-                        &connector.error_settings,
-                        debug_problems,
-                    );
-                }
+    // If we have error extensions mapping set for this connector, we will need to grab the code + the remaining extensions and map them to the error object
+    // We'll merge by applying the source and then the connect. Keep in mind that these will override defaults if the key names are the same.
+    // Note: that we set the extension code in this if/else but don't actually set it on the error until after the if/else. This is because the compiler
+    // can't make sense of it in the if/else due to how the builder is constructed.
+    let mut extension_code = "CONNECTOR_FETCH".to_string();
+    if let Some(extensions_selection) = &connector.error_settings.source_extensions {
+        let (res, apply_to_errors) = extensions_selection.apply_with_vars(data, &inputs);
+        warnings.extend(aggregate_apply_to_errors(
+            apply_to_errors,
+            ProblemLocation::SourceErrorsExtensions,
+        ));
 
-                MappedResponse::Data {
-                    key,
-                    data: res.unwrap_or_else(|| Value::Null),
-                    problems: mapping_problems,
-                }
-            }
+        // TODO: Currently this "fails silently". In the future, we probably add a warning to the debugger info.
+        let extensions = res
+            .and_then(|e| match e {
+                Value::Object(map) => Some(map),
+                _ => None,
+            })
+            .unwrap_or_default();
+
+        if let Some(code) = extensions.get("code") {
+            extension_code = code.as_str().unwrap_or_default().to_string();
+        }
+
+        for (key, value) in extensions {
+            error = error.extension(key, value);
         }
     }
 
-    /// Returns a `MappedResponse` with a GraphQL error.
-    ///
-    /// As a side effect, this will also write to the debug context.
-    pub fn map_error(
-        self,
-        connector: &Connector,
-        context: impl ContextReader,
-        debug_context: Option<&Arc<Mutex<ConnectorContext>>>,
-        client_headers: &HeaderMap<HeaderValue>,
-    ) -> MappedResponse {
-        match self {
-            RawResponse::Error { error, key } => MappedResponse::Error { error, key },
-            RawResponse::Data {
-                key,
-                parts,
-                debug_request,
-                data,
-            } => {
-                let mut warnings = Vec::new();
+    if let Some(extensions_selection) = &connector.error_settings.connect_extensions {
+        let (res, apply_to_errors) = extensions_selection.apply_with_vars(data, &inputs);
+        warnings.extend(aggregate_apply_to_errors(
+            apply_to_errors,
+            ProblemLocation::ConnectErrorsExtensions,
+        ));
 
-                let inputs = LazyCell::new(|| {
-                    key.inputs()
-                        .clone()
-                        .merger(&connector.response_variable_keys)
-                        .config(connector.config.as_ref())
-                        .context(context)
-                        .status(parts.status.as_u16())
-                        .request(&connector.response_headers, client_headers)
-                        .response(&connector.response_headers, Some(&parts))
-                        .merge()
-                });
+        // TODO: Currently this "fails silently". In the future, we probably add a warning to the debugger info.
+        let extensions = res
+            .and_then(|e| match e {
+                Value::Object(map) => Some(map),
+                _ => None,
+            })
+            .unwrap_or_default();
 
-                // Do we have a error message mapping set for this connector?
-                let message = if let Some(message_selection) = &connector.error_settings.message {
-                    let (res, apply_to_errors) = message_selection.apply_with_vars(&data, &inputs);
-                    warnings.extend(aggregate_apply_to_errors(
-                        apply_to_errors,
-                        ProblemLocation::ErrorsMessage,
-                    ));
+        if let Some(code) = extensions.get("code") {
+            extension_code = code.as_str().unwrap_or_default().to_string();
+        }
 
-                    res.as_ref()
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string()
-                } else {
-                    "Request failed".to_string()
-                };
-
-                // Now we can create the error object using either the default message or the message calculated by the JSONSelection
-                let mut error = RuntimeError::new(message, &key);
-                error.subgraph_name = Some(connector.id.subgraph_name.clone());
-                error.coordinate = Some(connector.id.coordinate());
-
-                // First, we will apply defaults... these may get overwritten below by user configured extensions
-                error = error.extension(
-                    "http",
-                    Value::Object(Map::from_iter([(
-                        "status".into(),
-                        Value::Number(parts.status.as_u16().into()),
-                    )])),
-                );
-
-                // If we have error extensions mapping set for this connector, we will need to grab the code + the remaining extensions and map them to the error object
-                // We'll merge by applying the source and then the connect. Keep in mind that these will override defaults if the key names are the same.
-                // Note: that we set the extension code in this if/else but don't actually set it on the error until after the if/else. This is because the compiler
-                // can't make sense of it in the if/else due to how the builder is constructed.
-                let mut extension_code = "CONNECTOR_FETCH".to_string();
-                if let Some(extensions_selection) = &connector.error_settings.source_extensions {
-                    let (res, apply_to_errors) =
-                        extensions_selection.apply_with_vars(&data, &inputs);
-                    warnings.extend(aggregate_apply_to_errors(
-                        apply_to_errors,
-                        ProblemLocation::SourceErrorsExtensions,
-                    ));
-
-                    // TODO: Currently this "fails silently". In the future, we probably add a warning to the debugger info.
-                    let extensions = res
-                        .and_then(|e| match e {
-                            Value::Object(map) => Some(map),
-                            _ => None,
-                        })
-                        .unwrap_or_default();
-
-                    if let Some(code) = extensions.get("code") {
-                        extension_code = code.as_str().unwrap_or_default().to_string();
-                    }
-
-                    for (key, value) in extensions {
-                        error = error.extension(key.clone(), value.clone());
-                    }
-                }
-
-                if let Some(extensions_selection) = &connector.error_settings.connect_extensions {
-                    let (res, apply_to_errors) =
-                        extensions_selection.apply_with_vars(&data, &inputs);
-                    warnings.extend(aggregate_apply_to_errors(
-                        apply_to_errors,
-                        ProblemLocation::ConnectErrorsExtensions,
-                    ));
-
-                    // TODO: Currently this "fails silently". In the future, we probably add a warning to the debugger info.
-                    let extensions = res
-                        .and_then(|e| match e {
-                            Value::Object(map) => Some(map),
-                            _ => None,
-                        })
-                        .unwrap_or_default();
-
-                    if let Some(code) = extensions.get("code") {
-                        extension_code = code.as_str().unwrap_or_default().to_string();
-                    }
-
-                    for (key, value) in extensions {
-                        error = error.extension(key.clone(), value.clone());
-                    }
-                }
-
-                error = error.with_code(extension_code);
-
-                if let Some(debug) = debug_context {
-                    debug.lock().push_response(
-                        debug_request.0.clone(),
-                        &parts,
-                        &data,
-                        None,
-                        &connector.error_settings,
-                        [debug_request.1, warnings]
-                            .iter()
-                            .flatten()
-                            .cloned()
-                            .collect(),
-                    );
-                }
-
-                MappedResponse::Error { error, key }
-            }
+        for (key, value) in extensions {
+            error = error.extension(key, value);
         }
     }
-}
 
+    error = error.with_code(extension_code);
+
+    MappedResponse::Error {
+        error,
+        key,
+        problems: warnings,
+    }
+}
 // --- MAPPED RESPONSE ---------------------------------------------------------
 #[derive(Debug)]
 pub enum MappedResponse {
@@ -286,6 +264,7 @@ pub enum MappedResponse {
     Error {
         error: RuntimeError,
         key: ResponseKey,
+        problems: Vec<Problem>,
     },
     /// The response data after applying the selection mapping.
     Data {
@@ -369,16 +348,23 @@ impl MappedResponse {
                         }
                     };
                 }
-                ResponseKey::BatchEntity { keys, inputs, .. } => {
+                ResponseKey::BatchEntity {
+                    selection,
+                    keys,
+                    inputs,
+                } => {
                     let Value::Array(values) = value else {
                         return Err(HandleResponseError::MergeError(
                             "Response for a batch request does not map to an array".into(),
                         ));
                     };
 
-                    let key_selection: Result<JSONSelection, _> = keys.try_into();
-                    let key_selection = key_selection
-                        .map_err(|e| HandleResponseError::MergeError(e.to_string()))?;
+                    let spec = selection.spec();
+                    let key_selection = JSONSelection::parse_with_spec(
+                        &keys.serialize().no_indent().to_string(),
+                        spec,
+                    )
+                    .map_err(|e| HandleResponseError::MergeError(e.to_string()))?;
 
                     // Convert representations into keys for use in the map
                     let key_values = inputs.batch.iter().map(|v| {
@@ -415,5 +401,11 @@ impl MappedResponse {
         }
 
         Ok(())
+    }
+
+    pub fn problems(&self) -> &[Problem] {
+        match self {
+            Self::Error { problems, .. } | Self::Data { problems, .. } => problems,
+        }
     }
 }

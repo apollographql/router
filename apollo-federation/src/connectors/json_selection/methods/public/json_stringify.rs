@@ -1,14 +1,14 @@
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
-use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(
@@ -19,7 +19,7 @@ impl_arrow_method!(
 /// Returns a string representation of a structure
 /// The simplest possible example:
 ///
-///    
+///
 /// $->echo({ "key": "value" })->jsonStringify     would result in "{\"key\":\"value\"}"
 fn json_stringify_method(
     method_name: &WithRange<String>,
@@ -27,6 +27,7 @@ fn json_stringify_method(
     data: &JSON,
     _vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if method_args.is_some() {
         return (
@@ -38,6 +39,7 @@ fn json_stringify_method(
                 ),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         );
     }
@@ -54,20 +56,20 @@ fn json_stringify_method(
                 ),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         ),
     }
 }
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn json_stringify_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
     _input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
-    Shape::string(method_name.shape_location(source_id))
+    Shape::string(method_name.shape_location(context.source_id()))
 }
 
 #[cfg(test)]
@@ -108,8 +110,9 @@ mod tests {
                 vec![ApplyToError::new(
                     "Method ->jsonStringify does not take any arguments".to_string(),
                     vec![json!("->jsonStringify")],
-                    Some(3..16)
-                )]
+                    Some(3..16),
+                    ConnectSpec::latest(),
+                )],
             ),
         );
     }

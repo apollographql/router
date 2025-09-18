@@ -147,9 +147,9 @@ mod test {
 
                 let persisted_query_manifest = results
                     .first()
-                    .unwrap_or_else(|| panic!("expected one result from {}", url))
+                    .unwrap_or_else(|| panic!("expected one result from {url}"))
                     .as_ref()
-                    .unwrap_or_else(|_| panic!("schema should be OK from {}", url))
+                    .unwrap_or_else(|_| panic!("schema should be OK from {url}"))
                     .as_ref()
                     .unwrap();
                 assert!(!persisted_query_manifest.is_empty())

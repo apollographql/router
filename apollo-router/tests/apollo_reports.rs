@@ -806,3 +806,95 @@ async fn test_features_disabled() {
     .await;
     assert_report!(report);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_persisted_query_by_id_stats() {
+    let request = supergraph::Request::fake_builder()
+        .extension(
+            "persistedQuery",
+            serde_json::json!({
+                "version": 1,
+                "sha256Hash": "test_pq_id"
+            }),
+        )
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_metrics_report(
+        reports,
+        req,
+        false,
+        false,
+        Some(include_str!("fixtures/reports/pq_enabled.router.yaml")),
+    )
+    .await;
+
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_persisted_query_by_safelist_body_stats() {
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name}}")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_metrics_report(
+        reports,
+        req,
+        false,
+        false,
+        Some(include_str!("fixtures/reports/pq_enabled.router.yaml")),
+    )
+    .await;
+
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_persisted_query_by_id_logging_only_stats() {
+    let request = supergraph::Request::fake_builder()
+        .extension(
+            "persistedQuery",
+            serde_json::json!({
+                "version": 1,
+                "sha256Hash": "test_pq_id"
+            }),
+        )
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_metrics_report(
+        reports,
+        req,
+        false,
+        false,
+        Some(include_str!("fixtures/reports/pq_logging.router.yaml")),
+    )
+    .await;
+
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_persisted_query_by_safelist_body_logging_pq_only_stats() {
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name}}")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_metrics_report(
+        reports,
+        req,
+        false,
+        false,
+        Some(include_str!("fixtures/reports/pq_logging.router.yaml")),
+    )
+    .await;
+
+    assert_report!(report);
+}

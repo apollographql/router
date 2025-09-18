@@ -8,8 +8,13 @@ use crate::Context;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::Selector;
 
+/// Specify a condition for when an [instrument][] should be mutated or an [event][] should be triggered.
+///
+/// [instrument]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/instruments
+/// [event]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/events
 #[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[schemars(rename = "Condition{T}")]
 pub(crate) enum Condition<T> {
     /// A condition to check a selection against a value.
     Eq([SelectorOrValue<T>; 2]),
@@ -45,6 +50,7 @@ impl Condition<()> {
 
 #[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+#[schemars(rename = "{T}OrValue")]
 pub(crate) enum SelectorOrValue<T> {
     /// A constant value.
     Value(AttributeValue),
@@ -67,12 +73,12 @@ where
                     (SelectorOrValue::Value(_), SelectorOrValue::Selector(sel))
                     | (SelectorOrValue::Selector(sel), SelectorOrValue::Value(_)) => {
                         // Special condition for events
-                        if let Some(Stage::Request) = &restricted_stage {
-                            if !sel.is_active(Stage::Request) {
-                                return Err(format!(
-                                    "selector {sel:?} is only valid for request stage, this log event will never trigger"
-                                ));
-                            }
+                        if let Some(Stage::Request) = &restricted_stage
+                            && !sel.is_active(Stage::Request)
+                        {
+                            return Err(format!(
+                                "selector {sel:?} is only valid for request stage, this log event will never trigger"
+                            ));
                         }
                         Ok(())
                     }
@@ -100,8 +106,7 @@ where
                         Ok(())
                     } else {
                         Err(format!(
-                            "the 'exists' condition use a selector applied at the wrong stage, this condition will be executed at the {} stage",
-                            stage
+                            "the 'exists' condition use a selector applied at the wrong stage, this condition will be executed at the {stage} stage"
                         ))
                     }
                 }

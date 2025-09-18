@@ -1,0 +1,72 @@
+---
+source: apollo-federation/src/connectors/json_selection/parser.rs
+expression: "selection!(\"a...b\", spec)"
+---
+JSONSelection {
+    inner: Named(
+        SubSelection {
+            selections: [
+                NamedSelection {
+                    prefix: None,
+                    path: PathSelection {
+                        path: WithRange {
+                            node: Key(
+                                WithRange {
+                                    node: Field(
+                                        "a",
+                                    ),
+                                    range: Some(
+                                        0..1,
+                                    ),
+                                },
+                                WithRange {
+                                    node: Empty,
+                                    range: Some(
+                                        1..1,
+                                    ),
+                                },
+                            ),
+                            range: Some(
+                                0..1,
+                            ),
+                        },
+                    },
+                },
+                NamedSelection {
+                    prefix: Spread(
+                        Some(
+                            1..4,
+                        ),
+                    ),
+                    path: PathSelection {
+                        path: WithRange {
+                            node: Key(
+                                WithRange {
+                                    node: Field(
+                                        "b",
+                                    ),
+                                    range: Some(
+                                        4..5,
+                                    ),
+                                },
+                                WithRange {
+                                    node: Empty,
+                                    range: Some(
+                                        5..5,
+                                    ),
+                                },
+                            ),
+                            range: Some(
+                                4..5,
+                            ),
+                        },
+                    },
+                },
+            ],
+            range: Some(
+                0..5,
+            ),
+        },
+    ),
+    spec: V0_3,
+}

@@ -1,18 +1,18 @@
 use std::iter::empty;
 
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
-use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::helpers::json_type_name;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(KeysMethod, keys_method, keys_shape);
@@ -26,6 +26,7 @@ fn keys_method(
     data: &JSON,
     _vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if method_args.is_some() {
         return (
@@ -37,6 +38,7 @@ fn keys_method(
                 ),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         );
     }
@@ -56,18 +58,18 @@ fn keys_method(
                 ),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         ),
     }
 }
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn keys_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
     input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
     match input_shape.case() {
         ShapeCase::Object { fields, rest, .. } => {
@@ -92,7 +94,7 @@ fn keys_shape(
         }
         _ => Shape::error(
             "Method ->keys requires an object input",
-            method_name.shape_location(source_id),
+            method_name.shape_location(context.source_id()),
         ),
     }
 }

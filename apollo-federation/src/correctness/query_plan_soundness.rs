@@ -52,8 +52,8 @@ impl AnalysisError {
 impl fmt::Display for AnalysisErrorMessage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AnalysisErrorMessage::FederationError(err) => write!(f, "{}", err),
-            AnalysisErrorMessage::QueryPlanError(err) => write!(f, "{}", err),
+            AnalysisErrorMessage::FederationError(err) => write!(f, "{err}"),
+            AnalysisErrorMessage::QueryPlanError(err) => write!(f, "{err}"),
         }
     }
 }

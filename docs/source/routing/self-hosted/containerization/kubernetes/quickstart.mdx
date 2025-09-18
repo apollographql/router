@@ -124,3 +124,12 @@ For example, this command deploys with a `common_values.yaml` file applied first
 ```bash
 helm install <name_for_install> --namespace <router-namespace> --set managedFederation.apiKey="<graph-api-key>" --set managedFederation.graphRef="<graph-ref>"  oci://ghcr.io/apollographql/helm-charts/router --version <router-version> --values router/values.yaml  --values common_values.yaml --values prod_values.yaml
 ```
+
+## Consider using the Apollo GraphOS Operator
+
+The [Apollo GraphOS Operator](/apollo-operator/), which is in Preview, offers an alternative method to deploy the router and manage your schema and subgraphs. The Operator provides declarative Kubernetes resources for managing routers, supergraphs, graph schemas, and subgraphs. It can simplify complex multi-service architectures.
+
+The Operator offers different [workflow patterns](/apollo-operator/workflows/) depending on your infrastructure:
+- Single-cluster setups for simpler deployments
+- Multi-cluster and hybrid configurations for distributed services
+- Deploy-only patterns for existing CI/CD workflows

@@ -1,7 +1,9 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use apollo_compiler::Name;
 use apollo_compiler::Schema;
+use apollo_compiler::collections::HashMap;
 use apollo_compiler::validation::Valid;
 use carryover::carryover_directives;
 use indexmap::IndexMap;
@@ -65,8 +67,21 @@ pub fn expand_connectors(
     let supergraph = Supergraph::new_with_router_specs(supergraph_str)?;
     let api_schema = supergraph.to_api_schema(api_schema_options.clone())?;
 
-    let (connect_subgraphs, graphql_subgraphs): (Vec<_>, Vec<_>) = supergraph
-        .extract_subgraphs()?
+    let all_subgraphs: Vec<_> = supergraph.extract_subgraphs()?.into_iter().collect();
+    let subgraph_connect_directive_names: HashMap<String, [Name; 2]> = all_subgraphs
+        .iter()
+        .flat_map(|(_, sub)| {
+            let Some(Ok(link)) = ConnectLink::new(sub.schema.schema()) else {
+                return None;
+            };
+            Some((
+                sub.name.clone(),
+                [link.connect_directive_name, link.source_directive_name],
+            ))
+        })
+        .collect::<HashMap<_, _>>();
+
+    let (connect_subgraphs, graphql_subgraphs): (Vec<_>, Vec<_>) = all_subgraphs
         .into_iter()
         .partition_map(|(_, sub)| match ConnectLink::new(sub.schema.schema()) {
             Some(Ok(link)) if contains_connectors(&link, &sub) => either::Either::Left((link, sub)),
@@ -107,6 +122,7 @@ pub fn expand_connectors(
         &mut new_supergraph,
         spec_versions.into_iter(),
         &subgraph_name_replacements,
+        subgraph_connect_directive_names,
     )
     .map_err(|e| FederationError::internal(format!("could not carry over directives: {e:?}")))?;
 
@@ -518,8 +534,11 @@ mod helpers {
                 _ => parent_type,
             };
 
-            let parsed = JSONSelection::parse(&resolvable_key.serialize().no_indent().to_string())
-                .map_err(|e| FederationError::internal(format!("error parsing key: {e}")))?;
+            let parsed = JSONSelection::parse_with_spec(
+                &resolvable_key.serialize().no_indent().to_string(),
+                connector.spec,
+            )
+            .map_err(|e| FederationError::internal(format!("error parsing key: {e}")))?;
 
             let visitor =
                 SchemaVisitor::new(self.original_schema, to_schema, &self.directive_deny_list);

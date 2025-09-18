@@ -3,6 +3,7 @@ use apollo_compiler::Node;
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
 
+use crate::connectors::ConnectSpec;
 use crate::connectors::JSONSelection;
 use crate::error::FederationError;
 
@@ -21,11 +22,11 @@ pub(crate) struct ErrorsArguments {
     pub(crate) extensions: Option<JSONSelection>,
 }
 
-impl TryFrom<(&[(Name, Node<Value>)], &Name)> for ErrorsArguments {
+impl TryFrom<(&[(Name, Node<Value>)], &Name, ConnectSpec)> for ErrorsArguments {
     type Error = FederationError;
 
     fn try_from(
-        (values, directive_name): (&[(Name, Node<Value>)], &Name),
+        (values, directive_name, spec): (&[(Name, Node<Value>)], &Name, ConnectSpec),
     ) -> Result<Self, FederationError> {
         let mut message = None;
         let mut extensions = None;
@@ -37,7 +38,7 @@ impl TryFrom<(&[(Name, Node<Value>)], &Name)> for ErrorsArguments {
                     "`message` field in `@{directive_name}` directive's `errors` field is not a string")
                 ))?;
                 message = Some(
-                    JSONSelection::parse(message_value)
+                    JSONSelection::parse_with_spec(message_value, spec)
                         .map_err(|e| FederationError::internal(e.message))?,
                 );
             } else if name == ERRORS_EXTENSIONS_ARGUMENT_NAME.as_str() {
@@ -45,7 +46,7 @@ impl TryFrom<(&[(Name, Node<Value>)], &Name)> for ErrorsArguments {
                     "`extensions` field in `@{directive_name}` directive's `errors` field is not a string")
                 ))?;
                 extensions = Some(
-                    JSONSelection::parse(extensions_value)
+                    JSONSelection::parse_with_spec(extensions_value, spec)
                         .map_err(|e| FederationError::internal(e.message))?,
                 );
             } else {

@@ -32,11 +32,10 @@ fn test_progressive_overrides_are_recognised_vor_join_v0_4_and_above() {
         format!(
             r#"schema
                 @link(url: "https://specs.apollo.dev/link/v1.0")
-                @link(url: "https://specs.apollo.dev/join/{}", for: EXECUTION)
+                @link(url: "https://specs.apollo.dev/join/{version}", for: EXECUTION)
                 @link(url: "https://specs.apollo.dev/context/v0.1", for: SECURITY)
 
-                directive @join__field repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION"#,
-            version
+                directive @join__field repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION"#
         )
     };
 

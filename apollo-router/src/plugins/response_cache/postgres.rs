@@ -298,9 +298,13 @@ impl PostgresCacheStorage {
 
     pub(crate) async fn insert_in_batch(
         &self,
-        batch_docs: Vec<BatchDocument>,
+        mut batch_docs: Vec<BatchDocument>,
         subgraph_name: &str,
     ) -> sqlx::Result<()> {
+        // order batch_docs to prevent deadlocks! don't need namespaced as we just need to make sure
+        // that transaction 1 can't lock A and wait for B, and transaction 2 can't lock B and wait for A
+        batch_docs.sort_by(|a, b| a.cache_key.cmp(&b.cache_key));
+
         let mut conn = self.pg_pool.acquire().await?;
         let batch_docs = batch_docs.chunks(self.batch_size);
         for batch_docs in batch_docs {

@@ -2,7 +2,7 @@
 
 [router](https://github.com/apollographql/router) Rust Graph Routing runtime for Apollo Federation
 
-![Version: 2.4.0](https://img.shields.io/badge/Version-2.4.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v2.4.0](https://img.shields.io/badge/AppVersion-v2.4.0-informational?style=flat-square)
+![Version: 2.6.2](https://img.shields.io/badge/Version-2.6.2-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v2.6.2](https://img.shields.io/badge/AppVersion-v2.6.2-informational?style=flat-square)
 
 ## Prerequisites
 
@@ -11,7 +11,7 @@
 ## Get Repo Info
 
 ```console
-helm pull oci://ghcr.io/apollographql/helm-charts/router --version 2.4.0
+helm pull oci://ghcr.io/apollographql/helm-charts/router --version 2.6.2
 ```
 
 ## Install Chart
@@ -19,7 +19,7 @@ helm pull oci://ghcr.io/apollographql/helm-charts/router --version 2.4.0
 **Important:** only helm3 is supported
 
 ```console
-helm upgrade --install [RELEASE_NAME] oci://ghcr.io/apollographql/helm-charts/router --version 2.4.0 --values my-values.yaml
+helm upgrade --install [RELEASE_NAME] oci://ghcr.io/apollographql/helm-charts/router --version 2.6.2 --values my-values.yaml
 ```
 
 _See [configuration](#configuration) below._
@@ -44,6 +44,7 @@ helm show values oci://ghcr.io/apollographql/helm-charts/router
 | containerPorts.health | int | `8088` | For exposing the health check endpoint |
 | containerPorts.http | int | `4000` | If you override the port in `router.configuration.server.listen` then make sure to match the listen port here |
 | containerPorts.metrics | int | `9090` | For exposing the metrics port when running a serviceMonitor for example |
+| deploymentAnnotations | object | `{}` |  |
 | extraContainers | list | `[]` | An array of extra containers to include in the router pod Example: extraContainers:   - name: coprocessor     image: acme/coprocessor:1.0     ports:       - containerPort: 4001 |
 | extraEnvVars | list | `[]` |  |
 | extraEnvVarsCM | string | `""` |  |

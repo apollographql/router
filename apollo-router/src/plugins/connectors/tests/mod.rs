@@ -81,6 +81,7 @@ async fn value_from_config() {
             }
         })),
         |_| {},
+        None,
     )
     .await;
 
@@ -120,6 +121,9 @@ async fn max_requests() {
           }
         })),
         |_| {},
+        Some(LicenseState::Licensed {
+            limits: Default::default(),
+        }),
     )
     .await;
 
@@ -150,7 +154,7 @@ async fn max_requests() {
             "code": "REQUEST_LIMIT_EXCEEDED",
             "service": "connectors",
             "connector": {
-              "coordinate": "connectors:Query.user@connect[0]"
+              "coordinate": "connectors:Query.user[0]"
             }
           }
         }
@@ -193,6 +197,9 @@ async fn source_max_requests() {
           }
         })),
         |_| {},
+        Some(LicenseState::Licensed {
+            limits: Default::default(),
+        }),
     )
     .await;
 
@@ -223,7 +230,7 @@ async fn source_max_requests() {
             "code": "REQUEST_LIMIT_EXCEEDED",
             "service": "connectors",
             "connector": {
-              "coordinate": "connectors:Query.user@connect[0]"
+              "coordinate": "connectors:Query.user[0]"
             }
           }
         }
@@ -254,6 +261,7 @@ async fn test_root_field_plus_entity() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -323,6 +331,7 @@ async fn test_root_field_plus_entity_plus_requires() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -380,6 +389,7 @@ async fn test_entity_references() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -450,6 +460,7 @@ async fn basic_errors() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -477,7 +488,7 @@ async fn basic_errors() {
             "code": "CONNECTOR_FETCH",
             "service": "connectors",
             "connector": {
-              "coordinate": "connectors:Query.users@connect[0]"
+              "coordinate": "connectors:Query.users[0]"
             },
             "http": {
               "status": 404
@@ -495,7 +506,7 @@ async fn basic_errors() {
             "code": "CONNECTOR_FETCH",
             "service": "connectors",
             "connector": {
-              "coordinate": "connectors:Query.user@connect[0]"
+              "coordinate": "connectors:Query.user[0]"
             },
             "http": {
               "status": 400
@@ -514,7 +525,7 @@ async fn basic_errors() {
             "code": "CONNECTOR_FETCH",
             "service": "connectors",
             "connector": {
-              "coordinate": "connectors:User.nickname@connect[0]"
+              "coordinate": "connectors:User.nickname[0]"
             },
             "http": {
               "status": 400
@@ -535,6 +546,7 @@ async fn basic_connection_errors() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -551,10 +563,9 @@ async fn basic_connection_errors() {
     let msg = err.get("message").unwrap().as_str().unwrap();
     assert!(
         msg.starts_with(
-            "Connector error: HTTP fetch failed from 'connectors.json': tcp connect error:" // *nix: Connection refused, Windows: No connection could be made
+            "Connector error: HTTP fetch failed from 'connectors.json': tcp connect error"
         ),
-        "got message: {}",
-        msg
+        "got message: {msg}"
     );
     assert_eq!(err.get("path").unwrap(), &serde_json::json!(["users"]));
     assert_eq!(
@@ -562,7 +573,7 @@ async fn basic_connection_errors() {
         &serde_json::json!({
           "service": "connectors",
           "connector": {
-            "coordinate": "connectors:Query.users@connect[0]"
+            "coordinate": "connectors:Query.users[0]"
           },
           "code": "HTTP_CLIENT_ERROR"
         })
@@ -606,6 +617,7 @@ async fn test_headers() {
                 .insert("val", String::from("val-from-request-context"))
                 .unwrap();
         },
+        None,
     )
     .await;
 
@@ -722,6 +734,7 @@ async fn test_override_headers_with_config() {
                 .insert("val", String::from("val-from-request-context"))
                 .unwrap();
         },
+        None,
     )
     .await;
 
@@ -794,6 +807,7 @@ async fn should_only_send_named_header_once_when_both_config_and_schema_propagat
                 .insert("val", String::from("val-from-request-context"))
                 .unwrap();
         },
+        None,
     )
     .await;
 
@@ -875,6 +889,7 @@ async fn should_only_send_matching_header_once_when_both_config_and_schema_propa
                 .insert("val", String::from("val-from-request-context"))
                 .unwrap();
         },
+        None,
     )
     .await;
 
@@ -957,6 +972,7 @@ async fn should_remove_header_when_sdl_has_insert_and_yaml_has_remove() {
                 .insert("val", String::from("val-from-request-context"))
                 .unwrap();
         },
+        None,
     )
     .await;
 
@@ -987,6 +1003,7 @@ async fn test_args_and_this_in_header() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -1092,6 +1109,7 @@ async fn test_tracing_connect_span() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 }
@@ -1108,6 +1126,7 @@ async fn test_operation_counter() {
             Default::default(),
             None,
             |_| {},
+            None,
         )
         .await;
         req_asserts::matches(
@@ -1152,6 +1171,7 @@ async fn test_mutation() {
             .clone(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -1203,6 +1223,7 @@ async fn test_mutation_empty_body() {
             .clone(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -1271,6 +1292,7 @@ async fn test_selection_set() {
         .clone(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -1325,6 +1347,7 @@ async fn test_nullability() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -1366,6 +1389,7 @@ async fn test_default_argument_values() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -1410,6 +1434,7 @@ async fn test_default_argument_overrides() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -1503,6 +1528,7 @@ async fn test_form_encoding() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -1542,6 +1568,7 @@ async fn test_no_source() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -1580,6 +1607,7 @@ async fn error_not_redacted() {
             }
         })),
         |_| {},
+        None,
     )
     .await;
 
@@ -1598,7 +1626,7 @@ async fn error_not_redacted() {
             "code": "CONNECTOR_FETCH",
             "service": "connectors",
             "connector": {
-              "coordinate": "connectors:Query.users@connect[0]"
+              "coordinate": "connectors:Query.users[0]"
             },
             "http": {
               "status": 404
@@ -1633,6 +1661,7 @@ async fn error_redacted() {
             }
         })),
         |_| {},
+        None,
     )
     .await;
 
@@ -1718,6 +1747,7 @@ async fn test_interface_object() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -1820,6 +1850,9 @@ async fn test_sources_in_context() {
           }
         })),
         |_| {},
+        Some(LicenseState::Licensed {
+            limits: Default::default(),
+        }),
     )
     .await;
 
@@ -1901,6 +1934,9 @@ async fn test_variables() {
           let headers = request.router_request.headers_mut();
           headers.insert("value", "coolheader".parse().unwrap());
         },
+        Some(LicenseState::Licensed {
+            limits: Default::default(),
+        }),
     )
     .await;
 
@@ -1986,6 +2022,7 @@ async fn should_support_using_variable_in_nested_input_argument() {
         variables,
         None,
         |_|{},
+        None
     )
     .await;
 
@@ -2009,7 +2046,7 @@ async fn should_support_using_variable_in_nested_input_argument() {
 }
 
 #[tokio::test]
-async fn should_error_when_using_arguments_that_has_not_been_defined() {
+async fn doesnt_error_when_using_undefined_arguments() {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/complexInputType"))
@@ -2030,25 +2067,17 @@ async fn should_error_when_using_arguments_that_has_not_been_defined() {
         variables,
         None,
         |_|{},
+          None,
     )
     .await;
 
-    insta::assert_json_snapshot!(response, @r#"
+    insta::assert_json_snapshot!(response, @r###"
     {
-      "data": null,
-      "errors": [
-        {
-          "message": "HTTP fetch failed from 'connectors': Invalid request arguments: cannot get inputs from field arguments: variable query used in operation but not defined in variables",
-          "path": [],
-          "extensions": {
-            "code": "SUBREQUEST_HTTP_ERROR",
-            "service": "connectors",
-            "reason": "Invalid request arguments: cannot get inputs from field arguments: variable query used in operation but not defined in variables"
-          }
-        }
-      ]
+      "data": {
+        "complexInputType": "Hello world!"
+      }
     }
-    "#);
+    "###);
 }
 
 mod quickstart_tests {
@@ -2089,6 +2118,7 @@ mod quickstart_tests {
             variables,
             None,
             |_| {},
+            None,
         )
         .await
     }
@@ -2247,9 +2277,10 @@ async fn execute(
     variables: JsonMap,
     config: Option<serde_json_bytes::Value>,
     mut request_mutator: impl FnMut(&mut Request),
+    license: Option<LicenseState>,
 ) -> serde_json::Value {
-    let connector_uri = format!("{}/", uri);
-    let subgraph_uri = format!("{}/graphql", uri);
+    let connector_uri = format!("{uri}/");
+    let subgraph_uri = format!("{uri}/graphql");
 
     // we cannot use Testharness because the subgraph connectors are actually extracted in YamlRouterFactory
     let mut factory = YamlRouterFactory;
@@ -2280,7 +2311,7 @@ async fn execute(
             Arc::new(crate::spec::Schema::parse(schema, &config).unwrap()),
             None,
             None,
-            LicenseState::default(),
+            Arc::new(license.unwrap_or_default()),
         )
         .await
         .unwrap();

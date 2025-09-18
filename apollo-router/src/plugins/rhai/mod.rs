@@ -54,6 +54,7 @@ struct Rhai {
 /// Configuration for the Rhai Plugin
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(rename = "RhaiConfig")]
 pub(crate) struct Conf {
     /// The directory where Rhai scripts can be found
     scripts: Option<PathBuf>,
@@ -633,7 +634,7 @@ struct Position {
 impl fmt::Display for Position {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some((line, pos)) = self.line.zip(self.pos) {
-            write!(f, "line {}, position {}", line, pos)
+            write!(f, "line {line}, position {pos}")
         } else {
             write!(f, "none")
         }

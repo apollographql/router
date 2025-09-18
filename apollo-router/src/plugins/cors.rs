@@ -52,10 +52,7 @@ impl CorsLayer {
                 // Validate origin URLs
                 for origin in &policy.origins {
                     http::HeaderValue::from_str(origin).map_err(|_| {
-                        format!(
-                            "origin '{}' is not valid: failed to parse header value",
-                            origin
-                        )
+                        format!("origin '{origin}' is not valid: failed to parse header value")
                     })?;
                 }
 
@@ -65,10 +62,10 @@ impl CorsLayer {
                 }
 
                 // Validate origin-specific methods
-                if let Some(methods) = &policy.methods {
-                    if !methods.is_empty() {
-                        parse_values::<http::Method>(methods, "method")?;
-                    }
+                if let Some(methods) = &policy.methods
+                    && !methods.is_empty()
+                {
+                    parse_values::<http::Method>(methods, "method")?;
                 }
 
                 // Validate origin-specific expose headers
@@ -277,29 +274,27 @@ impl<S> CorsService<S> {
                 );
             } else {
                 // If no headers are configured, mirror the client's Access-Control-Request-Headers
-                if let Some(request_headers) = request_headers {
-                    if let Ok(headers_str) = request_headers.to_str() {
-                        response.headers_mut().insert(
-                            ACCESS_CONTROL_ALLOW_HEADERS,
-                            http::HeaderValue::from_str(headers_str)
-                                .unwrap_or_else(|_| http::HeaderValue::from_static("")),
-                        );
-                    }
+                if let Some(request_headers) = request_headers
+                    && let Ok(headers_str) = request_headers.to_str()
+                {
+                    response.headers_mut().insert(
+                        ACCESS_CONTROL_ALLOW_HEADERS,
+                        http::HeaderValue::from_str(headers_str)
+                            .unwrap_or_else(|_| http::HeaderValue::from_static("")),
+                    );
                 }
             }
         }
 
         // Set Access-Control-Expose-Headers (only for non-preflight requests)
-        if !is_preflight {
-            if let Some(headers) = expose_headers {
-                // Join the headers with commas for a single header value
-                let header_value = headers.join(", ");
-                response.headers_mut().insert(
-                    ACCESS_CONTROL_EXPOSE_HEADERS,
-                    http::HeaderValue::from_str(&header_value)
-                        .unwrap_or_else(|_| http::HeaderValue::from_static("")),
-                );
-            }
+        if !is_preflight && let Some(headers) = expose_headers {
+            // Join the headers with commas for a single header value
+            let header_value = headers.join(", ");
+            response.headers_mut().insert(
+                ACCESS_CONTROL_EXPOSE_HEADERS,
+                http::HeaderValue::from_str(&header_value)
+                    .unwrap_or_else(|_| http::HeaderValue::from_static("")),
+            );
         }
 
         // Set Access-Control-Allow-Methods (for preflight requests)
@@ -317,15 +312,13 @@ impl<S> CorsService<S> {
         }
 
         // Set Access-Control-Max-Age (only for preflight requests)
-        if is_preflight {
-            if let Some(max_age) = max_age {
-                let max_age_secs = max_age.as_secs();
-                response.headers_mut().insert(
-                    ACCESS_CONTROL_MAX_AGE,
-                    http::HeaderValue::from_str(&max_age_secs.to_string())
-                        .unwrap_or_else(|_| http::HeaderValue::from_static("")),
-                );
-            }
+        if is_preflight && let Some(max_age) = max_age {
+            let max_age_secs = max_age.as_secs();
+            response.headers_mut().insert(
+                ACCESS_CONTROL_MAX_AGE,
+                http::HeaderValue::from_str(&max_age_secs.to_string())
+                    .unwrap_or_else(|_| http::HeaderValue::from_static("")),
+            );
         }
 
         // Set Vary header - append to existing values instead of overwriting
@@ -349,7 +342,7 @@ impl<S> CorsService<S> {
                 let mut existing_values = existing_str.split(',').map(|v| v.trim());
 
                 if !existing_values.any(|existing| existing.eq_ignore_ascii_case(value.as_str())) {
-                    let new_vary = format!("{}, {}", existing_str, value);
+                    let new_vary = format!("{existing_str}, {value}");
                     let new_header_value = http::HeaderValue::from_str(&new_vary)
                         .expect("combining pre-existing header + hardcoded valid value can not produce an invalid result");
                     headers.insert(VARY, new_header_value);
@@ -889,6 +882,64 @@ mod tests {
         let resp = futures::executor::block_on(service.call(req)).unwrap();
         let headers = resp.headers();
         assert_eq!(headers.get(ACCESS_CONTROL_ALLOW_ORIGIN).unwrap(), "*");
+    }
+
+    #[test]
+    fn test_allow_any_origin() {
+        let cors = Cors::builder().allow_any_origin(true).build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+
+        // Test that any origin is allowed (ACCESS_CONTROL_ALLOW_ORIGIN should be *)
+        let req = Request::get("/")
+            .header(ORIGIN, "http://example.com/")
+            .body(())
+            .unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+        assert_eq!(headers.get(ACCESS_CONTROL_ALLOW_ORIGIN).unwrap(), "*");
+    }
+
+    #[test]
+    fn test_allow_any_origin_nocors() {
+        let cors = Cors::builder().allow_any_origin(true).build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+
+        // This is not a cross-origin request, so no need to reply
+        let req = Request::get("/").body(()).unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+        assert!(headers.get(ACCESS_CONTROL_ALLOW_ORIGIN).is_none());
+    }
+
+    #[test]
+    fn test_allow_any_origin_preflight() {
+        let cors = Cors::builder().allow_any_origin(true).build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+
+        // Test that any origin is allowed (ACCESS_CONTROL_ALLOW_ORIGIN should be *)
+        let req = Request::options("/")
+            .header(ORIGIN, "http://example.com/")
+            .body(())
+            .unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+        assert_eq!(headers.get(ACCESS_CONTROL_ALLOW_ORIGIN).unwrap(), "*");
+    }
+
+    #[test]
+    fn test_allow_any_origin_nocors_preflight() {
+        let cors = Cors::builder().allow_any_origin(true).build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+
+        // No origin means we treat it as not a CORS request, even if method is OPTIONS
+        let req = Request::options("/").body(()).unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let headers = resp.headers();
+        assert!(headers.get(ACCESS_CONTROL_ALLOW_ORIGIN).is_none());
     }
 
     #[test]

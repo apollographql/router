@@ -1,4 +1,10 @@
+mod compose_directive;
 mod demand_control;
+// TODO: remove #[ignore] from tests once all fns called by Merger::merge() are implemented
+mod external;
+mod override_directive;
+mod subscription;
+mod supergraph_reversibility;
 mod validation_errors;
 
 pub(crate) mod test_helpers {
@@ -32,7 +38,7 @@ pub(crate) mod test_helpers {
                     subgraphs.push(subgraph);
                 }
                 Err(err) => {
-                    errors.push(err.into());
+                    errors.extend(err.to_composition_errors());
                 }
             }
         }
@@ -43,9 +49,9 @@ pub(crate) mod test_helpers {
         // PORT_NOTE: This statement corresponds to `asFed2Service` function in JS.
         let mut fed2_subgraphs = Vec::new();
         for subgraph in subgraphs {
-            match subgraph.into_fed2_test_subgraph(true) {
+            match subgraph.into_fed2_test_subgraph(true, false) {
                 Ok(subgraph) => fed2_subgraphs.push(subgraph),
-                Err(err) => errors.push(CompositionError::from(err)),
+                Err(err) => errors.extend(err.to_composition_errors()),
             }
         }
         if !errors.is_empty() {

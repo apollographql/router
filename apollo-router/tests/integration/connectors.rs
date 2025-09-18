@@ -4,15 +4,14 @@ mod apq {
     use tower::BoxError;
 
     use crate::integration::IntegrationTest;
+    use crate::integration::common::graph_os_enabled;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn incompatible_warnings_on_all() -> Result<(), BoxError> {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
-        if std::env::var("TEST_APOLLO_KEY").is_err()
-            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-        {
+        if !graph_os_enabled() {
             return Ok(());
         };
 
@@ -47,9 +46,7 @@ mod apq {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
-        if std::env::var("TEST_APOLLO_KEY").is_err()
-            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-        {
+        if !graph_os_enabled() {
             return Ok(());
         };
 
@@ -87,9 +84,7 @@ mod apq {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
-        if std::env::var("TEST_APOLLO_KEY").is_err()
-            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-        {
+        if !graph_os_enabled() {
             return Ok(());
         };
 
@@ -132,15 +127,14 @@ mod authentication {
 
     use crate::integration::IntegrationTest;
     use crate::integration::common::Query;
+    use crate::integration::common::graph_os_enabled;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn incompatible_warnings_on_all() -> Result<(), BoxError> {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
-        if std::env::var("TEST_APOLLO_KEY").is_err()
-            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-        {
+        if !graph_os_enabled() {
             return Ok(());
         };
 
@@ -183,9 +177,7 @@ mod authentication {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
-        if std::env::var("TEST_APOLLO_KEY").is_err()
-            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-        {
+        if !graph_os_enabled() {
             return Ok(());
         };
 
@@ -226,9 +218,7 @@ mod authentication {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
-        if std::env::var("TEST_APOLLO_KEY").is_err()
-            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-        {
+        if !graph_os_enabled() {
             return Ok(());
         };
 
@@ -280,9 +270,7 @@ mod authentication {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
-        if std::env::var("TEST_APOLLO_KEY").is_err()
-            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-        {
+        if !graph_os_enabled() {
             return Ok(());
         };
 
@@ -372,15 +360,14 @@ mod batching {
     use tower::BoxError;
 
     use crate::integration::IntegrationTest;
+    use crate::integration::common::graph_os_enabled;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn incompatible_warnings_on_all() -> Result<(), BoxError> {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
-        if std::env::var("TEST_APOLLO_KEY").is_err()
-            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-        {
+        if !graph_os_enabled() {
             return Ok(());
         };
 
@@ -417,9 +404,7 @@ mod batching {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
-        if std::env::var("TEST_APOLLO_KEY").is_err()
-            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-        {
+        if !graph_os_enabled() {
             return Ok(());
         };
 
@@ -459,9 +444,7 @@ mod batching {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
-        if std::env::var("TEST_APOLLO_KEY").is_err()
-            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-        {
+        if !graph_os_enabled() {
             return Ok(());
         };
 
@@ -503,15 +486,14 @@ mod coprocessor {
     use tower::BoxError;
 
     use crate::integration::IntegrationTest;
+    use crate::integration::common::graph_os_enabled;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn incompatible_warnings_on_all() -> Result<(), BoxError> {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
-        if std::env::var("TEST_APOLLO_KEY").is_err()
-            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-        {
+        if !graph_os_enabled() {
             return Ok(());
         };
 
@@ -547,9 +529,7 @@ mod coprocessor {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
-        if std::env::var("TEST_APOLLO_KEY").is_err()
-            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-        {
+        if !graph_os_enabled() {
             return Ok(());
         };
 
@@ -586,15 +566,14 @@ mod entity_cache {
     use tower::BoxError;
 
     use crate::integration::IntegrationTest;
+    use crate::integration::common::graph_os_enabled;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn incompatible_warnings_on_all() -> Result<(), BoxError> {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
-        if std::env::var("TEST_APOLLO_KEY").is_err()
-            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-        {
+        if !graph_os_enabled() {
             return Ok(());
         };
 
@@ -630,9 +609,7 @@ mod entity_cache {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
-        if std::env::var("TEST_APOLLO_KEY").is_err()
-            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-        {
+        if !graph_os_enabled() {
             return Ok(());
         };
 
@@ -671,9 +648,7 @@ mod entity_cache {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
-        if std::env::var("TEST_APOLLO_KEY").is_err()
-            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-        {
+        if !graph_os_enabled() {
             return Ok(());
         };
 
@@ -716,15 +691,14 @@ mod headers {
     use tower::BoxError;
 
     use crate::integration::IntegrationTest;
+    use crate::integration::common::graph_os_enabled;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn incompatible_warnings_on_all() -> Result<(), BoxError> {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
-        if std::env::var("TEST_APOLLO_KEY").is_err()
-            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-        {
+        if !graph_os_enabled() {
             return Ok(());
         };
 
@@ -762,9 +736,7 @@ mod headers {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
-        if std::env::var("TEST_APOLLO_KEY").is_err()
-            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-        {
+        if !graph_os_enabled() {
             return Ok(());
         };
 
@@ -805,15 +777,14 @@ mod rhai {
     use tower::BoxError;
 
     use crate::integration::IntegrationTest;
+    use crate::integration::common::graph_os_enabled;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn incompatible_warnings_on_all() -> Result<(), BoxError> {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
-        if std::env::var("TEST_APOLLO_KEY").is_err()
-            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-        {
+        if !graph_os_enabled() {
             return Ok(());
         };
 
@@ -848,15 +819,14 @@ mod telemetry {
     use tower::BoxError;
 
     use crate::integration::IntegrationTest;
+    use crate::integration::common::graph_os_enabled;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn incompatible_warnings_on_all() -> Result<(), BoxError> {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
-        if std::env::var("TEST_APOLLO_KEY").is_err()
-            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-        {
+        if !graph_os_enabled() {
             return Ok(());
         };
 
@@ -893,9 +863,7 @@ mod telemetry {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
-        if std::env::var("TEST_APOLLO_KEY").is_err()
-            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-        {
+        if !graph_os_enabled() {
             return Ok(());
         };
 
@@ -935,9 +903,7 @@ mod telemetry {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
-        if std::env::var("TEST_APOLLO_KEY").is_err()
-            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-        {
+        if !graph_os_enabled() {
             return Ok(());
         };
 
@@ -977,9 +943,7 @@ mod telemetry {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
-        if std::env::var("TEST_APOLLO_KEY").is_err()
-            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-        {
+        if !graph_os_enabled() {
             return Ok(());
         };
 
@@ -1022,15 +986,14 @@ mod tls {
     use tower::BoxError;
 
     use crate::integration::IntegrationTest;
+    use crate::integration::common::graph_os_enabled;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn incompatible_warnings_on_subgraph() -> Result<(), BoxError> {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
-        if std::env::var("TEST_APOLLO_KEY").is_err()
-            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-        {
+        if !graph_os_enabled() {
             return Ok(());
         };
 
@@ -1068,15 +1031,14 @@ mod traffic_shaping {
     use tower::BoxError;
 
     use crate::integration::IntegrationTest;
+    use crate::integration::common::graph_os_enabled;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn incompatible_warnings_on_subgraph() -> Result<(), BoxError> {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
-        if std::env::var("TEST_APOLLO_KEY").is_err()
-            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-        {
+        if !graph_os_enabled() {
             return Ok(());
         };
 
@@ -1113,15 +1075,14 @@ mod url_override {
     use tower::BoxError;
 
     use crate::integration::IntegrationTest;
+    use crate::integration::common::graph_os_enabled;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn incompatible_warnings_on_subgraph() -> Result<(), BoxError> {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
-        if std::env::var("TEST_APOLLO_KEY").is_err()
-            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-        {
+        if !graph_os_enabled() {
             return Ok(());
         };
 

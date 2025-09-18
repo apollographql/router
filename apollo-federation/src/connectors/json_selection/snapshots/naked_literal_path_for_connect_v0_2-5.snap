@@ -2,72 +2,75 @@
 source: apollo-federation/src/connectors/json_selection/parser.rs
 expression: selection_object_path_v0_2
 ---
-Path(
-    PathSelection {
-        path: WithRange {
-            node: Expr(
-                WithRange {
-                    node: LitPath(
-                        WithRange {
-                            node: Object(
-                                {
+JSONSelection {
+    inner: Path(
+        PathSelection {
+            path: WithRange {
+                node: Expr(
+                    WithRange {
+                        node: LitPath(
+                            WithRange {
+                                node: Object(
+                                    {
+                                        WithRange {
+                                            node: Field(
+                                                "a",
+                                            ),
+                                            range: Some(
+                                                4..5,
+                                            ),
+                                        }: WithRange {
+                                            node: Number(
+                                                Number(123),
+                                            ),
+                                            range: Some(
+                                                7..10,
+                                            ),
+                                        },
+                                    },
+                                ),
+                                range: Some(
+                                    2..12,
+                                ),
+                            },
+                            WithRange {
+                                node: Key(
                                     WithRange {
                                         node: Field(
                                             "a",
                                         ),
                                         range: Some(
-                                            4..5,
-                                        ),
-                                    }: WithRange {
-                                        node: Number(
-                                            Number(123),
-                                        ),
-                                        range: Some(
-                                            7..10,
+                                            13..14,
                                         ),
                                     },
-                                },
-                            ),
-                            range: Some(
-                                2..12,
-                            ),
-                        },
-                        WithRange {
-                            node: Key(
-                                WithRange {
-                                    node: Field(
-                                        "a",
-                                    ),
-                                    range: Some(
-                                        13..14,
-                                    ),
-                                },
-                                WithRange {
-                                    node: Empty,
-                                    range: Some(
-                                        14..14,
-                                    ),
-                                },
-                            ),
-                            range: Some(
-                                12..14,
-                            ),
-                        },
-                    ),
-                    range: Some(
-                        2..14,
-                    ),
-                },
-                WithRange {
-                    node: Empty,
-                    range: Some(
-                        15..15,
-                    ),
-                },
-            ),
-            range: Some(
-                0..15,
-            ),
+                                    WithRange {
+                                        node: Empty,
+                                        range: Some(
+                                            14..14,
+                                        ),
+                                    },
+                                ),
+                                range: Some(
+                                    12..14,
+                                ),
+                            },
+                        ),
+                        range: Some(
+                            2..14,
+                        ),
+                    },
+                    WithRange {
+                        node: Empty,
+                        range: Some(
+                            15..15,
+                        ),
+                    },
+                ),
+                range: Some(
+                    0..15,
+                ),
+            },
         },
-    },
-)
+    ),
+    spec: V0_2,
+}

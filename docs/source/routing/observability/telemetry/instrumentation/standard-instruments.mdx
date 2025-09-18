@@ -18,6 +18,16 @@ Standard router instruments are different than OpenTelemetry (OTel) instruments 
 
 The rest of this reference lists the available standard router instruments.
 
+### Measuring router overhead
+
+Measuring overhead in the router can be challenging because it consists of multiple components, each executing tasks in parallel. Subgraph latency, cache performance, and plugins influence performance and have the potential to cause back pressure. Limitations to CPU, memory, and network bandwidth can all create bottlenecks that hinder request processing. External factors such as request rate and operation complexity heavily affect the router’s overall load.
+
+You can find the activity of a particular request in its trace spans. Spans have the following attributes:
+  - <code>busy_ns</code> - time in which the span is actively executing
+  - <code>idle_ns</code> - time in which the span is alive, but not actively executing
+
+These attributes represent how a span spends time (in nanoseconds) over its lifetime. Your APM provider can likely use this trace data to generate synthetic metrics which you can then create an approximation of.
+
 ### GraphQL
 
 - `apollo.router.graphql_error` - counts GraphQL errors in responses. Also counts errors which occur during the response validation phase, which are represented in client responses as `extensions.valueCompletion` instead of actual GraphQL errors. Attributes:
@@ -40,6 +50,42 @@ All cache metrics listed above have the following attributes:
 
 - `kind`: the cache being queried (`apq`, `query planner`, `introspection`)
 - `storage`: The backend storage of the cache (`memory`, `redis`)
+
+### Redis Cache
+
+When using Redis as a cache backend, additional Redis-specific metrics are available:
+
+- `apollo.router.cache.redis.connections` - Number of Redis connections established
+- `apollo.router.cache.redis.command_queue_length` - Number of Redis commands buffered and not yet sent  
+- `apollo.router.cache.redis.commands_executed` - Total number of Redis commands executed
+- `apollo.router.cache.redis.redelivery_count` - Number of Redis command redeliveries due to connection issues
+- `apollo.router.cache.redis.errors` - Number of Redis errors by error type and cache kind
+- `experimental.apollo.router.cache.redis.latency_avg` - Average Redis command latency in seconds
+- `experimental.apollo.router.cache.redis.network_latency_avg` - Average Redis network latency in seconds  
+- `experimental.apollo.router.cache.redis.request_size_avg` - Average Redis request size in bytes
+- `experimental.apollo.router.cache.redis.response_size_avg` - Average Redis response size in bytes
+
+All Redis metrics include the following attribute:
+
+- `kind`: the cache being queried (`apq`, `query planner`, `introspection`, `entity`)
+
+The `apollo.router.cache.redis.errors` metric also includes an `error_type` attribute with possible values:
+- `config` - Configuration errors (invalid Redis settings)
+- `auth` - Authentication errors (wrong credentials)
+- `routing` - Cluster routing errors
+- `io` - Network I/O errors
+- `invalid_command` - Invalid Redis commands
+- `invalid_argument` - Invalid command arguments
+- `url` - Invalid Redis URL format
+- `protocol` - Redis protocol errors
+- `tls` - TLS/SSL connection errors
+- `canceled` - Canceled operations
+- `unknown` - Unknown errors
+- `timeout` - Operation timeouts
+- `cluster` - Redis cluster state errors
+- `parse` - Data parsing errors
+- `sentinel` - Redis Sentinel errors
+- `backpressure` - Backpressure/overload errors
 
 ### Coprocessor
 
@@ -74,6 +120,7 @@ All cache metrics listed above have the following attributes:
   - `job.type`: (`QueryPlanning`, `QueryParsing`, `Introspection`)
 - `apollo.router.compute_jobs.active_jobs` - A gauge of the number of compute jobs being processed in parallel.
   - `job.type`: (`QueryPlanning`, `QueryParsing`, `Introspection`)
+
 ### Uplink
 
 <Tip>
@@ -82,13 +129,13 @@ All cache metrics listed above have the following attributes:
 
 </Tip>
 
-- `apollo_router_uplink_fetch_duration_seconds` - Uplink request duration, attributes:
+- `apollo.router.uplink.fetch.duration.seconds` - Uplink request duration, attributes:
   - `url`: The Uplink URL that was polled
   - `query`: The query that the router sent to Uplink (`SupergraphSdl` or `License`)
   - `kind`: (`new`, `unchanged`, `http_error`, `uplink_error`)
   - `code`: The error code depending on type (if an error occurred)
   - `error`: The error message (if an error occurred)
-- `apollo_router_uplink_fetch_count_total`
+- `apollo.router.uplink.fetch.count.total`
   - `status`: (`success`, `failure`)
   - `query`: The query that the router sent to Uplink (`SupergraphSdl` or `License`)
 

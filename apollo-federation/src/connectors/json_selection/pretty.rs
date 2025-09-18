@@ -8,14 +8,17 @@
 use itertools::Itertools;
 
 use super::lit_expr::LitExpr;
+use super::lit_expr::LitOp;
 use super::parser::Alias;
 use super::parser::Key;
 use crate::connectors::json_selection::JSONSelection;
 use crate::connectors::json_selection::MethodArgs;
 use crate::connectors::json_selection::NamedSelection;
+use crate::connectors::json_selection::NamingPrefix;
 use crate::connectors::json_selection::PathList;
 use crate::connectors::json_selection::PathSelection;
 use crate::connectors::json_selection::SubSelection;
+use crate::connectors::json_selection::TopLevelSelection;
 
 impl std::fmt::Display for JSONSelection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -30,7 +33,7 @@ impl std::fmt::Display for JSONSelection {
 pub(crate) trait PrettyPrintable {
     /// Pretty print the struct
     fn pretty_print(&self) -> String {
-        self.pretty_print_with_indentation(true, 0)
+        self.pretty_print_with_indentation(false, 0)
     }
 
     /// Pretty print the struct, with indentation
@@ -47,9 +50,11 @@ fn indent_chars(indent: usize) -> String {
 
 impl PrettyPrintable for JSONSelection {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
-        match self {
-            JSONSelection::Named(named) => named.print_subselections(indentation),
-            JSONSelection::Path(path) => path.pretty_print_with_indentation(inline, indentation),
+        match &self.inner {
+            TopLevelSelection::Named(named) => named.print_subselections(inline, indentation),
+            TopLevelSelection::Path(path) => {
+                path.pretty_print_with_indentation(inline, indentation)
+            }
         }
     }
 }
@@ -57,18 +62,30 @@ impl PrettyPrintable for JSONSelection {
 impl PrettyPrintable for SubSelection {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         let mut result = String::new();
-        let indent = indent_chars(indentation);
 
-        if !inline {
-            result.push_str(indent.as_str());
+        result.push('{');
+
+        if self.selections.is_empty() {
+            result.push('}');
+            return result;
         }
 
-        result.push_str("{\n");
+        if inline {
+            result.push(' ');
+        } else {
+            result.push('\n');
+            result.push_str(indent_chars(indentation + 1).as_str());
+        }
 
-        result.push_str(&self.print_subselections(indentation + 1));
+        result.push_str(&self.print_subselections(inline, indentation + 1));
 
-        result.push('\n');
-        result.push_str(indent.as_str());
+        if inline {
+            result.push(' ');
+        } else {
+            result.push('\n');
+            result.push_str(indent_chars(indentation).as_str());
+        }
+
         result.push('}');
 
         result
@@ -77,11 +94,17 @@ impl PrettyPrintable for SubSelection {
 
 impl SubSelection {
     /// Prints all of the selections in a subselection
-    fn print_subselections(&self, indentation: usize) -> String {
+    fn print_subselections(&self, inline: bool, indentation: usize) -> String {
+        let separator = if inline {
+            ' '.to_string()
+        } else {
+            format!("\n{}", indent_chars(indentation))
+        };
+
         self.selections
             .iter()
-            .map(|s| s.pretty_print_with_indentation(false, indentation))
-            .join("\n")
+            .map(|s| s.pretty_print_with_indentation(inline, indentation))
+            .join(separator.as_str())
     }
 }
 
@@ -97,9 +120,9 @@ impl PrettyPrintable for PathSelection {
         // to indentation.
         let leading_space_count = inner.chars().take_while(|c| *c == ' ').count();
         let suffix = inner[leading_space_count..].to_string();
-        if suffix.starts_with('.') && !self.path.is_single_key() {
+        if let Some(after_dot) = suffix.strip_prefix('.') {
             // Strip the '.' but keep any leading spaces.
-            format!("{}{}", " ".repeat(leading_space_count), &suffix[1..])
+            format!("{}{}", " ".repeat(leading_space_count), after_dot)
         } else {
             inner
         }
@@ -110,27 +133,23 @@ impl PrettyPrintable for PathList {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         let mut result = String::new();
 
-        if !inline {
-            result.push_str(indent_chars(indentation).as_str());
-        }
-
         match self {
             Self::Var(var, tail) => {
-                let rest = tail.pretty_print_with_indentation(true, indentation);
+                let rest = tail.pretty_print_with_indentation(inline, indentation);
                 result.push_str(var.as_str());
                 result.push_str(rest.as_str());
             }
             Self::Key(key, tail) => {
                 result.push('.');
                 result.push_str(key.pretty_print().as_str());
-                let rest = tail.pretty_print_with_indentation(true, indentation);
+                let rest = tail.pretty_print_with_indentation(inline, indentation);
                 result.push_str(rest.as_str());
             }
             Self::Expr(expr, tail) => {
-                let rest = tail.pretty_print_with_indentation(true, indentation);
+                let rest = tail.pretty_print_with_indentation(inline, indentation);
                 result.push_str("$(");
                 result.push_str(
-                    expr.pretty_print_with_indentation(true, indentation)
+                    expr.pretty_print_with_indentation(inline, indentation)
                         .as_str(),
                 );
                 result.push(')');
@@ -141,17 +160,22 @@ impl PrettyPrintable for PathList {
                 result.push_str(method.as_str());
                 if let Some(args) = args {
                     result.push_str(
-                        args.pretty_print_with_indentation(true, indentation)
+                        args.pretty_print_with_indentation(inline, indentation)
                             .as_str(),
                     );
                 }
                 result.push_str(
-                    tail.pretty_print_with_indentation(true, indentation)
+                    tail.pretty_print_with_indentation(inline, indentation)
                         .as_str(),
                 );
             }
+            Self::Question(tail) => {
+                result.push('?');
+                let rest = tail.pretty_print_with_indentation(true, indentation);
+                result.push_str(rest.as_str());
+            }
             Self::Selection(sub) => {
-                let sub = sub.pretty_print_with_indentation(true, indentation);
+                let sub = sub.pretty_print_with_indentation(inline, indentation);
                 result.push(' ');
                 result.push_str(sub.as_str());
             }
@@ -166,10 +190,6 @@ impl PrettyPrintable for MethodArgs {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         let mut result = String::new();
 
-        if !inline {
-            result.push_str(indent_chars(indentation).as_str());
-        }
-
         result.push('(');
 
         // TODO Break long argument lists across multiple lines, with indentation?
@@ -178,7 +198,7 @@ impl PrettyPrintable for MethodArgs {
                 result.push_str(", ");
             }
             result.push_str(
-                arg.pretty_print_with_indentation(true, indentation)
+                arg.pretty_print_with_indentation(inline, indentation + 1)
                     .as_str(),
             );
         }
@@ -192,9 +212,6 @@ impl PrettyPrintable for MethodArgs {
 impl PrettyPrintable for LitExpr {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         let mut result = String::new();
-        if !inline {
-            result.push_str(indent_chars(indentation).as_str());
-        }
 
         match self {
             Self::String(s) => {
@@ -207,38 +224,40 @@ impl PrettyPrintable for LitExpr {
             Self::Object(map) => {
                 result.push('{');
 
-                if !map.is_empty() {
-                    if inline {
-                        result.push(' ');
-                    } else {
-                        result.push('\n');
-                    }
+                if map.is_empty() {
+                    result.push('}');
+                    return result;
                 }
 
                 let mut is_first = true;
                 for (key, value) in map {
                     if is_first {
                         is_first = false;
-                    } else if inline {
-                        result.push_str(", ");
                     } else {
-                        result.push_str(",\n");
+                        result.push(',');
                     }
-                    result.push_str(key.pretty_print().as_str());
-                    result.push_str(": ");
-                    result.push_str(
-                        value
-                            .pretty_print_with_indentation(true, indentation + 1)
-                            .as_str(),
-                    );
-                }
 
-                if !map.is_empty() {
                     if inline {
                         result.push(' ');
                     } else {
                         result.push('\n');
+                        result.push_str(indent_chars(indentation + 1).as_str());
                     }
+
+                    result.push_str(key.pretty_print().as_str());
+                    result.push_str(": ");
+                    result.push_str(
+                        value
+                            .pretty_print_with_indentation(inline, indentation + 1)
+                            .as_str(),
+                    );
+                }
+
+                if inline {
+                    result.push(' ');
+                } else {
+                    result.push('\n');
+                    result.push_str(indent_chars(indentation).as_str());
                 }
 
                 result.push('}');
@@ -254,15 +273,17 @@ impl PrettyPrintable for LitExpr {
                     }
                     result.push_str(
                         value
-                            .pretty_print_with_indentation(true, indentation)
+                            .pretty_print_with_indentation(inline, indentation)
                             .as_str(),
                     );
                 }
                 result.push(']');
             }
             Self::Path(path) => {
-                let path = path.pretty_print_with_indentation(inline, indentation);
-                result.push_str(path.as_str());
+                result.push_str(
+                    path.pretty_print_with_indentation(inline, indentation)
+                        .as_str(),
+                );
             }
             Self::LitPath(literal, subpath) => {
                 result.push_str(
@@ -276,6 +297,23 @@ impl PrettyPrintable for LitExpr {
                         .as_str(),
                 );
             }
+            Self::OpChain(op, operands) => {
+                let op_str = match op.as_ref() {
+                    LitOp::NullishCoalescing => " ?? ",
+                    LitOp::NoneCoalescing => " ?! ",
+                };
+
+                for (i, operand) in operands.iter().enumerate() {
+                    if i > 0 {
+                        result.push_str(op_str);
+                    }
+                    result.push_str(
+                        operand
+                            .pretty_print_with_indentation(inline, indentation)
+                            .as_str(),
+                    );
+                }
+            }
         }
 
         result
@@ -286,51 +324,24 @@ impl PrettyPrintable for NamedSelection {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         let mut result = String::new();
 
-        if !inline {
-            result.push_str(indent_chars(indentation).as_str());
-        }
-
-        match self {
-            Self::Field(alias, field_key, sub) => {
-                if let Some(alias) = alias {
-                    result.push_str(alias.pretty_print().as_str());
-                    result.push(' ');
-                }
-
-                result.push_str(field_key.pretty_print().as_str());
-
-                if let Some(sub) = sub {
-                    let sub = sub.pretty_print_with_indentation(true, indentation);
-                    result.push(' ');
-                    result.push_str(sub.as_str());
-                }
-            }
-            Self::Path { alias, path, .. } => {
-                // TODO Once we reintroduce conditional selections, I believe we
-                // should print the ... even for PathWithSubSelection selections
-                // which were not originally written with the ... (but for which
-                // *inline is nevertheless true), because the version with ...
-                // will be equivalent to the version without, and using the ...
-                // makes it much more obvious that the output of the selection
-                // will be inlined into the parent object.
-                // if *inline {
-                //     result.push_str("...");
-                // }
-                if let Some(alias) = alias {
-                    result.push_str(alias.pretty_print().as_str());
-                    result.push(' ');
-                }
-                let path = path.pretty_print_with_indentation(true, indentation);
-                result.push_str(path.trim_start());
-            }
-            Self::Group(alias, sub) => {
+        match &self.prefix {
+            NamingPrefix::None => {}
+            NamingPrefix::Alias(alias) => {
                 result.push_str(alias.pretty_print().as_str());
                 result.push(' ');
-
-                let sub = sub.pretty_print_with_indentation(true, indentation);
-                result.push_str(sub.as_str());
+            }
+            NamingPrefix::Spread(token_range) => {
+                if token_range.is_some() {
+                    result.push_str("... ");
+                }
             }
         };
+
+        // The .trim_start() handles the case when self.path is just a
+        // SubSelection (i.e., a NamedGroupSelection), since that PathList
+        // variant typically prints a single leading space.
+        let pretty_path = self.path.pretty_print_with_indentation(inline, indentation);
+        result.push_str(pretty_path.trim_start());
 
         result
     }
@@ -340,11 +351,7 @@ impl PrettyPrintable for Alias {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         let mut result = String::new();
 
-        if !inline {
-            result.push_str(indent_chars(indentation).as_str());
-        }
-
-        let name = self.name.pretty_print_with_indentation(true, indentation);
+        let name = self.name.pretty_print_with_indentation(inline, indentation);
         result.push_str(name.as_str());
         result.push(':');
 
@@ -379,6 +386,7 @@ mod tests {
             .map(|line| format!("{}{line}", indent_chars(indentation)))
             .collect::<Vec<_>>()
             .join("\n");
+        let expected_indented = expected_indented.trim_start();
 
         let prettified = selection.pretty_print();
         assert_eq!(
@@ -387,9 +395,10 @@ mod tests {
         );
 
         let prettified_inline = selection.pretty_print_with_indentation(true, indentation);
+        let expected_inline = collapse_spaces(expected);
         assert_eq!(
             prettified_inline.trim_start(),
-            expected_indented.trim_start(),
+            expected_inline.trim_start(),
             "pretty printing inline did not match: {prettified_inline} != {}",
             expected_indented.trim_start()
         );
@@ -399,6 +408,11 @@ mod tests {
             prettified_indented, expected_indented,
             "pretty printing indented did not match: {prettified_indented} != {expected_indented}"
         );
+    }
+
+    fn collapse_spaces(s: impl Into<String>) -> String {
+        let pattern = regex::Regex::new(r"\s+").expect("valid regex");
+        pattern.replace_all(s.into().as_str(), " ").to_string()
     }
 
     #[test]
@@ -506,18 +520,12 @@ mod tests {
             "nested sub pretty printing did not match: {pretty} != {sub_indented}"
         );
 
-        let pretty = sub_selection.pretty_print_with_indentation(true, 4);
+        let pretty = sub_selection.pretty_print_with_indentation(false, 4);
         assert_eq!(
             pretty,
             sub_super_indented.trim_start(),
             "nested inline sub pretty printing did not match: {pretty} != {}",
             sub_super_indented.trim_start()
-        );
-
-        let pretty = sub_selection.pretty_print_with_indentation(false, 4);
-        assert_eq!(
-            pretty, sub_super_indented,
-            "nested inline sub pretty printing did not match: {pretty} != {sub_super_indented}",
         );
     }
 

@@ -2,9 +2,10 @@ use std::string::FromUtf8Error;
 
 use docker_credential::CredentialRetrievalError;
 use docker_credential::DockerCredential;
-use oci_client::Client as ociClient;
 use oci_client::Client;
 use oci_client::Reference;
+use oci_client::client::ClientConfig;
+use oci_client::client::ClientProtocol;
 use oci_client::errors::OciDistributionError;
 use oci_client::secrets::RegistryAuth;
 use thiserror::Error;
@@ -27,13 +28,13 @@ pub(crate) struct OciContent {
 
 #[derive(Debug, Error)]
 pub(crate) enum OciError {
-    #[error("OCI layer does not have a title")]
+    #[error("oci layer does not have a title")]
     LayerMissingTitle,
-    #[error("Oci Distribution error: {0}")]
+    #[error("oci distribution error: {0}")]
     Distribution(OciDistributionError),
-    #[error("Oci Parsing error: {0}")]
+    #[error("oci parsing error: {0}")]
     Parse(oci_client::ParseError),
-    #[error("Unable to parse layer: {0}")]
+    #[error("unable to parse layer: {0}")]
     LayerParse(FromUtf8Error),
 }
 
@@ -67,7 +68,7 @@ fn build_auth(reference: &Reference, apollo_key: &str) -> RegistryAuth {
 
     // Check if the server registry ends with apollographql.com
     if server.ends_with(APOLLO_REGISTRY_ENDING) {
-        tracing::debug!("Using Apollo registry authentication");
+        tracing::debug!("using registry authentication");
         return RegistryAuth::Basic(APOLLO_REGISTRY_USERNAME.to_string(), apollo_key.to_string());
     }
 
@@ -75,27 +76,26 @@ fn build_auth(reference: &Reference, apollo_key: &str) -> RegistryAuth {
         Err(CredentialRetrievalError::ConfigNotFound)
         | Err(CredentialRetrievalError::NoCredentialConfigured) => RegistryAuth::Anonymous,
         Err(e) => {
-            tracing::warn!("Error handling docker configuration file: {e}");
+            tracing::warn!("error handling docker configuration file: {e}");
             RegistryAuth::Anonymous
         }
         Ok(DockerCredential::UsernamePassword(username, password)) => {
-            tracing::debug!("Found username/password docker credentials");
+            tracing::debug!("found username/password docker credentials");
             RegistryAuth::Basic(username, password)
         }
         Ok(DockerCredential::IdentityToken(token)) => {
-            tracing::debug!("Found identity token docker credentials");
+            tracing::debug!("found identity token docker credentials");
             RegistryAuth::Bearer(token)
         }
     }
 }
 
 async fn pull_oci(
-    client: &mut ociClient,
+    client: &mut Client,
     auth: &RegistryAuth,
     reference: &Reference,
 ) -> Result<OciContent, OciError> {
-    tracing::debug!(?reference, "pulling oci bundle");
-
+    tracing::debug!("pulling oci manifest");
     // We aren't using the default `pull` function because that validates that all the layers are in the
     // set of supported layers. Since we want to be able to add new layers for new features, we want the
     // client to have forwards compatibility.
@@ -109,6 +109,7 @@ async fn pull_oci(
         .ok_or(OciError::LayerMissingTitle)?
         .clone();
 
+    tracing::debug!("pulling oci blob");
     let mut schema = Vec::new();
     client
         .pull_blob(reference, &schema_layer, &mut schema)
@@ -119,11 +120,41 @@ async fn pull_oci(
     })
 }
 
+/// The oci reference may not contain the protocol, only hostname[:port]. As a result,
+/// in order to test locally without SSL, either (1) protocol needs to be exposed as an
+/// env var or (2) protocol needs to be inferred from hostname. Rather than introduce a
+/// largely unused configuration option, this function checks the hostname for local
+/// development/testing and disables SSL accordingly.
+async fn infer_oci_protocol(registry: &str) -> ClientProtocol {
+    let host = registry.split(":").next().expect("host must be provided");
+    if host == "localhost" || host == "127.0.0.1" {
+        ClientProtocol::Http
+    } else {
+        ClientProtocol::Https
+    }
+}
+
 /// Fetch an OCI bundle
 pub(crate) async fn fetch_oci(oci_config: OciConfig) -> Result<OciContent, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
     let auth = build_auth(&reference, &oci_config.apollo_key);
-    pull_oci(&mut Client::default(), &auth, &reference).await
+    let protocol = infer_oci_protocol(reference.registry()).await;
+
+    tracing::debug!(
+        "prepared to fetch schema from oci over {:?}, auth anonymous? {:?}",
+        protocol,
+        auth == RegistryAuth::Anonymous
+    );
+
+    pull_oci(
+        &mut Client::new(ClientConfig {
+            protocol,
+            ..Default::default()
+        }),
+        &auth,
+        &reference,
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -164,7 +195,7 @@ mod tests {
                 assert_eq!(username, APOLLO_REGISTRY_USERNAME);
                 assert_eq!(password, apollo_key);
             }
-            _ => panic!("Expected RegistryAuth::Basic, got something else"),
+            _ => panic!("expected basic authentication, got something else"),
         }
     }
 
@@ -261,7 +292,7 @@ mod tests {
         let image_reference = setup_mocks(mock_server, vec![schema_layer]).await;
         let result = pull_oci(&mut client, &RegistryAuth::Anonymous, &image_reference)
             .await
-            .expect("Failed to fetch OCI bundle");
+            .expect("failed to fetch oci bundle");
         assert_eq!(result.schema, "test schema");
     }
 
@@ -285,7 +316,7 @@ mod tests {
         let image_reference = setup_mocks(mock_server, vec![schema_layer, random_layer]).await;
         let result = pull_oci(&mut client, &RegistryAuth::Anonymous, &image_reference)
             .await
-            .expect("Failed to fetch OCI bundle");
+            .expect("failed to fetch oci bundle");
         assert_eq!(result.schema, "test schema");
     }
 
@@ -304,11 +335,81 @@ mod tests {
         let image_reference = setup_mocks(mock_server, vec![random_layer]).await;
         let result = pull_oci(&mut client, &RegistryAuth::Anonymous, &image_reference)
             .await
-            .expect_err("Expect can't fetch OCI bundle");
+            .expect_err("expect can't fetch oci bundle");
         if let LayerMissingTitle = result {
             // Expected error
         } else {
-            panic!("Expected OCILayerMissingTitle error, got {:?}", result);
+            panic!("expected missing title error, got {result:?}");
         }
+    }
+
+    #[tokio::test]
+    async fn test_infer_oci_protocol_localhost() {
+        let result = infer_oci_protocol("localhost").await;
+        assert_eq!(result, ClientProtocol::Http);
+    }
+
+    #[tokio::test]
+    async fn test_infer_oci_protocol_localhost_with_port() {
+        let result = infer_oci_protocol("localhost:5000").await;
+        assert_eq!(result, ClientProtocol::Http);
+    }
+
+    #[tokio::test]
+    async fn test_infer_oci_protocol_127_0_0_1() {
+        let result = infer_oci_protocol("127.0.0.1").await;
+        assert_eq!(result, ClientProtocol::Http);
+    }
+
+    #[tokio::test]
+    async fn test_infer_oci_protocol_127_0_0_1_with_port() {
+        let result = infer_oci_protocol("127.0.0.1:5000").await;
+        assert_eq!(result, ClientProtocol::Http);
+    }
+
+    #[tokio::test]
+    async fn test_infer_oci_protocol_docker_io() {
+        let result = infer_oci_protocol("docker.io").await;
+        assert_eq!(result, ClientProtocol::Https);
+    }
+
+    #[tokio::test]
+    async fn test_infer_oci_protocol_docker_io_with_port() {
+        let result = infer_oci_protocol("docker.io:443").await;
+        assert_eq!(result, ClientProtocol::Https);
+    }
+
+    #[tokio::test]
+    async fn test_infer_oci_protocol_apollo_registry() {
+        let result = infer_oci_protocol("registry.apollographql.com").await;
+        assert_eq!(result, ClientProtocol::Https);
+    }
+
+    #[tokio::test]
+    async fn test_infer_oci_protocol_apollo_registry_with_port() {
+        let result = infer_oci_protocol("registry.apollographql.com:443").await;
+        assert_eq!(result, ClientProtocol::Https);
+    }
+
+    #[tokio::test]
+    async fn test_infer_oci_protocol_custom_registry() {
+        let result = infer_oci_protocol("localhost.example.com").await;
+        assert_eq!(result, ClientProtocol::Https);
+    }
+
+    #[tokio::test]
+    async fn test_infer_oci_protocol_port_only() {
+        // This case will never pass the initial reference validation, but is
+        // included here as a second layer of security.
+        let result = infer_oci_protocol(":8080").await;
+        assert_eq!(result, ClientProtocol::Https);
+    }
+
+    #[tokio::test]
+    async fn test_infer_oci_protocol_empty_string() {
+        // This case will never pass the initial reference validation, but is
+        // included here as a second layer of security.
+        let result = infer_oci_protocol("").await;
+        assert_eq!(result, ClientProtocol::Https);
     }
 }

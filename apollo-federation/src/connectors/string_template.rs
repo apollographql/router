@@ -19,6 +19,7 @@ use serde_json_bytes::Value;
 
 pub(crate) use self::encoding::UriString;
 use super::ApplyToError;
+use super::ConnectSpec;
 use crate::connectors::JSONSelection;
 use crate::connectors::json_selection::helpers::json_to_string;
 
@@ -33,8 +34,45 @@ pub struct StringTemplate {
 impl FromStr for StringTemplate {
     type Err = Error;
 
-    fn from_str(input: &str) -> Result<Self, Error> {
-        let mut offset = 0;
+    /// Parses a [`StringTemplate`] from a &str, using [`ConnectSpec::V0_2`] as
+    /// the parsing version. This trait implementation should be avoided outside
+    /// tests because it runs the risk of ignoring the developer's chosen
+    /// [`ConnectSpec`] if used blindly via `.parse()`, since `FromStr` gives no
+    /// opportunity to specify additional context like the [`ConnectSpec`].
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse_with_spec(s, ConnectSpec::V0_2)
+        // If we want to detect risky uses of StringTemplate::from_str for
+        // templates with JSONSelection expressions, we can reenable this code.
+        // match Self::parse_with_spec(s, ConnectSpec::latest()) {
+        //     Ok(template) => {
+        //         if let Some(first) = template.expressions().next() {
+        //             Err(Error {
+        //                 message: "StringTemplate::from_str should be used only if the template does not contain any JSONSelection expressions".to_string(),
+        //                 location: first.location.clone(),
+        //             })
+        //         } else {
+        //             // If there were no expressions, the ConnectSpec does not
+        //             // matter.
+        //             Ok(template)
+        //         }
+        //     }
+        //     Err(err) => Err(err),
+        // }
+    }
+}
+
+impl StringTemplate {
+    pub fn parse_with_spec(input: &str, spec: ConnectSpec) -> Result<Self, Error> {
+        Self::common_parse_with_spec(input, 0, spec)
+    }
+
+    /// Parse a [`StringTemplate`] from a particular `offset` according to a
+    /// given [`ConnectSpec`].
+    fn common_parse_with_spec(
+        input: &str,
+        mut offset: usize,
+        spec: ConnectSpec,
+    ) -> Result<Self, Error> {
         let mut chars = input.chars().peekable();
         let mut parts = Vec::new();
         while let Some(next) = chars.peek() {
@@ -63,7 +101,9 @@ impl FromStr for StringTemplate {
                     });
                 }
                 offset += 1; // Account for opening brace
-                let parsed = JSONSelection::parse(&expression).map_err(|err| {
+                // TODO This should call JSONSelection::parse_with_spec with a
+                // ConnectSpec, but we don't have that information handy.
+                let parsed = JSONSelection::parse_with_spec(&expression, spec).map_err(|err| {
                     let start_of_parse_error = offset + err.offset;
                     Error {
                         message: err.message,
@@ -90,9 +130,7 @@ impl FromStr for StringTemplate {
         }
         Ok(StringTemplate { parts })
     }
-}
 
-impl StringTemplate {
     /// Get all the dynamic [`Expression`] pieces of the template for validation. If interpolating
     /// the entire template, use [`Self::interpolate`] instead.
     pub(crate) fn expressions(&self) -> impl Iterator<Item = &Expression> {
@@ -161,7 +199,7 @@ impl StringTemplate {
             PathAndQuery::from_str(result.as_ref()).map(Uri::from)
         }
         .map_err(|err| Error {
-            message: format!("Invalid URI: {}", err),
+            message: format!("Invalid URI: {err}"),
             location: 0..result.as_ref().len(),
         })?;
 
@@ -175,8 +213,8 @@ impl Display for StringTemplate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for part in &self.parts {
             match part {
-                Part::Constant(Constant { value, .. }) => write!(f, "{}", value)?,
-                Part::Expression(Expression { expression, .. }) => write!(f, "{{{}}}", expression)?,
+                Part::Constant(Constant { value, .. }) => write!(f, "{value}")?,
+                Part::Expression(Expression { expression, .. }) => write!(f, "{{{expression}}}")?,
             }
         }
         Ok(())
@@ -452,24 +490,33 @@ mod test_parse {
 
     #[test]
     fn simple_expression() {
-        assert_debug_snapshot!(StringTemplate::from_str("{$config.one}").unwrap());
+        assert_debug_snapshot!(
+            StringTemplate::parse_with_spec("{$config.one}", ConnectSpec::latest()).unwrap()
+        );
     }
     #[test]
     fn mixed_constant_and_expression() {
-        assert_debug_snapshot!(StringTemplate::from_str("text{$config.one}text").unwrap());
+        assert_debug_snapshot!(
+            StringTemplate::parse_with_spec("text{$config.one}text", ConnectSpec::latest())
+                .unwrap()
+        );
     }
 
     #[test]
     fn expressions_with_nested_braces() {
         assert_debug_snapshot!(
-            StringTemplate::from_str("const{$config.one { two { three } }}another-const").unwrap()
+            StringTemplate::parse_with_spec(
+                "const{$config.one { two { three } }}another-const",
+                ConnectSpec::latest()
+            )
+            .unwrap()
         );
     }
 
     #[test]
     fn missing_closing_braces() {
         assert_debug_snapshot!(
-            StringTemplate::from_str("{$config.one"),
+            StringTemplate::parse_with_spec("{$config.one", ConnectSpec::latest()),
             @r###"
         Err(
             Error {
@@ -491,7 +538,9 @@ mod test_interpolate {
     use super::*;
     #[test]
     fn test_interpolate() {
-        let template = StringTemplate::from_str("before {$config.one} after").unwrap();
+        let template =
+            StringTemplate::parse_with_spec("before {$config.one} after", ConnectSpec::latest())
+                .unwrap();
         let mut vars = IndexMap::default();
         vars.insert("$config".to_string(), json!({"one": "foo"}));
         assert_eq!(template.interpolate(&vars).unwrap().0, "before foo after");
@@ -499,14 +548,16 @@ mod test_interpolate {
 
     #[test]
     fn test_interpolate_missing_value() {
-        let template = StringTemplate::from_str("{$config.one}").unwrap();
+        let template =
+            StringTemplate::parse_with_spec("{$config.one}", ConnectSpec::latest()).unwrap();
         let vars = IndexMap::default();
         assert_eq!(template.interpolate(&vars).unwrap().0, "");
     }
 
     #[test]
     fn test_interpolate_value_array() {
-        let template = StringTemplate::from_str("{$config.one}").unwrap();
+        let template =
+            StringTemplate::parse_with_spec("{$config.one}", ConnectSpec::latest()).unwrap();
         let mut vars = IndexMap::default();
         vars.insert("$config".to_string(), json!({"one": ["one", "two"]}));
         assert_debug_snapshot!(
@@ -524,7 +575,8 @@ mod test_interpolate {
 
     #[test]
     fn test_interpolate_value_bool() {
-        let template = StringTemplate::from_str("{$config.one}").unwrap();
+        let template =
+            StringTemplate::parse_with_spec("{$config.one}", ConnectSpec::latest()).unwrap();
         let mut vars = IndexMap::default();
         vars.insert("$config".to_string(), json!({"one": true}));
         assert_eq!(template.interpolate(&vars).unwrap().0, "true");
@@ -532,7 +584,8 @@ mod test_interpolate {
 
     #[test]
     fn test_interpolate_value_null() {
-        let template = StringTemplate::from_str("{$config.one}").unwrap();
+        let template =
+            StringTemplate::parse_with_spec("{$config.one}", ConnectSpec::latest()).unwrap();
         let mut vars = IndexMap::default();
         vars.insert("$config".to_string(), json!({"one": null}));
         assert_eq!(template.interpolate(&vars).unwrap().0, "");
@@ -540,7 +593,8 @@ mod test_interpolate {
 
     #[test]
     fn test_interpolate_value_number() {
-        let template = StringTemplate::from_str("{$config.one}").unwrap();
+        let template =
+            StringTemplate::parse_with_spec("{$config.one}", ConnectSpec::latest()).unwrap();
         let mut vars = IndexMap::default();
         vars.insert("$config".to_string(), json!({"one": 1}));
         assert_eq!(template.interpolate(&vars).unwrap().0, "1");
@@ -548,7 +602,8 @@ mod test_interpolate {
 
     #[test]
     fn test_interpolate_value_object() {
-        let template = StringTemplate::from_str("{$config.one}").unwrap();
+        let template =
+            StringTemplate::parse_with_spec("{$config.one}", ConnectSpec::latest()).unwrap();
         let mut vars = IndexMap::default();
         vars.insert("$config".to_string(), json!({"one": {}}));
         assert_debug_snapshot!(
@@ -566,7 +621,8 @@ mod test_interpolate {
 
     #[test]
     fn test_interpolate_value_string() {
-        let template = StringTemplate::from_str("{$config.one}").unwrap();
+        let template =
+            StringTemplate::parse_with_spec("{$config.one}", ConnectSpec::latest()).unwrap();
         let mut vars = IndexMap::default();
         vars.insert("$config".to_string(), json!({"one": "string"}));
         assert_eq!(template.interpolate(&vars).unwrap().0, "string");
@@ -633,7 +689,7 @@ mod test_interpolate_uri {
             "hash": "a#b",
         };
 
-        let template = StringTemplate::from_str("http://localhost/{$this.path}/{$this.question_mark}?a={$this.ampersand}&c={$this.hash}")
+        let template = StringTemplate::parse_with_spec("http://localhost/{$this.path}/{$this.question_mark}?a={$this.ampersand}&c={$this.hash}", ConnectSpec::latest())
             .expect("Failed to parse URL template");
         let (url, _) = template
             .interpolate_uri(vars)
@@ -659,8 +715,9 @@ mod test_interpolate_uri {
             "extra": []
         };
 
-        let template = StringTemplate::from_str(
+        let template = StringTemplate::parse_with_spec(
             "/{$this.int}/{$this.float}/{$this.bool}/{$this.null}/{$this.string}",
+            ConnectSpec::latest(),
         )
         .unwrap();
 
@@ -732,8 +789,11 @@ mod test_get_expressions {
 
     #[test]
     fn test_variable_references() {
-        let value =
-            StringTemplate::from_str("a {$this.a.b.c} b {$args.a.b.c} c {$config.a.b.c}").unwrap();
+        let value = StringTemplate::parse_with_spec(
+            "a {$this.a.b.c} b {$args.a.b.c} c {$config.a.b.c}",
+            ConnectSpec::latest(),
+        )
+        .unwrap();
         let references: Vec<_> = value
             .expressions()
             .map(|e| e.expression.to_string())

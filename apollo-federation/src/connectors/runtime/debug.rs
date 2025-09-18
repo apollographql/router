@@ -76,7 +76,7 @@ impl ConnectorContext {
                         .collect(),
                     body: ConnectorDebugBody {
                         kind: "invalid".to_string(),
-                        content: format!("{:?}", body).into(),
+                        content: format!("{body:?}").into(),
                         selection: None,
                     },
                     errors: if error_settings.message.is_some()
@@ -204,6 +204,8 @@ struct ConnectorDebugErrors {
     source_extensions: Option<String>,
     connect_extensions: Option<String>,
 }
+
+pub type DebugRequest = (Option<Box<ConnectorDebugHttpRequest>>, Vec<Problem>);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

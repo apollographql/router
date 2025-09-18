@@ -1,0 +1,88 @@
+subgraphs:
+  one:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.12", import: [
+              "@override", "@inaccessible", "@tag",
+              "@authenticated", "@requiresScopes", "@policy",
+              "@cost", "@listSize",
+              "@composeDirective",
+              "@cacheTag"
+            ]
+          )
+          @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom1", "@custom2", { name: "@originalName", as: "@custom3" }])
+          @composeDirective(name: "@custom1")
+          @composeDirective(name: "@custom2")
+          @composeDirective(name: "@custom3")
+        directive @custom1 on OBJECT | FIELD_DEFINITION
+        directive @custom2 on OBJECT | FIELD_DEFINITION
+        directive @custom3 on OBJECT | FIELD_DEFINITION
+        type Query {
+          tagged: String @tag(name: "tag")
+          hidden: String @inaccessible
+          custom: T @custom1
+          authenticated: String @authenticated
+          requiresScopes: String @requiresScopes(scopes: ["scope"])
+          policy: String @policy(policies: [["admin"]])
+          overridden: String @override(from: "two", label: "label") @cacheTag(format: "hello")
+        }
+
+        type T @custom2 {
+          field: String @custom3 @cost(weight: 5)
+        }
+
+        # bug fix: if a customer tries to define @defer this way, it should be ignored
+        extend schema
+          @link(url: "http://bugfix/namespace/v1.0", import: ["@defer"])
+
+        directive @defer(label: String) on FIELD
+
+        # bug fix: don't redefine scalars if the user defines them for some reason
+        scalar federation__RequireScopes
+        scalar federation__Policy
+
+        # bug fix: here's a weird directive that's both executable and type system
+        extend schema
+          @link(url: "http://bugfix/weird/v1.0", import: ["@weird"])
+          @composeDirective(name: "@weird")
+
+        directive @weird on FIELD | FIELD_DEFINITION
+
+        extend type Query {
+          weird: [String] @weird @listSize(assumedSize: 99)
+        }
+
+        enum UnusedEnum @inaccessible {
+          A
+          B
+        }
+  two:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.12", import: ["@key", "@composeDirective", "@context", "@fromContext", "@cacheTag"])
+          @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom1", "@custom2", { name: "@originalName", as: "@custom3" }])
+          @composeDirective(name: "@custom1")
+
+        directive @custom1 on OBJECT | FIELD_DEFINITION
+        directive @custom2 on OBJECT | FIELD_DEFINITION
+        directive @custom3 on OBJECT | FIELD_DEFINITION
+        type Query {
+          overridden: String
+          customAgain: String @custom1 @cacheTag(format: "goodbye")
+          z: Z
+        }
+
+        type Z @key(fields: "id") @context(name: "ctx") {
+          id: ID!
+          y: String
+          x: X
+        }
+
+        type X @key(fields: "id") {
+          id: ID!
+          w(z: String @fromContext(field: "$$ctx { y }")): String
+        }

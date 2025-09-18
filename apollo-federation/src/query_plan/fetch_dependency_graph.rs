@@ -2359,8 +2359,7 @@ impl FetchDependencyGraph {
                         .map_or_else(
                             |_| {
                                 Err(FederationError::internal(format!(
-                                    "Invalid call from {} starting at {}: {} is not composite",
-                                    path, parent_type, field_position
+                                    "Invalid call from {path} starting at {parent_type}: {field_position} is not composite"
                                 )))
                             },
                             Ok,
@@ -2374,8 +2373,7 @@ impl FetchDependencyGraph {
                             .map_or_else(
                                 |_| {
                                     Err(FederationError::internal(format!(
-                                        "Invalid call from {} starting at {}: {} is not composite",
-                                        path, parent_type, type_condition_position
+                                        "Invalid call from {path} starting at {parent_type}: {type_condition_position} is not composite"
                                     )))
                                 },
                                 Ok,
@@ -3313,7 +3311,7 @@ impl std::fmt::Display for FetchInputs {
                 // We can safely unwrap because we know the len >= 1.
                 write!(f, "{}", iter.next().unwrap())?;
                 for x in iter {
-                    write!(f, ",{}", x)?;
+                    write!(f, ",{x}")?;
                 }
                 write!(f, "]")
             }
@@ -3651,10 +3649,10 @@ fn compute_nodes_for_key_resolution<'a>(
         let mut iter = dependency_graph.parents_relations_of(condition_node);
         if let (Some(condition_node_parent), None) = (iter.next(), iter.next()) {
             // There is exactly one parent
-            if condition_node_parent.parent_node_id == stack_item.node_id {
-                if let Some(condition_path) = condition_node_parent.path_in_parent {
-                    path = condition_path.strip_prefix(path_in_parent).map(Arc::new)
-                }
+            if condition_node_parent.parent_node_id == stack_item.node_id
+                && let Some(condition_path) = condition_node_parent.path_in_parent
+            {
+                path = condition_path.strip_prefix(path_in_parent).map(Arc::new)
             }
         }
         drop(iter);
@@ -4146,47 +4144,45 @@ fn compute_nodes_for_op_path_element<'a>(
         }
     }
 
-    if let OpPathElement::Field(field) = &updated_operation {
-        if *field.name() == TYPENAME_FIELD {
-            // Because of the optimization done in `QueryPlanner.optimizeSiblingTypenames`,
-            // we will rarely get an explicit `__typename` edge here.
-            // But one case where it can happen is where an @interfaceObject was involved,
-            // and we had to force jumping to another subgraph for getting the "true" `__typename`.
-            // However, this case can sometimes lead to fetch dependency node
-            // that only exists for that `__typename` resolution and that "looks" useless.
-            // That is, we could have a fetch dependency node that looks like:
-            // ```
-            //   Fetch(service: "Subgraph2") {
-            //     {
-            //       ... on I {
-            //         __typename
-            //         id
-            //       }
-            //     } =>
-            //     {
-            //       ... on I {
-            //         __typename
-            //       }
-            //     }
-            //   }
-            // ```
-            // but the trick is that the `__typename` in the input
-            // will be the name of the interface itself (`I` in this case)
-            // but the one return after the fetch will the name of the actual implementation
-            // (some implementation of `I`).
-            // *But* we later have optimizations that would remove such a node,
-            // on the node that the output is included in the input,
-            // which is in general the right thing to do
-            // (and genuinely ensure that some useless nodes created when handling
-            // complex @require gets eliminated).
-            // So we "protect" the node in this case to ensure
-            // that later optimization doesn't kick in in this case.
-            let updated_node = FetchDependencyGraph::node_weight_mut(
-                &mut dependency_graph.graph,
-                updated.node_id,
-            )?;
-            updated_node.must_preserve_selection_set = true
-        }
+    if let OpPathElement::Field(field) = &updated_operation
+        && *field.name() == TYPENAME_FIELD
+    {
+        // Because of the optimization done in `QueryPlanner.optimizeSiblingTypenames`,
+        // we will rarely get an explicit `__typename` edge here.
+        // But one case where it can happen is where an @interfaceObject was involved,
+        // and we had to force jumping to another subgraph for getting the "true" `__typename`.
+        // However, this case can sometimes lead to fetch dependency node
+        // that only exists for that `__typename` resolution and that "looks" useless.
+        // That is, we could have a fetch dependency node that looks like:
+        // ```
+        //   Fetch(service: "Subgraph2") {
+        //     {
+        //       ... on I {
+        //         __typename
+        //         id
+        //       }
+        //     } =>
+        //     {
+        //       ... on I {
+        //         __typename
+        //       }
+        //     }
+        //   }
+        // ```
+        // but the trick is that the `__typename` in the input
+        // will be the name of the interface itself (`I` in this case)
+        // but the one return after the fetch will the name of the actual implementation
+        // (some implementation of `I`).
+        // *But* we later have optimizations that would remove such a node,
+        // on the node that the output is included in the input,
+        // which is in general the right thing to do
+        // (and genuinely ensure that some useless nodes created when handling
+        // complex @require gets eliminated).
+        // So we "protect" the node in this case to ensure
+        // that later optimization doesn't kick in in this case.
+        let updated_node =
+            FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, updated.node_id)?;
+        updated_node.must_preserve_selection_set = true
     }
     if let QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { .. } = &edge.transition {
         // We shouldn't add the operation "as is" as it's a down-cast but we're "faking it".

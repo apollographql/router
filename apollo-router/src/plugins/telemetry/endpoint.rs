@@ -5,8 +5,8 @@ use std::str::FromStr;
 use http::Uri;
 use http::uri::Authority;
 use schemars::JsonSchema;
-use schemars::r#gen::SchemaGenerator;
-use schemars::schema::Schema;
+use schemars::Schema;
+use schemars::SchemaGenerator;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::de::Error;
@@ -45,7 +45,7 @@ impl UriEndpoint {
 
                     if let Some(port) = port {
                         parts.authority = Some(
-                            Authority::from_str(format!("{}:{}", host, port).as_str())
+                            Authority::from_str(format!("{host}:{port}").as_str())
                                 .expect("host and port must have come from a valid uri, qed"),
                         )
                     } else {
@@ -93,8 +93,7 @@ impl<'de> Deserialize<'de> for UriEndpoint {
                 match Uri::from_str(v) {
                     Ok(uri) => Ok(UriEndpoint { uri: Some(uri) }),
                     Err(_) => Err(Error::custom(format!(
-                        "invalid endpoint: {}. Expected a valid uri or 'default'",
-                        v
+                        "invalid endpoint: {v}. Expected a valid uri or 'default'"
                     ))),
                 }
             }
@@ -105,8 +104,8 @@ impl<'de> Deserialize<'de> for UriEndpoint {
 }
 
 impl JsonSchema for UriEndpoint {
-    fn schema_name() -> String {
-        "UriEndpoint".to_string()
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "UriEndpoint".into()
     }
 
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
@@ -151,8 +150,7 @@ impl<'de> Deserialize<'de> for SocketEndpoint {
                         socket: Some(socket),
                     }),
                     Err(_) => Err(Error::custom(format!(
-                        "invalid endpoint: {}. Expected a valid socket or 'default'",
-                        v
+                        "invalid endpoint: {v}. Expected a valid socket or 'default'"
                     ))),
                 }
             }
@@ -163,8 +161,8 @@ impl<'de> Deserialize<'de> for SocketEndpoint {
 }
 
 impl JsonSchema for SocketEndpoint {
-    fn schema_name() -> String {
-        "SocketEndpoint".to_string()
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "SocketEndpoint".into()
     }
 
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
