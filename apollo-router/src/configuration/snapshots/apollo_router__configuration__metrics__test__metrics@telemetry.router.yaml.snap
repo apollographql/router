@@ -27,6 +27,7 @@ expression: "& metrics.non_zero()"
           opt.spans.router: true
           opt.spans.subgraph: true
           opt.spans.supergraph: true
+          opt.tracing.common.sampler: false
           opt.tracing.datadog: true
           opt.tracing.otlp: true
           opt.tracing.zipkin: true

@@ -1703,7 +1703,7 @@ fn get_subgraph<'subgraph>(
     })
 }
 
-static EXECUTABLE_DIRECTIVE_LOCATIONS: LazyLock<IndexSet<DirectiveLocation>> =
+pub(crate) static EXECUTABLE_DIRECTIVE_LOCATIONS: LazyLock<IndexSet<DirectiveLocation>> =
     LazyLock::new(|| {
         [
             DirectiveLocation::Query,

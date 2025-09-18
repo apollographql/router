@@ -405,12 +405,10 @@ impl Exporter {
         buffer_size: NonZeroUsize,
         field_execution_sampler: &'a SamplerOption,
         errors_configuration: &'a ErrorsConfiguration,
-        batch_config: &'a BatchProcessorConfig,
+        batch_processor_config: &'a BatchProcessorConfig,
         use_legacy_request_span: Option<bool>,
         metrics_reference_mode: ApolloMetricsReferenceMode,
     ) -> Result<Self, BoxError> {
-        tracing::debug!("creating studio exporter");
-
         let otlp_tracing_ratio = match otlp_tracing_sampler {
             SamplerOption::TraceIdRatioBased(ratio) => {
                 // can't use std::cmp::min because f64 is not Ord
@@ -422,6 +420,8 @@ impl Exporter {
             },
         };
 
+        tracing::info!("configuring Apollo tracing: {}", batch_processor_config);
+
         let span_lru_size_instrument =
             LruSizeInstrument::new("apollo.router.exporter.span.lru.size");
 
@@ -431,7 +431,7 @@ impl Exporter {
             report_exporter: if otlp_tracing_ratio < 1f64 {
                 Some(Arc::new(ApolloExporter::new(
                     endpoint,
-                    batch_config,
+                    &batch_processor_config.into(),
                     apollo_key,
                     apollo_graph_ref,
                     schema_id,
@@ -445,7 +445,7 @@ impl Exporter {
                 Some(ApolloOtlpExporter::new(
                     otlp_endpoint,
                     otlp_tracing_protocol,
-                    batch_config,
+                    batch_processor_config,
                     apollo_key,
                     apollo_graph_ref,
                     schema_id,

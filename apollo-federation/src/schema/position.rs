@@ -8,6 +8,7 @@ use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast;
 use apollo_compiler::ast::Argument;
+use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
@@ -1197,9 +1198,17 @@ impl ObjectOrInterfaceTypeDefinitionPosition {
 
     pub(crate) fn implemented_interfaces<'schema>(
         &self,
-        _schema: &'schema FederationSchema,
-    ) -> Result<Vec<&'schema Name>, FederationError> {
-        todo!("Implemented in FED-549")
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema apollo_compiler::collections::IndexSet<ComponentName>, PositionLookupError>
+    {
+        match self {
+            Self::Object(type_) => type_
+                .get(schema.schema())
+                .map(|obj| &obj.implements_interfaces),
+            Self::Interface(type_) => type_
+                .get(schema.schema())
+                .map(|itf| &itf.implements_interfaces),
+        }
     }
 
     pub(crate) fn insert_implements_interface(
@@ -1456,6 +1465,17 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
 
     pub(crate) fn coordinate(&self) -> String {
         format!("{}.{}", self.type_name(), self.field_name())
+    }
+
+    pub(crate) fn insert(
+        &self,
+        schema: &mut FederationSchema,
+        field_def: Component<FieldDefinition>,
+    ) -> Result<(), FederationError> {
+        match self {
+            Self::Object(field) => field.insert(schema, field_def),
+            Self::Interface(field) => field.insert(schema, field_def),
+        }
     }
 }
 
@@ -6678,6 +6698,27 @@ impl DirectiveDefinitionPosition {
             self.argument(argument.name.clone())
                 .remove_references(argument, referencers)?;
         }
+        Ok(())
+    }
+
+    pub(crate) fn set_repeatable(
+        &self,
+        schema: &mut FederationSchema,
+        repeatable: bool,
+    ) -> Result<(), FederationError> {
+        self.make_mut(&mut schema.schema)?.make_mut().repeatable = repeatable;
+        Ok(())
+    }
+
+    pub(crate) fn add_locations(
+        &self,
+        schema: &mut FederationSchema,
+        locations: &Vec<DirectiveLocation>,
+    ) -> Result<(), FederationError> {
+        self.make_mut(&mut schema.schema)?
+            .make_mut()
+            .locations
+            .extend(locations);
         Ok(())
     }
 }
