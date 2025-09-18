@@ -109,29 +109,19 @@ impl Storage {
     }
 
     async fn invalidate_internal(&self, invalidation_keys: Vec<String>) -> StorageResult<u64> {
-        let mut join_set = JoinSet::default();
+        let pipeline = self.writer_storage.client().pipeline();
         for invalidation_key in &invalidation_keys {
-            let client = self.writer_storage.client();
             let invalidation_key = self.make_key(format!("cache-tag:{invalidation_key}"));
             let _ = self.cache_tag_tx.try_send(invalidation_key.clone());
-            join_set.spawn(async move {
-                client
-                    .zrange::<Vec<String>, _, _, _>(
-                        invalidation_key.clone(),
-                        0,
-                        -1,
-                        None,
-                        false,
-                        None,
-                        false,
-                    )
-                    .await
-            });
+            let _: () = pipeline
+                .zrange(invalidation_key.clone(), 0, -1, None, false, None, false)
+                .await?;
         }
 
         let mut all_keys = HashSet::new();
-        while let Some(result) = join_set.join_next().await {
-            all_keys.extend(result??.into_iter().map(fred::types::Key::from));
+        let result_vec: Vec<Result<Vec<String>, _>> = pipeline.try_all().await;
+        for result in result_vec {
+            all_keys.extend(result?.into_iter().map(fred::types::Key::from))
         }
 
         if all_keys.is_empty() {
@@ -178,6 +168,8 @@ impl Storage {
                 // NB: `cache_tag` already includes namespace
                 let cache_tag_key = cache_tag;
                 let cutoff = now_epoch_seconds() - 1;
+
+                // TODO: timeout for this?
                 let removed_items_result: Result<u64, _> = storage
                     .client()
                     .zremrangebyscore(&cache_tag_key, f64::NEG_INFINITY, cutoff as f64)
@@ -289,8 +281,7 @@ impl CacheStorage for Storage {
 
         // NB: spawn separate tasks in case sets are on different shards, as fred will multiplex into
         // pipelines anyway
-        let mut join_set = JoinSet::default();
-        let client = self.writer_storage.client();
+        let pipeline = self.writer_storage.client().pipeline();
         for (cache_tag_key, elements) in cache_tags_to_pcks.into_iter() {
             // NB: send this key to the queue for cleanup
             let _ = self.cache_tag_tx.try_send(cache_tag_key.clone());
@@ -305,70 +296,60 @@ impl CacheStorage for Storage {
                 .unwrap_or(now as f64)
                 + 1.0;
 
-            let pipeline = client.pipeline();
-            join_set.spawn(async move {
+            let _: Result<(), _> = pipeline
+                .zadd(
+                    cache_tag_key.clone(),
+                    None,
+                    Some(Ordering::GreaterThan),
+                    false,
+                    false,
+                    elements,
+                )
+                .await;
+
+            // > A non-volatile key is treated as an infinite TTL for the purpose of GT and LT.
+            // > The GT, LT and NX options are mutually exclusive.
+            //   - https://redis.io/docs/latest/commands/expire/
+            //
+            // what we want are NX (set when key has no expiry) AND GT (set when new expiry is greater
+            // than the current one).
+            // that means we have to call `expire_at` twice :(
+            for exp_opt in [ExpireOptions::NX, ExpireOptions::GT] {
                 let _: Result<(), _> = pipeline
-                    .zadd(
-                        cache_tag_key.clone(),
-                        None,
-                        Some(Ordering::GreaterThan),
-                        false,
-                        false,
-                        elements,
-                    )
+                    .expire_at(cache_tag_key.clone(), max_expiry_time as i64, Some(exp_opt))
                     .await;
-
-                // > A non-volatile key is treated as an infinite TTL for the purpose of GT and LT.
-                // > The GT, LT and NX options are mutually exclusive.
-                //   - https://redis.io/docs/latest/commands/expire/
-                //
-                // what we want are NX (set when key has no expiry) AND GT (set when new expiry is greater
-                // than the current one).
-                // that means we have to call `expire_at` twice :(
-                for exp_opt in [ExpireOptions::NX, ExpireOptions::GT] {
-                    let _: Result<(), _> = pipeline
-                        .expire_at(cache_tag_key.clone(), max_expiry_time as i64, Some(exp_opt))
-                        .await;
-                }
-
-                pipeline.try_all::<Value>().await
-            });
+            }
         }
 
-        while let Some(result_vec) = join_set.join_next().await {
-            for result in result_vec? {
-                if let Err(err) = result {
-                    tracing::debug!("Caught error during cache tag update: {err:?}");
-                    return Err(err.into());
-                }
+        let result_vec = pipeline.try_all::<Value>().await;
+        for result in result_vec {
+            if let Err(err) = result {
+                tracing::debug!("Caught error during cache tag update: {err:?}");
+                return Err(err.into());
             }
         }
 
         // phase 3
-        // NB: spawn separate tasks in case sets are on different shards, as fred will multiplex into
-        // pipelines anyway
-        let mut join_set = JoinSet::default();
+        let pipeline = self.writer_storage.client().pipeline();
         for document in batch_docs.into_iter() {
-            let client = self.writer_storage.client();
             let value = CacheValue {
                 data: document.data,
                 cache_control: document.cache_control,
             };
-            join_set.spawn(async move {
-                client
-                    .set::<(), _, _>(
-                        document.cache_key,
-                        &serde_json::to_string(&value).unwrap(),
-                        Some(Expiration::EXAT((now + document.expire.as_secs()) as i64)),
-                        None,
-                        false,
-                    )
-                    .await
-            });
+            let _: () = pipeline
+                .set::<(), _, _>(
+                    document.cache_key,
+                    &serde_json::to_string(&value).unwrap(),
+                    Some(Expiration::EXAT((now + document.expire.as_secs()) as i64)),
+                    None,
+                    false,
+                )
+                .await?;
         }
 
-        while let Some(result) = join_set.join_next().await {
-            if let Err(err) = result? {
+        let result_vec = pipeline.try_all::<Value>().await;
+        for result in result_vec {
+            if let Err(err) = result {
                 tracing::debug!("Caught error during document insert: {err:?}");
                 return Err(err.into());
             }
