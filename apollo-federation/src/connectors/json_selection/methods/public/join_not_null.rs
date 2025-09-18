@@ -209,6 +209,7 @@ mod tests {
     use shape::location::SourceId;
 
     use super::*;
+    use crate::connectors::json_selection::ApplyToError;
     use crate::connectors::json_selection::lit_expr::LitExpr;
     use crate::selection;
 
@@ -360,6 +361,34 @@ mod tests {
         assert_eq!(
             output_shape,
             Shape::string([SourceId::new("test".to_string()).location(0..7)])
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn join_not_null_should_return_none_when_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!("$.a->joinNotNull($.missing)", spec).apply_to(&json!({
+                "a": ["hello", "world"],
+            })),
+            (
+                None,
+                vec![
+                    ApplyToError::from_json(&json!({
+                        "message": "Property .missing not found in object",
+                        "path": ["missing"],
+                        "range": [19, 26],
+                        "spec": spec.to_string(),
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "Method ->joinNotNull requires a string argument, but received null",
+                        "path": ["a", "->joinNotNull"],
+                        "range": [5, 16],
+                        "spec": spec.to_string(),
+                    }))
+                ]
+            ),
         );
     }
 }

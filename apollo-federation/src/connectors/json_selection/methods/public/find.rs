@@ -168,6 +168,8 @@ fn find_shape(
 mod method_tests {
     use serde_json_bytes::json;
 
+    use crate::connectors::ConnectSpec;
+    use crate::connectors::json_selection::ApplyToError;
     use crate::selection;
 
     #[test]
@@ -291,6 +293,34 @@ mod method_tests {
         assert_eq!(
             selection!("$->echo([])->find(@->eq(1))").apply_to(&json!(null)),
             (None, vec![]),
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn find_should_return_none_when_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!("$.a->find($.missing)", spec).apply_to(&json!({
+                "a": [1, 2, 3],
+            })),
+            (
+                None,
+                vec![
+                    ApplyToError::from_json(&json!({
+                        "message": "Property .missing not found in object",
+                        "path": ["missing"],
+                        "range": [12, 19],
+                        "spec": spec.to_string(),
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "->find condition must return a boolean value",
+                        "path": ["a", "->find", 0],
+                        "range": [5, 9],
+                        "spec": spec.to_string(),
+                    }))
+                ]
+            ),
         );
     }
 }

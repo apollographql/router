@@ -94,6 +94,8 @@ fn match_if_shape(
 mod tests {
     use serde_json_bytes::json;
 
+    use crate::connectors::ConnectSpec;
+    use crate::connectors::json_selection::ApplyToError;
     use crate::selection;
 
     #[test]
@@ -134,6 +136,36 @@ mod tests {
                     "num": "not a number",
                 })),
                 vec![],
+            ),
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn match_if_should_return_none_when_condition_argument_evaluates_to_none(
+        #[case] spec: ConnectSpec,
+    ) {
+        assert_eq!(
+            selection!("$.a->matchIf([$.missing, 'default'])", spec).apply_to(&json!({
+                "a": "test",
+            })),
+            (
+                None,
+                vec![
+                    ApplyToError::from_json(&json!({
+                        "message": "Property .missing not found in object",
+                        "path": ["missing"],
+                        "range": [16, 23],
+                        "spec": spec.to_string(),
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "Method ->matchIf did not match any [condition, value] pair",
+                        "path": ["a", "->matchIf"],
+                        "range": [5, 36],
+                        "spec": spec.to_string(),
+                    }))
+                ]
             ),
         );
     }
