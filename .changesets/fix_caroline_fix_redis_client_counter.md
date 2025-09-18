@@ -1,10 +1,10 @@
 ### Correct Redis client counting metric ([PR #8161](https://github.com/apollographql/router/pull/8161))
 
-The `apollo.router.cache.redis.connections` metric has been removed and replaced with the
-`apollo.router.cache.redis.clients` metric.
+**The `apollo.router.cache.redis.connections` metric has been removed and replaced with the
+`apollo.router.cache.redis.clients` metric.**
 
 The `connections` metric was implemented with an up-down counter which would sometimes not be collected properly (i.e.
-it could go negative). The name `*.connections` was also inaccurate given that our Redis clients will each make multiple
+it could go negative). The name `connections` was also inaccurate given that the Redis clients will each make multiple
 connections, one to each node in the Redis pool (if in clustered mode).
 
 The new `clients` metric counts the number of clients across the router via an `AtomicU64` and surfaces that value in a
