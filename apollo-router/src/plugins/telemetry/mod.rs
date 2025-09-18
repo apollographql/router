@@ -15,7 +15,6 @@ use config_new::cache::CacheInstruments;
 use config_new::connector::instruments::ConnectorInstruments;
 use config_new::instruments::InstrumentsConfig;
 use config_new::instruments::StaticInstrument;
-use error_handler::handle_error;
 use futures::StreamExt;
 use futures::future::BoxFuture;
 use futures::future::ready;
@@ -44,7 +43,7 @@ use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceId;
 use opentelemetry::trace::TraceState;
-use opentelemetry::trace::TracerProvider;
+use opentelemetry_appender_tracing::layer;
 use opentelemetry_sdk::trace::Builder;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
@@ -58,6 +57,9 @@ use tokio::runtime::Handle;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tracing_subscriber::filter::filter_fn;
+use tracing_subscriber::fmt::Layer;
+use tracing_subscriber::prelude::*;
 use uuid::Uuid;
 
 use self::apollo::ForwardValues;
@@ -368,9 +370,6 @@ impl PluginPrivate for Telemetry {
     type Config = config::Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        opentelemetry::global::set_error_handler(handle_error)
-            .expect("otel error handler lock poisoned, fatal");
-
         let mut config = init.config;
         config.instrumentation.spans.update_defaults();
         config.instrumentation.instruments.update_defaults();
@@ -384,6 +383,26 @@ impl PluginPrivate for Telemetry {
             config.calculate_field_level_instrumentation_ratio()?;
         let metrics_builder = Self::create_metrics_builder(&config)?;
         let tracer_provider = Self::create_tracer_provider(&config)?;
+
+        // handle OpenTelemetry internal logs and stop them from propagating to tracing bridge/appender
+        // capture logs with the opentelemetry prefix and print them to eprintln!
+        let opentelemetry_layer = Layer::new()
+            .with_writer(std::io::stderr)
+            .with_filter(filter_fn(|metadata| {
+                metadata.target().starts_with("opentelemetry")
+            }));
+
+        // bridge layer to handle tracing (non-internal) logs
+        let non_opentelemetry_filter =
+            filter_fn(|metadata| !metadata.target().starts_with("opentelemetry"));
+        let otel_bridge_layer = layer::OpenTelemetryTracingBridge::new(&tracer_provider.clone())
+            .with_filter(non_opentelemetry_filter);
+
+        // register layers in tracing registry
+        tracing_subscriber::registry()
+            .with(opentelemetry_layer) // OpenTelemetry internal logs (filtered out)
+            .with(otel_bridge_layer) // OpenTelemetry tracing bridge
+            .init();
 
         if config.instrumentation.spans.mode == SpanMode::Deprecated {
             ::tracing::warn!(

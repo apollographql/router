@@ -166,6 +166,7 @@ opentelemetry_sdk = { version = "0.27.0", default-features = false, features = [
     "trace",
     "metrics",
 ] }
+opentelemetry-appender-tracing = "0.27.0"
 opentelemetry-aws = "0.15.0"
 # START TEMP DATADOG Temporarily remove until we upgrade otel to the latest version
 # This means including the rmp library
