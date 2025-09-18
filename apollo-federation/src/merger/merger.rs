@@ -607,7 +607,7 @@ impl Merger {
                 )
             })
             .collect();
-        let type_kind_to_string = |type_def: &TypeDefinitionPosition, _| {
+        let type_kind_to_string = |type_def: &TypeDefinitionPosition| {
             let type_kind_description = if types_with_interface_object.contains(type_def) {
                 "Interface Object Type (Object Type with @interfaceObject)".to_string()
             } else {
@@ -615,9 +615,9 @@ impl Merger {
             };
             Some(type_kind_description)
         };
-        // TODO: Second type param is supposed to be representation of AST nodes
+        // TODO: Third type param is supposed to be representation of AST nodes
         self.error_reporter
-            .report_mismatch_error::<TypeDefinitionPosition, ()>(
+            .report_mismatch_error::<TypeDefinitionPosition, TypeDefinitionPosition, ()>(
                 CompositionError::TypeKindMismatch {
                     message: format!(
                         "Type \"{}\" has mismatched kind: it is defined as ",
@@ -626,6 +626,7 @@ impl Merger {
                 },
                 mismatched_type,
                 &sources,
+                type_kind_to_string,
                 type_kind_to_string,
             );
     }
@@ -947,7 +948,29 @@ impl Merger {
                             ExtendedType::Interface(itf.get(self.merged.schema())?.clone())
                         }
                     };
-                    self.error_reporter.report_mismatch_hint::<ExtendedType, ()>(
+                    fn print_ty_has_field(
+                        ty: &ExtendedType,
+                        field_pos: &ObjectOrInterfaceFieldDefinitionPosition,
+                    ) -> Option<String> {
+                        match ty {
+                            ExtendedType::Object(obj) => {
+                                if obj.fields.contains_key(field_pos.field_name()) {
+                                    Some("yes".to_string())
+                                } else {
+                                    Some("no".to_string())
+                                }
+                            }
+                            ExtendedType::Interface(itf) => {
+                                if itf.fields.contains_key(field_pos.field_name()) {
+                                    Some("yes".to_string())
+                                } else {
+                                    Some("no".to_string())
+                                }
+                            }
+                            _ => Some("no".to_string()),
+                        }
+                    }
+                    self.error_reporter.report_mismatch_hint::<ExtendedType, ExtendedType, ()>(
                         hint_id.clone(),
                         format!("Field \"{}.{}\" of {} type \"{}\" is defined in some but not all subgraphs that define \"{}\"",
                             dest.type_name(),
@@ -958,23 +981,8 @@ impl Merger {
                         ),
                         &dest_in_supergraph,
                         &printable_sources,
-                        |ty, _| match ty {
-                            ExtendedType::Object(obj) => {
-                                if obj.fields.contains_key(field_pos.field_name()) {
-                                    Some("yes".to_string())
-                                } else {
-                                    Some("no".to_string())
-                                }
-                            },
-                            ExtendedType::Interface(itf) => {
-                                if itf.fields.contains_key(field_pos.field_name()) {
-                                    Some("yes".to_string())
-                                } else {
-                                    Some("no".to_string())
-                                }
-                            },
-                            _ => Some("no".to_string()),
-                        },
+                        |ty| print_ty_has_field(ty, &field_pos),
+                        |ty| print_ty_has_field(ty, &field_pos),
                         |_, subgraphs| format!("\"{}.{}\" is defined in {}", field_pos.type_name(), field_pos.field_name(), subgraphs.unwrap_or_default()),
                         |_, subgraphs| format!(" but not in {}", subgraphs),
                         None::<fn(Option<&ExtendedType>) -> bool>,
@@ -1010,20 +1018,21 @@ impl Merger {
         }
         let supergraph = 0;
         if !source_as_entity.is_empty() && !source_as_non_entity.is_empty() {
-            self.error_reporter.report_mismatch_hint::<usize, ()>(
-                        HintCode::InconsistentEntity,
-                        format!("Type \"{}\" is declared as an entity (has a @key applied) in some but all defining subgraphs: ",
-                            &obj.type_name,
-                        ),
-                        &supergraph,
-                        &sources,
-                        |idx, _| if source_as_entity.contains(idx) { Some("yes".to_string()) } else { Some("no".to_string()) },
-                        |_, subgraphs| format!("it has no @key in {}", subgraphs.unwrap_or_default()),
-                        |_, subgraphs| format!(" but has some @key in {}", subgraphs),
-                        None::<fn(Option<&usize>) -> bool>,
-                        false,
-                        false,
-                    );
+            self.error_reporter.report_mismatch_hint::<usize, usize, ()>(
+                HintCode::InconsistentEntity,
+                format!("Type \"{}\" is declared as an entity (has a @key applied) in some but all defining subgraphs: ",
+                    &obj.type_name,
+                ),
+                &supergraph,
+                &sources,
+                |idx| if source_as_entity.contains(idx) { Some("yes".to_string()) } else { Some("no".to_string()) },
+                |idx| if source_as_entity.contains(idx) { Some("yes".to_string()) } else { Some("no".to_string()) },
+                |_, subgraphs| format!("it has no @key in {}", subgraphs.unwrap_or_default()),
+                |_, subgraphs| format!(" but has some @key in {}", subgraphs),
+                None::<fn(Option<&usize>) -> bool>,
+                false,
+                false,
+            );
         }
         Ok(!source_as_entity.is_empty())
     }
@@ -1187,11 +1196,12 @@ impl Merger {
                 }
             };
 
-            self.error_reporter_mut().report_mismatch_error::<T, ()>(
+            self.error_reporter_mut().report_mismatch_error::<T, T, ()>(
                 error,
                 dest,
                 sources,
-                |typ, _is_supergraph| Some(format!("type \"{typ}\"")), // TODO: Check this is correct now that dest has changed to a position
+                |typ| Some(format!("type \"{typ}\"")), // TODO: Use return type here
+                |typ| Some(format!("type \"{typ}\"")), // TODO: Use return type here
             );
 
             Ok(false)
@@ -1209,7 +1219,7 @@ impl Merger {
                 "subtypes"
             };
 
-            self.error_reporter_mut().report_mismatch_hint::<T, ()>(
+            self.error_reporter_mut().report_mismatch_hint::<T, T, ()>(
                 hint_code,
                 format!(
                     "Type of {element_kind} \"{dest}\" is inconsistent but compatible across subgraphs:",
@@ -1217,7 +1227,8 @@ impl Merger {
                 ),
                 dest,
                 sources,
-                |typ, _is_supergraph| Some(format!("type \"{typ}\"")),
+                |typ| Some(format!("type \"{typ}\"")),
+                |typ| Some(format!("type \"{typ}\"")),
                 |elt, subgraphs| {
                     format!(
                         "will use type \"{elt}\" (from {}) in supergraph but \"{dest}\" has ",
@@ -1455,14 +1466,13 @@ impl Merger {
                 } else {
                     "The schema definition"
                 };
-                self.error_reporter.report_mismatch_hint::<T, ()>(
+                self.error_reporter.report_mismatch_hint::<T, T, ()>(
                     HintCode::InconsistentDescription,
                     format!("{name} has inconsistent descriptions across the subgraphs. "),
                     dest,
                     sources,
-                    |elem, _is_supergraph| {
-                        elem.description(&self.merged).map(|desc| desc.to_string())
-                    },
+                    |elem| elem.description(&self.merged).map(|desc| desc.to_string()),
+                    |elem| elem.description(&self.merged).map(|desc| desc.to_string()),
                     |desc, subgraphs| {
                         format!(
                             "The supergraph will use description (from {}):\n{}",

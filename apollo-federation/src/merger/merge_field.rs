@@ -506,7 +506,7 @@ impl Merger {
 
         // Phase 2: Reporting - report errors in groups, matching JS version order
         if has_invalid_types {
-            self.error_reporter.report_mismatch_error::<FieldDefinitionPosition, ()>(
+            self.error_reporter.report_mismatch_error::<FieldDefinitionPosition, FieldDefinitionPosition, ()>(
                 CompositionError::ExternalTypeMismatch {
                     message: format!(
                         "Type of field \"{dest}\" is incompatible across subgraphs (where marked @external): it has ",
@@ -514,7 +514,8 @@ impl Merger {
                 },
                 dest,
                 sources,
-                |source, _| Some(format!("type \"{source}\"")),
+                |dest| Some(format!("type \"{dest}\"")), // TODO: These should give the return type
+                |source| Some(format!("type \"{source}\"")),
             );
         }
 
@@ -536,7 +537,7 @@ impl Merger {
                 field_name: dest.field_name().clone(),
                 argument_name: arg_name.clone(),
             };
-            self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ()>(
+            self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ObjectFieldArgumentDefinitionPosition, ()>(
                 CompositionError::ExternalArgumentTypeMismatch {
                     message: format!(
                         "Type of argument \"{argument_pos}\" is incompatible across subgraphs (where \"{dest}\" is marked @external): it has ",
@@ -544,7 +545,8 @@ impl Merger {
                 },
                 &argument_pos,
                 &self.argument_sources(sources, arg_name)?,
-                |source, _| Some(format!("type \"{source}\"")),
+                |dest| Some(format!("type \"{dest}\"")), // TODO: These should use the return type
+                |source| Some(format!("type \"{source}\"")),
             );
         }
 
@@ -554,7 +556,7 @@ impl Merger {
                 field_name: dest.field_name().clone(),
                 argument_name: arg_name.clone(),
             };
-            self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ()>(
+            self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ObjectFieldArgumentDefinitionPosition, ()>(
                 CompositionError::ExternalArgumentDefaultMismatch {
                     message: format!(
                         "Argument \"{argument_pos}\" has incompatible defaults across subgraphs (where \"{dest}\" is marked @external): it has ",
@@ -562,7 +564,8 @@ impl Merger {
                 },
                 &argument_pos,
                 &self.argument_sources(sources, arg_name)?,
-                |source, _| Some(format!("default value {source:?}")), // TODO: Need proper value formatting
+                |dest| Some(format!("default value {dest:?}")), // TODO: Need proper value formatting
+                |source| Some(format!("default value {source:?}")), // TODO: Need proper value formatting
             );
         }
 
