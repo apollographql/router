@@ -165,6 +165,7 @@ opentelemetry_sdk = { version = "0.27.0", default-features = false, features = [
     "rt-tokio",
     "trace",
     "metrics",
+    "spec_unstable_metrics_views",
 ] }
 opentelemetry-appender-tracing = "0.27.0"
 opentelemetry-aws = "0.15.0"

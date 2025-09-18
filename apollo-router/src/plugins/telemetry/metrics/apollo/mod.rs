@@ -4,11 +4,11 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use opentelemetry::KeyValue;
-use opentelemetry_otlp::MetricsExporterBuilder;
+use opentelemetry_otlp::MetricExporter;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_otlp::WithTonicConfig;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::metrics::PeriodicReader;
-use opentelemetry_sdk::metrics::data::Temporality;
+use opentelemetry_sdk::metrics::{Aggregation, Instrument, PeriodicReader, Stream};
 use opentelemetry_sdk::runtime;
 use prometheus::exponential_buckets;
 use sys_info::hostname;
@@ -25,10 +25,8 @@ use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::MetricsCommon;
-use crate::plugins::telemetry::metrics::CustomAggregationSelector;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
-use crate::plugins::telemetry::otlp::CustomTemporalitySelector;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::plugins::telemetry::otlp::process_endpoint;
@@ -120,15 +118,16 @@ impl Config {
         let mut metadata = MetadataMap::new();
         metadata.insert("apollo.api.key", key.parse()?);
         let exporter = match otlp_protocol {
-            Protocol::Grpc => MetricsExporterBuilder::Tonic(
-                opentelemetry_otlp::new_exporter()
-                    .tonic()
+            Protocol::Grpc => 
+                MetricExporter::builder()
+                    .with_tonic()
                     .with_tls_config(ClientTlsConfig::new().with_native_roots())
                     .with_endpoint(endpoint.as_str())
                     .with_timeout(batch_config.max_export_timeout)
+                    .with_temporality(opentelemetry_sdk::metrics::Temporality::Delta)
                     .with_metadata(metadata.clone())
-                    .with_compression(opentelemetry_otlp::Compression::Gzip),
-            ),
+                    .with_compression(opentelemetry_otlp::Compression::Gzip)
+                    .build()?,
             // While Apollo doesn't use the HTTP protocol, we support it here for
             // use in tests to enable WireMock.
             Protocol::Http => {
@@ -137,68 +136,47 @@ impl Config {
                     &TelemetryDataKind::Metrics,
                     &Protocol::Http,
                 )?;
-                let mut otlp_exporter = opentelemetry_otlp::new_exporter()
-                    .http()
+                let mut otlp_exporter = MetricExporter::builder()
+                    .with_http()
                     .with_protocol(opentelemetry_otlp::Protocol::Grpc)
+                    .with_temporality(opentelemetry_sdk::metrics::Temporality::Delta)
                     .with_timeout(batch_config.max_export_timeout);
                 if let Some(endpoint) = maybe_endpoint {
                     otlp_exporter = otlp_exporter.with_endpoint(endpoint);
                 }
-                MetricsExporterBuilder::Http(otlp_exporter)
+                otlp_exporter.build()?
             }
-        }
-        .build_metrics_exporter(
-            Box::new(CustomTemporalitySelector(
-                Temporality::Delta,
-            )),
-            Box::new(
-                CustomAggregationSelector::builder()
-                    .boundaries(default_buckets())
-                    .build(),
-            ),
-        )?;
-        // MetricsExporterBuilder does not implement Clone, so we need to create a new builder for the realtime exporter
+        };
+        // MetricExporterBuilder does not implement Clone, so we need to create a new builder for the realtime exporter
         let realtime_exporter = match otlp_protocol {
-            Protocol::Grpc => MetricsExporterBuilder::Tonic(
-                opentelemetry_otlp::new_exporter()
-                    .tonic()
+            Protocol::Grpc => 
+                MetricExporter::builder()
+                    .with_tonic()
                     .with_tls_config(ClientTlsConfig::new().with_native_roots())
                     .with_endpoint(endpoint.as_str())
                     .with_timeout(batch_config.max_export_timeout)
+                    .with_temporality(opentelemetry_sdk::metrics::Temporality::Delta)
                     .with_metadata(metadata.clone())
-                    .with_compression(opentelemetry_otlp::Compression::Gzip),
-            ),
+                    .with_compression(opentelemetry_otlp::Compression::Gzip)
+                    .build()?,
+            
             Protocol::Http => {
                 let maybe_endpoint = process_endpoint(
                     &Some(endpoint.to_string()),
                     &TelemetryDataKind::Metrics,
                     &Protocol::Http,
                 )?;
-                let mut otlp_exporter = opentelemetry_otlp::new_exporter()
-                    .http()
+                let mut otlp_exporter = MetricExporter::builder()
+                    .with_http()
                     .with_protocol(opentelemetry_otlp::Protocol::Grpc)
-                    .with_timeout(batch_config.max_export_timeout);
+                    .with_timeout(batch_config.max_export_timeout)
+                    .with_temporality(opentelemetry_sdk::metrics::Temporality::Delta);
                 if let Some(endpoint) = maybe_endpoint {
                     otlp_exporter = otlp_exporter.with_endpoint(endpoint);
                 }
-                MetricsExporterBuilder::Http(otlp_exporter)
+                otlp_exporter.build()??
             }
-        }
-        .build_metrics_exporter(
-            Box::new(CustomTemporalitySelector(
-                Temporality::Delta,
-            )),
-            // This aggregation uses the Apollo histogram format where a duration, x, in μs is
-            // counted in the bucket of index max(0, min(ceil(ln(x)/ln(1.1)), 383)).
-            Box::new(
-                CustomAggregationSelector::builder()
-                    .boundaries(
-                        // Returns [~1.4ms ... ~5min]
-                        exponential_buckets(0.001399084909, 1.1, 129).unwrap(),
-                    )
-                    .build(),
-            ),
-        )?;
+        };
         let default_reader = PeriodicReader::builder(exporter, runtime::Tokio)
             .with_interval(Duration::from_secs(60))
             .with_timeout(batch_config.max_export_timeout)
@@ -225,15 +203,41 @@ impl Config {
             KeyValue::new("apollo.client.uname", get_uname()?),
         ]);
 
+        let view_default_aggregation = |_i: &Instrument| {
+            Some(
+                Stream::builder()
+                    .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                        boundaries: default_buckets(),
+                        record_min_max: true,
+                    })
+                    .build()
+                    .unwrap(),
+            )
+        };
+
+        let view_custom_aggregation = |_i: &Instrument| {
+            Some(
+                Stream::builder()
+                    .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                        boundaries: exponential_buckets(0.001399084909, 1.1, 129).unwrap(),
+                        record_min_max: true,
+                    })
+                    .build()
+                    .unwrap(),
+            )
+        };
+
         builder.apollo_meter_provider_builder = builder
             .apollo_meter_provider_builder
             .with_reader(default_reader)
-            .with_resource(resource.clone());
+            .with_resource(resource.clone())
+            .with_view(view_default_aggregation);
 
         builder.apollo_realtime_meter_provider_builder = builder
             .apollo_realtime_meter_provider_builder
             .with_reader(realtime_reader)
-            .with_resource(resource.clone());
+            .with_resource(resource.clone())
+            .with_view(view_custom_aggregation);
         Ok(builder)
     }
 
