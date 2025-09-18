@@ -45,6 +45,7 @@ impl From<StorageError> for InvalidationError {
                 fred::error::ErrorKind::Timeout,
                 "wrapper timed out",
             )),
+            StorageError::JoinError(error) => Self::Misc(error.into()),
         }
     }
 }

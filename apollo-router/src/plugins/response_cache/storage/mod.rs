@@ -4,6 +4,7 @@ use std::fmt::Formatter;
 use std::time::Duration;
 use std::time::Instant;
 
+use tokio::task::JoinError;
 use tokio::time::timeout;
 
 use crate::plugins::response_cache::ErrorCode;
@@ -16,6 +17,7 @@ pub(super) enum Error {
     Redis(fred::error::Error),
     Serialize(serde_json::Error),
     Timeout,
+    JoinError(JoinError),
 }
 
 impl Error {
@@ -23,6 +25,7 @@ impl Error {
         match self {
             Error::Redis(err) => err.is_not_found(),
             Error::Serialize(_) => false,
+            Error::JoinError(_) => false,
             Error::Timeout => false,
         }
     }
@@ -33,6 +36,7 @@ impl Display for Error {
         match self {
             Error::Redis(err) => f.write_str(&err.to_string()),
             Error::Serialize(err) => f.write_str(&err.to_string()),
+            Error::JoinError(err) => f.write_str(&err.to_string()),
             Error::Timeout => f.write_str("TIMED_OUT"),
         }
     }
@@ -56,11 +60,18 @@ impl From<tokio::time::error::Elapsed> for Error {
     }
 }
 
+impl From<JoinError> for Error {
+    fn from(err: JoinError) -> Self {
+        Error::JoinError(err)
+    }
+}
+
 impl ErrorCode for Error {
     fn code(&self) -> &'static str {
         match self {
             Error::Redis(err) => err.kind().to_str(),
             Error::Serialize(_) => "serialize // TODO",
+            Error::JoinError(_) => "join_error // TODO",
             Error::Timeout => "TIMED_OUT",
         }
     }

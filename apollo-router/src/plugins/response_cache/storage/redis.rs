@@ -9,11 +9,11 @@ use fred::types::Expiration;
 use fred::types::ExpireOptions;
 use fred::types::Value;
 use fred::types::sorted_sets::Ordering;
-use futures::future::join_all;
 use serde::Deserialize;
 use serde::Serialize;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Receiver;
+use tokio::task::JoinSet;
 use tower::BoxError;
 
 use crate::cache::redis::RedisCacheStorage;
@@ -109,12 +109,12 @@ impl Storage {
     }
 
     async fn invalidate_internal(&self, invalidation_keys: Vec<String>) -> StorageResult<u64> {
-        let mut tasks = Vec::new();
+        let mut join_set = JoinSet::default();
         for invalidation_key in &invalidation_keys {
             let client = self.writer_storage.client();
             let invalidation_key = self.make_key(format!("cache-tag:{invalidation_key}"));
             let _ = self.cache_tag_tx.try_send(invalidation_key.clone());
-            tasks.push(async move {
+            join_set.spawn(async move {
                 client
                     .zrange::<Vec<String>, _, _, _>(
                         invalidation_key.clone(),
@@ -130,9 +130,8 @@ impl Storage {
         }
 
         let mut all_keys = HashSet::new();
-        let results = join_all(tasks).await;
-        for result in results {
-            all_keys.extend(result?.into_iter().map(fred::types::Key::from));
+        while let Some(result) = join_set.join_next().await {
+            all_keys.extend(result??.into_iter().map(fred::types::Key::from));
         }
 
         if all_keys.is_empty() {
@@ -290,7 +289,7 @@ impl CacheStorage for Storage {
 
         // NB: spawn separate tasks in case sets are on different shards, as fred will multiplex into
         // pipelines anyway
-        let mut tasks = Vec::new();
+        let mut join_set = JoinSet::default();
         let client = self.writer_storage.client();
         for (cache_tag_key, elements) in cache_tags_to_pcks.into_iter() {
             // NB: send this key to the queue for cleanup
@@ -307,7 +306,7 @@ impl CacheStorage for Storage {
                 + 1.0;
 
             let pipeline = client.pipeline();
-            tasks.push(async move {
+            join_set.spawn(async move {
                 let _: Result<(), _> = pipeline
                     .zadd(
                         cache_tag_key.clone(),
@@ -332,31 +331,32 @@ impl CacheStorage for Storage {
                         .await;
                 }
 
-                pipeline.try_all().await
+                pipeline.try_all::<Value>().await
             });
         }
 
-        let results: Vec<Vec<Result<Value, _>>> = join_all(tasks).await;
-        for result in results.into_iter().flatten() {
-            if let Err(err) = result {
-                tracing::debug!("Caught error during cache tag update: {err:?}");
-                return Err(err.into());
+        while let Some(result_vec) = join_set.join_next().await {
+            for result in result_vec? {
+                if let Err(err) = result {
+                    tracing::debug!("Caught error during cache tag update: {err:?}");
+                    return Err(err.into());
+                }
             }
         }
 
         // phase 3
         // NB: spawn separate tasks in case sets are on different shards, as fred will multiplex into
         // pipelines anyway
-        let mut tasks = Vec::new();
+        let mut join_set = JoinSet::default();
         for document in batch_docs.into_iter() {
             let client = self.writer_storage.client();
             let value = CacheValue {
                 data: document.data,
                 cache_control: document.cache_control,
             };
-            tasks.push(async move {
+            join_set.spawn(async move {
                 client
-                    .set(
+                    .set::<(), _, _>(
                         document.cache_key,
                         &serde_json::to_string(&value).unwrap(),
                         Some(Expiration::EXAT((now + document.expire.as_secs()) as i64)),
@@ -367,9 +367,8 @@ impl CacheStorage for Storage {
             });
         }
 
-        let results: Vec<Result<Value, _>> = join_all(tasks).await;
-        for result in results {
-            if let Err(err) = result {
+        while let Some(result) = join_set.join_next().await {
+            if let Err(err) = result? {
                 tracing::debug!("Caught error during document insert: {err:?}");
                 return Err(err.into());
             }
@@ -420,22 +419,23 @@ impl CacheStorage for Storage {
         invalidation_keys: Vec<String>,
         subgraph_names: Vec<String>,
     ) -> StorageResult<HashMap<String, u64>> {
-        let mut tasks = Vec::new();
-        for subgraph_name in &subgraph_names {
+        let mut join_set = JoinSet::default();
+        for subgraph_name in subgraph_names {
             let keys: Vec<String> = invalidation_keys
                 .iter()
                 .map(|invalidation_key| format!("subgraph-{subgraph_name}:key-{invalidation_key}"))
                 .collect();
-            tasks.push(self.invalidate_internal(keys));
+            let storage = self.clone();
+            join_set.spawn(async move { (subgraph_name, storage.invalidate_internal(keys).await) });
         }
 
-        let counts = join_all(tasks).await;
+        let mut counts = HashMap::default();
+        while let Some(result) = join_set.join_next().await {
+            let (subgraph_name, count) = result?;
+            counts.insert(subgraph_name, count.unwrap_or(0));
+        }
 
-        Ok(subgraph_names
-            .into_iter()
-            .zip(counts.into_iter())
-            .map(|(name, result)| (name, result.unwrap_or(0)))
-            .collect())
+        Ok(counts)
     }
 
     #[cfg(all(
@@ -545,6 +545,7 @@ mod tests {
 
     use insta::assert_debug_snapshot;
     use itertools::Itertools;
+    use tower::BoxError;
 
     use super::Config;
     use super::Storage;
@@ -944,6 +945,8 @@ mod tests {
     /// Tests that ensure that if a key's cache tag cannot be updated, the key will not be updated.
     mod cache_tag_insert_failure_should_abort_key_insertion {
         use std::sync::Arc;
+        use std::time::Duration;
+        use std::time::Instant;
 
         use fred::error::Error;
         use fred::error::ErrorKind;
@@ -995,12 +998,10 @@ mod tests {
                 storage.truncate_namespace().await?;
                 insert_invalid_cache_tag(key.clone()).await?;
 
-                storage
-                    .insert(document.clone(), SUBGRAPH_NAME)
-                    .await
-                    .expect_err(&format!(
-                        "cache tag {key} should have caused insertion failure"
-                    ));
+                let result = storage.insert(document.clone(), SUBGRAPH_NAME).await;
+                result.expect_err(&format!(
+                    "cache tag {key} should have caused insertion failure"
+                ));
 
                 assert!(!inserted_data(document_key.clone()).await?);
             }
@@ -1043,13 +1044,16 @@ mod tests {
 
         #[tokio::test]
         async fn timeout_failure() -> Result<(), BoxError> {
-            // Mock the Redis connection to be able to simulate a timeout error
+            use crate::plugins::response_cache::storage::Error as StorageError;
+
+            // Mock the Redis connection to be able to simulate a timeout error coming from within
+            // the `fred` client
             #[derive(Default, Debug, Clone)]
             struct MockStorage(Arc<RwLock<Vec<MockCommand>>>);
             impl Mocks for MockStorage {
                 fn process_command(&self, command: MockCommand) -> Result<Value, Error> {
                     self.0.write().push(command);
-                    Err(Error::new(ErrorKind::Timeout, ""))
+                    Err(Error::new(ErrorKind::Timeout, "timeout"))
                 }
             }
 
@@ -1061,10 +1065,9 @@ mod tests {
             let document = common_document();
             let document_key = Value::from(storage.make_key(document.cache_key.clone()));
 
-            storage
-                .insert(document, SUBGRAPH_NAME)
-                .await
-                .expect_err("should have timed out");
+            let result = storage.insert(document, SUBGRAPH_NAME).await;
+            let error = result.expect_err("should have timed out via redis");
+            assert!(matches!(error, StorageError::Redis(e) if e.details() == "timeout"));
 
             // make sure the insert function did not try to operate on the document key
             for command in mock_redis.0.read().iter() {
@@ -1075,6 +1078,63 @@ mod tests {
 
             Ok(())
         }
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn no_response_failure() -> Result<(), BoxError> {
+            use crate::plugins::response_cache::storage::Error as StorageError;
+
+            // Mock the Redis connection to simulate the `fred` client not returning, despite the
+            // timeout value being configured
+            #[derive(Default, Debug, Clone)]
+            struct MockStorage(Arc<RwLock<Vec<MockCommand>>>);
+            impl Mocks for MockStorage {
+                fn process_command(&self, command: MockCommand) -> Result<Value, Error> {
+                    self.0.write().push(command);
+
+                    // NB: need to sleep in an async task so that the task can be aborted by
+                    // `CacheStorage::insert`
+                    let runtime = tokio::runtime::Handle::try_current().unwrap();
+                    let handle = runtime.spawn(async {
+                        tokio::time::sleep(Duration::from_secs(30)).await;
+                    });
+                    while !handle.is_finished() {
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    Ok(Value::Null)
+                }
+            }
+
+            let config = redis_config("no_response_failure");
+            let mock_redis = Arc::new(MockStorage::default());
+            let storage =
+                Storage::mocked(&config, false, mock_redis.clone(), mock_redis.clone()).await?;
+
+            let document = common_document();
+            let document_key = Value::from(storage.make_key(document.cache_key.clone()));
+
+            let now = Instant::now();
+            let result = storage.insert(document, SUBGRAPH_NAME).await;
+            let error = result.expect_err("should have timed out via the tokio::timeout wrapper");
+            assert!(matches!(error, StorageError::Timeout));
+
+            // elapsed time should be close to the configured timeout
+            let elapsed = now.elapsed();
+            assert!(elapsed < 2 * config.timeout);
+
+            // make sure the insert function did not try to operate on the document key
+            for command in mock_redis.0.read().iter() {
+                if command.cmd.contains("SET") && command.args.contains(&document_key) {
+                    panic!("Command {command:?} set the document key");
+                }
+            }
+
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn maintenance_removes_expired_data() -> Result<(), BoxError> {
+        Ok(())
     }
 
     // TODO: invalidation
