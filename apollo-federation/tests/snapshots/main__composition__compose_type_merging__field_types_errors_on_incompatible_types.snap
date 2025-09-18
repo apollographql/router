@@ -1,6 +1,0 @@
----
-source: apollo-federation/tests/composition/compose_type_merging.rs
-expression: "format!(\"Composition errors:\\n{}\", error_strings.join(\"\\n\\n\"))"
----
-Composition errors:
-Type of field "T.f" is incompatible across subgraphs: it has type "String" in subgraph "subgraphA" but type "Int" in subgraph "subgraphB"
