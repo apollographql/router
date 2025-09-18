@@ -32,7 +32,7 @@ use opentelemetry::trace::TraceId;
 use opentelemetry::trace::TracerProvider as OtherTracerProvider;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::Protocol;
-use opentelemetry_otlp::SpanExporterBuilder;
+use opentelemetry_otlp::SpanExporter;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_sdk::Resource;
@@ -381,13 +381,12 @@ impl Telemetry {
                 .with_config(config)
                 .with_span_processor(
                     BatchSpanProcessor::builder(
-                        SpanExporterBuilder::Http(
-                            HttpExporterBuilder::default()
-                                .with_endpoint(endpoint)
-                                .with_protocol(Protocol::HttpBinary),
-                        )
-                        .build_span_exporter()
-                        .expect("otlp pipeline failed"),
+                        SpanExporter::builder()
+                            .with_http()
+                            .with_endpoint(endpoint)
+                            .with_protocol(Protocol::HttpBinary)
+                            .build()
+                            .expect("otlp pipeline failed"),
                         opentelemetry_sdk::runtime::Tokio,
                     )
                     .with_batch_config(
