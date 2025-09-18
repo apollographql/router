@@ -159,22 +159,19 @@ impl Storage {
     }
 
     pub(crate) async fn perform_periodic_maintenance(&self, mut cache_tag_rx: Receiver<String>) {
-        let storage = self.writer_storage.clone();
+        let storage = self.clone();
 
         // spawn a task that reads from cache_tag_rx and uses `zremrangebyscore` on each cache tag
         tokio::spawn(async move {
             while let Some(cache_tag) = cache_tag_rx.recv().await {
-                let now = Instant::now();
                 // NB: `cache_tag` already includes namespace
-                let cache_tag_key = cache_tag;
                 let cutoff = now_epoch_seconds() - 1;
 
                 // TODO: timeout for this?
-                let removed_items_result: Result<u64, _> = storage
-                    .client()
-                    .zremrangebyscore(&cache_tag_key, f64::NEG_INFINITY, cutoff as f64)
+                let now = Instant::now();
+                let removed_items_result = storage
+                    .remove_keys_from_cache_tag_by_cutoff(cache_tag, cutoff as f64)
                     .await;
-
                 let elapsed = now.elapsed();
                 f64_histogram_with_unit!(
                     "apollo.router.operations.response_cache.storage.maintenance",
@@ -198,6 +195,19 @@ impl Storage {
                 }
             }
         });
+    }
+
+    async fn remove_keys_from_cache_tag_by_cutoff(
+        &self,
+        cache_tag_key: String,
+        cutoff_time: f64,
+    ) -> StorageResult<u64> {
+        // Returns number of items removed
+        Ok(self
+            .writer_storage
+            .client()
+            .zremrangebyscore(&cache_tag_key, f64::NEG_INFINITY, cutoff_time)
+            .await?)
     }
 
     /// Create a list of the cache tags that describe this document, with associated namespaces.
@@ -478,21 +488,35 @@ impl Storage {
         Ok(keys)
     }
 
-    async fn ttl(&self, key: &str) -> Result<i64, BoxError> {
+    async fn ttl(&self, key: &str) -> StorageResult<i64> {
         Ok(self.reader_storage.client().ttl(key).await?)
     }
 
-    async fn expire_time(&self, key: &str) -> Result<i64, BoxError> {
+    async fn expire_time(&self, key: &str) -> StorageResult<i64> {
         Ok(self.reader_storage.client().expire_time(key).await?)
     }
 
-    async fn score(&self, sorted_set_key: &str, member: &str) -> Result<i64, BoxError> {
+    async fn zscore(&self, sorted_set_key: &str, member: &str) -> Result<i64, BoxError> {
         let score: String = self
             .reader_storage
             .client()
             .zscore(sorted_set_key, member)
             .await?;
         Ok(score.parse()?)
+    }
+
+    async fn zcard(&self, sorted_set_key: &str) -> StorageResult<u64> {
+        let cardinality = self.reader_storage.client().zcard(sorted_set_key).await?;
+        Ok(cardinality)
+    }
+
+    async fn zexists(&self, sorted_set_key: &str, member: &str) -> StorageResult<bool> {
+        let score: Option<String> = self
+            .reader_storage
+            .client()
+            .zscore(sorted_set_key, member)
+            .await?;
+        Ok(score.is_some())
     }
 }
 
@@ -531,6 +555,8 @@ mod tests {
     use super::Config;
     use super::Storage;
     use super::default_redis_cache_config;
+    use crate::plugins::response_cache::cache_control::now_epoch_seconds;
+    use crate::plugins::response_cache::storage::CacheStorage;
     use crate::plugins::response_cache::storage::Document;
 
     const SUBGRAPH_NAME: &str = "test";
@@ -652,7 +678,7 @@ mod tests {
             assert!(document_expire_time > 0);
 
             for cache_tag_key in &expected_cache_tag_keys {
-                let document_score = storage.score(cache_tag_key, &document_key).await?;
+                let document_score = storage.zscore(cache_tag_key, &document_key).await?;
                 assert_eq!(document_expire_time, document_score);
             }
 
@@ -765,7 +791,7 @@ mod tests {
                 assert!(document_expire_time > 0);
 
                 for cache_tag_key in cache_tag_keys {
-                    let document_score = storage.score(cache_tag_key, document_key).await?;
+                    let document_score = storage.zscore(cache_tag_key, document_key).await?;
                     assert_eq!(document_expire_time, document_score);
                 }
             }
@@ -847,7 +873,7 @@ mod tests {
             let mut scores: HashMap<String, i64> = HashMap::default();
             let mut expire_times: HashMap<String, i64> = HashMap::default();
             for key in &keys {
-                let score = storage.score(key, &document_key).await?;
+                let score = storage.zscore(key, &document_key).await?;
                 assert!(score > 0);
                 scores.insert(key.clone(), score);
 
@@ -874,7 +900,7 @@ mod tests {
 
             // however, the TTL on the cache tags and the score in the cache tags will be the same
             for key in keys {
-                let score = storage.score(&key, &document_key).await?;
+                let score = storage.zscore(&key, &document_key).await?;
                 assert!(score > 0);
                 assert_eq!(*scores.get(&key).unwrap(), score);
 
@@ -932,7 +958,7 @@ mod tests {
 
             // the TTL on the cache tags and the score in the cache tags should have also increased
             for key in keys {
-                let score = storage.score(&key, &document_key).await?;
+                let score = storage.zscore(&key, &document_key).await?;
                 assert!(doc_expire_time <= score);
 
                 let expire_time = storage.expire_time(&key).await?;
@@ -1144,11 +1170,76 @@ mod tests {
     #[tokio::test]
     #[rstest::rstest]
     async fn maintenance_removes_expired_data(
-        #[values(true, false)] _clustered: bool,
+        #[values(true, false)] clustered: bool,
     ) -> Result<(), BoxError> {
+        let config = redis_config("maintenance_removes_expired_data", clustered);
+        let storage = Storage::new(&config).await?;
+
+        // set up two documents with a shared key and different TTLs
+        let documents = vec![
+            Document {
+                cache_key: "cache_key1".to_string(),
+                expire: Duration::from_secs(2),
+                ..common_document()
+            },
+            Document {
+                cache_key: "cache_key2".to_string(),
+                expire: Duration::from_secs(60),
+                ..common_document()
+            },
+            Document {
+                cache_key: "cache_key3".to_string(),
+                expire: Duration::from_secs(60),
+                ..common_document()
+            },
+        ];
+        storage
+            .insert_in_batch(documents.clone(), SUBGRAPH_NAME)
+            .await?;
+
+        // ensure that we have three elements in the 'whole-subgraph' invalidation key
+        let invalidation_key = storage
+            .namespaced_cache_tags(&vec![], SUBGRAPH_NAME)
+            .remove(0);
+        assert_eq!(storage.zcard(&invalidation_key).await?, 3);
+
+        let doc_key1 = storage.make_key("cache_key1");
+        let doc_key2 = storage.make_key("cache_key2");
+        let doc_key3 = storage.make_key("cache_key3");
+        for key in [&doc_key1, &doc_key2, &doc_key3] {
+            assert!(storage.zexists(&invalidation_key, key).await?);
+        }
+
+        // manually trigger maintenance with a time in the future, in between the expiry times of doc1
+        // and docs 2 and 3. therefore, we should remove `cache_key1` and leave `cache_key2` and `cache_key3`
+        let cutoff = now_epoch_seconds() + 10;
+        assert!(storage.zscore(&invalidation_key, &doc_key1).await? < cutoff as i64);
+        let removed_keys = storage
+            .remove_keys_from_cache_tag_by_cutoff(invalidation_key.clone(), cutoff as f64)
+            .await?;
+        assert_eq!(removed_keys, 1);
+
+        // now we should have two elements in the 'whole-subgraph' invalidation key
+        assert_eq!(storage.zcard(&invalidation_key).await?, 2);
+        assert!(!storage.zexists(&invalidation_key, &doc_key1).await?);
+        assert!(storage.zexists(&invalidation_key, &doc_key2).await?);
+        assert!(storage.zexists(&invalidation_key, &doc_key3).await?);
+
+        // manually trigger maintenance with the time set way in the future
+        let cutoff = now_epoch_seconds() + 1000;
+        let removed_keys = storage
+            .remove_keys_from_cache_tag_by_cutoff(invalidation_key.clone(), cutoff as f64)
+            .await?;
+        assert_eq!(removed_keys, 2);
+
+        // now we should have zero elements in the 'whole-subgraph' invalidation key
+        assert_eq!(storage.zcard(&invalidation_key).await?, 0);
+        for key in [&doc_key1, &doc_key2, &doc_key3] {
+            assert!(!storage.zexists(&invalidation_key, key).await?);
+        }
+
         Ok(())
     }
 
     // TODO: invalidation
-    // TODO: maintenance will only remove expired data
 }
