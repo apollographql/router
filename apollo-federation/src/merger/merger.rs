@@ -1038,15 +1038,14 @@ impl Merger {
 
         let mut has_key = false;
         for (idx, source) in sources.iter() {
-            if source.is_none()
-                || self.subgraphs[*idx].is_interface_object_type(&dest.clone().into())
-            {
+            let interface_pos: TypeDefinitionPosition = dest.clone().into();
+            if source.is_none() || self.subgraphs[*idx].is_interface_object_type(&interface_pos) {
                 continue;
             }
-
-            let subgraph = source.as_ref().unwrap();
+            let Some(subgraph) = source else {
+                continue;
+            };
             let source_metadata = self.subgraphs[*idx].metadata();
-            let interface_pos: TypeDefinitionPosition = dest.clone().into();
             let key_directive_name = source_metadata
                 .federation_spec_definition()
                 .key_directive_definition(&self.merged)?
@@ -1055,15 +1054,15 @@ impl Merger {
             let keys = interface_pos.get_applied_directives(subgraph.schema(), &key_directive_name);
 
             has_key = has_key || !keys.is_empty();
-            let resolvable_key = keys.iter().find(|key| !key.arguments.is_empty());
-            if resolvable_key.is_none() {
+            let resolvable_key = keys.iter().any(|key| !key.arguments.is_empty());
+            if !resolvable_key {
                 continue;
             }
 
             let implementations_in_subgraph = subgraph
                 .schema()
                 .possible_runtime_types(dest.clone().into())?;
-            if implementations_in_subgraph.len() > supergraph_implementations.len() {
+            if implementations_in_subgraph.len() < supergraph_implementations.len() {
                 let missing_implementations = supergraph_implementations
                     .iter()
                     .filter(|implementation| !implementations_in_subgraph.contains(*implementation))
@@ -1090,7 +1089,7 @@ impl Merger {
         &mut self,
         sources: &Sources<Subgraph<Validated>>,
         dest: &InterfaceTypeDefinitionPosition,
-    ) -> Result<bool, FederationError> {
+    ) -> Result<(), FederationError> {
         let supergraph_implementations = self.merged.possible_runtime_types(dest.clone().into())?;
 
         for (idx, source) in sources.iter() {
@@ -1101,7 +1100,11 @@ impl Merger {
             }
 
             let subgraph_name = &self.subgraphs[*idx].name;
-            let schema = source.as_ref().unwrap().schema().schema();
+            let schema = if let Some(subgraph) = source {
+                subgraph.schema().schema()
+            } else {
+                continue;
+            };
             let defined_implementations: IndexSet<_> = supergraph_implementations
                 .iter()
                 .filter(|implementation| implementation.get(schema).is_ok())
@@ -1118,33 +1121,28 @@ impl Merger {
             }
         }
 
-        Ok(true)
+        Ok(())
     }
 
     pub(crate) fn merge_interface(
         &mut self,
         itf: InterfaceTypeDefinitionPosition,
     ) -> Result<(), FederationError> {
-        let sources: Sources<Subgraph<Validated>> = self
-            .subgraphs
-            .iter()
-            .enumerate()
-            .map(|(idx, subgraph)| (idx, Some(subgraph.clone())))
-            .collect();
-        let has_key = self.validate_interface_keys(&sources, &itf)?;
+        let has_key = self.validate_interface_keys(&self.subgraph_sources(), &itf)?;
+        self.validate_interface_objects(&self.subgraph_sources(), &itf)?;
 
         let added = self.add_fields_shallow(itf.clone())?;
 
         for (dest_field, subgraph_fields) in added {
             if !has_key {
-                let _ = self.hint_on_inconsistent_value_type_field(
-                    &sources,
+                self.hint_on_inconsistent_value_type_field(
+                    &self.subgraph_sources(),
                     &ObjectOrInterfaceTypeDefinitionPosition::Interface(itf.clone()),
                     &dest_field,
-                );
+                )?;
             }
             let merge_context = self.validate_override(&subgraph_fields, &dest_field)?;
-            let _ = self.merge_field(&subgraph_fields, &dest_field, &merge_context);
+            self.merge_field(&subgraph_fields, &dest_field, &merge_context)?;
         }
         Ok(())
     }
