@@ -6,9 +6,9 @@ use apollo_federation::schema::argument_composition_strategies::ArgumentComposit
 use apollo_federation::supergraph::CompositionHint;
 
 use super::ServiceDefinition;
+use super::assert_composition_success;
 use super::compose_as_fed2_subgraphs;
 use super::errors;
-use super::assert_composition_success;
 
 // Helper function to create directive strings from applied directives
 // Note: This function is currently unused but kept for future implementation
@@ -61,20 +61,9 @@ mod tests {
                 CompositionStrategyTestCase {
                     name: "max",
                     composition_strategy: ArgumentCompositionStrategy::Max,
-                    arg_values_s1: HashMap::from([
-                        ("t", "3"),
-                        ("k", "1")
-                    ]),
-                    arg_values_s2: HashMap::from([
-                        ("t", "2"),
-                        ("k", "5"),
-                        ("b", "4")
-                    ]),
-                    result_values: HashMap::from([
-                        ("t", "3"),
-                        ("k", "5"),
-                        ("b", "4")
-                    ]),
+                    arg_values_s1: HashMap::from([("t", "3"), ("k", "1")]),
+                    arg_values_s2: HashMap::from([("t", "2"), ("k", "5"), ("b", "4")]),
+                    result_values: HashMap::from([("t", "3"), ("k", "5"), ("b", "4")]),
                 },
             ),
             (
@@ -82,20 +71,9 @@ mod tests {
                 CompositionStrategyTestCase {
                     name: "min",
                     composition_strategy: ArgumentCompositionStrategy::Min,
-                    arg_values_s1: HashMap::from([
-                        ("t", "3"),
-                        ("k", "1")
-                    ]),
-                    arg_values_s2: HashMap::from([
-                        ("t", "2"),
-                        ("k", "5"),
-                        ("b", "4")
-                    ]),
-                    result_values: HashMap::from([
-                        ("t", "2"),
-                        ("k", "1"),
-                        ("b", "4")
-                    ]),
+                    arg_values_s1: HashMap::from([("t", "3"), ("k", "1")]),
+                    arg_values_s2: HashMap::from([("t", "2"), ("k", "5"), ("b", "4")]),
+                    result_values: HashMap::from([("t", "2"), ("k", "1"), ("b", "4")]),
                 },
             ),
             (
@@ -103,19 +81,16 @@ mod tests {
                 CompositionStrategyTestCase {
                     name: "intersection",
                     composition_strategy: ArgumentCompositionStrategy::Intersection,
-                    arg_values_s1:  HashMap::from([
-                        ("t", r#"["foo", "bar"]"#),
-                        ("k", r#"[]"#)
-                    ]),
-                    arg_values_s2:  HashMap::from([
+                    arg_values_s1: HashMap::from([("t", r#"["foo", "bar"]"#), ("k", r#"[]"#)]),
+                    arg_values_s2: HashMap::from([
                         ("t", r#"["foo"]"#),
                         ("k", r#"["v1", "v2"]"#),
-                        ("b", r#"["x"]"#)
+                        ("b", r#"["x"]"#),
                     ]),
-                    result_values:  HashMap::from([
+                    result_values: HashMap::from([
                         ("t", r#"["foo"]"#),
                         ("k", r#"[]"#),
-                        ("b", r#"["x"]"#)
+                        ("b", r#"["x"]"#),
                     ]),
                 },
             ),
@@ -124,19 +99,16 @@ mod tests {
                 CompositionStrategyTestCase {
                     name: "union",
                     composition_strategy: ArgumentCompositionStrategy::Union,
-                    arg_values_s1:  HashMap::from([
-                        ("t", r#"["foo", "bar"]"#),
-                        ("k", r#"[]"#)
-                    ]),
-                    arg_values_s2:  HashMap::from([
+                    arg_values_s1: HashMap::from([("t", r#"["foo", "bar"]"#), ("k", r#"[]"#)]),
+                    arg_values_s2: HashMap::from([
                         ("t", r#"["foo"]"#),
                         ("k", r#"["v1", "v2"]"#),
-                        ("b", r#"["x"]"#)
+                        ("b", r#"["x"]"#),
                     ]),
-                    result_values:  HashMap::from([
+                    result_values: HashMap::from([
                         ("t", r#"["foo", "bar"]"#),
                         ("k", r#"["v1", "v2"]"#),
-                        ("b", r#"["x"]"#)
+                        ("b", r#"["x"]"#),
                     ]),
                 },
             ),
@@ -145,20 +117,9 @@ mod tests {
                 CompositionStrategyTestCase {
                     name: "nullable_and",
                     composition_strategy: ArgumentCompositionStrategy::NullableAnd,
-                    arg_values_s1:  HashMap::from([
-                        ("t", "true"),
-                        ("k", "true")
-                    ]),
-                    arg_values_s2:  HashMap::from([
-                        ("t", "null"),
-                        ("k", "false"),
-                        ("b", "false")
-                    ]),
-                    result_values:  HashMap::from([
-                        ("t", "true"),
-                        ("k", "false"),
-                        ("b", "false")
-                    ]),
+                    arg_values_s1: HashMap::from([("t", "true"), ("k", "true")]),
+                    arg_values_s2: HashMap::from([("t", "null"), ("k", "false"), ("b", "false")]),
+                    result_values: HashMap::from([("t", "true"), ("k", "false"), ("b", "false")]),
                 },
             ),
             (
@@ -166,20 +127,9 @@ mod tests {
                 CompositionStrategyTestCase {
                     name: "nullable_max",
                     composition_strategy: ArgumentCompositionStrategy::NullableMax,
-                    arg_values_s1:  HashMap::from([
-                        ("t", "3"),
-                        ("k", "1")
-                    ]),
-                    arg_values_s2:  HashMap::from([
-                        ("t", "2"),
-                        ("k", "null"),
-                        ("b", "null")
-                    ]),
-                    result_values:  HashMap::from([
-                        ("t", "3"),
-                        ("k", "1"),
-                        ("b", "null")
-                    ]),
+                    arg_values_s1: HashMap::from([("t", "3"), ("k", "1")]),
+                    arg_values_s2: HashMap::from([("t", "2"), ("k", "null"), ("b", "null")]),
+                    result_values: HashMap::from([("t", "3"), ("k", "1"), ("b", "null")]),
                 },
             ),
             (
@@ -187,19 +137,16 @@ mod tests {
                 CompositionStrategyTestCase {
                     name: "nullable_union",
                     composition_strategy: ArgumentCompositionStrategy::NullableUnion,
-                    arg_values_s1:  HashMap::from([
-                        ("t", r#"["foo", "bar"]"#),
-                        ("k", r#"[]"#)
-                    ]),
-                    arg_values_s2:  HashMap::from([
+                    arg_values_s1: HashMap::from([("t", r#"["foo", "bar"]"#), ("k", r#"[]"#)]),
+                    arg_values_s2: HashMap::from([
                         ("t", r#"["foo"]"#),
                         ("k", r#"["v1", "v2"]"#),
-                        ("b", r#"["x"]"#)
+                        ("b", r#"["x"]"#),
                     ]),
-                    result_values:  HashMap::from([
+                    result_values: HashMap::from([
                         ("t", r#"["foo", "bar"]"#),
                         ("k", r#"["v1", "v2"]"#),
-                        ("b", r#"["x"]"#)
+                        ("b", r#"["x"]"#),
                     ]),
                 },
             ),
@@ -300,24 +247,21 @@ mod tests {
             directive_strings_schema(&t.directives, test_case.name),
             [format!(
                 r#"@{}(value: {})"#,
-                test_case.name,
-                test_case.result_values["t"]
+                test_case.name, test_case.result_values["t"]
             )]
         );
         assert_eq!(
             directive_strings_ast(&t.fields.get("k").unwrap().directives, test_case.name),
             [format!(
                 r#"@{}(value: {})"#,
-                test_case.name,
-                test_case.result_values["k"]
+                test_case.name, test_case.result_values["k"]
             )]
         );
         assert_eq!(
             directive_strings_ast(&t.fields.get("b").unwrap().directives, test_case.name),
             [format!(
                 r#"@{}(value: {})"#,
-                test_case.name,
-                test_case.result_values["b"]
+                test_case.name, test_case.result_values["b"]
             )]
         );
     }

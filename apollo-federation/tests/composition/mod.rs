@@ -95,6 +95,6 @@ pub(crate) mod test_helpers {
 }
 
 pub(crate) use test_helpers::ServiceDefinition;
+pub(crate) use test_helpers::assert_composition_success;
 pub(crate) use test_helpers::compose_as_fed2_subgraphs;
 pub(crate) use test_helpers::errors;
-pub(crate) use test_helpers::assert_composition_success;
