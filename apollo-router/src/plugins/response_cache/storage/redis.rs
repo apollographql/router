@@ -518,6 +518,10 @@ impl Storage {
             .await?;
         Ok(score.is_some())
     }
+
+    async fn exists(&self, key: &str) -> StorageResult<bool> {
+        Ok(self.reader_storage.client().exists(key).await?)
+    }
 }
 
 #[cfg(all(
@@ -551,6 +555,7 @@ mod tests {
     use insta::assert_debug_snapshot;
     use itertools::Itertools;
     use tower::BoxError;
+    use uuid::Uuid;
 
     use super::Config;
     use super::Storage;
@@ -561,7 +566,7 @@ mod tests {
 
     const SUBGRAPH_NAME: &str = "test";
 
-    fn redis_config(namespace: &str, clustered: bool) -> Config {
+    fn redis_config(clustered: bool) -> Config {
         let url = if clustered {
             "redis-cluster://127.0.0.1:7000"
         } else {
@@ -570,9 +575,13 @@ mod tests {
 
         Config {
             urls: vec![url.parse().unwrap()],
-            namespace: Some(namespace.to_string()),
+            namespace: Some(random_namespace()),
             ..default_redis_cache_config()
         }
+    }
+
+    fn random_namespace() -> String {
+        Uuid::new_v4().to_string()
     }
 
     fn common_document() -> Document {
@@ -604,7 +613,7 @@ mod tests {
         let mock_storage = Arc::new(fred::mocks::Echo);
         let config = Config {
             namespace: namespace.map(ToString::to_string),
-            ..redis_config("", false)
+            ..redis_config(false)
         };
         let storage = Storage::mocked(&config, false, mock_storage.clone(), mock_storage.clone())
             .await
@@ -641,8 +650,8 @@ mod tests {
         #[tokio::test]
         #[rstest::rstest]
         async fn single_document(#[values(true, false)] clustered: bool) -> Result<(), BoxError> {
-            let config = redis_config("single_document", clustered);
-            let storage = Storage::new(&config).await?;
+            let storage = Storage::new(&redis_config(clustered)).await?;
+            storage.truncate_namespace().await?;
 
             // every element of this namespace must have a TTL associated with it, and the TTL of the
             // cache keys must be greater than the TTL of the document
@@ -690,8 +699,8 @@ mod tests {
         async fn multiple_documents(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
-            let config = redis_config("multiple_documents", clustered);
-            let storage = Storage::new(&config).await?;
+            let storage = Storage::new(&redis_config(clustered)).await?;
+            storage.truncate_namespace().await?;
 
             // set up two documents with a shared key and different TTLs
             let documents = vec![
@@ -804,8 +813,8 @@ mod tests {
         async fn cache_tag_ttl_will_only_increase(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
-            let config = redis_config("cache_tag_ttl_will_only_increase", clustered);
-            let storage = Storage::new(&config).await?;
+            let storage = Storage::new(&redis_config(clustered)).await?;
+            storage.truncate_namespace().await?;
 
             let document = Document {
                 cache_key: "cache_key1".to_string(),
@@ -852,8 +861,8 @@ mod tests {
         async fn cache_tag_score_will_not_decrease(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
-            let config = redis_config("cache_tag_score_will_not_decrease", clustered);
-            let storage = Storage::new(&config).await?;
+            let storage = Storage::new(&redis_config(clustered)).await?;
+            storage.truncate_namespace().await?;
 
             let document = Document {
                 expire: Duration::from_secs(60),
@@ -919,8 +928,8 @@ mod tests {
         async fn cache_tag_score_will_increase(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
-            let config = redis_config("cache_tag_score_will_increase", clustered);
-            let storage = Storage::new(&config).await?;
+            let storage = Storage::new(&redis_config(clustered)).await?;
+            storage.truncate_namespace().await?;
 
             let document = Document {
                 expire: Duration::from_secs(60),
@@ -996,8 +1005,9 @@ mod tests {
         #[tokio::test]
         #[rstest::rstest]
         async fn type_failure(#[values(true, false)] clustered: bool) -> Result<(), BoxError> {
-            let config = redis_config("type_failure", clustered);
+            let config = redis_config(clustered);
             let storage = Storage::new(&config).await?;
+            storage.truncate_namespace().await?;
 
             let document = common_document();
             let document_key = storage.make_key(document.cache_key.clone());
@@ -1086,10 +1096,14 @@ mod tests {
                 }
             }
 
-            let config = redis_config("timeout_failure", clustered);
             let mock_redis = Arc::new(MockStorage::default());
-            let storage =
-                Storage::mocked(&config, false, mock_redis.clone(), mock_redis.clone()).await?;
+            let storage = Storage::mocked(
+                &redis_config(clustered),
+                clustered,
+                mock_redis.clone(),
+                mock_redis.clone(),
+            )
+            .await?;
 
             let document = common_document();
             let document_key = Value::from(storage.make_key(document.cache_key.clone()));
@@ -1136,10 +1150,10 @@ mod tests {
                 }
             }
 
-            let config = redis_config("no_response_failure", clustered);
+            let config = redis_config(clustered);
             let mock_redis = Arc::new(MockStorage::default());
             let storage =
-                Storage::mocked(&config, false, mock_redis.clone(), mock_redis.clone()).await?;
+                Storage::mocked(&config, clustered, mock_redis.clone(), mock_redis.clone()).await?;
 
             let document = common_document();
             let document_key = Value::from(storage.make_key(document.cache_key.clone()));
@@ -1172,8 +1186,8 @@ mod tests {
     async fn maintenance_removes_expired_data(
         #[values(true, false)] clustered: bool,
     ) -> Result<(), BoxError> {
-        let config = redis_config("maintenance_removes_expired_data", clustered);
-        let storage = Storage::new(&config).await?;
+        let storage = Storage::new(&redis_config(clustered)).await?;
+        storage.truncate_namespace().await?;
 
         // set up two documents with a shared key and different TTLs
         let documents = vec![
@@ -1241,5 +1255,160 @@ mod tests {
         Ok(())
     }
 
-    // TODO: invalidation
+    mod invalidation {
+        use tower::BoxError;
+
+        use super::common_document;
+        use super::redis_config;
+        use crate::plugins::response_cache::storage::CacheStorage;
+        use crate::plugins::response_cache::storage::Document;
+        use crate::plugins::response_cache::storage::redis::Storage;
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn invalidation_by_subgraph_removes_everything_associated_with_that_subgraph(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = Storage::new(&redis_config(clustered)).await?;
+            storage.truncate_namespace().await?;
+
+            let document1 = Document {
+                cache_key: "cache_key1".to_string(),
+                ..common_document()
+            };
+
+            let document2 = Document {
+                cache_key: "cache_key2".to_string(),
+                ..common_document()
+            };
+
+            let document3 = Document {
+                cache_key: "cache_key3".to_string(),
+                ..common_document()
+            };
+
+            storage.insert(document1.clone(), "subgraph1").await?;
+            storage.insert(document2.clone(), "subgraph2").await?;
+            storage.insert(document3.clone(), "subgraph2").await?;
+
+            // invalidate just subgraph1
+            let num_invalidated = storage
+                .invalidate_by_subgraphs(vec!["subgraph1".to_string()])
+                .await?;
+            assert_eq!(num_invalidated, 1);
+            assert!(!storage.exists(&storage.make_key("cache_key1")).await?);
+            assert!(storage.exists(&storage.make_key("cache_key2")).await?);
+
+            // invalidate subgraph2
+            let num_invalidated = storage
+                .invalidate_by_subgraphs(vec!["subgraph2".to_string()])
+                .await?;
+            assert_eq!(num_invalidated, 2);
+            assert!(!storage.exists(&storage.make_key("cache_key2")).await?);
+            assert!(!storage.exists(&storage.make_key("cache_key3")).await?);
+
+            // re-add all items and invalidate both subgraphs
+            storage.insert(document1.clone(), "subgraph1").await?;
+            storage.insert(document2.clone(), "subgraph2").await?;
+            storage.insert(document3.clone(), "subgraph2").await?;
+
+            let num_invalidated = storage
+                .invalidate_by_subgraphs(vec!["subgraph1".to_string(), "subgraph2".to_string()])
+                .await?;
+            assert_eq!(num_invalidated, 3);
+            assert!(!storage.exists(&storage.make_key("cache_key1")).await?);
+            assert!(!storage.exists(&storage.make_key("cache_key2")).await?);
+            assert!(!storage.exists(&storage.make_key("cache_key3")).await?);
+
+            Ok(())
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn arguments_are_restrictive_rather_than_additive(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            // invalidate takes a list of invalidation keys and a list of subgraphs; the two are combined
+            // to form a list of cache tags to remove from
+            let storage = Storage::new(&redis_config(clustered)).await?;
+            storage.truncate_namespace().await?;
+
+            let document1 = Document {
+                cache_key: "cache_key1".to_string(),
+                invalidation_keys: vec!["A".to_string()],
+                ..common_document()
+            };
+
+            let document2 = Document {
+                cache_key: "cache_key2".to_string(),
+                invalidation_keys: vec!["A".to_string()],
+                ..common_document()
+            };
+
+            let document3 = Document {
+                cache_key: "cache_key3".to_string(),
+                invalidation_keys: vec!["B".to_string()],
+                ..common_document()
+            };
+
+            storage.insert(document1.clone(), "S1").await?;
+            storage.insert(document2.clone(), "S2").await?;
+            storage.insert(document3.clone(), "S2").await?;
+
+            // invalidate(A, S2) will invalidate cache_key2, NOT cache_key1 or cache_key3
+            let invalidated = storage
+                .invalidate(vec!["A".to_string()], vec!["S2".to_string()])
+                .await?;
+            assert_eq!(invalidated.len(), 1);
+            assert_eq!(*invalidated.get("S2").unwrap(), 1);
+            assert!(storage.exists(&storage.make_key("cache_key1")).await?);
+            assert!(!storage.exists(&storage.make_key("cache_key2")).await?);
+            assert!(storage.exists(&storage.make_key("cache_key3")).await?);
+
+            Ok(())
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn invalidating_missing_subgraph_will_not_error(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = Storage::new(&redis_config(clustered)).await?;
+            storage.truncate_namespace().await?;
+
+            storage.insert(common_document(), "S1").await?;
+
+            let invalidated = storage
+                .invalidate_by_subgraphs(vec!["S2".to_string()])
+                .await?;
+            assert_eq!(invalidated, 0);
+
+            let invalidated = storage
+                .invalidate(vec!["key".to_string()], vec!["S2".to_string()])
+                .await?;
+            assert_eq!(invalidated.len(), 1);
+            assert_eq!(*invalidated.get("S2").unwrap(), 0);
+
+            Ok(())
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn invalidating_missing_invalidation_key_will_not_error(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = Storage::new(&redis_config(clustered)).await?;
+            storage.truncate_namespace().await?;
+
+            storage.insert(common_document(), "S1").await?;
+
+            let invalidated = storage
+                .invalidate(vec!["key".to_string()], vec!["S1".to_string()])
+                .await?;
+            assert_eq!(invalidated.len(), 1);
+            assert_eq!(*invalidated.get("S1").unwrap(), 0);
+
+            Ok(())
+        }
+    }
 }
