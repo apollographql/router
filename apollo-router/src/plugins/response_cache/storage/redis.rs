@@ -1410,5 +1410,37 @@ mod tests {
 
             Ok(())
         }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn invalidation_is_idempotent(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = Storage::new(&redis_config(clustered)).await?;
+            storage.truncate_namespace().await?;
+
+            let document = common_document();
+            let document_key = storage.make_key(&document.cache_key);
+
+            storage.insert(document, "S1").await?;
+            assert!(storage.exists(&document_key).await?);
+
+            let invalidated = storage
+                .invalidate_by_subgraphs(vec!["S1".to_string()])
+                .await?;
+            assert_eq!(invalidated, 1);
+
+            assert!(!storage.exists(&document_key).await?);
+
+            // re-invalidate - storage still shouldn't have the key in it, and it shouldn't
+            // encounter an error
+            let invalidated = storage
+                .invalidate_by_subgraphs(vec!["S1".to_string()])
+                .await?;
+            assert_eq!(invalidated, 0);
+            assert!(!storage.exists(&document_key).await?);
+
+            Ok(())
+        }
     }
 }
