@@ -1,42 +1,44 @@
-use super::{ServiceDefinition, assert_composition_errors, compose_as_fed2_subgraphs};
 use apollo_compiler::schema::ExtendedType;
 use apollo_federation::composition::Satisfiable;
 use apollo_federation::supergraph::Supergraph;
+
+use super::ServiceDefinition;
+use super::assert_composition_errors;
+use super::compose_as_fed2_subgraphs;
 
 /// Validates that @inaccessible directives are properly propagated to the supergraph schema
 fn validate_inaccessible_propagation(supergraph: &Supergraph<Satisfiable>) {
     let schema = supergraph.schema().schema();
 
     // Check for @inaccessible directive on Query.me field
-    if let Some(query_type_name) = &schema.schema_definition.query {
-        if let Some(ExtendedType::Object(query_obj)) = schema.types.get(query_type_name.as_str()) {
-            if let Some(me_field) = query_obj.fields.get("me") {
-                let inaccessible_directives: Vec<_> = me_field
-                    .directives
-                    .iter()
-                    .filter(|d| d.name == "inaccessible")
-                    .collect();
-                assert!(
-                    !inaccessible_directives.is_empty(),
-                    "Expected @inaccessible directive on Query.me field"
-                );
-            }
-        }
+    if let Some(query_type_name) = &schema.schema_definition.query
+        && let Some(ExtendedType::Object(query_obj)) = schema.types.get(query_type_name.as_str())
+        && let Some(me_field) = query_obj.fields.get("me")
+    {
+        let inaccessible_directives: Vec<_> = me_field
+            .directives
+            .iter()
+            .filter(|d| d.name == "inaccessible")
+            .collect();
+        assert!(
+            !inaccessible_directives.is_empty(),
+            "Expected @inaccessible directive on Query.me field"
+        );
     }
 
     // Check for @inaccessible directive on User.age field
-    if let Some(ExtendedType::Object(user_type)) = schema.types.get("User") {
-        if let Some(age_field) = user_type.fields.get("age") {
-            let inaccessible_directives: Vec<_> = age_field
-                .directives
-                .iter()
-                .filter(|d| d.name == "inaccessible")
-                .collect();
-            assert!(
-                !inaccessible_directives.is_empty(),
-                "Expected @inaccessible directive on User.age field"
-            );
-        }
+    if let Some(ExtendedType::Object(user_type)) = schema.types.get("User")
+        && let Some(age_field) = user_type.fields.get("age")
+    {
+        let inaccessible_directives: Vec<_> = age_field
+            .directives
+            .iter()
+            .filter(|d| d.name == "inaccessible")
+            .collect();
+        assert!(
+            !inaccessible_directives.is_empty(),
+            "Expected @inaccessible directive on User.age field"
+        );
     }
 }
 
@@ -45,18 +47,18 @@ fn validate_inaccessible_merging(supergraph: &Supergraph<Satisfiable>) {
     let schema = supergraph.schema().schema();
 
     // Check that @inaccessible directive is present on User.name field (merged from both subgraphs)
-    if let Some(ExtendedType::Object(user_type)) = schema.types.get("User") {
-        if let Some(name_field) = user_type.fields.get("name") {
-            let inaccessible_directives: Vec<_> = name_field
-                .directives
-                .iter()
-                .filter(|d| d.name == "inaccessible")
-                .collect();
-            assert!(
-                !inaccessible_directives.is_empty(),
-                "Expected @inaccessible directive on User.name field"
-            );
-        }
+    if let Some(ExtendedType::Object(user_type)) = schema.types.get("User")
+        && let Some(name_field) = user_type.fields.get("name")
+    {
+        let inaccessible_directives: Vec<_> = name_field
+            .directives
+            .iter()
+            .filter(|d| d.name == "inaccessible")
+            .collect();
+        assert!(
+            !inaccessible_directives.is_empty(),
+            "Expected @inaccessible directive on User.name field"
+        );
     }
 }
 

@@ -1,4 +1,6 @@
-use super::{ServiceDefinition, assert_composition_errors, compose_as_fed2_subgraphs};
+use super::ServiceDefinition;
+use super::assert_composition_errors;
+use super::compose_as_fed2_subgraphs;
 
 // =============================================================================
 // MERGE VALIDATIONS - Tests for validation during the merge phase

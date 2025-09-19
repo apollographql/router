@@ -25,7 +25,6 @@ pub(crate) mod test_helpers {
     use apollo_federation::subgraph::typestate::Subgraph;
     use apollo_federation::supergraph::Satisfiable;
     use apollo_federation::supergraph::Supergraph;
-    use insta::assert_snapshot;
 
     pub(crate) struct ServiceDefinition<'a> {
         pub(crate) name: &'a str,
@@ -101,7 +100,7 @@ pub(crate) mod test_helpers {
         );
 
         // Verify each expected error code and message
-        for (i, (expected_code, expected_message)) in expected_errors.iter().enumerate() {
+        for (i, (_expected_code, expected_message)) in expected_errors.iter().enumerate() {
             let error = &errors[i];
 
             // Check error code (assuming CompositionError has a code method or field)

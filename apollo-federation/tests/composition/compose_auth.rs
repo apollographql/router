@@ -1,7 +1,9 @@
 use apollo_compiler::schema::ExtendedType;
 use insta::assert_snapshot;
 
-use super::{ServiceDefinition, assert_composition_errors, compose_as_fed2_subgraphs};
+use super::ServiceDefinition;
+use super::assert_composition_errors;
+use super::compose_as_fed2_subgraphs;
 
 /// Helper function to print directive definition for snapshot comparison
 fn print_directive_definition(directive: &apollo_compiler::schema::DirectiveDefinition) -> String {
@@ -200,18 +202,18 @@ fn authenticated_comprehensive_locations() {
     }
 
     // Query.authenticatedRootField
-    if let Some(query_type_name) = &schema.schema_definition.query {
-        if let Some(ExtendedType::Object(query_obj)) = schema.types.get(query_type_name.as_str()) {
-            if let Some(authenticated_root_field) = query_obj.fields.get("authenticatedRootField") {
-                assert!(
-                    authenticated_root_field
-                        .directives
-                        .iter()
-                        .any(|d| d.name == "authenticated")
-                );
-            } else {
-                panic!("authenticatedRootField not found on Query");
-            }
+    if let Some(query_type_name) = &schema.schema_definition.query
+        && let Some(ExtendedType::Object(query_obj)) = schema.types.get(query_type_name.as_str())
+    {
+        if let Some(authenticated_root_field) = query_obj.fields.get("authenticatedRootField") {
+            assert!(
+                authenticated_root_field
+                    .directives
+                    .iter()
+                    .any(|d| d.name == "authenticated")
+            );
+        } else {
+            panic!("authenticatedRootField not found on Query");
         }
     }
 
@@ -572,18 +574,18 @@ fn requires_scopes_comprehensive_locations() {
     }
 
     // Query.scopedRootField
-    if let Some(query_type_name) = &schema.schema_definition.query {
-        if let Some(ExtendedType::Object(query_obj)) = schema.types.get(query_type_name.as_str()) {
-            if let Some(scoped_root_field) = query_obj.fields.get("scopedRootField") {
-                assert!(
-                    scoped_root_field
-                        .directives
-                        .iter()
-                        .any(|d| d.name == "requiresScopes")
-                );
-            } else {
-                panic!("scopedRootField not found on Query");
-            }
+    if let Some(query_type_name) = &schema.schema_definition.query
+        && let Some(ExtendedType::Object(query_obj)) = schema.types.get(query_type_name.as_str())
+    {
+        if let Some(scoped_root_field) = query_obj.fields.get("scopedRootField") {
+            assert!(
+                scoped_root_field
+                    .directives
+                    .iter()
+                    .any(|d| d.name == "requiresScopes")
+            );
+        } else {
+            panic!("scopedRootField not found on Query");
         }
     }
 
@@ -797,18 +799,18 @@ fn policy_comprehensive_locations() {
     }
 
     // Query.scopedRootField
-    if let Some(query_type_name) = &schema.schema_definition.query {
-        if let Some(ExtendedType::Object(query_obj)) = schema.types.get(query_type_name.as_str()) {
-            if let Some(scoped_root_field) = query_obj.fields.get("scopedRootField") {
-                assert!(
-                    scoped_root_field
-                        .directives
-                        .iter()
-                        .any(|d| d.name == "policy")
-                );
-            } else {
-                panic!("scopedRootField not found on Query");
-            }
+    if let Some(query_type_name) = &schema.schema_definition.query
+        && let Some(ExtendedType::Object(query_obj)) = schema.types.get(query_type_name.as_str())
+    {
+        if let Some(scoped_root_field) = query_obj.fields.get("scopedRootField") {
+            assert!(
+                scoped_root_field
+                    .directives
+                    .iter()
+                    .any(|d| d.name == "policy")
+            );
+        } else {
+            panic!("scopedRootField not found on Query");
         }
     }
 

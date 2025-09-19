@@ -1,5 +1,8 @@
-use super::{ServiceDefinition, assert_composition_errors, compose_as_fed2_subgraphs, print_sdl};
 use insta::assert_snapshot;
+
+use super::ServiceDefinition;
+use super::assert_composition_errors;
+use super::compose_as_fed2_subgraphs;
 
 // =============================================================================
 // ENUM TYPES - Tests for enum type merging behavior

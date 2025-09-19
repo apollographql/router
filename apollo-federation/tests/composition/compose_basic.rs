@@ -1,8 +1,9 @@
-use super::{
-    ServiceDefinition, compose_as_fed2_subgraphs, extract_subgraphs_from_supergraph_result,
-    print_sdl,
-};
 use insta::assert_snapshot;
+
+use super::ServiceDefinition;
+use super::compose_as_fed2_subgraphs;
+use super::extract_subgraphs_from_supergraph_result;
+use super::print_sdl;
 
 #[test]
 #[ignore = "until merge implementation completed"]

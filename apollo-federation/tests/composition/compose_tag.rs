@@ -1,7 +1,10 @@
-use super::{ServiceDefinition, assert_composition_errors, compose_as_fed2_subgraphs};
 use apollo_compiler::schema::ExtendedType;
 use apollo_federation::composition::Satisfiable;
 use apollo_federation::supergraph::Supergraph;
+
+use super::ServiceDefinition;
+use super::assert_composition_errors;
+use super::compose_as_fed2_subgraphs;
 
 /// Validates that @tag directives are properly propagated to the supergraph schema
 /// Equivalent to validatePropagation function in the JS tests
@@ -9,31 +12,30 @@ fn validate_tag_propagation(supergraph: &Supergraph<Satisfiable>) {
     let schema = supergraph.schema().schema();
 
     // Check for @tag directive on Query.users field
-    if let Some(query_type_name) = &schema.schema_definition.query {
-        if let Some(ExtendedType::Object(query_obj)) = schema.types.get(query_type_name.as_str()) {
-            if let Some(users_field) = query_obj.fields.get("users") {
-                let tag_directives: Vec<_> = users_field
-                    .directives
-                    .iter()
-                    .filter(|d| d.name == "tag")
-                    .collect();
-                assert!(
-                    !tag_directives.is_empty(),
-                    "Expected @tag directive on Query.users field"
-                );
+    if let Some(query_type_name) = &schema.schema_definition.query
+        && let Some(ExtendedType::Object(query_obj)) = schema.types.get(query_type_name.as_str())
+        && let Some(users_field) = query_obj.fields.get("users")
+    {
+        let tag_directives: Vec<_> = users_field
+            .directives
+            .iter()
+            .filter(|d| d.name == "tag")
+            .collect();
+        assert!(
+            !tag_directives.is_empty(),
+            "Expected @tag directive on Query.users field"
+        );
 
-                // Check for the specific tag name "aTaggedOperation"
-                let has_operation_tag = tag_directives.iter().any(|d| {
-                    d.arguments.iter().any(|arg| {
-                        arg.name == "name" && arg.value.to_string().contains("aTaggedOperation")
-                    })
-                });
-                assert!(
-                    has_operation_tag,
-                    "Expected @tag(name: \"aTaggedOperation\") on Query.users"
-                );
-            }
-        }
+        // Check for the specific tag name "aTaggedOperation"
+        let has_operation_tag = tag_directives.iter().any(|d| {
+            d.arguments
+                .iter()
+                .any(|arg| arg.name == "name" && arg.value.to_string().contains("aTaggedOperation"))
+        });
+        assert!(
+            has_operation_tag,
+            "Expected @tag(name: \"aTaggedOperation\") on Query.users"
+        );
     }
 
     // Check for @tag directive on User type
@@ -135,19 +137,19 @@ fn validate_tag_merging(supergraph: &Supergraph<Satisfiable>) {
     }
 
     // Check merged tags on Name.firstName field
-    if let Some(ExtendedType::Object(name_type)) = schema.types.get("Name") {
-        if let Some(first_name_field) = name_type.fields.get("firstName") {
-            let field_tag_directives: Vec<_> = first_name_field
-                .directives
-                .iter()
-                .filter(|d| d.name == "tag")
-                .collect();
+    if let Some(ExtendedType::Object(name_type)) = schema.types.get("Name")
+        && let Some(first_name_field) = name_type.fields.get("firstName")
+    {
+        let field_tag_directives: Vec<_> = first_name_field
+            .directives
+            .iter()
+            .filter(|d| d.name == "tag")
+            .collect();
 
-            assert!(
-                field_tag_directives.len() >= 2,
-                "Expected multiple @tag directives on Name.firstName field"
-            );
-        }
+        assert!(
+            field_tag_directives.len() >= 2,
+            "Expected multiple @tag directives on Name.firstName field"
+        );
     }
 }
 
@@ -193,7 +195,7 @@ fn tag_propagates_to_supergraph_fed2_subgraphs() {
 #[test]
 #[ignore = "until Fed1 composition mode is implemented"]
 fn tag_propagates_to_supergraph_fed1_subgraphs() {
-    let subgraph_a = ServiceDefinition {
+    let _subgraph_a = ServiceDefinition {
         name: "subgraphA",
         type_defs: r#"
         type Query {
@@ -207,7 +209,7 @@ fn tag_propagates_to_supergraph_fed1_subgraphs() {
         "#,
     };
 
-    let subgraph_b = ServiceDefinition {
+    let _subgraph_b = ServiceDefinition {
         name: "subgraphB",
         type_defs: r#"
         type User @key(fields: "id") @tag(name: "aTaggedType") {
@@ -227,7 +229,7 @@ fn tag_propagates_to_supergraph_fed1_subgraphs() {
 #[test]
 #[ignore = "until mixed Fed1/Fed2 composition mode is implemented"]
 fn tag_propagates_to_supergraph_mixed_fed1_fed2_subgraphs() {
-    let subgraph_a = ServiceDefinition {
+    let _subgraph_a = ServiceDefinition {
         name: "subgraphA",
         type_defs: r#"
         type Query {
@@ -241,7 +243,7 @@ fn tag_propagates_to_supergraph_mixed_fed1_fed2_subgraphs() {
         "#,
     };
 
-    let subgraph_b = ServiceDefinition {
+    let _subgraph_b = ServiceDefinition {
         name: "subgraphB",
         type_defs: r#"
         type User @key(fields: "id") @tag(name: "aTaggedType") {
@@ -309,7 +311,7 @@ fn tag_merges_multiple_tags_fed2_subgraphs() {
 #[test]
 #[ignore = "until Fed1 composition mode is implemented"]
 fn tag_merges_multiple_tags_fed1_subgraphs() {
-    let subgraph_a = ServiceDefinition {
+    let _subgraph_a = ServiceDefinition {
         name: "subgraphA",
         type_defs: r#"
         type Query {
@@ -328,7 +330,7 @@ fn tag_merges_multiple_tags_fed1_subgraphs() {
         "#,
     };
 
-    let subgraph_b = ServiceDefinition {
+    let _subgraph_b = ServiceDefinition {
         name: "subgraphB",
         type_defs: r#"
         type User @key(fields: "id") @tag(name: "aTagOnTypeFromSubgraphB") @tag(name: "aMergedTagOnType") {
@@ -352,7 +354,7 @@ fn tag_merges_multiple_tags_fed1_subgraphs() {
 #[test]
 #[ignore = "until mixed Fed1/Fed2 composition mode is implemented"]
 fn tag_merges_multiple_tags_mixed_fed1_fed2_subgraphs() {
-    let subgraph_a = ServiceDefinition {
+    let _subgraph_a = ServiceDefinition {
         name: "subgraphA",
         type_defs: r#"
         type Query {
@@ -371,7 +373,7 @@ fn tag_merges_multiple_tags_mixed_fed1_fed2_subgraphs() {
         "#,
     };
 
-    let subgraph_b = ServiceDefinition {
+    let _subgraph_b = ServiceDefinition {
         name: "subgraphB",
         type_defs: r#"
         type User @key(fields: "id") @tag(name: "aTagOnTypeFromSubgraphB") @tag(name: "aMergedTagOnType") {
@@ -440,7 +442,7 @@ fn tag_rejects_tag_and_external_together_fed2_subgraphs() {
 #[test]
 #[ignore = "until Fed1 composition mode is implemented"]
 fn tag_rejects_tag_and_external_together_fed1_subgraphs() {
-    let subgraph_a = ServiceDefinition {
+    let _subgraph_a = ServiceDefinition {
         name: "subgraphA",
         type_defs: r#"
         type Query {
@@ -456,7 +458,7 @@ fn tag_rejects_tag_and_external_together_fed1_subgraphs() {
         "#,
     };
 
-    let subgraph_b = ServiceDefinition {
+    let _subgraph_b = ServiceDefinition {
         name: "subgraphB",
         type_defs: r#"
         type User @key(fields: "id") {
@@ -476,7 +478,7 @@ fn tag_rejects_tag_and_external_together_fed1_subgraphs() {
 #[test]
 #[ignore = "until mixed Fed1/Fed2 composition mode is implemented"]
 fn tag_rejects_tag_and_external_together_mixed_fed1_fed2_subgraphs() {
-    let subgraph_a = ServiceDefinition {
+    let _subgraph_a = ServiceDefinition {
         name: "subgraphA",
         type_defs: r#"
         type Query {
@@ -492,7 +494,7 @@ fn tag_rejects_tag_and_external_together_mixed_fed1_fed2_subgraphs() {
         "#,
     };
 
-    let subgraph_b = ServiceDefinition {
+    let _subgraph_b = ServiceDefinition {
         name: "subgraphB",
         type_defs: r#"
         type User @key(fields: "id") {

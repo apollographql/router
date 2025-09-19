@@ -1,5 +1,8 @@
-use super::{ServiceDefinition, assert_composition_errors, compose_as_fed2_subgraphs, print_sdl};
 use insta::assert_snapshot;
+
+use super::ServiceDefinition;
+use super::compose_as_fed2_subgraphs;
+use super::print_sdl;
 
 // =============================================================================
 // MISCELLANEOUS COMPOSITION TESTS - Standalone composition behavior tests

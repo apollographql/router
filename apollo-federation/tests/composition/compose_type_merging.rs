@@ -1,8 +1,10 @@
-use super::{
-    ServiceDefinition, assert_composition_errors, compose_as_fed2_subgraphs,
-    extract_subgraphs_from_supergraph_result, print_sdl,
-};
 use insta::assert_snapshot;
+
+use super::ServiceDefinition;
+use super::assert_composition_errors;
+use super::compose_as_fed2_subgraphs;
+use super::extract_subgraphs_from_supergraph_result;
+use super::print_sdl;
 
 // =============================================================================
 // FIELD TYPES - Tests for field type compatibility during composition
