@@ -149,6 +149,8 @@ pub(crate) fn match_shape(
 mod tests {
     use serde_json_bytes::json;
 
+    use crate::connectors::ConnectSpec;
+    use crate::connectors::json_selection::ApplyToError;
     use crate::selection;
 
     #[test]
@@ -232,6 +234,34 @@ mod tests {
                 .1
                 .iter()
                 .any(|e| e.message() == "Method ->match did not match any [candidate, value] pair")
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn match_should_return_none_when_pattern_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!("$.a->match([$.missing, 'default'])", spec).apply_to(&json!({
+                "a": "test",
+            })),
+            (
+                None,
+                vec![
+                    ApplyToError::from_json(&json!({
+                        "message": "Property .missing not found in object",
+                        "path": ["missing"],
+                        "range": [14, 21],
+                        "spec": spec.to_string(),
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "Method ->match did not match any [candidate, value] pair",
+                        "path": ["a", "->match"],
+                        "range": [5, 34],
+                        "spec": spec.to_string(),
+                    }))
+                ]
+            ),
         );
     }
 }

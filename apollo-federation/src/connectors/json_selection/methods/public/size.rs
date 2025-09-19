@@ -118,6 +118,7 @@ fn size_shape(
                 Shape::int(method_name.shape_location(context.source_id()))
             }
         }
+        ShapeCase::Unknown => Shape::int(method_name.shape_location(context.source_id())),
         _ => Shape::error(
             format!(
                 "Method ->{} requires an array, string, or object input",
