@@ -3,6 +3,8 @@ use std::fmt;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use fred::interfaces::EventInterface;
@@ -28,6 +30,7 @@ use fred::types::config::UnresponsiveConfig;
 use fred::types::scan::ScanResult;
 use futures::FutureExt;
 use futures::Stream;
+use futures::future::join_all;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::task::AbortHandle;
 use tower::BoxError;
@@ -38,6 +41,8 @@ use super::ValueType;
 use super::metrics::RedisMetricsCollector;
 use crate::configuration::RedisCache;
 use crate::services::generate_tls_client_config;
+
+pub(super) static ACTIVE_CLIENT_COUNT: AtomicU64 = AtomicU64::new(0);
 
 const SUPPORTED_REDIS_SCHEMES: [&str; 6] = [
     "redis",
@@ -339,13 +344,7 @@ impl RedisCacheStorage {
             let mut reconnect_rx = client.reconnect_rx();
             let mut unresponsive_rx = client.unresponsive_rx();
 
-            i64_up_down_counter_with_unit!(
-                "apollo.router.cache.redis.connections",
-                "Number of Redis connections",
-                "{connection}",
-                1,
-                kind = caller
-            );
+            ACTIVE_CLIENT_COUNT.fetch_add(1, Ordering::Relaxed);
 
             tokio::spawn(async move {
                 loop {
@@ -402,22 +401,21 @@ impl RedisCacheStorage {
                         Err(RecvError::Closed) => break,
                     }
                 }
-
-                // NB: closing the Redis client connection will also close the error, pubsub, and
-                // reconnection event streams, so the above while loop will only terminate when the
-                // connection closes.
-                i64_up_down_counter_with_unit!(
-                    "apollo.router.cache.redis.connections",
-                    "Number of Redis connections",
-                    "{connection}",
-                    -1,
-                    kind = caller
-                );
             });
         }
 
         // NB: error is not recorded here as it will be observed by the task following `client.error_rx()`
-        let _handle = pooled_client.init().await?;
+        let client_handles = pooled_client.connect_pool();
+        pooled_client.wait_for_connect().await?;
+
+        tokio::spawn(async move {
+            // the handles will resolve when the clients finish terminating. per the `fred` docs:
+            // > [the connect] function returns a `JoinHandle` to a task that drives the connection.
+            // > It will not resolve until the connection closes, or if a reconnection policy with
+            // > unlimited attempts is provided then it will run until `QUIT` is called.
+            let results = join_all(client_handles).await;
+            ACTIVE_CLIENT_COUNT.fetch_sub(results.len() as u64, Ordering::Relaxed);
+        });
         let heartbeat_clients = pooled_client.clone();
         let heartbeat_handle = tokio::spawn(async move {
             heartbeat_clients
