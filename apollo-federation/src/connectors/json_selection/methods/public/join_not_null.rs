@@ -66,7 +66,7 @@ fn join_not_null_method(
                 method_name.as_ref(),
                 separator
                     .as_ref()
-                    .map_or("null".to_string(), |s| s.to_string())
+                    .map_or_else(|| "null".to_string(), |s| s.to_string())
             ),
             input_path.to_vec(),
             method_name.range(),
