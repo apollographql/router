@@ -140,14 +140,6 @@ expression: "&schema"
     "ApolloTelemetryConfig": {
       "additionalProperties": false,
       "properties": {
-        "batch_processor": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/BatchProcessorConfig"
-            }
-          ],
-          "description": "Configuration for batch processing."
-        },
         "buffer_size": {
           "default": 10000,
           "description": "The buffer size for sending traces to Apollo. Increase this if you are experiencing lost traces.",
@@ -220,6 +212,14 @@ expression: "&schema"
           ],
           "description": "Field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses."
         },
+        "metrics": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/MetricsConfiguration"
+            }
+          ],
+          "description": "Configuration for metrics."
+        },
         "metrics_reference_mode": {
           "allOf": [
             {
@@ -265,6 +265,42 @@ expression: "&schema"
           ],
           "default": "enhanced",
           "description": "Set the signature normalization algorithm to use when sending Apollo usage reports."
+        },
+        "tracing": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/TracingConfiguration"
+            }
+          ],
+          "description": "Configuration for tracing."
+        }
+      },
+      "type": "object"
+    },
+    "ApolloUsageReportsBatchProcessorConfiguration": {
+      "properties": {
+        "max_export_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 30
+          },
+          "description": "The maximum duration to export a batch of data.\nThe default value is 30 seconds.",
+          "type": "string"
+        },
+        "max_queue_size": {
+          "default": 2048,
+          "description": "The maximum queue size to buffer spans for delayed processing. If the\nqueue gets full it drops the reports. The default value is 2048.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "scheduled_delay": {
+          "default": {
+            "nanos": 0,
+            "secs": 5
+          },
+          "description": "The delay interval in milliseconds between two consecutive processing\nof batches. The default value is 5 seconds.",
+          "type": "string"
         }
       },
       "type": "object"
@@ -611,7 +647,7 @@ expression: "&schema"
         },
         "max_queue_size": {
           "default": 2048,
-          "description": "The maximum queue size to buffer spans for delayed processing. If the\nqueue gets full it drops the spans. The default value of is 2048.",
+          "description": "The maximum queue size to buffer spans for delayed processing. If the\nqueue gets full it drops the spans. The default value is 2048.",
           "format": "uint",
           "minimum": 0,
           "type": "integer"
@@ -6245,6 +6281,28 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "MetricsConfiguration": {
+      "additionalProperties": false,
+      "properties": {
+        "otlp": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/OtlpMetricsConfiguration"
+            }
+          ],
+          "description": "Configuration for exporting metrics via OTLP."
+        },
+        "usage_reports": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/UsageReportsMetricsConfiguration"
+            }
+          ],
+          "description": "Configuration for exporting metrics via Apollo usage reports."
+        }
+      },
+      "type": "object"
+    },
     "Mode": {
       "enum": [
         "measure",
@@ -6496,6 +6554,41 @@ expression: "&schema"
           "type": "string"
         }
       ]
+    },
+    "OtlpMetricsBatchProcessorConfiguration": {
+      "properties": {
+        "max_export_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 30
+          },
+          "description": "The maximum duration to export a batch of data.\nThe default value is 30 seconds.",
+          "type": "string"
+        },
+        "scheduled_delay": {
+          "default": {
+            "nanos": 0,
+            "secs": 5
+          },
+          "description": "The delay interval in milliseconds between two consecutive processing\nof batches. The default value is 5 seconds.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "OtlpMetricsConfiguration": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_processor": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/OtlpMetricsBatchProcessorConfiguration"
+            }
+          ],
+          "description": "Batch processor config for OTLP metrics."
+        }
+      },
+      "type": "object"
     },
     "PersistedQueries": {
       "additionalProperties": false,
@@ -10812,6 +10905,20 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "TracingConfiguration": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_processor": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/BatchProcessorConfig"
+            }
+          ],
+          "description": "Configuration for tracing batch processor."
+        }
+      },
+      "type": "object"
+    },
     "TrafficShapingConfig": {
       "additionalProperties": false,
       "description": "Configuration for the traffic shaping plugin",
@@ -10883,6 +10990,20 @@ expression: "&schema"
     },
     "UriEndpoint": {
       "type": "string"
+    },
+    "UsageReportsMetricsConfiguration": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_processor": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ApolloUsageReportsBatchProcessorConfiguration"
+            }
+          ],
+          "description": "Batch processor config for Apollo usage report metrics."
+        }
+      },
+      "type": "object"
     },
     "WebSocketConfiguration": {
       "additionalProperties": false,

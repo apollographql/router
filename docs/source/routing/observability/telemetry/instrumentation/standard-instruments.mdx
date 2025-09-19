@@ -55,8 +55,8 @@ All cache metrics listed above have the following attributes:
 
 When using Redis as a cache backend, additional Redis-specific metrics are available:
 
-- `apollo.router.cache.redis.connections` - Number of Redis connections established
-- `apollo.router.cache.redis.command_queue_length` - Number of Redis commands buffered and not yet sent  
+- `apollo.router.cache.redis.clients` - Number of Redis clients active
+- `apollo.router.cache.redis.command_queue_length` - Number of Redis commands buffered and not yet sent
 - `apollo.router.cache.redis.commands_executed` - Total number of Redis commands executed
 - `apollo.router.cache.redis.redelivery_count` - Number of Redis command redeliveries due to connection issues
 - `apollo.router.cache.redis.errors` - Number of Redis errors by error type and cache kind
@@ -65,7 +65,7 @@ When using Redis as a cache backend, additional Redis-specific metrics are avail
 - `experimental.apollo.router.cache.redis.request_size_avg` - Average Redis request size in bytes
 - `experimental.apollo.router.cache.redis.response_size_avg` - Average Redis response size in bytes
 
-All Redis metrics include the following attribute:
+All Redis metrics, except for `apollo.router.cache.redis.clients`, include the following attribute:
 
 - `kind`: the cache being queried (`apq`, `query planner`, `introspection`, `entity`)
 
@@ -120,6 +120,7 @@ The `apollo.router.cache.redis.errors` metric also includes an `error_type` attr
   - `job.type`: (`QueryPlanning`, `QueryParsing`, `Introspection`)
 - `apollo.router.compute_jobs.active_jobs` - A gauge of the number of compute jobs being processed in parallel.
   - `job.type`: (`QueryPlanning`, `QueryParsing`, `Introspection`)
+
 ### Uplink
 
 <Tip>

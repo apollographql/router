@@ -85,6 +85,7 @@ impl<'schema> Context<'schema> {
             } => {
                 let mut var_lookup: IndexMap<Namespace, Shape> = [
                     (Namespace::Args, shape_for_arguments(field_def)),
+                    // TODO Should these be Dict<Unknown> instead of Unknown?
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Request, REQUEST_SHAPE.clone()),
@@ -760,6 +761,8 @@ mod tests {
     #[case::first("$args.array->first.bool")]
     #[case::last("$args.array->last.bool")]
     #[case::multi_level_input("$args.multiLevel.inner.nested")]
+    #[case::entries_when_type_unknown("$config.something->entries->first.value")]
+    #[case::methods_with_unknown_input(r#"$config->get("something")->slice(0, 1)"#)]
     fn valid_expressions(#[case] selection: &str) {
         // If this fails, another ConnectSpec version has probably been added,
         // and should be accounted for in the loop below.
@@ -822,6 +825,17 @@ mod tests {
             !err.err().unwrap().locations.is_empty(),
             "Every error should have at least one location"
         );
+    }
+
+    #[test]
+    fn coalescing() {
+        let spec = ConnectSpec::V0_3;
+        validate_with_context(
+            r#"$($args.string ?? "unknown error")"#,
+            Shape::string([]),
+            spec,
+        )
+        .expect("coalescing type checks in expressions");
     }
 
     #[test]

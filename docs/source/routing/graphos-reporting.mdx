@@ -424,13 +424,15 @@ The `code` refers to the specific type of error that was raised by the router, f
 ##### Cardinality limitations
 
 At scale, this feature is known to hit cardinality limitations in the OTel reporting agent. When this happens, some of the extended metrics attributes may no longer
-be visible in Studio. In the case of cardinality warnings in logs, adjusting the Apollo batch processing configuration to send reports more frequently can help to alleviate this.
+be visible in Studio. To reduce cardinality warnings in your logs, adjust the Apollo metrics OTLP batch processor configuration to send reports more frequently.
 
 Additionally, this feature may increase the Router's memory usage profile. Similarly, lowering the `scheduled_delay` can help to alleviate that as well. See the example below.
 
 ```yaml title="router.yaml"
 telemetry:
   apollo:
-    batch_processor:
-      scheduled_delay: 100ms # default is 5s
+    metrics:
+      otlp:
+        batch_processor:
+          scheduled_delay: 1s # default is 5s
 ```
