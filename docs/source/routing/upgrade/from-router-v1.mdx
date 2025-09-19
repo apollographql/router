@@ -326,6 +326,8 @@ Various metrics in router 2.x have been renamed to conform to the OpenTelemetry 
 
 **Update step**: use the updated names for the following metrics:
 
+<div style={{ overflowX: 'auto' }}>
+  
 | Previous metric | Renamed metric |
 | --------------- | -------------- |
 | `apollo_router_opened_subscriptions` | `apollo.router.opened.subscriptions` |
@@ -336,6 +338,8 @@ Various metrics in router 2.x have been renamed to conform to the OpenTelemetry 
 | `apollo_router_span_lru_size` | `apollo.router.exporter.span.lru.size` * |
 | `apollo_router_uplink_fetch_count_total` | `apollo.router.uplink.fetch.count.total` |
 | `apollo_router_uplink_fetch_duration_seconds` | `apollo.router.uplink.fetch.duration.seconds`|
+
+</div>
 
 <Note>
 
@@ -407,6 +411,8 @@ You can continue using deprecated context key names from router 1.x if you confi
 | `operation_name` | `apollo::supergraph::operation_name` |
 | `persisted_query_hit` | `apollo::apq::cache_hit` |
 | `persisted_query_register` | `apollo::apq::registered` |
+
+
 
 <!-- TODO(@goto-bus-stop): list configuration keys that contain context keys? -->
 
