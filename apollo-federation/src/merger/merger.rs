@@ -1068,7 +1068,7 @@ impl Merger {
                     .filter(|implementation| !implementations_in_subgraph.contains(*implementation))
                     .collect::<IndexSet<_>>();
 
-                self.error_reporter.add_error(CompositionError::InterfaceObjectUsageError {
+                self.error_reporter.add_error(CompositionError::InterfaceKeyMissingImplementationType {
                             message: format!("Interface type \"{}\" has a resolvable key \"{}\" in subgraph \"{}\" but is missing some of the supergraph implementation types of \"{}\". Subgraph \"{}\" should define {} (and have {} implement \"{}\").",
                                 &dest.type_name,
                                 "true",

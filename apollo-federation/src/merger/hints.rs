@@ -87,7 +87,7 @@ pub(crate) enum HintCode {
     InconsistentRuntimeTypesForShareableReturn,
     ImplicitlyUpgradedFederationVersion,
     ContextualArgumentNotContextualInAllSubgraphs,
-    InterfaceObjectUsageError,
+    InterfaceKeyMissingImplementationType,
 }
 
 #[allow(dead_code)]
@@ -152,7 +152,9 @@ impl HintCode {
             HintCode::ContextualArgumentNotContextualInAllSubgraphs => {
                 &CONTEXTUAL_ARGUMENT_NOT_CONTEXTUAL_IN_ALL_SUBGRAPHS
             }
-            HintCode::InterfaceObjectUsageError => &INTERFACE_OBJECT_USAGE_ERROR,
+            HintCode::InterfaceKeyMissingImplementationType => {
+                &INTERFACE_KEY_MISSING_IMPLEMENTATION_TYPE
+            }
         }
     }
 
@@ -453,11 +455,11 @@ pub(crate) static CONTEXTUAL_ARGUMENT_NOT_CONTEXTUAL_IN_ALL_SUBGRAPHS: LazyLock<
 });
 
 #[allow(dead_code)]
-pub(crate) static INTERFACE_OBJECT_USAGE_ERROR: LazyLock<HintCodeDefinition> =
+pub(crate) static INTERFACE_KEY_MISSING_IMPLEMENTATION_TYPE: LazyLock<HintCodeDefinition> =
     LazyLock::new(|| {
         HintCodeDefinition::new(
-            "INTERFACE_OBJECT_USAGE_ERROR",
+            "INTERFACE_KEY_MISSING_IMPLEMENTATION_TYPE",
             HintLevel::Warn,
-            "Interface object usage error",
+            "Interface key missing implementation type",
         )
     });
