@@ -64,7 +64,7 @@ use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
 
-pub(crate) mod argument_composition_strategies;
+pub mod argument_composition_strategies;
 pub(crate) mod blueprint;
 pub(crate) mod definitions;
 pub(crate) mod directive_location;

@@ -1,5 +1,6 @@
 mod compose_directive;
 mod demand_control;
+mod directive_argument_merge_strategies;
 // TODO: remove #[ignore] from tests once all fns called by Merger::merge() are implemented
 mod external;
 mod override_directive;
@@ -60,7 +61,21 @@ pub(crate) mod test_helpers {
 
         compose(fed2_subgraphs)
     }
+
+    // Return a vec of error codes and error messages as strings
+    pub(crate) fn errors<S>(
+        result: &Result<Supergraph<S>, Vec<CompositionError>>,
+    ) -> Vec<(String, String)> {
+        match result {
+            Ok(_) => panic!("Expected an error, but got a successful composition"),
+            Err(err) => err
+                .iter()
+                .map(|e| (e.code().definition().code().to_string(), e.to_string()))
+                .collect(),
+        }
+    }
 }
 
 pub(crate) use test_helpers::ServiceDefinition;
 pub(crate) use test_helpers::compose_as_fed2_subgraphs;
+pub(crate) use test_helpers::errors;
