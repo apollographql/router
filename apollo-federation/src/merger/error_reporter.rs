@@ -76,7 +76,7 @@ impl ErrorReporter {
         mismatched_element: &D,
         subgraph_elements: &Sources<S>,
         supergraph_mismatch_accessor: impl Fn(&D) -> Option<String>,
-        subgraph_mismatch_accessor: impl Fn(&S) -> Option<String>,
+        subgraph_mismatch_accessor: impl Fn(&S, usize) -> Option<String>,
     ) {
         self.report_mismatch::<D, S, L>(
             Some(mismatched_element),
@@ -106,7 +106,7 @@ impl ErrorReporter {
         &mut self,
         error: CompositionError,
         subgraph_elements: &Sources<T>,
-        mismatch_accessor: impl Fn(&T) -> Option<String>,
+        mismatch_accessor: impl Fn(&T, usize) -> Option<String>,
     ) {
         self.report_mismatch::<String, T, U>(
             None,
@@ -140,7 +140,7 @@ impl ErrorReporter {
         supergraph_element: &D,
         subgraph_elements: &Sources<S>,
         supergraph_element_to_string: impl Fn(&D) -> Option<String>,
-        subgraph_element_to_string: impl Fn(&S) -> Option<String>,
+        subgraph_element_to_string: impl Fn(&S, usize) -> Option<String>,
         supergraph_element_printer: impl Fn(&str, Option<String>) -> String,
         other_elements_printer: impl Fn(&str, &str) -> String,
         ignore_predicate: Option<impl Fn(Option<&S>) -> bool>,
@@ -190,8 +190,8 @@ impl ErrorReporter {
         // indicating whether it was a supergraph element or a subgraph element. Now, we have two
         // separate functions, which allows us to use different types for the destination and
         // source data.
-        supergraph_mismatch_accessor: impl Fn(&D) -> Option<String>,
-        subgraph_mismatch_accessor: impl Fn(&S) -> Option<String>,
+        supergraph_mismatch_accessor: impl Fn(&D) -> Option<String>, // TODO: Consider using `impl AsRef<str>` to allow `&'static str`
+        subgraph_mismatch_accessor: impl Fn(&S, usize) -> Option<String>,
         supergraph_element_printer: impl Fn(&str, Option<String>) -> String,
         other_elements_printer: impl Fn(&str, &str) -> String,
         reporter: impl FnOnce(&mut Self, Vec<String>, Vec<L>),
@@ -203,6 +203,7 @@ impl ErrorReporter {
         let mut locations: Vec<L> = Vec::new();
         let process_subgraph_element =
             |name: &str,
+             idx: usize,
              subgraph_element: &S,
              distribution_map: &mut HashMap<String, Vec<String>>| {
                 if ignore_predicate
@@ -211,7 +212,7 @@ impl ErrorReporter {
                 {
                     return;
                 }
-                let element = subgraph_mismatch_accessor(subgraph_element);
+                let element = subgraph_mismatch_accessor(subgraph_element, idx);
                 distribution_map
                     .entry(element.unwrap_or("".to_string()))
                     .or_default()
@@ -221,7 +222,7 @@ impl ErrorReporter {
         if include_missing_sources {
             for (i, name) in self.names.iter().enumerate() {
                 if let Some(Some(subgraph_element)) = subgraph_elements.get(&i) {
-                    process_subgraph_element(name, subgraph_element, &mut distribution_map);
+                    process_subgraph_element(name, i, subgraph_element, &mut distribution_map);
                 } else {
                     distribution_map
                         .entry("".to_string())
@@ -232,7 +233,7 @@ impl ErrorReporter {
         } else {
             for (i, name) in self.names.iter().enumerate() {
                 if let Some(Some(subgraph_element)) = subgraph_elements.get(&i) {
-                    process_subgraph_element(name, subgraph_element, &mut distribution_map);
+                    process_subgraph_element(name, i, subgraph_element, &mut distribution_map);
                 }
             }
         }

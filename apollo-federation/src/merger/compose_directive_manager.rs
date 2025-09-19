@@ -546,7 +546,7 @@ impl ErrorReporter {
                     .to_string(),
             },
             &sources,
-            |elt| Some(format!("\"@{}\"", elt.aliased_directive_name())),
+            |elt, _| Some(format!("\"@{}\"", elt.aliased_directive_name())),
         );
     }
 }

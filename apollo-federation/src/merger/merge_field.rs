@@ -496,8 +496,6 @@ impl Merger {
                 if dest_arg.ty != source_arg.ty && !arg_is_subtype {
                     invalid_args_types.insert(name.clone());
                 }
-                // TODO: Use valueEquals instead of != for proper GraphQL value comparison
-                // See: https://github.com/apollographql/federation/blob/4653320016ed4202a229d9ab5933ad3f13e5b6c0/composition-js/src/merging/merge.ts#L1877
                 if dest_arg.default_value != source_arg.default_value {
                     invalid_args_defaults.insert(name.clone());
                 }
@@ -506,20 +504,21 @@ impl Merger {
 
         // Phase 2: Reporting - report errors in groups, matching JS version order
         if has_invalid_types {
-            self.error_reporter.report_mismatch_error::<FieldDefinitionPosition, FieldDefinitionPosition, ()>(
+            self.error_reporter.report_mismatch_error::<FieldDefinition, FieldDefinitionPosition, ()>(
                 CompositionError::ExternalTypeMismatch {
                     message: format!(
                         "Type of field \"{dest}\" is incompatible across subgraphs (where marked @external): it has ",
                     ),
                 },
-                dest,
+                dest_field,
                 sources,
-                |dest| Some(format!("type \"{dest}\"")), // TODO: These should give the return type
-                |source| Some(format!("type \"{source}\"")),
+                |d| Some(format!("type \"{}\"", d.ty)),
+                |s, idx| s.try_get(self.subgraphs[idx].schema().schema()).map(|f| format!("type \"{}\"", f.ty)),
             );
         }
 
         for arg_name in &invalid_args_presence {
+            // TODO: We need a more complete port of this on `ErrorReporter`
             self.report_mismatch_error_with_specifics(
                 CompositionError::ExternalArgumentMissing {
                     message: format!(
@@ -545,8 +544,8 @@ impl Merger {
                 },
                 &argument_pos,
                 &self.argument_sources(sources, arg_name)?,
-                |dest| Some(format!("type \"{dest}\"")), // TODO: These should use the return type
-                |source| Some(format!("type \"{source}\"")),
+                |d| d.try_get(self.merged.schema()).map(|a| format!("type \"{}\"", a.ty)),
+                |s, idx| s.try_get(self.subgraphs[idx].schema().schema()).map(|a| format!("type \"{}\"", a.ty)),
             );
         }
 
@@ -564,8 +563,10 @@ impl Merger {
                 },
                 &argument_pos,
                 &self.argument_sources(sources, arg_name)?,
-                |dest| Some(format!("default value {dest:?}")), // TODO: Need proper value formatting
-                |source| Some(format!("default value {source:?}")), // TODO: Need proper value formatting
+                |d| d.try_get(self.merged.schema())
+                        .and_then(|f| Some(format!("default value {}", f.default_value.as_ref()?))), 
+                |s, idx| s.try_get(self.subgraphs[idx].schema().schema())
+                        .and_then(|f| Some(format!("default value {}", f.default_value.as_ref()?))),
             );
         }
 

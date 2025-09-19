@@ -627,7 +627,7 @@ impl Merger {
                 mismatched_type,
                 &sources,
                 type_kind_to_string,
-                type_kind_to_string,
+                |ty, _| type_kind_to_string(ty),
             );
     }
 
@@ -982,7 +982,7 @@ impl Merger {
                         &dest_in_supergraph,
                         &printable_sources,
                         |ty| print_ty_has_field(ty, &field_pos),
-                        |ty| print_ty_has_field(ty, &field_pos),
+                        |ty, _| print_ty_has_field(ty, &field_pos),
                         |_, subgraphs| format!("\"{}.{}\" is defined in {}", field_pos.type_name(), field_pos.field_name(), subgraphs.unwrap_or_default()),
                         |_, subgraphs| format!(" but not in {}", subgraphs),
                         None::<fn(Option<&ExtendedType>) -> bool>,
@@ -1026,7 +1026,7 @@ impl Merger {
                 &supergraph,
                 &sources,
                 |idx| if source_as_entity.contains(idx) { Some("yes".to_string()) } else { Some("no".to_string()) },
-                |idx| if source_as_entity.contains(idx) { Some("yes".to_string()) } else { Some("no".to_string()) },
+                |idx, _| if source_as_entity.contains(idx) { Some("yes".to_string()) } else { Some("no".to_string()) },
                 |_, subgraphs| format!("it has no @key in {}", subgraphs.unwrap_or_default()),
                 |_, subgraphs| format!(" but has some @key in {}", subgraphs),
                 None::<fn(Option<&usize>) -> bool>,
@@ -1196,12 +1196,16 @@ impl Merger {
                 }
             };
 
-            self.error_reporter_mut().report_mismatch_error::<T, T, ()>(
+            self.error_reporter.report_mismatch_error::<Type, T, ()>(
                 error,
-                dest,
+                &ty,
                 sources,
-                |typ| Some(format!("type \"{typ}\"")), // TODO: Use return type here
-                |typ| Some(format!("type \"{typ}\"")), // TODO: Use return type here
+                |d| Some(format!("type \"{d}\"")),
+                |s, idx| {
+                    s.get_type(self.subgraphs[idx].schema())
+                        .ok()
+                        .map(|t| format!("type \"{t}\""))
+                },
             );
 
             Ok(false)
@@ -1219,16 +1223,20 @@ impl Merger {
                 "subtypes"
             };
 
-            self.error_reporter_mut().report_mismatch_hint::<T, T, ()>(
+            self.error_reporter.report_mismatch_hint::<Type, T, ()>(
                 hint_code,
                 format!(
                     "Type of {element_kind} \"{dest}\" is inconsistent but compatible across subgraphs:",
 
                 ),
-                dest,
+                &ty,
                 sources,
-                |typ| Some(format!("type \"{typ}\"")),
-                |typ| Some(format!("type \"{typ}\"")),
+                |d| Some(format!("type \"{d}\"")),
+                |s, idx| {
+                    s.get_type(self.subgraphs[idx].schema())
+                        .ok()
+                        .map(|t| format!("type \"{t}\""))
+                },
                 |elt, subgraphs| {
                     format!(
                         "will use type \"{elt}\" (from {}) in supergraph but \"{dest}\" has ",
@@ -1472,7 +1480,7 @@ impl Merger {
                     dest,
                     sources,
                     |elem| elem.description(&self.merged).map(|desc| desc.to_string()),
-                    |elem| elem.description(&self.merged).map(|desc| desc.to_string()),
+                    |elem, _| elem.description(&self.merged).map(|desc| desc.to_string()),
                     |desc, subgraphs| {
                         format!(
                             "The supergraph will use description (from {}):\n{}",

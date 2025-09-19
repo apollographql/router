@@ -151,7 +151,7 @@ impl Merger {
                         &directive,
                         &definition_sources,
                         |def| Some(format!("\"@{}\"", def.name)),
-                        |def| Some(format!("\"@{}\"", def.name)),
+                        |def, _| Some(format!("\"@{}\"", def.name)),
                     );
                     return Ok(());
                 }

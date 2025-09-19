@@ -128,7 +128,7 @@ impl Merger {
                             &dest_field,
                             &subgraph_fields,
                             |_| Some("yes".to_string()),
-                            |_| Some("yes".to_string()),
+                            |_, _| Some("yes".to_string()),
                             |_, subgraphs| {
                                 format!(
                                     "it is defined in {}", subgraphs.unwrap_or_else(|| "undefined".to_string())
