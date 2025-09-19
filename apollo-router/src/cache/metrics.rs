@@ -202,7 +202,7 @@ impl RedisMetricsCollector {
                     &[KeyValue::new("kind", caller)],
                 );
             })
-            .init()
+            .build()
     }
 
     /// Generic method to create a weighted average gauge
@@ -233,7 +233,7 @@ impl RedisMetricsCollector {
 
                 gauge.observe(average, &[KeyValue::new("kind", caller)]);
             })
-            .init()
+            .build()
     }
 
     /// Spawn the metrics collection task

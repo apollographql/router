@@ -32,7 +32,7 @@ pub(crate) mod jemalloc {
                         tracing::warn!("Failed to read jemalloc {} stats", stringify!($name));
                     }
                 })
-                .init()
+                .build()
         };
     }
 

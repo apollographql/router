@@ -593,7 +593,7 @@ impl From<InstrumentData> for Metrics {
                         .with_callback(move |observer| {
                             observer.observe(value, &attributes);
                         })
-                        .init()
+                        .build()
                 })
                 .collect(),
         }

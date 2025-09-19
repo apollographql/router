@@ -910,7 +910,7 @@ macro_rules! metric {
                         builder = builder.with_unit($unit);
                     }
 
-                    builder.init()
+                    builder.build()
                 };
 
                 if cache_callsite {
@@ -1497,13 +1497,13 @@ mod test {
             .meter("test")
             .u64_observable_gauge("test")
             .with_callback(|m| m.observe(5, &[]))
-            .init();
+            .build();
         assert_gauge!("test", 5);
     }
 
     #[test]
     fn test_gauge_record() {
-        let gauge = meter_provider().meter("test").u64_gauge("test").init();
+        let gauge = meter_provider().meter("test").u64_gauge("test").build();
         gauge.record(5, &[]);
         assert_gauge!("test", 5);
     }
@@ -1683,7 +1683,7 @@ mod test {
                 .meter("test")
                 .u64_observable_gauge("test")
                 .with_callback(|m| m.observe(5, &[]))
-                .init();
+                .build();
             assert_histogram_sum!("test", 1, "attr" = "val");
         }
         .with_metrics()
