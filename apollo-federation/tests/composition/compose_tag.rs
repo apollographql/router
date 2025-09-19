@@ -145,11 +145,69 @@ fn tag_propagates_to_supergraph_fed2_subgraphs() {
     validate_tag_propagation(&supergraph);
 }
 
-// TODO: Add test for Fed1 subgraphs when Fed1 composition mode is implemented
-// This would be equivalent to the JS test that uses composeServices() instead of composeAsFed2Subgraphs()
+#[test]
+#[ignore = "until Fed1 composition mode is implemented"]
+fn tag_propagates_to_supergraph_fed1_subgraphs() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          users: [User] @tag(name: "aTaggedOperation")
+        }
 
-// TODO: Add test for mixed Fed1/Fed2 subgraphs when mixed composition mode is implemented  
-// This would be equivalent to the JS test that uses composeServices([subgraphA, asFed2Service(subgraphB)])
+        type User @key(fields: "id") {
+          id: ID!
+          name: String! @tag(name: "aTaggedField")
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type User @key(fields: "id") @tag(name: "aTaggedType") {
+          id: ID!
+          birthdate: String!
+          age: Int!
+        }
+        "#,
+    };
+
+    // TODO: Implement Fed1 composition mode - this should use composeServices() equivalent
+    panic!("Fed1 composition mode not yet implemented - need compose_services() function equivalent to JS composeServices([subgraphA, subgraphB])");
+}
+
+#[test]
+#[ignore = "until mixed Fed1/Fed2 composition mode is implemented"]
+fn tag_propagates_to_supergraph_mixed_fed1_fed2_subgraphs() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          users: [User] @tag(name: "aTaggedOperation")
+        }
+
+        type User @key(fields: "id") {
+          id: ID!
+          name: String! @tag(name: "aTaggedField")
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type User @key(fields: "id") @tag(name: "aTaggedType") {
+          id: ID!
+          birthdate: String!
+          age: Int!
+        }
+        "#,
+    };
+
+    // TODO: Implement mixed Fed1/Fed2 composition mode - this should use composeServices([subgraphA, asFed2Service(subgraphB)]) equivalent
+    panic!("Mixed Fed1/Fed2 composition mode not yet implemented - need compose_services() function equivalent to JS composeServices([subgraphA, asFed2Service(subgraphB)])");
+}
 
 // =============================================================================
 // @tag DIRECTIVE MERGING - Tests for merging multiple @tag directives
@@ -199,11 +257,89 @@ fn tag_merges_multiple_tags_fed2_subgraphs() {
     validate_tag_merging(&supergraph);
 }
 
-// TODO: Add test for Fed1 @tag merging when Fed1 composition mode is implemented
-// This would be equivalent to the JS test that uses composeServices() for tag merging
+#[test]
+#[ignore = "until Fed1 composition mode is implemented"]
+fn tag_merges_multiple_tags_fed1_subgraphs() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          user: [User]
+        }
 
-// TODO: Add test for mixed Fed1/Fed2 @tag merging when mixed composition mode is implemented
-// This would be equivalent to the JS test that uses composeServices([subgraphA, asFed2Service(subgraphB)]) for tag merging
+        type User @key(fields: "id") @tag(name: "aTagOnTypeFromSubgraphA") @tag(name: "aMergedTagOnType") {
+          id: ID!
+          name1: Name!
+        }
+
+        type Name {
+          firstName: String @tag(name: "aTagOnFieldFromSubgraphA")
+          lastName: String @tag(name: "aMergedTagOnField")
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type User @key(fields: "id") @tag(name: "aTagOnTypeFromSubgraphB") @tag(name: "aMergedTagOnType") {
+          id: ID!
+          name2: String!
+        }
+
+        type Name {
+          firstName: String @tag(name: "aTagOnFieldFromSubgraphB")
+          lastName: String @tag(name: "aMergedTagOnField")
+        }
+        "#,
+    };
+
+    // TODO: Implement Fed1 composition mode - this should use composeServices() equivalent
+    panic!("Fed1 composition mode not yet implemented - need compose_services() function equivalent to JS composeServices([subgraphA, subgraphB])");
+}
+
+#[test]
+#[ignore = "until mixed Fed1/Fed2 composition mode is implemented"]
+fn tag_merges_multiple_tags_mixed_fed1_fed2_subgraphs() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          user: [User]
+        }
+
+        type User @key(fields: "id") @tag(name: "aTagOnTypeFromSubgraphA") @tag(name: "aMergedTagOnType") {
+          id: ID!
+          name1: Name!
+        }
+
+        type Name {
+          firstName: String @tag(name: "aTagOnFieldFromSubgraphA")
+          lastName: String @tag(name: "aMergedTagOnField")
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type User @key(fields: "id") @tag(name: "aTagOnTypeFromSubgraphB") @tag(name: "aMergedTagOnType") {
+          id: ID!
+          name2: String!
+        }
+
+        type Name @shareable {
+          firstName: String @tag(name: "aTagOnFieldFromSubgraphB")
+          lastName: String @tag(name: "aMergedTagOnField")
+        }
+        "#,
+    };
+
+    // TODO: Implement mixed Fed1/Fed2 composition mode with proper shareable handling
+    // This should use composeServices([subgraphA, updatedSubgraphB]) equivalent
+    // where subgraphB has been converted to Fed2 with @shareable applied to Name type
+    panic!("Mixed Fed1/Fed2 composition mode not yet implemented - need compose_services() function equivalent to JS composeServices([subgraphA, updatedSubgraphB])");
+}
 
 // =============================================================================
 // @tag DIRECTIVE VALIDATION - Tests for @tag and @external conflicts
@@ -244,11 +380,73 @@ fn tag_rejects_tag_and_external_together_fed2_subgraphs() {
     ]);
 }
 
-// TODO: Add test for Fed1 @tag+@external conflict when Fed1 composition mode is implemented
-// This would be equivalent to the JS test that uses composeServices() to test @tag+@external conflicts
+#[test]
+#[ignore = "until Fed1 composition mode is implemented"]
+fn tag_rejects_tag_and_external_together_fed1_subgraphs() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          user: [User]
+        }
 
-// TODO: Add test for mixed Fed1/Fed2 @tag+@external conflict when mixed composition mode is implemented
-// This would be equivalent to the JS test that uses composeServices([subgraphA, asFed2Service(subgraphB)]) for conflicts
+        type User @key(fields: "id") {
+          id: ID!
+          name: String!
+          birthdate: Int! @external @tag(name: "myTag")
+          age: Int! @requires(fields: "birthdate")
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type User @key(fields: "id") {
+          id: ID!
+          birthdate: Int!
+        }
+        "#,
+    };
+
+    // TODO: Implement Fed1 composition mode - this should use composeServices() equivalent
+    // and should produce MERGED_DIRECTIVE_APPLICATION_ON_EXTERNAL error
+    panic!("Fed1 composition mode not yet implemented - need compose_services() function equivalent to JS composeServices([subgraphA, subgraphB]) that validates @tag+@external conflicts");
+}
+
+#[test]
+#[ignore = "until mixed Fed1/Fed2 composition mode is implemented"]
+fn tag_rejects_tag_and_external_together_mixed_fed1_fed2_subgraphs() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          user: [User]
+        }
+
+        type User @key(fields: "id") {
+          id: ID!
+          name: String!
+          birthdate: Int! @external @tag(name: "myTag")
+          age: Int! @requires(fields: "birthdate")
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type User @key(fields: "id") {
+          id: ID!
+          birthdate: Int!
+        }
+        "#,
+    };
+
+    // TODO: Implement mixed Fed1/Fed2 composition mode - this should use composeServices([subgraphA, asFed2Service(subgraphB)]) equivalent
+    // and should produce MERGED_DIRECTIVE_APPLICATION_ON_EXTERNAL error
+    panic!("Mixed Fed1/Fed2 composition mode not yet implemented - need compose_services() function equivalent to JS composeServices([subgraphA, asFed2Service(subgraphB)]) that validates @tag+@external conflicts");
+}
 
 // =============================================================================
 // @tag DIRECTIVE IMPORT VALIDATION - Tests for @tag import name validation
