@@ -1295,6 +1295,46 @@ impl IntegrationTest {
         }
     }
 
+    /// Assert that some metric is non-zero. Useful for those metrics that are non-zero but whose
+    /// values might change across integration test runs.  
+    ///
+    /// example use: `.assert_metric_non_zero("some_metric_name{label="example"}", None)`
+    ///
+    /// Note: make sure you strip off the value at the end or you'll potentially get false
+    /// negatives
+    #[allow(dead_code)]
+    pub async fn assert_metric_non_zero(&self, text: &str, duration: Option<Duration>) {
+        let now = Instant::now();
+        let mut last_metrics = String::new();
+
+        let pattern = regex::escape(text);
+        let pattern = format!(
+            // disjunction between two patterns: the first (before the `|`) says to look for a value
+            // starting with a digit between 1-9, matching however many, optionally with a decimal; the
+            // second pattern matches values starting with 0 and then a decimal (both required), at least
+            // on non-zero digit, and then however many (if any) other digits
+            "(?m)^{}\\s+([1-9]\\d*(\\.\\d+)?|0\\.[0-9]*[1-9][0-9]*)",
+            pattern
+        );
+        let re = Regex::new(&format!("(?m)^{}", pattern)).expect("Invalid regex");
+
+        while now.elapsed() < duration.unwrap_or_else(|| Duration::from_secs(15)) {
+            if let Ok(metrics) = self
+                .get_metrics_response()
+                .await
+                .expect("failed to fetch metrics")
+                .text()
+                .await
+            {
+                if re.is_match(&metrics) {
+                    return;
+                }
+                last_metrics = metrics;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("'{text}' not detected in metrics\n{last_metrics}");
+    }
     #[allow(dead_code)]
     /// Checks the metrics contain the supplied string in prometheus format.
     /// To allow checking of metrics where the value is not stable the magic tag `<any>` can be used.

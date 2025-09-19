@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::error::Error;
 use std::fmt;
 use std::ops::Deref;
 use std::pin::Pin;
@@ -85,6 +86,12 @@ fn record_redis_error(error: &RedisError, caller: &'static str) {
         RedisErrorKind::Replica => "replica",
     };
 
+    tracing::error!(
+        "AWA :: error string: {}, details: {}, source: {:?}",
+        error.to_string(),
+        error.details(),
+        error.source()
+    );
     u64_counter_with_unit!(
         "apollo.router.cache.redis.errors",
         "Number of Redis errors by type",
@@ -94,7 +101,6 @@ fn record_redis_error(error: &RedisError, caller: &'static str) {
         error_type = error_type
     );
 
-    // TODO: cleaner; misleading
     if !error.is_not_found() && !error.is_canceled() {
         tracing::error!(
             error_type = error_type,
@@ -349,7 +355,6 @@ impl RedisCacheStorage {
         metrics_interval: Duration,
         required_to_start: bool,
     ) -> Result<Self, BoxError> {
-        tracing::warn!("starting redis client!");
         let pooled_client = Builder::from_config(client_config)
             // TODO: comment
             .with_config(|client_config| {
