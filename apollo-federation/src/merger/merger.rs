@@ -1029,13 +1029,20 @@ impl Merger {
         Ok(!source_as_entity.is_empty())
     }
 
+    // Returns whether the interface has a key (even a non-resolvable one) in any subgraph.
     fn validate_interface_keys(
         &mut self,
         sources: &Sources<Subgraph<Validated>>,
         dest: &InterfaceTypeDefinitionPosition,
     ) -> Result<bool, FederationError> {
+        // Remark: it might be ok to filter @inaccessible types in `supergraphImplementations`, but this requires
+        // some more thinking (and I'm not even sure it makes a practical difference given the rules for validity
+        // of @inaccessible) and it will be backward compatible to filter them later, while the reverse wouldn't
+        // technically be, so we stay on the safe side.
         let supergraph_implementations = self.merged.possible_runtime_types(dest.clone().into())?;
 
+        // Validate that if a source defines a (resolvable) @key on an interface, then that subgraph defines
+        // all the implementations of that interface in the supergraph.
         let mut has_key = false;
         for (idx, source) in sources.iter() {
             let interface_pos: TypeDefinitionPosition = dest.clone().into();
@@ -1092,6 +1099,12 @@ impl Merger {
     ) -> Result<(), FederationError> {
         let supergraph_implementations = self.merged.possible_runtime_types(dest.clone().into())?;
 
+        // Validates that if a source defines the interface as an @interfaceObject, then it doesn't define any
+        // of the implementations. We can discuss if there is ways to lift that limitation later, but an
+        // @interfaceObject already "provides" fields for all the underlying impelmentations, so also defining
+        // one those implementation would require additional care for shareability and more. This also feel
+        // like this can get easily be done by mistake and gets rather confusing, so it's worth some additional
+        // consideration before allowing.
         for (idx, source) in sources.iter() {
             if source.is_none()
                 || self.subgraphs[*idx].is_interface_object_type(&dest.clone().into())
