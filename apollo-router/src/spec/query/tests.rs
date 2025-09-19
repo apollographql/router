@@ -413,7 +413,7 @@ fn inline_fragment_on_top_level_operation() {
 #[test]
 fn reformat_response_data_fragment_spread() {
     let schema = "type Query {
-      thing: Thing    
+      thing: Thing
     }
 
     type Foo {
@@ -861,7 +861,7 @@ fn reformat_response_array_of_type_alias() {
             type Element {
                 stuff: String
             }
-            
+
         ",
         )
         .query("{get { aliased: array {stuff}}}")
@@ -918,7 +918,7 @@ fn reformat_response_array_of_type_duplicate_alias() {
         type Thing {
             array: [Element]
         }
-        
+
         type Element {
             stuff: String
         }",
@@ -1207,7 +1207,7 @@ fn reformat_response_expected_types() {
                 id: ID
                 l: [Int]
             }
-            
+
             enum E {
               A
               B
@@ -1630,6 +1630,438 @@ fn reformat_response_expected_id() {
             //     "path": ["g"],
             //     "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             // },
+        ]))
+        .test();
+}
+
+#[test]
+fn reformat_response_coersion_propagation_into_list() {
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                thing: Thing
+            }
+
+            type Thing {
+                a: [Int]
+            }
+            "#,
+        )
+        .query(r#"{ thing { a } }"#)
+        .response(json!({
+            "thing": {
+                "a": [1, 1.1, 1.2]
+            }
+        }))
+        .expected(json!({
+            "thing": {
+                "a": [1, null, null]
+            }
+        }))
+        .expected_errors(json!([
+        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
+         * does not produce these errors.
+            {
+                "message": "Invalid value found for field Query.thing.a",
+                "path": ["thing", "a"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.thing.a",
+                "path": ["thing", "a"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        */
+        ]))
+        .test();
+
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                thing: Thing
+            }
+
+            type Thing {
+                a: [Int!]
+            }
+            "#,
+        )
+        .query(r#"{ thing { a } }"#)
+        .response(json!({
+            "thing": {
+                "a": [1, 1.1, 1.2]
+            }
+        }))
+        .expected(json!({
+            "thing": {
+                "a": null
+            }
+        }))
+        .expected_errors(json!([
+        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
+         * does not produce these errors.
+            {
+                "message": "Invalid value found for field Query.thing.a",
+                "path": ["thing", "a"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.thing.a",
+                "path": ["thing", "a"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.thing.a",
+                "path": ["thing", "a"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        */
+        ]))
+        .test();
+
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                thing: Thing
+            }
+
+            type Thing {
+                a: [Int!]!
+            }
+            "#,
+        )
+        .query(r#"{ thing { a } }"#)
+        .response(json!({
+            "thing": {
+                "a": [1, 1.1, 1.2]
+            }
+        }))
+        .expected(json!({
+            "thing": null
+        }))
+        .expected_errors(json!([
+        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
+         * does not produce these errors.
+            {
+                "message": "Invalid value found for field Query.thing.a",
+                "path": ["thing", "a"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.thing.a",
+                "path": ["thing", "a"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.thing.a",
+                "path": ["thing", "a"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.thing",
+                "path": ["thing"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        */
+        ]))
+        .test();
+}
+
+#[test]
+fn reformat_response_coersion_propagation_into_object() {
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                thing: Thing
+            }
+
+            type Thing {
+                a: Int
+                b: Int
+                c: Int
+            }
+            "#,
+        )
+        .query(r#"{ thing { a, b, c } }"#)
+        .response(json!({
+            "thing": {
+                "a": 1,
+                "b": 1.1,
+                "c": 1.2
+            }
+        }))
+        .expected(json!({
+            "thing": {
+                "a": 1,
+                "b": null,
+                "c": null
+            }
+        }))
+        .expected_errors(json!([
+        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
+         * does not produce these errors.
+            {
+                "message": "Invalid value found for field Query.thing.b",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.thing.c",
+                "path": ["thing", "c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        */
+        ]))
+        .test();
+
+    FormatTest::builder()
+       .schema(
+            r#"
+            type Query {
+                thing: Thing
+            }
+
+            type Thing {
+                a: Int!
+                b: Int!
+                c: Int!
+            }
+            "#,
+        )
+        .query(r#"{ thing { a, b, c } }"#)
+        .response(json!({
+            "thing": {
+                "a": 1,
+                "b": 1.1,
+                "c": 1.2
+            }
+        }))
+        .expected(json!({
+            "thing": null
+        }))
+        .expected_errors(json!([
+        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
+         * does not produce these errors.
+            {
+                "message": "Invalid value found for field Query.thing.b",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.thing.c",
+                "path": ["thing", "c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.thing",
+                "path": ["thing"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        */
+        ]))
+        .test();
+
+    FormatTest::builder()
+       .schema(
+            r#"
+            type Query {
+                thing: Thing!
+            }
+
+            type Thing {
+                a: Int!
+                b: Int!
+                c: Int!
+            }
+            "#,
+        )
+        .query(r#"{ thing { a, b, c } }"#)
+        .response(json!({ }))
+        .expected_errors(json!([
+        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
+         * does not produce these errors.
+            {
+                "message": "Invalid value found for field Query.thing.b",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.thing.c",
+                "path": ["thing", "c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.thing",
+                "path": ["thing"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query",
+                "path": [],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        */
+        ]))
+        .test();
+}
+
+#[test]
+fn reformat_response_coersion_propagation_into_union() {
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                thing: Thing
+            }
+
+            union Thing = Bar | Foo
+
+            type Foo {
+                a: Int
+                b: Int
+                c: Int
+            }
+
+            type Bar {
+                bar: String
+            }
+            "#,
+        )
+        .query(r#"{ thing { __typename, ... on Foo { a, b, c } } }"#)
+        .response(json!({
+            "thing": {
+                "a": 1,
+                "b": 1.1,
+                "c": 1.2
+            }
+        }))
+        .expected(json!({
+            "thing": {
+                "a": 1,
+                "b": null,
+                "c": null
+            }
+        }))
+        .expected_errors(json!([
+        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
+         * does not produce these errors.
+            {
+                "message": "Invalid value found for field Query.thing.b",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.thing.c",
+                "path": ["thing", "c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        */
+        ]))
+        .test();
+
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                thing: Thing
+            }
+
+            union Thing = Bar | Foo
+
+            type Foo {
+                a: Int!
+                b: Int!
+                c: Int!
+            }
+
+            type Bar {
+                bar: String
+            }
+            "#,
+        )
+        .query(r#"{ thing { ... on Foo { a, b, c } } }"#)
+        .response(json!({
+            "thing": {
+                "a": 1,
+                "b": 1.1,
+                "c": 1.2
+            }
+        }))
+        .expected(json!({
+            "thing": null
+        }))
+        .expected_errors(json!([
+        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
+         * does not produce these errors.
+            {
+                "message": "Invalid value found for field Query.thing.b",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.thing.c",
+                "path": ["thing", "c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.thing",
+                "path": ["thing"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        */
+        ]))
+        .test();
+
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                thing: Thing!
+            }
+
+            union Thing = Bar | Foo
+
+            type Foo {
+                a: Int!
+                b: Int!
+                c: Int!
+            }
+
+            type Bar {
+                bar: String
+            }
+            "#,
+        )
+        .query(r#"{ thing { ... on Foo { a, b, c } } }"#)
+        .response(json!({ }))
+        .expected_errors(json!([
+        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
+         * does not produce these errors.
+            {
+                "message": "Invalid value found for field Query.thing.b",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.thing.c",
+                "path": ["thing", "c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.thing",
+                "path": ["thing"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query",
+                "path": [],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        */
         ]))
         .test();
 }
@@ -2628,7 +3060,7 @@ fn filter_nested_object_errors() {
         reviews2: [Review!]
         reviews3: [Review!]!
     }
-    
+
     type Review {
         text1: String
         text2: String!
@@ -3161,7 +3593,7 @@ fn filter_scalar_errors() {
         a: A
         b: A!
     }
-    
+
     scalar A
     ";
 
@@ -3659,7 +4091,7 @@ fn filter_extended_interface_errors() {
 #[test]
 fn filter_errors_top_level_fragment() {
     let schema = "type Query {
-        get: Thing   
+        get: Thing
       }
 
       type Thing {
@@ -3812,7 +4244,7 @@ fn merge_selections() {
         name: String
         review: Review
     }
-    
+
     type Review {
         id: String!
         body: String
@@ -4251,7 +4683,7 @@ fn skip() {
         .query(
             "query($skip: Boolean = false)  {
                 get @skip(if: $skip) {
-                    id 
+                    id
                     review {
                         id
                     }
@@ -4277,7 +4709,7 @@ fn skip() {
         .query(
             "query {
                 get @skip(if: true) {
-                    id 
+                    id
                     review {
                         id
                     }
@@ -5392,7 +5824,7 @@ fn inaccessible_on_interface() {
         test_union: U
         test_enum: E
     }
-    
+
     type Object implements Interface @inaccessible {
         foo: String
         other: String
@@ -5402,7 +5834,7 @@ fn inaccessible_on_interface() {
         foo: String
         other: String @inaccessible
     }
-      
+
     interface Interface {
         foo: String
     }
@@ -5416,7 +5848,7 @@ fn inaccessible_on_interface() {
         common: String
         b: String
     }
-    
+
     union U = A | B
 
     enum E {
@@ -5933,7 +6365,7 @@ fn query_operation_nullification() {
             "query {
                 ...F
              }
-             
+
              fragment F on Query {
                  get {
                      name
@@ -6129,7 +6561,7 @@ fn test_query_not_named_query() {
           `SECURITY` features provide metadata necessary to securely resolve fields.
           """
           SECURITY
-  
+
           """
           `EXECUTION` features provide metadata necessary for operation execution.
           """
