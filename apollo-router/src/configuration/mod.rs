@@ -713,12 +713,6 @@ const fn default_generate_query_fragments() -> bool {
     true
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum Auto {
-    Auto,
-}
-
 fn default_defer_support() -> bool {
     true
 }

@@ -343,7 +343,7 @@ mod tests {
     }
 
     fn is_even(i: usize) -> bool {
-        i % 2 == 0
+        i.is_multiple_of(2)
     }
 
     #[test]

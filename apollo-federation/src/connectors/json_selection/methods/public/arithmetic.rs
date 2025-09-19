@@ -265,6 +265,8 @@ infix_math_method!(ModMethod, mod_method, rem_op);
 mod tests {
     use serde_json_bytes::json;
 
+    use crate::connectors::ConnectSpec;
+    use crate::connectors::json_selection::ApplyToError;
     use crate::selection;
 
     #[test]
@@ -684,6 +686,146 @@ mod tests {
             result.1[0]
                 .message()
                 .contains("Method ->mod requires at least one argument")
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn add_should_return_none_when_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!("$.a->add($.missing)", spec).apply_to(&json!({
+                "a": 5,
+            })),
+            (
+                None,
+                vec![
+                    ApplyToError::from_json(&json!({
+                        "message": "Property .missing not found in object",
+                        "path": ["missing"],
+                        "range": [11, 18],
+                        "spec": spec.to_string(),
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "Method ->add requires numeric arguments",
+                        "path": ["a", "->add"],
+                        "range": [9, 18],
+                        "spec": spec.to_string(),
+                    })),
+                ]
+            ),
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn sub_should_return_none_when_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!("$.a->sub($.missing)", spec).apply_to(&json!({
+                "a": 5,
+            })),
+            (
+                None,
+                vec![
+                    ApplyToError::from_json(&json!({
+                        "message": "Property .missing not found in object",
+                        "path": ["missing"],
+                        "range": [11, 18],
+                        "spec": spec.to_string(),
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "Method ->sub requires numeric arguments",
+                        "path": ["a", "->sub"],
+                        "range": [9, 18],
+                        "spec": spec.to_string(),
+                    })),
+                ]
+            ),
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn mul_should_return_none_when_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!("$.a->mul($.missing)", spec).apply_to(&json!({
+                "a": 5,
+            })),
+            (
+                None,
+                vec![
+                    ApplyToError::from_json(&json!({
+                        "message": "Property .missing not found in object",
+                        "path": ["missing"],
+                        "range": [11, 18],
+                        "spec": spec.to_string(),
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "Method ->mul requires numeric arguments",
+                        "path": ["a", "->mul"],
+                        "range": [9, 18],
+                        "spec": spec.to_string(),
+                    })),
+                ]
+            ),
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn div_should_return_none_when_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!("$.a->div($.missing)", spec).apply_to(&json!({
+                "a": 5,
+            })),
+            (
+                None,
+                vec![
+                    ApplyToError::from_json(&json!({
+                        "message": "Property .missing not found in object",
+                        "path": ["missing"],
+                        "range": [11, 18],
+                        "spec": spec.to_string(),
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "Method ->div requires numeric arguments",
+                        "path": ["a", "->div"],
+                        "range": [9, 18],
+                        "spec": spec.to_string(),
+                    })),
+                ]
+            ),
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn mod_should_return_none_when_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!("$.a->mod($.missing)", spec).apply_to(&json!({
+                "a": 5,
+            })),
+            (
+                None,
+                vec![
+                    ApplyToError::from_json(&json!({
+                        "message": "Property .missing not found in object",
+                        "path": ["missing"],
+                        "range": [11, 18],
+                        "spec": spec.to_string(),
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "Method ->mod requires numeric arguments",
+                        "path": ["a", "->mod"],
+                        "range": [9, 18],
+                        "spec": spec.to_string(),
+                    })),
+                ]
+            ),
         );
     }
 }
