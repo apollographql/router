@@ -60,8 +60,8 @@ pub(crate) fn extract_connect_directive_arguments(
                 field_def
                     .directives
                     .iter()
+                    .filter(|directive| directive.name == *name)
                     .enumerate()
-                    .filter(|(_, directive)| directive.name == *name)
                     .map(move |(i, directive)| {
                         let field_pos = if is_interface {
                             ObjectOrInterfaceFieldDefinitionPosition::Interface(
@@ -106,8 +106,8 @@ pub(crate) fn extract_connect_directive_arguments(
                 .flat_map(|ty| {
                     ty.directives
                         .iter()
+                        .filter(|directive| directive.name == *name)
                         .enumerate()
-                        .filter(|(_, directive)| directive.name == *name)
                         .map(move |(i, directive)| {
                             let position =
                                 ConnectorPosition::Type(ObjectTypeDefinitionDirectivePosition {

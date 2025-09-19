@@ -16,7 +16,9 @@ use tonic::transport::ClientTlsConfig;
 use tower::BoxError;
 use url::Url;
 
+use crate::plugins::telemetry::apollo::ApolloUsageReportsBatchProcessorConfiguration;
 use crate::plugins::telemetry::apollo::Config;
+use crate::plugins::telemetry::apollo::OtlpMetricsBatchProcessorConfiguration;
 use crate::plugins::telemetry::apollo::router_id;
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::apollo_exporter::get_uname;
@@ -29,7 +31,6 @@ use crate::plugins::telemetry::otlp::CustomTemporalitySelector;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::plugins::telemetry::otlp::process_endpoint;
-use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
 pub(crate) mod histogram;
 pub(crate) mod studio;
@@ -60,7 +61,7 @@ impl MetricsConfigurator for Config {
                 apollo_key: Some(key),
                 apollo_graph_ref: Some(reference),
                 schema_id,
-                batch_processor,
+                metrics,
                 metrics_reference_mode,
                 ..
             } => {
@@ -76,7 +77,7 @@ impl MetricsConfigurator for Config {
                     key,
                     reference,
                     schema_id,
-                    batch_processor,
+                    &metrics.usage_reports.batch_processor,
                     *metrics_reference_mode,
                 )?;
                 // env variable EXPERIMENTAL_APOLLO_OTLP_METRICS_ENABLED will disappear without warning in future
@@ -91,7 +92,7 @@ impl MetricsConfigurator for Config {
                         key,
                         reference,
                         schema_id,
-                        batch_processor,
+                        &metrics.otlp.batch_processor,
                     )?;
                 }
                 builder
@@ -112,9 +113,9 @@ impl Config {
         key: &str,
         reference: &str,
         schema_id: &str,
-        batch_processor: &BatchProcessorConfig,
+        batch_config: &OtlpMetricsBatchProcessorConfiguration,
     ) -> Result<MetricsBuilder, BoxError> {
-        tracing::debug!(endpoint = %endpoint, "creating Apollo OTLP metrics exporter");
+        tracing::info!("configuring Apollo OTLP metrics: {}", batch_config);
         let mut metadata = MetadataMap::new();
         metadata.insert("apollo.api.key", key.parse()?);
         let exporter = match otlp_protocol {
@@ -123,7 +124,7 @@ impl Config {
                     .tonic()
                     .with_tls_config(ClientTlsConfig::new().with_native_roots())
                     .with_endpoint(endpoint.as_str())
-                    .with_timeout(batch_processor.max_export_timeout)
+                    .with_timeout(batch_config.max_export_timeout)
                     .with_metadata(metadata.clone())
                     .with_compression(opentelemetry_otlp::Compression::Gzip),
             ),
@@ -138,7 +139,7 @@ impl Config {
                 let mut otlp_exporter = opentelemetry_otlp::new_exporter()
                     .http()
                     .with_protocol(opentelemetry_otlp::Protocol::Grpc)
-                    .with_timeout(batch_processor.max_export_timeout);
+                    .with_timeout(batch_config.max_export_timeout);
                 if let Some(endpoint) = maybe_endpoint {
                     otlp_exporter = otlp_exporter.with_endpoint(endpoint);
                 }
@@ -162,7 +163,7 @@ impl Config {
                     .tonic()
                     .with_tls_config(ClientTlsConfig::new().with_native_roots())
                     .with_endpoint(endpoint.as_str())
-                    .with_timeout(batch_processor.max_export_timeout)
+                    .with_timeout(batch_config.max_export_timeout)
                     .with_metadata(metadata.clone())
                     .with_compression(opentelemetry_otlp::Compression::Gzip),
             ),
@@ -175,7 +176,7 @@ impl Config {
                 let mut otlp_exporter = opentelemetry_otlp::new_exporter()
                     .http()
                     .with_protocol(opentelemetry_otlp::Protocol::Grpc)
-                    .with_timeout(batch_processor.max_export_timeout);
+                    .with_timeout(batch_config.max_export_timeout);
                 if let Some(endpoint) = maybe_endpoint {
                     otlp_exporter = otlp_exporter.with_endpoint(endpoint);
                 }
@@ -199,12 +200,12 @@ impl Config {
         )?;
         let default_reader = PeriodicReader::builder(exporter, runtime::Tokio)
             .with_interval(Duration::from_secs(60))
-            .with_timeout(batch_processor.max_export_timeout)
+            .with_timeout(batch_config.max_export_timeout)
             .build();
 
         let realtime_reader = PeriodicReader::builder(realtime_exporter, runtime::Tokio)
-            .with_interval(batch_processor.scheduled_delay)
-            .with_timeout(batch_processor.max_export_timeout)
+            .with_interval(batch_config.scheduled_delay)
+            .with_timeout(batch_config.max_export_timeout)
             .build();
 
         let resource = Resource::new([
@@ -241,14 +242,13 @@ impl Config {
         key: &str,
         reference: &str,
         schema_id: &str,
-        batch_processor: &BatchProcessorConfig,
+        batch_config: &ApolloUsageReportsBatchProcessorConfiguration,
         metrics_reference_mode: ApolloMetricsReferenceMode,
     ) -> Result<MetricsBuilder, BoxError> {
-        let batch_processor_config = batch_processor;
-        tracing::debug!(endpoint = %endpoint, "creating Apollo metrics exporter");
+        tracing::info!("configuring Apollo usage report metrics: {}", batch_config);
         let exporter = ApolloExporter::new(
             endpoint,
-            batch_processor_config,
+            batch_config,
             key,
             reference,
             schema_id,

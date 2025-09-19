@@ -8,7 +8,7 @@ services:
     ports:
       - 6379:6379
   postgres:
-    image: cimg/postgres:17.5
+    image: cimg/postgres:17.6
     security_opt:
       - no-new-privileges:true
     environment:
