@@ -10,8 +10,7 @@ use super::assert_composition_success;
 use super::compose_as_fed2_subgraphs;
 use super::errors;
 
-// Helper function to create directive strings from applied directives
-// Note: This function is currently unused but kept for future implementation
+// Helper function to create directive strings from applied directives using schema::DirectiveList
 fn directive_strings_schema(directives: &schema::DirectiveList, target: &str) -> Vec<String> {
     directives
         .iter()
@@ -20,6 +19,7 @@ fn directive_strings_schema(directives: &schema::DirectiveList, target: &str) ->
         .collect()
 }
 
+// Helper function to create directive strings from applied directives using ast::DirectiveList
 fn directive_strings_ast(directives: &ast::DirectiveList, target: &str) -> Vec<String> {
     directives
         .iter()
