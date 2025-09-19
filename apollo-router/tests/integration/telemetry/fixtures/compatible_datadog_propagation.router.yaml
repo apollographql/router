@@ -1,0 +1,8 @@
+telemetry:
+  exporters:
+    tracing:
+      propagation:
+        datadog: true
+        trace_context: false
+      datadog:
+        enabled: true

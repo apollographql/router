@@ -394,6 +394,9 @@ impl PluginPrivate for Telemetry {
             );
         }
 
+        // Validate that Datadog and trace context propagation are not both active
+        Self::validate_propagation_compatibility(&config)?;
+
         let field_level_instrumentation_ratio =
             config.calculate_field_level_instrumentation_ratio()?;
         let metrics_builder = Self::create_metrics_builder(&config)?;
@@ -1238,14 +1241,14 @@ impl Telemetry {
         if propagation.baggage {
             propagators.push(Box::<opentelemetry_sdk::propagation::BaggagePropagator>::default());
         }
-        if propagation.trace_context || tracing.otlp.enabled {
+        if Self::is_trace_context_propagation_active(config) {
             propagators
                 .push(Box::<opentelemetry_sdk::propagation::TraceContextPropagator>::default());
         }
         if propagation.zipkin || tracing.zipkin.enabled {
             propagators.push(Box::<opentelemetry_zipkin::Propagator>::default());
         }
-        if propagation.datadog || tracing.datadog.enabled() {
+        if Self::is_datadog_propagation_active(config) {
             propagators.push(Box::<tracing::datadog_exporter::DatadogPropagator>::default());
         }
         if propagation.aws_xray {
@@ -1262,6 +1265,41 @@ impl Telemetry {
         }
 
         TextMapCompositePropagator::new(propagators)
+    }
+
+    /// Check if Datadog propagation is active.
+    /// This includes both explicit configuration and implicit activation via the Datadog exporter.
+    fn is_datadog_propagation_active(config: &config::Conf) -> bool {
+        let propagation = &config.exporters.tracing.propagation;
+        let tracing = &config.exporters.tracing;
+        propagation.datadog || tracing.datadog.enabled()
+    }
+
+    /// Check if trace context propagation is active.
+    /// This includes both explicit configuration and implicit activation via the OTLP exporter.
+    fn is_trace_context_propagation_active(config: &config::Conf) -> bool {
+        let propagation = &config.exporters.tracing.propagation;
+        let tracing = &config.exporters.tracing;
+        propagation.trace_context || tracing.otlp.enabled
+    }
+
+    pub(crate) fn validate_propagation_compatibility(
+        config: &config::Conf,
+    ) -> Result<(), BoxError> {
+        // Check if both Datadog and trace context propagation are active
+        let datadog_active = Self::is_datadog_propagation_active(config);
+        let trace_context_active = Self::is_trace_context_propagation_active(config);
+
+        if datadog_active && trace_context_active {
+            return Err(BoxError::from(
+                "Configuration error: Datadog and `trace_context` propagation cannot be enabled at the same time due to incompatibilities in the trace ID formats. \
+                 Please disable one of the following: \
+                 - Set `telemetry.exporters.tracing.propagation.datadog: false` to disable Datadog propagation, or \
+                 - Set `telemetry.exporters.tracing.propagation.trace_context: false` to disable trace context propagation.",
+            ));
+        }
+
+        Ok(())
     }
 
     fn create_tracer_provider(
@@ -2172,6 +2210,7 @@ mod tests {
     use super::EnabledFeatures;
     use super::Telemetry;
     use super::apollo::ForwardHeaders;
+    use super::config::Conf;
     use crate::error::FetchError;
     use crate::graphql;
     use crate::graphql::Error;
@@ -3472,5 +3511,126 @@ mod tests {
         }
         .with_metrics()
         .await;
+    }
+
+    #[test]
+    fn test_validate_propagation_compatibility_both_datadog_and_trace_context_enabled() {
+        // Test using YAML configuration to set the enabled field properly
+        let config_yaml = r#"
+exporters:
+  tracing:
+    datadog:
+      enabled: true
+    propagation:
+      datadog: true
+      trace_context: true
+"#;
+        let config: Conf = serde_yaml::from_str(config_yaml).expect("Valid config");
+
+        let result = Telemetry::validate_propagation_compatibility(&config);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Datadog"));
+        assert!(err.to_string().contains("`trace_context` propagation"));
+        assert!(
+            err.to_string()
+                .contains("incompatibilities in the trace ID formats")
+        );
+    }
+
+    #[test]
+    fn test_validate_propagation_compatibility_datadog_enabled_no_trace_context() {
+        let config_yaml = r#"
+exporters:
+  tracing:
+    datadog:
+      enabled: true
+    propagation:
+      datadog: true
+      trace_context: false
+"#;
+        let config: Conf = serde_yaml::from_str(config_yaml).expect("Valid config");
+
+        let result = Telemetry::validate_propagation_compatibility(&config);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_propagation_compatibility_trace_context_enabled_no_datadog() {
+        let config_yaml = r#"
+exporters:
+  tracing:
+    datadog:
+      enabled: false
+    propagation:
+      datadog: false
+      trace_context: true
+"#;
+        let config: Conf = serde_yaml::from_str(config_yaml).expect("Valid config");
+
+        let result = Telemetry::validate_propagation_compatibility(&config);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_propagation_compatibility_neither_enabled() {
+        let config_yaml = r#"
+exporters:
+  tracing:
+    datadog:
+      enabled: false
+    propagation:
+      datadog: false
+      trace_context: false
+"#;
+        let config: Conf = serde_yaml::from_str(config_yaml).expect("Valid config");
+
+        let result = Telemetry::validate_propagation_compatibility(&config);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_propagation_compatibility_datadog_implicit_via_exporter() {
+        // Test case where datadog propagation is implicitly enabled via the datadog exporter
+        // but trace_context is explicitly enabled
+        let config_yaml = r#"
+exporters:
+  tracing:
+    datadog:
+      enabled: true
+    propagation:
+      datadog: false
+      trace_context: true
+"#;
+        let config: Conf = serde_yaml::from_str(config_yaml).expect("Valid config");
+
+        let result = Telemetry::validate_propagation_compatibility(&config);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Datadog"));
+        assert!(err.to_string().contains("trace context propagation"));
+    }
+
+    #[test]
+    fn test_validate_propagation_compatibility_otlp_enabled_with_datadog() {
+        // Test case where OTLP exporter (which enables trace context) is enabled with Datadog
+        let config_yaml = r#"
+exporters:
+  tracing:
+    datadog:
+      enabled: true
+    otlp:
+      enabled: true
+    propagation:
+      datadog: true
+      trace_context: false
+"#;
+        let config: Conf = serde_yaml::from_str(config_yaml).expect("Valid config");
+
+        let result = Telemetry::validate_propagation_compatibility(&config);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Datadog"));
+        assert!(err.to_string().contains("trace context propagation"));
     }
 }
