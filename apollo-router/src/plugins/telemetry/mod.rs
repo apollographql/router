@@ -91,10 +91,8 @@ use crate::context::OPERATION_NAME;
 use crate::graphql::ResponseVisitor;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::instrument::InstrumentLayer;
-use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
 use crate::metrics::meter_provider;
-use crate::metrics::meter_provider_internal;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
@@ -133,7 +131,6 @@ use crate::plugins::telemetry::metrics::apollo::studio::SinglePathErrorStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleStatsReport;
-use crate::plugins::telemetry::metrics::prometheus::commit_prometheus;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::OPENTELEMETRY_TRACER_HANDLE;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
@@ -157,6 +154,8 @@ use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::operation_limits::OperationLimits;
 
+use self::lifecycle::TelemetryActivation;
+
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
 pub(crate) mod apollo_otlp_exporter;
@@ -169,6 +168,7 @@ mod error_counter;
 mod error_handler;
 mod fmt_layer;
 pub(crate) mod formatters;
+pub(crate) mod lifecycle;
 mod logging;
 pub(crate) mod metrics;
 /// Opentelemetry utils
@@ -226,15 +226,6 @@ pub(crate) struct Telemetry {
     enabled_features: EnabledFeatures,
 }
 
-struct TelemetryActivation {
-    tracer_provider: Option<opentelemetry_sdk::trace::TracerProvider>,
-    // We have to have separate meter providers for prometheus metrics so that they don't get zapped on router reload.
-    public_meter_provider: Option<FilterMeterProvider>,
-    public_prometheus_meter_provider: Option<FilterMeterProvider>,
-    private_meter_provider: Option<FilterMeterProvider>,
-    private_realtime_meter_provider: Option<FilterMeterProvider>,
-    is_active: bool,
-}
 
 fn setup_tracing<T: TracingConfigurator>(
     mut builder: Builder,
@@ -1906,43 +1897,6 @@ impl Telemetry {
     }
 }
 
-impl TelemetryActivation {
-    fn reload_metrics(&mut self) {
-        let meter_provider = meter_provider_internal();
-        commit_prometheus();
-        let mut old_meter_providers: [Option<FilterMeterProvider>; 4] = Default::default();
-
-        old_meter_providers[0] = meter_provider.set(
-            MeterProviderType::PublicPrometheus,
-            self.public_prometheus_meter_provider.take(),
-        );
-
-        old_meter_providers[1] = meter_provider.set(
-            MeterProviderType::Apollo,
-            self.private_meter_provider.take(),
-        );
-
-        old_meter_providers[2] = meter_provider.set(
-            MeterProviderType::ApolloRealtime,
-            self.private_realtime_meter_provider.take(),
-        );
-
-        old_meter_providers[3] =
-            meter_provider.set(MeterProviderType::Public, self.public_meter_provider.take());
-
-        Self::checked_meter_shutdown(old_meter_providers);
-    }
-
-    fn checked_meter_shutdown(meters: [Option<FilterMeterProvider>; 4]) {
-        for meter_provider in meters.into_iter().flatten() {
-            Telemetry::checked_spawn_task(Box::new(move || {
-                if let Err(e) = meter_provider.shutdown() {
-                    ::tracing::error!(error = %e, "failed to shutdown meter provider")
-                }
-            }));
-        }
-    }
-}
 
 fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders) -> String {
     if let ForwardHeaders::None = forward_rules {
