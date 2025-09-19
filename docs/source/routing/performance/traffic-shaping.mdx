@@ -64,7 +64,7 @@ The router applies a default timeout of 30 seconds for all requests, including t
 - Initial requests subgraphs make to the router for [subscription callbacks](https://www.apollographql.com/docs/react/data/subscriptions/#http)
   - For subscriptions callbacks, the timeout only applies to the initial request to the router. Once the subscription has been established, the request duration can exceed the timeout.
 
-#### Router Timeouts
+#### Router timeouts
 
 You can change the default timeout for client requests to the router like so:
 
@@ -74,9 +74,9 @@ traffic_shaping:
     timeout: 50s # If client requests to the router take more than 50 seconds, cancel the request (30 seconds by default)
 ```
 
-If the router-level timeout is hit, a [HTTP 504 status code](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/504) is returned to indicate there was a gateway timeout.
+If the router-level timeout is hit, the router returns a [HTTP 504 status code](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/504) to indicate a gateway timeout.
 
-#### Subgraph Timeouts
+#### Subgraph timeouts
 You can change the default timeout for all requests between the router and subgraphs like so:
 
 ```yaml title="router.yaml"
@@ -85,7 +85,7 @@ traffic_shaping:
     timeout: 50s # If subgraph requests take more than 50 seconds, cancel the request (30 seconds by default)
 ```
 
-If the subgraph-level timeout is hit, a [GraphQL-compliant HTTP 200 status code](https://graphql.github.io/graphql-over-http/) is returned. Since the Router may be handling multiple subgraph requests for one operation, the timeout of one subraph does not immediately invalidate other requests in the query plan. Returning a 200 status code allows the Router to return partial data if it has any from other requests that did not time out.
+If the subgraph-level timeout is hit, the router returns a [GraphQL-compliant HTTP 200 status code](https://graphql.github.io/graphql-over-http/). Because the router can handle multiple subgraph requests for one operation, the timeout of one subgraph doesn't immediately invalidate other requests in the query plan. Returning a 200 status code enables the router to return partial data from other requests that didn't timeout.
 
 <Note>
 
