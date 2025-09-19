@@ -97,7 +97,6 @@ impl ErrorReporter {
                 );
                 myself.add_error(error.append_message(distribution_str));
             },
-            Some(|elt: Option<&S>| elt.is_none()),
             false,
         );
     }
@@ -127,7 +126,6 @@ impl ErrorReporter {
                 );
                 myself.add_error(error.append_message(distribution_str));
             },
-            Some(|elt: Option<&T>| elt.is_none()),
             false,
         );
     }
@@ -143,7 +141,6 @@ impl ErrorReporter {
         subgraph_element_to_string: impl Fn(&S, usize) -> Option<String>,
         supergraph_element_printer: impl Fn(&str, Option<String>) -> String,
         other_elements_printer: impl Fn(&str, &str) -> String,
-        ignore_predicate: Option<impl Fn(Option<&S>) -> bool>,
         include_missing_sources: bool,
         no_end_of_message_dot: bool,
     ) {
@@ -171,7 +168,6 @@ impl ErrorReporter {
                     locations: Default::default(), // TODO
                 });
             },
-            ignore_predicate,
             include_missing_sources,
         );
     }
@@ -195,7 +191,6 @@ impl ErrorReporter {
         supergraph_element_printer: impl Fn(&str, Option<String>) -> String,
         other_elements_printer: impl Fn(&str, &str) -> String,
         reporter: impl FnOnce(&mut Self, Vec<String>, Vec<L>),
-        ignore_predicate: Option<impl Fn(Option<&S>) -> bool>,
         include_missing_sources: bool,
     ) {
         let mut distribution_map = HashMap::new();
@@ -206,17 +201,12 @@ impl ErrorReporter {
              idx: usize,
              subgraph_element: &S,
              distribution_map: &mut HashMap<String, Vec<String>>| {
-                if ignore_predicate
-                    .as_ref()
-                    .is_some_and(|pred| pred(Some(subgraph_element)))
-                {
-                    return;
+                if let Some(element) = subgraph_mismatch_accessor(subgraph_element, idx) {
+                    distribution_map
+                        .entry(element)
+                        .or_default()
+                        .push(name.to_string());
                 }
-                let element = subgraph_mismatch_accessor(subgraph_element, idx);
-                distribution_map
-                    .entry(element.unwrap_or("".to_string()))
-                    .or_default()
-                    .push(name.to_string());
                 // TODO: Get AST node equivalent and push onto `locations`
             };
         if include_missing_sources {

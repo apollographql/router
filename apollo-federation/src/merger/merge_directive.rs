@@ -148,7 +148,6 @@ impl Merger {
                     |d, _| print_arguments(d),
                     |application, subgraphs| format!("The supergraph will use {} (from {}), but found ", application, subgraphs.unwrap_or_else(|| "undefined".to_string())),
                     |application, subgraphs| format!("{application} in {subgraphs}"),
-                    None::<fn(Option<&Directive>) -> bool>,
                     false,
                     false,
                 );
@@ -261,7 +260,6 @@ impl Merger {
                     |_elt, _idx| Some("yes".to_string()),
                     |_, subgraphs| format!("it is defined in {}", subgraphs.unwrap_or_default()),
                     |_, subgraphs| format!(" but not in {subgraphs}"),
-                    None::<fn(Option<&DirectiveDefinitionPosition>) -> bool>,
                     false,
                     false,
                 );
@@ -296,7 +294,6 @@ impl Merger {
                         |elt, _idx| Some(location_string(&extract_executable_locations(elt))),
                         |_, _subgraphs| "it will not appear in the supergraph as there no intersection between ".to_string(),
                         |locs, subgraphs| format!("{locs} in {subgraphs}"),
-                        None::<fn(Option<&Node<DirectiveDefinition>>) -> bool>,
                         false,
                         false,
                     );
@@ -318,7 +315,6 @@ impl Merger {
                 |elt, _idx| if elt.repeatable { Some("yes".to_string()) } else { Some("no".to_string()) },
                 |_, subgraphs| format!("it is not repeatable in {}", subgraphs.unwrap_or_default()),
                 |_, subgraphs| format!(" but is repeatable in {}", subgraphs),
-                None::<fn(Option<&Node<DirectiveDefinition>>) -> bool>,
                 false,
                 false,
             );
@@ -338,7 +334,6 @@ impl Merger {
                         .to_string()
                 },
                 |locs, subgraphs| format!("{locs} in {subgraphs}"),
-                None::<fn(Option<&Node<DirectiveDefinition>>) -> bool>,
                 false,
                 false,
             );

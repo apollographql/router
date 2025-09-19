@@ -140,7 +140,6 @@ impl Merger {
                                     subgraphs,
                                 )
                             },
-                            None::<fn(Option<&InputObjectFieldDefinitionPosition>) -> bool>,
                             true,
                             false,
                         );

@@ -985,7 +985,6 @@ impl Merger {
                         |ty, _| print_ty_has_field(ty, &field_pos),
                         |_, subgraphs| format!("\"{}.{}\" is defined in {}", field_pos.type_name(), field_pos.field_name(), subgraphs.unwrap_or_default()),
                         |_, subgraphs| format!(" but not in {}", subgraphs),
-                        None::<fn(Option<&ExtendedType>) -> bool>,
                         false,
                         false,
                     );
@@ -1029,7 +1028,6 @@ impl Merger {
                 |idx, _| if source_as_entity.contains(idx) { Some("yes".to_string()) } else { Some("no".to_string()) },
                 |_, subgraphs| format!("it has no @key in {}", subgraphs.unwrap_or_default()),
                 |_, subgraphs| format!(" but has some @key in {}", subgraphs),
-                None::<fn(Option<&usize>) -> bool>,
                 false,
                 false,
             );
@@ -1244,7 +1242,6 @@ impl Merger {
                     )
                 },
                 |elt, subgraphs| format!("{type_class} \"{elt}\" in {subgraphs}"),
-                None::<fn(Option<&T>) -> bool>,
                 false,
                 false,
             );
@@ -1495,13 +1492,6 @@ impl Merger {
                             Self::description_string(desc, "  ")
                         )
                     },
-                    Some(|elem: Option<&T>| {
-                        if let Some(el) = elem {
-                            el.description(&self.merged).is_none()
-                        } else {
-                            true
-                        }
-                    }),
                     false,
                     true,
                 );
