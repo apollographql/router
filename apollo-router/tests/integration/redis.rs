@@ -49,6 +49,31 @@ use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
 use crate::integration::response_cache::namespace;
 
+// TODO: consider centralizing this fn and the same one in entity_cache.rs?
+fn subgraphs_with_many_entities(count: usize) -> serde_json::Value {
+    let mut reviews = vec![];
+    let mut top_products = vec![];
+    for upc in 1..=count {
+        top_products.push(json!({ "upc": upc.to_string() }));
+        reviews.push(json!({
+            "__typename": "Product",
+            "upc": upc.to_string(),
+            "reviews": [{ "id": format!("r{upc}") }],
+        }));
+    }
+
+    json!({
+        "products": {
+            "headers": {"cache-control": "public"},
+            "query": { "topProducts": top_products },
+        },
+        "reviews": {
+            "headers": {"cache-control": "public"},
+            "entities": reviews,
+        },
+    })
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn query_planner_cache() -> Result<(), BoxError> {
     if !graph_os_enabled() {
@@ -1541,4 +1566,133 @@ async fn test_redis_connections_are_closed_on_router_reload() {
     router.assert_reloaded().await;
 
     router.assert_metrics_contains(expected_metric, None).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_redis_emits_response_size_avg_metric() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let router_config = include_str!("fixtures/clustered_redis_query_planning.router.yaml");
+    let mut router = IntegrationTest::builder()
+        .config(router_config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    // two queries to ensure a cache hit
+    router.execute_default_query().await;
+    router.execute_default_query().await;
+
+    let experimental_response_avg_metric = r#"experimental_apollo_router_cache_redis_response_size_avg{kind="query planner",otel_scope_name="apollo/router"}"#;
+    router
+        .assert_metric_non_zero(experimental_response_avg_metric, None)
+        .await;
+
+    router.print_logs();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_redis_emits_request_size_avg_metric() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let router_config = include_str!("fixtures/clustered_redis_query_planning.router.yaml");
+    let mut router = IntegrationTest::builder()
+        .config(router_config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    // two queries to ensure a cache hit
+    router.execute_default_query().await;
+    router.execute_default_query().await;
+
+    let experimental_response_avg_metric = r#"experimental_apollo_router_cache_redis_request_size_avg{kind="query planner",otel_scope_name="apollo/router"}"#;
+    router
+        .assert_metric_non_zero(experimental_response_avg_metric, None)
+        .await;
+
+    router.print_logs();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_redis_emits_configuration_error_metric() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let config = json!({
+        "include_subgraph_errors": {
+            "all": true,
+        },
+        "preview_entity_cache": {
+            "enabled": true,
+            "subgraph": {
+                "all": {
+                    "redis": {
+                        "urls": ["invalid-redis-schem://127.0.0.1:7000"], // invalid schema!
+                        "ttl": "10m",
+                        "required_to_start": false, // don't fail startup, allow errors during runtime
+                    },
+                },
+            },
+        },
+        "telemetry": {
+            "exporters": {
+                "metrics": {
+                    "prometheus": {
+                        "enabled": true,
+                        "listen": "127.0.0.1:0",
+                        "path": "/metrics",
+                    },
+                },
+            },
+        },
+        "experimental_mock_subgraphs": subgraphs_with_many_entities(10),
+    });
+
+    let mut router = IntegrationTest::builder()
+        .config(serde_yaml::to_string(&config).unwrap())
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Execute queries that will attempt Redis operations and fail
+    for _ in 0..3 {
+        let query = Query::builder()
+            .body(json!({"query":"{ topProducts { reviews { id } } }","variables":{}}))
+            .build();
+        let (_trace_id, response) = router.execute_query(query).await;
+        // The query should still succeed (using fallback) even though Redis fails
+        assert_eq!(response.status(), 200);
+    }
+
+    router
+        .assert_metric_non_zero(
+            r#"apollo_router_cache_redis_errors_total{error_type="cluster",kind="entity",otel_scope_name="apollo/router"}"#,
+            None,
+        )
+        .await;
+
+    // LEFT OFF HERE: trying to figure out why we're getting `unknown` error type; trying to
+    // trigger an actual config error
+    router
+        .assert_metric_non_zero(
+            // NOTE: the `unknown` here should be `configuration`! it gets emitted from fred; so,
+            // maybe we need to trigger a config error in a different way; this test might actually
+            // test what happens with a config fred doesn't know how to use (eg, the schema isn't
+            // redis, rediss-cluster, etc)
+           r#"apollo_router_cache_redis_errors_total{error_type="unknown",kind="entity",otel_scope_name="apollo/router"}"#,
+            None,
+        )
+        .await;
+
+    router.graceful_shutdown().await;
 }
