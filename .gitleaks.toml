@@ -14,6 +14,9 @@
             "d826844c8cf433f78938059f02feecc108468e49", 
             # Not a key: https://github.com/apollographql/router/pull/8193#issuecomment-3249460075
             "77700b93798ce98eaf75c3b02b70198e7b730ddb",
+            # Not an API key: https://github.com/apollographql/router/pull/8095#issuecomment-3304207192
+            "d5df1c6505c4447e95d989842ce6bea80ded07c8",
+            "1fed9f2b856277f65f5567ef10b91e6335bf449a",
         ]
 
         paths = [
