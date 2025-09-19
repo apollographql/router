@@ -16,7 +16,7 @@ use crate::plugins::telemetry::config::TraceIdFormat;
 use crate::plugins::telemetry::resource::ConfigResource;
 
 /// Logging configuration.
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
+#[derive(Deserialize, JsonSchema, Clone, Default, Debug, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Logging {
     /// Common configuration
@@ -28,7 +28,7 @@ pub(crate) struct Logging {
     pub(crate) file: File,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, Default, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct LoggingCommon {
     /// Set a service.name resource in your metrics
@@ -53,7 +53,7 @@ impl ConfigResource for LoggingCommon {
     }
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct StdOut {
     /// Set to true to log to stdout.
@@ -77,7 +77,7 @@ impl Default for StdOut {
     }
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct RateLimit {
     /// Set to true to limit the rate of log messages
@@ -102,7 +102,7 @@ impl Default for RateLimit {
 
 /// Log to a file
 #[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
+#[derive(Deserialize, JsonSchema, Clone, Default, Debug, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct File {
     /// Set to true to log to a file.
@@ -388,7 +388,7 @@ impl Default for TextFormat {
 
 /// The period to rollover the log file.
 #[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
+#[derive(Deserialize, JsonSchema, Clone, Default, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Rollover {
     /// Roll over every hour.

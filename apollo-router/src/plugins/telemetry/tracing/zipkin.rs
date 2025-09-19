@@ -21,7 +21,7 @@ use crate::plugins::telemetry::tracing::TracingConfigurator;
 static DEFAULT_ENDPOINT: LazyLock<Uri> =
     LazyLock::new(|| Uri::from_static("http://127.0.0.1:9411/api/v2/spans"));
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "ZipkinConfig")]
 pub(crate) struct Config {

@@ -66,7 +66,7 @@ fn default_resource_mappings() -> HashMap<String, String> {
 const ENV_KEY: Key = Key::from_static_str("env");
 const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:8126";
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "DatadogConfig")]
 pub(crate) struct Config {

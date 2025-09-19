@@ -28,7 +28,7 @@ use crate::router_factory::Endpoint;
 use crate::services::router;
 
 /// Prometheus configuration
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 #[schemars(rename = "PrometheusMetricsConfig")]
 pub(crate) struct Config {
@@ -42,7 +42,7 @@ pub(crate) struct Config {
     pub(crate) path: String,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema, Default, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ResourceSelectorConfig {
     /// Export all resource attributes with every metrics.
