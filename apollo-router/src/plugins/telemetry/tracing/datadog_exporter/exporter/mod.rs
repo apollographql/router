@@ -27,7 +27,7 @@ use opentelemetry_sdk::resource::SdkProvidedResourceDetector;
 use opentelemetry_sdk::runtime::RuntimeChannel;
 use opentelemetry_sdk::trace::Config;
 use opentelemetry_sdk::trace::Tracer;
-use opentelemetry_sdk::trace::TracerProvider
+use opentelemetry_sdk::trace::TracerProvider;
 use opentelemetry_semantic_conventions as semcov;
 use url::Url;
 

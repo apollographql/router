@@ -16,7 +16,7 @@ use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
 use http::header::RETRY_AFTER;
 use http::header::USER_AGENT;
-use opentelemetry::ExportError;
+use opentelemetry::trace::ExportError;
 use parking_lot::Mutex;
 pub(crate) use prost::*;
 use reqwest::Client;

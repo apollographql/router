@@ -34,7 +34,9 @@ impl Hash for InternValue<'_> {
                         }
                     }
                     opentelemetry::Array::String(x) => x.hash(state),
+                    _ => unreachable!()
                 },
+                _ => unreachable!()
             },
         }
     }
@@ -108,7 +110,9 @@ impl InternValue<'_> {
                     opentelemetry::Array::String(x) => {
                         Self::write_generic_array(payload, reusable_buffer, x)
                     }
+                    _ => unreachable!()
                 },
+                _ => unreachable!()
             },
         }
     }

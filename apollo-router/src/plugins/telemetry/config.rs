@@ -11,8 +11,8 @@ use opentelemetry::metrics::MetricsError;
 use opentelemetry_sdk::metrics::Aggregation;
 use opentelemetry_sdk::metrics::Instrument;
 use opentelemetry_sdk::metrics::Stream;
-use opentelemetry_sdk::metrics::View;
 use opentelemetry_sdk::metrics::new_view;
+use opentelemetry_sdk::metrics::View;
 use opentelemetry_sdk::trace::SpanLimits;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -613,6 +613,7 @@ impl From<opentelemetry::Array> for AttributeArray {
             opentelemetry::Array::String(v) => {
                 AttributeArray::String(v.into_iter().map(|v| v.into()).collect())
             }
+            _ => AttributeArray::String(vec![]),
         }
     }
 }

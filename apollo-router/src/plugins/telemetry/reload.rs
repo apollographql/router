@@ -9,7 +9,6 @@ use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
-use opentelemetry::trace::TracerProvider;
 use opentelemetry_sdk::trace::Tracer;
 use tower::BoxError;
 use tracing_subscriber::EnvFilter;
