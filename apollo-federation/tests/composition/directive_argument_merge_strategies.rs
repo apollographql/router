@@ -53,14 +53,14 @@ mod tests {
     use super::*;
 
     // Test cases for different argument composition strategies
-    struct CompositionStrategyTestCase {
-        name: &'static str,
+    struct CompositionStrategyTestCase<'a> {
+        name: &'a str,
         composition_strategy: ArgumentCompositionStrategy,
-        arg_values_s1: serde_json::Value,
-        arg_values_s2: serde_json::Value,
-        result_values: serde_json::Value,
+        arg_values_s1: HashMap<&'a str, &'a str>,
+        arg_values_s2: HashMap<&'a str, &'a str>,
+        result_values: HashMap<&'a str, &'a str>,
     }
-
+    
     static TEST_CASES: LazyLock<HashMap<&str, CompositionStrategyTestCase>> = LazyLock::new(|| {
         HashMap::from([
             (
@@ -68,20 +68,20 @@ mod tests {
                 CompositionStrategyTestCase {
                     name: "max",
                     composition_strategy: ArgumentCompositionStrategy::Max,
-                    arg_values_s1: serde_json::json!({
-                        "t": "3",
-                        "k": "1"
-                    }),
-                    arg_values_s2: serde_json::json!({
-                        "t": "2",
-                        "k": "5",
-                        "b": "4"
-                    }),
-                    result_values: serde_json::json!({
-                        "t": "3",
-                        "k": "5",
-                        "b": "4"
-                    }),
+                    arg_values_s1: HashMap::from([
+                        ("t", "3"),
+                        ("k", "1")
+                    ]),
+                    arg_values_s2: HashMap::from([
+                        ("t", "2"),
+                        ("k", "5"),
+                        ("b", "4")
+                    ]),
+                    result_values: HashMap::from([
+                        ("t", "3"),
+                        ("k", "5"),
+                        ("b", "4")
+                    ]),
                 },
             ),
             (
@@ -89,20 +89,20 @@ mod tests {
                 CompositionStrategyTestCase {
                     name: "min",
                     composition_strategy: ArgumentCompositionStrategy::Min,
-                    arg_values_s1: serde_json::json!({
-                        "t": "3",
-                        "k": "1"
-                    }),
-                    arg_values_s2: serde_json::json!({
-                        "t": "2",
-                        "k": "5",
-                        "b": "4"
-                    }),
-                    result_values: serde_json::json!({
-                        "t": "2",
-                        "k": "1",
-                        "b": "4"
-                    }),
+                    arg_values_s1: HashMap::from([
+                        ("t", "3"),
+                        ("k", "1")
+                    ]),
+                    arg_values_s2: HashMap::from([
+                        ("t", "2"),
+                        ("k", "5"),
+                        ("b", "4")
+                    ]),
+                    result_values: HashMap::from([
+                        ("t", "2"),
+                        ("k", "1"),
+                        ("b", "4")
+                    ]),
                 },
             ),
             (
@@ -110,20 +110,20 @@ mod tests {
                 CompositionStrategyTestCase {
                     name: "intersection",
                     composition_strategy: ArgumentCompositionStrategy::Intersection,
-                    arg_values_s1: serde_json::json!({
-                        "t": r#"["foo", "bar"]"#,
-                        "k": r#"[]"#
-                    }),
-                    arg_values_s2: serde_json::json!({
-                        "t": r#"["foo"]"#,
-                        "k": r#"["v1", "v2"]"#,
-                        "b": r#"["x"]"#
-                    }),
-                    result_values: serde_json::json!({
-                        "t": r#"["foo"]"#,
-                        "k": r#"[]"#,
-                        "b": r#"["x"]"#
-                    }),
+                    arg_values_s1:  HashMap::from([
+                        ("t", r#"["foo", "bar"]"#),
+                        ("k", r#"[]"#)
+                    ]),
+                    arg_values_s2:  HashMap::from([
+                        ("t", r#"["foo"]"#),
+                        ("k", r#"["v1", "v2"]"#),
+                        ("b", r#"["x"]"#)
+                    ]),
+                    result_values:  HashMap::from([
+                        ("t", r#"["foo"]"#),
+                        ("k", r#"[]"#),
+                        ("b", r#"["x"]"#)
+                    ]),
                 },
             ),
             (
@@ -131,20 +131,20 @@ mod tests {
                 CompositionStrategyTestCase {
                     name: "union",
                     composition_strategy: ArgumentCompositionStrategy::Union,
-                    arg_values_s1: serde_json::json!({
-                        "t": r#"["foo", "bar"]"#,
-                        "k": r#"[]"#
-                    }),
-                    arg_values_s2: serde_json::json!({
-                        "t": r#"["foo"]"#,
-                        "k": r#"["v1", "v2"]"#,
-                        "b": r#"["x"]"#
-                    }),
-                    result_values: serde_json::json!({
-                        "t": r#"["foo", "bar"]"#,
-                        "k": r#"["v1", "v2"]"#,
-                        "b": r#"["x"]"#
-                    }),
+                    arg_values_s1:  HashMap::from([
+                        ("t", r#"["foo", "bar"]"#),
+                        ("k", r#"[]"#)
+                    ]),
+                    arg_values_s2:  HashMap::from([
+                        ("t", r#"["foo"]"#),
+                        ("k", r#"["v1", "v2"]"#),
+                        ("b", r#"["x"]"#)
+                    ]),
+                    result_values:  HashMap::from([
+                        ("t", r#"["foo", "bar"]"#),
+                        ("k", r#"["v1", "v2"]"#),
+                        ("b", r#"["x"]"#)
+                    ]),
                 },
             ),
             (
@@ -152,20 +152,20 @@ mod tests {
                 CompositionStrategyTestCase {
                     name: "nullable_and",
                     composition_strategy: ArgumentCompositionStrategy::NullableAnd,
-                    arg_values_s1: serde_json::json!({
-                        "t": "true",
-                        "k": "true"
-                    }),
-                    arg_values_s2: serde_json::json!({
-                        "t": "null",
-                        "k": "false",
-                        "b": "false"
-                    }),
-                    result_values: serde_json::json!({
-                        "t": "true",
-                        "k": "false",
-                        "b": "false"
-                    }),
+                    arg_values_s1:  HashMap::from([
+                        ("t", "true"),
+                        ("k", "true")
+                    ]),
+                    arg_values_s2:  HashMap::from([
+                        ("t", "null"),
+                        ("k", "false"),
+                        ("b", "false")
+                    ]),
+                    result_values:  HashMap::from([
+                        ("t", "true"),
+                        ("k", "false"),
+                        ("b", "false")
+                    ]),
                 },
             ),
             (
@@ -173,20 +173,20 @@ mod tests {
                 CompositionStrategyTestCase {
                     name: "nullable_max",
                     composition_strategy: ArgumentCompositionStrategy::NullableMax,
-                    arg_values_s1: serde_json::json!({
-                        "t": "3",
-                        "k": "1"
-                    }),
-                    arg_values_s2: serde_json::json!({
-                        "t": "2",
-                        "k": "null",
-                        "b": "null"
-                    }),
-                    result_values: serde_json::json!({
-                        "t": "3",
-                        "k": "1",
-                        "b": "null"
-                    }),
+                    arg_values_s1:  HashMap::from([
+                        ("t", "3"),
+                        ("k", "1")
+                    ]),
+                    arg_values_s2:  HashMap::from([
+                        ("t", "2"),
+                        ("k", "null"),
+                        ("b", "null")
+                    ]),
+                    result_values:  HashMap::from([
+                        ("t", "3"),
+                        ("k", "1"),
+                        ("b", "null")
+                    ]),
                 },
             ),
             (
@@ -194,43 +194,24 @@ mod tests {
                 CompositionStrategyTestCase {
                     name: "nullable_union",
                     composition_strategy: ArgumentCompositionStrategy::NullableUnion,
-                    arg_values_s1: serde_json::json!({
-                        "t": r#"["foo", "bar"]"#,
-                        "k": r#"[]"#
-                    }),
-                    arg_values_s2: serde_json::json!({
-                        "t": r#"["foo"]"#,
-                        "k": r#"["v1", "v2"]"#,
-                        "b": r#"["x"]"#
-                    }),
-                    result_values: serde_json::json!({
-                        "t": r#"["foo", "bar"]"#,
-                        "k": r#"["v1", "v2"]"#,
-                        "b": r#"["x"]"#
-                    }),
+                    arg_values_s1:  HashMap::from([
+                        ("t", r#"["foo", "bar"]"#),
+                        ("k", r#"[]"#)
+                    ]),
+                    arg_values_s2:  HashMap::from([
+                        ("t", r#"["foo"]"#),
+                        ("k", r#"["v1", "v2"]"#),
+                        ("b", r#"["x"]"#)
+                    ]),
+                    result_values:  HashMap::from([
+                        ("t", r#"["foo", "bar"]"#),
+                        ("k", r#"["v1", "v2"]"#),
+                        ("b", r#"["x"]"#)
+                    ]),
                 },
             ),
         ])
     });
-
-    // Helper function to convert JSON values to GraphQL value strings
-    fn value_to_string(value: &serde_json::Value) -> String {
-        match value {
-            serde_json::Value::Null => "null".to_string(),
-            serde_json::Value::Bool(b) => b.to_string(),
-            serde_json::Value::Number(n) => n.to_string(),
-            serde_json::Value::String(s) => format!("\"{}\"", s),
-            serde_json::Value::Array(arr) => {
-                let items: Vec<String> = arr.iter().map(value_to_string).collect();
-                format!("[{}]", items.join(", "))
-            }
-            serde_json::Value::Object(_) => {
-                // For objects, we'll need to handle this differently based on the test case
-                // For now, return a placeholder
-                "{}".to_string()
-            }
-        }
-    }
 
     fn test_composition_of_directive_with_non_trivial_argument_strategies(
         test_case: &CompositionStrategyTestCase,
@@ -254,9 +235,9 @@ mod tests {
                 "#,
                 test_case.name,
                 test_case.name,
-                value_to_string(&test_case.arg_values_s1["t"]),
+                test_case.arg_values_s1["t"],
                 test_case.name,
-                value_to_string(&test_case.arg_values_s1["k"])
+                test_case.arg_values_s1["k"]
             ),
         };
 
@@ -277,11 +258,11 @@ mod tests {
                 "#,
                 test_case.name,
                 test_case.name,
-                value_to_string(&test_case.arg_values_s2["t"]),
+                test_case.arg_values_s2["t"],
                 test_case.name,
-                value_to_string(&test_case.arg_values_s2["k"]),
+                test_case.arg_values_s2["k"],
                 test_case.name,
-                value_to_string(&test_case.arg_values_s2["b"])
+                test_case.arg_values_s2["b"]
             ),
         };
 
@@ -327,7 +308,7 @@ mod tests {
             [format!(
                 r#"@{}(value: {})"#,
                 test_case.name,
-                value_to_string(test_case.result_values.get("t").unwrap())
+                test_case.result_values["t"]
             )]
         );
         assert_eq!(
@@ -335,7 +316,7 @@ mod tests {
             [format!(
                 r#"@{}(value: {})"#,
                 test_case.name,
-                value_to_string(test_case.result_values.get("k").unwrap())
+                test_case.result_values["k"]
             )]
         );
         assert_eq!(
@@ -343,7 +324,7 @@ mod tests {
             [format!(
                 r#"@{}(value: {})"#,
                 test_case.name,
-                value_to_string(test_case.result_values.get("b").unwrap())
+                test_case.result_values["b"]
             )]
         );
     }
