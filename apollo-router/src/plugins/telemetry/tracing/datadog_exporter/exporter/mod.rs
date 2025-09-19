@@ -11,10 +11,11 @@ use futures::future::BoxFuture;
 pub use model::ApiVersion;
 pub use model::Error;
 pub use model::FieldMappingFn;
+use opentelemetry::InstrumentationScope;
 use opentelemetry::KeyValue;
 use opentelemetry::global;
 use opentelemetry::trace::TraceError;
-use opentelemetry::trace::TracerProvider;
+use opentelemetry::trace::TracerProvider as OtherTracerProvider;
 use opentelemetry_http::HttpClient;
 use opentelemetry_http::ResponseExt;
 use opentelemetry_sdk::Resource;
@@ -26,6 +27,7 @@ use opentelemetry_sdk::resource::SdkProvidedResourceDetector;
 use opentelemetry_sdk::runtime::RuntimeChannel;
 use opentelemetry_sdk::trace::Config;
 use opentelemetry_sdk::trace::Tracer;
+use opentelemetry_sdk::trace::TracerProvider
 use opentelemetry_semantic_conventions as semcov;
 use url::Url;
 
@@ -271,14 +273,13 @@ impl DatadogPipelineBuilder {
         let (config, service_name) = self.build_config_and_service_name();
         let exporter = self.build_exporter_with_service_name(service_name)?;
         let mut provider_builder =
-            opentelemetry_sdk::trace::TracerProvider::builder().with_simple_exporter(exporter);
-        provider_builder = provider_builder.with_config(config);
+            TracerProvider::builder().with_simple_exporter(exporter);
+        provider_builder = provider_builder.with_resource(config.resource);
         let provider = provider_builder.build();
-        let tracer = provider
-            .tracer_builder("opentelemetry-datadog")
-            .with_version(env!("CARGO_PKG_VERSION"))
-            .with_schema_url(semcov::SCHEMA_URL)
-            .build();
+        let scope = InstrumentationScope::builder("opentelemetry-datadog")
+        .with_schema_url(semcov::SCHEMA_URL)
+        .with_version(env!("CARGO_PKG_VERSION"));
+        let tracer = provider.tracer_with_scope(scope);
         let _ = global::set_tracer_provider(provider);
         Ok(tracer)
     }

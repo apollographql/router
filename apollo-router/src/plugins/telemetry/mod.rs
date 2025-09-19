@@ -7,6 +7,8 @@ use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 use std::time::Instant;
 
+use opentelemetry::InstrumentationScope;
+use opentelemetry::trace::TracerProvider as OtherTracerProvider;
 use ::tracing::Span;
 use ::tracing::info_span;
 use axum_extra::headers::HeaderName;
@@ -305,7 +307,7 @@ impl LruSizeInstrument {
                     gauge.observe(value.load(std::sync::atomic::Ordering::Relaxed), &[]);
                 }
             })
-            .init();
+            .build();
 
         Self {
             value,
@@ -1204,10 +1206,10 @@ impl PluginPrivate for Telemetry {
                 .take()
                 .expect("must have new tracer_provider");
 
-            let tracer = tracer_provider
-                .tracer_builder(GLOBAL_TRACER_NAME)
-                .with_version(env!("CARGO_PKG_VERSION"))
-                .build();
+            let scope = InstrumentationScope::builder(GLOBAL_TRACER_NAME)
+            .with_version(env!("CARGO_PKG_VERSION"))
+            .build();
+            let tracer = tracer_provider.tracer_with_scope(scope);
             hot_tracer.reload(tracer);
 
             let last_provider = opentelemetry::global::set_tracer_provider(tracer_provider);
