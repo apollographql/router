@@ -1,4 +1,4 @@
-use super::{assert_composition_errors, compose_as_fed2_subgraphs, print_sdl, ServiceDefinition};
+use super::{ServiceDefinition, assert_composition_errors, compose_as_fed2_subgraphs, print_sdl};
 use insta::assert_snapshot;
 
 // =============================================================================
@@ -28,7 +28,8 @@ fn directive_merging_propagates_graphql_built_in_directives() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
     let supergraph = result.expect("Expected composition to succeed");
-    let api_schema = supergraph.to_api_schema(Default::default())
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
         .expect("Expected API schema generation to succeed");
     assert_snapshot!(print_sdl(api_schema.schema()), @r###"
     type Query {
@@ -60,7 +61,8 @@ fn directive_merging_merges_graphql_built_in_directives() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
     let supergraph = result.expect("Expected composition to succeed");
-    let api_schema = supergraph.to_api_schema(Default::default())
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
         .expect("Expected API schema generation to succeed");
     assert_snapshot!(print_sdl(api_schema.schema()), @r###"
     type Query {
@@ -96,7 +98,8 @@ fn directive_merging_propagates_built_in_directives_even_if_redefined() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
     let supergraph = result.expect("Expected composition to succeed");
-    let api_schema = supergraph.to_api_schema(Default::default())
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
         .expect("Expected API schema generation to succeed");
     assert_snapshot!(print_sdl(api_schema.schema()), @r###"
     type Query {
@@ -107,7 +110,7 @@ fn directive_merging_propagates_built_in_directives_even_if_redefined() {
 }
 
 // =============================================================================
-// FIELD SHARING - Tests for @shareable directive validation  
+// FIELD SHARING - Tests for @shareable directive validation
 // =============================================================================
 
 #[test]
@@ -139,10 +142,19 @@ fn field_sharing_errors_if_non_shareable_fields_shared_in_value_types() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("INVALID_FIELD_SHARING", r#"Non-shareable field "A.x" is resolved from multiple subgraphs: it is resolved from subgraphs "subgraphA" and "subgraphB" and defined as non-shareable in all of them"#),
-        ("INVALID_FIELD_SHARING", r#"Non-shareable field "A.z" is resolved from multiple subgraphs: it is resolved from subgraphs "subgraphA" and "subgraphB" and defined as non-shareable in subgraph "subgraphA""#),
-    ]);
+    assert_composition_errors(
+        &result,
+        &[
+            (
+                "INVALID_FIELD_SHARING",
+                r#"Non-shareable field "A.x" is resolved from multiple subgraphs: it is resolved from subgraphs "subgraphA" and "subgraphB" and defined as non-shareable in all of them"#,
+            ),
+            (
+                "INVALID_FIELD_SHARING",
+                r#"Non-shareable field "A.z" is resolved from multiple subgraphs: it is resolved from subgraphs "subgraphA" and "subgraphB" and defined as non-shareable in subgraph "subgraphA""#,
+            ),
+        ],
+    );
 }
 
 #[test]
@@ -174,9 +186,13 @@ fn field_sharing_errors_if_non_shareable_fields_shared_in_entity_type() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("INVALID_FIELD_SHARING", r#"Non-shareable field "A.z" is resolved from multiple subgraphs: it is resolved from subgraphs "subgraphA" and "subgraphB" and defined as non-shareable in subgraph "subgraphA""#),
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "INVALID_FIELD_SHARING",
+            r#"Non-shareable field "A.z" is resolved from multiple subgraphs: it is resolved from subgraphs "subgraphA" and "subgraphB" and defined as non-shareable in subgraph "subgraphA""#,
+        )],
+    );
 }
 
 #[test]
@@ -201,9 +217,13 @@ fn field_sharing_errors_if_query_shared_without_shareable() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("INVALID_FIELD_SHARING", r#"Non-shareable field "Query.me" is resolved from multiple subgraphs: it is resolved from subgraphs "subgraphA" and "subgraphB" and defined as non-shareable in all of them"#),
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "INVALID_FIELD_SHARING",
+            r#"Non-shareable field "Query.me" is resolved from multiple subgraphs: it is resolved from subgraphs "subgraphA" and "subgraphB" and defined as non-shareable in all of them"#,
+        )],
+    );
 }
 
 #[test]
@@ -235,9 +255,13 @@ fn field_sharing_errors_if_provided_fields_not_marked_shareable() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("INVALID_FIELD_SHARING", r#"Field "Product.name" is provided by subgraph "subgraphA" but is not marked @shareable"#),
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "INVALID_FIELD_SHARING",
+            r#"Field "Product.name" is provided by subgraph "subgraphA" but is not marked @shareable"#,
+        )],
+    );
 }
 
 #[test]
@@ -271,9 +295,13 @@ fn field_sharing_applies_shareable_on_type_only_to_fields_within_definition() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("INVALID_FIELD_SHARING", r#"Non-shareable field "A.x" is resolved from multiple subgraphs"#),
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "INVALID_FIELD_SHARING",
+            r#"Non-shareable field "A.x" is resolved from multiple subgraphs"#,
+        )],
+    );
 }
 
 #[test]
@@ -304,9 +332,13 @@ fn field_sharing_include_hint_in_error_for_targetless_override() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("INVALID_FIELD_SHARING", r#"Non-shareable field "User.name" is resolved from multiple subgraphs"#),
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "INVALID_FIELD_SHARING",
+            r#"Non-shareable field "User.name" is resolved from multiple subgraphs"#,
+        )],
+    );
 }
 
 #[test]
@@ -341,7 +373,8 @@ fn field_sharing_allows_shareable_on_type_definition_and_extensions() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
     let supergraph = result.expect("Expected composition to succeed");
-    let api_schema = supergraph.to_api_schema(Default::default())
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
         .expect("Expected API schema generation to succeed");
     assert_snapshot!(print_sdl(api_schema.schema()), @r###"
     type A {
@@ -356,7 +389,7 @@ fn field_sharing_allows_shareable_on_type_definition_and_extensions() {
     "###);
 }
 
-// =============================================================================  
+// =============================================================================
 // FEDERATION DIRECTIVE RENAMING - Tests for renamed federation directives
 // =============================================================================
 
@@ -385,7 +418,7 @@ fn federation_directive_handles_renamed_federation_directives() {
     };
 
     let subgraph_b = ServiceDefinition {
-        name: "subgraphB", 
+        name: "subgraphB",
         type_defs: r#"
         extend schema @link(
           url: "https://specs.apollo.dev/federation/v2.0",
@@ -402,8 +435,10 @@ fn federation_directive_handles_renamed_federation_directives() {
     // Note: This test uses manual federation links, not composeAsFed2Subgraphs
     // TODO: Need to implement equivalent of composeServices for manual @link handling
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    let supergraph = result.expect("Expected composition to succeed with renamed federation directives");
-    let api_schema = supergraph.to_api_schema(Default::default())
+    let supergraph =
+        result.expect("Expected composition to succeed with renamed federation directives");
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
         .expect("Expected API schema generation to succeed");
     assert_snapshot!(print_sdl(api_schema.schema()), @r###"
     type Query {

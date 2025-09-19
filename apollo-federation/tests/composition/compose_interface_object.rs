@@ -1,4 +1,4 @@
-use super::{assert_composition_errors, compose_as_fed2_subgraphs, print_sdl, ServiceDefinition};
+use super::{ServiceDefinition, assert_composition_errors, compose_as_fed2_subgraphs, print_sdl};
 use insta::assert_snapshot;
 
 // =============================================================================
@@ -50,7 +50,8 @@ fn interface_object_composes_valid_usages_correctly() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
     let supergraph = result.expect("Expected composition to succeed");
-    let api_schema = supergraph.to_api_schema(Default::default())
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
         .expect("Expected API schema generation to succeed");
     assert_snapshot!(print_sdl(api_schema.schema()));
 }
@@ -87,9 +88,13 @@ fn interface_object_errors_if_used_with_no_corresponding_interface() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("INTERFACE_OBJECT_USAGE_ERROR", r#"Type "I" is declared with @interfaceObject in all the subgraphs in which is is defined (it is defined in subgraphs "subgraphA" and "subgraphB" but should be defined as an interface in at least one subgraph)"#),
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "INTERFACE_OBJECT_USAGE_ERROR",
+            r#"Type "I" is declared with @interfaceObject in all the subgraphs in which is is defined (it is defined in subgraphs "subgraphA" and "subgraphB" but should be defined as an interface in at least one subgraph)"#,
+        )],
+    );
 }
 
 #[test]
@@ -143,9 +148,13 @@ fn interface_object_errors_if_missing_in_some_subgraph() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b, subgraph_c]);
-    assert_composition_errors(&result, &[
-        ("TYPE_KIND_MISMATCH", r#"Type "I" has mismatched kind: it is defined as Interface Type in subgraph "subgraphA" but Interface Object Type (Object Type with @interfaceObject) in subgraph "subgraphB" and Object Type in subgraph "subgraphC""#),
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "TYPE_KIND_MISMATCH",
+            r#"Type "I" has mismatched kind: it is defined as Interface Type in subgraph "subgraphA" but Interface Object Type (Object Type with @interfaceObject) in subgraph "subgraphB" and Object Type in subgraph "subgraphC""#,
+        )],
+    );
 }
 
 #[test]
@@ -195,9 +204,13 @@ fn interface_object_errors_if_interface_has_key_but_subgraph_doesnt_know_all_imp
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("INTERFACE_OBJECT_USAGE_ERROR", r#"Interface "I" has a @key in subgraph "subgraphB" but that subgraph does not know all the implementations of "I""#),
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "INTERFACE_OBJECT_USAGE_ERROR",
+            r#"Interface "I" has a @key in subgraph "subgraphB" but that subgraph does not know all the implementations of "I""#,
+        )],
+    );
 }
 
 #[test]
@@ -249,9 +262,13 @@ fn interface_object_errors_if_subgraph_defines_both_interface_object_and_impleme
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("INTERFACE_OBJECT_USAGE_ERROR", r#"[subgraphB] Interface type "I" is defined as an @interfaceObject in subgraph "subgraphB" so that subgraph should not define any of the implementation types of "I", but it defines type "A""#),
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "INTERFACE_OBJECT_USAGE_ERROR",
+            r#"[subgraphB] Interface type "I" is defined as an @interfaceObject in subgraph "subgraphB" so that subgraph should not define any of the implementation types of "I", but it defines type "A""#,
+        )],
+    );
 }
 
 #[test]
@@ -296,7 +313,8 @@ fn interface_object_composes_references_to_interface_object() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    let _supergraph = result.expect("Expected composition to succeed with @interfaceObject references");
+    let _supergraph =
+        result.expect("Expected composition to succeed with @interfaceObject references");
 }
 
 #[test]
@@ -355,7 +373,9 @@ fn interface_object_does_not_error_when_optimizing_unnecessary_loops() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    let _supergraph = result.expect("Expected composition to succeed - should not error when optimizing unnecessary loops");
+    let _supergraph = result.expect(
+        "Expected composition to succeed - should not error when optimizing unnecessary loops",
+    );
 }
 
 #[test]
@@ -385,7 +405,7 @@ fn interface_object_fed354_repro_failure() {
     };
 
     let subgraph2 = ServiceDefinition {
-        name: "Subgraph2", 
+        name: "Subgraph2",
         type_defs: r#"
         interface Ticket @key(fields: "id", resolvable: true) {
           id: ID!
@@ -424,5 +444,6 @@ fn interface_object_fed354_repro_failure() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
-    let _supergraph = result.expect("Expected composition to succeed - this is a repro test for issue FED-354");
+    let _supergraph =
+        result.expect("Expected composition to succeed - this is a repro test for issue FED-354");
 }

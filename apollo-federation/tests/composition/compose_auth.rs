@@ -1,7 +1,7 @@
 use apollo_compiler::schema::ExtendedType;
 use insta::assert_snapshot;
 
-use super::{assert_composition_errors, compose_as_fed2_subgraphs, ServiceDefinition};
+use super::{ServiceDefinition, assert_composition_errors, compose_as_fed2_subgraphs};
 
 /// Helper function to print directive definition for snapshot comparison
 fn print_directive_definition(directive: &apollo_compiler::schema::DirectiveDefinition) -> String {
@@ -126,67 +126,100 @@ fn authenticated_comprehensive_locations() {
         on_entity_field,
     ]);
     let supergraph = result.expect("Expected composition to succeed");
-    
+
     let schema = supergraph.schema().schema();
-    
+
     // Validate @authenticated is applied to all expected elements:
-    // ["AuthenticatedObject", "AuthenticatedInterface", "AuthenticatedInterfaceObject", 
+    // ["AuthenticatedObject", "AuthenticatedInterface", "AuthenticatedInterfaceObject",
     //  "AuthenticatedScalar", "AuthenticatedEnum", "Query.authenticatedRootField",
     //  "ObjectWithAuthenticatedField.field", "EntityWithAuthenticatedField.field"]
-    
+
     // AuthenticatedObject
-    let authenticated_object = schema.types.get("AuthenticatedObject").expect("AuthenticatedObject exists");
+    let authenticated_object = schema
+        .types
+        .get("AuthenticatedObject")
+        .expect("AuthenticatedObject exists");
     if let ExtendedType::Object(object) = authenticated_object {
         assert!(object.directives.iter().any(|d| d.name == "authenticated"));
     } else {
         panic!("AuthenticatedObject is not an object");
     }
-    
+
     // AuthenticatedInterface
-    let authenticated_interface = schema.types.get("AuthenticatedInterface").expect("AuthenticatedInterface exists");
+    let authenticated_interface = schema
+        .types
+        .get("AuthenticatedInterface")
+        .expect("AuthenticatedInterface exists");
     if let ExtendedType::Interface(interface) = authenticated_interface {
-        assert!(interface.directives.iter().any(|d| d.name == "authenticated"));
+        assert!(
+            interface
+                .directives
+                .iter()
+                .any(|d| d.name == "authenticated")
+        );
     } else {
         panic!("AuthenticatedInterface is not an interface");
     }
-    
+
     // AuthenticatedInterfaceObject
-    let authenticated_interface_object = schema.types.get("AuthenticatedInterfaceObject").expect("AuthenticatedInterfaceObject exists");
+    let authenticated_interface_object = schema
+        .types
+        .get("AuthenticatedInterfaceObject")
+        .expect("AuthenticatedInterfaceObject exists");
     if let ExtendedType::Object(object) = authenticated_interface_object {
         assert!(object.directives.iter().any(|d| d.name == "authenticated"));
     } else {
         panic!("AuthenticatedInterfaceObject is not an object");
     }
-    
+
     // AuthenticatedScalar
-    let authenticated_scalar = schema.types.get("AuthenticatedScalar").expect("AuthenticatedScalar exists");
+    let authenticated_scalar = schema
+        .types
+        .get("AuthenticatedScalar")
+        .expect("AuthenticatedScalar exists");
     if let ExtendedType::Scalar(scalar) = authenticated_scalar {
         assert!(scalar.directives.iter().any(|d| d.name == "authenticated"));
     } else {
         panic!("AuthenticatedScalar is not a scalar");
     }
-    
+
     // AuthenticatedEnum
-    let authenticated_enum = schema.types.get("AuthenticatedEnum").expect("AuthenticatedEnum exists");
+    let authenticated_enum = schema
+        .types
+        .get("AuthenticatedEnum")
+        .expect("AuthenticatedEnum exists");
     if let ExtendedType::Enum(enum_type) = authenticated_enum {
-        assert!(enum_type.directives.iter().any(|d| d.name == "authenticated"));
+        assert!(
+            enum_type
+                .directives
+                .iter()
+                .any(|d| d.name == "authenticated")
+        );
     } else {
         panic!("AuthenticatedEnum is not an enum");
     }
-    
+
     // Query.authenticatedRootField
     if let Some(query_type_name) = &schema.schema_definition.query {
         if let Some(ExtendedType::Object(query_obj)) = schema.types.get(query_type_name.as_str()) {
             if let Some(authenticated_root_field) = query_obj.fields.get("authenticatedRootField") {
-                assert!(authenticated_root_field.directives.iter().any(|d| d.name == "authenticated"));
+                assert!(
+                    authenticated_root_field
+                        .directives
+                        .iter()
+                        .any(|d| d.name == "authenticated")
+                );
             } else {
                 panic!("authenticatedRootField not found on Query");
             }
         }
     }
-    
+
     // ObjectWithAuthenticatedField.field
-    let object_with_field = schema.types.get("ObjectWithAuthenticatedField").expect("ObjectWithAuthenticatedField exists");
+    let object_with_field = schema
+        .types
+        .get("ObjectWithAuthenticatedField")
+        .expect("ObjectWithAuthenticatedField exists");
     if let ExtendedType::Object(object) = object_with_field {
         if let Some(field) = object.fields.get("field") {
             assert!(field.directives.iter().any(|d| d.name == "authenticated"));
@@ -196,9 +229,12 @@ fn authenticated_comprehensive_locations() {
     } else {
         panic!("ObjectWithAuthenticatedField is not an object");
     }
-    
+
     // EntityWithAuthenticatedField.field
-    let entity_with_field = schema.types.get("EntityWithAuthenticatedField").expect("EntityWithAuthenticatedField exists");
+    let entity_with_field = schema
+        .types
+        .get("EntityWithAuthenticatedField")
+        .expect("EntityWithAuthenticatedField exists");
     if let ExtendedType::Object(object) = entity_with_field {
         if let Some(field) = object.fields.get("field") {
             assert!(field.directives.iter().any(|d| d.name == "authenticated"));
@@ -225,23 +261,29 @@ fn authenticated_has_correct_definition_in_supergraph() {
     let result = compose_as_fed2_subgraphs(&[subgraph_a]);
     let supergraph = result.expect("Expected composition to succeed");
     let schema = supergraph.schema().schema();
-    
+
     // Validate the supergraph has the correct @authenticated spec URL
-    let has_authenticated_link = schema
-        .schema_definition
-        .directives
-        .iter()
-        .any(|d| {
-            d.name == "link" && d.arguments.iter().any(|arg| {
-                arg.name == "url" && arg.value.to_string().contains("https://specs.apollo.dev/authenticated/v0.1")
+    let has_authenticated_link = schema.schema_definition.directives.iter().any(|d| {
+        d.name == "link"
+            && d.arguments.iter().any(|arg| {
+                arg.name == "url"
+                    && arg
+                        .value
+                        .to_string()
+                        .contains("https://specs.apollo.dev/authenticated/v0.1")
             })
-        });
-    assert!(has_authenticated_link, "Expected @link with authenticated spec URL in supergraph");
-    
+    });
+    assert!(
+        has_authenticated_link,
+        "Expected @link with authenticated spec URL in supergraph"
+    );
+
     // Validate the @authenticated directive definition is properly added
-    let authenticated_directive = schema.directive_definitions.get("authenticated")
+    let authenticated_directive = schema
+        .directive_definitions
+        .get("authenticated")
         .expect("Expected @authenticated directive definition in supergraph");
-    
+
     // Compare the directive definition with expected structure
     assert_snapshot!(print_directive_definition(authenticated_directive), @"directive @authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM");
 }
@@ -274,13 +316,18 @@ fn authenticated_applies_on_types_as_long_as_used_once() {
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
     let supergraph = result.expect("Expected composition to succeed");
     let schema = supergraph.schema().schema();
-    
+
     // Validate that @authenticated is applied to type T in the supergraph
     // even though it's only present in subgraphA
-    let type_t = schema.types.get("T").expect("Type T should exist in supergraph");
+    let type_t = schema
+        .types
+        .get("T")
+        .expect("Type T should exist in supergraph");
     if let ExtendedType::Object(object) = type_t {
-        assert!(object.directives.iter().any(|d| d.name == "authenticated"), 
-               "Expected @authenticated directive on type T in supergraph");
+        assert!(
+            object.directives.iter().any(|d| d.name == "authenticated"),
+            "Expected @authenticated directive on type T in supergraph"
+        );
     } else {
         panic!("Type T should be an object type");
     }
@@ -301,9 +348,13 @@ fn authenticated_validation_error_on_incompatible_directive_definition() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a]);
-    assert_composition_errors(&result, &[
-        ("DIRECTIVE_DEFINITION_INVALID", r#"Directive definition for "@authenticated" is incompatible with federation specification"#),
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "DIRECTIVE_DEFINITION_INVALID",
+            r#"Directive definition for "@authenticated" is incompatible with federation specification"#,
+        )],
+    );
 }
 
 #[test]
@@ -323,13 +374,17 @@ fn authenticated_validation_error_on_invalid_application() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a]);
-    assert_composition_errors(&result, &[
-        ("DIRECTIVE_INVALID_USAGE", r#"Directive "@authenticated" cannot be applied to input types"#),
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "DIRECTIVE_INVALID_USAGE",
+            r#"Directive "@authenticated" cannot be applied to input types"#,
+        )],
+    );
 }
 
 // =============================================================================
-// @requiresScopes DIRECTIVE TESTS - Tests for @requiresScopes functionality  
+// @requiresScopes DIRECTIVE TESTS - Tests for @requiresScopes functionality
 // =============================================================================
 
 #[test]
@@ -349,7 +404,7 @@ fn requires_scopes_comprehensive_locations() {
     };
 
     let on_interface = ServiceDefinition {
-        name: "on-interface", 
+        name: "on-interface",
         type_defs: r#"
         type Query {
           interface: ScopedInterface!
@@ -445,67 +500,98 @@ fn requires_scopes_comprehensive_locations() {
         on_object_field,
         on_entity_field,
     ]);
-    let supergraph = result.expect("Expected composition to succeed with @requiresScopes on various locations");
+    let supergraph =
+        result.expect("Expected composition to succeed with @requiresScopes on various locations");
     let schema = supergraph.schema().schema();
-    
+
     // Validate @requiresScopes is applied to all expected elements:
-    // ["ScopedObject", "ScopedInterface", "ScopedInterfaceObject", 
+    // ["ScopedObject", "ScopedInterface", "ScopedInterfaceObject",
     //  "ScopedScalar", "ScopedEnum", "Query.scopedRootField",
     //  "ObjectWithScopedField.field", "EntityWithScopedField.field"]
-    
+
     // ScopedObject
-    let scoped_object = schema.types.get("ScopedObject").expect("ScopedObject exists");
+    let scoped_object = schema
+        .types
+        .get("ScopedObject")
+        .expect("ScopedObject exists");
     if let ExtendedType::Object(object) = scoped_object {
         assert!(object.directives.iter().any(|d| d.name == "requiresScopes"));
     } else {
         panic!("ScopedObject is not an object");
     }
-    
+
     // ScopedInterface
-    let scoped_interface = schema.types.get("ScopedInterface").expect("ScopedInterface exists");
+    let scoped_interface = schema
+        .types
+        .get("ScopedInterface")
+        .expect("ScopedInterface exists");
     if let ExtendedType::Interface(interface) = scoped_interface {
-        assert!(interface.directives.iter().any(|d| d.name == "requiresScopes"));
+        assert!(
+            interface
+                .directives
+                .iter()
+                .any(|d| d.name == "requiresScopes")
+        );
     } else {
         panic!("ScopedInterface is not an interface");
     }
-    
+
     // ScopedInterfaceObject
-    let scoped_interface_object = schema.types.get("ScopedInterfaceObject").expect("ScopedInterfaceObject exists");
+    let scoped_interface_object = schema
+        .types
+        .get("ScopedInterfaceObject")
+        .expect("ScopedInterfaceObject exists");
     if let ExtendedType::Object(object) = scoped_interface_object {
         assert!(object.directives.iter().any(|d| d.name == "requiresScopes"));
     } else {
         panic!("ScopedInterfaceObject is not an object");
     }
-    
+
     // ScopedScalar
-    let scoped_scalar = schema.types.get("ScopedScalar").expect("ScopedScalar exists");
+    let scoped_scalar = schema
+        .types
+        .get("ScopedScalar")
+        .expect("ScopedScalar exists");
     if let ExtendedType::Scalar(scalar) = scoped_scalar {
         assert!(scalar.directives.iter().any(|d| d.name == "requiresScopes"));
     } else {
         panic!("ScopedScalar is not a scalar");
     }
-    
+
     // ScopedEnum
     let scoped_enum = schema.types.get("ScopedEnum").expect("ScopedEnum exists");
     if let ExtendedType::Enum(enum_type) = scoped_enum {
-        assert!(enum_type.directives.iter().any(|d| d.name == "requiresScopes"));
+        assert!(
+            enum_type
+                .directives
+                .iter()
+                .any(|d| d.name == "requiresScopes")
+        );
     } else {
         panic!("ScopedEnum is not an enum");
     }
-    
+
     // Query.scopedRootField
     if let Some(query_type_name) = &schema.schema_definition.query {
         if let Some(ExtendedType::Object(query_obj)) = schema.types.get(query_type_name.as_str()) {
             if let Some(scoped_root_field) = query_obj.fields.get("scopedRootField") {
-                assert!(scoped_root_field.directives.iter().any(|d| d.name == "requiresScopes"));
+                assert!(
+                    scoped_root_field
+                        .directives
+                        .iter()
+                        .any(|d| d.name == "requiresScopes")
+                );
             } else {
                 panic!("scopedRootField not found on Query");
             }
         }
     }
-    
+
     // ObjectWithScopedField.field
-    let object_with_field = schema.types.get("ObjectWithScopedField").expect("ObjectWithScopedField exists");
+    let object_with_field = schema
+        .types
+        .get("ObjectWithScopedField")
+        .expect("ObjectWithScopedField exists");
     if let ExtendedType::Object(object) = object_with_field {
         if let Some(field) = object.fields.get("field") {
             assert!(field.directives.iter().any(|d| d.name == "requiresScopes"));
@@ -515,9 +601,12 @@ fn requires_scopes_comprehensive_locations() {
     } else {
         panic!("ObjectWithScopedField is not an object");
     }
-    
+
     // EntityWithScopedField.field
-    let entity_with_field = schema.types.get("EntityWithScopedField").expect("EntityWithScopedField exists");
+    let entity_with_field = schema
+        .types
+        .get("EntityWithScopedField")
+        .expect("EntityWithScopedField exists");
     if let ExtendedType::Object(object) = entity_with_field {
         if let Some(field) = object.fields.get("field") {
             assert!(field.directives.iter().any(|d| d.name == "requiresScopes"));
@@ -646,46 +735,59 @@ fn policy_comprehensive_locations() {
         on_object_field,
         on_entity_field,
     ]);
-    let supergraph = result.expect("Expected composition to succeed with @policy on various locations");
+    let supergraph =
+        result.expect("Expected composition to succeed with @policy on various locations");
     let schema = supergraph.schema().schema();
-    
+
     // Validate @policy is applied to all expected elements:
-    // ["ScopedObject", "ScopedInterface", "ScopedInterfaceObject", 
+    // ["ScopedObject", "ScopedInterface", "ScopedInterfaceObject",
     //  "ScopedScalar", "ScopedEnum", "Query.scopedRootField",
     //  "ObjectWithScopedField.field", "EntityWithScopedField.field"]
-    
+
     // ScopedObject
-    let scoped_object = schema.types.get("ScopedObject").expect("ScopedObject exists");
+    let scoped_object = schema
+        .types
+        .get("ScopedObject")
+        .expect("ScopedObject exists");
     if let ExtendedType::Object(object) = scoped_object {
         assert!(object.directives.iter().any(|d| d.name == "policy"));
     } else {
         panic!("ScopedObject is not an object");
     }
-    
+
     // ScopedInterface
-    let scoped_interface = schema.types.get("ScopedInterface").expect("ScopedInterface exists");
+    let scoped_interface = schema
+        .types
+        .get("ScopedInterface")
+        .expect("ScopedInterface exists");
     if let ExtendedType::Interface(interface) = scoped_interface {
         assert!(interface.directives.iter().any(|d| d.name == "policy"));
     } else {
         panic!("ScopedInterface is not an interface");
     }
-    
+
     // ScopedInterfaceObject
-    let scoped_interface_object = schema.types.get("ScopedInterfaceObject").expect("ScopedInterfaceObject exists");
+    let scoped_interface_object = schema
+        .types
+        .get("ScopedInterfaceObject")
+        .expect("ScopedInterfaceObject exists");
     if let ExtendedType::Object(object) = scoped_interface_object {
         assert!(object.directives.iter().any(|d| d.name == "policy"));
     } else {
         panic!("ScopedInterfaceObject is not an object");
     }
-    
+
     // ScopedScalar
-    let scoped_scalar = schema.types.get("ScopedScalar").expect("ScopedScalar exists");
+    let scoped_scalar = schema
+        .types
+        .get("ScopedScalar")
+        .expect("ScopedScalar exists");
     if let ExtendedType::Scalar(scalar) = scoped_scalar {
         assert!(scalar.directives.iter().any(|d| d.name == "policy"));
     } else {
         panic!("ScopedScalar is not a scalar");
     }
-    
+
     // ScopedEnum
     let scoped_enum = schema.types.get("ScopedEnum").expect("ScopedEnum exists");
     if let ExtendedType::Enum(enum_type) = scoped_enum {
@@ -693,20 +795,28 @@ fn policy_comprehensive_locations() {
     } else {
         panic!("ScopedEnum is not an enum");
     }
-    
+
     // Query.scopedRootField
     if let Some(query_type_name) = &schema.schema_definition.query {
         if let Some(ExtendedType::Object(query_obj)) = schema.types.get(query_type_name.as_str()) {
             if let Some(scoped_root_field) = query_obj.fields.get("scopedRootField") {
-                assert!(scoped_root_field.directives.iter().any(|d| d.name == "policy"));
+                assert!(
+                    scoped_root_field
+                        .directives
+                        .iter()
+                        .any(|d| d.name == "policy")
+                );
             } else {
                 panic!("scopedRootField not found on Query");
             }
         }
     }
-    
+
     // ObjectWithScopedField.field
-    let object_with_field = schema.types.get("ObjectWithScopedField").expect("ObjectWithScopedField exists");
+    let object_with_field = schema
+        .types
+        .get("ObjectWithScopedField")
+        .expect("ObjectWithScopedField exists");
     if let ExtendedType::Object(object) = object_with_field {
         if let Some(field) = object.fields.get("field") {
             assert!(field.directives.iter().any(|d| d.name == "policy"));
@@ -716,9 +826,12 @@ fn policy_comprehensive_locations() {
     } else {
         panic!("ObjectWithScopedField is not an object");
     }
-    
+
     // EntityWithScopedField.field
-    let entity_with_field = schema.types.get("EntityWithScopedField").expect("EntityWithScopedField exists");
+    let entity_with_field = schema
+        .types
+        .get("EntityWithScopedField")
+        .expect("EntityWithScopedField exists");
     if let ExtendedType::Object(object) = entity_with_field {
         if let Some(field) = object.fields.get("field") {
             assert!(field.directives.iter().any(|d| d.name == "policy"));

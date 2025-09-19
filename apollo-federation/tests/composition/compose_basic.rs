@@ -1,4 +1,7 @@
-use super::{compose_as_fed2_subgraphs, extract_subgraphs_from_supergraph_result, print_sdl, ServiceDefinition};
+use super::{
+    ServiceDefinition, compose_as_fed2_subgraphs, extract_subgraphs_from_supergraph_result,
+    print_sdl,
+};
 use insta::assert_snapshot;
 
 #[test]
@@ -45,8 +48,9 @@ fn generates_a_valid_supergraph() {
     // Test supergraph SDL structure
     assert_snapshot!(print_sdl(supergraph.schema().schema()));
 
-    // Test API schema structure  
-    let api_schema = supergraph.to_api_schema(Default::default())
+    // Test API schema structure
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
         .expect("Expected API schema generation to succeed");
     assert_snapshot!(print_sdl(api_schema.schema()));
 }
@@ -98,7 +102,8 @@ fn respects_given_compose_options() {
     assert_snapshot!(print_sdl(supergraph.schema().schema()));
 
     // Test API schema with print options (currently same as without options)
-    let api_schema = supergraph.to_api_schema(Default::default())
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
         .expect("Expected API schema generation to succeed");
     assert_snapshot!(print_sdl(api_schema.schema()));
 }
@@ -149,7 +154,8 @@ fn preserves_descriptions() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
     let supergraph = result.expect("Expected composition to succeed");
-    let api_schema = supergraph.to_api_schema(Default::default())
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
         .expect("Expected API schema generation to succeed");
     assert_snapshot!(print_sdl(api_schema.schema()));
 }
@@ -191,9 +197,14 @@ fn no_hint_raised_when_merging_empty_description() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
     let supergraph = result.expect("Expected composition to succeed");
-    
+
     // Verify that no hints are raised when merging empty description with non-empty description
-    assert_eq!(supergraph.hints().len(), 0, "Expected no hints but got: {:?}", supergraph.hints());
+    assert_eq!(
+        supergraph.hints().len(),
+        0,
+        "Expected no hints but got: {:?}",
+        supergraph.hints()
+    );
 }
 
 #[test]
@@ -225,19 +236,22 @@ fn include_types_from_different_subgraphs() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
     let supergraph = result.expect("Expected composition to succeed");
-    let api_schema = supergraph.to_api_schema(Default::default())
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
         .expect("Expected API schema generation to succeed");
     assert_snapshot!(print_sdl(api_schema.schema()));
 
     // Validate extracted subgraphs contain proper federation directives
     let extracted_subgraphs = extract_subgraphs_from_supergraph_result(&supergraph)
         .expect("Expected subgraph extraction to succeed");
-    
-    let subgraph_a_extracted = extracted_subgraphs.get("subgraphA")
+
+    let subgraph_a_extracted = extracted_subgraphs
+        .get("subgraphA")
         .expect("Expected subgraphA to be present in extracted subgraphs");
     assert_snapshot!(print_sdl(subgraph_a_extracted.schema.schema()));
 
-    let subgraph_b_extracted = extracted_subgraphs.get("subgraphB")
+    let subgraph_b_extracted = extracted_subgraphs
+        .get("subgraphB")
         .expect("Expected subgraphB to be present in extracted subgraphs");
     assert_snapshot!(print_sdl(subgraph_b_extracted.schema.schema()));
 }
@@ -271,20 +285,23 @@ fn doesnt_leave_federation_directives_in_the_final_schema() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
     let supergraph = result.expect("Expected composition to succeed");
-    let api_schema = supergraph.to_api_schema(Default::default())
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
         .expect("Expected API schema generation to succeed");
     assert_snapshot!(print_sdl(api_schema.schema()));
 
-    // Validate that federation directives (@provides, @key, @external, @shareable) 
+    // Validate that federation directives (@provides, @key, @external, @shareable)
     // are properly rebuilt in the extracted subgraphs
     let extracted_subgraphs = extract_subgraphs_from_supergraph_result(&supergraph)
         .expect("Expected subgraph extraction to succeed");
-    
-    let subgraph_a_extracted = extracted_subgraphs.get("subgraphA")
+
+    let subgraph_a_extracted = extracted_subgraphs
+        .get("subgraphA")
         .expect("Expected subgraphA to be present in extracted subgraphs");
     assert_snapshot!(print_sdl(subgraph_a_extracted.schema.schema()));
 
-    let subgraph_b_extracted = extracted_subgraphs.get("subgraphB")
+    let subgraph_b_extracted = extracted_subgraphs
+        .get("subgraphB")
         .expect("Expected subgraphB to be present in extracted subgraphs");
     assert_snapshot!(print_sdl(subgraph_b_extracted.schema.schema()));
 }

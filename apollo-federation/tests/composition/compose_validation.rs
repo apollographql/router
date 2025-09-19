@@ -1,4 +1,4 @@
-use super::{assert_composition_errors, compose_as_fed2_subgraphs, ServiceDefinition};
+use super::{ServiceDefinition, assert_composition_errors, compose_as_fed2_subgraphs};
 
 // =============================================================================
 // MERGE VALIDATIONS - Tests for validation during the merge phase
@@ -26,9 +26,10 @@ fn merge_validations_errors_when_a_subgraph_is_invalid() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("INVALID_GRAPHQL", "[subgraphA] Unknown type A")
-    ]);
+    assert_composition_errors(
+        &result,
+        &[("INVALID_GRAPHQL", "[subgraphA] Unknown type A")],
+    );
 }
 
 #[test]
@@ -53,9 +54,13 @@ fn merge_validations_errors_when_subgraph_has_introspection_reserved_name() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("INVALID_GRAPHQL", r#"[subgraphA] Name "__someQuery" must not begin with "__", which is reserved by GraphQL introspection."#)
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "INVALID_GRAPHQL",
+            r#"[subgraphA] Name "__someQuery" must not begin with "__", which is reserved by GraphQL introspection."#,
+        )],
+    );
 }
 
 #[test]
@@ -82,9 +87,13 @@ fn merge_validations_errors_when_tag_definition_is_invalid() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("DIRECTIVE_DEFINITION_INVALID", r#"[subgraphA] Invalid definition for directive "@tag": missing required argument "name""#)
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "DIRECTIVE_DEFINITION_INVALID",
+            r#"[subgraphA] Invalid definition for directive "@tag": missing required argument "name""#,
+        )],
+    );
 }
 
 #[test]
@@ -109,9 +118,13 @@ fn merge_validations_reject_subgraph_named_underscore() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("INVALID_SUBGRAPH_NAME", "[_] Invalid name _ for a subgraph: this name is reserved")
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "INVALID_SUBGRAPH_NAME",
+            "[_] Invalid name _ for a subgraph: this name is reserved",
+        )],
+    );
 }
 
 #[test]
@@ -136,9 +149,13 @@ fn merge_validations_reject_if_no_subgraphs_have_query() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("NO_QUERIES", "No queries found in any subgraph: a supergraph must have a query root type.")
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "NO_QUERIES",
+            "No queries found in any subgraph: a supergraph must have a query root type.",
+        )],
+    );
 }
 
 #[test]
@@ -167,9 +184,13 @@ fn merge_validations_reject_type_defined_with_different_kinds() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("TYPE_KIND_MISMATCH", r#"Type "A" has mismatched kind: it is defined as Object Type in subgraph "subgraphA" but Interface Type in subgraph "subgraphB""#)
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "TYPE_KIND_MISMATCH",
+            r#"Type "A" has mismatched kind: it is defined as Object Type in subgraph "subgraphA" but Interface Type in subgraph "subgraphB""#,
+        )],
+    );
 }
 
 #[test]
@@ -199,9 +220,13 @@ fn merge_validations_errors_if_external_field_not_defined_elsewhere() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("EXTERNAL_MISSING_ON_BASE", r#"Field "A.f" is marked @external on all the subgraphs in which it is listed (subgraph "subgraphB")."#)
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "EXTERNAL_MISSING_ON_BASE",
+            r#"Field "A.f" is marked @external on all the subgraphs in which it is listed (subgraph "subgraphB")."#,
+        )],
+    );
 }
 
 #[test]
@@ -226,10 +251,13 @@ fn merge_validations_errors_if_mandatory_argument_not_in_all_subgraphs() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("REQUIRED_ARGUMENT_MISSING_IN_SOME_SUBGRAPH", 
-         r#"Argument "Query.q(a:)" is required in some subgraphs but does not appear in all subgraphs: it is required in subgraph "subgraphA" but does not appear in subgraph "subgraphB""#)
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "REQUIRED_ARGUMENT_MISSING_IN_SOME_SUBGRAPH",
+            r#"Argument "Query.q(a:)" is required in some subgraphs but does not appear in all subgraphs: it is required in subgraph "subgraphA" but does not appear in subgraph "subgraphB""#,
+        )],
+    );
 }
 
 #[test]
@@ -261,10 +289,13 @@ fn merge_validations_errors_if_subgraph_required_without_args_but_mandatory_in_s
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("REQUIRES_INVALID_FIELDS", 
-         r#"[subgraphA] On field "T.y", for @requires(fields: "x"): no value provided for argument "arg" of field "T.x" but a value is mandatory as "arg" is required in subgraph "subgraphB""#)
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "REQUIRES_INVALID_FIELDS",
+            r#"[subgraphA] On field "T.y", for @requires(fields: "x"): no value provided for argument "arg" of field "T.x" but a value is mandatory as "arg" is required in subgraph "subgraphB""#,
+        )],
+    );
 }
 
 #[test]
@@ -296,10 +327,13 @@ fn merge_validations_errors_if_subgraph_required_with_arg_not_in_supergraph() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("REQUIRES_INVALID_FIELDS", 
-         r#"[subgraphA] On field "T.y", for @requires(fields: "x(arg: 42)"): cannot provide a value for argument "arg" of field "T.x" as argument "arg" is not defined in subgraph "subgraphB""#)
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "REQUIRES_INVALID_FIELDS",
+            r#"[subgraphA] On field "T.y", for @requires(fields: "x(arg: 42)"): cannot provide a value for argument "arg" of field "T.x" as argument "arg" is not defined in subgraph "subgraphB""#,
+        )],
+    );
 }
 
 // =============================================================================
@@ -341,9 +375,13 @@ fn post_merge_errors_if_type_does_not_implement_interface_post_merge() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("INTERFACE_FIELD_NO_IMPLEM", r#"Interface field "I.a" is declared in subgraph "subgraphA" but type "B", which implements "I" only in subgraph "subgraphB" does not have field "a"."#)
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "INTERFACE_FIELD_NO_IMPLEM",
+            r#"Interface field "I.a" is declared in subgraph "subgraphA" but type "B", which implements "I" only in subgraph "subgraphB" does not have field "a"."#,
+        )],
+    );
 }
 
 #[test]
@@ -386,9 +424,13 @@ fn post_merge_errors_if_type_does_not_implement_interface_on_interface() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("INTERFACE_FIELD_NO_IMPLEM", r#"Interface field "J.a" is declared in subgraph "subgraphA" but type "B", which implements "J" only in subgraph "subgraphB" does not have field "a"."#)
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "INTERFACE_FIELD_NO_IMPLEM",
+            r#"Interface field "J.a" is declared in subgraph "subgraphA" but type "B", which implements "J" only in subgraph "subgraphB" does not have field "a"."#,
+        )],
+    );
 }
 
 // =============================================================================
@@ -432,7 +474,7 @@ fn misc_not_broken_by_similar_field_argument_signatures() {
 // =============================================================================
 
 #[test]
-#[ignore = "until merge implementation completed"]  
+#[ignore = "until merge implementation completed"]
 fn satisfiability_validation_uses_proper_error_code() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -462,8 +504,13 @@ fn satisfiability_validation_uses_proper_error_code() {
     // The exact error message is tested elsewhere
     let errors = result.expect_err("Expected composition to fail due to satisfiability");
     let error_codes: Vec<String> = errors.iter().map(|e| format!("{:?}", e)).collect();
-    assert!(error_codes.iter().any(|msg| msg.contains("SATISFIABILITY_ERROR")), 
-           "Expected SATISFIABILITY_ERROR but got: {:?}", error_codes);
+    assert!(
+        error_codes
+            .iter()
+            .any(|msg| msg.contains("SATISFIABILITY_ERROR")),
+        "Expected SATISFIABILITY_ERROR but got: {:?}",
+        error_codes
+    );
 }
 
 #[test]
@@ -497,7 +544,7 @@ fn satisfiability_validation_handles_indirectly_reachable_keys() {
     };
 
     let subgraph_c = ServiceDefinition {
-        name: "subgraphC", 
+        name: "subgraphC",
         type_defs: r#"
         type T @key(fields: "k2") {
           k2: Int

@@ -1,4 +1,4 @@
-use super::{assert_composition_errors, compose_as_fed2_subgraphs, print_sdl, ServiceDefinition};
+use super::{ServiceDefinition, assert_composition_errors, compose_as_fed2_subgraphs, print_sdl};
 use insta::assert_snapshot;
 
 // =============================================================================
@@ -26,7 +26,8 @@ fn misc_works_with_normal_graphql_type_extension_when_definition_is_empty() {
     // NOTE: This test uses composeServices() in JS (Fed1), not composeAsFed2Subgraphs()
     // For now, using Fed2 composition as the equivalent
     let result = compose_as_fed2_subgraphs(&[subgraph_a]);
-    let _supergraph = result.expect("Expected composition to succeed with empty type definition + extension");
+    let _supergraph =
+        result.expect("Expected composition to succeed with empty type definition + extension");
 }
 
 #[test]
@@ -104,10 +105,13 @@ fn misc_handles_fragments_in_requires_using_inaccessible_types() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    let supergraph = result.expect("Expected composition to succeed with @requires fragments using @inaccessible types");
-    let api_schema = supergraph.to_api_schema(Default::default())
+    let supergraph = result.expect(
+        "Expected composition to succeed with @requires fragments using @inaccessible types",
+    );
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
         .expect("Expected API schema generation to succeed");
-    
+
     // Validate that @inaccessible type Baz is excluded from API schema but Qux is included
     assert_snapshot!(print_sdl(api_schema.schema()), @r###"
     interface Bar implements Foo {
@@ -168,10 +172,10 @@ fn misc_existing_authenticated_directive_with_fed1() {
     // NOTE: This test uses composeServices() in JS (Fed1), not composeAsFed2Subgraphs()
     // The test validates that existing @authenticated directives in Fed1 are handled properly
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    let supergraph = result.expect("Expected composition to succeed with existing @authenticated directive");
-    
+    let supergraph =
+        result.expect("Expected composition to succeed with existing @authenticated directive");
+
     // NOTE: The JS test validates that the custom @authenticated directive is NOT present in the final schema
     // (it should be filtered out). For now, we just verify composition succeeds.
     let _schema = supergraph.schema();
 }
-

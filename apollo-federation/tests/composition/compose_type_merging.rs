@@ -1,4 +1,7 @@
-use super::{assert_composition_errors, compose_as_fed2_subgraphs, extract_subgraphs_from_supergraph_result, print_sdl, ServiceDefinition};
+use super::{
+    ServiceDefinition, assert_composition_errors, compose_as_fed2_subgraphs,
+    extract_subgraphs_from_supergraph_result, print_sdl,
+};
 use insta::assert_snapshot;
 
 // =============================================================================
@@ -33,9 +36,13 @@ fn field_types_errors_on_incompatible_types() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("FIELD_TYPE_MISMATCH", r#"Type of field "T.f" is incompatible across subgraphs: it has type "String" in subgraph "subgraphA" but type "Int" in subgraph "subgraphB""#)
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "FIELD_TYPE_MISMATCH",
+            r#"Type of field "T.f" is incompatible across subgraphs: it has type "String" in subgraph "subgraphA" but type "Int" in subgraph "subgraphB""#,
+        )],
+    );
 }
 
 #[test]
@@ -66,9 +73,13 @@ fn field_types_errors_on_merging_list_with_non_list() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("FIELD_TYPE_MISMATCH", r#"Type of field "T.f" is incompatible across subgraphs: it has type "String" in subgraph "subgraphA" but type "[String]" in subgraph "subgraphB""#)
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "FIELD_TYPE_MISMATCH",
+            r#"Type of field "T.f" is incompatible across subgraphs: it has type "String" in subgraph "subgraphA" but type "[String]" in subgraph "subgraphB""#,
+        )],
+    );
 }
 
 #[test]
@@ -100,9 +111,10 @@ fn field_types_merges_nullable_and_non_nullable() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
     let supergraph = result.expect("Expected composition to succeed");
-    let api_schema = supergraph.to_api_schema(Default::default())
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
         .expect("Expected API schema generation to succeed");
-    
+
     // We expect `f` to be nullable (String, not String!)
     assert_snapshot!(print_sdl(api_schema.schema()), @r###"
     type Query {
@@ -164,21 +176,24 @@ fn field_types_merges_interface_subtypes() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
     let supergraph = result.expect("Expected composition to succeed");
-    let api_schema = supergraph.to_api_schema(Default::default())
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
         .expect("Expected API schema generation to succeed");
-    
+
     // We expect `f` to be `I` as that is the supertype between itself and `A`
     assert_snapshot!(print_sdl(api_schema.schema()));
 
     // Validate that field types are properly preserved in extracted subgraphs
     let extracted_subgraphs = extract_subgraphs_from_supergraph_result(&supergraph)
         .expect("Expected subgraph extraction to succeed");
-    
-    let subgraph_a_extracted = extracted_subgraphs.get("subgraphA")
+
+    let subgraph_a_extracted = extracted_subgraphs
+        .get("subgraphA")
         .expect("Expected subgraphA to be present in extracted subgraphs");
     assert_snapshot!(print_sdl(subgraph_a_extracted.schema.schema()));
 
-    let subgraph_b_extracted = extracted_subgraphs.get("subgraphB")  
+    let subgraph_b_extracted = extracted_subgraphs
+        .get("subgraphB")
         .expect("Expected subgraphB to be present in extracted subgraphs");
     assert_snapshot!(print_sdl(subgraph_b_extracted.schema.schema()));
 }
@@ -226,22 +241,25 @@ fn field_types_merges_union_subtypes() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
     let supergraph = result.expect("Expected composition to succeed");
-    let api_schema = supergraph.to_api_schema(Default::default())
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
         .expect("Expected API schema generation to succeed");
-    
+
     // We expect `f` to be `U` as that is the supertype between itself and `A`
     assert_snapshot!(print_sdl(api_schema.schema()));
 
-    // Validate that field types are properly preserved in extracted subgraphs  
+    // Validate that field types are properly preserved in extracted subgraphs
     let extracted_subgraphs = extract_subgraphs_from_supergraph_result(&supergraph)
         .expect("Expected subgraph extraction to succeed");
-    
-    let subgraph_a_extracted = extracted_subgraphs.get("subgraphA")
+
+    let subgraph_a_extracted = extracted_subgraphs
+        .get("subgraphA")
         .expect("Expected subgraphA to be present in extracted subgraphs");
     assert_snapshot!(print_sdl(subgraph_a_extracted.schema.schema()));
 
-    let subgraph_b_extracted = extracted_subgraphs.get("subgraphB")
-        .expect("Expected subgraphB to be present in extracted subgraphs");  
+    let subgraph_b_extracted = extracted_subgraphs
+        .get("subgraphB")
+        .expect("Expected subgraphB to be present in extracted subgraphs");
     assert_snapshot!(print_sdl(subgraph_b_extracted.schema.schema()));
 }
 
@@ -299,9 +317,10 @@ fn field_types_merges_complex_subtypes() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
     let supergraph = result.expect("Expected composition to succeed");
-    let api_schema = supergraph.to_api_schema(Default::default())
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
         .expect("Expected API schema generation to succeed");
-    
+
     // Field should merge to the common supertype
     assert_snapshot!(print_sdl(api_schema.schema()));
 }
@@ -360,10 +379,11 @@ fn field_types_merges_subtypes_within_lists() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
     let supergraph = result.expect("Expected composition to succeed");
-    let api_schema = supergraph.to_api_schema(Default::default())
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
         .expect("Expected API schema generation to succeed");
-    
-    // Should merge list element types while preserving list structure  
+
+    // Should merge list element types while preserving list structure
     assert_snapshot!(print_sdl(api_schema.schema()));
 }
 
@@ -421,15 +441,16 @@ fn field_types_merges_subtypes_within_non_nullable() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
     let supergraph = result.expect("Expected composition to succeed");
-    let api_schema = supergraph.to_api_schema(Default::default())
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
         .expect("Expected API schema generation to succeed");
-    
+
     // Should merge to nullable interface type
     assert_snapshot!(print_sdl(api_schema.schema()));
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]  
+#[ignore = "until merge implementation completed"]
 fn field_types_errors_on_incompatible_input_field_types_first() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -454,9 +475,13 @@ fn field_types_errors_on_incompatible_input_field_types_first() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("FIELD_TYPE_MISMATCH", r#"Type of field "MyInput.field" is incompatible across subgraphs"#)
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "FIELD_TYPE_MISMATCH",
+            r#"Type of field "MyInput.field" is incompatible across subgraphs"#,
+        )],
+    );
 }
 
 #[test]
@@ -485,9 +510,13 @@ fn field_types_errors_on_incompatible_input_field_types_second() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("FIELD_TYPE_MISMATCH", r#"Type of field "MyInput.field" is incompatible across subgraphs"#)
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "FIELD_TYPE_MISMATCH",
+            r#"Type of field "MyInput.field" is incompatible across subgraphs"#,
+        )],
+    );
 }
 
 // =============================================================================
@@ -516,12 +545,16 @@ fn arguments_errors_on_incompatible_types() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("FIELD_ARGUMENT_TYPE_MISMATCH", r#"Type of argument "Query.field(arg:)" is incompatible across subgraphs"#)
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "FIELD_ARGUMENT_TYPE_MISMATCH",
+            r#"Type of argument "Query.field(arg:)" is incompatible across subgraphs"#,
+        )],
+    );
 }
 
-#[test] 
+#[test]
 #[ignore = "until merge implementation completed"]
 fn arguments_errors_on_incompatible_argument_default() {
     let subgraph_a = ServiceDefinition {
@@ -543,9 +576,13 @@ fn arguments_errors_on_incompatible_argument_default() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("FIELD_ARGUMENT_DEFAULT_MISMATCH", r#"Default value of argument "Query.field(arg:)" is incompatible across subgraphs"#)
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "FIELD_ARGUMENT_DEFAULT_MISMATCH",
+            r#"Default value of argument "Query.field(arg:)" is incompatible across subgraphs"#,
+        )],
+    );
 }
 
 #[test]
@@ -576,9 +613,13 @@ fn arguments_errors_on_incompatible_argument_default_in_external_declaration() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("FIELD_ARGUMENT_DEFAULT_MISMATCH", r#"Default value of argument "T.field(arg:)" is incompatible across subgraphs"#)
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "FIELD_ARGUMENT_DEFAULT_MISMATCH",
+            r#"Default value of argument "T.field(arg:)" is incompatible across subgraphs"#,
+        )],
+    );
 }
 
 #[test]
@@ -603,9 +644,13 @@ fn arguments_errors_on_merging_list_with_non_list() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    assert_composition_errors(&result, &[
-        ("FIELD_ARGUMENT_TYPE_MISMATCH", r#"Type of argument "Query.field(arg:)" is incompatible across subgraphs"#)
-    ]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "FIELD_ARGUMENT_TYPE_MISMATCH",
+            r#"Type of argument "Query.field(arg:)" is incompatible across subgraphs"#,
+        )],
+    );
 }
 
 #[test]
@@ -631,9 +676,10 @@ fn arguments_merges_nullable_and_non_nullable() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
     let supergraph = result.expect("Expected composition to succeed");
-    let api_schema = supergraph.to_api_schema(Default::default())
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
         .expect("Expected API schema generation to succeed");
-    
+
     // Argument should merge to non-nullable (String!)
     assert_snapshot!(print_sdl(api_schema.schema()), @r###"
     type Query {
@@ -693,9 +739,10 @@ fn arguments_merges_subtypes_within_lists() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
     let supergraph = result.expect("Expected composition to succeed");
-    let api_schema = supergraph.to_api_schema(Default::default())
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
         .expect("Expected API schema generation to succeed");
-    
+
     // Should merge list element types and nullability
     assert_snapshot!(print_sdl(api_schema.schema()));
 }

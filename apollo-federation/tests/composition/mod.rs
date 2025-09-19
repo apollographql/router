@@ -1,5 +1,5 @@
-mod compose_basic;
 mod compose_auth;
+mod compose_basic;
 mod compose_directive;
 mod compose_directive_sharing;
 mod compose_inaccessible;
@@ -18,13 +18,13 @@ mod supergraph_reversibility;
 mod validation_errors;
 
 pub(crate) mod test_helpers {
+    use apollo_federation::ValidFederationSubgraphs;
     use apollo_federation::composition::compose;
     use apollo_federation::error::CompositionError;
-    use apollo_federation::error::FederationError;  
+    use apollo_federation::error::FederationError;
     use apollo_federation::subgraph::typestate::Subgraph;
     use apollo_federation::supergraph::Satisfiable;
     use apollo_federation::supergraph::Supergraph;
-    use apollo_federation::ValidFederationSubgraphs;
     use insta::assert_snapshot;
 
     pub(crate) struct ServiceDefinition<'a> {
@@ -85,15 +85,20 @@ pub(crate) mod test_helpers {
     /// Helper function to assert composition errors
     pub(crate) fn assert_composition_errors(
         result: &Result<Supergraph<Satisfiable>, Vec<CompositionError>>,
-        expected_errors: &[(&str, &str)]
+        expected_errors: &[(&str, &str)],
     ) {
         let errors = result.as_ref().expect_err("Expected composition to fail");
         let error_strings: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
 
         // Verify error count matches expectations
-        assert_eq!(errors.len(), expected_errors.len(),
+        assert_eq!(
+            errors.len(),
+            expected_errors.len(),
             "Expected {} errors but got {}: {:?}",
-            expected_errors.len(), errors.len(), error_strings);
+            expected_errors.len(),
+            errors.len(),
+            error_strings
+        );
 
         // Verify each expected error code and message
         for (i, (expected_code, expected_message)) in expected_errors.iter().enumerate() {
@@ -103,16 +108,20 @@ pub(crate) mod test_helpers {
             // This will need to be implemented based on the actual CompositionError structure
             // For now, we'll validate the error message contains the expected content
             let error_str = error.to_string();
-            assert!(error_str.contains(expected_message),
-                   "Error {} does not contain expected message.\nExpected: {}\nActual: {}",
-                   i, expected_message, error_str);
+            assert!(
+                error_str.contains(expected_message),
+                "Error {} does not contain expected message.\nExpected: {}\nActual: {}",
+                i,
+                expected_message,
+                error_str
+            );
         }
     }
 
     /// Helper function to extract subgraphs from supergraph for testing
     /// Equivalent to extractSubgraphFromSupergraph from the JS tests
     pub(crate) fn extract_subgraphs_from_supergraph_result(
-        supergraph: &Supergraph<Satisfiable>
+        supergraph: &Supergraph<Satisfiable>,
     ) -> Result<ValidFederationSubgraphs, FederationError> {
         // Use the public API on Supergraph to extract subgraphs
         let schema_sdl = supergraph.schema().schema().to_string();
@@ -122,7 +131,7 @@ pub(crate) mod test_helpers {
 }
 
 pub(crate) use test_helpers::ServiceDefinition;
-pub(crate) use test_helpers::compose_as_fed2_subgraphs;
-pub(crate) use test_helpers::print_sdl;
 pub(crate) use test_helpers::assert_composition_errors;
+pub(crate) use test_helpers::compose_as_fed2_subgraphs;
 pub(crate) use test_helpers::extract_subgraphs_from_supergraph_result;
+pub(crate) use test_helpers::print_sdl;
