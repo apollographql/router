@@ -1074,14 +1074,12 @@ impl FederationSchema {
         self.referencers().interface_types.contains_key(type_name)
     }
 
-    pub(crate) fn all_features(
-        &self,
-    ) -> Result<Vec<&'static (dyn SpecDefinition)>, FederationError> {
+    pub(crate) fn all_features(&self) -> Result<Vec<&'static dyn SpecDefinition>, FederationError> {
         let Some(links) = self.metadata() else {
             return Ok(Vec::new());
         };
 
-        let mut features: Vec<&'static (dyn SpecDefinition)> =
+        let mut features: Vec<&'static dyn SpecDefinition> =
             Vec::with_capacity(links.all_links().len());
 
         for link in links.all_links() {

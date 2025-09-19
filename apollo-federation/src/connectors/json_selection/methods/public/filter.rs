@@ -169,6 +169,8 @@ fn filter_shape(
 mod method_tests {
     use serde_json_bytes::json;
 
+    use crate::connectors::ConnectSpec;
+    use crate::connectors::json_selection::ApplyToError;
     use crate::selection;
 
     #[test]
@@ -291,6 +293,46 @@ mod method_tests {
                 "values": [1, "hello", 2.5, true, null, 42],
             })),
             (Some(json!([1, 2.5, 42])), vec![]),
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn filter_should_return_none_when_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!("$.a->filter($.missing)", spec).apply_to(&json!({
+                "a": [1, 2, 3],
+            })),
+            (
+                None,
+                vec![
+                    ApplyToError::from_json(&json!({
+                        "message": "Property .missing not found in object",
+                        "path": ["missing"],
+                        "range": [14, 21],
+                        "spec": spec.to_string(),
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "->filter condition must return a boolean value",
+                        "path": ["a", "->filter", 0],
+                        "range": [5, 11],
+                        "spec": spec.to_string(),
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "->filter condition must return a boolean value",
+                        "path": ["a", "->filter", 1],
+                        "range": [5, 11],
+                        "spec": spec.to_string(),
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "->filter condition must return a boolean value",
+                        "path": ["a", "->filter", 2],
+                        "range": [5, 11],
+                        "spec": spec.to_string(),
+                    }))
+                ]
+            ),
         );
     }
 }

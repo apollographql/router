@@ -152,6 +152,15 @@ fn entries_shape(
                 method_name.shape_location(context.source_id()),
             )
         }
+        ShapeCase::Unknown => {
+            let mut entries = Shape::empty_map();
+            entries.insert("key".to_string(), Shape::string([]));
+            entries.insert("value".to_string(), Shape::unknown([]));
+            Shape::list(
+                Shape::record(entries, method_name.shape_location(context.source_id())),
+                method_name.shape_location(context.source_id()),
+            )
+        }
         _ => Shape::error(
             format!("Method ->{} requires an object input", method_name.as_ref()),
             {
