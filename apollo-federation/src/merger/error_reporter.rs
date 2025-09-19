@@ -186,7 +186,7 @@ impl ErrorReporter {
         // indicating whether it was a supergraph element or a subgraph element. Now, we have two
         // separate functions, which allows us to use different types for the destination and
         // source data.
-        supergraph_mismatch_accessor: impl Fn(&D) -> Option<String>, // TODO: Consider using `impl AsRef<str>` to allow `&'static str`
+        supergraph_mismatch_accessor: impl Fn(&D) -> Option<String>,
         subgraph_mismatch_accessor: impl Fn(&S, usize) -> Option<String>,
         supergraph_element_printer: impl Fn(&str, Option<String>) -> String,
         other_elements_printer: impl Fn(&str, &str) -> String,
