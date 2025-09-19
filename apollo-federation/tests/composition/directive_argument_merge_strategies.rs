@@ -2,20 +2,13 @@ use std::iter::zip;
 
 use apollo_compiler::ast;
 use apollo_compiler::schema;
-use apollo_federation::error::CompositionError;
 use apollo_federation::schema::argument_composition_strategies::ArgumentCompositionStrategy;
 use apollo_federation::supergraph::CompositionHint;
-use apollo_federation::supergraph::Supergraph;
 
 use super::ServiceDefinition;
 use super::compose_as_fed2_subgraphs;
 use super::errors;
-
-fn assert_composition_success<S>(
-    result: Result<Supergraph<S>, Vec<CompositionError>>,
-) -> Supergraph<S> {
-    result.expect("Expected successful composition, but got errors")
-}
+use super::assert_composition_success;
 
 // Helper function to create directive strings from applied directives
 // Note: This function is currently unused but kept for future implementation
@@ -60,7 +53,7 @@ mod tests {
         arg_values_s2: HashMap<&'a str, &'a str>,
         result_values: HashMap<&'a str, &'a str>,
     }
-    
+
     static TEST_CASES: LazyLock<HashMap<&str, CompositionStrategyTestCase>> = LazyLock::new(|| {
         HashMap::from([
             (

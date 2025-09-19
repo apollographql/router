@@ -62,6 +62,24 @@ pub(crate) mod test_helpers {
         compose(fed2_subgraphs)
     }
 
+    pub(crate) fn assert_composition_success<S>(
+        result: Result<Supergraph<S>, Vec<CompositionError>>,
+    ) -> Supergraph<S> {
+        match result {
+            Ok(supergraph) => supergraph,
+            Err(errors) => {
+                panic!(
+                    "Expected successful composition, but got errors: {:?}",
+                    errors
+                        .iter()
+                        .map(|e| e.to_string())
+                        .collect::<Vec<_>>()
+                        .join("\n\n")
+                );
+            }
+        }
+    }
+
     // Return a vec of error codes and error messages as strings
     pub(crate) fn errors<S>(
         result: &Result<Supergraph<S>, Vec<CompositionError>>,
@@ -79,3 +97,4 @@ pub(crate) mod test_helpers {
 pub(crate) use test_helpers::ServiceDefinition;
 pub(crate) use test_helpers::compose_as_fed2_subgraphs;
 pub(crate) use test_helpers::errors;
+pub(crate) use test_helpers::assert_composition_success;
