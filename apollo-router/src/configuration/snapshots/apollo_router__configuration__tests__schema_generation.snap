@@ -1682,16 +1682,16 @@ expression: "&schema"
     },
     "Config5": {
       "additionalProperties": false,
-      "description": "Configuration for response caching",
+      "description": "Configuration for entity caching",
       "properties": {
-        "debug": {
-          "default": false,
-          "description": "Enable debug mode for the debugger",
-          "type": "boolean"
-        },
         "enabled": {
           "default": false,
-          "description": "Enable or disable the response caching feature",
+          "description": "Enable or disable the entity caching feature",
+          "type": "boolean"
+        },
+        "expose_keys_in_context": {
+          "default": false,
+          "description": "Expose cache keys in context",
           "type": "boolean"
         },
         "invalidation": {
@@ -1705,12 +1705,13 @@ expression: "&schema"
           ],
           "description": "Global invalidation configuration"
         },
-        "private_queries_buffer_size": {
-          "default": 2048,
-          "description": "Buffer size for known private queries (default: 2048)",
-          "format": "uint",
-          "minimum": 1,
-          "type": "integer"
+        "metrics": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Metrics"
+            }
+          ],
+          "description": "Entity caching evaluation metrics"
         },
         "subgraph": {
           "allOf": [
@@ -1728,16 +1729,16 @@ expression: "&schema"
     },
     "Config6": {
       "additionalProperties": false,
-      "description": "Configuration for entity caching",
+      "description": "Configuration for response caching",
       "properties": {
-        "enabled": {
+        "debug": {
           "default": false,
-          "description": "Enable or disable the entity caching feature",
+          "description": "Enable debug mode for the debugger",
           "type": "boolean"
         },
-        "expose_keys_in_context": {
+        "enabled": {
           "default": false,
-          "description": "Expose cache keys in context",
+          "description": "Enable or disable the response caching feature",
           "type": "boolean"
         },
         "invalidation": {
@@ -1751,13 +1752,12 @@ expression: "&schema"
           ],
           "description": "Global invalidation configuration"
         },
-        "metrics": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/Metrics"
-            }
-          ],
-          "description": "Entity caching evaluation metrics"
+        "private_queries_buffer_size": {
+          "default": 2048,
+          "description": "Buffer size for known private queries (default: 2048)",
+          "format": "uint",
+          "minimum": 1,
+          "type": "integer"
         },
         "subgraph": {
           "allOf": [
@@ -5723,28 +5723,6 @@ expression: "&schema"
     "InvalidationEndpointConfig": {
       "additionalProperties": false,
       "properties": {
-        "listen": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/ListenAddr"
-            }
-          ],
-          "description": "Listen address on which the invalidation endpoint must listen."
-        },
-        "path": {
-          "description": "Specify on which path you want to listen for invalidation endpoint.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "path",
-        "listen"
-      ],
-      "type": "object"
-    },
-    "InvalidationEndpointConfig2": {
-      "additionalProperties": false,
-      "properties": {
         "concurrent_requests": {
           "default": 10,
           "description": "Number of concurrent invalidation requests",
@@ -5770,6 +5748,28 @@ expression: "&schema"
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "listen"
+      ],
+      "type": "object"
+    },
+    "InvalidationEndpointConfig2": {
+      "additionalProperties": false,
+      "properties": {
+        "listen": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ListenAddr"
+            }
+          ],
+          "description": "Listen address on which the invalidation endpoint must listen."
+        },
+        "path": {
+          "description": "Specify on which path you want to listen for invalidation endpoint.",
+          "type": "string"
         }
       },
       "required": [
@@ -6180,7 +6180,7 @@ expression: "&schema"
         "ttl": {
           "anyOf": [
             {
-              "$ref": "#/definitions/Ttl2"
+              "$ref": "#/definitions/Ttl"
             },
             {
               "type": "null"
@@ -8649,65 +8649,6 @@ expression: "&schema"
     },
     "Subgraph": {
       "additionalProperties": false,
-      "description": "Per subgraph configuration for response caching",
-      "properties": {
-        "enabled": {
-          "default": true,
-          "description": "activates caching for this subgraph, overrides the global configuration",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "invalidation": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/SubgraphInvalidationConfig"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Invalidation configuration"
-        },
-        "postgres": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/PostgresCacheConfig"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "PostgreSQL configuration"
-        },
-        "private_id": {
-          "default": null,
-          "description": "Context key used to separate cache sections per user",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "ttl": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Ttl"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "expiration for all keys for this subgraph, unless overridden by the `Cache-Control` header in subgraph responses"
-        }
-      },
-      "type": "object"
-    },
-    "Subgraph2": {
-      "additionalProperties": false,
       "description": "Per subgraph configuration for entity caching",
       "properties": {
         "enabled": {
@@ -8721,7 +8662,7 @@ expression: "&schema"
         "invalidation": {
           "anyOf": [
             {
-              "$ref": "#/definitions/SubgraphInvalidationConfig2"
+              "$ref": "#/definitions/SubgraphInvalidationConfig"
             },
             {
               "type": "null"
@@ -8749,6 +8690,65 @@ expression: "&schema"
           ],
           "default": null,
           "description": "Redis configuration"
+        },
+        "ttl": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Ttl"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "expiration for all keys for this subgraph, unless overridden by the `Cache-Control` header in subgraph responses"
+        }
+      },
+      "type": "object"
+    },
+    "Subgraph2": {
+      "additionalProperties": false,
+      "description": "Per subgraph configuration for response caching",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "activates caching for this subgraph, overrides the global configuration",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "invalidation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SubgraphInvalidationConfig2"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Invalidation configuration"
+        },
+        "postgres": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PostgresCacheConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "PostgreSQL configuration"
+        },
+        "private_id": {
+          "default": null,
+          "description": "Context key used to separate cache sections per user",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "ttl": {
           "anyOf": [
@@ -9868,8 +9868,8 @@ expression: "&schema"
           "default": {
             "enabled": true,
             "invalidation": null,
-            "postgres": null,
             "private_id": null,
+            "redis": null,
             "ttl": null
           },
           "description": "options applying to all subgraphs"
@@ -9897,8 +9897,8 @@ expression: "&schema"
           "default": {
             "enabled": true,
             "invalidation": null,
+            "postgres": null,
             "private_id": null,
-            "redis": null,
             "ttl": null
           },
           "description": "options applying to all subgraphs"
@@ -11102,11 +11102,11 @@ expression: "&schema"
       "type": "object"
     },
     "Ttl": {
-      "description": "Per subgraph configuration for response caching",
+      "description": "Per subgraph configuration for entity caching",
       "type": "string"
     },
     "Ttl2": {
-      "description": "Per subgraph configuration for entity caching",
+      "description": "Per subgraph configuration for response caching",
       "type": "string"
     },
     "TypeName": {
@@ -11413,8 +11413,8 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "^experimental_response_cache$": {
-      "$ref": "#/definitions/Config5"
+    "^preview_response_cache$": {
+      "$ref": "#/definitions/Config6"
     }
   },
   "properties": {
@@ -11600,7 +11600,7 @@ expression: "&schema"
       "description": "Plugin configuration"
     },
     "preview_entity_cache": {
-      "$ref": "#/definitions/Config6"
+      "$ref": "#/definitions/Config5"
     },
     "preview_file_uploads": {
       "$ref": "#/definitions/FileUploadsConfig"
