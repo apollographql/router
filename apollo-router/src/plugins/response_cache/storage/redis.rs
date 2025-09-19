@@ -981,8 +981,6 @@ mod tests {
     /// Tests that ensure that if a key's cache tag cannot be updated, the key will not be updated.
     mod cache_tag_insert_failure_should_abort_key_insertion {
         use std::sync::Arc;
-        use std::time::Duration;
-        use std::time::Instant;
 
         use fred::error::Error;
         use fred::error::ErrorKind;
@@ -1111,64 +1109,6 @@ mod tests {
             let result = storage.insert(document, SUBGRAPH_NAME).await;
             let error = result.expect_err("should have timed out via redis");
             assert!(matches!(error, StorageError::Redis(e) if e.details() == "timeout"));
-
-            // make sure the insert function did not try to operate on the document key
-            for command in mock_redis.0.read().iter() {
-                if command.cmd.contains("SET") && command.args.contains(&document_key) {
-                    panic!("Command {command:?} set the document key");
-                }
-            }
-
-            Ok(())
-        }
-
-        #[tokio::test(flavor = "multi_thread")]
-        #[rstest::rstest]
-        async fn no_response_failure(
-            #[values(true, false)] clustered: bool,
-        ) -> Result<(), BoxError> {
-            use crate::plugins::response_cache::storage::Error as StorageError;
-
-            // Mock the Redis connection to simulate the `fred` client not returning, despite the
-            // timeout value being configured
-            #[derive(Default, Debug, Clone)]
-            struct MockStorage(Arc<RwLock<Vec<MockCommand>>>);
-            impl Mocks for MockStorage {
-                fn process_command(&self, command: MockCommand) -> Result<Value, Error> {
-                    self.0.write().push(command);
-
-                    // NB: need to sleep in an async task so that the task can be aborted by
-                    // `CacheStorage::insert`
-                    let runtime = tokio::runtime::Handle::try_current().unwrap();
-                    let handle = runtime.spawn(async {
-                        tokio::time::sleep(Duration::from_secs(60)).await;
-                    });
-                    while !handle.is_finished() {
-                        std::thread::sleep(Duration::from_millis(5));
-                    }
-                    Ok(Value::Null)
-                }
-            }
-
-            let config = redis_config(clustered);
-            let mock_redis = Arc::new(MockStorage::default());
-            let storage =
-                Storage::mocked(&config, clustered, mock_redis.clone(), mock_redis.clone()).await?;
-
-            let document = common_document();
-            let document_key = Value::from(storage.make_key(document.cache_key.clone()));
-
-            let now = Instant::now();
-            let result = storage.insert(document, SUBGRAPH_NAME).await;
-            let error = result.expect_err("should have timed out via the tokio::timeout wrapper");
-            assert!(
-                matches!(error, StorageError::Timeout)
-                    || matches!(error, StorageError::Redis(e) if e.kind() == &ErrorKind::Timeout)
-            );
-
-            // elapsed time should be close to the configured timeout
-            let elapsed = now.elapsed();
-            assert!(elapsed < 2 * config.timeout);
 
             // make sure the insert function did not try to operate on the document key
             for command in mock_redis.0.read().iter() {

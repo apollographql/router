@@ -1005,20 +1005,14 @@ mod test {
         // make a `get` call for each key and ensure that it has the expected value. this tests both
         // the `get` and `insert_multiple` functions
         for key in &keys {
-            let value: RedisValue<usize> = storage
-                .get(key.clone())
-                .await
-                .ok_or("unable to get value")?;
+            let value: RedisValue<usize> = storage.get(key.clone()).await?;
             assert_eq!(value.0, expected_value);
         }
 
         // test the `mget` functionality
-        let values = storage
-            .get_multiple(keys)
-            .await
-            .ok_or("unable to get_multiple")?;
+        let values = storage.get_multiple(keys).await;
         for value in values {
-            let value: RedisValue<usize> = value.ok_or("missing value")?;
+            let value: RedisValue<usize> = value.expect("missing");
             assert_eq!(value.0, expected_value);
         }
 
