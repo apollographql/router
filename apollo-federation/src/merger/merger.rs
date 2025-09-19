@@ -1056,7 +1056,12 @@ impl Merger {
     }
 
     fn validate_query_root(&mut self) {
-        todo!("Implement query root validation")
+        if self.merged.schema().schema_definition.query.is_none() {
+            self.error_reporter_mut()
+                .add_error(CompositionError::QueryRootMissing {
+                    message: "Query root is missing from the merged schema".to_string(),
+                });
+        }
     }
 
     pub(in crate::merger) fn directive_applications_with_transformed_arguments(
