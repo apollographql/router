@@ -1,5 +1,4 @@
 use std::fmt::Formatter;
-use std::net::SocketAddr;
 use std::str::FromStr;
 
 use http::Uri;
@@ -119,80 +118,11 @@ impl From<Uri> for UriEndpoint {
     }
 }
 
-#[derive(Debug, Clone, Default, Eq, PartialEq)]
-pub(crate) struct SocketEndpoint {
-    // None means that the value `default` was specified. We may remove the use of `default` in the future.
-    socket: Option<SocketAddr>,
-}
-
-impl<'de> Deserialize<'de> for SocketEndpoint {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct EndpointVisitor;
-
-        impl Visitor<'_> for EndpointVisitor {
-            type Value = SocketEndpoint;
-
-            fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
-                formatter.write_str("a valid uri or 'default'")
-            }
-
-            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-            where
-                E: Error,
-            {
-                if v == "default" {
-                    // This is a legacy of the old config format, where the 'default' was accepted.
-                    // Users should just not set the endpoint if they want the default.
-                    return Ok(SocketEndpoint::default());
-                }
-                match SocketAddr::from_str(v) {
-                    Ok(socket) => Ok(SocketEndpoint {
-                        socket: Some(socket),
-                    }),
-                    Err(_) => Err(Error::custom(format!(
-                        "invalid endpoint: {v}. Expected a valid socket or 'default'"
-                    ))),
-                }
-            }
-        }
-
-        deserializer.deserialize_str(EndpointVisitor)
-    }
-}
-
-impl JsonSchema for SocketEndpoint {
-    fn schema_name() -> std::borrow::Cow<'static, str> {
-        "SocketEndpoint".into()
-    }
-
-    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        generator.subschema_for::<String>()
-    }
-}
-
-impl From<SocketAddr> for SocketEndpoint {
-    fn from(socket: SocketAddr) -> Self {
-        SocketEndpoint {
-            socket: Some(socket),
-        }
-    }
-}
-
 #[cfg(test)]
 mod test {
-    use std::net::SocketAddr;
-    use std::str::FromStr;
-
     use http::Uri;
 
-    use crate::plugins::telemetry::endpoint::SocketEndpoint;
     use crate::plugins::telemetry::endpoint::UriEndpoint;
-
-    impl SocketEndpoint {
-        fn to_socket(&self) -> Option<SocketAddr> {
-            self.socket
-        }
-    }
 
     #[test]
     fn test_parse_uri_default() {
@@ -263,40 +193,6 @@ mod test {
             UriEndpoint::from(Uri::from_static("/path1"))
                 .to_full_uri(&Uri::from_static("http://localhost:9411/path2")),
             Uri::from_static("http://localhost:9411/path1")
-        );
-    }
-
-    #[test]
-    fn test_parse_socket_default() {
-        let endpoint = serde_yaml::from_str::<SocketEndpoint>("default").unwrap();
-        assert_eq!(endpoint, SocketEndpoint::default());
-    }
-    #[test]
-    fn test_parse_socket() {
-        let endpoint = serde_yaml::from_str::<SocketEndpoint>("127.0.0.1:8000").unwrap();
-        assert_eq!(
-            endpoint,
-            SocketAddr::from_str("127.0.0.1:8000").unwrap().into()
-        );
-    }
-
-    #[test]
-    fn test_parse_socket_error() {
-        let error = serde_yaml::from_str::<SocketEndpoint>("example.com:2000/path")
-            .expect_err("expected error");
-        assert_eq!(
-            error.to_string(),
-            "invalid endpoint: example.com:2000/path. Expected a valid socket or 'default' at line 1 column 1"
-        );
-    }
-
-    #[test]
-    fn test_to_socket() {
-        assert_eq!(
-            SocketEndpoint::from(SocketAddr::from_str("127.0.0.1:8000").unwrap())
-                .to_socket()
-                .unwrap(),
-            SocketAddr::from_str("127.0.0.1:8000").unwrap()
         );
     }
 }
