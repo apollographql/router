@@ -122,6 +122,7 @@ where
 //   when each clone is dropped, only when the last instance is dropped.
 struct DropSafeRedisPool {
     pool: Arc<RedisPool>,
+    caller: &'static str,
     heartbeat_abort_handle: AbortHandle,
     // Metrics collector handles its own abort and gauges
     _metrics_collector: RedisMetricsCollector,
@@ -138,10 +139,12 @@ impl Deref for DropSafeRedisPool {
 impl Drop for DropSafeRedisPool {
     fn drop(&mut self) {
         let inner = self.pool.clone();
+        let caller = self.caller;
         tokio::spawn(async move {
             let result = inner.quit().await;
             if let Err(err) = result {
                 tracing::warn!("Caught error while closing unused Redis connections: {err:?}");
+                record_redis_error(&err, caller);
             }
         });
         self.heartbeat_abort_handle.abort();
@@ -156,7 +159,6 @@ pub(crate) struct RedisCacheStorage {
     pub(crate) ttl: Option<Duration>,
     is_cluster: bool,
     reset_ttl: bool,
-    caller: &'static str,
 }
 
 fn get_type_of<T>(_: &T) -> &'static str {
@@ -340,6 +342,7 @@ impl RedisCacheStorage {
             // spawn tasks that listen for connection close or reconnect events
             let mut error_rx = client.error_rx();
             let mut reconnect_rx = client.reconnect_rx();
+            let mut unresponsive_rx = client.unresponsive_rx();
 
             ACTIVE_CLIENT_COUNT.fetch_add(1, Ordering::Relaxed);
 
@@ -347,22 +350,53 @@ impl RedisCacheStorage {
                 loop {
                     match error_rx.recv().await {
                         Ok((error, Some(server))) => {
-                            tracing::error!(
-                                "Redis client disconnected from {server:?} with error: {error:?}",
-                            )
+                            tracing::error!("Redis client ({server:?}) error: {error:?}",);
+                            record_redis_error(&error, caller);
                         }
                         Ok((error, None)) => {
-                            tracing::error!("Redis client disconnected with error: {error:?}",)
+                            tracing::error!("Redis client error: {error:?}",);
+                            record_redis_error(&error, caller);
                         }
                         Err(RecvError::Lagged(_)) => continue,
                         Err(RecvError::Closed) => break,
                     }
                 }
             });
+
+            tokio::spawn(async move {
+                loop {
+                    match unresponsive_rx.recv().await {
+                        Ok(server) => {
+                            tracing::debug!("Redis client ({server:?}) unresponsive");
+                            u64_counter_with_unit!(
+                                "apollo.router.cache.redis.unresponsive",
+                                "Counter for Redis client unresponsive events",
+                                "{event}",
+                                1,
+                                kind = caller,
+                                server = server.to_string()
+                            );
+                        }
+                        Err(RecvError::Lagged(_)) => continue,
+                        Err(RecvError::Closed) => break,
+                    }
+                }
+            });
+
             tokio::spawn(async move {
                 loop {
                     match reconnect_rx.recv().await {
-                        Ok(server) => tracing::info!("Redis client connected to {server:?}"),
+                        Ok(server) => {
+                            u64_counter_with_unit!(
+                                "apollo.router.cache.redis.reconnection",
+                                "Counter for Redis client reconnection events",
+                                "{reconnection}",
+                                1,
+                                kind = caller,
+                                server = server.to_string()
+                            );
+                            tracing::info!("Redis client connected to {server:?}")
+                        }
                         Err(RecvError::Lagged(_)) => continue,
                         Err(RecvError::Closed) => break,
                     }
@@ -370,11 +404,9 @@ impl RedisCacheStorage {
             });
         }
 
+        // NB: error is not recorded here as it will be observed by the task following `client.error_rx()`
         let client_handles = pooled_client.connect_pool();
-        pooled_client.wait_for_connect().await.inspect_err(|e| {
-            // Record connection failure as metrics even when initial setup fails
-            record_redis_error(e, caller);
-        })?;
+        pooled_client.wait_for_connect().await?;
 
         tokio::spawn(async move {
             // the handles will resolve when the clients finish terminating. per the `fred` docs:
@@ -384,7 +416,6 @@ impl RedisCacheStorage {
             let results = join_all(client_handles).await;
             ACTIVE_CLIENT_COUNT.fetch_sub(results.len() as u64, Ordering::Relaxed);
         });
-
         let heartbeat_clients = pooled_client.clone();
         let heartbeat_handle = tokio::spawn(async move {
             heartbeat_clients
@@ -400,6 +431,7 @@ impl RedisCacheStorage {
         Ok(Self {
             inner: Arc::new(DropSafeRedisPool {
                 pool: pooled_client_arc,
+                caller,
                 heartbeat_abort_handle: heartbeat_handle.abort_handle(),
                 _metrics_collector: metrics_collector,
             }),
@@ -407,7 +439,6 @@ impl RedisCacheStorage {
             ttl,
             is_cluster,
             reset_ttl,
-            caller,
         })
     }
 
@@ -417,7 +448,7 @@ impl RedisCacheStorage {
 
     /// Helper method to record Redis errors for metrics
     fn record_error(&self, error: &RedisError) {
-        record_redis_error(error, self.caller);
+        record_redis_error(error, self.inner.caller);
     }
 
     fn preprocess_urls(urls: Vec<Url>) -> Result<Url, RedisError> {
@@ -648,6 +679,9 @@ impl RedisCacheStorage {
             .set::<(), _, _>(key, value, expiration, None, false)
             .await;
         tracing::trace!("insert result {:?}", r);
+        if let Err(err) = r {
+            self.record_error(&err);
+        }
     }
 
     pub(crate) async fn insert_multiple<K: KeyType, V: ValueType>(
@@ -656,29 +690,28 @@ impl RedisCacheStorage {
         ttl: Option<Duration>,
     ) {
         tracing::trace!("inserting into redis: {:#?}", data);
+        let expiration = ttl
+            .or(self.ttl)
+            .map(|ttl| Expiration::EX(ttl.as_secs() as i64));
 
-        let r = match ttl.as_ref().or(self.ttl.as_ref()) {
-            None => self.inner.mset(data.to_owned()).await,
-            Some(ttl) => {
-                let expiration = Some(Expiration::EX(ttl.as_secs() as i64));
-                let pipeline = self.inner.next().pipeline();
+        // NB: if we were using MSET here, we'd need to split the keys by hash slot. however, fred
+        // seems to split the pipeline by hash slot in the background.
+        let pipeline = self.inner.next().pipeline();
+        for (key, value) in data {
+            let key = self.make_key(key.clone());
+            let _ = pipeline
+                .set::<(), _, _>(key, value.clone(), expiration.clone(), None, false)
+                .await;
+        }
 
-                for (key, value) in data {
-                    let _ = pipeline
-                        .set::<(), _, _>(
-                            self.make_key(key.clone()),
-                            value.clone(),
-                            expiration.clone(),
-                            None,
-                            false,
-                        )
-                        .await;
-                }
-
-                pipeline.last().await
+        let result: Result<Vec<()>, _> = pipeline.all().await;
+        match result {
+            Ok(values) => tracing::trace!("successfully inserted {} values", values.len()),
+            Err(err) => {
+                tracing::trace!("caught error during insert: {err:?}");
+                self.record_error(&err);
             }
-        };
-        tracing::trace!("insert result {:?}", r);
+        }
     }
 
     /// Delete keys *without* adding the `namespace` prefix because `keys` is from
@@ -725,10 +758,20 @@ impl RedisCacheStorage {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashMap;
     use std::time::SystemTime;
 
+    use fred::types::cluster::ClusterRouting;
+    use itertools::Itertools;
+    use rand::Rng;
+    use rand::RngCore;
+    use rand::distr::Alphanumeric;
+    use serde_json::json;
+    use tower::BoxError;
     use url::Url;
 
+    use crate::cache::redis::RedisKey;
+    use crate::cache::redis::RedisValue;
     use crate::cache::storage::ValueType;
 
     #[test]
@@ -834,5 +877,80 @@ mod test {
         let url_1 = Url::parse(url_s1).expect("it's a valid url");
         let urls = vec![url, url_1];
         assert!(super::RedisCacheStorage::preprocess_urls(urls).is_err());
+    }
+
+    /// Tests that `insert_multiple` and `get_multiple` are successful when run against clustered Redis.
+    ///
+    /// Clustered Redis works by hashing each key to one of 16384 hash slots, and assigning each hash
+    /// slot to a node. Operations which interact with multiple keys (`MGET`, `MSET`) *cannot* be
+    /// used on keys which map to different hash slots, even if those hash slots are on the same node.
+    ///
+    /// This test inserts data that is guaranteed to hash to different slots to verify that
+    /// `RedisCacheStorage` is well-behaved when operating against a cluster.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_redis_storage_avoids_common_cross_slot_errors() -> Result<(), BoxError> {
+        let config_json = json!({
+            "urls": ["redis-cluster://localhost:7000"],
+            "namespace": "test_redis_cluster",
+            "required_to_start": true,
+            "ttl": "60s"
+        });
+        let config = serde_json::from_value(config_json).unwrap();
+        let storage = super::RedisCacheStorage::new(config, "test_redis_cluster").await;
+
+        // only error for lack of storage when running in CI. otherwise, skip this test.
+        #[cfg(not(all(feature = "ci", all(target_arch = "x86_64", target_os = "linux"))))]
+        if storage.is_err() {
+            return Ok(());
+        }
+        let storage = storage?;
+
+        // insert values which reflect different cluster slots
+        let mut data = HashMap::default();
+        let expected_value = rand::rng().next_u32() as usize;
+        let unique_cluster_slot_count = |data: &HashMap<RedisKey<String>, _>| {
+            data.keys()
+                .map(|key| ClusterRouting::hash_key(key.0.as_bytes()))
+                .unique()
+                .count()
+        };
+
+        while unique_cluster_slot_count(&data) < 50 {
+            // NB: include {} around key so that this key is what determines the cluster hash slot - adding
+            // the namespace will otherwise change the slot
+            let key = rand::rng()
+                .sample_iter(&Alphanumeric)
+                .take(10)
+                .map(char::from)
+                .collect::<String>();
+            data.insert(RedisKey(format!("{{{}}}", key)), RedisValue(expected_value));
+        }
+
+        // insert values
+        let keys: Vec<_> = data.keys().cloned().collect();
+        let data: Vec<_> = data.into_iter().collect();
+        storage.insert_multiple(&data, None).await;
+
+        // make a `get` call for each key and ensure that it has the expected value. this tests both
+        // the `get` and `insert_multiple` functions
+        for key in &keys {
+            let value: RedisValue<usize> = storage
+                .get(key.clone())
+                .await
+                .ok_or("unable to get value")?;
+            assert_eq!(value.0, expected_value);
+        }
+
+        // test the `mget` functionality
+        let values = storage
+            .get_multiple(keys)
+            .await
+            .ok_or("unable to get_multiple")?;
+        for value in values {
+            let value: RedisValue<usize> = value.ok_or("missing value")?;
+            assert_eq!(value.0, expected_value);
+        }
+
+        Ok(())
     }
 }
