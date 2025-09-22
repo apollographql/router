@@ -6,88 +6,89 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🚀 Features
 
-### add ResponseErrors selector to router response ([PR #7882](https://github.com/apollographql/router/pull/7882))
+### Add `ResponseErrors` selector to router response ([PR #7882](https://github.com/apollographql/router/pull/7882))
 
-Introducing the `ResponseErrors` selector in telemetry configurations to capture router response errors, allowing users to capture and log errors encountered at the router service layer. This new selector enhances logging for the router service, as it allows users the option to only log router errors instead of the entire router response body to reduce noise.
+The `ResponseErrors` selector in telemetry configurations captures router response errors, enabling you to log errors encountered at the router service layer. This selector enhances logging by allowing you to log only router errors instead of the entire router response body, reducing noise in your telemetry data.
 
-``` yaml
+```yaml
 telemetry:
   instrumentation:
     events:
       router:
-         router.error:
-            attributes:
-               "my_attribute":
-                   response_errors: "$.[0]"
-                   # Examples: "$.[0].message", "$.[0].locations", "$.[0].extensions", etc.
+        router.error:
+          attributes:
+            "my_attribute":
+              response_errors: "$.[0]"
+              # Examples: "$.[0].message", "$.[0].locations", "$.[0].extensions", etc.
 ```
 
 By [@Aguilarjaf](https://github.com/Aguilarjaf) in https://github.com/apollographql/router/pull/7882
 
 ## 🐛 Fixes
 
-### Fix _entities Apollo Error Metrics Missing Service Attribute ([PR #8153](https://github.com/apollographql/router/pull/8153))
+### `_entities` Apollo error metrics missing service attribute ([PR #8153](https://github.com/apollographql/router/pull/8153))
 
-Error counting https://github.com/apollographql/router/pull/7712 introduced a bug where `_entities` errors from a subgraph fetch no longer reported a service (subgraph or connector) attribute. This erroneously categorized these errors as from the Router rather than their originating service in the Studio UI.
+The error counting feature introduced in v2.5.0 caused `_entities` errors from subgraph fetches to no longer report a service (subgraph or connector) attribute. This incorrectly categorized these errors as originating from the router instead of their actual service in Apollo Studio.
 
-The attribute has been re-added, fixing this issue.
+The service attribute is now correctly included for `_entities` errors.
 
 By [@rregitsky](https://github.com/rregitsky) in https://github.com/apollographql/router/pull/8153
 
-### Fix deduplication and websocket stream termination ([PR #8104](https://github.com/apollographql/router/pull/8104))
+### WebSocket connection cleanup for subscriptions ([PR #8104](https://github.com/apollographql/router/pull/8104))
 
-Fixes an issue where WebSocket connections to subgraphs would remain open after all client subscriptions were closed. This could lead to unnecessary resource usage and connections not being properly cleaned up until a new event was received.
+A regression introduced in v2.5.0 caused WebSocket connections to subgraphs to remain open after all client subscriptions ended. This led to unnecessary resource usage and connections not being cleaned up until a new event was received.
 
-Previously, when clients disconnected from subscription streams, the router would correctly close client connections but would leave the underlying WebSocket connection to the subgraph open indefinitely in some cases.
+The router now correctly closes WebSocket connections to subgraphs when clients disconnect from subscription streams.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/8104
 
-### Fix OTLP metrics export to prevent UpDown counter drift ([PR #8174](https://github.com/apollographql/router/pull/8174))
+### OTLP metrics Up/Down counter drift ([PR #8174](https://github.com/apollographql/router/pull/8174))
 
-Previously, when using OTLP metrics export with delta temporality configured, UpDown counters could exhibit drift issues where the counter values would become inaccurate over time. This happened because UpDown counters were incorrectly exported as deltas instead of cumulative values.
+When using OTLP metrics export with delta temporality configured, UpDown counters could exhibit drift issues where counter values became inaccurate over time. This occurred because UpDown counters were incorrectly exported as deltas instead of cumulative values.
 
-UpDownCounters will now always be exported as aggregate values as per the otel spec.
+UpDown counters now export as aggregate values according to the OpenTelemetry specification.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/8174
 
-### Make the `id` field optional for WebSocket subscription `connection_error` messages ([Issue #6138](https://github.com/apollographql/router/issues/6138))
+### WebSocket subscription `connection_error` message handling ([Issue #6138](https://github.com/apollographql/router/issues/6138))
 
-Fixed a Subscriptions over WebSocket issue where `connection_error` messages from subgraphs would be swallowed by the router because they incorrectly required an `id` field. According to the `graphql-transport-ws` specification (one of two transport specifications we provide support for), `connection_error` messages only require a `payload` field, **not** an `id` field. The `id` field in is now optional which will allow the underlying error message to propagate to clients when underlying connection failures occur.
+The router now correctly processes `connection_error` messages from subgraphs that don't include an `id` field. Previously, these messages were ignored because the router incorrectly required an `id` field. According to the `graphql-transport-ws` specification, `connection_error` messages only require a `payload` field.
+
+The `id` field is now optional for `connection_error` messages, allowing underlying error messages to propagate to clients when connection failures occur.
 
 By [@jeffutter](https://github.com/jeffutter) in https://github.com/apollographql/router/pull/8189
 
-### Enable annotations on deployments via Helm Chart ([PR #8164](https://github.com/apollographql/router/pull/8164))
+### Add Helm chart support for deployment annotations ([PR #8164](https://github.com/apollographql/router/pull/8164))
 
-The Helm chart previously did not allow customization of annotations on the deployment itself (as opposed to the pods within it, which is done with `podAnnotations`); this can now be done with the `deploymentAnnotations` value.
+The Helm chart now supports customizing annotations on the deployment itself using the `deploymentAnnotations` value. Previously, you could only customize pod annotations with `podAnnotations`.
 
 By [@glasser](https://github.com/glasser) in https://github.com/apollographql/router/pull/8164
 
-### (Federation) Removed `RebaseError::InterfaceObjectTypename` variant ([PR #8109](https://github.com/apollographql/router/pull/8109))
+### Uncommon query planning error with interface object types ([PR #8109](https://github.com/apollographql/router/pull/8109))
 
-Fixed an uncommon query planning error, "Cannot add selection of field `X` to selection set of parent type `Y` that is potentially an interface object type at runtime". Although fetching `__typename` selections from interface object types are unnecessary, it is difficult to avoid them in all cases and the effect of having those selections in query plans is benign. Thus, the error variant and the check for the error have been removed.
+An uncommon query planning error has been resolved: "Cannot add selection of field `X` to selection set of parent type `Y` that is potentially an interface object type at runtime". The router now handles `__typename` selections from interface object types correctly, as these selections are benign even when unnecessary.
 
 By [@duckki](https://github.com/duckki) in https://github.com/apollographql/router/pull/8109
 
-### Connection shutdown sometimes fails over hot reload ([PR #8169](https://github.com/apollographql/router/pull/8169))
+### Connection shutdown race condition during hot reload ([PR #8169](https://github.com/apollographql/router/pull/8169))
 
-A race in the way that connections were shutdown when a hot-reload is triggered meant that occasionally some connections 
-were left in active state and never entered terminating state. This could cause OOMs over time as multiple pipelines are 
-left active.
+A race condition during hot reload that occasionally left connections in an active state instead of terminating has been fixed. This issue could cause out-of-memory errors over time as multiple pipelines remained active.
 
-This is now fixed and connections that are opening at the same time as shutdown will immediately terminate.
+Connections that are opening during shutdown now immediately terminate.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/8169
 
-### Report PQ usage when an operation is requested by safelisted operation body ([PR #8168](https://github.com/apollographql/router/pull/8168))
+### Persisted Query usage reporting for safelisted operation body requests ([PR #8168](https://github.com/apollographql/router/pull/8168))
 
-Previously we would only record PQ metrics for operations that were requested by the PQ ID. This change updates usage reporting so that we also report usage if the PQ operation is requested by the safelisted operation body.
+Persisted Query metrics now include operations requested by safelisted operation **body**. Previously, the router only recorded metrics for operations requested by **ID**.
 
 By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/8168
 
 ## 📃 Configuration
 
-### Split Apollo trace/metrics batch processor configs ([PR #8258](https://github.com/apollographql/router/pull/8258))
-The config related to the exporting of Apollo metrics and traces has been separated so that the various configuration can be fine-tuned for each of the Apollo batch processors. The config has changed from:
+### Separate Apollo telemetry batch processor configurations ([PR #8258](https://github.com/apollographql/router/pull/8258))
+
+Apollo telemetry configuration now allows separate fine-tuning for metrics and traces batch processors. The configuration has changed from:
 
 ```yaml
 telemetry:
@@ -128,13 +129,13 @@ telemetry:
           max_queue_size: 2048
 ```
 
-The old telemetry.apollo.batch_processor config will be used if these new config values are not specified. The configuration used will be shown in an info-level log on router startup.
+The old `telemetry.apollo.batch_processor` configuration will be used if you don't specify these new values. The router displays the configuration being used in an info-level log message at startup.
 
 By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/8258
 
-### [Subgraph Insights] Subgraph metrics config flag now in preview ([PR #8200](https://github.com/apollographql/router/pull/8200))
-The `subgraph_metrics` config flag which powers the Studio `Subgraph Insights` feature is being promoted from `experimental` to `preview`. 
-The flag name has been updated from `experimental_subgraph_metrics` to 
+### Promote Subgraph Insights metrics flag to preview ([PR #8200](https://github.com/apollographql/router/pull/8200))
+
+The `subgraph_metrics` configuration flag that powers Apollo Studio's Subgraph Insights feature has been promoted from `experimental` to `preview`. The flag name has been updated from `experimental_subgraph_metrics` to `preview_subgraph_metrics`: 
 ```yaml
 telemetry:
   apollo:
