@@ -205,25 +205,21 @@ impl Config {
 
         let view_default_aggregation = |_i: &Instrument| {
             Some(
-                Stream::builder()
-                    .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                Stream::new() // change to StreamBuilder when we upgrade to v0.30.0
+                    .aggregation(Aggregation::ExplicitBucketHistogram {
                         boundaries: default_buckets(),
                         record_min_max: true,
-                    })
-                    .build()
-                    .unwrap(),
+                    }),
             )
         };
 
         let view_custom_aggregation = |_i: &Instrument| {
             Some(
-                Stream::builder()
-                    .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                Stream::new() // change to StreamBuilder when we upgrade to v0.30.0
+                    .aggregation(Aggregation::ExplicitBucketHistogram {
                         boundaries: exponential_buckets(0.001399084909, 1.1, 129).unwrap(),
                         record_min_max: true,
-                    })
-                    .build()
-                    .unwrap(),
+                    }),
             )
         };
 
