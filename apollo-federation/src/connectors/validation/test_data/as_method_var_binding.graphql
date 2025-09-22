@@ -1,0 +1,47 @@
+extend schema @link(
+  url: "https://specs.apollo.dev/connect/v0.3"
+  import: ["@connect"]
+)
+
+type Query {
+  validAsNameBinding: JSON @connect(
+    http: { GET: "http://127.0.0.1" }
+    selection: """
+    person->as($name, @.name)->echo({ hello: $name })
+    """
+  )
+
+  validSubSelection: JSON @connect(
+    http: { GET: "http://127.0.0.1" }
+    selection: """
+    product->as($name, @.name) {
+      upc
+      name: $name
+    }
+    """
+  )
+
+  validThisShadowing: JSON @connect(
+    http: { GET: "http://127.0.0.1" }
+    selection: """
+    scope->as($this) { scope: $this }
+    """
+  )
+
+  invalidAsNameBinding: JSON @connect(
+    http: { GET: "http://127.0.0.1" }
+    selection: """
+    $->as($typo, @.name)->echo({ hello: $name })
+    """
+  )
+
+  invalidSubSelection: JSON @connect(
+    http: { GET: "http://127.0.0.1" }
+    selection: """
+    product->as($name, @.name) {
+      upc
+      name: $typo
+    }
+    """
+  )
+}
