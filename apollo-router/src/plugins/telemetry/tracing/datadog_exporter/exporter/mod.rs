@@ -274,11 +274,12 @@ impl DatadogPipelineBuilder {
         let exporter = self.build_exporter_with_service_name(service_name)?;
         let mut provider_builder =
             TracerProvider::builder().with_simple_exporter(exporter);
-        provider_builder = provider_builder.with_resource(config.resource);
+        provider_builder = provider_builder.with_resource(config.resource.into_owned());
         let provider = provider_builder.build();
         let scope = InstrumentationScope::builder("opentelemetry-datadog")
         .with_schema_url(semcov::SCHEMA_URL)
-        .with_version(env!("CARGO_PKG_VERSION"));
+        .with_version(env!("CARGO_PKG_VERSION"))
+        .build();
         let tracer = provider.tracer_with_scope(scope);
         let _ = global::set_tracer_provider(provider);
         Ok(tracer)
@@ -293,11 +294,11 @@ impl DatadogPipelineBuilder {
             .with_batch_exporter(exporter, runtime);
         provider_builder = provider_builder.with_config(config);
         let provider = provider_builder.build();
-        let tracer = provider
-            .tracer_builder("opentelemetry-datadog")
-            .with_version(env!("CARGO_PKG_VERSION"))
+        let scope = InstrumentationScope::builder("opentelemetry-datadog")
+        .with_version(env!("CARGO_PKG_VERSION"))
             .with_schema_url(semcov::SCHEMA_URL)
             .build();
+        let tracer = provider.tracer_with_scope(scope);
         let _ = global::set_tracer_provider(provider);
         Ok(tracer)
     }
