@@ -565,24 +565,16 @@ impl RedisCacheStorage {
             Some(ttl) if self.reset_ttl => {
                 let pipeline = self.pipeline();
                 let key = self.make_key(key);
-                let res = pipeline
-                    .get::<fred::types::Value, _>(&key)
+                let _: () = pipeline
+                    .get(&key)
                     .await
                     .inspect_err(|e| self.record_error(e))
                     .ok()?;
-                if !res.is_queued() {
-                    tracing::error!("could not queue GET command");
-                    return None;
-                }
-                let res: fred::types::Value = pipeline
+                let _: () = pipeline
                     .expire(&key, ttl.as_secs() as i64, None)
                     .await
                     .inspect_err(|e| self.record_error(e))
                     .ok()?;
-                if !res.is_queued() {
-                    tracing::error!("could not queue EXPIRE command");
-                    return None;
-                }
 
                 let (first, _): (Option<RedisValue<V>>, bool) = pipeline
                     .all()
