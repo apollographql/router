@@ -12,7 +12,6 @@ use fred::clients::Pipeline;
 use fred::interfaces::EventInterface;
 #[cfg(test)]
 use fred::mocks::Mocks;
-use fred::prelude::Client as RedisClient;
 use fred::prelude::ClientLike;
 use fred::prelude::Error as RedisError;
 use fred::prelude::ErrorKind as RedisErrorKind;
@@ -560,35 +559,29 @@ impl RedisCacheStorage {
     pub(crate) async fn get<K: KeyType, V: ValueType>(
         &self,
         key: RedisKey<K>,
-    ) -> Option<RedisValue<V>> {
+    ) -> Result<RedisValue<V>, RedisError> {
+        let key = self.make_key(key);
         match self.ttl {
             Some(ttl) if self.reset_ttl => {
                 let pipeline = self.pipeline();
-                let key = self.make_key(key);
                 let _: () = pipeline
                     .get(&key)
                     .await
-                    .inspect_err(|e| self.record_error(e))
-                    .ok()?;
+                    .inspect_err(|e| self.record_error(e))?;
                 let _: () = pipeline
                     .expire(&key, ttl.as_secs() as i64, None)
                     .await
-                    .inspect_err(|e| self.record_error(e))
-                    .ok()?;
+                    .inspect_err(|e| self.record_error(e))?;
 
-                let (first, _): (Option<RedisValue<V>>, bool) = pipeline
-                    .all()
-                    .await
-                    .inspect_err(|e| self.record_error(e))
-                    .ok()?;
-                first
+                let (value, _timeout_set): (RedisValue<V>, bool) =
+                    pipeline.all().await.inspect_err(|e| self.record_error(e))?;
+                Ok(value)
             }
             _ => self
                 .inner
-                .get::<RedisValue<V>, _>(self.make_key(key))
+                .get(key)
                 .await
-                .inspect_err(|e| self.record_error(e))
-                .ok(),
+                .inspect_err(|e| self.record_error(e)),
         }
     }
 
@@ -933,10 +926,7 @@ mod test {
         // make a `get` call for each key and ensure that it has the expected value. this tests both
         // the `get` and `insert_multiple` functions
         for key in &keys {
-            let value: RedisValue<usize> = storage
-                .get(key.clone())
-                .await
-                .ok_or("unable to get value")?;
+            let value: RedisValue<usize> = storage.get(key.clone()).await?;
             assert_eq!(value.0, expected_value);
         }
 

@@ -931,10 +931,10 @@ async fn cache_lookup_root(
         private_id,
     );
 
-    let cache_result: Option<RedisValue<CacheEntry>> = cache.get(RedisKey(key.clone())).await;
+    let cache_result: Result<RedisValue<CacheEntry>, _> = cache.get(RedisKey(key.clone())).await;
 
     match cache_result {
-        Some(value) => {
+        Ok(value) => {
             if value.0.control.can_use() {
                 let control = value.0.control.clone();
                 update_cache_control(&request.context, &control);
@@ -985,7 +985,7 @@ async fn cache_lookup_root(
                 Ok(ControlFlow::Continue((request, key)))
             }
         }
-        None => Ok(ControlFlow::Continue((request, key))),
+        Err(_) => Ok(ControlFlow::Continue((request, key))),
     }
 }
 
