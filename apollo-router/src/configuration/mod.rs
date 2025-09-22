@@ -1061,6 +1061,7 @@ pub(crate) struct RedisCache {
         deserialize_with = "humantime_serde::deserialize",
         default = "default_timeout"
     )]
+    #[schemars(with = "Option<String>", default)]
     /// Redis request timeout (default: 500ms)
     pub(crate) timeout: Duration,
 

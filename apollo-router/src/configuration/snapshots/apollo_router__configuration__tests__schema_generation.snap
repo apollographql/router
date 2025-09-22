@@ -7095,8 +7095,11 @@ expression: "&schema"
           "type": "boolean"
         },
         "timeout": {
-          "default": null,
-          "description": "Redis request timeout (default: 2ms)",
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Redis request timeout (default: 500ms)",
           "type": [
             "string",
             "null"
@@ -7378,8 +7381,11 @@ expression: "&schema"
           "type": "boolean"
         },
         "timeout": {
-          "default": null,
-          "description": "Redis request timeout (default: 2ms)",
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Redis request timeout (default: 500ms)",
           "type": [
             "string",
             "null"

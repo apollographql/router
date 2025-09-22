@@ -770,7 +770,6 @@ mod test {
     use crate::cache::redis::RedisKey;
     use crate::cache::redis::RedisValue;
     use crate::cache::storage::ValueType;
-    use crate::configuration::RedisCache;
 
     #[test]
     fn ensure_invalid_payload_serialization_doesnt_fail() {
@@ -959,10 +958,9 @@ mod test {
             "required_to_start": true,
             "ttl": "60s"
         });
-        let config: RedisCache = serde_json::from_value(config_json).unwrap();
+        let config = serde_json::from_value(config_json).unwrap();
         let storage = super::RedisCacheStorage::new(config, "test_get_multiple_is_ordered").await?;
 
-        // TODO(@carodewig) this would be an excellent property-based test
         let data = [("a", "1"), ("b", "2"), ("c", "3")]
             .map(|(k, v)| (RedisKey(k.to_string()), RedisValue(v.to_string())));
         storage.insert_multiple(&data, None).await;
