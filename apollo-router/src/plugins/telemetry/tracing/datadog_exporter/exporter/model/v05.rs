@@ -198,7 +198,7 @@ where
                 .unwrap_or(0);
 
             let mut span_type = interner.intern("");
-            for KeyValue { key, value } in &span.attributes {
+            for KeyValue { key, value, .. } in &span.attributes {
                 if key.as_str() == "span.type" {
                     span_type = interner.intern_value(value);
                     break;
@@ -253,7 +253,7 @@ where
 
             write_unified_tags(&mut encoded, interner, unified_tags)?;
 
-            for KeyValue { key, value } in span.attributes.iter() {
+            for KeyValue { key, value, .. } in span.attributes.iter() {
                 rmp::encode::write_u32(&mut encoded, interner.intern(key.as_str()))?;
                 rmp::encode::write_u32(&mut encoded, interner.intern_value(value))?;
             }

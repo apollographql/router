@@ -164,6 +164,7 @@ impl TracingConfigurator for Config {
                         && let Some(KeyValue {
                             key: _,
                             value: Value::String(v),
+                            ..
                         }) = span.attributes.iter().find(|kv| kv.key == *mapping)
                     {
                         return v.as_str();

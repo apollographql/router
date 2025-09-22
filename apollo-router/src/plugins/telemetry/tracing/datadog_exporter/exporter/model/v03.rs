@@ -111,7 +111,7 @@ where
                     rmp::encode::write_str(&mut encoded, value.as_str().as_ref())?;
                 }
             }
-            for KeyValue { key, value } in span.attributes.iter() {
+            for KeyValue { key, value, .. } in span.attributes.iter() {
                 rmp::encode::write_str(&mut encoded, key.as_str())?;
                 rmp::encode::write_str(&mut encoded, value.as_str().as_ref())?;
             }
