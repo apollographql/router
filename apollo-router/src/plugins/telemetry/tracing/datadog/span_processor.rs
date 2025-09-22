@@ -120,7 +120,7 @@ mod tests {
             events: SpanEvents::default(),
             links: SpanLinks::default(),
             status: Default::default(),
-            instrumentation_lib: Default::default(),
+            instrumentation_scope: Default::default(),
             dropped_attributes_count: 0,
         };
 
