@@ -7,6 +7,8 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+use fred::clients::Client;
+use fred::clients::Pipeline;
 use fred::interfaces::EventInterface;
 #[cfg(test)]
 use fred::mocks::Mocks;
@@ -544,6 +546,10 @@ impl RedisCacheStorage {
         self.ttl = ttl;
     }
 
+    fn pipeline(&self) -> Pipeline<Client> {
+        self.inner.next().pipeline()
+    }
+
     fn make_key<K: KeyType>(&self, key: RedisKey<K>) -> String {
         match &self.namespace {
             Some(namespace) => format!("{namespace}:{key}"),
@@ -557,7 +563,7 @@ impl RedisCacheStorage {
     ) -> Option<RedisValue<V>> {
         match self.ttl {
             Some(ttl) if self.reset_ttl => {
-                let pipeline: fred::clients::Pipeline<RedisClient> = self.inner.next().pipeline();
+                let pipeline = self.pipeline();
                 let key = self.make_key(key);
                 let res = pipeline
                     .get::<fred::types::Value, _>(&key)
@@ -697,7 +703,7 @@ impl RedisCacheStorage {
 
         // NB: if we were using MSET here, we'd need to split the keys by hash slot. however, fred
         // seems to split the pipeline by hash slot in the background.
-        let pipeline = self.inner.next().pipeline();
+        let pipeline = self.pipeline();
         for (key, value) in data {
             let key = self.make_key(key.clone());
             let _ = pipeline
