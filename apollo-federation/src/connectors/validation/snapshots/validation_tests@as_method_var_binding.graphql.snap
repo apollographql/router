@@ -8,14 +8,14 @@ input_file: apollo-federation/src/connectors/validation/test_data/as_method_var_
         code: InvalidSelection,
         message: "In `@connect(selection:)` on `Query.invalidAsNameBinding`: unknown variable `$name`, must be one of $args, $config, $context, $env, $request, $response, $status, $this",
         locations: [
-            34:41..34:46,
+            86:41..86:46,
         ],
     },
     Message {
         code: InvalidSelection,
         message: "In `@connect(selection:)` on `Query.invalidSubSelection`: unknown variable `$typo`, must be one of $args, $config, $context, $env, $request, $response, $status, $this",
         locations: [
-            43:13..43:18,
+            95:13..95:18,
         ],
     },
 ]
