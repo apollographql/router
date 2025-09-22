@@ -1653,7 +1653,6 @@ mod test {
     #[case::authorization("authorization")]
     #[case::authentication("authentication")]
     #[case::file_upload("preview_file_uploads")]
-    #[case::entity_cache("preview_entity_cache")]
     #[case::response_cache("preview_response_cache")]
     #[case::demand_control("demand_control")]
     #[case::connectors("connectors")]

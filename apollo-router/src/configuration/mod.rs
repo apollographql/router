@@ -428,6 +428,15 @@ impl Configuration {
             },
         }
     }
+
+    fn apollo_plugin_enabled(&self, plugin_name: &str) -> bool {
+        self.apollo_plugins
+            .plugins
+            .get(plugin_name)
+            .and_then(|config| config.as_object().and_then(|c| c.get("enabled")))
+            .and_then(|enabled| enabled.as_bool())
+            .unwrap_or(false)
+    }
 }
 
 impl Default for Configuration {
@@ -565,6 +574,16 @@ impl Configuration {
                     error: "either set persisted_queries.log_unknown: false or persisted_queries.enabled: true in your router yaml configuration".into()
                 });
             }
+        }
+
+        // response & entity caching
+        if self.apollo_plugin_enabled("experimental_response_cache")
+            && self.apollo_plugin_enabled("preview_entity_cache")
+        {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "entity cache and response cache features are mutually exclusive",
+                error: "either set experimental_response_cache.enabled: false or preview_entity_cache.enabled: false in your router yaml configuration".into(),
+            });
         }
 
         Ok(self)
