@@ -714,7 +714,10 @@ impl RedisCacheStorage {
 
     /// Delete keys *without* adding the `namespace` prefix because `keys` is from
     /// `scan_with_namespaced_results` and already includes it.
-    pub(crate) async fn delete_from_scan_result(&self, keys: Vec<fred::types::Key>) -> Option<u32> {
+    pub(crate) async fn delete_from_scan_result(
+        &self,
+        keys: Vec<fred::types::Key>,
+    ) -> Result<u32, RedisError> {
         let mut h: HashMap<u16, Vec<fred::types::Key>> = HashMap::new();
         for key in keys.into_iter() {
             let hash = ClusterRouting::hash_key(key.as_bytes());
@@ -724,19 +727,15 @@ impl RedisCacheStorage {
 
         // then we query all the key groups at the same time
         let results: Vec<Result<u32, RedisError>> =
-            futures::future::join_all(h.into_values().map(|keys| self.inner.del(keys))).await;
-        let mut total = 0u32;
+            join_all(h.into_values().map(|keys| self.inner.del(keys))).await;
 
-        for res in results {
-            match res {
-                Ok(res) => total += res,
-                Err(e) => {
-                    self.record_error(&e);
-                }
-            }
+        let mut total = 0;
+        for result in results {
+            let count = result.inspect_err(|e| self.record_error(e))?;
+            total += count;
         }
 
-        Some(total)
+        Ok(total)
     }
 
     /// The keys returned in `ScanResult` do include the prefix from `namespace` configuration.
