@@ -31,9 +31,12 @@ mod execution;
 
 pub(crate) use callback::SUBSCRIPTION_CALLBACK_HMAC_KEY;
 pub(crate) use callback::create_verifier;
+pub(crate) use execution::SubscriptionTaskParams;
+pub(crate) use execution::subscription_task as subscription_execution_task;
 
 pub(crate) const APOLLO_SUBSCRIPTION_PLUGIN: &str = "apollo.subscription";
 pub(crate) const APOLLO_SUBSCRIPTION_PLUGIN_NAME: &str = "subscription";
+pub(crate) const SUBSCRIPTION_ERROR_EXTENSION_KEY: &str = "apollo::subscriptions::fatal_error";
 pub(crate) const SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS: &str =
     "apollo.subscription.custom_connection_params";
 
@@ -281,11 +284,24 @@ impl Plugin for Subscription {
         ServiceBuilder::new()
             .checkpoint(move |req: subgraph::Request| {
                 if req.operation_kind == OperationKind::Subscription && !enabled {
-                    Ok(ControlFlow::Break(subgraph::Response::builder().context(req.context).subgraph_name(req.subgraph_name).error(graphql::Error::builder().message("cannot execute a subscription if it's not enabled in the configuration").extension_code("SUBSCRIPTION_DISABLED").build()).extensions(Object::default()).build()))
+                    Ok(ControlFlow::Break(
+                        subgraph::Response::builder()
+                            .context(req.context)
+                            .subgraph_name(req.subgraph_name)
+                            .error(
+                                graphql::Error::builder()
+                                    .message("cannot execute a subscription if it's not enabled in the configuration")
+                                    .extension_code("SUBSCRIPTION_DISABLED")
+                                    .build(),
+                            )
+                            .extensions(Object::default())
+                            .build(),
+                    ))
                 } else {
                     Ok(ControlFlow::Continue(req))
                 }
-            }).service(service)
+            })
+            .service(service)
             .boxed()
     }
 
