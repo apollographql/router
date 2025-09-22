@@ -1,10 +1,12 @@
 //! Shared configuration for Otlp tracing and metrics.
 use std::collections::HashMap;
 
+use axum_extra::handler::Or;
 use http::Uri;
-use opentelemetry_otlp::HttpExporterBuilder;
+use opentelemetry_otlp::HasExportConfig;
+use opentelemetry_otlp::HasHttpConfig;
+use opentelemetry_otlp::HasTonicConfig;
 use opentelemetry_otlp::SpanExporter;
-use opentelemetry_otlp::TonicExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_otlp::WithHttpConfig;
 use opentelemetry_otlp::WithTonicConfig;
@@ -156,10 +158,11 @@ pub(super) fn process_endpoint(
 }
 
 impl Config {
-    pub(crate) fn exporter<T: From<HttpExporterBuilder> + From<TonicExporterBuilder>>(
+    pub(crate) fn exporter(
         &self,
         kind: TelemetryDataKind,
-    ) -> Result<T, BoxError> {
+    ) -> Result<impl HasExportConfig, BoxError> // can change `impl HasExportConfig` to `SpanExporterBuilder` when we upgrade to v0.30.0
+    {
         match self.protocol {
             Protocol::Grpc => {
                 let endpoint_opt = process_endpoint(&self.endpoint, &kind, &self.protocol)?;
@@ -186,7 +189,7 @@ impl Config {
                 if let Some(tls_config) = tls_config_opt {
                     exporter = exporter.with_tls_config(tls_config);
                 }
-                Ok(exporter.into())
+                Ok(exporter)
             }
             Protocol::Http => {
                 let endpoint_opt = process_endpoint(&self.endpoint, &kind, &self.protocol)?;
@@ -200,7 +203,7 @@ impl Config {
                 if let Some(endpoint) = endpoint_opt {
                     exporter = exporter.with_endpoint(endpoint);
                 }
-                Ok(exporter.into())
+                Ok(exporter)
             }
         }
     }
