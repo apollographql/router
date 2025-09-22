@@ -18,8 +18,7 @@ subscription:
       all:
         path: /ws
       subgraphs:
-        # This is not a real subgraph. it's replaced by a subgraph name by test code.
-        rng:
+        accounts:
           path: /ws
           protocol: graphql_ws
 headers:

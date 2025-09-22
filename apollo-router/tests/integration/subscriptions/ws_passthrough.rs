@@ -237,7 +237,6 @@ async fn test_subscription_ws_passthrough(
     let ws_url = format!("ws://{ws_addr}/ws");
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
-    router.replace_config_string("rng:", "accounts:");
 
     info!("WebSocket server started at: {}", ws_url);
 
@@ -307,7 +306,6 @@ async fn test_subscription_ws_passthrough_with_coprocessor() -> Result<(), BoxEr
         "http://localhost:{{COPROCESSOR_PORT}}",
         &coprocessor_server.uri(),
     );
-    router.replace_config_string("rng:", "accounts:");
 
     info!("WebSocket server started at: {}", ws_url);
     info!(
@@ -388,7 +386,6 @@ async fn test_subscription_ws_passthrough_error_payload(
     let ws_url = format!("ws://{ws_addr}/ws");
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
-    router.replace_config_string("rng:", "accounts:");
 
     info!("WebSocket server started at: {}", ws_url);
 
@@ -476,7 +473,6 @@ async fn test_subscription_ws_passthrough_pure_error_payload(
     let ws_url = format!("ws://{ws_addr}/ws");
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
-    router.replace_config_string("rng:", "accounts:");
 
     info!("WebSocket server started at: {}", ws_url);
 
@@ -566,7 +562,6 @@ async fn test_subscription_ws_passthrough_pure_error_payload_with_coprocessor()
         "http://localhost:{{COPROCESSOR_PORT}}",
         &coprocessor_server.uri(),
     );
-    router.replace_config_string("rng:", "accounts:");
 
     info!("WebSocket server started at: {}", ws_url);
     info!(
@@ -655,7 +650,6 @@ async fn test_subscription_ws_passthrough_on_config_reload() -> Result<(), BoxEr
     let ws_url = format!("ws://{ws_addr}/ws");
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
-    router.replace_config_string("rng:", "accounts:");
 
     info!("WebSocket server started at: {}", ws_url);
 
@@ -756,7 +750,6 @@ async fn test_subscription_ws_passthrough_on_schema_reload() -> Result<(), BoxEr
     let ws_url = format!("ws://{ws_addr}/ws");
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
-    router.replace_config_string("rng:", "accounts:");
 
     info!("WebSocket server started at: {}", ws_url);
 
@@ -856,7 +849,6 @@ async fn test_subscription_ws_passthrough_dedup() -> Result<(), BoxError> {
     let ws_url = format!("ws://{ws_addr}/ws");
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
-    router.replace_config_string("rng:", "accounts:");
 
     info!("WebSocket server started at: {}", ws_url);
 
@@ -971,7 +963,6 @@ async fn test_subscription_ws_passthrough_dedup_close_early() -> Result<(), BoxE
     let ws_url = format!("ws://{}/ws", ws_addr);
     router.replace_config_string("http://localhost:{{PRODUCTS_PORT}}", &http_server.uri());
     router.replace_config_string("http://localhost:{{ACCOUNTS_PORT}}", &ws_url);
-    router.replace_config_string("rng:", "accounts:");
 
     info!("WebSocket server started at: {}", ws_url);
 
