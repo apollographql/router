@@ -14,7 +14,9 @@ use futures::stream::StreamExt;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::SendError;
 use tokio_stream::wrappers::ReceiverStream;
-use tower::ServiceExt;
+use tower::Layer;
+use tower::Service;
+use tower::ServiceExt as _;
 use tracing::Span;
 use tracing::field;
 use tracing_futures::Instrument;
@@ -43,6 +45,83 @@ const SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE: &str = "SUBSCRIPTION_SCHEMA_REL
 const SUBSCRIPTION_JWT_EXPIRED_EXTENSION_CODE: &str = "SUBSCRIPTION_JWT_EXPIRED";
 const SUBSCRIPTION_EXECUTION_ERROR_EXTENSION_CODE: &str = "SUBSCRIPTION_EXECUTION_ERROR";
 
+pub(crate) struct SubscriptionExecutionLayer {
+    notify: Notify<String, graphql::Response>,
+}
+
+impl SubscriptionExecutionLayer {
+    pub(crate) fn new(notify: Notify<String, graphql::Response>) -> Self {
+        Self { notify }
+    }
+}
+
+impl<S> Layer<S> for SubscriptionExecutionLayer {
+    type Service = SubscriptionExecutionService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        SubscriptionExecutionService {
+            inner,
+            notify: self.notify.clone(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct SubscriptionExecutionService<S> {
+    inner: S,
+    notify: Notify<String, graphql::Response>,
+}
+
+impl<S> Service<ExecutionRequest> for SubscriptionExecutionService<S>
+where
+    S: Service<ExecutionRequest, Response = execution::Response, Error = tower::BoxError>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = S::Future;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, mut req: ExecutionRequest) -> Self::Future {
+        let inner = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, inner);
+
+        if req.query_plan.is_subscription() {
+            let notify = self.notify.clone();
+            let context = req.context.clone();
+            let (subs_tx, subs_rx) = mpsc::channel(1);
+            let query_plan = req.query_plan.clone();
+            let execution_service_cloned = inner.clone();
+            let cloned_supergraph_req =
+                clone_supergraph_request(&req.supergraph_request, context.clone());
+            // Spawn the side-channel task for subscription.
+            tokio::spawn(async move {
+                subscription_task(
+                    execution_service_cloned,
+                    context,
+                    query_plan,
+                    subs_rx,
+                    notify,
+                    cloned_supergraph_req,
+                )
+                .await;
+            });
+            req.subscription_tx = subs_tx.into();
+        }
+
+        inner.call(req)
+    }
+}
+
 pub(crate) struct SubscriptionTaskParams {
     pub(crate) client_sender: tokio::sync::mpsc::Sender<Response>,
     pub(crate) subscription_handle: SubscriptionHandle,
@@ -63,9 +142,12 @@ fn subscription_fatal_error(message: impl Into<String>, extension_code: &str) ->
         .build()
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn subscription_task(
-    execution_service: execution::BoxCloneService,
+async fn subscription_task(
+    execution_service: impl Service<
+        ExecutionRequest,
+        Response = execution::Response,
+        Error = tower::BoxError,
+    > + Clone,
     context: Context,
     query_plan: Arc<QueryPlan>,
     mut rx: mpsc::Receiver<SubscriptionTaskParams>,
@@ -202,7 +284,11 @@ pub(crate) async fn subscription_task(
 
 async fn dispatch_subscription_event(
     supergraph_req: &SupergraphRequest,
-    execution_service: execution::BoxCloneService,
+    execution_service: impl Service<
+        ExecutionRequest,
+        Response = execution::Response,
+        Error = tower::BoxError,
+    > + Clone,
     query_plan: Option<&Arc<QueryPlan>>,
     context: Context,
     mut val: graphql::Response,
