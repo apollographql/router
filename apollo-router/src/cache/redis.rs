@@ -321,6 +321,7 @@ impl RedisCacheStorage {
         let pooled_client = Builder::from_config(client_config)
             .with_connection_config(|config| {
                 config.internal_command_timeout = DEFAULT_INTERNAL_REDIS_TIMEOUT;
+                config.max_command_buffer_len = 10_000;
                 config.reconnect_on_auth_error = true;
                 config.tcp = TcpConfig {
                     #[cfg(target_os = "linux")]
