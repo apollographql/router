@@ -1,0 +1,233 @@
+---
+title: Router Instrumentation for Datadog
+subtitle: Configure Apollo Router telemetry to optimize Datadog APM views
+description: Learn how to configure router telemetry instrumentation with Datadog-specific attributes for better APM organization and error tracking.
+context:
+  - telemetry
+---
+
+This guide explains how to configure Apollo Router telemetry instrumentation for optimal integration with Datadog APM.
+
+## Quick start
+
+Jump to the [complete configuration example](#complete-configuration-example) for a full working configuration suitable for graphs with moderate traffic volumes. For high-traffic graphs, review the [high cardinality warning](#basic-instrumentation) to avoid metric explosion.
+
+## Understanding Datadog's attribute mapping
+
+Datadog uses specific attributes to organize its APM views. While `resource.name` and `operation.name` are not OpenTelemetry standard attributes, Datadog synthesizes them from other span attributes if not present. Setting them explicitly gives you control over how your traces appear in Datadog APM.
+
+Learn more:
+- [OpenTelemetry semantic mapping in Datadog](https://docs.datadoghq.com/opentelemetry/mapping/semantic_mapping/?tab=datadogexporter)
+- [Operation name mapping logic](https://docs.datadoghq.com/opentelemetry/migrate/migrate_operation_names/?tab=opentelemetrycollector#new-mapping-logic)
+
+## Basic instrumentation
+
+Start with this minimal configuration to add Datadog-specific attributes to your router spans:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      default_attribute_requirement_level: recommended
+
+      router:
+        attributes:
+          otel.name: router
+          operation.name: "router"
+          resource.name:
+            request_method: true
+
+      supergraph:
+        attributes:
+          otel.name: supergraph
+          operation.name: "supergraph"
+          resource.name:
+            operation_name: string
+
+      subgraph:
+        attributes:
+          otel.name: subgraph
+          operation.name: "subgraph"
+          resource.name:
+            subgraph_operation_name: string
+```
+
+<Caution>
+High Cardinality: The `operation_name` and `subgraph_operation_name` attributes can be unbounded and high-cardinality if your GraphQL operations have many unique operation names. This affects both APM views and trace metrics, because Datadog creates metrics for each unique `resource.name` value. Consider using a more bounded attribute like `operation_type` (query/mutation/subscription) or removing the `resource.name` attribute and letting Datadog calculate the resource name on its own if you experience cardinality issues in Datadog.
+</Caution>
+
+With these attributes configured, you can filter for operations in Datadog APM:
+
+<img
+  className="screenshot"
+  alt="Datadog APM showing operations set with example attributes set in router.yaml"
+  src="../../../../../images/router/datadog-apm-ops-example.png"
+  width="600"
+/>
+
+## Error tracking
+
+Configure the `error.message` attribute to surface GraphQL errors and properly reflect them in Datadog APM.
+
+<Note>
+
+The error tracking configuration depends on the structure of your GraphQL error responses. The example below assumes errors are returned as an array with a `message` field. Adjust the JSONPath expression (`$[0].message`) to match your specific error response format.
+
+</Note>
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      supergraph:
+        attributes:
+          # Mark span as error when GraphQL errors occur
+          otel.status_code:
+            static: ERROR
+            condition:
+              eq:
+                - true
+                - on_graphql_error: true
+          # Capture the error message from the first error in the array
+          # Adjust the JSONPath to match your error response structure
+          error.message:
+            response_errors: $[0].message
+
+      subgraph:
+        attributes:
+          otel.status_code:
+            static: ERROR
+            condition:
+              eq:
+                - true
+                - subgraph_on_graphql_error: true
+          error.message:
+            subgraph_response_errors: $[0].message
+```
+
+## Metrics instrumentation
+
+Add GraphQL error tracking to your metrics for more insights into your GraphQL errors and correlate them with your supergraph and subgraph spans.
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        http.server.request.duration:
+          attributes:
+            # Track GraphQL errors in metrics
+            graphql.errors:
+              on_graphql_error: true
+
+      subgraph:
+        http.client.request.duration:
+          attributes:
+            subgraph.name: true
+            graphql.errors:
+              subgraph_on_graphql_error: true
+```
+
+## Complete configuration example
+
+Here's a comprehensive router configuration optimized for Datadog:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      default_attribute_requirement_level: recommended
+
+      router:
+        attributes:
+          otel.name: router
+          operation.name: "router"
+          resource.name:
+            request_method: true
+
+      supergraph:
+        attributes:
+          otel.name: supergraph
+          operation.name: "supergraph"
+          resource.name:
+            operation_name: string
+          # Error tracking
+          otel.status_code:
+            static: ERROR
+            condition:
+              eq:
+                - true
+                - on_graphql_error: true
+          error.message:
+            response_errors: $[0].message
+
+      subgraph:
+        attributes:
+          otel.name: subgraph
+          operation.name: "subgraph"
+          resource.name:
+            subgraph_operation_name: string
+          otel.status_code:
+            static: ERROR
+            condition:
+              eq:
+                - true
+                - subgraph_on_graphql_error: true
+          error.message:
+            subgraph_response_errors: $[0].message
+
+    instruments:
+      default_requirement_level: required
+
+      router:
+        http.server.request.duration:
+          attributes:
+            graphql.errors:
+              on_graphql_error: true
+
+      subgraph:
+        http.client.request.duration:
+          attributes:
+            subgraph.name: true
+            graphql.errors:
+              subgraph_on_graphql_error: true
+```
+
+## Best practices
+
+### Resource naming
+
+Choose `resource.name` attributes that provide meaningful grouping without high cardinality.
+
+### Operation naming
+
+Keep `operation.name` consistent and low-cardinality:
+- Use static values like "router", "supergraph", "subgraph"
+- Don't include dynamic data in operation names
+- Use `resource.name` to provide the detailed grouping
+
+### Error handling
+
+Ensure errors are properly tracked:
+- Set `otel.status_code` to `ERROR` for GraphQL errors
+- Include `error.message` with the actual error text
+- Track errors in both spans and metrics for correlation
+
+## Troubleshooting
+
+### Spans not appearing in Datadog
+
+- Verify `service.name` is set in your exporter configuration
+- Check that `operation.name` is being set correctly
+- Ensure the OpenTelemetry integration is installed in Datadog
+
+### High cardinality warnings
+
+- Review `resource.name` attributes for high-cardinality values
+- Avoid using unique identifiers in span attributes
+- Consider grouping operations more broadly
+
+
+## Next steps
+
+- [Configure Datadog dashboards](/graphos/routing/observability/router-telemetry-otel/apm-guides/datadog/observing-and-monitoring/dashboard-template) for router monitoring

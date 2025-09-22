@@ -125,10 +125,24 @@ items:
               children:
                 - label: "Datadog"
                   children:
-                    - label: "Metrics"
-                      href: "./observability/router-telemetry-otel/apm-guides/datadog/connecting-to-datadog/datadog-agent/datadog-agent-metrics"
-                    - label: "Traces"
-                      href: "./observability/router-telemetry-otel/apm-guides/datadog/connecting-to-datadog/datadog-agent/datadog-agent-traces"
+                    - label: "Overview"
+                      href: "./observability/router-telemetry-otel/apm-guides/datadog"
+                    - label: "Router Instrumentation"
+                      href: "./observability/router-telemetry-otel/apm-guides/datadog/router-instrumentation"
+                    - label: "Connecting to Datadog"
+                      children:
+                        - label: "Overview"
+                          href: "./observability/router-telemetry-otel/apm-guides/datadog/connecting-to-datadog"
+                        - label: "OTel-Collector"
+                          href: "./observability/router-telemetry-otel/apm-guides/datadog/connecting-to-datadog/otel-collector"
+                        - label: "Datadog Agent"
+                          children:
+                            - label: "Metrics"
+                              href: "./observability/router-telemetry-otel/apm-guides/datadog/connecting-to-datadog/datadog-agent/datadog-agent-metrics"
+                            - label: "Traces"
+                              href: "./observability/router-telemetry-otel/apm-guides/datadog/connecting-to-datadog/datadog-agent/datadog-agent-traces"
+                    - label: "Dashboard Template"
+                      href: "./observability/router-telemetry-otel/apm-guides/datadog/observing-and-monitoring/dashboard-template"
                 - label: "New Relic"
                   children:
                     - label: "Metrics"

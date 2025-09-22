@@ -1,0 +1,51 @@
+---
+title: Dashboard Template for Datadog
+subtitle: Use pre-configured Datadog dashboards for the Apollo GraphOS Runtime
+description: Set up and use pre-configured Datadog dashboards for monitoring the Apollo GraphOS Runtime.
+  - telemetry
+---
+
+Start your observability journey with Datadog using Apollo's pre-configured dashboard template and router telemetry configuration.
+
+## Install the dashboard template
+
+To install the dashboard template to your Datadog account, follow these steps:
+
+1. In your Datadog account, navigate to **Dashboards** > **New Dashboard** and create a new blank dashboard.
+2. Copy the JSON content from the [dashboard template](https://github.com/apollographql/apm-templates/blob/main/datadog/graphos-template.json).
+3. Paste the JSON content into your new blank dashboard and accept the prompt to overwrite it.
+4. Update the dashboard name and teams as desired.
+
+## Use the dashboard template
+
+### Configure template variables
+
+After you install the template, configure the template variables to match the appropriate tag values for your Runtime instances and ensure the relevant telemetry data is being sent to Datadog.
+For details on that configuration, see the [Router Instrumentation guide](/graphos/routing/observability/router-telemetry-otel/apm-guides/datadog/router-instrumentation).
+
+The dashboard is pre-configured to use Datadog's [unified service tagging](https://docs.datadoghq.com/getting_started/tagging/unified_service_tagging) to filter the dashboard views. If you followed the instrumentation guide, these values are already configured.
+If you have created your own configuration, follow the Datadog documentation to apply them appropriately.
+
+### Interpret the dashboard
+
+Each section and metric includes a description of what it represents and why it matters. The sections are ordered to guide you through a typical investigation workflow, starting with high-level service metrics that provide quick insights and become more specific in the later sections.
+
+### Follow best practices
+- This dashboard is a starting point. Modify it to suit your particular needs.
+- Be aware of metric cardinality. A high number of tag values on a high-volume metric can lead to high costs from Datadog.
+- In high-traffic volume environments, use trace sampling to reduce the volume of data sent to Datadog.
+
+## Keep the dashboard up to date
+
+Apollo plans to support keeping the dashboard in sync with upstream changes via tagged releases and Terraform modules.
+Until this feature is implemented, Apollo will treat the dashboard template as an immutable artifact unless router telemetry becomes incompatible with the template.
+
+In that exceptional case, Apollo recommends the following process to update your dashboard:
+
+1. On the Datadog UI, select **Share** > **Export dashboard JSON**
+2. Make a fork of [the template repository](https://github.com/apollographql/apm-templates)
+3. Reset the HEAD state of the fork to the commit you imported the dashboard from
+   - Select a commit hash from the [file history](https://github.com/apollographql/apm-templates/commits/main/datadog) based on commit title if you aren't certain
+4. Overwrite the <code>datadog/graphos-template.json</code> file with your exported dashboard JSON and commit it
+5. Sync your fork from the upstream repository and apply merge conflicts with your committed file, retaining any customizations you wish to keep
+6. Import your merged JSON file into the dashboard using the [install instructions](#install-the-dashboard-template)
