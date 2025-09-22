@@ -1,8 +1,9 @@
 use std::fmt::Debug;
 
 use http::uri;
+use opentelemetry::trace::ExportError;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::export::ExportError;
+use opentelemetry_sdk::export::ExportError as SdkExportError;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::export::trace::{self};
 use url::ParseError;
@@ -99,6 +100,12 @@ pub enum Error {
 }
 
 impl ExportError for Error {
+    fn exporter_name(&self) -> &'static str {
+        "datadog"
+    }
+}
+
+impl SdkExportError for Error {
     fn exporter_name(&self) -> &'static str {
         "datadog"
     }
