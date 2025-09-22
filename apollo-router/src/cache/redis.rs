@@ -29,7 +29,6 @@ use fred::types::config::TlsConfig;
 use fred::types::config::TlsHostMapping;
 use fred::types::config::UnresponsiveConfig;
 use fred::types::scan::ScanResult;
-use futures::FutureExt;
 use futures::Stream;
 use futures::future::join_all;
 use tokio::sync::broadcast::error::RecvError;
@@ -588,18 +587,23 @@ impl RedisCacheStorage {
     pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
         &self,
         mut keys: Vec<RedisKey<K>>,
-    ) -> Option<Vec<Option<RedisValue<V>>>> {
+    ) -> Vec<Option<RedisValue<V>>> {
+        // NB: MGET is different from GET in that it returns `Option`s rather than `Result`s.
+        //  > For every key that does not hold a string value or does not exist, the special value
+        //    nil is returned. Because of this, the operation never fails.
+        //    - https://redis.io/docs/latest/commands/mget/
+
         tracing::trace!("getting multiple values from redis: {:?}", keys);
 
         if keys.len() == 1 {
+            let key = self.make_key(keys.remove(0));
             let res = self
                 .inner
-                .get::<RedisValue<V>, _>(self.make_key(keys.remove(0)))
+                .get(key)
                 .await
                 .inspect_err(|e| self.record_error(e))
                 .ok();
-
-            Some(vec![res])
+            vec![res]
         } else if self.is_cluster {
             // when using a cluster of redis nodes, the keys are hashed, and the hash number indicates which
             // node will store it. So first we have to group the keys by hash, because we cannot do a MGET
@@ -615,41 +619,43 @@ impl RedisCacheStorage {
             }
 
             // then we query all the key groups at the same time
-            let results = futures::future::join_all(h.into_iter().map(|(_, (indexes, keys))| {
-                self.inner
-                    .mget(keys)
-                    .map(|values: Result<Vec<Option<RedisValue<V>>>, RedisError>| (indexes, values))
-            }))
-            .await;
+            let mut tasks = Vec::new();
+            for (_shard, (indexes, keys)) in h {
+                let client = self.inner.next();
+                tasks.push(async move {
+                    let result: Result<Vec<Option<RedisValue<V>>>, _> = client.mget(keys).await;
+                    (indexes, result)
+                });
+            }
 
             // then we have to assemble the results, by making sure that the values are in the same order as
             // the keys argument's order
-            let mut res = Vec::with_capacity(len);
-            for (indexes, result) in results.into_iter() {
-                match result {
-                    Err(e) => {
-                        self.record_error(&e);
-                        return None;
-                    }
+            let mut result = vec![None; len];
+            for (indexes, result_value) in join_all(tasks).await.into_iter() {
+                match result_value {
                     Ok(values) => {
                         for (index, value) in indexes.into_iter().zip(values.into_iter()) {
-                            res.push((index, value));
+                            result[index] = value;
                         }
+                    }
+                    Err(e) => {
+                        self.record_error(&e);
                     }
                 }
             }
-            res.sort_by(|(i, _), (j, _)| i.cmp(j));
-            Some(res.into_iter().map(|(_, v)| v).collect())
+
+            result
         } else {
+            let len = keys.len();
+            let keys = keys
+                .into_iter()
+                .map(|k| self.make_key(k))
+                .collect::<Vec<_>>();
             self.inner
-                .mget(
-                    keys.into_iter()
-                        .map(|k| self.make_key(k))
-                        .collect::<Vec<_>>(),
-                )
+                .mget(keys)
                 .await
                 .inspect_err(|e| self.record_error(e))
-                .ok()
+                .unwrap_or_else(|_| vec![None; len])
         }
     }
 
@@ -931,10 +937,7 @@ mod test {
         }
 
         // test the `mget` functionality
-        let values = storage
-            .get_multiple(keys)
-            .await
-            .ok_or("unable to get_multiple")?;
+        let values = storage.get_multiple(keys).await;
         for value in values {
             let value: RedisValue<usize> = value.ok_or("missing value")?;
             assert_eq!(value.0, expected_value);

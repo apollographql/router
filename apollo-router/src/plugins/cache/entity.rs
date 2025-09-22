@@ -1018,22 +1018,19 @@ async fn cache_lookup_entities(
     let cache_result: Vec<Option<CacheEntry>> = cache
         .get_multiple(keys.iter().map(|k| RedisKey(k.clone())).collect::<Vec<_>>())
         .await
-        .map(|res| {
-            res.into_iter()
-                .map(|r| r.map(|v: RedisValue<CacheEntry>| v.0))
-                .map(|v| match v {
-                    None => None,
-                    Some(v) => {
-                        if v.control.can_use() {
-                            Some(v)
-                        } else {
-                            None
-                        }
-                    }
-                })
-                .collect()
+        .into_iter()
+        .map(|r| r.map(|v: RedisValue<CacheEntry>| v.0))
+        .map(|v| match v {
+            None => None,
+            Some(v) => {
+                if v.control.can_use() {
+                    Some(v)
+                } else {
+                    None
+                }
+            }
         })
-        .unwrap_or_else(|| vec![None; keys.len()]);
+        .collect();
 
     let representations = body
         .variables
