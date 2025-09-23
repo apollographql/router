@@ -240,7 +240,7 @@ impl Merger {
         T: Display + HasDefaultValue,
     {
         let mut dest_default: Option<Node<Value>> = None;
-        let mut locations: Locations = Vec::with_capacity(sources.len());
+        let mut locations = Locations::with_capacity(sources.len());
         let mut has_seen_source = false;
         let mut is_inconsistent = false;
         let mut is_incompatible = false;
@@ -250,7 +250,7 @@ impl Merger {
         // 2 different defaults no matter what). Essentially, an argument/input field can only be made optional
         // in the supergraph API if it is optional in all subgraphs, or we may query a subgraph that expects the
         // value to be provided when it isn't. Note that an alternative could be to use an union strategy instead
-        // but have the router/gateway fill in the default for subgraphs that don't know it, but that imply parsing
+        // but have the router/gateway fill in the default for subgraphs that don't know it, but that implies parsing
         // all the subgraphs fetches and we probably don't want that.
         for (idx, source_pos) in sources.iter() {
             let Some(pos) = source_pos else { continue };
@@ -273,6 +273,7 @@ impl Merger {
                     }
                 }
                 Some(current) => {
+                    // We have `&Node<Value>` here, so we need the double deref to get value equality.
                     if source_default.is_none_or(|next| **next != **current) {
                         is_inconsistent = true;
                         // It's only incompatible if neither is undefined
@@ -300,16 +301,12 @@ impl Merger {
             self.error_reporter.report_mismatch_error::<Node<Value>, T, ()>(
                 if T::is_input_field() {
                     CompositionError::InputFieldDefaultMismatch {
-                        message: format!(
-                            "Input field \"{dest}\" has incompatible default values across subgraphs: it has ",
-                        ),
+                        message: format!("Input field \"{dest}\" has incompatible default values across subgraphs: it has "),
                         locations
                     }
                 } else {
                     CompositionError::ArgumentDefaultMismatch {
-                        message: format!(
-                            "Argument \"{dest}\" has incompatible default values across subgraphs: it has ",
-                        ),
+                        message: format!("Argument \"{dest}\" has incompatible default values across subgraphs: it has "),
                         locations
                     }
                 },
@@ -317,28 +314,24 @@ impl Merger {
                 sources,
                 |v| Some(format!("default value {v}")),
                 |pos, idx| {
-                    pos.get_default_value(self.subgraphs[idx].schema())
-                        .map(|v| v.to_string())
+                    Some(pos.get_default_value(self.subgraphs[idx].schema())
+                            .map(|v| format!("default value {v}"))
+                            .unwrap_or_else(|| "no default value".to_string()))
                 },
             );
         } else if is_inconsistent {
             self.error_reporter.report_mismatch_hint::<Node<Value>, T, ()>(
                 HintCode::InconsistentDefaultValuePresence,
-                format!(
-                    "Argument \"{}\" has a default value in only some subgraphs: ",
-                    dest
-                ),
+                format!("Argument \"{dest}\" has a default value in only some subgraphs: "),
                 dest_default,
                 sources,
                 |v| Some(format!("default value {v}")),
-                |pos, idx| todo!(),
+                |pos, idx| pos.get_default_value(self.subgraphs[idx].schema()).map(|v| v.to_string()),
                 |_, subgraphs| {
-                    format!(
-                        "will not use a default in the supergraph (there is no default in {}) but ",
-                        subgraphs.unwrap_or_default()
-                    )
+                    let subgraphs = subgraphs.unwrap_or_default();
+                    format!("will not use a default in the supergraph (there is no default in {subgraphs}) but ")
                 },
-                |elt, subgraphs| format!("\"{}\" has default value {} in {}", dest, elt, subgraphs),
+                |elt, subgraphs| format!("\"{dest}\" has default value {elt} in {subgraphs}"),
                 false,
                 false,
             );
