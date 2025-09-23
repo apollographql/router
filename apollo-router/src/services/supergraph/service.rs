@@ -535,6 +535,8 @@ impl PluggableSupergraphServiceBuilder {
                     .map(|(name, service)| (name, service.into()))
                     .collect(),
                 self.plugins.clone(),
+                configuration.notify.clone(),
+                subscription_plugin_conf.clone().map(Arc::new),
             )),
             subscription_plugin_conf.clone(),
             Arc::new(ConnectorServiceFactory::new(

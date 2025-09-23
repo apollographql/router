@@ -1,7 +1,6 @@
 //! Tower fetcher for subgraphs.
 
 use std::collections::HashMap;
-use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
@@ -31,6 +30,7 @@ use serde_json_bytes::json;
 use tokio::sync::oneshot;
 use tower::BoxError;
 use tower::Service;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower::buffer::Buffer;
 use tracing::Instrument;
@@ -58,11 +58,11 @@ use crate::json_ext::Object;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugins::file_uploads;
 use crate::plugins::subscription::SubscriptionConfig;
+use crate::plugins::subscription::subgraph::SubscriptionSubgraphLayer;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::subgraph::events::SubgraphEventRequest;
 use crate::plugins::telemetry::config_new::subgraph::events::SubgraphEventResponse;
 use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
-use crate::query_planner::OperationKind;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::layers::apq;
@@ -107,16 +107,12 @@ pub(crate) struct SubgraphService {
     /// If a subgraph sends the error message PERSISTED_QUERY_NOT_SUPPORTED,
     /// apq is set to false
     apq: Arc<AtomicBool>,
-    /// Subscription config if enabled
-    subscription_config: Option<SubscriptionConfig>,
-    notify: Notify<String, graphql::Response>,
 }
 
 impl SubgraphService {
     pub(crate) fn from_config(
         service: impl Into<String>,
         configuration: &Configuration,
-        subscription_config: Option<SubscriptionConfig>,
         client_factory: HttpClientServiceFactory,
     ) -> Result<Self, BoxError> {
         let name: String = service.into();
@@ -129,28 +125,18 @@ impl SubgraphService {
             .map(|apq| apq.enabled)
             .unwrap_or(configuration.apq.subgraph.all.enabled);
 
-        SubgraphService::new(
-            name,
-            enable_apq,
-            subscription_config,
-            configuration.notify.clone(),
-            client_factory,
-        )
+        SubgraphService::new(name, enable_apq, client_factory)
     }
 
     pub(crate) fn new(
         service: impl Into<String>,
         enable_apq: bool,
-        subscription_config: Option<SubscriptionConfig>,
-        notify: Notify<String, graphql::Response>,
         client_factory: crate::services::http::HttpClientServiceFactory,
     ) -> Result<Self, BoxError> {
         Ok(Self {
             client_factory,
             service: Arc::new(service.into()),
             apq: Arc::new(<AtomicBool>::new(enable_apq)),
-            subscription_config,
-            notify,
         })
     }
 }
@@ -190,31 +176,13 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
     }
 
     fn call(&mut self, request: SubgraphRequest) -> Self::Future {
-        let subscription_config = (request.operation_kind == OperationKind::Subscription)
-            .then(|| self.subscription_config.clone())
-            .flatten();
         let service_name = (*self.service).to_owned();
 
         let client_factory = self.client_factory.clone();
 
         let arc_apq_enabled = self.apq.clone();
 
-        let notify = self.notify.clone();
-
         let make_calls = async move {
-            // Subscription handling
-            let request = match crate::plugins::subscription::subgraph::subgraph_request(
-                notify,
-                request,
-                subscription_config,
-                &service_name,
-            )
-            .await?
-            {
-                ControlFlow::Continue(request) => request,
-                ControlFlow::Break(response) => return Ok(response),
-            };
-
             // XXX(@goto-bus-stop): We are cloning the subgraph request potentially 3 times below.
             // It will normally not be super expensive? but it still does not seem great or
             // necessary.
@@ -1145,16 +1113,26 @@ impl SubgraphServiceFactory {
     pub(crate) fn new(
         services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
         plugins: Arc<Plugins>,
+        notify: Notify<String, graphql::Response>,
+        subscription_config: Option<Arc<SubscriptionConfig>>,
     ) -> Self {
         let mut map = HashMap::with_capacity(services.len());
         for (name, maker) in services.into_iter() {
-            let service = Buffer::new(
+            // We have to do a little dance here to insert the subscription layer at the right
+            // place: *after* all user plugins, but *before* the subgraph service proper.
+            let inner_service = ServiceBuilder::new()
+                .layer(SubscriptionSubgraphLayer::new(
+                    notify.clone(),
+                    subscription_config.clone(),
+                    Arc::from(name.clone()),
+                ))
+                .service(maker.make())
+                .boxed();
+            let service = ServiceBuilder::new().buffer(DEFAULT_BUFFER_SIZE).service(
                 plugins
                     .iter()
                     .rev()
-                    .fold(maker.make(), |acc, (_, e)| e.subgraph_service(&name, acc))
-                    .boxed(),
-                DEFAULT_BUFFER_SIZE,
+                    .fold(inner_service, |acc, (_, e)| e.subgraph_service(&name, acc)),
             );
             map.insert(name, service);
         }
@@ -1174,7 +1152,7 @@ impl SubgraphServiceFactory {
 ///
 /// there can be multiple instances of that service executing at any given time
 pub(crate) trait MakeSubgraphService: Send + Sync + 'static {
-    fn make(&self) -> subgraph::BoxService;
+    fn make(&self) -> subgraph::BoxCloneService;
 }
 
 impl<S> MakeSubgraphService for S
@@ -1186,8 +1164,8 @@ where
         + 'static,
     <S as Service<SubgraphRequest>>::Future: Send,
 {
-    fn make(&self) -> subgraph::BoxService {
-        self.clone().boxed()
+    fn make(&self) -> subgraph::BoxCloneService {
+        self.clone().boxed_clone()
     }
 }
 
@@ -1215,6 +1193,7 @@ mod tests {
     use tokio::net::TcpListener;
     use tokio::sync::mpsc;
     use tokio_stream::wrappers::ReceiverStream;
+    use tower::Layer as _;
     use tower::ServiceExt;
     use url::Url;
 
@@ -1231,6 +1210,8 @@ mod tests {
     use crate::plugins::subscription::SubgraphPassthroughMode;
     use crate::plugins::subscription::SubscriptionModeConfig;
     use crate::plugins::subscription::WebSocketConfiguration;
+    use crate::plugins::subscription::subgraph::SubscriptionSubgraphLayer;
+    use crate::plugins::subscription::subgraph::SubscriptionSubgraphService;
     use crate::protocols::websocket::ClientMessage;
     use crate::protocols::websocket::ServerMessage;
     use crate::protocols::websocket::WebSocketProtocol;
@@ -1896,6 +1877,18 @@ mod tests {
         }
     }
 
+    /// Manually add the subgraph subscription layer for subscriptions tests.
+    /// This would otherwise be done by the SubgraphServiceFactory, but many unit tests do not use
+    /// it.
+    fn with_subscription_layer(s: SubgraphService) -> SubscriptionSubgraphService<SubgraphService> {
+        SubscriptionSubgraphLayer::new(
+            Notify::builder().build(),
+            Some(Arc::new(subscription_config())),
+            Arc::from(s.service.to_string()),
+        )
+        .layer(s)
+    }
+
     fn supergraph_request(query: &str) -> Arc<http::Request<Request>> {
         Arc::new(
             http::Request::builder()
@@ -1921,18 +1914,18 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         let spawned_task = tokio::task::spawn(emulate_subgraph_with_callback_data(listener));
-        let subgraph_service = SubgraphService::new(
-            "testbis",
-            true,
-            subscription_config().into(),
-            Notify::builder().build(),
-            HttpClientServiceFactory::from_config(
+        let subgraph_service = with_subscription_layer(
+            SubgraphService::new(
                 "testbis",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            ),
-        )
-        .expect("can create a SubgraphService");
+                true,
+                HttpClientServiceFactory::from_config(
+                    "testbis",
+                    &Configuration::default(),
+                    crate::configuration::shared::Client::default(),
+                ),
+            )
+            .expect("can create a SubgraphService"),
+        );
         let (tx, _rx) = mpsc::channel(2);
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1968,8 +1961,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -2002,8 +1993,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -2037,8 +2026,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -2075,8 +2062,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -2114,8 +2099,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -2157,8 +2140,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -2195,18 +2176,18 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         let spawned_task = tokio::task::spawn(emulate_correct_websocket_server(listener));
-        let subgraph_service = SubgraphService::new(
-            "test",
-            true,
-            subscription_config().into(),
-            Notify::builder().build(),
-            HttpClientServiceFactory::from_config(
+        let subgraph_service = with_subscription_layer(
+            SubgraphService::new(
                 "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            ),
-        )
-        .expect("can create a SubgraphService");
+                true,
+                HttpClientServiceFactory::from_config(
+                    "test",
+                    &Configuration::default(),
+                    crate::configuration::shared::Client::default(),
+                ),
+            )
+            .expect("can create a SubgraphService"),
+        );
         let (tx, rx) = mpsc::channel(2);
         let mut rx_stream = ReceiverStream::new(rx);
 
@@ -2248,18 +2229,18 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_incorrect_websocket_server(listener));
-        let subgraph_service = SubgraphService::new(
-            "test",
-            true,
-            subscription_config().into(),
-            Notify::builder().build(),
-            HttpClientServiceFactory::from_config(
+        let subgraph_service = with_subscription_layer(
+            SubgraphService::new(
                 "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            ),
-        )
-        .expect("can create a SubgraphService");
+                true,
+                HttpClientServiceFactory::from_config(
+                    "test",
+                    &Configuration::default(),
+                    crate::configuration::shared::Client::default(),
+                ),
+            )
+            .expect("can create a SubgraphService"),
+        );
         let (tx, _rx) = mpsc::channel(2);
 
         let url = Uri::from_str(&format!("ws://{socket_addr}")).unwrap();
@@ -2294,8 +2275,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -2336,8 +2315,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -2374,8 +2351,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -2412,8 +2387,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -2449,8 +2422,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -2486,8 +2457,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -2532,8 +2501,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -2576,8 +2543,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -2617,8 +2582,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -2658,8 +2621,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -2699,8 +2660,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             false,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),

@@ -4,6 +4,7 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use futures::StreamExt;
+use futures::future::BoxFuture;
 use http::HeaderValue;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
@@ -40,6 +41,83 @@ use crate::services::SubgraphResponse;
 
 static CALLBACK_PROTOCOL_ACCEPT: HeaderValue =
     HeaderValue::from_static("application/json;callbackSpec=1.0");
+
+pub(crate) struct SubscriptionSubgraphLayer {
+    notify: Notify<String, graphql::Response>,
+    subscription_config: Option<Arc<SubscriptionConfig>>,
+    service_name: Arc<str>,
+}
+
+impl SubscriptionSubgraphLayer {
+    pub(crate) fn new(
+        notify: Notify<String, graphql::Response>,
+        subscription_config: Option<Arc<SubscriptionConfig>>,
+        service_name: Arc<str>,
+    ) -> Self {
+        Self {
+            notify,
+            subscription_config,
+            service_name,
+        }
+    }
+}
+
+impl<S> tower::Layer<S> for SubscriptionSubgraphLayer {
+    type Service = SubscriptionSubgraphService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        SubscriptionSubgraphService {
+            notify: self.notify.clone(),
+            subscription_config: self.subscription_config.clone(),
+            service_name: self.service_name.clone(),
+            inner,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct SubscriptionSubgraphService<S> {
+    notify: Notify<String, graphql::Response>,
+    subscription_config: Option<Arc<SubscriptionConfig>>,
+    service_name: Arc<str>,
+    inner: S,
+}
+
+impl<S> tower::Service<SubgraphRequest> for SubscriptionSubgraphService<S>
+where
+    S: tower::Service<SubgraphRequest, Response = SubgraphResponse, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = SubgraphResponse;
+    type Error = BoxError;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: SubgraphRequest) -> Self::Future {
+        let inner = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, inner);
+
+        let notify = self.notify.clone();
+        let subscription_config = self.subscription_config.clone();
+        let service_name = self.service_name.clone();
+
+        Box::pin(async move {
+            match subgraph_request(notify, req, subscription_config, &service_name).await? {
+                ControlFlow::Continue(request) => inner.call(request).await,
+                ControlFlow::Break(response) => Ok(response),
+            }
+        })
+    }
+}
 
 #[cfg_attr(test, derive(serde::Deserialize))]
 #[derive(Serialize, Clone, Debug)]
@@ -468,10 +546,10 @@ async fn setup_callback(
     Ok(ControlFlow::Continue(()))
 }
 
-pub(crate) async fn subgraph_request(
+async fn subgraph_request(
     notify: Notify<String, graphql::Response>,
     mut request: SubgraphRequest,
-    subscription_config: Option<SubscriptionConfig>,
+    subscription_config: Option<Arc<SubscriptionConfig>>,
     service_name: &str,
 ) -> Result<ControlFlow<SubgraphResponse, SubgraphRequest>, BoxError> {
     if request.operation_kind == OperationKind::Subscription
@@ -483,7 +561,7 @@ pub(crate) async fn subgraph_request(
                 reason: "subscription is not enabled".to_string(),
                 status_code: None,
             })?;
-        let mode = subscription_config.mode.get_subgraph_config(&service_name);
+        let mode = subscription_config.mode.get_subgraph_config(service_name);
         let context = request.context.clone();
 
         let hashed_request = if subscription_config.deduplication.enabled {

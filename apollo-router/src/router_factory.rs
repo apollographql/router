@@ -28,8 +28,6 @@ use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
 use crate::plugin::PluginInit;
-use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
-use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::notification::Notify;
 use crate::plugins::telemetry::reload::otel::apollo_opentelemetry_initialized;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
@@ -338,7 +336,7 @@ impl YamlRouterFactory {
             let http_service_factory =
                 create_http_services(&plugins, &schema, &configuration).await?;
             let subgraph_services =
-                create_subgraph_services(&http_service_factory, &plugins, &configuration).await?;
+                create_subgraph_services(&http_service_factory, &configuration).await?;
             builder = builder.with_http_service_factory(http_service_factory);
             for (name, subgraph_service) in subgraph_services {
                 builder = builder.with_subgraph_service(&name, subgraph_service);
@@ -356,21 +354,13 @@ impl YamlRouterFactory {
 
 pub(crate) async fn create_subgraph_services(
     http_service_factory: &IndexMap<String, HttpClientServiceFactory>,
-    plugins: &Arc<Plugins>,
     configuration: &Configuration,
 ) -> Result<IndexMap<String, SubgraphService>, BoxError> {
-    let subscription_plugin_conf = plugins
-        .iter()
-        .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
-        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
-        .map(|p| p.config.clone());
-
     let mut subgraph_services = IndexMap::default();
     for (name, http_service_factory) in http_service_factory.iter() {
         let subgraph_service = SubgraphService::from_config(
             name.clone(),
             configuration,
-            subscription_plugin_conf.clone(),
             http_service_factory.clone(),
         )?;
         subgraph_services.insert(name.clone(), subgraph_service);
