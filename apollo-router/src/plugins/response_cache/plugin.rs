@@ -307,17 +307,17 @@ impl PluginPrivate for ResponseCache {
                     if required_to_start {
                         return Err(e.into());
                     } else {
-                        let pg_cache_storage = Arc::new(OnceLock::new());
+                        let storage = Arc::new(OnceLock::new());
                         task_aborts.push(
-                            tokio::spawn(check_pg_connection(
+                            tokio::spawn(check_connection(
                                 postgres_config,
-                                pg_cache_storage.clone(),
+                                storage.clone(),
                                 drop_rx,
                                 None,
                             ))
                             .abort_handle(),
                         );
-                        Some(pg_cache_storage)
+                        Some(storage)
                     }
                 }
             };
@@ -337,17 +337,17 @@ impl PluginPrivate for ResponseCache {
                         if required_to_start {
                             return Err(e.into());
                         } else {
-                            let pg_cache_storage = Arc::new(OnceLock::new());
+                            let storage = Arc::new(OnceLock::new());
                             task_aborts.push(
-                                tokio::spawn(check_pg_connection(
+                                tokio::spawn(check_connection(
                                     postgres.clone(),
-                                    pg_cache_storage.clone(),
+                                    storage.clone(),
                                     drop_tx.subscribe(),
                                     subgraph.clone().into(),
                                 ))
                                 .abort_handle(),
                             );
-                            pg_cache_storage
+                            storage
                         }
                     }
                 };
@@ -2507,9 +2507,9 @@ fn assemble_response_from_errors(
     (new_entities, new_errors)
 }
 
-async fn check_pg_connection(
+async fn check_connection(
     postgres_config: PostgresCacheConfig,
-    pg_storage: Arc<OnceLock<PostgresCacheStorage>>,
+    cache_storage: Arc<OnceLock<PostgresCacheStorage>>,
     mut abort_signal: Receiver<()>,
     subgraph_name: Option<String>,
 ) {
@@ -2537,7 +2537,7 @@ async fn check_pg_connection(
                     if let Err(err) = storage.update_cron().await {
                         tracing::error!(error = %err, "cannot update cron storage");
                     }
-                    let _ = pg_storage.set(storage.clone());
+                    let _ = cache_storage.set(storage.clone());
                     tokio::task::spawn(metrics::expired_data_task(storage, abort_signal_cloned, None));
                     break;
                 }
@@ -2622,7 +2622,7 @@ mod tests {
     #[tokio::test]
     async fn test_subgraph_enabled() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
             tls: Default::default(),
             cleanup_interval: default_cleanup_interval(),
             url: "postgres://127.0.0.1".parse().unwrap(),
@@ -2652,7 +2652,7 @@ mod tests {
         });
 
         let mut response_cache = ResponseCache::for_test(
-            pg_cache.clone(),
+            storage.clone(),
             serde_json::from_value(map).unwrap(),
             valid_schema.clone(),
             true,
@@ -2678,7 +2678,7 @@ mod tests {
     #[tokio::test]
     async fn test_subgraph_ttl() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
             tls: Default::default(),
             cleanup_interval: default_cleanup_interval(),
             url: "postgres://127.0.0.1".parse().unwrap(),
@@ -2710,7 +2710,7 @@ mod tests {
         });
 
         let mut response_cache = ResponseCache::for_test(
-            pg_cache.clone(),
+            storage.clone(),
             serde_json::from_value(map).unwrap(),
             valid_schema.clone(),
             true,

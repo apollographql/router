@@ -272,7 +272,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key() {
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
             tls: Default::default(),
             cleanup_interval: default_cleanup_interval(),
             url: "postgres://127.0.0.1".parse().unwrap(),
@@ -288,7 +288,7 @@ mod tests {
         .await
         .unwrap();
         let storage = Arc::new(Storage {
-            all: Some(Arc::new(pg_cache.into())),
+            all: Some(Arc::new(storage.into())),
             subgraphs: HashMap::new(),
         });
         let invalidation = Invalidation::new(storage.clone()).await.unwrap();
@@ -334,7 +334,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key_subgraph() {
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
             tls: Default::default(),
             cleanup_interval: default_cleanup_interval(),
             url: "postgres://127.0.0.1".parse().unwrap(),
@@ -352,7 +352,7 @@ mod tests {
         .await
         .unwrap();
         let storage = Arc::new(Storage {
-            all: Some(Arc::new(pg_cache.into())),
+            all: Some(Arc::new(storage.into())),
             subgraphs: HashMap::new(),
         });
         let invalidation = Invalidation::new(storage.clone()).await.unwrap();
@@ -407,7 +407,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key_subgraphs() {
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
             tls: Default::default(),
             cleanup_interval: default_cleanup_interval(),
             url: "postgres://127.0.0.1".parse().unwrap(),
@@ -425,7 +425,7 @@ mod tests {
         .await
         .unwrap();
         let storage = Arc::new(Storage {
-            all: Some(Arc::new(pg_cache.into())),
+            all: Some(Arc::new(storage.into())),
             subgraphs: HashMap::new(),
         });
         let invalidation = Invalidation::new(storage.clone()).await.unwrap();
@@ -500,7 +500,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation_service_good_shared_key_subgraphs() {
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
             tls: Default::default(),
             cleanup_interval: default_cleanup_interval(),
             url: "postgres://127.0.0.1".parse().unwrap(),
@@ -518,7 +518,7 @@ mod tests {
         .await
         .unwrap();
         let storage = Arc::new(Storage {
-            all: Some(Arc::new(pg_cache.into())),
+            all: Some(Arc::new(storage.into())),
             subgraphs: HashMap::new(),
         });
         let invalidation = Invalidation::new(storage.clone()).await.unwrap();

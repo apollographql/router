@@ -72,7 +72,7 @@ async fn insert() {
         },
     });
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
         cleanup_interval: default_cleanup_interval(),
         tls: Default::default(),
         url: "postgres://127.0.0.1".parse().unwrap(),
@@ -112,7 +112,7 @@ async fn insert() {
     .into_iter()
     .collect();
     let response_cache =
-        ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, false)
             .await
             .unwrap();
 
@@ -305,7 +305,7 @@ async fn insert_without_debug_header() {
         },
     });
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
         tls: Default::default(),
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
@@ -345,7 +345,7 @@ async fn insert_without_debug_header() {
     .into_iter()
     .collect();
     let response_cache =
-        ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, false)
             .await
             .unwrap();
 
@@ -522,7 +522,7 @@ async fn insert_with_requires() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build())
     ].into_iter().collect());
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
         cleanup_interval: default_cleanup_interval(),
         tls: Default::default(),
         url: "postgres://127.0.0.1".parse().unwrap(),
@@ -562,7 +562,7 @@ async fn insert_with_requires() {
     .into_iter()
     .collect();
     let response_cache = ResponseCache::for_test(
-        pg_cache.clone(),
+        storage.clone(),
         map.clone(),
         valid_schema.clone(),
         true,
@@ -753,7 +753,7 @@ async fn insert_with_nested_field_set() {
         }
     });
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
         cleanup_interval: default_cleanup_interval(),
         tls: Default::default(),
         url: "postgres://127.0.0.1".parse().unwrap(),
@@ -793,7 +793,7 @@ async fn insert_with_nested_field_set() {
     .into_iter()
     .collect();
     let response_cache =
-        ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, false)
             .await
             .unwrap();
 
@@ -988,7 +988,7 @@ async fn no_cache_control() {
         },
     });
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
         cleanup_interval: default_cleanup_interval(),
         tls: Default::default(),
         url: "postgres://127.0.0.1".parse().unwrap(),
@@ -1004,7 +1004,7 @@ async fn no_cache_control() {
     .await
     .unwrap();
     let response_cache = ResponseCache::for_test(
-        pg_cache.clone(),
+        storage.clone(),
         HashMap::new(),
         valid_schema.clone(),
         false,
@@ -1150,7 +1150,7 @@ async fn no_store_from_request() {
         },
     });
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
         cleanup_interval: default_cleanup_interval(),
         tls: Default::default(),
         url: "postgres://127.0.0.1".parse().unwrap(),
@@ -1166,7 +1166,7 @@ async fn no_store_from_request() {
     .await
     .unwrap();
     let response_cache = ResponseCache::for_test(
-        pg_cache.clone(),
+        storage.clone(),
         HashMap::new(),
         valid_schema.clone(),
         false,
@@ -1233,7 +1233,7 @@ async fn no_store_from_request() {
 
     // Just to make sure it doesn't invalidate anything, which means nothing has been stored
     assert!(
-        pg_cache
+        storage
             .invalidate(
                 vec![
                     "user".to_string(),
@@ -1305,7 +1305,7 @@ async fn no_store_from_request() {
 
     // Just to make sure it doesn't invalidate anything, which means nothing has been stored
     assert!(
-        pg_cache
+        storage
             .invalidate(
                 vec![
                     "user".to_string(),
@@ -1353,7 +1353,7 @@ async fn private_only() {
             },
         });
 
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
             cleanup_interval: default_cleanup_interval(),
             tls: Default::default(),
             url: "postgres://127.0.0.1".parse().unwrap(),
@@ -1393,7 +1393,7 @@ async fn private_only() {
         .into_iter()
         .collect();
         let response_cache =
-            ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, false)
                 .await
                 .unwrap();
 
@@ -1624,7 +1624,7 @@ async fn private_and_public() {
         },
     });
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
         cleanup_interval: default_cleanup_interval(),
         tls: Default::default(),
         url: "postgres://127.0.0.1".parse().unwrap(),
@@ -1664,7 +1664,7 @@ async fn private_and_public() {
     .into_iter()
     .collect();
     let response_cache =
-        ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, false)
             .await
             .unwrap();
 
@@ -1902,7 +1902,7 @@ async fn polymorphic_private_and_public() {
             },
         });
 
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
             cleanup_interval: default_cleanup_interval(),
             tls: Default::default(),
             url: "postgres://127.0.0.1".parse().unwrap(),
@@ -1942,7 +1942,7 @@ async fn polymorphic_private_and_public() {
         .into_iter()
         .collect();
         let response_cache =
-            ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, false)
                 .await
                 .unwrap();
 
@@ -2424,7 +2424,7 @@ async fn private_without_private_id() {
             },
         });
 
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
             cleanup_interval: default_cleanup_interval(),
             tls: Default::default(),
             url: "postgres://127.0.0.1".parse().unwrap(),
@@ -2462,7 +2462,7 @@ async fn private_without_private_id() {
         .into_iter()
         .collect();
         let response_cache =
-            ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, false)
                 .await
                 .unwrap();
 
@@ -2650,7 +2650,7 @@ async fn no_data() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
     ].into_iter().collect());
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
         cleanup_interval: default_cleanup_interval(),
         tls: Default::default(),
         url: "postgres://127.0.0.1".parse().unwrap(),
@@ -2690,7 +2690,7 @@ async fn no_data() {
     .into_iter()
     .collect();
     let response_cache =
-        ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, false)
             .await
             .unwrap();
 
@@ -2928,7 +2928,7 @@ async fn missing_entities() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
     ].into_iter().collect());
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
         cleanup_interval: default_cleanup_interval(),
         tls: Default::default(),
         url: "postgres://127.0.0.1".parse().unwrap(),
@@ -2968,7 +2968,7 @@ async fn missing_entities() {
     .into_iter()
     .collect();
     let response_cache =
-        ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, false)
             .await
             .unwrap();
 
@@ -3002,7 +3002,7 @@ async fn missing_entities() {
     insta::assert_json_snapshot!(response);
 
     let response_cache = ResponseCache::for_test(
-        pg_cache.clone(),
+        storage.clone(),
         HashMap::new(),
         valid_schema.clone(),
         false,
@@ -3112,7 +3112,7 @@ async fn invalidate_by_cache_tag() {
             },
         });
 
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
             cleanup_interval: default_cleanup_interval(),
             tls: Default::default(),
             url: "postgres://127.0.0.1".parse().unwrap(),
@@ -3152,7 +3152,7 @@ async fn invalidate_by_cache_tag() {
         .into_iter()
         .collect();
         let response_cache =
-            ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, false)
                 .await
                 .unwrap();
 
@@ -3426,7 +3426,7 @@ async fn invalidate_by_type() {
             },
         });
 
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
             tls: Default::default(),
             cleanup_interval: default_cleanup_interval(),
             url: "postgres://127.0.0.1".parse().unwrap(),
@@ -3466,7 +3466,7 @@ async fn invalidate_by_type() {
         .into_iter()
         .collect();
         let response_cache =
-            ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, false)
                 .await
                 .unwrap();
 
@@ -3705,7 +3705,7 @@ async fn invalidate_by_type() {
 async fn interval_cleanup_config() {
     let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
         tls: Default::default(),
         cleanup_interval: std::time::Duration::from_secs(60 * 7), // Every 7 minutes
         url: "postgres://127.0.0.1".parse().unwrap(),
@@ -3721,7 +3721,7 @@ async fn interval_cleanup_config() {
     .await
     .unwrap();
     let _response_cache = ResponseCache::for_test(
-        pg_cache.clone(),
+        storage.clone(),
         Default::default(),
         valid_schema.clone(),
         true,
@@ -3730,10 +3730,10 @@ async fn interval_cleanup_config() {
     .await
     .unwrap();
 
-    let cron = pg_cache.get_cron().await.unwrap();
+    let cron = storage.get_cron().await.unwrap();
     assert_eq!(cron.0, String::from("*/7 * * * *"));
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
         tls: Default::default(),
         cleanup_interval: std::time::Duration::from_secs(60 * 60 * 7), // Every 7 hours
         url: "postgres://127.0.0.1".parse().unwrap(),
@@ -3749,7 +3749,7 @@ async fn interval_cleanup_config() {
     .await
     .unwrap();
     let _response_cache = ResponseCache::for_test(
-        pg_cache.clone(),
+        storage.clone(),
         Default::default(),
         valid_schema.clone(),
         true,
@@ -3758,10 +3758,10 @@ async fn interval_cleanup_config() {
     .await
     .unwrap();
 
-    let cron = pg_cache.get_cron().await.unwrap();
+    let cron = storage.get_cron().await.unwrap();
     assert_eq!(cron.0, String::from("0 */7 * * *"));
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
         tls: Default::default(),
         cleanup_interval: std::time::Duration::from_secs(60 * 60 * 24 * 7), // Every 7 days
         url: "postgres://127.0.0.1".parse().unwrap(),
@@ -3777,7 +3777,7 @@ async fn interval_cleanup_config() {
     .await
     .unwrap();
     let _response_cache = ResponseCache::for_test(
-        pg_cache.clone(),
+        storage.clone(),
         Default::default(),
         valid_schema.clone(),
         true,
@@ -3786,7 +3786,7 @@ async fn interval_cleanup_config() {
     .await
     .unwrap();
 
-    let cron = pg_cache.get_cron().await.unwrap();
+    let cron = storage.get_cron().await.unwrap();
     assert_eq!(cron.0, String::from("0 0 */7 * *"));
 }
 
@@ -3968,7 +3968,7 @@ async fn expired_data_count() {
     async {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
 
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
             tls: Default::default(),
             cleanup_interval: std::time::Duration::from_secs(60 * 7), // Every 7 minutes
             url: "postgres://127.0.0.1".parse().unwrap(),
@@ -3984,7 +3984,7 @@ async fn expired_data_count() {
         .await
         .unwrap();
         let _response_cache = ResponseCache::for_test(
-            pg_cache.clone(),
+            storage.clone(),
             Default::default(),
             valid_schema.clone(),
             true,
@@ -4000,11 +4000,11 @@ async fn expired_data_count() {
             invalidation_keys: vec![],
             expire: Duration::from_millis(2),
         };
-        pg_cache.insert(document, "test").await.unwrap();
+        storage.insert(document, "test").await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         let (_drop_rx, drop_tx) = broadcast::channel(2);
         tokio::spawn(
-            metrics::expired_data_task(pg_cache.clone(), drop_tx, None)
+            metrics::expired_data_task(storage.clone(), drop_tx, None)
                 .with_current_meter_provider(),
         );
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -4072,7 +4072,7 @@ async fn failure_mode_reconnect() {
         ]
         .into_iter()
         .collect();
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
             tls: Default::default(),
             cleanup_interval: std::time::Duration::from_secs(60 * 7), // Every 7 minutes
             url: "postgres://127.0.0.1".parse().unwrap(),
@@ -4087,8 +4087,8 @@ async fn failure_mode_reconnect() {
         })
         .await
         .unwrap();
-        pg_cache.migrate().await.unwrap();
-        pg_cache.truncate_namespace().await.unwrap();
+        storage.migrate().await.unwrap();
+        storage.truncate_namespace().await.unwrap();
 
         let response_cache =
             ResponseCache::without_storage_for_failure_mode(map, valid_schema.clone())
@@ -4166,7 +4166,7 @@ async fn failure_mode_reconnect() {
             .all
             .as_ref()
             .expect("the database all should already be Some")
-            .set(pg_cache)
+            .set(storage)
             .map_err(|_| "this should not be already set")
             .unwrap();
 
