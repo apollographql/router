@@ -6,6 +6,7 @@ use std::fmt::Formatter;
 use std::time::Duration;
 use std::time::Instant;
 
+use serde_json::error::Category;
 use tokio::time::timeout;
 
 use crate::plugins::response_cache::ErrorCode;
@@ -60,7 +61,12 @@ impl ErrorCode for Error {
     fn code(&self) -> &'static str {
         match self {
             Error::Database(err) => err.code(),
-            Error::Serialize(_) => "serialize // TODO",
+            Error::Serialize(err) => match err.classify() {
+                Category::Io => "Serialize::IO",
+                Category::Syntax => "Serialize::Syntax",
+                Category::Data => "Serialize::Data",
+                Category::Eof => "Serialize::EOF",
+            },
             Error::Timeout => "TIMED_OUT",
         }
     }
