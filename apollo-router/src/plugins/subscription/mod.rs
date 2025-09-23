@@ -24,15 +24,20 @@ use crate::plugin::PluginInit;
 use crate::protocols::websocket::WebSocketProtocol;
 use crate::query_planner::OperationKind;
 use crate::register_plugin;
-use crate::services::subgraph;
+use crate::services::SubgraphRequest;
+use crate::services::SubgraphResponse;
 
 mod callback;
 mod execution;
+// Only pub(crate) for tests: tests that rely on subscription internals should probably
+// be moved into the plugin.
+pub(crate) mod subgraph;
 
 pub(crate) use callback::SUBSCRIPTION_CALLBACK_HMAC_KEY;
 pub(crate) use callback::create_verifier;
 pub(crate) use execution::SubscriptionExecutionLayer;
 pub(crate) use execution::SubscriptionTaskParams;
+pub(crate) use subgraph::call_websocket;
 
 pub(crate) const APOLLO_SUBSCRIPTION_PLUGIN: &str = "apollo.subscription";
 pub(crate) const APOLLO_SUBSCRIPTION_PLUGIN_NAME: &str = "subscription";
@@ -277,15 +282,15 @@ impl Plugin for Subscription {
     fn subgraph_service(
         &self,
         _subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: crate::services::subgraph::BoxService,
+    ) -> crate::services::subgraph::BoxService {
         let enabled = self.config.enabled
             && (self.config.mode.callback.is_some() || self.config.mode.passthrough.is_some());
         ServiceBuilder::new()
-            .checkpoint(move |req: subgraph::Request| {
+            .checkpoint(move |req: SubgraphRequest| {
                 if req.operation_kind == OperationKind::Subscription && !enabled {
                     Ok(ControlFlow::Break(
-                        subgraph::Response::builder()
+                        SubgraphResponse::builder()
                             .context(req.context)
                             .subgraph_name(req.subgraph_name)
                             .error(

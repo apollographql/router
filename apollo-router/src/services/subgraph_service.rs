@@ -7,7 +7,6 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::task::Poll;
 
 use bytes::Bytes;
-use futures::StreamExt;
 use futures::TryFutureExt;
 use futures::future::BoxFuture;
 use http::HeaderValue;
@@ -29,11 +28,7 @@ use rustls::RootCertStore;
 use serde::Serialize;
 use serde_json_bytes::Entry;
 use serde_json_bytes::json;
-use tokio::select;
 use tokio::sync::oneshot;
-use tokio_tungstenite::connect_async;
-use tokio_tungstenite::connect_async_tls_with_config;
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceExt;
@@ -63,20 +58,15 @@ use crate::error::SubgraphBatchingError;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::layers::DEFAULT_BUFFER_SIZE;
-use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::file_uploads;
 use crate::plugins::subscription::CallbackMode;
-use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::SubscriptionMode;
-use crate::plugins::subscription::WebSocketConfiguration;
 use crate::plugins::subscription::create_verifier;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::subgraph::events::SubgraphEventRequest;
 use crate::plugins::telemetry::config_new::subgraph::events::SubgraphEventResponse;
 use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
-use crate::protocols::websocket::GraphqlWebSocket;
-use crate::protocols::websocket::convert_websocket_stream;
 use crate::query_planner::OperationKind;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
@@ -274,7 +264,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                 match &mode {
                     Some(SubscriptionMode::Passthrough(ws_conf)) => {
                         // call_websocket for passthrough mode
-                        return call_websocket(
+                        return crate::plugins::subscription::call_websocket(
                             notify,
                             request,
                             context,
@@ -472,267 +462,6 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
 
         Box::pin(make_calls)
     }
-}
-
-/// call websocket makes websocket calls with modified graphql::Request (body)
-async fn call_websocket(
-    mut notify: Notify<String, graphql::Response>,
-    request: SubgraphRequest,
-    context: Context,
-    service_name: String,
-    subgraph_cfg: &WebSocketConfiguration,
-    subscription_hash: String,
-) -> Result<SubgraphResponse, BoxError> {
-    let subgraph_request_event = context
-        .extensions()
-        .with_lock(|lock| lock.get::<SubgraphEventRequest>().cloned());
-    let log_request_level = subgraph_request_event.and_then(|s| {
-        if s.condition.lock().evaluate_request(&request) == Some(true) {
-            Some(s.level)
-        } else {
-            None
-        }
-    });
-
-    let SubgraphRequest {
-        subgraph_request,
-        subscription_stream,
-        id: subgraph_request_id,
-        ..
-    } = request;
-    let subscription_stream_tx =
-        subscription_stream.ok_or_else(|| FetchError::SubrequestWsError {
-            service: service_name.clone(),
-            reason: "cannot get the websocket stream".to_string(),
-        })?;
-    let supergraph_operation_name = context.get::<_, String>(OPERATION_NAME).ok().flatten();
-    // In passthrough mode, we maintain persistent WebSocket connections and need the
-    // subscription_closing_signal to properly clean up long-running forwarding tasks
-    // when subscriptions are terminated (see tokio::select! usage below).
-    //
-    // Websocket subscriptions are closed when:
-    // * The closing signal is received from the subgraph.
-    // * The connection to the subgraph is severed.
-    //
-    // The reason that we need the subscription closing signal is that deduplication will
-    // cause multiple client subscriptions to listen to the same source subscription. Therefore we
-    // must not close the subscription if a single connection is dropped. Only when ALL connections are dropped.
-    // Conversely, if the connection between router and subgraph is closed, ALL client subscription connections
-    // are dropped immediately.
-    let (handle, created, mut subscription_closing_signal) = notify
-        .create_or_subscribe(subscription_hash.clone(), false, supergraph_operation_name)
-        .await?;
-    u64_counter!(
-        "apollo.router.operations.subscriptions",
-        "Total requests with subscription operations",
-        1,
-        subscriptions.mode = "passthrough",
-        subscriptions.deduplicated = !created,
-        subgraph.service.name = service_name.clone()
-    );
-    if !created {
-        subscription_stream_tx
-            .send(Box::pin(handle.into_stream()))
-            .await?;
-
-        // Dedup happens here
-        return Ok(SubgraphResponse::builder()
-            .context(context)
-            .subgraph_name(service_name.clone())
-            .extensions(Object::default())
-            .build());
-    }
-
-    let (parts, body) = subgraph_request.into_parts();
-
-    // Check context key and Authorization header (context key takes precedence) to set connection params if needed
-    let connection_params = match (
-        context.get_json_value(SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS),
-        parts
-            .headers
-            .get(http::header::AUTHORIZATION)
-            .and_then(|auth| auth.to_str().ok()),
-    ) {
-        (Some(connection_params), _) => Some(connection_params),
-        (None, Some(authorization)) => Some(serde_json_bytes::json!({ "token": authorization })),
-        _ => None,
-    };
-
-    let request = get_websocket_request(service_name.clone(), parts, subgraph_cfg)?;
-
-    let signing_params = context
-        .extensions()
-        .with_lock(|lock| lock.get::<Arc<SigningParamsConfig>>().cloned());
-
-    let request = if let Some(signing_params) = signing_params {
-        signing_params
-            .sign_empty(request, service_name.as_str())
-            .await?
-    } else {
-        request
-    };
-
-    if let Some(level) = log_request_level {
-        let mut attrs = Vec::with_capacity(5);
-        attrs.push(KeyValue::new(
-            Key::from_static_str("http.request.headers"),
-            opentelemetry::Value::String(format!("{:?}", request.headers()).into()),
-        ));
-        attrs.push(KeyValue::new(
-            Key::from_static_str("http.request.method"),
-            opentelemetry::Value::String(format!("{}", request.method()).into()),
-        ));
-        attrs.push(KeyValue::new(
-            Key::from_static_str("http.request.version"),
-            opentelemetry::Value::String(format!("{:?}", request.version()).into()),
-        ));
-        attrs.push(KeyValue::new(
-            Key::from_static_str("http.request.body"),
-            opentelemetry::Value::String(
-                serde_json::to_string(request.body())
-                    .unwrap_or_default()
-                    .into(),
-            ),
-        ));
-        attrs.push(KeyValue::new(
-            Key::from_static_str("subgraph.name"),
-            opentelemetry::Value::String(service_name.clone().into()),
-        ));
-        log_event(
-            level,
-            "subgraph.request",
-            attrs,
-            &format!("Websocket request body to subgraph {service_name:?}"),
-        );
-    }
-
-    let uri = request.uri();
-    let path = uri.path();
-    let host = uri.host().unwrap_or_default();
-    let port = uri.port_u16().unwrap_or_else(|| {
-        let scheme = uri.scheme_str();
-        if scheme == Some("wss") {
-            443
-        } else if scheme == Some("ws") {
-            80
-        } else {
-            0
-        }
-    });
-
-    let subgraph_req_span = tracing::info_span!(SUBGRAPH_REQUEST_SPAN_NAME,
-        "otel.kind" = "CLIENT",
-        "net.peer.name" = %host,
-        "net.peer.port" = %port,
-        "http.route" = %path,
-        "http.url" = %uri,
-        "net.transport" = "ip_tcp",
-        "apollo.subgraph.name" = %service_name,
-        "graphql.operation.name" = body.operation_name.as_deref().unwrap_or(""),
-    );
-
-    let (ws_stream, resp) = match request.uri().scheme_str() {
-        Some("wss") => {
-            connect_async_tls_with_config(request, None, false, None)
-                .instrument(subgraph_req_span)
-                .await
-        }
-        _ => connect_async(request).instrument(subgraph_req_span).await,
-    }
-    .map_err(|err| {
-        let error_details = match &err {
-            tokio_tungstenite::tungstenite::Error::Utf8(details) => {
-                format!("invalid UTF-8 in WebSocket handshake: {details}")
-            }
-
-            tokio_tungstenite::tungstenite::Error::Http(response) => {
-                let status = response.status();
-                let headers = response
-                    .headers()
-                    .iter()
-                    .map(|(k, v)| {
-                        let header_value = v.to_str().unwrap_or("HTTP Error");
-                        format!("{k:?}: {header_value:?}")
-                    })
-                    .collect::<Vec<String>>()
-                    .join("; ");
-
-                format!("WebSocket upgrade failed. Status: {status}; Headers: [{headers}]")
-            }
-
-            tokio_tungstenite::tungstenite::Error::Protocol(proto_err) => {
-                format!("WebSocket protocol error: {proto_err}")
-            }
-
-            other_error => other_error.to_string(),
-        };
-
-        tracing::debug!(
-            error.type   = "websocket_connection_failed",
-            error.details= %error_details,
-            error.source = %std::any::type_name_of_val(&err),
-            "WebSocket connection failed"
-        );
-
-        FetchError::SubrequestWsError {
-            service: service_name.clone(),
-            reason: format!("cannot connect websocket to subgraph: {error_details}"),
-        }
-    })?;
-
-    let gql_socket = GraphqlWebSocket::new(
-        convert_websocket_stream(ws_stream, subscription_hash.clone()),
-        subscription_hash,
-        subgraph_cfg.protocol,
-        connection_params,
-    )
-    .await
-    .map_err(|err| FetchError::SubrequestWsError {
-        service: service_name.clone(),
-        reason: format!("cannot get the GraphQL websocket stream: {}", err.message),
-    })?;
-
-    let gql_stream = gql_socket
-        .into_subscription(body, subgraph_cfg.heartbeat_interval.into_option())
-        .await
-        .map_err(|err| FetchError::SubrequestWsError {
-            service: service_name.clone(),
-            reason: format!("cannot send the subgraph request to websocket stream: {err:?}"),
-        })?;
-
-    let (handle_sink, handle_stream) = handle.split();
-    // Forward GraphQL subscription stream to WebSocket handle
-    // Connection lifecycle is managed by the WebSocket infrastructure,
-    // so we don't need to handle connection_closed_signal here
-    tokio::task::spawn(async move {
-        select! {
-            // We prefer to specify the order of checks within the select
-            biased;
-            // gql_stream is the stream opened from router to subgraph to receive events
-            // handle_sink is just a broadcast sender to send the events received from subgraphs to the router's client
-            // if all router's clients are closed the sink will be closed too and then the .forward future will end
-            // It will then also trigger poll_close on the gql_stream which will initiate the termination process (like properly closing ws connection cf protocols/websocket.rs)
-            _ = gql_stream
-                .map(Ok::<_, graphql::Error>)
-                .forward(handle_sink) => {
-                tracing::debug!("gql_stream empty");
-            },
-            // This branch handles subscription termination signals. Unlike callback mode,
-            // passthrough mode maintains persistent connections that require explicit cleanup.
-            _ = subscription_closing_signal.recv() => {
-                tracing::debug!("subscription_closing_signal triggered");
-            }
-        }
-    });
-
-    subscription_stream_tx.send(Box::pin(handle_stream)).await?;
-
-    Ok(SubgraphResponse::new_from_response(
-        resp.map(|_| graphql::Response::default()),
-        context,
-        service_name,
-        subgraph_request_id,
-    ))
 }
 
 // Utility function to extract uri details.
@@ -1533,64 +1262,6 @@ async fn do_fetch(
     Ok((parts, content_type, body))
 }
 
-fn get_websocket_request(
-    service_name: String,
-    mut parts: http::request::Parts,
-    subgraph_ws_cfg: &WebSocketConfiguration,
-) -> Result<http::Request<()>, FetchError> {
-    let mut subgraph_url = url::Url::parse(&parts.uri.to_string()).map_err(|err| {
-        tracing::error!("cannot parse subgraph url {}: {err:?}", parts.uri);
-        FetchError::SubrequestWsError {
-            service: service_name.clone(),
-            reason: "cannot parse subgraph url".to_string(),
-        }
-    })?;
-    let new_scheme = match subgraph_url.scheme() {
-        "http" => "ws",
-        "https" => "wss",
-        _ => "ws",
-    };
-    subgraph_url.set_scheme(new_scheme).map_err(|err| {
-        tracing::error!("cannot set a scheme '{new_scheme}' on subgraph url: {err:?}");
-
-        FetchError::SubrequestWsError {
-            service: service_name.clone(),
-            reason: "cannot set a scheme on websocket url".to_string(),
-        }
-    })?;
-
-    let subgraph_url = match &subgraph_ws_cfg.path {
-        Some(path) => subgraph_url
-            .join(path)
-            .map_err(|_| FetchError::SubrequestWsError {
-                service: service_name.clone(),
-                reason: "cannot parse subgraph url with the specific websocket path".to_string(),
-            })?,
-        None => subgraph_url,
-    };
-    // XXX During hyper upgrade, observed that we had lost the implementation for Url
-    // so I made the expedient decision to get a string representation (as_str())
-    // for the creation of the client request. This works fine, but I'm not sure
-    // why we need to do it, because into_client_request **should** be implemented
-    // for Url...
-    let mut request = subgraph_url.as_str().into_client_request().map_err(|err| {
-        tracing::error!("cannot create websocket client request: {err:?}");
-
-        FetchError::SubrequestWsError {
-            service: service_name.clone(),
-            reason: "cannot create websocket client request".to_string(),
-        }
-    })?;
-    request.headers_mut().insert(
-        http::header::SEC_WEBSOCKET_PROTOCOL,
-        subgraph_ws_cfg.protocol.into(),
-    );
-    parts.headers.extend(request.headers_mut().drain());
-    *request.headers_mut() = parts.headers;
-
-    Ok(request)
-}
-
 fn get_apq_error(gql_response: &graphql::Response) -> APQError {
     for error in &gql_response.errors {
         // Check if error message is an APQ error
@@ -1710,6 +1381,7 @@ mod tests {
     use crate::plugins::subscription::SUBSCRIPTION_CALLBACK_HMAC_KEY;
     use crate::plugins::subscription::SubgraphPassthroughMode;
     use crate::plugins::subscription::SubscriptionModeConfig;
+    use crate::plugins::subscription::WebSocketConfiguration;
     use crate::protocols::websocket::ClientMessage;
     use crate::protocols::websocket::ServerMessage;
     use crate::protocols::websocket::WebSocketProtocol;
