@@ -13,7 +13,7 @@ use thiserror::Error;
 use tower::BoxError;
 use tracing::Instrument;
 
-use super::plugin::Storage;
+use super::plugin::StorageInterface;
 use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::response_cache::plugin::INTERNAL_CACHE_TAG_PREFIX;
 use crate::plugins::response_cache::plugin::RESPONSE_CACHE_VERSION;
@@ -23,7 +23,7 @@ use crate::plugins::response_cache::storage::postgres::PostgresCacheStorage;
 
 #[derive(Clone)]
 pub(crate) struct Invalidation {
-    pub(crate) storage: Arc<Storage>,
+    pub(crate) storage: Arc<StorageInterface>,
 }
 
 #[derive(Error, Debug)]
@@ -62,7 +62,7 @@ impl std::fmt::Display for InvalidationErrors {
 impl std::error::Error for InvalidationErrors {}
 
 impl Invalidation {
-    pub(crate) async fn new(storage: Arc<Storage>) -> Result<Self, BoxError> {
+    pub(crate) async fn new(storage: Arc<StorageInterface>) -> Result<Self, BoxError> {
         Ok(Self { storage })
     }
 

@@ -263,7 +263,7 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
-    use crate::plugins::response_cache::plugin::Storage;
+    use crate::plugins::response_cache::plugin::StorageInterface;
     use crate::plugins::response_cache::storage::postgres::PostgresCacheConfig;
     use crate::plugins::response_cache::storage::postgres::PostgresCacheStorage;
     use crate::plugins::response_cache::storage::postgres::default_batch_size;
@@ -292,10 +292,7 @@ mod tests {
             PostgresCacheStorage::new(&storage_config("test_invalidation_service_bad_shared_key"))
                 .await
                 .unwrap();
-        let storage = Arc::new(Storage {
-            all: Some(Arc::new(storage.into())),
-            subgraphs: HashMap::new(),
-        });
+        let storage = Arc::new(StorageInterface::from(storage));
         let invalidation = Invalidation::new(storage.clone()).await.unwrap();
 
         let config = Arc::new(SubgraphConfiguration {
@@ -344,10 +341,7 @@ mod tests {
         ))
         .await
         .unwrap();
-        let storage = Arc::new(Storage {
-            all: Some(Arc::new(storage.into())),
-            subgraphs: HashMap::new(),
-        });
+        let storage = Arc::new(StorageInterface::from(storage));
         let invalidation = Invalidation::new(storage.clone()).await.unwrap();
 
         let config = Arc::new(SubgraphConfiguration {
@@ -405,10 +399,7 @@ mod tests {
         ))
         .await
         .unwrap();
-        let storage = Arc::new(Storage {
-            all: Some(Arc::new(storage.into())),
-            subgraphs: HashMap::new(),
-        });
+        let storage = Arc::new(StorageInterface::from(storage));
         let invalidation = Invalidation::new(storage.clone()).await.unwrap();
 
         let config = Arc::new(SubgraphConfiguration {
@@ -486,10 +477,7 @@ mod tests {
         ))
         .await
         .unwrap();
-        let storage = Arc::new(Storage {
-            all: Some(Arc::new(storage.into())),
-            subgraphs: HashMap::new(),
-        });
+        let storage = Arc::new(StorageInterface::from(storage));
         let invalidation = Invalidation::new(storage.clone()).await.unwrap();
 
         let config = Arc::new(SubgraphConfiguration {

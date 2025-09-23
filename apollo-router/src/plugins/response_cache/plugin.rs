@@ -104,7 +104,7 @@ register_private_plugin!("apollo", "experimental_response_cache", ResponseCache)
 
 #[derive(Clone)]
 pub(crate) struct ResponseCache {
-    pub(super) storage: Arc<Storage>,
+    pub(super) storage: Arc<StorageInterface>,
     endpoint_config: Option<Arc<InvalidationEndpointConfig>>,
     subgraphs: Arc<SubgraphConfiguration<Subgraph>>,
     entity_type: Option<String>,
@@ -133,12 +133,12 @@ impl Drop for ResponseCache {
 }
 
 #[derive(Clone)]
-pub(crate) struct Storage {
-    pub(crate) all: Option<Arc<OnceLock<PostgresCacheStorage>>>,
-    pub(crate) subgraphs: HashMap<String, Arc<OnceLock<PostgresCacheStorage>>>,
+pub(crate) struct StorageInterface {
+    all: Option<Arc<OnceLock<PostgresCacheStorage>>>,
+    subgraphs: HashMap<String, Arc<OnceLock<PostgresCacheStorage>>>,
 }
 
-impl Storage {
+impl StorageInterface {
     pub(crate) fn get(&self, subgraph: &str) -> Option<&PostgresCacheStorage> {
         match self.subgraphs.get(subgraph) {
             Some(subgraph) => subgraph.get(),
@@ -146,7 +146,7 @@ impl Storage {
         }
     }
 
-    pub(crate) async fn migrate(&self) -> anyhow::Result<()> {
+    async fn migrate(&self) -> anyhow::Result<()> {
         if let Some(all) = self.all.as_ref().and_then(|all| all.get()) {
             all.migrate().await?;
         }
@@ -180,7 +180,7 @@ impl Storage {
         }
     }
 
-    pub(crate) async fn update_cron(&self) -> anyhow::Result<()> {
+    async fn update_cron(&self) -> anyhow::Result<()> {
         if let Some(all) = self.all.as_ref().and_then(|all| all.get()) {
             all.update_cron().await?;
         }
@@ -192,6 +192,23 @@ impl Storage {
         .await?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+impl StorageInterface {
+    pub(crate) fn replace_all(&self, storage: PostgresCacheStorage) -> Option<()> {
+        self.all.as_ref()?.set(storage).ok()
+    }
+}
+
+#[cfg(test)]
+impl From<PostgresCacheStorage> for StorageInterface {
+    fn from(storage: PostgresCacheStorage) -> Self {
+        Self {
+            all: Some(Arc::new(storage.into())),
+            subgraphs: HashMap::new(),
+        }
     }
 }
 
@@ -384,7 +401,7 @@ impl PluginPrivate for ResponseCache {
             );
         }
 
-        let storage = Arc::new(Storage {
+        let storage = Arc::new(StorageInterface {
             all,
             subgraphs: subgraph_storages,
         });
@@ -574,7 +591,7 @@ impl ResponseCache {
             storage.truncate_namespace().await?;
         }
 
-        let storage = Arc::new(Storage {
+        let storage = Arc::new(StorageInterface {
             all: Some(Arc::new(storage.into())),
             subgraphs: HashMap::new(),
         });
@@ -626,7 +643,7 @@ impl ResponseCache {
         use std::net::Ipv4Addr;
         use std::net::SocketAddr;
 
-        let storage = Arc::new(Storage {
+        let storage = Arc::new(StorageInterface {
             all: Some(Default::default()),
             subgraphs: HashMap::new(),
         });
@@ -716,7 +733,7 @@ struct CacheService {
     service: subgraph::BoxCloneService,
     name: String,
     entity_type: Option<String>,
-    storage: Arc<Storage>,
+    storage: Arc<StorageInterface>,
     subgraph_ttl: Duration,
     private_queries: Arc<RwLock<LruCache<PrivateQueryKey, ()>>>,
     private_id: Option<String>,

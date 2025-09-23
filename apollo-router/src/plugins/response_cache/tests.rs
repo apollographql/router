@@ -4162,13 +4162,7 @@ async fn failure_mode_reconnect() {
             .unwrap();
 
         response_cache
-            .storage
-            .all
-            .as_ref()
-            .expect("the database all should already be Some")
-            .set(storage)
-            .map_err(|_| "this should not be already set")
-            .unwrap();
+            .storage.replace_all(storage).expect("must be able to replace");
 
         let request = supergraph::Request::fake_builder()
             .query(query)
