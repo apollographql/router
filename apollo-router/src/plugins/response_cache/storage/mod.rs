@@ -28,7 +28,10 @@ pub(super) struct CacheEntry {
 }
 
 pub(super) trait CacheStorage {
-    fn timeout_duration(&self) -> Duration;
+    /// Timeout to apply to insert command.
+    fn insert_timeout(&self) -> Duration;
+    fn fetch_timeout(&self) -> Duration;
+    fn invalidate_timeout(&self) -> Duration;
 
     #[doc(hidden)]
     async fn internal_insert(&self, document: Document, subgraph_name: &str) -> StorageResult<()>;
@@ -37,7 +40,7 @@ pub(super) trait CacheStorage {
         let now = Instant::now();
         let result = self
             .internal_insert(document, subgraph_name)
-            .timeout(self.timeout_duration())
+            .timeout(self.insert_timeout())
             .await;
 
         f64_histogram_with_unit!(
@@ -68,7 +71,7 @@ pub(super) trait CacheStorage {
         let now = Instant::now();
         let result = self
             .internal_insert_in_batch(documents, subgraph_name)
-            .timeout(self.timeout_duration())
+            .timeout(self.insert_timeout())
             .await;
 
         f64_histogram_with_unit!(
@@ -90,7 +93,7 @@ pub(super) trait CacheStorage {
         let now = Instant::now();
         let result = self
             .internal_fetch(cache_key)
-            .timeout(self.timeout_duration())
+            .timeout(self.fetch_timeout())
             .await;
 
         f64_histogram_with_unit!(
@@ -121,7 +124,7 @@ pub(super) trait CacheStorage {
         let now = Instant::now();
         let result = self
             .internal_fetch_multiple(cache_keys)
-            .timeout(self.timeout_duration())
+            .timeout(self.fetch_timeout())
             .await;
 
         f64_histogram_with_unit!(
@@ -146,7 +149,7 @@ pub(super) trait CacheStorage {
         let now = Instant::now();
         let result = self
             .internal_invalidate_by_subgraphs(subgraph_names)
-            .timeout(self.timeout_duration())
+            .timeout(self.invalidate_timeout())
             .await;
 
         f64_histogram_with_unit!(
@@ -174,7 +177,7 @@ pub(super) trait CacheStorage {
         let now = Instant::now();
         let result = self
             .internal_invalidate(invalidation_keys, subgraph_names)
-            .timeout(self.timeout_duration())
+            .timeout(self.invalidate_timeout())
             .await;
 
         f64_histogram_with_unit!(

@@ -238,7 +238,17 @@ impl Storage {
 }
 
 impl CacheStorage for Storage {
-    fn timeout_duration(&self) -> Duration {
+    fn insert_timeout(&self) -> Duration {
+        // NB: this will be replaced
+        Duration::from_secs(1)
+    }
+
+    fn fetch_timeout(&self) -> Duration {
+        // NB: this will be replaced
+        Duration::from_secs(1)
+    }
+
+    fn invalidate_timeout(&self) -> Duration {
         // NB: this will be replaced
         Duration::from_secs(1)
     }
