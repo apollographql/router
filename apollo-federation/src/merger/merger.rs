@@ -1651,10 +1651,6 @@ impl Merger {
         self.join_directive_identities.contains(&url.identity)
     }
 
-    pub(in crate::merger) fn add_arguments_shallow<T>(&mut self, _sources: &Sources<T>, _dest: &T) {
-        todo!("Implement add_arguments_shallow")
-    }
-
     pub(in crate::merger) fn merge_default_value<T>(
         &mut self,
         _sources: &Sources<T>,

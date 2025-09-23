@@ -326,7 +326,7 @@ impl Merger {
         }
 
         // Doing args last, mostly so we don't bother adding if the directive doesn't make it in.
-        self.add_arguments_shallow(&position_sources, &dest);
+        self.add_arguments_shallow(&position_sources, &dest)?;
         for arg in &supergraph_dest.arguments {
             let subgraph_args = map_sources(sources, |src| {
                 src.as_ref()
