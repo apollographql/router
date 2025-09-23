@@ -544,11 +544,15 @@ impl RedisCacheStorage {
         self.ttl = ttl;
     }
 
-    fn pipeline(&self) -> Pipeline<Client> {
+    pub(crate) fn client(&self) -> Client {
+        self.inner.next().clone()
+    }
+
+    pub(crate) fn pipeline(&self) -> Pipeline<Client> {
         self.inner.next().pipeline()
     }
 
-    fn make_key<K: KeyType>(&self, key: RedisKey<K>) -> String {
+    pub(crate) fn make_key<K: KeyType>(&self, key: RedisKey<K>) -> String {
         match &self.namespace {
             Some(namespace) => format!("{namespace}:{key}"),
             None => key.to_string(),
@@ -750,6 +754,39 @@ impl RedisCacheStorage {
         } else {
             Box::pin(self.inner.next().scan(pattern, count, None))
         }
+    }
+}
+
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
+impl RedisCacheStorage {
+    pub(crate) async fn truncate_namespace(&self) -> Result<(), RedisError> {
+        use fred::prelude::Key;
+        use futures::StreamExt;
+
+        if self.namespace.is_none() {
+            return Ok(());
+        }
+
+        // find all members of this namespace via `SCAN`
+        let pattern = self.make_key(RedisKey("*"));
+        let client = self.client();
+        let mut stream: Pin<Box<dyn Stream<Item = Result<Key, RedisError>>>> = if self.is_cluster {
+            Box::pin(client.scan_cluster_buffered(pattern, None, None))
+        } else {
+            Box::pin(client.scan_buffered(pattern, None, None))
+        };
+
+        let mut keys = Vec::new();
+        while let Some(key) = stream.next().await {
+            keys.push(key?);
+        }
+
+        // remove all members of this namespace
+        self.delete_from_scan_result(keys).await?;
+        Ok(())
     }
 }
 

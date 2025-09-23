@@ -7,6 +7,9 @@ pub(crate) enum Error {
     #[error("{0}")]
     Database(#[from] sqlx::Error),
 
+    #[error("{0}")]
+    Join(#[from] tokio::task::JoinError),
+
     #[error("NO_STORAGE")]
     NoStorage,
 
@@ -19,17 +22,21 @@ pub(crate) enum Error {
 
 impl Error {
     pub(crate) fn is_row_not_found(&self) -> bool {
-        match self {
-            Error::Database(err) => matches!(err, &sqlx::Error::RowNotFound),
-            Error::NoStorage | Error::Serialize(_) | Error::Timeout(_) => false,
-        }
+        matches!(self, Error::Database(err) if err.is_not_found())
     }
 }
 
 impl ErrorCode for Error {
     fn code(&self) -> &'static str {
         match self {
-            Error::Database(err) => err.code(),
+            Error::Database(err) => err.kind().to_str(),
+            Error::Join(err) => {
+                if err.is_cancelled() {
+                    "CANCELLED"
+                } else {
+                    "PANICKED"
+                }
+            }
             Error::NoStorage => "NO_STORAGE",
             Error::Serialize(err) => match err.classify() {
                 Category::Io => "Serialize::IO",

@@ -7,27 +7,38 @@ use apollo_router::graphql;
 use apollo_router::services::router;
 use apollo_router::services::supergraph;
 use apollo_router::test_harness::HttpService;
+use fred::clients::Client;
+use fred::interfaces::ClientLike;
+use fred::interfaces::KeysInterface;
+use fred::types::Builder;
 use http::HeaderMap;
 use http::HeaderValue;
 use http_body_util::BodyExt as _;
 use indexmap::IndexMap;
 use serde_json::Value;
 use serde_json::json;
-use sqlx::Connection;
-use sqlx::FromRow;
-use sqlx::PgConnection;
+use tokio::time::sleep;
+use tokio_util::future::FutureExt;
 use tower::BoxError;
 use tower::Service as _;
 use tower::ServiceExt as _;
 
 use crate::integration::common::graph_os_enabled;
 
+const REDIS_URL: &str = "redis://127.0.0.1:6379";
 const INVALIDATION_PATH: &str = "/invalidation";
 const INVALIDATION_SHARED_KEY: &str = "supersecret";
 
 /// Isolate tests from each other by adding a random redis key prefix
 pub(crate) fn namespace() -> String {
     uuid::Uuid::new_v4().simple().to_string()
+}
+
+async fn redis_client() -> Result<Client, BoxError> {
+    let client =
+        Builder::from_config(fred::prelude::Config::from_url(REDIS_URL).unwrap()).build()?;
+    client.init().await?;
+    Ok(client)
 }
 
 fn base_config() -> Value {
@@ -39,8 +50,8 @@ fn base_config() -> Value {
             "enabled": true,
             "subgraph": {
                 "all": {
-                    "postgres": {
-                        "url": "postgres://127.0.0.1",
+                    "redis": {
+                        "urls": ["redis://127.0.0.1:6379"],
                         "pool_size": 3,
                         "namespace": namespace(),
                         "required_to_start": true,
@@ -69,8 +80,8 @@ fn failure_config() -> Value {
             "enabled": true,
             "subgraph": {
                 "all": {
-                    "postgres": {
-                        "url": "postgres://test",
+                    "redis": {
+                        "urls": ["redis://invalid"],
                         "pool_size": 3,
                         "namespace": namespace(),
                         "required_to_start": false,
@@ -502,36 +513,49 @@ fn parse_max_age(cache_control: &str) -> u32 {
         .unwrap_or_else(|| panic!("expected 'max-age={{seconds}},public', got '{cache_control}'"))
 }
 
-#[derive(FromRow)]
-struct Record {
-    data: String,
-}
-
 macro_rules! check_cache_key {
-    ($cache_key: expr, $conn: expr) => {
-        let mut record = None;
-        // Because insert is async
+    ($namespace: expr, $cache_key: expr, $client: expr) => {
+        let mut record: Option<String> = None;
+        let key = format!("{}:{}", $namespace, $cache_key);
+        // Retry a few times because insert is asynchronous
         for _ in 0..10 {
-            if let Ok(resp) = sqlx::query_as!(
-                Record,
-                "SELECT data FROM cache WHERE cache_key = $1",
-                $cache_key
-            )
-            .fetch_one(&mut $conn)
-            .await
+            match $client
+                .get(key.clone())
+                .timeout(Duration::from_secs(5))
+                .await
             {
-                record = Some(resp);
-                break;
+                Ok(Ok(resp)) => {
+                    record = Some(resp);
+                    break;
+                }
+                Ok(Err(_)) => {
+                    sleep(Duration::from_secs(1)).await;
+                }
+                Err(_) => {
+                    panic!("long timeout connecting to redis - did you call client.init()?");
+                }
             }
         }
+
         match record {
             Some(s) => {
-                let v: Value = serde_json::from_str(&s.data).unwrap();
+                let cache_value: Value = serde_json::from_str(&s).unwrap();
+                let v: Value = cache_value.get("data").unwrap().clone();
                 insta::assert_json_snapshot!(v);
             }
             None => panic!("cannot get cache key {}", $cache_key),
         }
     };
+}
+
+async fn cache_key_exists(
+    namespace: &str,
+    cache_key: &str,
+    client: &Client,
+) -> Result<bool, fred::error::Error> {
+    let key = format!("{namespace}:{cache_key}");
+    let count: u32 = client.exists(key).await?;
+    Ok(count == 1)
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -540,9 +564,8 @@ async fn integration_test_basic() -> Result<(), BoxError> {
         return Ok(());
     }
     let namespace = namespace();
+    let client = redis_client().await?;
 
-    let mut conn = PgConnection::connect("postgres://127.0.0.1").await?;
-    sqlx::migrate!().run(&mut conn).await.unwrap();
     let subgraphs = json!({
         "products": {
             "query": {"topProducts": [{
@@ -611,8 +634,8 @@ async fn integration_test_basic() -> Result<(), BoxError> {
                 "subgraph": {
                     "all": {
                         "enabled": true,
-                        "postgres": {
-                            "url": "postgres://127.0.0.1",
+                        "redis": {
+                            "urls": ["redis://127.0.0.1:6379"],
                             "namespace": namespace,
                             "pool_size": 3
                         },
@@ -656,16 +679,11 @@ async fn integration_test_basic() -> Result<(), BoxError> {
         ".extensions.apolloCacheDebugging.data[].cacheControl.created" => 0
     });
 
-    let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:products:type:Query:hash:bf44683f0c222652b509d6efb8f324610c8671181de540a96a5016bd71daa7cc:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6"
-    );
+    let cache_key = "version:1.0:subgraph:products:type:Query:hash:bf44683f0c222652b509d6efb8f324610c8671181de540a96a5016bd71daa7cc:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    check_cache_key!(&namespace, cache_key, &client);
 
-    check_cache_key!(&cache_key, conn);
-
-    let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:reviews:type:Product:entity:cf4952a1e511b1bf2561a6193b4cdfc95f265a79e5cae4fd3e46fd9e75bc512f:representation::hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6"
-    );
-    check_cache_key!(&cache_key, conn);
+    let cache_key = "version:1.0:subgraph:reviews:type:Product:entity:cf4952a1e511b1bf2561a6193b4cdfc95f265a79e5cae4fd3e46fd9e75bc512f:representation::hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    check_cache_key!(&namespace, cache_key, &client);
 
     let supergraph = apollo_router::TestHarness::builder()
         .configuration_json(json!({
@@ -679,8 +697,8 @@ async fn integration_test_basic() -> Result<(), BoxError> {
                 "subgraph": {
                     "all": {
                         "enabled": false,
-                        "postgres": {
-                            "url": "postgres://127.0.0.1",
+                        "redis": {
+                            "urls": ["redis://127.0.0.1:6379"],
                             "namespace": namespace,
                         },
                     },
@@ -722,10 +740,8 @@ async fn integration_test_basic() -> Result<(), BoxError> {
         ".extensions.apolloCacheDebugging.data[].cacheControl.created" => 0
     });
 
-    let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:reviews:type:Product:entity:cf4952a1e511b1bf2561a6193b4cdfc95f265a79e5cae4fd3e46fd9e75bc512f:representation::hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6"
-    );
-    check_cache_key!(&cache_key, conn);
+    let cache_key = "version:1.0:subgraph:reviews:type:Product:entity:cf4952a1e511b1bf2561a6193b4cdfc95f265a79e5cae4fd3e46fd9e75bc512f:representation::hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    check_cache_key!(&namespace, cache_key, &client);
 
     const SECRET_SHARED_KEY: &str = "supersecret";
     let http_service = apollo_router::TestHarness::builder()
@@ -739,8 +755,8 @@ async fn integration_test_basic() -> Result<(), BoxError> {
                 "subgraph": {
                     "all": {
                         "enabled": true,
-                        "postgres": {
-                            "url": "postgres://127.0.0.1",
+                        "redis": {
+                            "urls": ["redis://127.0.0.1:6379"],
                             "namespace": namespace,
                         },
                         "invalidation": {
@@ -819,33 +835,12 @@ async fn integration_test_basic() -> Result<(), BoxError> {
     assert!(response_status.is_success());
 
     // This should be in error because we invalidated this entity
-    let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:reviews:type:Product:entity:cf4952a1e511b1bf2561a6193b4cdfc95f265a79e5cae4fd3e46fd9e75bc512f:representation::hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6"
-    );
-    assert!(
-        sqlx::query_as!(
-            Record,
-            "SELECT data FROM cache WHERE cache_key = $1",
-            cache_key
-        )
-        .fetch_one(&mut conn)
-        .await
-        .is_err()
-    );
+    let cache_key = "version:1.0:subgraph:reviews:type:Product:entity:cf4952a1e511b1bf2561a6193b4cdfc95f265a79e5cae4fd3e46fd9e75bc512f:representation::hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    assert!(!cache_key_exists(&namespace, &cache_key, &client).await?);
+
     // This entry should still be in redis because we didn't invalidate this entry
-    let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:products:type:Query:hash:bf44683f0c222652b509d6efb8f324610c8671181de540a96a5016bd71daa7cc:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6"
-    );
-    assert!(
-        sqlx::query_as!(
-            Record,
-            "SELECT data FROM cache WHERE cache_key = $1",
-            cache_key
-        )
-        .fetch_one(&mut conn)
-        .await
-        .is_ok()
-    );
+    let cache_key = "version:1.0:subgraph:products:type:Query:hash:bf44683f0c222652b509d6efb8f324610c8671181de540a96a5016bd71daa7cc:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    assert!(cache_key_exists(&namespace, &cache_key, &client).await?);
 
     Ok(())
 }
@@ -858,8 +853,7 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
     let namespace = namespace();
     let schema = include_str!("../../src/testdata/supergraph_nested_fields.graphql");
 
-    let mut conn = PgConnection::connect("postgres://127.0.0.1").await?;
-    sqlx::migrate!().run(&mut conn).await.unwrap();
+    let client = redis_client().await?;
 
     let subgraphs = json!({
         "products": {
@@ -896,8 +890,8 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
                 "subgraph": {
                     "all": {
                         "enabled": true,
-                        "postgres": {
-                            "url": "postgres://127.0.0.1",
+                        "redis": {
+                            "urls": ["redis://127.0.0.1:6379"],
                             "namespace": namespace,
                             "pool_size": 3
                         },
@@ -931,15 +925,11 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
         ".extensions.apolloCacheDebugging.data[].cacheControl.created" => 0
     });
 
-    let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:products:type:Query:hash:f4f41cfa309494d41648c3a3c398c61cb00197696102199454a25a0dcdd2f592:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6"
-    );
-    check_cache_key!(&cache_key, conn);
+    let cache_key = "version:1.0:subgraph:products:type:Query:hash:f4f41cfa309494d41648c3a3c398c61cb00197696102199454a25a0dcdd2f592:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    check_cache_key!(&namespace, cache_key, &client);
 
-    let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:users:type:User:entity:b41dfad85edaabac7bb681098e9b23e21b3b8b9b8b1849babbd5a1300af64b43:representation:68fd4df7c06fd234bd0feb24e3300abcc06136ea8a9dd7533b7378f5fce7cfc4:hash:460b70e698b8c9d8496b0567e0f0848b9f7fef36e841a8a0b0771891150c35e5:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6"
-    );
-    check_cache_key!(&cache_key, conn);
+    let cache_key = "version:1.0:subgraph:users:type:User:entity:b41dfad85edaabac7bb681098e9b23e21b3b8b9b8b1849babbd5a1300af64b43:representation:68fd4df7c06fd234bd0feb24e3300abcc06136ea8a9dd7533b7378f5fce7cfc4:hash:460b70e698b8c9d8496b0567e0f0848b9f7fef36e841a8a0b0771891150c35e5:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    check_cache_key!(&namespace, cache_key, &client);
 
     let supergraph = apollo_router::TestHarness::builder()
         .configuration_json(json!({
@@ -953,8 +943,8 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
                 "subgraph": {
                     "all": {
                         "enabled": false,
-                        "postgres": {
-                            "url": "postgres://127.0.0.1",
+                        "redis": {
+                            "urls": ["redis://127.0.0.1:6379"],
                             "namespace": namespace,
                         },
                     },
@@ -995,10 +985,8 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
         ".extensions.apolloCacheDebugging.data[].cacheControl.created" => 0
     });
 
-    let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:users:type:User:entity:b41dfad85edaabac7bb681098e9b23e21b3b8b9b8b1849babbd5a1300af64b43:representation:68fd4df7c06fd234bd0feb24e3300abcc06136ea8a9dd7533b7378f5fce7cfc4:hash:460b70e698b8c9d8496b0567e0f0848b9f7fef36e841a8a0b0771891150c35e5:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6"
-    );
-    check_cache_key!(&cache_key, conn);
+    let cache_key = "version:1.0:subgraph:users:type:User:entity:b41dfad85edaabac7bb681098e9b23e21b3b8b9b8b1849babbd5a1300af64b43:representation:68fd4df7c06fd234bd0feb24e3300abcc06136ea8a9dd7533b7378f5fce7cfc4:hash:460b70e698b8c9d8496b0567e0f0848b9f7fef36e841a8a0b0771891150c35e5:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    check_cache_key!(&namespace, cache_key, &client);
 
     const SECRET_SHARED_KEY: &str = "supersecret";
     let http_service = apollo_router::TestHarness::builder()
@@ -1013,8 +1001,8 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
                 "subgraph": {
                     "all": {
                         "enabled": true,
-                        "postgres": {
-                            "url": "postgres://127.0.0.1",
+                        "redis": {
+                            "urls": ["redis://127.0.0.1:6379"],
                             "namespace": namespace,
                         },
                         "invalidation": {
@@ -1093,34 +1081,12 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
     assert!(response_status.is_success());
 
     // This should be in error because we invalidated this entity
-    let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:users:type:User:entity:b41dfad85edaabac7bb681098e9b23e21b3b8b9b8b1849babbd5a1300af64b43:representation:68fd4df7c06fd234bd0feb24e3300abcc06136ea8a9dd7533b7378f5fce7cfc4:hash:460b70e698b8c9d8496b0567e0f0848b9f7fef36e841a8a0b0771891150c35e5:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6"
-    );
-    assert!(
-        sqlx::query_as!(
-            Record,
-            "SELECT data FROM cache WHERE cache_key = $1",
-            cache_key
-        )
-        .fetch_one(&mut conn)
-        .await
-        .is_err()
-    );
+    let cache_key = "version:1.0:subgraph:users:type:User:entity:b41dfad85edaabac7bb681098e9b23e21b3b8b9b8b1849babbd5a1300af64b43:representation:68fd4df7c06fd234bd0feb24e3300abcc06136ea8a9dd7533b7378f5fce7cfc4:hash:460b70e698b8c9d8496b0567e0f0848b9f7fef36e841a8a0b0771891150c35e5:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    assert!(!cache_key_exists(&namespace, &cache_key, &client).await?);
 
     // This entry should still be in redis because we didn't invalidate this entry
-    let cache_key = format!(
-        "{namespace}-version:1.0:subgraph:products:type:Query:hash:f4f41cfa309494d41648c3a3c398c61cb00197696102199454a25a0dcdd2f592:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6"
-    );
-    assert!(
-        sqlx::query_as!(
-            Record,
-            "SELECT data FROM cache WHERE cache_key = $1",
-            cache_key
-        )
-        .fetch_one(&mut conn)
-        .await
-        .is_ok()
-    );
+    let cache_key = "version:1.0:subgraph:products:type:Query:hash:f4f41cfa309494d41648c3a3c398c61cb00197696102199454a25a0dcdd2f592:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    assert!(cache_key_exists(&namespace, &cache_key, &client).await?);
 
     Ok(())
 }

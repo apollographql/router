@@ -60,8 +60,8 @@ experimental_response_cache:
   subgraph:
     all:
       enabled: true
-      postgres:
-        url: "postgres://localhost:5432"
+      redis:
+        urls: [ "redis://localhost:6379" ]
       ttl: 360s # overrides the global TTL
 
 telemetry:

@@ -18,7 +18,7 @@ use crate::plugins::response_cache::plugin::INTERNAL_CACHE_TAG_PREFIX;
 use crate::plugins::response_cache::plugin::RESPONSE_CACHE_VERSION;
 use crate::plugins::response_cache::storage;
 use crate::plugins::response_cache::storage::CacheStorage;
-use crate::plugins::response_cache::storage::postgres::Storage;
+use crate::plugins::response_cache::storage::redis::Storage;
 
 #[derive(Clone)]
 pub(crate) struct Invalidation {

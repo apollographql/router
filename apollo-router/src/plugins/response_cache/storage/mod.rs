@@ -1,5 +1,5 @@
 mod error;
-pub(super) mod postgres;
+pub(super) mod redis;
 
 use std::collections::HashMap;
 use std::time::Duration;
