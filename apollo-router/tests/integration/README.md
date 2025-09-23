@@ -28,7 +28,7 @@ the [development README](../../DEVELOPMENT.md#testing) for nuances of how tests 
 **Enterprise tests:** Require GraphOS credentials (entity caching, Apollo reporting, etc.)  
 **CI-only tests:** Some Redis tests only run on Linux x86_64 in CI
 
-**Note:** Most integration tests are configured with `required_to_start: true` for Redis/PostgreSQL, meaning they will
+**Note:** Most integration tests are configured with `required_to_start: true` for Redis, meaning they will
 fail at startup if these services aren't available. A few tests use `required_to_start: false` and will continue without
 the services.
 
