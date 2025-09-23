@@ -1063,7 +1063,12 @@ impl Merger {
     }
 
     fn validate_query_root(&mut self) {
-        todo!("Implement query root validation")
+        if self.merged.schema().schema_definition.query.is_none() {
+            self.error_reporter_mut()
+                .add_error(CompositionError::QueryRootMissing {
+                    message: "Query root is missing from the merged schema".to_string(),
+                });
+        }
     }
 
     pub(in crate::merger) fn directive_applications_with_transformed_arguments(
@@ -1652,10 +1657,6 @@ impl Merger {
 
     fn should_use_join_directive_for_url(&self, url: &Url) -> bool {
         self.join_directive_identities.contains(&url.identity)
-    }
-
-    pub(in crate::merger) fn add_arguments_shallow<T>(&mut self, _sources: &Sources<T>, _dest: &T) {
-        todo!("Implement add_arguments_shallow")
     }
 
     pub(in crate::merger) fn merge_default_value<T>(

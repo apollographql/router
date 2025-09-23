@@ -16,8 +16,10 @@ use crate::ValidFederationSchema;
 use crate::bail;
 use crate::ensure;
 use crate::error::FederationError;
+use crate::error::Locations;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
+use crate::error::SubgraphLocation;
 use crate::internal_error;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::federation_spec_definition::FED_1;
@@ -457,6 +459,16 @@ impl<S: HasMetadata> Subgraph<S> {
             return interface_object_referencers.is_ok_and(|refs| refs.object_types.contains(obj));
         }
         false
+    }
+
+    pub(crate) fn node_locations<T>(&self, node: &Node<T>) -> Locations {
+        self.schema()
+            .node_locations(node)
+            .map(|range| SubgraphLocation {
+                subgraph: self.name.clone(),
+                range,
+            })
+            .collect()
     }
 }
 
