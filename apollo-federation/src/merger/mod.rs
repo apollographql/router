@@ -10,3 +10,4 @@ mod merge_input;
 mod merge_links;
 mod merge_type;
 mod merge_union;
+mod merge_interface;
