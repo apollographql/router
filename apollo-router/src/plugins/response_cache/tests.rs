@@ -25,9 +25,9 @@ use crate::plugins::response_cache::plugin::CACHE_DEBUG_HEADER_NAME;
 use crate::plugins::response_cache::plugin::CONTEXT_DEBUG_CACHE_KEYS;
 use crate::plugins::response_cache::plugin::CacheKeysContext;
 use crate::plugins::response_cache::plugin::Subgraph;
+use crate::plugins::response_cache::storage;
 use crate::plugins::response_cache::storage::CacheStorage;
 use crate::plugins::response_cache::storage::Document;
-use crate::plugins::response_cache::storage::postgres::PostgresCacheConfig;
 use crate::plugins::response_cache::storage::postgres::PostgresCacheStorage;
 use crate::plugins::response_cache::storage::postgres::default_batch_size;
 use crate::plugins::response_cache::storage::postgres::default_cleanup_interval;
@@ -72,7 +72,7 @@ async fn insert() {
         },
     });
 
-    let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let storage = PostgresCacheStorage::new(&storage::postgres::Config {
         cleanup_interval: default_cleanup_interval(),
         tls: Default::default(),
         url: "postgres://127.0.0.1".parse().unwrap(),
@@ -305,7 +305,7 @@ async fn insert_without_debug_header() {
         },
     });
 
-    let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let storage = PostgresCacheStorage::new(&storage::postgres::Config {
         tls: Default::default(),
         url: "postgres://127.0.0.1".parse().unwrap(),
         username: None,
@@ -522,7 +522,7 @@ async fn insert_with_requires() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build())
     ].into_iter().collect());
 
-    let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let storage = PostgresCacheStorage::new(&storage::postgres::Config {
         cleanup_interval: default_cleanup_interval(),
         tls: Default::default(),
         url: "postgres://127.0.0.1".parse().unwrap(),
@@ -753,7 +753,7 @@ async fn insert_with_nested_field_set() {
         }
     });
 
-    let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let storage = PostgresCacheStorage::new(&storage::postgres::Config {
         cleanup_interval: default_cleanup_interval(),
         tls: Default::default(),
         url: "postgres://127.0.0.1".parse().unwrap(),
@@ -988,7 +988,7 @@ async fn no_cache_control() {
         },
     });
 
-    let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let storage = PostgresCacheStorage::new(&storage::postgres::Config {
         cleanup_interval: default_cleanup_interval(),
         tls: Default::default(),
         url: "postgres://127.0.0.1".parse().unwrap(),
@@ -1150,7 +1150,7 @@ async fn no_store_from_request() {
         },
     });
 
-    let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let storage = PostgresCacheStorage::new(&storage::postgres::Config {
         cleanup_interval: default_cleanup_interval(),
         tls: Default::default(),
         url: "postgres://127.0.0.1".parse().unwrap(),
@@ -1353,7 +1353,7 @@ async fn private_only() {
             },
         });
 
-        let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let storage = PostgresCacheStorage::new(&storage::postgres::Config {
             cleanup_interval: default_cleanup_interval(),
             tls: Default::default(),
             url: "postgres://127.0.0.1".parse().unwrap(),
@@ -1624,7 +1624,7 @@ async fn private_and_public() {
         },
     });
 
-    let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let storage = PostgresCacheStorage::new(&storage::postgres::Config {
         cleanup_interval: default_cleanup_interval(),
         tls: Default::default(),
         url: "postgres://127.0.0.1".parse().unwrap(),
@@ -1902,7 +1902,7 @@ async fn polymorphic_private_and_public() {
             },
         });
 
-        let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let storage = PostgresCacheStorage::new(&storage::postgres::Config {
             cleanup_interval: default_cleanup_interval(),
             tls: Default::default(),
             url: "postgres://127.0.0.1".parse().unwrap(),
@@ -2424,7 +2424,7 @@ async fn private_without_private_id() {
             },
         });
 
-        let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let storage = PostgresCacheStorage::new(&storage::postgres::Config {
             cleanup_interval: default_cleanup_interval(),
             tls: Default::default(),
             url: "postgres://127.0.0.1".parse().unwrap(),
@@ -2650,7 +2650,7 @@ async fn no_data() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
     ].into_iter().collect());
 
-    let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let storage = PostgresCacheStorage::new(&storage::postgres::Config {
         cleanup_interval: default_cleanup_interval(),
         tls: Default::default(),
         url: "postgres://127.0.0.1".parse().unwrap(),
@@ -2928,7 +2928,7 @@ async fn missing_entities() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
     ].into_iter().collect());
 
-    let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let storage = PostgresCacheStorage::new(&storage::postgres::Config {
         cleanup_interval: default_cleanup_interval(),
         tls: Default::default(),
         url: "postgres://127.0.0.1".parse().unwrap(),
@@ -3112,7 +3112,7 @@ async fn invalidate_by_cache_tag() {
             },
         });
 
-        let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let storage = PostgresCacheStorage::new(&storage::postgres::Config {
             cleanup_interval: default_cleanup_interval(),
             tls: Default::default(),
             url: "postgres://127.0.0.1".parse().unwrap(),
@@ -3426,7 +3426,7 @@ async fn invalidate_by_type() {
             },
         });
 
-        let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let storage = PostgresCacheStorage::new(&storage::postgres::Config {
             tls: Default::default(),
             cleanup_interval: default_cleanup_interval(),
             url: "postgres://127.0.0.1".parse().unwrap(),
@@ -3705,7 +3705,7 @@ async fn invalidate_by_type() {
 async fn interval_cleanup_config() {
     let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
 
-    let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let storage = PostgresCacheStorage::new(&storage::postgres::Config {
         tls: Default::default(),
         cleanup_interval: std::time::Duration::from_secs(60 * 7), // Every 7 minutes
         url: "postgres://127.0.0.1".parse().unwrap(),
@@ -3733,7 +3733,7 @@ async fn interval_cleanup_config() {
     let cron = storage.get_cron().await.unwrap();
     assert_eq!(cron.0, String::from("*/7 * * * *"));
 
-    let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let storage = PostgresCacheStorage::new(&storage::postgres::Config {
         tls: Default::default(),
         cleanup_interval: std::time::Duration::from_secs(60 * 60 * 7), // Every 7 hours
         url: "postgres://127.0.0.1".parse().unwrap(),
@@ -3761,7 +3761,7 @@ async fn interval_cleanup_config() {
     let cron = storage.get_cron().await.unwrap();
     assert_eq!(cron.0, String::from("0 */7 * * *"));
 
-    let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
+    let storage = PostgresCacheStorage::new(&storage::postgres::Config {
         tls: Default::default(),
         cleanup_interval: std::time::Duration::from_secs(60 * 60 * 24 * 7), // Every 7 days
         url: "postgres://127.0.0.1".parse().unwrap(),
@@ -3968,7 +3968,7 @@ async fn expired_data_count() {
     async {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
 
-        let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let storage = PostgresCacheStorage::new(&storage::postgres::Config {
             tls: Default::default(),
             cleanup_interval: std::time::Duration::from_secs(60 * 7), // Every 7 minutes
             url: "postgres://127.0.0.1".parse().unwrap(),
@@ -4072,7 +4072,7 @@ async fn failure_mode_reconnect() {
         ]
         .into_iter()
         .collect();
-        let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let storage = PostgresCacheStorage::new(&storage::postgres::Config {
             tls: Default::default(),
             cleanup_interval: std::time::Duration::from_secs(60 * 7), // Every 7 minutes
             url: "postgres://127.0.0.1".parse().unwrap(),

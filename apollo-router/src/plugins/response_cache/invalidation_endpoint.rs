@@ -264,14 +264,14 @@ mod tests {
 
     use super::*;
     use crate::plugins::response_cache::plugin::StorageInterface;
-    use crate::plugins::response_cache::storage::postgres::PostgresCacheConfig;
+    use crate::plugins::response_cache::storage;
     use crate::plugins::response_cache::storage::postgres::PostgresCacheStorage;
     use crate::plugins::response_cache::storage::postgres::default_batch_size;
     use crate::plugins::response_cache::storage::postgres::default_cleanup_interval;
     use crate::plugins::response_cache::storage::postgres::default_pool_size;
 
-    fn storage_config(namespace: &str) -> PostgresCacheConfig {
-        PostgresCacheConfig {
+    fn storage_config(namespace: &str) -> storage::postgres::Config {
+        storage::postgres::Config {
             tls: Default::default(),
             cleanup_interval: default_cleanup_interval(),
             url: "postgres://127.0.0.1".parse().unwrap(),

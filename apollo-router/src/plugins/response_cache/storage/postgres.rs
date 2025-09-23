@@ -35,7 +35,7 @@ pub(crate) struct CacheEntryRow {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// Postgres cache configuration
-pub(crate) struct PostgresCacheConfig {
+pub(crate) struct Config {
     /// List of URL to Postgres
     pub(crate) url: url::Url,
 
@@ -167,7 +167,7 @@ pub(crate) enum PostgresCacheStorageError {
 }
 
 impl PostgresCacheStorage {
-    pub(crate) async fn new(conf: &PostgresCacheConfig) -> Result<Self, PostgresCacheStorageError> {
+    pub(crate) async fn new(conf: &Config) -> Result<Self, PostgresCacheStorageError> {
         // After 500ms trying to get a connection from PG pool it will return a warning in logs
         const ACQUIRE_SLOW_THRESHOLD: std::time::Duration = std::time::Duration::from_millis(500);
         let mut pg_connection: PgConnectOptions = conf.url.as_ref().parse()?;

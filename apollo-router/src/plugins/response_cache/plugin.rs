@@ -67,10 +67,10 @@ use crate::plugins::response_cache::cache_key::PrimaryCacheKeyRoot;
 use crate::plugins::response_cache::cache_key::hash_additional_data;
 use crate::plugins::response_cache::cache_key::hash_query;
 use crate::plugins::response_cache::metrics;
+use crate::plugins::response_cache::storage;
 use crate::plugins::response_cache::storage::CacheEntry;
 use crate::plugins::response_cache::storage::CacheStorage;
 use crate::plugins::response_cache::storage::Document;
-use crate::plugins::response_cache::storage::postgres::PostgresCacheConfig;
 use crate::plugins::response_cache::storage::postgres::PostgresCacheStorage;
 use crate::plugins::telemetry::LruSizeInstrument;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
@@ -244,7 +244,7 @@ const fn default_lru_private_queries_size() -> NonZeroUsize {
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 pub(crate) struct Subgraph {
     /// PostgreSQL configuration
-    pub(crate) postgres: Option<PostgresCacheConfig>,
+    pub(crate) postgres: Option<storage::postgres::Config>,
 
     /// expiration for all keys for this subgraph, unless overridden by the `Cache-Control` header in subgraph responses
     pub(crate) ttl: Option<Ttl>,
@@ -2525,7 +2525,7 @@ fn assemble_response_from_errors(
 }
 
 async fn check_connection(
-    postgres_config: PostgresCacheConfig,
+    postgres_config: storage::postgres::Config,
     cache_storage: Arc<OnceLock<PostgresCacheStorage>>,
     mut abort_signal: Receiver<()>,
     subgraph_name: Option<String>,
@@ -2639,7 +2639,7 @@ mod tests {
     #[tokio::test]
     async fn test_subgraph_enabled() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
-        let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let storage = PostgresCacheStorage::new(&storage::postgres::Config {
             tls: Default::default(),
             cleanup_interval: default_cleanup_interval(),
             url: "postgres://127.0.0.1".parse().unwrap(),
@@ -2695,7 +2695,7 @@ mod tests {
     #[tokio::test]
     async fn test_subgraph_ttl() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
-        let storage = PostgresCacheStorage::new(&PostgresCacheConfig {
+        let storage = PostgresCacheStorage::new(&storage::postgres::Config {
             tls: Default::default(),
             cleanup_interval: default_cleanup_interval(),
             url: "postgres://127.0.0.1".parse().unwrap(),
