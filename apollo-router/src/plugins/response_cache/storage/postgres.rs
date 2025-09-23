@@ -385,7 +385,7 @@ impl CacheStorage for Storage {
         Ok(())
     }
 
-    async fn internal_get(&self, cache_key: &str) -> StorageResult<super::CacheEntry> {
+    async fn internal_fetch(&self, cache_key: &str) -> StorageResult<super::CacheEntry> {
         let cache_key = self.namespaced(cache_key);
         let resp = sqlx::query_as!(
             CacheEntryRow,
@@ -402,7 +402,7 @@ impl CacheStorage for Storage {
         Ok(cache_entry_json)
     }
 
-    async fn internal_get_multiple(
+    async fn internal_fetch_multiple(
         &self,
         cache_keys: &[&str],
     ) -> StorageResult<Vec<Option<CacheEntry>>> {

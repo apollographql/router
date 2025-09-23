@@ -1297,7 +1297,7 @@ async fn cache_lookup_root(
 
     Span::current().record("cache.key", key.clone());
 
-    match cache.get(&key, &request.subgraph_name).await {
+    match cache.fetch(&key, &request.subgraph_name).await {
         Ok(value) => {
             if value.control.can_use() {
                 let control = value.control.clone();
@@ -1534,7 +1534,7 @@ async fn cache_lookup_entities(
         .iter()
         .map(|k| k.cache_key.as_str())
         .collect::<Vec<&str>>();
-    let cache_result = cache.get_multiple(&cache_keys, &name).await;
+    let cache_result = cache.fetch_multiple(&cache_keys, &name).await;
     Span::current().set_span_dyn_attribute(
         "cache.keys".into(),
         opentelemetry::Value::Array(Array::String(

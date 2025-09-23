@@ -84,12 +84,12 @@ pub(super) trait CacheStorage {
     }
 
     #[doc(hidden)]
-    async fn internal_get(&self, cache_key: &str) -> StorageResult<CacheEntry>;
+    async fn internal_fetch(&self, cache_key: &str) -> StorageResult<CacheEntry>;
 
-    async fn get(&self, cache_key: &str, subgraph_name: &str) -> StorageResult<CacheEntry> {
+    async fn fetch(&self, cache_key: &str, subgraph_name: &str) -> StorageResult<CacheEntry> {
         let now = Instant::now();
         let result = self
-            .internal_get(cache_key)
+            .internal_fetch(cache_key)
             .timeout(self.timeout_duration())
             .await;
 
@@ -106,12 +106,12 @@ pub(super) trait CacheStorage {
     }
 
     #[doc(hidden)]
-    async fn internal_get_multiple(
+    async fn internal_fetch_multiple(
         &self,
         cache_keys: &[&str],
     ) -> StorageResult<Vec<Option<CacheEntry>>>;
 
-    async fn get_multiple(
+    async fn fetch_multiple(
         &self,
         cache_keys: &[&str],
         subgraph_name: &str,
@@ -120,7 +120,7 @@ pub(super) trait CacheStorage {
 
         let now = Instant::now();
         let result = self
-            .internal_get_multiple(cache_keys)
+            .internal_fetch_multiple(cache_keys)
             .timeout(self.timeout_duration())
             .await;
 
