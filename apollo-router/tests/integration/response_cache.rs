@@ -244,7 +244,7 @@ async fn basic_cache_skips_subgraph_request() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn no_failure_when_unavailable_pg() {
+async fn no_failure_when_storage_unavailable() {
     if !graph_os_enabled() {
         return;
     }
