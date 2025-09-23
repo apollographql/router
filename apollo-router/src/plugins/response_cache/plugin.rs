@@ -71,7 +71,7 @@ use crate::plugins::response_cache::storage;
 use crate::plugins::response_cache::storage::CacheEntry;
 use crate::plugins::response_cache::storage::CacheStorage;
 use crate::plugins::response_cache::storage::Document;
-use crate::plugins::response_cache::storage::postgres::PostgresCacheStorage;
+use crate::plugins::response_cache::storage::postgres::Storage;
 use crate::plugins::telemetry::LruSizeInstrument;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::span_ext::SpanMarkError;
@@ -134,12 +134,12 @@ impl Drop for ResponseCache {
 
 #[derive(Clone)]
 pub(crate) struct StorageInterface {
-    all: Option<Arc<OnceLock<PostgresCacheStorage>>>,
-    subgraphs: HashMap<String, Arc<OnceLock<PostgresCacheStorage>>>,
+    all: Option<Arc<OnceLock<Storage>>>,
+    subgraphs: HashMap<String, Arc<OnceLock<Storage>>>,
 }
 
 impl StorageInterface {
-    pub(crate) fn get(&self, subgraph: &str) -> Option<&PostgresCacheStorage> {
+    pub(crate) fn get(&self, subgraph: &str) -> Option<&Storage> {
         match self.subgraphs.get(subgraph) {
             Some(subgraph) => subgraph.get(),
             None => self.all.as_ref().and_then(|s| s.get()),
@@ -197,14 +197,14 @@ impl StorageInterface {
 
 #[cfg(test)]
 impl StorageInterface {
-    pub(crate) fn replace_all(&self, storage: PostgresCacheStorage) -> Option<()> {
+    pub(crate) fn replace_all(&self, storage: Storage) -> Option<()> {
         self.all.as_ref()?.set(storage).ok()
     }
 }
 
 #[cfg(test)]
-impl From<PostgresCacheStorage> for StorageInterface {
-    fn from(storage: PostgresCacheStorage) -> Self {
+impl From<Storage> for StorageInterface {
+    fn from(storage: Storage) -> Self {
         Self {
             all: Some(Arc::new(storage.into())),
             subgraphs: HashMap::new(),
@@ -313,7 +313,7 @@ impl PluginPrivate for ResponseCache {
         if let Some(postgres) = &init.config.subgraph.all.postgres {
             let postgres_config = postgres.clone();
             let required_to_start = postgres_config.required_to_start;
-            all = match PostgresCacheStorage::new(&postgres_config).await {
+            all = match Storage::new(&postgres_config).await {
                 Ok(storage) => Some(Arc::new(OnceLock::from(storage))),
                 Err(e) => {
                     tracing::error!(
@@ -343,7 +343,7 @@ impl PluginPrivate for ResponseCache {
         for (subgraph, config) in &init.config.subgraph.subgraphs {
             if let Some(postgres) = &config.postgres {
                 let required_to_start = postgres.required_to_start;
-                let storage = match PostgresCacheStorage::new(postgres).await {
+                let storage = match Storage::new(postgres).await {
                     Ok(storage) => Arc::new(OnceLock::from(storage)),
                     Err(e) => {
                         tracing::error!(
@@ -571,7 +571,7 @@ impl ResponseCache {
         any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
     ))]
     pub(crate) async fn for_test(
-        storage: PostgresCacheStorage,
+        storage: Storage,
         subgraphs: HashMap<String, Subgraph>,
         supergraph_schema: Arc<Valid<Schema>>,
         truncate_namespace: bool,
@@ -1265,7 +1265,7 @@ impl CacheService {
 async fn cache_lookup_root(
     name: String,
     entity_type_opt: Option<&str>,
-    cache: PostgresCacheStorage,
+    cache: Storage,
     is_known_private: bool,
     private_id: Option<&str>,
     debug: bool,
@@ -1520,7 +1520,7 @@ async fn cache_lookup_entities(
     name: String,
     supergraph_schema: Arc<Valid<Schema>>,
     subgraph_enums: &HashMap<String, String>,
-    cache: PostgresCacheStorage,
+    cache: Storage,
     is_known_private: bool,
     private_id: Option<&str>,
     mut request: subgraph::Request,
@@ -1692,7 +1692,7 @@ fn update_cache_control(context: &Context, cache_control: &CacheControl) {
 }
 
 async fn cache_store_root_from_response(
-    cache: PostgresCacheStorage,
+    cache: Storage,
     default_subgraph_ttl: Duration,
     response: &subgraph::Response,
     cache_control: CacheControl,
@@ -1767,7 +1767,7 @@ async fn cache_store_root_from_response(
 
 #[allow(clippy::too_many_arguments)]
 async fn cache_store_entities_from_response(
-    cache: PostgresCacheStorage,
+    cache: Storage,
     default_subgraph_ttl: Duration,
     response: &mut subgraph::Response,
     cache_control: CacheControl,
@@ -2316,7 +2316,7 @@ fn filter_representations(
 async fn insert_entities_in_result(
     entities: &mut Vec<Value>,
     errors: &[Error],
-    cache: PostgresCacheStorage,
+    cache: Storage,
     default_subgraph_ttl: Duration,
     cache_control: CacheControl,
     result: &mut Vec<IntermediateResult>,
@@ -2526,7 +2526,7 @@ fn assemble_response_from_errors(
 
 async fn check_connection(
     postgres_config: storage::postgres::Config,
-    cache_storage: Arc<OnceLock<PostgresCacheStorage>>,
+    cache_storage: Arc<OnceLock<Storage>>,
     mut abort_signal: Receiver<()>,
     subgraph_name: Option<String>,
 ) {
@@ -2547,7 +2547,7 @@ async fn check_connection(
                     1,
                     "subgraph.name" = subgraph_name.clone().unwrap_or_default()
                 );
-                if let Ok(storage) = PostgresCacheStorage::new(&postgres_config).await {
+                if let Ok(storage) = Storage::new(&postgres_config).await {
                     if let Err(err) = storage.migrate().await {
                         tracing::error!(error = %err, "cannot migrate storage");
                     }
@@ -2629,31 +2629,26 @@ impl Ord for CacheKeySource {
     any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
 ))]
 mod tests {
-    use super::*;
-    use crate::plugins::response_cache::storage::postgres::default_batch_size;
-    use crate::plugins::response_cache::storage::postgres::default_cleanup_interval;
-    use crate::plugins::response_cache::storage::postgres::default_pool_size;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use apollo_compiler::Schema;
+
+    use super::Subgraph;
+    use super::Ttl;
+    use crate::configuration::subgraph::SubgraphConfiguration;
+    use crate::plugins::response_cache::plugin::ResponseCache;
+    use crate::plugins::response_cache::storage::postgres::Config;
+    use crate::plugins::response_cache::storage::postgres::Storage;
 
     const SCHEMA: &str = include_str!("../../testdata/orga_supergraph_cache_key.graphql");
 
     #[tokio::test]
     async fn test_subgraph_enabled() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
-        let storage = PostgresCacheStorage::new(&storage::postgres::Config {
-            tls: Default::default(),
-            cleanup_interval: default_cleanup_interval(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from("test_subgraph_enabled")),
-        })
-        .await
-        .unwrap();
+        let storage = Storage::new(&Config::test("test_subgraph_enabled"))
+            .await
+            .unwrap();
         let map = serde_json::json!({
             "user": {
                 "private_id": "sub"
@@ -2695,21 +2690,9 @@ mod tests {
     #[tokio::test]
     async fn test_subgraph_ttl() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
-        let storage = PostgresCacheStorage::new(&storage::postgres::Config {
-            tls: Default::default(),
-            cleanup_interval: default_cleanup_interval(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from("test_subgraph_ttl")),
-        })
-        .await
-        .unwrap();
+        let storage = Storage::new(&Config::test("test_subgraph_ttl"))
+            .await
+            .unwrap();
         let map = serde_json::json!({
             "user": {
                 "private_id": "sub",

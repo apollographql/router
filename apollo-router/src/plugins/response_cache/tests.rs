@@ -25,13 +25,10 @@ use crate::plugins::response_cache::plugin::CACHE_DEBUG_HEADER_NAME;
 use crate::plugins::response_cache::plugin::CONTEXT_DEBUG_CACHE_KEYS;
 use crate::plugins::response_cache::plugin::CacheKeysContext;
 use crate::plugins::response_cache::plugin::Subgraph;
-use crate::plugins::response_cache::storage;
 use crate::plugins::response_cache::storage::CacheStorage;
 use crate::plugins::response_cache::storage::Document;
-use crate::plugins::response_cache::storage::postgres::PostgresCacheStorage;
-use crate::plugins::response_cache::storage::postgres::default_batch_size;
-use crate::plugins::response_cache::storage::postgres::default_cleanup_interval;
-use crate::plugins::response_cache::storage::postgres::default_pool_size;
+use crate::plugins::response_cache::storage::postgres::Config;
+use crate::plugins::response_cache::storage::postgres::Storage;
 use crate::services::subgraph;
 use crate::services::supergraph;
 
@@ -72,21 +69,9 @@ async fn insert() {
         },
     });
 
-    let storage = PostgresCacheStorage::new(&storage::postgres::Config {
-        cleanup_interval: default_cleanup_interval(),
-        tls: Default::default(),
-        url: "postgres://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: Some(String::from("test_insert_simple")),
-    })
-    .await
-    .unwrap();
+    let storage = Storage::new(&Config::test("test_insert_simple"))
+        .await
+        .unwrap();
     let map = [
         (
             "user".to_string(),
@@ -305,21 +290,9 @@ async fn insert_without_debug_header() {
         },
     });
 
-    let storage = PostgresCacheStorage::new(&storage::postgres::Config {
-        tls: Default::default(),
-        url: "postgres://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        cleanup_interval: Duration::from_secs(60 * 60),
-        namespace: Some(String::from("insert_without_debug_header")),
-    })
-    .await
-    .unwrap();
+    let storage = Storage::new(&Config::test("insert_without_debug_header"))
+        .await
+        .unwrap();
     let map = [
         (
             "user".to_string(),
@@ -492,17 +465,17 @@ async fn insert_with_requires() {
 
     let subgraphs = MockedSubgraphs([
         ("products", MockSubgraph::builder().with_json(
-                serde_json::json!{{"query":"{ topProducts { __typename upc name price weight } }"}},
-                serde_json::json!{{"data": {"topProducts": [{
+            serde_json::json! {{"query":"{ topProducts { __typename upc name price weight } }"}},
+            serde_json::json! {{"data": {"topProducts": [{
                     "__typename": "Product",
                     "upc": "1",
                     "name": "Test",
                     "price": 150,
                     "weight": 5
-                }]}}}
+                }]}}},
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build()),
         ("inventory", MockSubgraph::builder().with_json(
-            serde_json::json!{{
+            serde_json::json! {{
                 "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { shippingEstimate } } }",
                 "variables": {
                     "representations": [
@@ -514,29 +487,17 @@ async fn insert_with_requires() {
                         }
                     ]
             }}},
-            serde_json::json!{{"data": {
+            serde_json::json! {{"data": {
                 "_entities": [{
                     "shippingEstimate": 15
                 }]
-            }}}
+            }}},
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build())
     ].into_iter().collect());
 
-    let storage = PostgresCacheStorage::new(&storage::postgres::Config {
-        cleanup_interval: default_cleanup_interval(),
-        tls: Default::default(),
-        url: "postgres://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: Some(String::from("test_insert_with_requires")),
-    })
-    .await
-    .unwrap();
+    let storage = Storage::new(&Config::test("test_insert_with_requires"))
+        .await
+        .unwrap();
     let map: HashMap<String, Subgraph> = [
         (
             "products".to_string(),
@@ -753,21 +714,9 @@ async fn insert_with_nested_field_set() {
         }
     });
 
-    let storage = PostgresCacheStorage::new(&storage::postgres::Config {
-        cleanup_interval: default_cleanup_interval(),
-        tls: Default::default(),
-        url: "postgres://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: Some(String::from("test_insert_with_nested_field_set")),
-    })
-    .await
-    .unwrap();
+    let storage = Storage::new(&Config::test("test_insert_with_nested_field_set"))
+        .await
+        .unwrap();
     let map = [
         (
             "products".to_string(),
@@ -988,21 +937,9 @@ async fn no_cache_control() {
         },
     });
 
-    let storage = PostgresCacheStorage::new(&storage::postgres::Config {
-        cleanup_interval: default_cleanup_interval(),
-        tls: Default::default(),
-        url: "postgres://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: Some(String::from("test_no_cache_control")),
-    })
-    .await
-    .unwrap();
+    let storage = Storage::new(&Config::test("test_no_cache_control"))
+        .await
+        .unwrap();
     let response_cache = ResponseCache::for_test(
         storage.clone(),
         HashMap::new(),
@@ -1150,21 +1087,9 @@ async fn no_store_from_request() {
         },
     });
 
-    let storage = PostgresCacheStorage::new(&storage::postgres::Config {
-        cleanup_interval: default_cleanup_interval(),
-        tls: Default::default(),
-        url: "postgres://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: Some(String::from("test_no_store_from_client")),
-    })
-    .await
-    .unwrap();
+    let storage = Storage::new(&Config::test("test_no_store_from_client"))
+        .await
+        .unwrap();
     let response_cache = ResponseCache::for_test(
         storage.clone(),
         HashMap::new(),
@@ -1353,21 +1278,9 @@ async fn private_only() {
             },
         });
 
-        let storage = PostgresCacheStorage::new(&storage::postgres::Config {
-            cleanup_interval: default_cleanup_interval(),
-            tls: Default::default(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from("private_only")),
-        })
-        .await
-        .unwrap();
+        let storage = Storage::new(&Config::test("private_only"))
+            .await
+            .unwrap();
         let map = [
             (
                 "user".to_string(),
@@ -1390,8 +1303,8 @@ async fn private_only() {
                 },
             ),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         let response_cache =
             ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, false)
                 .await
@@ -1624,21 +1537,9 @@ async fn private_and_public() {
         },
     });
 
-    let storage = PostgresCacheStorage::new(&storage::postgres::Config {
-        cleanup_interval: default_cleanup_interval(),
-        tls: Default::default(),
-        url: "postgres://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: Some(String::from("private_and_public")),
-    })
-    .await
-    .unwrap();
+    let storage = Storage::new(&Config::test("private_and_public"))
+        .await
+        .unwrap();
     let map = [
         (
             "user".to_string(),
@@ -1902,21 +1803,9 @@ async fn polymorphic_private_and_public() {
             },
         });
 
-        let storage = PostgresCacheStorage::new(&storage::postgres::Config {
-            cleanup_interval: default_cleanup_interval(),
-            tls: Default::default(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from("polymorphic_private_and_public")),
-        })
-        .await
-        .unwrap();
+        let storage = Storage::new(&Config::test("polymorphic_private_and_public"))
+            .await
+            .unwrap();
         let map = [
             (
                 "user".to_string(),
@@ -1939,8 +1828,8 @@ async fn polymorphic_private_and_public() {
                 },
             ),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         let response_cache =
             ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, false)
                 .await
@@ -2424,21 +2313,9 @@ async fn private_without_private_id() {
             },
         });
 
-        let storage = PostgresCacheStorage::new(&storage::postgres::Config {
-            cleanup_interval: default_cleanup_interval(),
-            tls: Default::default(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from("private_without_private_id")),
-        })
-        .await
-        .unwrap();
+        let storage = Storage::new(&Config::test("private_without_private_id"))
+            .await
+            .unwrap();
         let map = [
             (
                 "user".to_string(),
@@ -2459,8 +2336,8 @@ async fn private_without_private_id() {
                 },
             ),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         let response_cache =
             ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, false)
                 .await
@@ -2610,8 +2487,8 @@ async fn no_data() {
 
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
-                serde_json::json!{{"query":"{currentUser{allOrganizations{__typename id}}}"}},
-                serde_json::json!{{"data": {"currentUser": { "allOrganizations": [
+            serde_json::json! {{"query":"{currentUser{allOrganizations{__typename id}}}"}},
+            serde_json::json! {{"data": {"currentUser": { "allOrganizations": [
                     {
                         "__typename": "Organization",
                         "id": "1"
@@ -2620,10 +2497,10 @@ async fn no_data() {
                         "__typename": "Organization",
                         "id": "3"
                     }
-                ] }}}}
+                ] }}}},
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("no-store")).build()),
         ("orga", MockSubgraph::builder().with_json(
-            serde_json::json!{{
+            serde_json::json! {{
                 "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
             "variables": {
                 "representations": [
@@ -2637,7 +2514,7 @@ async fn no_data() {
                     }
                 ]
             }}},
-            serde_json::json!{{
+            serde_json::json! {{
                 "data": {
                     "_entities": [{
                     "name": "Organization 1",
@@ -2646,25 +2523,11 @@ async fn no_data() {
                     "name": "Organization 3"
                 }]
             }
-            }}
+            }},
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
     ].into_iter().collect());
 
-    let storage = PostgresCacheStorage::new(&storage::postgres::Config {
-        cleanup_interval: default_cleanup_interval(),
-        tls: Default::default(),
-        url: "postgres://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: Some(String::from("no_data")),
-    })
-    .await
-    .unwrap();
+    let storage = Storage::new(&Config::test("no_data")).await.unwrap();
     let map = [
         (
             "user".to_string(),
@@ -2886,8 +2749,8 @@ async fn missing_entities() {
     let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
-                serde_json::json!{{"query":"{currentUser{allOrganizations{__typename id}}}"}},
-                serde_json::json!{{"data": {"currentUser": { "allOrganizations": [
+            serde_json::json! {{"query":"{currentUser{allOrganizations{__typename id}}}"}},
+            serde_json::json! {{"data": {"currentUser": { "allOrganizations": [
                     {
                         "__typename": "Organization",
                         "id": "1"
@@ -2896,10 +2759,10 @@ async fn missing_entities() {
                         "__typename": "Organization",
                         "id": "2"
                     }
-                ] }}}}
+                ] }}}},
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("no-store")).build()),
         ("orga", MockSubgraph::builder().with_json(
-            serde_json::json!{{
+            serde_json::json! {{
                 "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
             "variables": {
                 "representations": [
@@ -2913,7 +2776,7 @@ async fn missing_entities() {
                     }
                 ]
             }}},
-            serde_json::json!{{
+            serde_json::json! {{
                 "data": {
                     "_entities": [
                         {
@@ -2924,25 +2787,13 @@ async fn missing_entities() {
                         }
                     ]
             }
-            }}
+            }},
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
     ].into_iter().collect());
 
-    let storage = PostgresCacheStorage::new(&storage::postgres::Config {
-        cleanup_interval: default_cleanup_interval(),
-        tls: Default::default(),
-        url: "postgres://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: Some(String::from("missing_entities")),
-    })
-    .await
-    .unwrap();
+    let storage = Storage::new(&Config::test("missing_entities"))
+        .await
+        .unwrap();
     let map = [
         (
             "user".to_string(),
@@ -3012,9 +2863,9 @@ async fn missing_entities() {
     .unwrap();
 
     let subgraphs = MockedSubgraphs([
-            ("user", MockSubgraph::builder().with_json(
-                    serde_json::json!{{"query":"{currentUser{allOrganizations{__typename id}}}"}},
-                    serde_json::json!{{"data": {"currentUser": { "allOrganizations": [
+        ("user", MockSubgraph::builder().with_json(
+            serde_json::json! {{"query":"{currentUser{allOrganizations{__typename id}}}"}},
+            serde_json::json! {{"data": {"currentUser": { "allOrganizations": [
                         {
                             "__typename": "Organization",
                             "id": "1"
@@ -3027,10 +2878,10 @@ async fn missing_entities() {
                             "__typename": "Organization",
                             "id": "3"
                         }
-                    ] }}}}
-            ).with_header(CACHE_CONTROL, HeaderValue::from_static("no-store")).build()),
-            ("orga", MockSubgraph::builder().with_json(
-                serde_json::json!{{
+                    ] }}}},
+        ).with_header(CACHE_CONTROL, HeaderValue::from_static("no-store")).build()),
+        ("orga", MockSubgraph::builder().with_json(
+            serde_json::json! {{
                     "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
                 "variables": {
                     "representations": [
@@ -3040,14 +2891,14 @@ async fn missing_entities() {
                         }
                     ]
                 }}},
-                serde_json::json!{{
+            serde_json::json! {{
                     "data": null,
                     "errors": [{
                         "message": "Organization not found",
                     }]
-                }}
-            ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
-        ].into_iter().collect());
+                }},
+        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
+    ].into_iter().collect());
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -3112,21 +2963,9 @@ async fn invalidate_by_cache_tag() {
             },
         });
 
-        let storage = PostgresCacheStorage::new(&storage::postgres::Config {
-            cleanup_interval: default_cleanup_interval(),
-            tls: Default::default(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from("test_invalidate_by_cache_tag")),
-        })
-        .await
-        .unwrap();
+        let storage = Storage::new(&Config::test("test_invalidate_by_cache_tag"))
+            .await
+            .unwrap();
         let map = [
             (
                 "user".to_string(),
@@ -3149,8 +2988,8 @@ async fn invalidate_by_cache_tag() {
                 },
             ),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         let response_cache =
             ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, false)
                 .await
@@ -3390,7 +3229,6 @@ async fn invalidate_by_cache_tag() {
         }
         "#);
         assert_histogram_sum!("apollo.router.operations.response_cache.fetch.entity", 3u64, "subgraph.name" = "orga", "graphql.type" = "Organization");
-
     }.with_metrics().await;
 }
 
@@ -3426,21 +3264,9 @@ async fn invalidate_by_type() {
             },
         });
 
-        let storage = PostgresCacheStorage::new(&storage::postgres::Config {
-            tls: Default::default(),
-            cleanup_interval: default_cleanup_interval(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from("test_invalidate_by_subgraph")),
-        })
-        .await
-        .unwrap();
+        let storage = Storage::new(&Config::test("test_invalidate_by_subgraph"))
+            .await
+            .unwrap();
         let map = [
             (
                 "user".to_string(),
@@ -3463,8 +3289,8 @@ async fn invalidate_by_type() {
                 },
             ),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         let response_cache =
             ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, false)
                 .await
@@ -3619,7 +3445,7 @@ async fn invalidate_by_type() {
 
         // now we invalidate data
         let res = invalidation
-            .invalidate(vec![InvalidationRequest::Type {subgraph:"orga".to_string(), r#type: "Organization".to_string() }])
+            .invalidate(vec![InvalidationRequest::Type { subgraph: "orga".to_string(), r#type: "Organization".to_string() }])
             .await
             .unwrap();
         assert_eq!(res, 1);
@@ -3697,7 +3523,6 @@ async fn invalidate_by_type() {
           }
         }
         "#);
-
     }.with_metrics().await;
 }
 
@@ -3705,18 +3530,9 @@ async fn invalidate_by_type() {
 async fn interval_cleanup_config() {
     let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
 
-    let storage = PostgresCacheStorage::new(&storage::postgres::Config {
-        tls: Default::default(),
+    let storage = Storage::new(&Config {
         cleanup_interval: std::time::Duration::from_secs(60 * 7), // Every 7 minutes
-        url: "postgres://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: Some(String::from("interval_cleanup_config_1")),
+        ..Config::test("interval_cleanup_config_1")
     })
     .await
     .unwrap();
@@ -3733,18 +3549,9 @@ async fn interval_cleanup_config() {
     let cron = storage.get_cron().await.unwrap();
     assert_eq!(cron.0, String::from("*/7 * * * *"));
 
-    let storage = PostgresCacheStorage::new(&storage::postgres::Config {
-        tls: Default::default(),
+    let storage = Storage::new(&Config {
         cleanup_interval: std::time::Duration::from_secs(60 * 60 * 7), // Every 7 hours
-        url: "postgres://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: Some(String::from("interval_cleanup_config_2")),
+        ..Config::test("interval_cleanup_config_2")
     })
     .await
     .unwrap();
@@ -3761,18 +3568,9 @@ async fn interval_cleanup_config() {
     let cron = storage.get_cron().await.unwrap();
     assert_eq!(cron.0, String::from("0 */7 * * *"));
 
-    let storage = PostgresCacheStorage::new(&storage::postgres::Config {
-        tls: Default::default(),
+    let storage = Storage::new(&Config {
         cleanup_interval: std::time::Duration::from_secs(60 * 60 * 24 * 7), // Every 7 days
-        url: "postgres://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: Some(String::from("interval_cleanup_config_2")),
+        ..Config::test("interval_cleanup_config_2")
     })
     .await
     .unwrap();
@@ -3968,21 +3766,9 @@ async fn expired_data_count() {
     async {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
 
-        let storage = PostgresCacheStorage::new(&storage::postgres::Config {
-            tls: Default::default(),
-            cleanup_interval: std::time::Duration::from_secs(60 * 7), // Every 7 minutes
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from("expired_data_count")),
-        })
-        .await
-        .unwrap();
+        let storage = Storage::new(&Config::test("expired_data_count"))
+            .await
+            .unwrap();
         let _response_cache = ResponseCache::for_test(
             storage.clone(),
             Default::default(),
@@ -4070,23 +3856,11 @@ async fn failure_mode_reconnect() {
                 },
             ),
         ]
-        .into_iter()
-        .collect();
-        let storage = PostgresCacheStorage::new(&storage::postgres::Config {
-            tls: Default::default(),
-            cleanup_interval: std::time::Duration::from_secs(60 * 7), // Every 7 minutes
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from("failure_mode_reconnect")),
-        })
-        .await
-        .unwrap();
+            .into_iter()
+            .collect();
+        let storage = Storage::new(&Config::test("failure_mode_reconnect"))
+            .await
+            .unwrap();
         storage.migrate().await.unwrap();
         storage.truncate_namespace().await.unwrap();
 
@@ -4301,6 +4075,6 @@ async fn failure_mode_reconnect() {
             "code" = "NO_STORAGE"
         );
     }
-    .with_metrics()
-    .await;
+        .with_metrics()
+        .await;
 }

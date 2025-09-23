@@ -19,7 +19,7 @@ use crate::plugins::response_cache::plugin::INTERNAL_CACHE_TAG_PREFIX;
 use crate::plugins::response_cache::plugin::RESPONSE_CACHE_VERSION;
 use crate::plugins::response_cache::storage;
 use crate::plugins::response_cache::storage::CacheStorage;
-use crate::plugins::response_cache::storage::postgres::PostgresCacheStorage;
+use crate::plugins::response_cache::storage::postgres::Storage;
 
 #[derive(Clone)]
 pub(crate) struct Invalidation {
@@ -85,7 +85,7 @@ impl Invalidation {
 
     async fn handle_request(
         &self,
-        storage: &PostgresCacheStorage,
+        storage: &Storage,
         request: &mut InvalidationRequest,
     ) -> Result<u64, InvalidationError> {
         let invalidation_key = request.invalidation_key();

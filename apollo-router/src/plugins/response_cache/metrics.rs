@@ -9,7 +9,7 @@ use tokio_stream::StreamExt;
 use tokio_stream::wrappers::IntervalStream;
 
 use crate::metrics::meter_provider;
-use crate::plugins::response_cache::storage::postgres::PostgresCacheStorage;
+use crate::plugins::response_cache::storage::postgres::Storage;
 
 pub(crate) const CACHE_INFO_SUBGRAPH_CONTEXT_KEY: &str =
     "apollo::router::response_cache::cache_info_subgraph";
@@ -31,7 +31,7 @@ impl From<CacheMetricContextKey> for String {
 /// This task counts all rows in the given Postgres DB that is expired and will be removed when pg_cron will be triggered
 /// parameter subgraph_name is optional and is None when the database is the global one, and Some(...) when it's a database configured for a specific subgraph
 pub(super) async fn expired_data_task(
-    storage: PostgresCacheStorage,
+    storage: Storage,
     mut abort_signal: broadcast::Receiver<()>,
     subgraph_name: Option<String>,
 ) {

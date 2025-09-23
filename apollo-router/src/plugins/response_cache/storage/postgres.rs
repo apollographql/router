@@ -87,27 +87,46 @@ pub(crate) struct Config {
     pub(crate) tls: TlsConfig,
 }
 
-pub(in crate::plugins::response_cache) const fn default_required_to_start() -> bool {
+#[cfg(test)]
+impl Config {
+    pub(crate) fn test(namespace: &str) -> Self {
+        Self {
+            cleanup_interval: default_cleanup_interval(),
+            tls: Default::default(),
+            url: "postgres://127.0.0.1".parse().unwrap(),
+            username: None,
+            password: None,
+            idle_timeout: Duration::from_secs(5),
+            acquire_timeout: Duration::from_millis(50),
+            required_to_start: true,
+            pool_size: default_pool_size(),
+            batch_size: default_batch_size(),
+            namespace: Some(String::from(namespace)),
+        }
+    }
+}
+
+const fn default_required_to_start() -> bool {
     false
 }
 
-pub(in crate::plugins::response_cache) const fn default_pool_size() -> u32 {
+const fn default_pool_size() -> u32 {
     5
 }
 
-pub(in crate::plugins::response_cache) const fn default_cleanup_interval() -> Duration {
+const fn default_cleanup_interval() -> Duration {
     Duration::from_secs(60 * 60)
 }
 
-pub(in crate::plugins::response_cache) const fn default_idle_timeout() -> Duration {
+const fn default_idle_timeout() -> Duration {
     Duration::from_secs(60)
 }
 
-pub(in crate::plugins::response_cache) const fn default_acquire_timeout() -> Duration {
+const fn default_acquire_timeout() -> Duration {
     Duration::from_millis(50)
 }
 
-pub(in crate::plugins::response_cache) const fn default_batch_size() -> usize {
+const fn default_batch_size() -> usize {
     100
 }
 
@@ -149,7 +168,7 @@ impl TryFrom<CacheEntryRow> for CacheEntry {
 }
 
 #[derive(Clone)]
-pub(crate) struct PostgresCacheStorage {
+pub(crate) struct Storage {
     batch_size: usize,
     pg_pool: PgPool,
     namespace: Option<String>,
@@ -166,7 +185,7 @@ pub(crate) enum PostgresCacheStorageError {
     InvalidCleanupInterval(String),
 }
 
-impl PostgresCacheStorage {
+impl Storage {
     pub(crate) async fn new(conf: &Config) -> Result<Self, PostgresCacheStorageError> {
         // After 500ms trying to get a connection from PG pool it will return a warning in logs
         const ACQUIRE_SLOW_THRESHOLD: std::time::Duration = std::time::Duration::from_millis(500);
@@ -216,7 +235,7 @@ impl PostgresCacheStorage {
     }
 }
 
-impl CacheStorage for PostgresCacheStorage {
+impl CacheStorage for Storage {
     fn timeout_duration(&self) -> Duration {
         // NB: this will be replaced
         Duration::from_secs(1)
@@ -477,7 +496,7 @@ impl CacheStorage for PostgresCacheStorage {
     }
 }
 
-impl PostgresCacheStorage {
+impl Storage {
     pub(crate) async fn expired_data_count(&self) -> anyhow::Result<u64> {
         match &self.namespace {
             Some(ns) => {

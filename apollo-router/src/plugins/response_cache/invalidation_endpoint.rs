@@ -264,34 +264,14 @@ mod tests {
 
     use super::*;
     use crate::plugins::response_cache::plugin::StorageInterface;
-    use crate::plugins::response_cache::storage;
-    use crate::plugins::response_cache::storage::postgres::PostgresCacheStorage;
-    use crate::plugins::response_cache::storage::postgres::default_batch_size;
-    use crate::plugins::response_cache::storage::postgres::default_cleanup_interval;
-    use crate::plugins::response_cache::storage::postgres::default_pool_size;
-
-    fn storage_config(namespace: &str) -> storage::postgres::Config {
-        storage::postgres::Config {
-            tls: Default::default(),
-            cleanup_interval: default_cleanup_interval(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(500),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from(namespace)),
-        }
-    }
+    use crate::plugins::response_cache::storage::postgres::Config;
+    use crate::plugins::response_cache::storage::postgres::Storage;
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key() {
-        let storage =
-            PostgresCacheStorage::new(&storage_config("test_invalidation_service_bad_shared_key"))
-                .await
-                .unwrap();
+        let storage = Storage::new(&Config::test("test_invalidation_service_bad_shared_key"))
+            .await
+            .unwrap();
         let storage = Arc::new(StorageInterface::from(storage));
         let invalidation = Invalidation::new(storage.clone()).await.unwrap();
 
@@ -336,7 +316,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key_subgraph() {
-        let storage = PostgresCacheStorage::new(&storage_config(
+        let storage = Storage::new(&Config::test(
             "test_invalidation_service_bad_shared_key_subgraph",
         ))
         .await
@@ -394,7 +374,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key_subgraphs() {
-        let storage = PostgresCacheStorage::new(&storage_config(
+        let storage = Storage::new(&Config::test(
             "test_invalidation_service_bad_shared_key_subgraphs",
         ))
         .await
@@ -472,7 +452,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation_service_good_shared_key_subgraphs() {
-        let storage = PostgresCacheStorage::new(&storage_config(
+        let storage = Storage::new(&Config::test(
             "test_invalidation_service_good_shared_key_subgraphs",
         ))
         .await
