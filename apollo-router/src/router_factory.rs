@@ -30,6 +30,7 @@ use crate::plugin::PluginFactory;
 use crate::plugin::PluginInit;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::Subscription;
+use crate::plugins::subscription::notification::Notify;
 use crate::plugins::telemetry::reload::otel::apollo_opentelemetry_initialized;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::plugins::traffic_shaping::TrafficShaping;
@@ -539,7 +540,7 @@ pub(crate) async fn add_plugin(
     supergraph_schema: Arc<Valid<apollo_compiler::Schema>>,
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     launch_id: Option<Arc<String>>,
-    notify: &crate::notification::Notify<String, crate::graphql::Response>,
+    notify: &Notify<String, crate::graphql::Response>,
     plugin_instances: &mut Plugins,
     errors: &mut Vec<ConfigurationError>,
     license: Arc<LicenseState>,

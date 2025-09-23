@@ -13,12 +13,12 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use self::callback::CallbackService;
+use self::notification::Notify;
 use crate::Endpoint;
 use crate::ListenAddr;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::layers::ServiceBuilderExt;
-use crate::notification::Notify;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::protocols::websocket::WebSocketProtocol;
@@ -29,6 +29,7 @@ use crate::services::SubgraphResponse;
 
 mod callback;
 mod execution;
+pub(crate) mod notification;
 // Only pub(crate) for tests: tests that rely on subscription internals should probably
 // be moved into the plugin.
 pub(crate) mod subgraph;

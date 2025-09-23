@@ -22,8 +22,8 @@ use tracing_futures::Instrument;
 use crate::context::Context;
 use crate::graphql;
 use crate::graphql::Response;
-use crate::notification::Notify;
-use crate::notification::NotifyError;
+use crate::plugins::subscription::notification::Notify;
+use crate::plugins::subscription::notification::NotifyError;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 
