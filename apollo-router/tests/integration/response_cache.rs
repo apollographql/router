@@ -4,13 +4,11 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use apollo_router::graphql;
-use apollo_router::services;
-use apollo_router::services::router::body::from_bytes;
+use apollo_router::services::router;
 use apollo_router::services::supergraph;
 use apollo_router::test_harness::HttpService;
 use http::HeaderMap;
 use http::HeaderValue;
-use http::Method;
 use http_body_util::BodyExt as _;
 use indexmap::IndexMap;
 use serde_json::Value;
@@ -32,7 +30,7 @@ pub(crate) fn namespace() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
 
-fn base_config() -> serde_json::Value {
+fn base_config() -> Value {
     json!({
         "include_subgraph_errors": {
             "all": true,
@@ -62,7 +60,7 @@ fn base_config() -> serde_json::Value {
     })
 }
 
-fn failure_config() -> serde_json::Value {
+fn failure_config() -> Value {
     json!({
         "include_subgraph_errors": {
             "all": true,
@@ -92,7 +90,7 @@ fn failure_config() -> serde_json::Value {
     })
 }
 
-fn base_subgraphs() -> serde_json::Value {
+fn base_subgraphs() -> Value {
     json!({
         "products": {
             "headers": {"cache-control": "public"},
@@ -124,8 +122,8 @@ fn base_subgraphs() -> serde_json::Value {
 }
 
 async fn harness(
-    mut config: serde_json::Value,
-    subgraphs: serde_json::Value,
+    mut config: Value,
+    subgraphs: Value,
 ) -> (HttpService, Arc<IndexMap<String, Arc<AtomicUsize>>>) {
     let counters = Arc::new(IndexMap::from([
         ("products".into(), Default::default()),
@@ -165,8 +163,8 @@ async fn make_graphql_request(router: &mut HttpService) -> (HeaderMap<String>, g
     make_http_request(router, request.into()).await
 }
 
-fn graphql_request(query: &str) -> services::router::Request {
-    services::supergraph::Request::fake_builder()
+fn graphql_request(query: &str) -> router::Request {
+    supergraph::Request::fake_builder()
         .query(query)
         .build()
         .unwrap()
@@ -176,16 +174,15 @@ fn graphql_request(query: &str) -> services::router::Request {
 
 async fn make_json_request(
     router: &mut HttpService,
-    request: http::Request<serde_json::Value>,
-) -> (HeaderMap<String>, serde_json::Value) {
-    let request =
-        request.map(|body| services::router::body::from_bytes(serde_json::to_vec(&body).unwrap()));
+    request: http::Request<Value>,
+) -> (HeaderMap<String>, Value) {
+    let request = request.map(|body| router::body::from_bytes(serde_json::to_vec(&body).unwrap()));
     make_http_request(router, request).await
 }
 
 async fn make_http_request<ResponseBody>(
     router: &mut HttpService,
-    request: http::Request<apollo_router::services::router::Body>,
+    request: http::Request<router::Body>,
 ) -> (HeaderMap<String>, ResponseBody)
 where
     ResponseBody: for<'a> serde::Deserialize<'a>,
@@ -376,7 +373,7 @@ async fn invalidate_with_endpoint_by_type() {
     // Needed because insert in the cache is async
     for i in 0..10 {
         let (_headers, body) = make_json_request(&mut router, request.clone()).await;
-        let expected_value = serde_json::json!({"count": 2});
+        let expected_value = json!({"count": 2});
 
         if body == expected_value {
             break;
@@ -423,7 +420,7 @@ async fn invalidate_with_endpoint_by_entity_cache_tag() {
     // Needed because insert in the cache is async
     for i in 0..10 {
         let (_headers, body) = make_json_request(&mut router, request.clone()).await;
-        let expected_value = serde_json::json!({"count": 1});
+        let expected_value = json!({"count": 1});
 
         if body == expected_value {
             break;
@@ -458,7 +455,7 @@ async fn cache_control_merging_single_fetch() {
         make_http_request::<graphql::Response>(&mut router, graphql_request(query).into()).await;
     insta::assert_snapshot!(&headers["cache-control"], @"max-age=120,public");
 
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
 
     let query = "{ topProducts { upc } }";
     let (headers, _body) =
@@ -487,7 +484,7 @@ async fn cache_control_merging_multi_fetch() {
         make_http_request::<graphql::Response>(&mut router, graphql_request(query).into()).await;
     insta::assert_snapshot!(&headers["cache-control"], @"max-age=60,public");
 
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
 
     let (headers, _body) =
         make_http_request::<graphql::Response>(&mut router, graphql_request(query).into()).await;
@@ -644,7 +641,7 @@ async fn integration_test_basic() -> Result<(), BoxError> {
 
     let request = supergraph::Request::fake_builder()
         .query(r#"{ topProducts { name reviews { body } } }"#)
-        .method(Method::POST)
+        .method(http::Method::POST)
         .header("apollo-cache-debugging", "true")
         .build()?;
 
@@ -712,7 +709,7 @@ async fn integration_test_basic() -> Result<(), BoxError> {
     let request = supergraph::Request::fake_builder()
         .query(r#"{ topProducts(first: 2) { name reviews { body } } }"#)
         .header("apollo-cache-debugging", "true")
-        .method(Method::POST)
+        .method(http::Method::POST)
         .build()?;
 
     let response = supergraph
@@ -792,7 +789,7 @@ async fn integration_test_basic() -> Result<(), BoxError> {
             http::header::AUTHORIZATION,
             HeaderValue::from_static(SECRET_SHARED_KEY),
         )
-        .body(from_bytes(
+        .body(router::body::from_bytes(
             serde_json::to_vec(&vec![json!({
                 "subgraph": "reviews",
                 "kind": "type",
@@ -803,8 +800,8 @@ async fn integration_test_basic() -> Result<(), BoxError> {
         .unwrap();
     let response = http_service.oneshot(request).await.unwrap();
     let response_status = response.status();
-    let mut resp: serde_json::Value = serde_json::from_str(
-        &apollo_router::services::router::body::into_string(response.into_body())
+    let mut resp: Value = serde_json::from_str(
+        &router::body::into_string(response.into_body())
             .await
             .unwrap(),
     )
@@ -864,7 +861,7 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
     let mut conn = PgConnection::connect("postgres://127.0.0.1").await?;
     sqlx::migrate!().run(&mut conn).await.unwrap();
 
-    let subgraphs = serde_json::json!({
+    let subgraphs = json!({
         "products": {
             "query": {"allProducts": [{
                 "id": "1",
@@ -921,7 +918,7 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
     let request = supergraph::Request::fake_builder()
         .query(query)
         .header("apollo-cache-debugging", "true")
-        .method(Method::POST)
+        .method(http::Method::POST)
         .build()?;
 
     let response = supergraph
@@ -985,7 +982,7 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
 
     let request = supergraph::Request::fake_builder()
         .query(query)
-        .method(Method::POST)
+        .method(http::Method::POST)
         .build()?;
 
     let response = supergraph
@@ -1066,7 +1063,7 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
             http::header::AUTHORIZATION,
             HeaderValue::from_static(SECRET_SHARED_KEY),
         )
-        .body(from_bytes(
+        .body(router::body::from_bytes(
             serde_json::to_vec(&vec![json!({
                 "subgraph": "users",
                 "kind": "type",
@@ -1077,8 +1074,8 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
         .unwrap();
     let response = http_service.oneshot(request).await.unwrap();
     let response_status = response.status();
-    let mut resp: serde_json::Value = serde_json::from_str(
-        &apollo_router::services::router::body::into_string(response.into_body())
+    let mut resp: Value = serde_json::from_str(
+        &router::body::into_string(response.into_body())
             .await
             .unwrap(),
     )
