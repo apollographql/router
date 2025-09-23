@@ -1061,8 +1061,8 @@ impl Merger {
             let keys = interface_pos.get_applied_directives(subgraph.schema(), &key_directive_name);
 
             has_key = has_key || !keys.is_empty();
-            let resolvable_key = keys.iter().any(|key| !key.arguments.is_empty());
-            if !resolvable_key {
+            let resolvable_key = keys.iter().find(|key| !key.arguments.is_empty());
+            if resolvable_key.is_none() {
                 continue;
             }
 
@@ -1107,7 +1107,7 @@ impl Merger {
         // consideration before allowing.
         for (idx, source) in sources.iter() {
             if source.is_none()
-                || self.subgraphs[*idx].is_interface_object_type(&dest.clone().into())
+                || !self.subgraphs[*idx].is_interface_object_type(&dest.clone().into())
             {
                 continue;
             }
