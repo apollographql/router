@@ -1,1 +1,264 @@
 pub(crate) mod postgres;
+
+use std::collections::HashMap;
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::time::Duration;
+use std::time::Instant;
+
+use tokio::task::JoinError;
+use tokio::time::timeout;
+
+use crate::plugins::response_cache::ErrorCode;
+use crate::plugins::response_cache::cache_control::CacheControl;
+
+#[derive(Debug)]
+pub(super) enum Error {
+    Database(sqlx::Error),
+    Serialize(serde_json::Error),
+    Timeout,
+    JoinError(JoinError),
+}
+
+impl Error {
+    pub(super) fn is_row_not_found(&self) -> bool {
+        match self {
+            Error::Database(err) => err.is_not_found(),
+            Error::Serialize(_) => false,
+            Error::JoinError(_) => false,
+            Error::Timeout => false,
+        }
+    }
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::Database(err) => f.write_str(&err.to_string()),
+            Error::Serialize(err) => f.write_str(&err.to_string()),
+            Error::JoinError(err) => f.write_str(&err.to_string()),
+            Error::Timeout => f.write_str("TIMED_OUT"),
+        }
+    }
+}
+
+impl From<sqlx::Error> for Error {
+    fn from(err: sqlx::Error) -> Self {
+        Error::Database(err)
+    }
+}
+
+impl From<serde_json::Error> for Error {
+    fn from(err: serde_json::Error) -> Self {
+        Error::Serialize(err)
+    }
+}
+
+impl From<tokio::time::error::Elapsed> for Error {
+    fn from(_: tokio::time::error::Elapsed) -> Self {
+        Error::Timeout
+    }
+}
+
+impl From<JoinError> for Error {
+    fn from(err: JoinError) -> Self {
+        Error::JoinError(err)
+    }
+}
+
+impl ErrorCode for Error {
+    fn code(&self) -> &'static str {
+        match self {
+            Error::Database(err) => err.kind().to_str(),
+            Error::Serialize(_) => "serialize // TODO",
+            Error::JoinError(_) => "join_error // TODO",
+            Error::Timeout => "TIMED_OUT",
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+type StorageResult<T> = Result<T, Error>;
+
+type Documents = Vec<Document>;
+
+#[derive(Debug, Clone)]
+pub(crate) struct Document {
+    pub(crate) cache_key: String,
+    pub(crate) data: serde_json_bytes::Value,
+    pub(crate) cache_control: CacheControl,
+    pub(crate) invalidation_keys: Vec<String>,
+    pub(crate) expire: Duration,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CacheEntry {
+    pub(crate) cache_key: String,
+    pub(crate) data: serde_json_bytes::Value,
+    pub(crate) control: CacheControl,
+}
+
+// TODO: in theory, we could have `struct Storage<S: CacheStorage>`. But the types are a huge pain.
+//  Keeping this trait around for now as it provides clear expected cache behavior, but not sure if
+//  that's actually good practice.
+pub(super) trait CacheStorage {
+    fn timeout_duration(&self) -> Duration;
+
+    #[doc(hidden)]
+    async fn internal_insert(&self, document: Document, subgraph_name: &str) -> StorageResult<()>;
+
+    async fn insert(&self, document: Document, subgraph_name: &str) -> StorageResult<()> {
+        let now = Instant::now();
+
+        let result = timeout(
+            self.timeout_duration(),
+            self.internal_insert(document, subgraph_name),
+        )
+        .await;
+
+        let elapsed = now.elapsed().as_secs_f64();
+        f64_histogram_with_unit!(
+            "apollo.router.operations.response_cache.storage.insert",
+            "Time to insert new data in cache",
+            "s",
+            elapsed,
+            "kind" = "single"
+        );
+        result?
+    }
+
+    #[doc(hidden)]
+    async fn internal_insert_in_batch(
+        &self,
+        batch_docs: Documents,
+        subgraph_name: &str,
+    ) -> StorageResult<()>;
+
+    async fn insert_in_batch(
+        &self,
+        batch_docs: Documents,
+        subgraph_name: &str,
+    ) -> StorageResult<()> {
+        let now = Instant::now();
+        let result = timeout(
+            self.timeout_duration(),
+            self.internal_insert_in_batch(batch_docs, subgraph_name),
+        )
+        .await;
+
+        let elapsed = now.elapsed().as_secs_f64();
+        f64_histogram_with_unit!(
+            "apollo.router.operations.response_cache.storage.insert",
+            "Time to insert new data in cache",
+            "s",
+            elapsed,
+            "kind" = "batch"
+        );
+        result?
+    }
+
+    #[doc(hidden)]
+    async fn internal_get(&self, cache_key: &str) -> StorageResult<CacheEntry>;
+
+    async fn get(&self, cache_key: &str) -> StorageResult<CacheEntry> {
+        let now = Instant::now();
+        let result = timeout(self.timeout_duration(), self.internal_get(cache_key)).await;
+
+        let elapsed = now.elapsed().as_secs_f64();
+        f64_histogram_with_unit!(
+            "apollo.router.operations.response_cache.storage.get",
+            "Time to get new data from cache",
+            "s",
+            elapsed,
+            "kind" = "single"
+        );
+        result?
+    }
+
+    #[doc(hidden)]
+    async fn internal_get_multiple(
+        &self,
+        cache_keys: &[&str],
+    ) -> StorageResult<Vec<Option<CacheEntry>>>;
+
+    async fn get_multiple(&self, cache_keys: &[&str]) -> StorageResult<Vec<Option<CacheEntry>>> {
+        let now = Instant::now();
+        let result = timeout(
+            self.timeout_duration(),
+            self.internal_get_multiple(cache_keys),
+        )
+        .await;
+
+        let elapsed = now.elapsed().as_secs_f64();
+        f64_histogram_with_unit!(
+            "apollo.router.operations.response_cache.storage.get",
+            "Time to get new data from cache",
+            "s",
+            elapsed,
+            "kind" = "batch"
+        );
+        result?
+    }
+
+    #[doc(hidden)]
+    async fn internal_invalidate_by_subgraphs(
+        &self,
+        subgraph_names: Vec<String>,
+    ) -> StorageResult<u64>;
+
+    async fn invalidate_by_subgraphs(&self, subgraph_names: Vec<String>) -> StorageResult<u64> {
+        let now = Instant::now();
+        let result = timeout(
+            self.timeout_duration(),
+            self.internal_invalidate_by_subgraphs(subgraph_names),
+        )
+        .await;
+
+        let elapsed = now.elapsed().as_secs_f64();
+        f64_histogram_with_unit!(
+            "apollo.router.operations.response_cache.storage.invalidate",
+            "Time to get invalidate data in cache",
+            "s",
+            elapsed,
+            "kind" = "subgraphs"
+        );
+        result?
+    }
+
+    #[doc(hidden)]
+    async fn internal_invalidate(
+        &self,
+        invalidation_keys: Vec<String>,
+        subgraph_names: Vec<String>,
+    ) -> StorageResult<HashMap<String, u64>>;
+
+    async fn invalidate(
+        &self,
+        invalidation_keys: Vec<String>,
+        subgraph_names: Vec<String>,
+    ) -> StorageResult<HashMap<String, u64>> {
+        let now = Instant::now();
+        let result = timeout(
+            self.timeout_duration(),
+            self.internal_invalidate(invalidation_keys, subgraph_names),
+        )
+        .await;
+
+        let elapsed = now.elapsed().as_secs_f64();
+        f64_histogram_with_unit!(
+            "apollo.router.operations.response_cache.storage.invalidate",
+            "Time to get invalidate data in cache",
+            "s",
+            elapsed,
+            "kind" = "specific"
+        );
+        result?
+    }
+
+    #[cfg(all(
+        test,
+        any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+    ))]
+    async fn truncate_namespace(&self) -> StorageResult<()>;
+}
