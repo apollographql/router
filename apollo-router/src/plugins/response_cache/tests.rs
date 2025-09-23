@@ -25,6 +25,8 @@ use crate::plugins::response_cache::plugin::CACHE_DEBUG_HEADER_NAME;
 use crate::plugins::response_cache::plugin::CONTEXT_DEBUG_CACHE_KEYS;
 use crate::plugins::response_cache::plugin::CacheKeysContext;
 use crate::plugins::response_cache::plugin::Subgraph;
+use crate::plugins::response_cache::storage::CacheStorage;
+use crate::plugins::response_cache::storage::Document;
 use crate::plugins::response_cache::storage::postgres::PostgresCacheConfig;
 use crate::plugins::response_cache::storage::postgres::PostgresCacheStorage;
 use crate::plugins::response_cache::storage::postgres::default_batch_size;
@@ -3991,17 +3993,14 @@ async fn expired_data_count() {
         .await
         .unwrap();
         let cache_key = uuid::Uuid::new_v4().to_string();
-        pg_cache
-            .insert(
-                &cache_key,
-                std::time::Duration::from_millis(2),
-                vec![],
-                serde_json_bytes::json!({}),
-                CacheControl::default(),
-                "test",
-            )
-            .await
-            .unwrap();
+        let document = Document {
+            cache_key,
+            data: Default::default(),
+            cache_control: CacheControl::default(),
+            invalidation_keys: vec![],
+            expire: Duration::from_millis(2),
+        };
+        pg_cache.insert(document, "test").await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         let (_drop_rx, drop_tx) = broadcast::channel(2);
         tokio::spawn(

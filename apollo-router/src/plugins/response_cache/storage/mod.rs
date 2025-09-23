@@ -6,26 +6,23 @@ use std::fmt::Formatter;
 use std::time::Duration;
 use std::time::Instant;
 
-use tokio::task::JoinError;
 use tokio::time::timeout;
 
 use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::response_cache::cache_control::CacheControl;
 
 #[derive(Debug)]
-pub(super) enum Error {
+pub(crate) enum Error {
     Database(sqlx::Error),
     Serialize(serde_json::Error),
     Timeout,
-    JoinError(JoinError),
 }
 
 impl Error {
     pub(super) fn is_row_not_found(&self) -> bool {
         match self {
-            Error::Database(err) => err.is_not_found(),
+            Error::Database(err) => matches!(err, &sqlx::Error::RowNotFound),
             Error::Serialize(_) => false,
-            Error::JoinError(_) => false,
             Error::Timeout => false,
         }
     }
@@ -36,7 +33,6 @@ impl Display for Error {
         match self {
             Error::Database(err) => f.write_str(&err.to_string()),
             Error::Serialize(err) => f.write_str(&err.to_string()),
-            Error::JoinError(err) => f.write_str(&err.to_string()),
             Error::Timeout => f.write_str("TIMED_OUT"),
         }
     }
@@ -60,18 +56,11 @@ impl From<tokio::time::error::Elapsed> for Error {
     }
 }
 
-impl From<JoinError> for Error {
-    fn from(err: JoinError) -> Self {
-        Error::JoinError(err)
-    }
-}
-
 impl ErrorCode for Error {
     fn code(&self) -> &'static str {
         match self {
-            Error::Database(err) => err.kind().to_str(),
+            Error::Database(err) => err.code(),
             Error::Serialize(_) => "serialize // TODO",
-            Error::JoinError(_) => "join_error // TODO",
             Error::Timeout => "TIMED_OUT",
         }
     }

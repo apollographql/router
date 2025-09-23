@@ -67,8 +67,9 @@ use crate::plugins::response_cache::cache_key::PrimaryCacheKeyRoot;
 use crate::plugins::response_cache::cache_key::hash_additional_data;
 use crate::plugins::response_cache::cache_key::hash_query;
 use crate::plugins::response_cache::metrics;
-use crate::plugins::response_cache::storage::postgres::BatchDocument;
-use crate::plugins::response_cache::storage::postgres::CacheEntry;
+use crate::plugins::response_cache::storage::CacheEntry;
+use crate::plugins::response_cache::storage::CacheStorage;
+use crate::plugins::response_cache::storage::Document;
 use crate::plugins::response_cache::storage::postgres::PostgresCacheConfig;
 use crate::plugins::response_cache::storage::postgres::PostgresCacheStorage;
 use crate::plugins::telemetry::LruSizeInstrument;
@@ -1356,7 +1357,7 @@ async fn cache_lookup_root(
         }
         Err(err) => {
             let span = Span::current();
-            if !matches!(err, sqlx::Error::RowNotFound) {
+            if !err.is_row_not_found() {
                 span.mark_as_error(format!("cannot get cache entry: {err}"));
 
                 u64_counter_with_unit!(
@@ -1552,7 +1553,7 @@ async fn cache_lookup_entities(
             .collect(),
         Err(err) => {
             let span = Span::current();
-            if !matches!(err, sqlx::Error::RowNotFound) {
+            if !err.is_row_not_found() {
                 span.mark_as_error(format!("cannot get cache entry: {err}"));
 
                 u64_counter_with_unit!(
@@ -1710,15 +1711,15 @@ async fn cache_store_root_from_response(
             // Write to cache in a non-awaited task so it’s on in the request’s critical path
             tokio::spawn(async move {
                 let now = Instant::now();
+                let document = Document {
+                    cache_key,
+                    data,
+                    cache_control,
+                    invalidation_keys,
+                    expire: ttl,
+                };
                 if let Err(err) = cache
-                    .insert(
-                        &cache_key,
-                        ttl,
-                        invalidation_keys,
-                        data,
-                        cache_control,
-                        &subgraph_name,
-                    )
+                    .insert(document, &subgraph_name)
                     .instrument(span)
                     .await
                 {
@@ -2404,9 +2405,9 @@ async fn insert_entities_in_result(
                         invalidation_keys
                             .extend(keys.iter().filter_map(|v| v.as_str()).map(|s| s.to_owned()));
                     }
-                    to_insert.push(BatchDocument {
-                        control: serde_json::to_string(&cache_control)?,
-                        data: serde_json::to_string(&value)?,
+                    to_insert.push(Document {
+                        cache_control: cache_control.clone(),
+                        data: value.clone(),
                         cache_key: key,
                         invalidation_keys,
                         expire: ttl,

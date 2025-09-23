@@ -17,6 +17,8 @@ use super::plugin::Storage;
 use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::response_cache::plugin::INTERNAL_CACHE_TAG_PREFIX;
 use crate::plugins::response_cache::plugin::RESPONSE_CACHE_VERSION;
+use crate::plugins::response_cache::storage;
+use crate::plugins::response_cache::storage::CacheStorage;
 use crate::plugins::response_cache::storage::postgres::PostgresCacheStorage;
 
 #[derive(Clone)]
@@ -25,11 +27,11 @@ pub(crate) struct Invalidation {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum InvalidationError {
+pub(super) enum InvalidationError {
     #[error("error")]
     Misc(#[from] anyhow::Error),
     #[error("caching database error")]
-    Postgres(#[from] sqlx::Error),
+    Storage(#[from] storage::Error),
     #[error("several errors")]
     Errors(#[from] InvalidationErrors),
 }
@@ -38,7 +40,7 @@ impl ErrorCode for InvalidationError {
     fn code(&self) -> &'static str {
         match &self {
             InvalidationError::Misc(_) => "MISC",
-            InvalidationError::Postgres(error) => error.code(),
+            InvalidationError::Storage(error) => error.code(),
             InvalidationError::Errors(_) => "INVALIDATION_ERRORS",
         }
     }

@@ -14,36 +14,22 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::types::chrono::DateTime;
 use sqlx::types::chrono::Utc;
 
+use super::CacheEntry;
 use crate::plugins::response_cache::ErrorCode;
-use crate::plugins::response_cache::cache_control::CacheControl;
+use crate::plugins::response_cache::storage::CacheStorage;
+use crate::plugins::response_cache::storage::Document;
+use crate::plugins::response_cache::storage::Documents;
+use crate::plugins::response_cache::storage::StorageResult;
 
 #[derive(sqlx::FromRow, Debug, Clone)]
 pub(crate) struct CacheEntryRow {
+    #[allow(unused)]
     pub(crate) id: i64,
     pub(crate) cache_key: String,
     pub(crate) data: String,
+    #[allow(unused)]
     pub(crate) expires_at: DateTime<Utc>,
     pub(crate) control: String,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct CacheEntry {
-    #[allow(unused)] // Used in the database but not in rust code
-    pub(crate) id: i64,
-    pub(crate) cache_key: String,
-    pub(crate) data: serde_json_bytes::Value,
-    #[allow(unused)] // Used in the database but not in rust code
-    pub(crate) expires_at: DateTime<Utc>,
-    pub(crate) control: CacheControl,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct BatchDocument {
-    pub(crate) cache_key: String,
-    pub(crate) data: String,
-    pub(crate) control: String,
-    pub(crate) invalidation_keys: Vec<String>,
-    pub(crate) expire: Duration,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -155,10 +141,8 @@ impl TryFrom<CacheEntryRow> for CacheEntry {
         let data = serde_json::from_str(&value.data)?;
         let control = serde_json::from_str(&value.control)?;
         Ok(Self {
-            id: value.id,
             cache_key: value.cache_key,
             data,
-            expires_at: value.expires_at,
             control,
         })
     }
@@ -223,20 +207,6 @@ impl PostgresCacheStorage {
         Ok(())
     }
 
-    #[cfg(all(
-        test,
-        any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
-    ))]
-    pub(crate) async fn truncate_namespace(&self) -> sqlx::Result<()> {
-        if let Some(ns) = &self.namespace {
-            sqlx::query!("DELETE FROM cache WHERE starts_with(cache_key, $1)", ns)
-                .execute(&self.pg_pool)
-                .await?;
-        }
-
-        Ok(())
-    }
-
     fn namespaced(&self, key: &str) -> String {
         if let Some(ns) = &self.namespace {
             format!("{ns}-{key}")
@@ -244,26 +214,25 @@ impl PostgresCacheStorage {
             key.into()
         }
     }
+}
 
-    pub(crate) async fn insert(
-        &self,
-        cache_key: &str,
-        expire: Duration,
-        invalidation_keys: Vec<String>,
-        value: serde_json_bytes::Value,
-        control: CacheControl,
-        subgraph_name: &str,
-    ) -> sqlx::Result<()> {
+impl CacheStorage for PostgresCacheStorage {
+    fn timeout_duration(&self) -> Duration {
+        // NB: this will be replaced
+        Duration::from_secs(1)
+    }
+
+    async fn internal_insert(&self, document: Document, subgraph_name: &str) -> StorageResult<()> {
         let mut conn = self.pg_pool.acquire().await?;
         let mut transaction = conn.begin().await?;
         let tx = &mut transaction;
 
-        let expired_at = Utc::now() + expire;
-        let value_str =
-            serde_json::to_string(&value).map_err(|err| sqlx::Error::Encode(Box::new(err)))?;
-        let control_str =
-            serde_json::to_string(&control).map_err(|err| sqlx::Error::Encode(Box::new(err)))?;
-        let cache_key = self.namespaced(cache_key);
+        let expired_at = Utc::now() + document.expire;
+        let value_str = serde_json::to_string(&document.data)
+            .map_err(|err| sqlx::Error::Encode(Box::new(err)))?;
+        let control_str = serde_json::to_string(&document.cache_control)
+            .map_err(|err| sqlx::Error::Encode(Box::new(err)))?;
+        let cache_key = self.namespaced(&document.cache_key);
         let rec = sqlx::query!(
             r#"
         INSERT INTO cache ( cache_key, data, control, expires_at )
@@ -279,16 +248,16 @@ impl PostgresCacheStorage {
         .fetch_one(&mut **tx)
         .await?;
 
-        for invalidation_key in invalidation_keys {
-            let invalidation_key = self.namespaced(&invalidation_key);
+        for invalidation_key in &document.invalidation_keys {
+            let invalidation_key = self.namespaced(invalidation_key);
             sqlx::query!(
                 r#"INSERT into invalidation_key (cache_key_id, invalidation_key, subgraph_name) VALUES ($1, $2, $3) ON CONFLICT (cache_key_id, invalidation_key, subgraph_name) DO NOTHING"#,
                 rec.id,
                 &invalidation_key,
                 subgraph_name
             )
-            .execute(&mut **tx)
-            .await?;
+                .execute(&mut **tx)
+                .await?;
         }
 
         transaction.commit().await?;
@@ -296,13 +265,14 @@ impl PostgresCacheStorage {
         Ok(())
     }
 
-    pub(crate) async fn insert_in_batch(
+    async fn internal_insert_in_batch(
         &self,
-        mut batch_docs: Vec<BatchDocument>,
+        batch_docs: Documents,
         subgraph_name: &str,
-    ) -> sqlx::Result<()> {
+    ) -> StorageResult<()> {
         // order batch_docs to prevent deadlocks! don't need namespaced as we just need to make sure
         // that transaction 1 can't lock A and wait for B, and transaction 2 can't lock B and wait for A
+        let mut batch_docs = batch_docs.clone();
         batch_docs.sort_by(|a, b| a.cache_key.cmp(&b.cache_key));
 
         let mut conn = self.pg_pool.acquire().await?;
@@ -318,10 +288,12 @@ impl PostgresCacheStorage {
             let data = batch_docs
                 .iter()
                 .map(|b| b.data.clone())
+                .flat_map(|d| serde_json::to_string(&d))
                 .collect::<Vec<String>>();
             let controls = batch_docs
                 .iter()
-                .map(|b| b.control.clone())
+                .map(|b| b.cache_control.clone())
+                .flat_map(|d| serde_json::to_string(&d))
                 .collect::<Vec<String>>();
             let expires = batch_docs
                 .iter()
@@ -344,8 +316,8 @@ impl PostgresCacheStorage {
                 &expires,
                 &controls
             )
-            .fetch_all(&mut **tx)
-            .await?;
+                .fetch_all(&mut **tx)
+                .await?;
 
             let invalidation_keys: Vec<(i64, String)> = resp
                 .iter()
@@ -392,7 +364,7 @@ impl PostgresCacheStorage {
         Ok(())
     }
 
-    pub(crate) async fn get(&self, cache_key: &str) -> sqlx::Result<CacheEntry> {
+    async fn internal_get(&self, cache_key: &str) -> StorageResult<super::CacheEntry> {
         let cache_key = self.namespaced(cache_key);
         let resp = sqlx::query_as!(
             CacheEntryRow,
@@ -409,24 +381,23 @@ impl PostgresCacheStorage {
         Ok(cache_entry_json)
     }
 
-    pub(crate) async fn get_multiple(
+    async fn internal_get_multiple(
         &self,
         cache_keys: &[&str],
-    ) -> sqlx::Result<Vec<Option<CacheEntry>>> {
+    ) -> StorageResult<Vec<Option<CacheEntry>>> {
         let cache_keys: Vec<_> = cache_keys.iter().map(|ck| self.namespaced(ck)).collect();
         let resp = sqlx::query_as!(
             CacheEntryRow,
             "SELECT * FROM cache WHERE cache.cache_key = ANY($1::VARCHAR(1024)[]) AND expires_at >= NOW()",
             &cache_keys
         )
-        .fetch_all(&self.pg_pool)
-        .await?;
+            .fetch_all(&self.pg_pool)
+            .await?;
 
-        let cache_key_entries: Result<HashMap<String, CacheEntry>, serde_json::Error> = resp
+        let cache_key_entries: Result<HashMap<String, super::CacheEntry>, serde_json::Error> = resp
             .into_iter()
             .map(|e| {
                 let entry: CacheEntry = e.try_into()?;
-
                 Ok((entry.cache_key.clone(), entry))
             })
             .collect();
@@ -439,12 +410,10 @@ impl PostgresCacheStorage {
             .collect())
     }
 
-    /// Deletes all documents that have one (or more) of the keys
-    /// Returns the number of deleted documents.
-    pub(crate) async fn invalidate_by_subgraphs(
+    async fn internal_invalidate_by_subgraphs(
         &self,
         subgraph_names: Vec<String>,
-    ) -> sqlx::Result<u64> {
+    ) -> StorageResult<u64> {
         let rec = sqlx::query!(
             r#"WITH deleted AS
             (DELETE
@@ -455,19 +424,17 @@ impl PostgresCacheStorage {
         SELECT COUNT(*) AS count FROM deleted WHERE deleted.expires_at >= NOW()"#,
             &subgraph_names
         )
-        .fetch_one(&self.pg_pool)
-        .await?;
+            .fetch_one(&self.pg_pool)
+            .await?;
 
         Ok(rec.count.unwrap_or_default() as u64)
     }
 
-    /// Deletes all documents that have one (or more) of the keys
-    /// Returns the number of deleted documents.
-    pub(crate) async fn invalidate(
+    async fn internal_invalidate(
         &self,
         invalidation_keys: Vec<String>,
         subgraph_names: Vec<String>,
-    ) -> sqlx::Result<HashMap<String, u64>> {
+    ) -> StorageResult<HashMap<String, u64>> {
         let invalidation_keys: Vec<String> = invalidation_keys
             .iter()
             .map(|ck| self.namespaced(ck))
@@ -486,8 +453,8 @@ impl PostgresCacheStorage {
             &invalidation_keys,
             &subgraph_names
         )
-        .fetch_all(&self.pg_pool)
-        .await?;
+            .fetch_all(&self.pg_pool)
+            .await?;
 
         Ok(rec
             .into_iter()
@@ -495,12 +462,28 @@ impl PostgresCacheStorage {
             .collect())
     }
 
+    #[cfg(all(
+        test,
+        any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+    ))]
+    async fn truncate_namespace(&self) -> StorageResult<()> {
+        if let Some(ns) = &self.namespace {
+            sqlx::query!("DELETE FROM cache WHERE starts_with(cache_key, $1)", ns)
+                .execute(&self.pg_pool)
+                .await?;
+        }
+
+        Ok(())
+    }
+}
+
+impl PostgresCacheStorage {
     pub(crate) async fn expired_data_count(&self) -> anyhow::Result<u64> {
         match &self.namespace {
             Some(ns) => {
                 let resp = sqlx::query!("SELECT COUNT(id) AS count FROM cache WHERE starts_with(cache_key, $1) AND expires_at <= NOW()", ns)
-                .fetch_one(&self.pg_pool)
-                .await?;
+                    .fetch_one(&self.pg_pool)
+                    .await?;
 
                 Ok(resp.count.unwrap_or_default() as u64)
             }
@@ -522,8 +505,8 @@ impl PostgresCacheStorage {
             )))
         })?;
         sqlx::query!("SELECT cron.alter_job((SELECT jobid FROM cron.job WHERE jobname = 'delete-old-cache-entries'), $1)", &cron.0)
-                .execute(&self.pg_pool)
-                .await?;
+            .execute(&self.pg_pool)
+            .await?;
         log::trace!(
             "Configured `delete-old-cache-entries` cron to have interval = `{}`",
             &cron.0
