@@ -118,10 +118,7 @@ impl Merger {
                     let subgraph = &self.subgraphs[*idx];
                     if let Some(arg) = pos.get_argument(subgraph.schema(), &arg_name) {
                         if arg.is_required() && arg.default_value.is_none() {
-                            self.error_reporter.add_hint(CompositionHint {
-                                code: HintCode::ContextualArgumentNotContextualInAllSubgraphs
-                                    .code()
-                                    .to_string(),
+                            self.error_reporter.add_error(CompositionError::ContextualArgumentNotContextualInAllSubgraphs {
                                 message: format!(
                                     "Argument \"{dest_arg_pos}\" is contextual in at least one subgraph but in \"{pos}\" it does not have @fromContext, is not nullable and has no default value.",
                                 ),

@@ -144,6 +144,11 @@ pub enum CompositionError {
         locations: Locations,
     },
     #[error("{message}")]
+    ContextualArgumentNotContextualInAllSubgraphs {
+        message: String,
+        locations: Locations,
+    },
+    #[error("{message}")]
     EmptyMergedEnumType {
         message: String,
         locations: Locations,
@@ -247,6 +252,9 @@ impl CompositionError {
     pub fn code(&self) -> ErrorCode {
         match self {
             Self::SubgraphError { error, .. } => error.code(),
+            Self::ContextualArgumentNotContextualInAllSubgraphs { .. } => {
+                ErrorCode::ContextualArgumentNotContextualInAllSubgraphs
+            }
             Self::EmptyMergedEnumType { .. } => ErrorCode::EmptyMergedEnumType,
             Self::EnumValueMismatch { .. } => ErrorCode::EnumValueMismatch,
             Self::ExternalTypeMismatch { .. } => ErrorCode::ExternalTypeMismatch,
@@ -401,6 +409,12 @@ impl CompositionError {
             Self::FieldTypeMismatch { message } => Self::FieldTypeMismatch {
                 message: format!("{message}{appendix}"),
             },
+            Self::ContextualArgumentNotContextualInAllSubgraphs { message, locations } => {
+                Self::ContextualArgumentNotContextualInAllSubgraphs {
+                    message: format!("{message}{appendix}"),
+                    locations,
+                }
+            }
             // Remaining errors do not have an obvious way to appending a message, so we just return self.
             Self::SubgraphError { .. }
             | Self::InvalidGraphQLName(..)
@@ -2284,6 +2298,18 @@ static INVALID_TAG_NAME: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     )
 });
 
+static CONTEXTUAL_ARGUMENT_NOT_CONTEXTUAL_IN_ALL_SUBGRAPHS: LazyLock<ErrorCodeDefinition> =
+    LazyLock::new(|| {
+        ErrorCodeDefinition::new(
+            "CONTEXTUAL_ARGUMENT_NOT_CONTEXTUAL_IN_ALL_SUBGRAPHS".to_owned(),
+            "Argument on field is marked contextual in only some subgraphs".to_owned(),
+            Some(ErrorCodeMetadata {
+                added_in: "2.7.0",
+                replaces: &[],
+            }),
+        )
+    });
+
 #[derive(Debug, PartialEq, strum_macros::EnumIter)]
 pub enum ErrorCode {
     ErrorCodeMissing,
@@ -2384,6 +2410,7 @@ pub enum ErrorCode {
     ContextSelectionInvalid,
     InvalidTagName,
     OverrideLabelInvalid,
+    ContextualArgumentNotContextualInAllSubgraphs,
 }
 
 impl ErrorCode {
@@ -2503,6 +2530,9 @@ impl ErrorCode {
             ErrorCode::InvalidTagName => &INVALID_TAG_NAME,
             ErrorCode::ErrorCodeMissing => &ERROR_CODE_MISSING,
             ErrorCode::OverrideLabelInvalid => &OVERRIDE_LABEL_INVALID,
+            ErrorCode::ContextualArgumentNotContextualInAllSubgraphs => {
+                &CONTEXTUAL_ARGUMENT_NOT_CONTEXTUAL_IN_ALL_SUBGRAPHS
+            }
         }
     }
 }
