@@ -246,6 +246,8 @@ pub enum CompositionError {
     OverrideOnInterface { message: String },
     #[error("{message}")]
     OverrideSourceHasOverride { message: String },
+    #[error("{message}")]
+    QueryRootMissing { message: String },
 }
 
 impl CompositionError {
@@ -305,6 +307,7 @@ impl CompositionError {
             Self::OverrideLabelInvalid { .. } => ErrorCode::OverrideLabelInvalid,
             Self::OverrideOnInterface { .. } => ErrorCode::OverrideOnInterface,
             Self::OverrideSourceHasOverride { .. } => ErrorCode::OverrideSourceHasOverride,
+            Self::QueryRootMissing { .. } => ErrorCode::QueryRootMissing,
         }
     }
 
@@ -425,7 +428,8 @@ impl CompositionError {
             | Self::OverrideFromSelfError { .. }
             | Self::OverrideLabelInvalid { .. }
             | Self::OverrideOnInterface { .. }
-            | Self::OverrideSourceHasOverride { .. } => self,
+            | Self::OverrideSourceHasOverride { .. }
+            | Self::QueryRootMissing { .. } => self,
         }
     }
 
@@ -778,6 +782,8 @@ pub enum SingleFederationError {
     ListSizeInvalidSizedField { message: String },
     #[error("{message}")]
     InvalidTagName { message: String },
+    #[error("{message}")]
+    QueryRootMissing { message: String },
 }
 
 impl SingleFederationError {
@@ -1002,6 +1008,7 @@ impl SingleFederationError {
             #[allow(unused)]
             SingleFederationError::InvalidFieldSharing { .. } => ErrorCode::InvalidFieldSharing,
             SingleFederationError::InvalidTagName { .. } => ErrorCode::InvalidTagName,
+            SingleFederationError::QueryRootMissing { .. } => ErrorCode::QueryRootMissing,
         }
     }
 
@@ -2310,6 +2317,17 @@ static CONTEXTUAL_ARGUMENT_NOT_CONTEXTUAL_IN_ALL_SUBGRAPHS: LazyLock<ErrorCodeDe
         )
     });
 
+static QUERY_ROOT_MISSING: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "QUERY_ROOT_MISSING".to_owned(),
+        "The schema has no query root type.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.0.0",
+            replaces: &[],
+        }),
+    )
+});
+
 #[derive(Debug, PartialEq, strum_macros::EnumIter)]
 pub enum ErrorCode {
     ErrorCodeMissing,
@@ -2411,6 +2429,7 @@ pub enum ErrorCode {
     InvalidTagName,
     OverrideLabelInvalid,
     ContextualArgumentNotContextualInAllSubgraphs,
+    QueryRootMissing,
 }
 
 impl ErrorCode {
@@ -2533,6 +2552,7 @@ impl ErrorCode {
             ErrorCode::ContextualArgumentNotContextualInAllSubgraphs => {
                 &CONTEXTUAL_ARGUMENT_NOT_CONTEXTUAL_IN_ALL_SUBGRAPHS
             }
+            ErrorCode::QueryRootMissing => &QUERY_ROOT_MISSING,
         }
     }
 }

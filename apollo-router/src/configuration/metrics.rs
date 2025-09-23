@@ -323,7 +323,7 @@ impl InstrumentData {
 
         populate_config_instrument!(
             apollo.router.config.response_cache,
-            "$.experimental_response_cache",
+            "$.preview_response_cache",
             opt.enabled,
             "$[?(@.enabled)]",
             opt.debug,

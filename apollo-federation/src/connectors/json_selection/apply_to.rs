@@ -852,10 +852,20 @@ impl ApplyToInternal for WithRange<PathList> {
                 )
             }
 
-            PathList::Selection(selection) => (
-                selection.compute_output_shape(context, input_shape, dollar_shape.clone()),
-                None,
-            ),
+            PathList::Selection(selection) => {
+                if input_shape.is_none() {
+                    // We do not require that the input shape for a SubSelection
+                    // must be an object (as it will be bound to $ and @
+                    // regardless), but we skip executing the SubSelection
+                    // if/when the input shape is None, since we can't bind None
+                    // to $ or @.
+                    return input_shape;
+                }
+                (
+                    selection.compute_output_shape(context, input_shape, dollar_shape.clone()),
+                    None,
+                )
+            }
 
             PathList::Empty => (input_shape, None),
         };
@@ -3830,6 +3840,57 @@ mod tests {
         assert_eq!(
             author_selection.shape().pretty_print(),
             "{ author: One<{ age: $root.*.author.*.age, middleName: One<$root.*.author.*.middleName, None> }, None> }",
+        );
+    }
+
+    #[test]
+    fn test_optional_input_shape_with_selection() {
+        let spec = ConnectSpec::V0_3;
+        let optional_author_shape_selection =
+            selection!("unreliableAuthor { age middleName? }", spec);
+
+        let shape_context = ShapeContext::new(SourceId::Other("JSONSelection".into()))
+            .with_spec(spec)
+            .with_named_shapes([(
+                "$root".to_string(),
+                Shape::record(
+                    {
+                        let mut map = Shape::empty_map();
+                        map.insert(
+                            "unreliableAuthor".to_string(),
+                            Shape::one(
+                                [
+                                    Shape::record(
+                                        {
+                                            let mut map = Shape::empty_map();
+                                            map.insert("age".to_string(), Shape::int([]));
+                                            map.insert(
+                                                "middleName".to_string(),
+                                                Shape::one([Shape::string([]), Shape::none()], []),
+                                            );
+                                            map
+                                        },
+                                        [],
+                                    ),
+                                    Shape::none(),
+                                ],
+                                [],
+                            ),
+                        );
+                        map
+                    },
+                    [],
+                ),
+            )]);
+
+        assert_eq!(
+            optional_author_shape_selection
+                .compute_output_shape(
+                    &shape_context,
+                    shape_context.named_shapes().get("$root").unwrap().clone(),
+                )
+                .pretty_print(),
+            "{ unreliableAuthor: One<{ age: Int, middleName: One<String, None> }, None> }",
         );
     }
 
