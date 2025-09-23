@@ -1150,9 +1150,7 @@ mod tests {
             .await?;
 
         // ensure that we have three elements in the 'whole-subgraph' invalidation key
-        let invalidation_key = storage
-            .namespaced_cache_tags(&vec![], SUBGRAPH_NAME)
-            .remove(0);
+        let invalidation_key = storage.namespaced_cache_tags(&[], SUBGRAPH_NAME).remove(0);
         assert_eq!(storage.zcard(&invalidation_key).await?, 3);
 
         let doc_key1 = storage.make_key("key1");
