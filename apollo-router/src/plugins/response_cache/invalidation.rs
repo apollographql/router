@@ -30,7 +30,7 @@ pub(super) enum InvalidationError {
     #[error("error")]
     Misc(#[from] anyhow::Error),
     #[error("caching database error")]
-    Storage(#[from] storage::Error),
+    Storage(#[from] storage::error::Error),
     #[error("several errors")]
     Errors(#[from] InvalidationErrors),
 }
