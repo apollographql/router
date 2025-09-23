@@ -18,7 +18,6 @@ use super::CacheEntry;
 use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::response_cache::storage::CacheStorage;
 use crate::plugins::response_cache::storage::Document;
-use crate::plugins::response_cache::storage::Documents;
 use crate::plugins::response_cache::storage::StorageResult;
 
 #[derive(sqlx::FromRow, Debug, Clone)]
@@ -163,7 +162,7 @@ impl TryFrom<CacheEntryRow> for CacheEntry {
         let data = serde_json::from_str(&value.data)?;
         let control = serde_json::from_str(&value.control)?;
         Ok(Self {
-            cache_key: value.cache_key,
+            key: value.cache_key,
             data,
             control,
         })
@@ -252,9 +251,9 @@ impl CacheStorage for Storage {
         let expired_at = Utc::now() + document.expire;
         let value_str = serde_json::to_string(&document.data)
             .map_err(|err| sqlx::Error::Encode(Box::new(err)))?;
-        let control_str = serde_json::to_string(&document.cache_control)
+        let control_str = serde_json::to_string(&document.control)
             .map_err(|err| sqlx::Error::Encode(Box::new(err)))?;
-        let cache_key = self.namespaced(&document.cache_key);
+        let cache_key = self.namespaced(&document.key);
         let rec = sqlx::query!(
             r#"
         INSERT INTO cache ( cache_key, data, control, expires_at )
@@ -289,13 +288,13 @@ impl CacheStorage for Storage {
 
     async fn internal_insert_in_batch(
         &self,
-        documents: Documents,
+        documents: Vec<Document>,
         subgraph_name: &str,
     ) -> StorageResult<()> {
         // order batch_docs to prevent deadlocks! don't need namespaced as we just need to make sure
         // that transaction 1 can't lock A and wait for B, and transaction 2 can't lock B and wait for A
         let mut batch_docs = documents.clone();
-        batch_docs.sort_by(|a, b| a.cache_key.cmp(&b.cache_key));
+        batch_docs.sort_by(|a, b| a.key.cmp(&b.key));
 
         let mut conn = self.pg_pool.acquire().await?;
         let batch_docs = batch_docs.chunks(self.batch_size);
@@ -304,7 +303,7 @@ impl CacheStorage for Storage {
             let tx = &mut transaction;
             let cache_keys = batch_docs
                 .iter()
-                .map(|b| self.namespaced(&b.cache_key))
+                .map(|b| self.namespaced(&b.key))
                 .collect::<Vec<_>>();
 
             let data = batch_docs
@@ -314,7 +313,7 @@ impl CacheStorage for Storage {
                 .collect::<Vec<String>>();
             let controls = batch_docs
                 .iter()
-                .map(|b| b.cache_control.clone())
+                .map(|b| b.control.clone())
                 .flat_map(|d| serde_json::to_string(&d))
                 .collect::<Vec<String>>();
             let expires = batch_docs
@@ -420,7 +419,7 @@ impl CacheStorage for Storage {
             .into_iter()
             .map(|e| {
                 let entry: CacheEntry = e.try_into()?;
-                Ok((entry.cache_key.clone(), entry))
+                Ok((entry.key.clone(), entry))
             })
             .collect();
         let mut cache_key_entries =

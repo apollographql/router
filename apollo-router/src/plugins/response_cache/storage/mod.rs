@@ -9,22 +9,20 @@ use tokio_util::future::FutureExt;
 
 use super::cache_control::CacheControl;
 
-type StorageResult<T> = Result<T, self::error::Error>;
-
-type Documents = Vec<Document>;
+type StorageResult<T> = Result<T, error::Error>;
 
 #[derive(Debug, Clone)]
 pub(super) struct Document {
-    pub(super) cache_key: String,
+    pub(super) key: String,
     pub(super) data: serde_json_bytes::Value,
-    pub(super) cache_control: CacheControl,
+    pub(super) control: CacheControl,
     pub(super) invalidation_keys: Vec<String>,
     pub(super) expire: Duration,
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct CacheEntry {
-    pub(super) cache_key: String,
+    pub(super) key: String,
     pub(super) data: serde_json_bytes::Value,
     pub(super) control: CacheControl,
 }
@@ -56,13 +54,13 @@ pub(super) trait CacheStorage {
     #[doc(hidden)]
     async fn internal_insert_in_batch(
         &self,
-        documents: Documents,
+        documents: Vec<Document>,
         subgraph_name: &str,
     ) -> StorageResult<()>;
 
     async fn insert_in_batch(
         &self,
-        documents: Documents,
+        documents: Vec<Document>,
         subgraph_name: &str,
     ) -> StorageResult<()> {
         let batch_size = batch_size_str(documents.len());

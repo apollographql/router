@@ -3780,9 +3780,9 @@ async fn expired_data_count() {
         .unwrap();
         let cache_key = uuid::Uuid::new_v4().to_string();
         let document = Document {
-            cache_key,
+            key: cache_key,
             data: Default::default(),
-            cache_control: CacheControl::default(),
+            control: CacheControl::default(),
             invalidation_keys: vec![],
             expire: Duration::from_millis(2),
         };

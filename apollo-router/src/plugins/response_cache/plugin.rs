@@ -1143,7 +1143,7 @@ impl CacheService {
                         let debug_cache_keys_ctx = cache_result.0.iter().filter_map(|ir| {
                             ir.cache_entry.as_ref().map(|cache_entry| CacheKeyContext {
                                 hashed_private_id: private_id.clone(),
-                                key: cache_entry.cache_key.clone(),
+                                key: cache_entry.key.clone(),
                                 invalidation_keys: ir.invalidation_keys.clone().into_iter()
                                 .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
                                 .collect(),
@@ -1323,7 +1323,7 @@ async fn cache_lookup_root(
                         CONTEXT_DEBUG_CACHE_KEYS,
                         |mut val| {
                             val.push(CacheKeyContext {
-                                key: value.cache_key.clone(),
+                                key: value.key.clone(),
                                 hashed_private_id: private_id.map(ToString::to_string),
                                 invalidation_keys: invalidation_keys
                                     .clone()
@@ -1713,9 +1713,9 @@ async fn cache_store_root_from_response(
             // Write to cache in a non-awaited task so it’s on in the request’s critical path
             tokio::spawn(async move {
                 let document = Document {
-                    cache_key,
+                    key: cache_key,
                     data,
-                    cache_control,
+                    control: cache_control,
                     invalidation_keys,
                     expire: ttl,
                 };
@@ -2399,9 +2399,9 @@ async fn insert_entities_in_result(
                             .extend(keys.iter().filter_map(|v| v.as_str()).map(|s| s.to_owned()));
                     }
                     to_insert.push(Document {
-                        cache_control: cache_control.clone(),
+                        control: cache_control.clone(),
                         data: value.clone(),
-                        cache_key: key,
+                        key,
                         invalidation_keys,
                         expire: ttl,
                     });
