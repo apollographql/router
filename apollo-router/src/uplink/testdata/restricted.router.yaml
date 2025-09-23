@@ -52,7 +52,7 @@ plugins:
   experimental.restricted:
     enabled: true
 
-experimental_response_cache:
+preview_response_cache:
   enabled: true
   invalidation:
     listen: 0.0.0.0:4000
