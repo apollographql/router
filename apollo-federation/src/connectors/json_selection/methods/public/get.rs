@@ -1191,9 +1191,9 @@ mod shape_tests {
                     )
                     .into_with_range(),
                 }),
-                None
+                None,
             )],
-            input_shape.clone()
+            input_shape.clone(),
         );
 
         assert_eq!(

@@ -408,7 +408,8 @@ fn resolve_shape(
                         namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", "),
                     ),
                     locations: transform_locations(
-                        subpath.first()
+                        subpath
+                            .first()
                             .map(|key| &key.locations)
                             .unwrap_or(&shape.locations),
                         context,
