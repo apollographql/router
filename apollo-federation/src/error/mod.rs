@@ -248,6 +248,16 @@ pub enum CompositionError {
     OverrideSourceHasOverride { message: String },
     #[error("{message}")]
     QueryRootMissing { message: String },
+    #[error("{message}")]
+    ArgumentDefaultMismatch {
+        message: String,
+        locations: Locations,
+    },
+    #[error("{message}")]
+    InputFieldDefaultMismatch {
+        message: String,
+        locations: Locations,
+    },
 }
 
 impl CompositionError {
@@ -308,6 +318,8 @@ impl CompositionError {
             Self::OverrideOnInterface { .. } => ErrorCode::OverrideOnInterface,
             Self::OverrideSourceHasOverride { .. } => ErrorCode::OverrideSourceHasOverride,
             Self::QueryRootMissing { .. } => ErrorCode::QueryRootMissing,
+            Self::ArgumentDefaultMismatch { .. } => ErrorCode::FieldArgumentDefaultMismatch,
+            Self::InputFieldDefaultMismatch { .. } => ErrorCode::InputFieldDefaultMismatch,
         }
     }
 
@@ -414,6 +426,16 @@ impl CompositionError {
             },
             Self::ContextualArgumentNotContextualInAllSubgraphs { message, locations } => {
                 Self::ContextualArgumentNotContextualInAllSubgraphs {
+                    message: format!("{message}{appendix}"),
+                    locations,
+                }
+            }
+            Self::ArgumentDefaultMismatch { message, locations } => Self::ArgumentDefaultMismatch {
+                message: format!("{message}{appendix}"),
+                locations,
+            },
+            Self::InputFieldDefaultMismatch { message, locations } => {
+                Self::InputFieldDefaultMismatch {
                     message: format!("{message}{appendix}"),
                     locations,
                 }

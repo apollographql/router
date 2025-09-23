@@ -36,6 +36,7 @@ use crate::error::SingleFederationError;
 use crate::link::database::links_metadata;
 use crate::link::spec_definition::SpecDefinition;
 use crate::merger::merge_argument::HasArguments;
+use crate::merger::merge_argument::HasDefaultValue;
 use crate::merger::merge_enum::EnumExampleAst;
 use crate::schema::FederationSchema;
 use crate::schema::referencer::DirectiveReferencers;
@@ -6678,6 +6679,30 @@ impl InputObjectFieldDefinitionPosition {
 impl Display for InputObjectFieldDefinitionPosition {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}.{}", self.type_name, self.field_name)
+    }
+}
+
+impl HasDefaultValue for InputObjectFieldDefinitionPosition {
+    fn is_input_field() -> bool {
+        true
+    }
+
+    fn get_default_value<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<ast::Value>> {
+        self.try_get(&schema.schema)
+            .and_then(|field| field.default_value.as_ref())
+    }
+
+    fn set_default_value(
+        &self,
+        schema: &mut FederationSchema,
+        default: Option<Node<ast::Value>>,
+    ) -> Result<(), FederationError> {
+        let field = self.make_mut(&mut schema.schema)?;
+        field.make_mut().default_value = default;
+        Ok(())
     }
 }
 
