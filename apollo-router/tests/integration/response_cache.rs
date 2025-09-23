@@ -538,7 +538,7 @@ macro_rules! check_cache_key {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn entity_cache_basic() -> Result<(), BoxError> {
+async fn integration_test_basic() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
     }
@@ -861,7 +861,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
+async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
     }
