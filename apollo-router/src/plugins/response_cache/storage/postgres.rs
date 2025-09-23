@@ -87,7 +87,10 @@ pub(crate) struct Config {
     pub(crate) tls: TlsConfig,
 }
 
-#[cfg(test)]
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
 impl Config {
     pub(crate) fn test(namespace: &str) -> Self {
         Self {
@@ -286,12 +289,12 @@ impl CacheStorage for Storage {
 
     async fn internal_insert_in_batch(
         &self,
-        batch_docs: Documents,
+        documents: Documents,
         subgraph_name: &str,
     ) -> StorageResult<()> {
         // order batch_docs to prevent deadlocks! don't need namespaced as we just need to make sure
         // that transaction 1 can't lock A and wait for B, and transaction 2 can't lock B and wait for A
-        let mut batch_docs = batch_docs.clone();
+        let mut batch_docs = documents.clone();
         batch_docs.sort_by(|a, b| a.cache_key.cmp(&b.cache_key));
 
         let mut conn = self.pg_pool.acquire().await?;

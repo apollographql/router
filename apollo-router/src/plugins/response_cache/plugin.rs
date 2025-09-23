@@ -5,7 +5,6 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
-use std::time::Instant;
 
 use apollo_compiler::Schema;
 use apollo_compiler::ast::NamedType;
@@ -195,14 +194,20 @@ impl StorageInterface {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
 impl StorageInterface {
     pub(crate) fn replace_all(&self, storage: Storage) -> Option<()> {
         self.all.as_ref()?.set(storage).ok()
     }
 }
 
-#[cfg(test)]
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
 impl From<Storage> for StorageInterface {
     fn from(storage: Storage) -> Self {
         Self {
@@ -1292,18 +1297,7 @@ async fn cache_lookup_root(
 
     Span::current().record("cache.key", key.clone());
 
-    let now = Instant::now();
-    let cache_result = cache.get(&key).await;
-    f64_histogram_with_unit!(
-        "apollo.router.operations.response_cache.fetch",
-        "Time to fetch data from cache",
-        "s",
-        now.elapsed().as_secs_f64(),
-        "subgraph.name" = request.subgraph_name.clone(),
-        "kind" = "single"
-    );
-
-    match cache_result {
+    match cache.get(&key, &request.subgraph_name).await {
         Ok(value) => {
             if value.control.can_use() {
                 let control = value.control.clone();
@@ -1536,12 +1530,11 @@ async fn cache_lookup_entities(
     )?;
     let keys_len = cache_metadata.len();
 
-    let now = Instant::now();
     let cache_keys = cache_metadata
         .iter()
         .map(|k| k.cache_key.as_str())
         .collect::<Vec<&str>>();
-    let cache_result = cache.get_multiple(&cache_keys).await;
+    let cache_result = cache.get_multiple(&cache_keys, &name).await;
     Span::current().set_span_dyn_attribute(
         "cache.keys".into(),
         opentelemetry::Value::Array(Array::String(
@@ -1550,14 +1543,6 @@ async fn cache_lookup_entities(
                 .map(|ck| StringValue::from(ck.to_string()))
                 .collect(),
         )),
-    );
-    f64_histogram_with_unit!(
-        "apollo.router.operations.response_cache.fetch",
-        "Time to fetch data from cache",
-        "s",
-        now.elapsed().as_secs_f64(),
-        "subgraph.name" = request.subgraph_name.clone(),
-        "kind" = "batch"
     );
 
     let cache_result: Vec<Option<CacheEntry>> = match cache_result {
@@ -1727,7 +1712,6 @@ async fn cache_store_root_from_response(
             let span = tracing::info_span!("response_cache.store", "kind" = "root", "subgraph.name" = subgraph_name.clone(), "ttl" = ?ttl);
             // Write to cache in a non-awaited task so it’s on in the request’s critical path
             tokio::spawn(async move {
-                let now = Instant::now();
                 let document = Document {
                     cache_key,
                     data,
@@ -1750,14 +1734,6 @@ async fn cache_store_root_from_response(
                     );
                     tracing::debug!(error = %err, "cannot insert data in cache");
                 }
-                f64_histogram_with_unit!(
-                    "apollo.router.operations.response_cache.insert",
-                    "Time to insert new data in cache",
-                    "s",
-                    now.elapsed().as_secs_f64(),
-                    "subgraph.name" = subgraph_name,
-                    "kind" = "single"
-                );
             });
         }
     }
@@ -2448,20 +2424,9 @@ async fn insert_entities_in_result(
         let batch_size = to_insert.len();
         let span = tracing::info_span!("response_cache.store", "kind" = "entity", "subgraph.name" = subgraph_name, "ttl" = ?ttl, "batch.size" = %batch_size);
 
-        let batch_size_str = if batch_size <= 10 {
-            "1-10"
-        } else if batch_size <= 20 {
-            "11-20"
-        } else if batch_size <= 50 {
-            "21-50"
-        } else {
-            "50+"
-        };
-
         let subgraph_name = subgraph_name.to_string();
         // Write to cache in a non-awaited task so it’s on in the request’s critical path
         tokio::spawn(async move {
-            let now = Instant::now();
             if let Err(err) = cache
                 .insert_in_batch(to_insert, &subgraph_name)
                 .instrument(span)
@@ -2477,15 +2442,6 @@ async fn insert_entities_in_result(
                 );
                 tracing::debug!(error = %err, "cannot insert data in cache");
             }
-            f64_histogram_with_unit!(
-                "apollo.router.operations.response_cache.insert",
-                "Time to insert new data in cache",
-                "s",
-                now.elapsed().as_secs_f64(),
-                "subgraph.name" = subgraph_name,
-                "kind" = "batch",
-                "batch.size" = batch_size_str
-            );
         });
     }
 

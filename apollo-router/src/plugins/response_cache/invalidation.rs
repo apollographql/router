@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::time::Instant;
 
 use futures::FutureExt;
 use futures::StreamExt;
@@ -239,20 +238,9 @@ impl Invalidation {
             for storage in storages {
                 let mut request = request.clone();
                 let f = async move {
-                    let start = Instant::now();
-
-                    let res = self
-                        .handle_request(storage, &mut request)
+                    self.handle_request(storage, &mut request)
                         .instrument(tracing::info_span!("cache.invalidation.request"))
-                        .await;
-
-                    f64_histogram_with_unit!(
-                        "apollo.router.operations.response_cache.invalidation.duration",
-                        "Duration of the invalidation event execution, in seconds.",
-                        "s",
-                        start.elapsed().as_secs_f64()
-                    );
-                    res
+                        .await
                 };
                 futures.push(f.boxed());
             }
