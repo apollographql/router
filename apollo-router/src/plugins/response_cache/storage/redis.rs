@@ -467,3 +467,918 @@ impl Config {
         }
     }
 }
+
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
+impl Storage {
+    async fn mocked(
+        config: &Config,
+        is_cluster: bool,
+        reader_mock: std::sync::Arc<dyn fred::mocks::Mocks>,
+        writer_mock: std::sync::Arc<dyn fred::mocks::Mocks>,
+    ) -> Result<Storage, BoxError> {
+        let reader_storage = RedisCacheStorage::from_mocks_and_config(
+            reader_mock,
+            config.clone(),
+            "response-cache-reader",
+            is_cluster,
+        )
+        .await?;
+        let writer_storage = RedisCacheStorage::from_mocks_and_config(
+            writer_mock,
+            config.clone(),
+            "response-cache-writer",
+            is_cluster,
+        )
+        .await?;
+        Self::from_storage(reader_storage, writer_storage, config.timeout).await
+    }
+
+    async fn all_keys_in_namespace(&self) -> Result<Vec<String>, BoxError> {
+        use fred::types::scan::Scanner;
+        use tokio_stream::StreamExt;
+
+        let mut scan_stream = self
+            .reader_storage
+            .scan_with_namespaced_results(String::from("*"), None);
+        let mut keys = Vec::default();
+        while let Some(result) = scan_stream.next().await {
+            if let Some(page_keys) = result?.take_results() {
+                let mut str_keys: Vec<String> = page_keys
+                    .into_iter()
+                    .map(|k| k.into_string().unwrap())
+                    .collect();
+                keys.append(&mut str_keys);
+            }
+        }
+
+        Ok(keys)
+    }
+
+    async fn ttl(&self, key: &str) -> StorageResult<i64> {
+        Ok(self.reader_storage.client().ttl(key).await?)
+    }
+
+    async fn expire_time(&self, key: &str) -> StorageResult<i64> {
+        Ok(self.reader_storage.client().expire_time(key).await?)
+    }
+
+    async fn zscore(&self, sorted_set_key: &str, member: &str) -> Result<i64, BoxError> {
+        let score: String = self
+            .reader_storage
+            .client()
+            .zscore(sorted_set_key, member)
+            .await?;
+        Ok(score.parse()?)
+    }
+
+    async fn zcard(&self, sorted_set_key: &str) -> StorageResult<u64> {
+        let cardinality = self.reader_storage.client().zcard(sorted_set_key).await?;
+        Ok(cardinality)
+    }
+
+    async fn zexists(&self, sorted_set_key: &str, member: &str) -> StorageResult<bool> {
+        let score: Option<String> = self
+            .reader_storage
+            .client()
+            .zscore(sorted_set_key, member)
+            .await?;
+        Ok(score.is_some())
+    }
+
+    async fn exists(&self, key: &str) -> StorageResult<bool> {
+        Ok(self.reader_storage.client().exists(key).await?)
+    }
+}
+
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
+mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use insta::assert_debug_snapshot;
+    use itertools::Itertools;
+    use tower::BoxError;
+    use uuid::Uuid;
+
+    use super::Config;
+    use super::Storage;
+    use super::now;
+    use crate::plugins::response_cache::storage::CacheStorage;
+    use crate::plugins::response_cache::storage::Document;
+
+    const SUBGRAPH_NAME: &str = "test";
+
+    fn redis_config(clustered: bool) -> Config {
+        Config::test(clustered, &random_namespace())
+    }
+
+    fn random_namespace() -> String {
+        Uuid::new_v4().to_string()
+    }
+
+    fn common_document() -> Document {
+        Document {
+            key: "key".to_string(),
+            data: Default::default(),
+            control: Default::default(),
+            invalidation_keys: vec!["invalidate".to_string()],
+            expire: Duration::from_secs(60),
+        }
+    }
+
+    #[tokio::test]
+    #[rstest::rstest]
+    async fn test_invalidation_key_permutations(
+        #[values(None, Some("test"))] namespace: Option<&str>,
+        #[values(vec![], vec!["invalidation_key"], vec!["invalidation_key1", "invalidation_key2", "invalidation_key3"])]
+        invalidation_keys: Vec<&str>,
+    ) {
+        // Set up insta snapshot to support test parameterization
+        let mut settings = insta::Settings::clone_current();
+        settings.set_snapshot_suffix(format!(
+            "input____{}____{}",
+            namespace.unwrap_or("None"),
+            invalidation_keys.iter().join("__")
+        ));
+        let _guard = settings.bind_to_scope();
+
+        let mock_storage = Arc::new(fred::mocks::Echo);
+        let config = Config {
+            namespace: namespace.map(ToString::to_string),
+            ..redis_config(false)
+        };
+        let storage = Storage::mocked(&config, false, mock_storage.clone(), mock_storage.clone())
+            .await
+            .expect("could not build storage");
+
+        let invalidation_keys: Vec<String> = invalidation_keys
+            .into_iter()
+            .map(ToString::to_string)
+            .collect();
+
+        let mut cache_tags = storage.namespaced_cache_tags(&invalidation_keys, "products");
+        cache_tags.sort();
+        assert_debug_snapshot!(cache_tags);
+    }
+
+    /// Tests that validate the following TTL behaviors:
+    /// * a document's TTL must be shorter than the TTL of all its related cache tags
+    /// * a document's TTL will always be less than or equal to its score in all its related cache tags
+    /// * only expired keys will be removed via the cache maintenance
+    mod ttl_guarantees {
+        use std::collections::HashMap;
+        use std::time::Duration;
+
+        use itertools::Itertools;
+        use tower::BoxError;
+
+        use super::SUBGRAPH_NAME;
+        use super::common_document;
+        use super::redis_config;
+        use crate::plugins::response_cache::storage::CacheStorage;
+        use crate::plugins::response_cache::storage::Document;
+        use crate::plugins::response_cache::storage::redis::Storage;
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn single_document(#[values(true, false)] clustered: bool) -> Result<(), BoxError> {
+            let storage = Storage::new(&redis_config(clustered)).await?;
+            storage.truncate_namespace().await?;
+
+            // every element of this namespace must have a TTL associated with it, and the TTL of the
+            // cache keys must be greater than the TTL of the document
+            let document = common_document();
+            storage.insert(document.clone(), SUBGRAPH_NAME).await?;
+
+            let document_key = storage.make_key(document.key.clone());
+            let expected_cache_tag_keys =
+                storage.namespaced_cache_tags(&document.invalidation_keys, SUBGRAPH_NAME);
+
+            // iterate over all the keys in the namespace and make sure we have everything we'd expect
+            let keys = storage.all_keys_in_namespace().await?;
+            assert!(keys.contains(&document_key));
+            for key in &expected_cache_tag_keys {
+                assert!(keys.contains(key), "missing {key}");
+            }
+            assert_eq!(keys.len(), 4);
+
+            // extract the TTL for each key. the TTL for the document must be less than the TTL for each
+            // of the invalidation keys.
+            let document_ttl = storage.ttl(&document_key).await?;
+            assert!(document_ttl > 0);
+
+            for cache_tag_key in &expected_cache_tag_keys {
+                let cache_tag_ttl = storage.ttl(cache_tag_key).await?;
+                assert!(cache_tag_ttl > 0, "{cache_tag_key}");
+                assert!(document_ttl < cache_tag_ttl, "{cache_tag_key}")
+            }
+
+            // extract the expiry time for the document key. it should match the sorted set score in each
+            // of the cache tags.
+            let document_expire_time = storage.expire_time(&document_key).await?;
+            assert!(document_expire_time > 0);
+
+            for cache_tag_key in &expected_cache_tag_keys {
+                let document_score = storage.zscore(cache_tag_key, &document_key).await?;
+                assert_eq!(document_expire_time, document_score);
+            }
+
+            Ok(())
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn multiple_documents(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = Storage::new(&redis_config(clustered)).await?;
+            storage.truncate_namespace().await?;
+
+            // set up two documents with a shared key and different TTLs
+            let documents = vec![
+                Document {
+                    key: "key1".to_string(),
+                    invalidation_keys: vec![
+                        "invalidation".to_string(),
+                        "invalidation1".to_string(),
+                    ],
+                    expire: Duration::from_secs(30),
+                    ..common_document()
+                },
+                Document {
+                    key: "key2".to_string(),
+                    invalidation_keys: vec![
+                        "invalidation".to_string(),
+                        "invalidation2".to_string(),
+                    ],
+                    expire: Duration::from_secs(60),
+                    ..common_document()
+                },
+            ];
+            storage
+                .insert_in_batch(documents.clone(), SUBGRAPH_NAME)
+                .await?;
+
+            // based on these documents, we expect:
+            // * subgraph cache-tag TTL ~60s
+            // * `invalidation` cache-tag TTL ~60s
+            // * `invalidation1` cache-tag TTL ~30s
+            // * `invalidation2` cache-tag TTL ~60s
+            // since those are the maximums observed
+
+            let mut expected_document_keys = Vec::new();
+            let mut expected_cache_tag_keys = Vec::new();
+            for document in &documents {
+                expected_document_keys.push(storage.make_key(&document.key));
+                expected_cache_tag_keys.push(
+                    storage.namespaced_cache_tags(&document.invalidation_keys, SUBGRAPH_NAME),
+                );
+            }
+
+            let all_expected_cache_tag_keys: Vec<String> = expected_cache_tag_keys
+                .iter()
+                .flatten()
+                .cloned()
+                .unique()
+                .collect();
+
+            // we should have a few shared keys
+            assert!(
+                all_expected_cache_tag_keys.len()
+                    < expected_cache_tag_keys.iter().map(|keys| keys.len()).sum()
+            );
+
+            // iterate over all the keys in the namespace and make sure we have everything we'd expect
+            let keys = storage.all_keys_in_namespace().await?;
+            for expected_document_key in &expected_document_keys {
+                assert!(keys.contains(expected_document_key));
+            }
+            for expected_cache_tag_key in &all_expected_cache_tag_keys {
+                assert!(keys.contains(expected_cache_tag_key));
+            }
+            assert_eq!(keys.len(), 9);
+
+            // extract all TTLs
+            let mut ttls: HashMap<String, i64> = HashMap::default();
+            for key in &keys {
+                let ttl = storage.ttl(key).await?;
+                assert!(ttl > 0);
+                ttls.insert(key.clone(), ttl);
+            }
+
+            // for each document, make sure that its cache tags have a TTL greater than its own
+            for (index, document) in documents.iter().enumerate() {
+                let document_key = &expected_document_keys[index];
+                let cache_tag_keys = &expected_cache_tag_keys[index];
+
+                let document_ttl = ttls.get(document_key).unwrap();
+
+                // the document TTL should be close to the expiry time on the document (within some range
+                // of acceptable redis latency - 10s for now)
+                assert!(document.expire.as_secs() as i64 - *document_ttl < 10);
+
+                for cache_tag_key in cache_tag_keys {
+                    let cache_tag_ttl = ttls.get(cache_tag_key).unwrap();
+                    assert!(document_ttl < cache_tag_ttl);
+                }
+            }
+
+            // for each document, make sure the expiry time matches its score in each cache tag set
+            for index in 0..documents.len() {
+                let document_key = &expected_document_keys[index];
+                let cache_tag_keys = &expected_cache_tag_keys[index];
+
+                let document_expire_time = storage.expire_time(document_key).await?;
+                assert!(document_expire_time > 0);
+
+                for cache_tag_key in cache_tag_keys {
+                    let document_score = storage.zscore(cache_tag_key, document_key).await?;
+                    assert_eq!(document_expire_time, document_score);
+                }
+            }
+
+            Ok(())
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn cache_tag_ttl_will_only_increase(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = Storage::new(&redis_config(clustered)).await?;
+            storage.truncate_namespace().await?;
+
+            let document = Document {
+                key: "key1".to_string(),
+                expire: Duration::from_secs(60),
+                ..common_document()
+            };
+            storage.insert(document.clone(), SUBGRAPH_NAME).await?;
+
+            let keys = storage.all_keys_in_namespace().await?;
+
+            // save current expiry times
+            let mut expire_times: HashMap<String, i64> = HashMap::default();
+            for key in &keys {
+                let expire_time = storage.expire_time(key).await?;
+                assert!(expire_time > 0);
+                expire_times.insert(key.clone(), expire_time);
+            }
+
+            // add another document with a very short expiry time but the same cache tags
+            let document = Document {
+                key: "key2".to_string(),
+                expire: Duration::from_secs(1),
+                ..common_document()
+            };
+            storage.insert(document, SUBGRAPH_NAME).await?;
+
+            // fetch new expiry times; they should be the same
+            for key in keys {
+                let new_expire_time = storage.expire_time(&key).await?;
+                assert!(new_expire_time > 0);
+                assert_eq!(*expire_times.get(&key).unwrap(), new_expire_time);
+            }
+
+            Ok(())
+        }
+
+        /// When re-inserting the same key with a lower TTL, the score in the sorted set will not
+        /// decrease.
+        ///
+        /// This might seem strange, but it's a defensive mechanism in case the insert fails midway
+        /// through - we don't want to lower the cache tag score only to not change the TTL on the key.
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn cache_tag_score_will_not_decrease(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = Storage::new(&redis_config(clustered)).await?;
+            storage.truncate_namespace().await?;
+
+            let document = Document {
+                expire: Duration::from_secs(60),
+                data: serde_json_bytes::Value::Number(1.into()),
+                ..common_document()
+            };
+            let document_key = storage.make_key(document.key.clone());
+            storage.insert(document.clone(), SUBGRAPH_NAME).await?;
+
+            // make sure the document was stored
+            let stored_data = storage.fetch(&common_document().key, SUBGRAPH_NAME).await?;
+            assert_eq!(stored_data.data, document.data);
+
+            let keys = storage.namespaced_cache_tags(&document.invalidation_keys, SUBGRAPH_NAME);
+
+            // save current scores
+            let mut scores: HashMap<String, i64> = HashMap::default();
+            let mut expire_times: HashMap<String, i64> = HashMap::default();
+            for key in &keys {
+                let score = storage.zscore(key, &document_key).await?;
+                assert!(score > 0);
+                scores.insert(key.clone(), score);
+
+                let expire_time = storage.expire_time(key).await?;
+                assert!(expire_time > 0);
+                expire_times.insert(key.clone(), expire_time);
+            }
+
+            // update the document with new data and a shorter TTL
+            let document = Document {
+                expire: Duration::from_secs(10),
+                data: serde_json_bytes::Value::Number(2.into()),
+                ..common_document()
+            };
+            storage.insert(document.clone(), SUBGRAPH_NAME).await?;
+
+            // make sure the document was updated
+            let stored_data = storage.fetch(&document.key, SUBGRAPH_NAME).await?;
+            assert_eq!(stored_data.data, document.data);
+
+            // the TTL on the document should be aligned with the new document expiry time
+            let ttl = storage.ttl(&document_key).await?;
+            assert!(ttl <= document.expire.as_secs() as i64);
+
+            // however, the TTL on the cache tags and the score in the cache tags will be the same
+            for key in keys {
+                let score = storage.zscore(&key, &document_key).await?;
+                assert!(score > 0);
+                assert_eq!(*scores.get(&key).unwrap(), score);
+
+                let expire_time = storage.expire_time(&key).await?;
+                assert!(expire_time > 0);
+                assert_eq!(*expire_times.get(&key).unwrap(), expire_time);
+            }
+
+            Ok(())
+        }
+
+        /// When re-inserting the same key with a later expiry time, the score in the sorted set will
+        /// increase.
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn cache_tag_score_will_increase(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = Storage::new(&redis_config(clustered)).await?;
+            storage.truncate_namespace().await?;
+
+            let document = Document {
+                expire: Duration::from_secs(60),
+                data: serde_json_bytes::Value::Number(1.into()),
+                ..common_document()
+            };
+            let document_key = storage.make_key(document.key.clone());
+            storage.insert(document.clone(), SUBGRAPH_NAME).await?;
+
+            // make sure the document was stored
+            let stored_data = storage.fetch(&common_document().key, SUBGRAPH_NAME).await?;
+            assert_eq!(stored_data.data, document.data);
+
+            let keys = storage.namespaced_cache_tags(&document.invalidation_keys, SUBGRAPH_NAME);
+
+            // update the document with new data and a longer TTL
+            let old_ttl = document.expire;
+            let document = Document {
+                expire: old_ttl * 2,
+                data: serde_json_bytes::Value::Number(2.into()),
+                ..common_document()
+            };
+            storage.insert(document.clone(), SUBGRAPH_NAME).await?;
+
+            // make sure the document was updated
+            let stored_data = storage.fetch(&document.key, SUBGRAPH_NAME).await?;
+            assert_eq!(stored_data.data, document.data);
+
+            // the TTL on the document should be aligned with the new document expiry time
+            let ttl = storage.ttl(&document_key).await?;
+            assert!(ttl <= document.expire.as_secs() as i64);
+            assert!(ttl > old_ttl.as_secs() as i64);
+
+            let doc_expire_time = storage.expire_time(&document_key).await?;
+
+            // the TTL on the cache tags and the score in the cache tags should have also increased
+            for key in keys {
+                let score = storage.zscore(&key, &document_key).await?;
+                assert!(doc_expire_time <= score);
+
+                let expire_time = storage.expire_time(&key).await?;
+                assert!(doc_expire_time < expire_time);
+            }
+
+            Ok(())
+        }
+    }
+
+    /// Tests that ensure that if a key's cache tag cannot be updated, the key will not be updated.
+    mod cache_tag_insert_failure_should_abort_key_insertion {
+        use std::sync::Arc;
+
+        use fred::error::Error;
+        use fred::error::ErrorKind;
+        use fred::interfaces::KeysInterface;
+        use fred::mocks::MockCommand;
+        use fred::mocks::Mocks;
+        use fred::prelude::Expiration;
+        use fred::prelude::Value;
+        use parking_lot::RwLock;
+        use tower::BoxError;
+
+        use super::SUBGRAPH_NAME;
+        use super::common_document;
+        use super::redis_config;
+        use crate::plugins::response_cache::storage::CacheStorage;
+        use crate::plugins::response_cache::storage::Document;
+        use crate::plugins::response_cache::storage::redis::Storage;
+
+        /// Trigger failure by pre-setting the cache tag to an invalid type.
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn type_failure(#[values(true, false)] clustered: bool) -> Result<(), BoxError> {
+            let config = redis_config(clustered);
+            let storage = Storage::new(&config).await?;
+            storage.truncate_namespace().await?;
+
+            let document = common_document();
+            let document_key = storage.make_key(document.key.clone());
+            let cache_tag_keys =
+                storage.namespaced_cache_tags(&document.invalidation_keys, SUBGRAPH_NAME);
+
+            let insert_invalid_cache_tag = |key: String| async {
+                let expiration = config.ttl.map(|ttl| Expiration::EX(ttl.as_secs() as i64));
+                let _: () = storage
+                    .writer_storage
+                    .client()
+                    .set(key, 1, expiration, None, false)
+                    .await?;
+                Ok::<(), BoxError>(())
+            };
+            let inserted_data = |key: String| async {
+                let exists = storage.reader_storage.client().exists(key).await?;
+                Ok::<bool, BoxError>(exists)
+            };
+
+            // try performing the insert with one of the cache_tag_keys set to a string so that the ZADD
+            // is guaranteed to fail.
+            // NB: we do this for each key because fred might report a failure at the beginning of a pipeline
+            // differently than a failure at the end.
+            for key in cache_tag_keys {
+                storage.truncate_namespace().await?;
+                insert_invalid_cache_tag(key.clone()).await?;
+
+                let result = storage.insert(document.clone(), SUBGRAPH_NAME).await;
+                result.expect_err(&format!(
+                    "cache tag {key} should have caused insertion failure"
+                ));
+
+                assert!(!inserted_data(document_key.clone()).await?);
+            }
+
+            // this should also be true if inserting multiple documents, even if only one of the
+            // documents' cache tags couldn't be updated.
+            let documents = vec![
+                Document {
+                    key: "key1".to_string(),
+                    invalidation_keys: vec![],
+                    ..common_document()
+                },
+                Document {
+                    key: "key2".to_string(),
+                    invalidation_keys: vec!["invalidate".to_string()],
+                    ..common_document()
+                },
+            ];
+
+            let cache_tag_keys =
+                storage.namespaced_cache_tags(&documents[1].invalidation_keys, SUBGRAPH_NAME);
+            for key in cache_tag_keys {
+                storage.truncate_namespace().await?;
+                insert_invalid_cache_tag(key.clone()).await?;
+
+                storage
+                    .insert_in_batch(documents.clone(), SUBGRAPH_NAME)
+                    .await
+                    .expect_err(&format!(
+                        "cache tag {key} should have caused insertion failure"
+                    ));
+
+                for document in &documents {
+                    assert!(!inserted_data(storage.make_key(document.key.clone())).await?);
+                }
+            }
+
+            Ok(())
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn timeout_failure(#[values(true, false)] clustered: bool) -> Result<(), BoxError> {
+            use crate::plugins::response_cache::storage::error::Error as StorageError;
+
+            // Mock the Redis connection to be able to simulate a timeout error coming from within
+            // the `fred` client
+            #[derive(Default, Debug, Clone)]
+            struct MockStorage(Arc<RwLock<Vec<MockCommand>>>);
+            impl Mocks for MockStorage {
+                fn process_command(&self, command: MockCommand) -> Result<Value, Error> {
+                    self.0.write().push(command);
+                    Err(Error::new(ErrorKind::Timeout, "timeout"))
+                }
+            }
+
+            let mock_redis = Arc::new(MockStorage::default());
+            let storage = Storage::mocked(
+                &redis_config(clustered),
+                clustered,
+                mock_redis.clone(),
+                mock_redis.clone(),
+            )
+            .await?;
+
+            let document = common_document();
+            let document_key = Value::from(storage.make_key(document.key.clone()));
+
+            let result = storage.insert(document, SUBGRAPH_NAME).await;
+            let error = result.expect_err("should have timed out via redis");
+            assert!(matches!(error, StorageError::Database(e) if e.details() == "timeout"));
+
+            // make sure the insert function did not try to operate on the document key
+            for command in mock_redis.0.read().iter() {
+                if command.cmd.contains("SET") && command.args.contains(&document_key) {
+                    panic!("Command {command:?} set the document key");
+                }
+            }
+
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    #[rstest::rstest]
+    async fn maintenance_removes_expired_data(
+        #[values(true, false)] clustered: bool,
+    ) -> Result<(), BoxError> {
+        let storage = Storage::new(&redis_config(clustered)).await?;
+        storage.truncate_namespace().await?;
+
+        // set up two documents with a shared key and different TTLs
+        let documents = vec![
+            Document {
+                key: "key1".to_string(),
+                expire: Duration::from_secs(2),
+                ..common_document()
+            },
+            Document {
+                key: "key2".to_string(),
+                expire: Duration::from_secs(60),
+                ..common_document()
+            },
+            Document {
+                key: "key3".to_string(),
+                expire: Duration::from_secs(60),
+                ..common_document()
+            },
+        ];
+        storage
+            .insert_in_batch(documents.clone(), SUBGRAPH_NAME)
+            .await?;
+
+        // ensure that we have three elements in the 'whole-subgraph' invalidation key
+        let invalidation_key = storage
+            .namespaced_cache_tags(&vec![], SUBGRAPH_NAME)
+            .remove(0);
+        assert_eq!(storage.zcard(&invalidation_key).await?, 3);
+
+        let doc_key1 = storage.make_key("key1");
+        let doc_key2 = storage.make_key("key2");
+        let doc_key3 = storage.make_key("key3");
+        for key in [&doc_key1, &doc_key2, &doc_key3] {
+            assert!(storage.zexists(&invalidation_key, key).await?);
+        }
+
+        // manually trigger maintenance with a time in the future, in between the expiry times of doc1
+        // and docs 2 and 3. therefore, we should remove `key1` and leave `key2` and `key3`
+        let cutoff = now() + 10;
+        assert!(storage.zscore(&invalidation_key, &doc_key1).await? < cutoff as i64);
+        let removed_keys = storage
+            .remove_keys_from_cache_tag_by_cutoff(invalidation_key.clone(), cutoff as f64)
+            .await?;
+        assert_eq!(removed_keys, 1);
+
+        // now we should have two elements in the 'whole-subgraph' invalidation key
+        assert_eq!(storage.zcard(&invalidation_key).await?, 2);
+        assert!(!storage.zexists(&invalidation_key, &doc_key1).await?);
+        assert!(storage.zexists(&invalidation_key, &doc_key2).await?);
+        assert!(storage.zexists(&invalidation_key, &doc_key3).await?);
+
+        // manually trigger maintenance with the time set way in the future
+        let cutoff = now() + 1000;
+        let removed_keys = storage
+            .remove_keys_from_cache_tag_by_cutoff(invalidation_key.clone(), cutoff as f64)
+            .await?;
+        assert_eq!(removed_keys, 2);
+
+        // now we should have zero elements in the 'whole-subgraph' invalidation key
+        assert_eq!(storage.zcard(&invalidation_key).await?, 0);
+        for key in [&doc_key1, &doc_key2, &doc_key3] {
+            assert!(!storage.zexists(&invalidation_key, key).await?);
+        }
+
+        Ok(())
+    }
+
+    mod invalidation {
+        use tower::BoxError;
+
+        use super::common_document;
+        use super::redis_config;
+        use crate::plugins::response_cache::storage::CacheStorage;
+        use crate::plugins::response_cache::storage::Document;
+        use crate::plugins::response_cache::storage::redis::Storage;
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn invalidation_by_subgraph_removes_everything_associated_with_that_subgraph(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = Storage::new(&redis_config(clustered)).await?;
+            storage.truncate_namespace().await?;
+
+            let document1 = Document {
+                key: "key1".to_string(),
+                ..common_document()
+            };
+
+            let document2 = Document {
+                key: "key2".to_string(),
+                ..common_document()
+            };
+
+            let document3 = Document {
+                key: "key3".to_string(),
+                ..common_document()
+            };
+
+            storage.insert(document1.clone(), "subgraph1").await?;
+            storage.insert(document2.clone(), "subgraph2").await?;
+            storage.insert(document3.clone(), "subgraph2").await?;
+
+            // invalidate just subgraph1
+            let num_invalidated = storage
+                .invalidate_by_subgraphs(vec!["subgraph1".to_string()])
+                .await?;
+            assert_eq!(num_invalidated, 1);
+            assert!(!storage.exists(&storage.make_key("key1")).await?);
+            assert!(storage.exists(&storage.make_key("key2")).await?);
+
+            // invalidate subgraph2
+            let num_invalidated = storage
+                .invalidate_by_subgraphs(vec!["subgraph2".to_string()])
+                .await?;
+            assert_eq!(num_invalidated, 2);
+            assert!(!storage.exists(&storage.make_key("key2")).await?);
+            assert!(!storage.exists(&storage.make_key("key3")).await?);
+
+            // re-add all items and invalidate both subgraphs
+            storage.insert(document1.clone(), "subgraph1").await?;
+            storage.insert(document2.clone(), "subgraph2").await?;
+            storage.insert(document3.clone(), "subgraph2").await?;
+
+            let num_invalidated = storage
+                .invalidate_by_subgraphs(vec!["subgraph1".to_string(), "subgraph2".to_string()])
+                .await?;
+            assert_eq!(num_invalidated, 3);
+            assert!(!storage.exists(&storage.make_key("key1")).await?);
+            assert!(!storage.exists(&storage.make_key("key2")).await?);
+            assert!(!storage.exists(&storage.make_key("key3")).await?);
+
+            Ok(())
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn arguments_are_restrictive_rather_than_additive(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            // invalidate takes a list of invalidation keys and a list of subgraphs; the two are combined
+            // to form a list of cache tags to remove from
+            let storage = Storage::new(&redis_config(clustered)).await?;
+            storage.truncate_namespace().await?;
+
+            let document1 = Document {
+                key: "key1".to_string(),
+                invalidation_keys: vec!["A".to_string()],
+                ..common_document()
+            };
+
+            let document2 = Document {
+                key: "key2".to_string(),
+                invalidation_keys: vec!["A".to_string()],
+                ..common_document()
+            };
+
+            let document3 = Document {
+                key: "key3".to_string(),
+                invalidation_keys: vec!["B".to_string()],
+                ..common_document()
+            };
+
+            storage.insert(document1.clone(), "S1").await?;
+            storage.insert(document2.clone(), "S2").await?;
+            storage.insert(document3.clone(), "S2").await?;
+
+            // invalidate(A, S2) will invalidate key2, NOT key1 or key3
+            let invalidated = storage
+                .invalidate(vec!["A".to_string()], vec!["S2".to_string()])
+                .await?;
+            assert_eq!(invalidated.len(), 1);
+            assert_eq!(*invalidated.get("S2").unwrap(), 1);
+            assert!(storage.exists(&storage.make_key("key1")).await?);
+            assert!(!storage.exists(&storage.make_key("key2")).await?);
+            assert!(storage.exists(&storage.make_key("key3")).await?);
+
+            Ok(())
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn invalidating_missing_subgraph_will_not_error(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = Storage::new(&redis_config(clustered)).await?;
+            storage.truncate_namespace().await?;
+
+            storage.insert(common_document(), "S1").await?;
+
+            let invalidated = storage
+                .invalidate_by_subgraphs(vec!["S2".to_string()])
+                .await?;
+            assert_eq!(invalidated, 0);
+
+            let invalidated = storage
+                .invalidate(vec!["key".to_string()], vec!["S2".to_string()])
+                .await?;
+            assert_eq!(invalidated.len(), 1);
+            assert_eq!(*invalidated.get("S2").unwrap(), 0);
+
+            Ok(())
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn invalidating_missing_invalidation_key_will_not_error(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = Storage::new(&redis_config(clustered)).await?;
+            storage.truncate_namespace().await?;
+
+            storage.insert(common_document(), "S1").await?;
+
+            let invalidated = storage
+                .invalidate(vec!["key".to_string()], vec!["S1".to_string()])
+                .await?;
+            assert_eq!(invalidated.len(), 1);
+            assert_eq!(*invalidated.get("S1").unwrap(), 0);
+
+            Ok(())
+        }
+
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn invalidation_is_idempotent(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage = Storage::new(&redis_config(clustered)).await?;
+            storage.truncate_namespace().await?;
+
+            let document = common_document();
+            let document_key = storage.make_key(&document.key);
+
+            storage.insert(document, "S1").await?;
+            assert!(storage.exists(&document_key).await?);
+
+            let invalidated = storage
+                .invalidate_by_subgraphs(vec!["S1".to_string()])
+                .await?;
+            assert_eq!(invalidated, 1);
+
+            assert!(!storage.exists(&document_key).await?);
+
+            // re-invalidate - storage still shouldn't have the key in it, and it shouldn't
+            // encounter an error
+            let invalidated = storage
+                .invalidate_by_subgraphs(vec!["S1".to_string()])
+                .await?;
+            assert_eq!(invalidated, 0);
+            assert!(!storage.exists(&document_key).await?);
+
+            Ok(())
+        }
+    }
+}
