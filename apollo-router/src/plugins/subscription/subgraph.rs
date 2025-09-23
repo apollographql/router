@@ -14,6 +14,7 @@ use tokio_tungstenite::connect_async_tls_with_config;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tower::BoxError;
 use tracing::Instrument;
+use uuid::Uuid;
 
 use super::callback::create_verifier;
 use super::notification::Notify;
@@ -25,12 +26,15 @@ use crate::json_ext::Object;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::subscription::CallbackMode;
 use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
+use crate::plugins::subscription::SubscriptionConfig;
+use crate::plugins::subscription::SubscriptionMode;
 use crate::plugins::subscription::WebSocketConfiguration;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::subgraph::events::SubgraphEventRequest;
 use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
 use crate::protocols::websocket::GraphqlWebSocket;
 use crate::protocols::websocket::convert_websocket_stream;
+use crate::services::OperationKind;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 
@@ -48,11 +52,11 @@ pub(crate) struct SubscriptionExtension {
 }
 
 /// Set up a subscription with the subgraph over a WebSocket protocol
-pub(crate) async fn call_websocket(
+async fn call_websocket(
     mut notify: Notify<String, graphql::Response>,
     request: SubgraphRequest,
     context: Context,
-    service_name: String,
+    service_name: &str,
     subgraph_cfg: &WebSocketConfiguration,
     subscription_hash: String,
 ) -> Result<SubgraphResponse, BoxError> {
@@ -75,7 +79,7 @@ pub(crate) async fn call_websocket(
     } = request;
     let subscription_stream_tx =
         subscription_stream.ok_or_else(|| FetchError::SubrequestWsError {
-            service: service_name.clone(),
+            service: service_name.to_string(),
             reason: "cannot get the websocket stream".to_string(),
         })?;
     let supergraph_operation_name = context.get::<_, String>(OPERATION_NAME).ok().flatten();
@@ -101,7 +105,7 @@ pub(crate) async fn call_websocket(
         1,
         subscriptions.mode = "passthrough",
         subscriptions.deduplicated = !created,
-        subgraph.service.name = service_name.clone()
+        subgraph.service.name = service_name.to_string()
     );
     if !created {
         subscription_stream_tx
@@ -111,7 +115,7 @@ pub(crate) async fn call_websocket(
         // Dedup happens here
         return Ok(SubgraphResponse::builder()
             .context(context)
-            .subgraph_name(service_name.clone())
+            .subgraph_name(service_name)
             .extensions(Object::default())
             .build());
     }
@@ -131,16 +135,14 @@ pub(crate) async fn call_websocket(
         _ => None,
     };
 
-    let request = get_websocket_request(service_name.clone(), parts, subgraph_cfg)?;
+    let request = get_websocket_request(service_name, parts, subgraph_cfg)?;
 
     let signing_params = context
         .extensions()
         .with_lock(|lock| lock.get::<Arc<SigningParamsConfig>>().cloned());
 
     let request = if let Some(signing_params) = signing_params {
-        signing_params
-            .sign_empty(request, service_name.as_str())
-            .await?
+        signing_params.sign_empty(request, service_name).await?
     } else {
         request
     };
@@ -169,7 +171,7 @@ pub(crate) async fn call_websocket(
         ));
         attrs.push(KeyValue::new(
             Key::from_static_str("subgraph.name"),
-            opentelemetry::Value::String(service_name.clone().into()),
+            opentelemetry::Value::String(service_name.to_string().into()),
         ));
         log_event(
             level,
@@ -248,7 +250,7 @@ pub(crate) async fn call_websocket(
         );
 
         FetchError::SubrequestWsError {
-            service: service_name.clone(),
+            service: service_name.to_string(),
             reason: format!("cannot connect websocket to subgraph: {error_details}"),
         }
     })?;
@@ -261,7 +263,7 @@ pub(crate) async fn call_websocket(
     )
     .await
     .map_err(|err| FetchError::SubrequestWsError {
-        service: service_name.clone(),
+        service: service_name.to_string(),
         reason: format!("cannot get the GraphQL websocket stream: {}", err.message),
     })?;
 
@@ -269,7 +271,7 @@ pub(crate) async fn call_websocket(
         .into_subscription(body, subgraph_cfg.heartbeat_interval.into_option())
         .await
         .map_err(|err| FetchError::SubrequestWsError {
-            service: service_name.clone(),
+            service: service_name.to_string(),
             reason: format!("cannot send the subgraph request to websocket stream: {err:?}"),
         })?;
 
@@ -303,20 +305,20 @@ pub(crate) async fn call_websocket(
     Ok(SubgraphResponse::new_from_response(
         resp.map(|_| graphql::Response::default()),
         context,
-        service_name,
+        service_name.to_string(),
         subgraph_request_id,
     ))
 }
 
 fn get_websocket_request(
-    service_name: String,
+    service_name: &str,
     mut parts: http::request::Parts,
     subgraph_ws_cfg: &WebSocketConfiguration,
 ) -> Result<http::Request<()>, FetchError> {
     let mut subgraph_url = url::Url::parse(&parts.uri.to_string()).map_err(|err| {
         tracing::error!("cannot parse subgraph url {}: {err:?}", parts.uri);
         FetchError::SubrequestWsError {
-            service: service_name.clone(),
+            service: service_name.to_string(),
             reason: "cannot parse subgraph url".to_string(),
         }
     })?;
@@ -329,7 +331,7 @@ fn get_websocket_request(
         tracing::error!("cannot set a scheme '{new_scheme}' on subgraph url: {err:?}");
 
         FetchError::SubrequestWsError {
-            service: service_name.clone(),
+            service: service_name.to_string(),
             reason: "cannot set a scheme on websocket url".to_string(),
         }
     })?;
@@ -338,7 +340,7 @@ fn get_websocket_request(
         Some(path) => subgraph_url
             .join(path)
             .map_err(|_| FetchError::SubrequestWsError {
-                service: service_name.clone(),
+                service: service_name.to_string(),
                 reason: "cannot parse subgraph url with the specific websocket path".to_string(),
             })?,
         None => subgraph_url,
@@ -352,7 +354,7 @@ fn get_websocket_request(
         tracing::error!("cannot create websocket client request: {err:?}");
 
         FetchError::SubrequestWsError {
-            service: service_name.clone(),
+            service: service_name.to_string(),
             reason: "cannot create websocket client request".to_string(),
         }
     })?;
@@ -367,11 +369,11 @@ fn get_websocket_request(
 }
 
 /// Set up a subscription with the subgraph over the callback protocol
-pub(crate) async fn setup_callback(
+async fn setup_callback(
     mut notify: Notify<String, graphql::Response>,
     request: &mut SubgraphRequest,
     context: Context,
-    service_name: String,
+    service_name: &str,
     config: &CallbackMode,
     subscription_id: String,
 ) -> Result<ControlFlow<SubgraphResponse>, BoxError> {
@@ -394,7 +396,7 @@ pub(crate) async fn setup_callback(
             .subscription_stream
             .clone()
             .ok_or_else(|| FetchError::SubrequestWsError {
-                service: service_name.clone(),
+                service: service_name.to_string(),
                 reason: "cannot get the callback stream".to_string(),
             })?;
     stream_tx.send(Box::pin(handle.into_stream())).await?;
@@ -405,13 +407,13 @@ pub(crate) async fn setup_callback(
         1,
         subscriptions.mode = "callback",
         subscriptions.deduplicated = !created,
-        subgraph.service.name = service_name.clone()
+        subgraph.service.name = service_name.to_string()
     );
     if !created {
         // Dedup happens here
         return Ok(ControlFlow::Break(
             SubgraphResponse::builder()
-                .subgraph_name(service_name.clone())
+                .subgraph_name(service_name)
                 .context(context)
                 .extensions(Object::default())
                 .build(),
@@ -433,7 +435,7 @@ pub(crate) async fn setup_callback(
     // Generate verifier
     let verifier =
         create_verifier(&subscription_id).map_err(|err| FetchError::SubrequestHttpError {
-            service: service_name.clone(),
+            service: service_name.to_string(),
             reason: format!("{err:?}"),
             status_code: None,
         })?;
@@ -456,7 +458,7 @@ pub(crate) async fn setup_callback(
         "subscription",
         serde_json_bytes::to_value(subscription_extension).map_err(|err| {
             FetchError::SubrequestHttpError {
-                service: service_name.clone(),
+                service: service_name.to_string(),
                 reason: format!("cannot serialize the subscription extension: {err:?}",),
                 status_code: None,
             }
@@ -464,4 +466,73 @@ pub(crate) async fn setup_callback(
     );
 
     Ok(ControlFlow::Continue(()))
+}
+
+pub(crate) async fn subgraph_request(
+    notify: Notify<String, graphql::Response>,
+    mut request: SubgraphRequest,
+    subscription_config: Option<SubscriptionConfig>,
+    service_name: &str,
+) -> Result<ControlFlow<SubgraphResponse, SubgraphRequest>, BoxError> {
+    if request.operation_kind == OperationKind::Subscription
+        && request.subscription_stream.is_some()
+    {
+        let subscription_config =
+            subscription_config.ok_or_else(|| FetchError::SubrequestHttpError {
+                service: service_name.to_string(),
+                reason: "subscription is not enabled".to_string(),
+                status_code: None,
+            })?;
+        let mode = subscription_config.mode.get_subgraph_config(&service_name);
+        let context = request.context.clone();
+
+        let hashed_request = if subscription_config.deduplication.enabled {
+            request.to_sha256(&subscription_config.deduplication.ignored_headers)
+        } else {
+            Uuid::new_v4().to_string()
+        };
+
+        match &mode {
+            Some(SubscriptionMode::Passthrough(ws_conf)) => {
+                // call_websocket for passthrough mode
+                return call_websocket(
+                    notify,
+                    request,
+                    context,
+                    service_name,
+                    ws_conf,
+                    hashed_request,
+                )
+                .await
+                .map(ControlFlow::Break);
+            }
+            Some(SubscriptionMode::Callback(callback_conf)) => {
+                // This will modify the body to add `extensions` for the callback
+                // subscription protocol.
+                let control = setup_callback(
+                    notify,
+                    &mut request,
+                    context.clone(),
+                    service_name,
+                    callback_conf,
+                    hashed_request,
+                )
+                .await?;
+
+                if let ControlFlow::Break(response) = control {
+                    return Ok(ControlFlow::Break(response));
+                }
+            }
+            _ => {
+                return Err(Box::new(FetchError::SubrequestWsError {
+                    service: service_name.to_string(),
+                    reason: "subscription mode is not enabled".to_string(),
+                }));
+            }
+        }
+
+        Ok(ControlFlow::Continue(request))
+    } else {
+        Ok(ControlFlow::Continue(request))
+    }
 }

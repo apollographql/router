@@ -37,8 +37,6 @@ pub(crate) mod subgraph;
 pub(crate) use callback::SUBSCRIPTION_CALLBACK_HMAC_KEY;
 pub(crate) use execution::SubscriptionExecutionLayer;
 pub(crate) use execution::SubscriptionTaskParams;
-pub(crate) use subgraph::call_websocket;
-pub(crate) use subgraph::setup_callback;
 
 pub(crate) const APOLLO_SUBSCRIPTION_PLUGIN: &str = "apollo.subscription";
 pub(crate) const APOLLO_SUBSCRIPTION_PLUGIN_NAME: &str = "subscription";

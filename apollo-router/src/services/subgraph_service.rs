@@ -35,7 +35,6 @@ use tower::ServiceExt;
 use tower::buffer::Buffer;
 use tracing::Instrument;
 use tracing::instrument;
-use uuid::Uuid;
 
 use super::Plugins;
 use super::http::HttpClientServiceFactory;
@@ -59,7 +58,6 @@ use crate::json_ext::Object;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugins::file_uploads;
 use crate::plugins::subscription::SubscriptionConfig;
-use crate::plugins::subscription::SubscriptionMode;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::subgraph::events::SubgraphEventRequest;
 use crate::plugins::telemetry::config_new::subgraph::events::SubgraphEventResponse;
@@ -191,33 +189,11 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, mut request: SubgraphRequest) -> Self::Future {
+    fn call(&mut self, request: SubgraphRequest) -> Self::Future {
         let subscription_config = (request.operation_kind == OperationKind::Subscription)
             .then(|| self.subscription_config.clone())
             .flatten();
         let service_name = (*self.service).to_owned();
-
-        // Do it only for subscription to dedup them
-        let hashed_request = if request.operation_kind == OperationKind::Subscription {
-            let subscription_config = match &subscription_config {
-                Some(sub_cfg) => sub_cfg,
-                None => {
-                    return Box::pin(async move {
-                        Err(BoxError::from(FetchError::SubrequestWsError {
-                            service: service_name,
-                            reason: "subscription is not enabled".to_string(),
-                        }))
-                    });
-                }
-            };
-            if subscription_config.deduplication.enabled {
-                request.to_sha256(&subscription_config.deduplication.ignored_headers)
-            } else {
-                Uuid::new_v4().to_string()
-            }
-        } else {
-            String::new()
-        };
 
         let client_factory = self.client_factory.clone();
 
@@ -227,56 +203,17 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
 
         let make_calls = async move {
             // Subscription handling
-            if request.operation_kind == OperationKind::Subscription
-                && request.subscription_stream.is_some()
+            let request = match crate::plugins::subscription::subgraph::subgraph_request(
+                notify,
+                request,
+                subscription_config,
+                &service_name,
+            )
+            .await?
             {
-                let subscription_config =
-                    subscription_config.ok_or_else(|| FetchError::SubrequestHttpError {
-                        service: service_name.clone(),
-                        reason: "subscription is not enabled".to_string(),
-                        status_code: None,
-                    })?;
-                let mode = subscription_config.mode.get_subgraph_config(&service_name);
-                let context = request.context.clone();
-
-                match &mode {
-                    Some(SubscriptionMode::Passthrough(ws_conf)) => {
-                        // call_websocket for passthrough mode
-                        return crate::plugins::subscription::call_websocket(
-                            notify,
-                            request,
-                            context,
-                            service_name,
-                            ws_conf,
-                            hashed_request,
-                        )
-                        .await;
-                    }
-                    Some(SubscriptionMode::Callback(callback_conf)) => {
-                        // This will modify the body to add `extensions` for the callback
-                        // subscription protocol.
-                        let control = crate::plugins::subscription::setup_callback(
-                            notify,
-                            &mut request,
-                            context.clone(),
-                            service_name.clone(),
-                            callback_conf,
-                            hashed_request,
-                        )
-                        .await?;
-
-                        if let ControlFlow::Break(response) = control {
-                            return Ok(response);
-                        }
-                    }
-                    _ => {
-                        return Err(Box::new(FetchError::SubrequestWsError {
-                            service: service_name.clone(),
-                            reason: "subscription mode is not enabled".to_string(),
-                        }));
-                    }
-                }
-            }
+                ControlFlow::Continue(request) => request,
+                ControlFlow::Break(response) => return Ok(response),
+            };
 
             // XXX(@goto-bus-stop): We are cloning the subgraph request potentially 3 times below.
             // It will normally not be super expensive? but it still does not seem great or
