@@ -35,10 +35,10 @@ pub(crate) mod notification;
 pub(crate) mod subgraph;
 
 pub(crate) use callback::SUBSCRIPTION_CALLBACK_HMAC_KEY;
-pub(crate) use callback::create_verifier;
 pub(crate) use execution::SubscriptionExecutionLayer;
 pub(crate) use execution::SubscriptionTaskParams;
 pub(crate) use subgraph::call_websocket;
+pub(crate) use subgraph::setup_callback;
 
 pub(crate) const APOLLO_SUBSCRIPTION_PLUGIN: &str = "apollo.subscription";
 pub(crate) const APOLLO_SUBSCRIPTION_PLUGIN_NAME: &str = "subscription";
@@ -353,6 +353,7 @@ mod tests {
     use crate::http_ext;
     use crate::plugin::DynPlugin;
     use crate::plugin::test::MockSubgraphService;
+    use crate::plugins::subscription::callback::create_verifier;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
     use crate::services::router;

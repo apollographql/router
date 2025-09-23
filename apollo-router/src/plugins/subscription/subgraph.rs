@@ -1,10 +1,13 @@
 //! Subgraph-side implementation of subscriptions.
 
+use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use futures::StreamExt;
+use http::HeaderValue;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
+use serde::Serialize;
 use tokio::select;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::connect_async_tls_with_config;
@@ -12,13 +15,15 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tower::BoxError;
 use tracing::Instrument;
 
+use super::callback::create_verifier;
+use super::notification::Notify;
 use crate::Context;
-use crate::Notify;
 use crate::context::OPERATION_NAME;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
+use crate::plugins::subscription::CallbackMode;
 use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
 use crate::plugins::subscription::WebSocketConfiguration;
 use crate::plugins::telemetry::config_new::events::log_event;
@@ -28,6 +33,19 @@ use crate::protocols::websocket::GraphqlWebSocket;
 use crate::protocols::websocket::convert_websocket_stream;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
+
+static CALLBACK_PROTOCOL_ACCEPT: HeaderValue =
+    HeaderValue::from_static("application/json;callbackSpec=1.0");
+
+#[cfg_attr(test, derive(serde::Deserialize))]
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SubscriptionExtension {
+    pub(crate) subscription_id: String,
+    pub(crate) callback_url: url::Url,
+    pub(crate) verifier: String,
+    pub(crate) heartbeat_interval_ms: u64,
+}
 
 /// Set up a subscription with the subgraph over a WebSocket protocol
 pub(crate) async fn call_websocket(
@@ -346,4 +364,104 @@ fn get_websocket_request(
     *request.headers_mut() = parts.headers;
 
     Ok(request)
+}
+
+/// Set up a subscription with the subgraph over the callback protocol
+pub(crate) async fn setup_callback(
+    mut notify: Notify<String, graphql::Response>,
+    request: &mut SubgraphRequest,
+    context: Context,
+    service_name: String,
+    config: &CallbackMode,
+    subscription_id: String,
+) -> Result<ControlFlow<SubgraphResponse>, BoxError> {
+    let operation_name = context.get::<_, String>(OPERATION_NAME).ok().flatten();
+    // Call create_or_subscribe on notify
+    // Note: _subscription_closing_signal is intentionally unused in callback mode.
+    // In callback mode, subscriptions are managed via HTTP callbacks rather than
+    // persistent connections, so there's no long-running task that needs to be
+    // notified when the subscription closes (unlike passthrough mode which uses
+    // the signal to clean up WebSocket forwarding tasks).
+    //
+    // Callback subscriptions are closed when the subgraph returns 404
+    let (handle, created, _subscription_closing_signal) = notify
+        .create_or_subscribe(subscription_id.clone(), true, operation_name)
+        .await?;
+
+    // If it existed before just send the right stream (handle) and early return
+    let stream_tx =
+        request
+            .subscription_stream
+            .clone()
+            .ok_or_else(|| FetchError::SubrequestWsError {
+                service: service_name.clone(),
+                reason: "cannot get the callback stream".to_string(),
+            })?;
+    stream_tx.send(Box::pin(handle.into_stream())).await?;
+
+    u64_counter!(
+        "apollo.router.operations.subscriptions",
+        "Total requests with subscription operations",
+        1,
+        subscriptions.mode = "callback",
+        subscriptions.deduplicated = !created,
+        subgraph.service.name = service_name.clone()
+    );
+    if !created {
+        // Dedup happens here
+        return Ok(ControlFlow::Break(
+            SubgraphResponse::builder()
+                .subgraph_name(service_name.clone())
+                .context(context)
+                .extensions(Object::default())
+                .build(),
+        ));
+    }
+
+    // If not then put the subscription_id in the extensions for callback mode and continue
+    // Do this if the topic doesn't already exist
+    let mut callback_url = config.public_url.clone();
+    if callback_url.path_segments_mut().is_err() {
+        callback_url = callback_url.join(&subscription_id)?;
+    } else {
+        callback_url
+            .path_segments_mut()
+            .expect("can't happen because we checked before")
+            .push(&subscription_id);
+    }
+
+    // Generate verifier
+    let verifier =
+        create_verifier(&subscription_id).map_err(|err| FetchError::SubrequestHttpError {
+            service: service_name.clone(),
+            reason: format!("{err:?}"),
+            status_code: None,
+        })?;
+    request
+        .subgraph_request
+        .headers_mut()
+        .append(http::header::ACCEPT, CALLBACK_PROTOCOL_ACCEPT.clone());
+
+    let subscription_extension = SubscriptionExtension {
+        subscription_id,
+        callback_url,
+        verifier,
+        heartbeat_interval_ms: config
+            .heartbeat_interval
+            .into_option()
+            .map(|duration| duration.as_millis() as u64)
+            .unwrap_or(0),
+    };
+    request.subgraph_request.body_mut().extensions.insert(
+        "subscription",
+        serde_json_bytes::to_value(subscription_extension).map_err(|err| {
+            FetchError::SubrequestHttpError {
+                service: service_name.clone(),
+                reason: format!("cannot serialize the subscription extension: {err:?}",),
+                status_code: None,
+            }
+        })?,
+    );
+
+    Ok(ControlFlow::Continue(()))
 }
