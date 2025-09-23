@@ -14,8 +14,8 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::types::chrono::DateTime;
 use sqlx::types::chrono::Utc;
 
-use super::cache_control::CacheControl;
 use crate::plugins::response_cache::ErrorCode;
+use crate::plugins::response_cache::cache_control::CacheControl;
 
 #[derive(sqlx::FromRow, Debug, Clone)]
 pub(crate) struct CacheEntryRow {
@@ -101,27 +101,27 @@ pub(crate) struct PostgresCacheConfig {
     pub(crate) tls: TlsConfig,
 }
 
-pub(super) const fn default_required_to_start() -> bool {
+pub(in crate::plugins::response_cache) const fn default_required_to_start() -> bool {
     false
 }
 
-pub(super) const fn default_pool_size() -> u32 {
+pub(in crate::plugins::response_cache) const fn default_pool_size() -> u32 {
     5
 }
 
-pub(super) const fn default_cleanup_interval() -> Duration {
+pub(in crate::plugins::response_cache) const fn default_cleanup_interval() -> Duration {
     Duration::from_secs(60 * 60)
 }
 
-pub(super) const fn default_idle_timeout() -> Duration {
+pub(in crate::plugins::response_cache) const fn default_idle_timeout() -> Duration {
     Duration::from_secs(60)
 }
 
-pub(super) const fn default_acquire_timeout() -> Duration {
+pub(in crate::plugins::response_cache) const fn default_acquire_timeout() -> Duration {
     Duration::from_millis(50)
 }
 
-pub(super) const fn default_batch_size() -> usize {
+pub(in crate::plugins::response_cache) const fn default_batch_size() -> usize {
     100
 }
 
@@ -169,7 +169,7 @@ pub(crate) struct PostgresCacheStorage {
     batch_size: usize,
     pg_pool: PgPool,
     namespace: Option<String>,
-    pub(super) cleanup_interval: TimeDelta,
+    pub(in crate::plugins::response_cache) cleanup_interval: TimeDelta,
 }
 
 #[derive(thiserror::Error, Debug)]

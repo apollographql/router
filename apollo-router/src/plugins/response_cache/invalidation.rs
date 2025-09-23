@@ -14,10 +14,10 @@ use tower::BoxError;
 use tracing::Instrument;
 
 use super::plugin::Storage;
-use super::postgres::PostgresCacheStorage;
 use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::response_cache::plugin::INTERNAL_CACHE_TAG_PREFIX;
 use crate::plugins::response_cache::plugin::RESPONSE_CACHE_VERSION;
+use crate::plugins::response_cache::storage::postgres::PostgresCacheStorage;
 
 #[derive(Clone)]
 pub(crate) struct Invalidation {

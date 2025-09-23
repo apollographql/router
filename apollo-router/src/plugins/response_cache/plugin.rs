@@ -45,10 +45,6 @@ use super::invalidation_endpoint::InvalidationEndpointConfig;
 use super::invalidation_endpoint::InvalidationService;
 use super::invalidation_endpoint::SubgraphInvalidationConfig;
 use super::metrics::CacheMetricContextKey;
-use super::postgres::BatchDocument;
-use super::postgres::CacheEntry;
-use super::postgres::PostgresCacheConfig;
-use super::postgres::PostgresCacheStorage;
 use crate::Context;
 use crate::Endpoint;
 use crate::ListenAddr;
@@ -71,6 +67,10 @@ use crate::plugins::response_cache::cache_key::PrimaryCacheKeyRoot;
 use crate::plugins::response_cache::cache_key::hash_additional_data;
 use crate::plugins::response_cache::cache_key::hash_query;
 use crate::plugins::response_cache::metrics;
+use crate::plugins::response_cache::storage::postgres::BatchDocument;
+use crate::plugins::response_cache::storage::postgres::CacheEntry;
+use crate::plugins::response_cache::storage::postgres::PostgresCacheConfig;
+use crate::plugins::response_cache::storage::postgres::PostgresCacheStorage;
 use crate::plugins::telemetry::LruSizeInstrument;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::span_ext::SpanMarkError;
@@ -2612,9 +2612,9 @@ impl Ord for CacheKeySource {
 ))]
 mod tests {
     use super::*;
-    use crate::plugins::response_cache::postgres::default_batch_size;
-    use crate::plugins::response_cache::postgres::default_cleanup_interval;
-    use crate::plugins::response_cache::postgres::default_pool_size;
+    use crate::plugins::response_cache::storage::postgres::default_batch_size;
+    use crate::plugins::response_cache::storage::postgres::default_cleanup_interval;
+    use crate::plugins::response_cache::storage::postgres::default_pool_size;
 
     const SCHEMA: &str = include_str!("../../testdata/orga_supergraph_cache_key.graphql");
 

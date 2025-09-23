@@ -9,7 +9,7 @@ use tokio_stream::StreamExt;
 use tokio_stream::wrappers::IntervalStream;
 
 use crate::metrics::meter_provider;
-use crate::plugins::response_cache::postgres::PostgresCacheStorage;
+use crate::plugins::response_cache::storage::postgres::PostgresCacheStorage;
 
 pub(crate) const CACHE_INFO_SUBGRAPH_CONTEXT_KEY: &str =
     "apollo::router::response_cache::cache_info_subgraph";

@@ -264,11 +264,11 @@ mod tests {
 
     use super::*;
     use crate::plugins::response_cache::plugin::Storage;
-    use crate::plugins::response_cache::postgres::PostgresCacheConfig;
-    use crate::plugins::response_cache::postgres::PostgresCacheStorage;
-    use crate::plugins::response_cache::postgres::default_batch_size;
-    use crate::plugins::response_cache::postgres::default_cleanup_interval;
-    use crate::plugins::response_cache::postgres::default_pool_size;
+    use crate::plugins::response_cache::storage::postgres::PostgresCacheConfig;
+    use crate::plugins::response_cache::storage::postgres::PostgresCacheStorage;
+    use crate::plugins::response_cache::storage::postgres::default_batch_size;
+    use crate::plugins::response_cache::storage::postgres::default_cleanup_interval;
+    use crate::plugins::response_cache::storage::postgres::default_pool_size;
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key() {
