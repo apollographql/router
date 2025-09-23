@@ -1,18 +1,19 @@
+use indexmap::IndexSet;
+
+use crate::error::CompositionError;
+use crate::error::FederationError;
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
-use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
+use crate::schema::position::TypeDefinitionPosition;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::utils::human_readable::human_readable_types;
-use crate::error::FederationError;
-use crate::error::CompositionError;
-use indexmap::IndexSet;
 
 impl Merger {
-      // Returns whether the interface has a key (even a non-resolvable one) in any subgraph.
-      fn validate_interface_keys(
+    // Returns whether the interface has a key (even a non-resolvable one) in any subgraph.
+    fn validate_interface_keys(
         &mut self,
         sources: &Sources<Subgraph<Validated>>,
         dest: &InterfaceTypeDefinitionPosition,
@@ -27,7 +28,6 @@ impl Merger {
         // all the implementations of that interface in the supergraph.
         let mut has_key = false;
         for (idx, source) in sources.iter() {
-
             let Some(subgraph) = source else {
                 continue;
             };
@@ -92,13 +92,12 @@ impl Merger {
             } else {
                 continue;
             };
-            if !self.subgraphs[*idx].is_interface_object_type(&dest.clone().into())
-            {
+            if !self.subgraphs[*idx].is_interface_object_type(&dest.clone().into()) {
                 continue;
             }
 
             let subgraph_name = &self.subgraphs[*idx].name;
-          
+
             let defined_implementations: IndexSet<_> = supergraph_implementations
                 .iter()
                 .filter(|implementation| implementation.get(schema).is_ok())

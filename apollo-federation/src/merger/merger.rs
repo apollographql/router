@@ -1028,7 +1028,6 @@ impl Merger {
         Ok(!source_as_entity.is_empty())
     }
 
-
     pub(crate) fn merge_input_object(&mut self, _io: InputObjectTypeDefinitionPosition) {
         todo!("Implement merge_input_object")
     }

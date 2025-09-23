@@ -7,7 +7,7 @@ pub(crate) mod merge_directive;
 pub(crate) mod merge_enum;
 mod merge_field;
 mod merge_input;
+mod merge_interface;
 mod merge_links;
 mod merge_type;
 mod merge_union;
-mod merge_interface;
