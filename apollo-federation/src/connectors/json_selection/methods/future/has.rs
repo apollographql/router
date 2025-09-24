@@ -59,7 +59,8 @@ fn has_method(
             _ => (Some(JSON::Bool(false)), arg_errors),
         },
 
-        (_, arg_errors) => (Some(JSON::Bool(false)), arg_errors),
+        (None, arg_errors) => (None, arg_errors),
+        (Some(_), arg_errors) => (Some(JSON::Bool(false)), arg_errors),
     }
 }
 
@@ -80,6 +81,8 @@ fn has_shape(
 mod tests {
     use serde_json_bytes::json;
 
+    use crate::connectors::ConnectSpec;
+    use crate::connectors::json_selection::ApplyToError;
     use crate::selection;
 
     #[test]
@@ -184,6 +187,26 @@ mod tests {
                 },
             })),
             (Some(json!("boolean")), vec![]),
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn has_should_return_none_when_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!("obj->has($.missing)", spec).apply_to(&json!({
+                "obj": [1, 2, 3]
+            })),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Property .missing not found in object",
+                    "path": ["missing"],
+                    "range": [11, 18],
+                    "spec": spec.to_string(),
+                }))]
+            ),
         );
     }
 }

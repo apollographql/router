@@ -1,0 +1,35 @@
+---
+title: New Relic configuration of OTLP exporter
+subtitle: Configure the OTLP trace exporter for New Relic
+description: Configure the OpenTelemetry Protocol (OTLP) trace exporter for New Relic in the Apollo GraphOS Router or Apollo Router Core.
+context:
+  - telemetry
+redirectFrom:
+    - /graphos/routing/observability/telemetry/trace-exporters/new-relic
+---
+
+This tracing exporter is a configuration of the [OTLP exporter](/graphos/routing/observability/telemetry/trace-exporters/otlp) to use with [New Relic](https://newrelic.com/).
+
+For general tracing configuration, refer to [Router Tracing Configuration](/router/configuration/telemetry/exporters/tracing/overview).
+
+## New Relic configuration
+
+To configure the router, enable the [OTLP exporter](/router/configuration/telemetry/exporters/tracing/otlp/#otlp-configuration) and set both `endpoint: <new-relic-endpoint>` and `api-key: <new-relic-api-key>`. For example: 
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      otlp:
+        enabled: true
+        # Endpoint for your region.
+        endpoint: <new-relic-endpoint>
+        protocol: grpc
+        grpc:
+          metadata:
+            api-key: <new-relic-api-key>
+
+```
+
+For more details about New Relic configuration, see [New Relic's docs on OpenTelemetry configuration](https://docs.newrelic.com/docs/more-integrations/open-source-telemetry-integrations/opentelemetry/get-started/opentelemetry-set-up-your-app/#review-settings).
+

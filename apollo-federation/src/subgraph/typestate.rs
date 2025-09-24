@@ -16,8 +16,10 @@ use crate::ValidFederationSchema;
 use crate::bail;
 use crate::ensure;
 use crate::error::FederationError;
+use crate::error::Locations;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
+use crate::error::SubgraphLocation;
 use crate::internal_error;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::federation_spec_definition::FED_1;
@@ -175,16 +177,21 @@ impl Subgraph<Initial> {
     /// Converts the schema to a fed2 schema.
     /// - It is assumed to have no `@link` to the federation spec.
     /// - Returns an equivalent subgraph with a `@link` to the auto expanded federation spec.
+    /// - Imports may optionally be omitted.
     /// - This is mainly for testing and not optimized.
     // PORT_NOTE: Corresponds to `asFed2SubgraphDocument` function in JS, but simplified.
-    pub fn into_fed2_test_subgraph(self, use_latest: bool) -> Result<Self, SubgraphError> {
+    pub fn into_fed2_test_subgraph(
+        self,
+        use_latest: bool,
+        no_imports: bool,
+    ) -> Result<Self, SubgraphError> {
         let mut schema = self.state.schema;
         let federation_spec = if use_latest {
             FederationSpecDefinition::latest()
         } else {
             FederationSpecDefinition::auto_expanded_federation_spec()
         };
-        add_federation_link_to_test_schema(&mut schema, federation_spec.version())
+        add_federation_link_to_test_schema(&mut schema, federation_spec.version(), no_imports)
             .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;
         Ok(Self::new(&self.name, &self.url, schema))
     }
@@ -453,15 +460,26 @@ impl<S: HasMetadata> Subgraph<S> {
         }
         false
     }
+
+    pub(crate) fn node_locations<T>(&self, node: &Node<T>) -> Locations {
+        self.schema()
+            .node_locations(node)
+            .map(|range| SubgraphLocation {
+                subgraph: self.name.clone(),
+                range,
+            })
+            .collect()
+    }
 }
 
 /// Adds a federation (v2 or above) link directive to the schema.
 /// - Similar to `add_fed1_link_to_schema` & `schema_as_fed2_subgraph`, but the link can be added
-///   before collecting metadata.
+///   before collecting metadata, and imports can be optionally omitted.
 /// - This is mainly for testing.
 fn add_federation_link_to_test_schema(
     schema: &mut Schema,
     federation_version: &Version,
+    no_imports: bool,
 ) -> Result<(), FederationError> {
     let federation_spec = FEDERATION_VERSIONS
         .find(federation_version)
@@ -471,12 +489,16 @@ fn add_federation_link_to_test_schema(
         ))?;
 
     // Insert `@link(url: "http://specs.apollo.dev/federation/vX.Y", import: ...)`.
-    // - auto import all directives.
-    let imports: Vec<_> = federation_spec
-        .directive_specs()
-        .iter()
-        .map(|d| format!("@{}", d.name()).into())
-        .collect();
+    // - auto import all directives, if requested
+    let imports: Vec<_> = if no_imports {
+        Vec::new()
+    } else {
+        federation_spec
+            .directive_specs()
+            .iter()
+            .map(|d| format!("@{}", d.name()).into())
+            .collect()
+    };
 
     schema
         .schema_definition

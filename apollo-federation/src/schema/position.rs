@@ -35,6 +35,7 @@ use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::database::links_metadata;
 use crate::link::spec_definition::SpecDefinition;
+use crate::merger::merge_argument::HasArguments;
 use crate::merger::merge_enum::EnumExampleAst;
 use crate::schema::FederationSchema;
 use crate::schema::referencer::DirectiveReferencers;
@@ -1475,6 +1476,60 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
         match self {
             Self::Object(field) => field.insert(schema, field_def),
             Self::Interface(field) => field.insert(schema, field_def),
+        }
+    }
+}
+
+impl HasArguments for ObjectOrInterfaceFieldDefinitionPosition {
+    type ArgumentPosition = FieldArgumentDefinitionPosition;
+
+    fn argument_position(&self, name: Name) -> Self::ArgumentPosition {
+        match self {
+            Self::Object(field) => field.argument_position(name).into(),
+            Self::Interface(field) => field.argument_position(name).into(),
+        }
+    }
+
+    fn get_argument<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        name: &Name,
+    ) -> Option<&'schema Node<InputValueDefinition>> {
+        match self {
+            Self::Object(field) => field.get_argument(schema, name),
+            Self::Interface(field) => field.get_argument(schema, name),
+        }
+    }
+
+    fn get_arguments<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema Vec<Node<InputValueDefinition>>, FederationError> {
+        match self {
+            Self::Object(field) => field.get_arguments(schema),
+            Self::Interface(field) => field.get_arguments(schema),
+        }
+    }
+
+    fn insert_argument(
+        &self,
+        schema: &mut FederationSchema,
+        arg: Node<InputValueDefinition>,
+    ) -> Result<(), FederationError> {
+        match self {
+            Self::Object(field) => field.insert_argument(schema, arg),
+            Self::Interface(field) => field.insert_argument(schema, arg),
+        }
+    }
+
+    fn remove_argument(
+        &self,
+        schema: &mut FederationSchema,
+        name: &Name,
+    ) -> Result<(), FederationError> {
+        match self {
+            Self::Object(field) => field.remove_argument(schema, name),
+            Self::Interface(field) => field.remove_argument(schema, name),
         }
     }
 }
@@ -3250,6 +3305,45 @@ impl Debug for ObjectFieldDefinitionPosition {
     }
 }
 
+impl HasArguments for ObjectFieldDefinitionPosition {
+    type ArgumentPosition = ObjectFieldArgumentDefinitionPosition;
+
+    fn argument_position(&self, name: Name) -> Self::ArgumentPosition {
+        self.argument(name)
+    }
+
+    fn get_argument<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        name: &Name,
+    ) -> Option<&'schema Node<InputValueDefinition>> {
+        self.argument_position(name.clone()).try_get(&schema.schema)
+    }
+
+    fn get_arguments<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema Vec<Node<InputValueDefinition>>, FederationError> {
+        Ok(&self.get(schema.schema())?.arguments)
+    }
+
+    fn insert_argument(
+        &self,
+        schema: &mut FederationSchema,
+        arg: Node<InputValueDefinition>,
+    ) -> Result<(), FederationError> {
+        self.argument_position(arg.name.clone()).insert(schema, arg)
+    }
+
+    fn remove_argument(
+        &self,
+        schema: &mut FederationSchema,
+        name: &Name,
+    ) -> Result<(), FederationError> {
+        self.argument_position(name.clone()).remove(schema)
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct ObjectFieldArgumentDefinitionPosition {
     pub(crate) type_name: Name,
@@ -3391,6 +3485,20 @@ impl ObjectFieldArgumentDefinitionPosition {
             .make_mut()
             .directives
             .retain(|other_directive| other_directive.name != name);
+    }
+
+    fn insert(
+        &self,
+        schema: &mut FederationSchema,
+        argument: Node<InputValueDefinition>,
+    ) -> Result<(), FederationError> {
+        let parent = self.parent().make_mut(&mut schema.schema)?;
+        if parent.argument_by_name(&self.argument_name).is_some() {
+            bail!(r#"Object field argument "{self}" already exists in schema"#);
+        }
+        self.insert_references(&argument, &mut schema.referencers)?;
+        parent.make_mut().arguments.push(argument);
+        Ok(())
     }
 
     fn insert_references(
@@ -4146,7 +4254,7 @@ impl InterfaceFieldDefinitionPosition {
         self.get(schema).ok()
     }
 
-    fn make_mut<'schema>(
+    pub(crate) fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
     ) -> Result<&'schema mut Component<FieldDefinition>, PositionLookupError> {
@@ -4480,6 +4588,45 @@ impl Display for InterfaceFieldDefinitionPosition {
     }
 }
 
+impl HasArguments for InterfaceFieldDefinitionPosition {
+    type ArgumentPosition = InterfaceFieldArgumentDefinitionPosition;
+
+    fn argument_position(&self, name: Name) -> Self::ArgumentPosition {
+        self.argument(name)
+    }
+
+    fn get_argument<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        name: &Name,
+    ) -> Option<&'schema Node<InputValueDefinition>> {
+        self.argument_position(name.clone()).try_get(&schema.schema)
+    }
+
+    fn get_arguments<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema Vec<Node<InputValueDefinition>>, FederationError> {
+        Ok(&self.get(&schema.schema)?.arguments)
+    }
+
+    fn insert_argument(
+        &self,
+        schema: &mut FederationSchema,
+        arg: Node<InputValueDefinition>,
+    ) -> Result<(), FederationError> {
+        self.argument_position(arg.name.clone()).insert(schema, arg)
+    }
+
+    fn remove_argument(
+        &self,
+        schema: &mut FederationSchema,
+        name: &Name,
+    ) -> Result<(), FederationError> {
+        self.argument_position(name.clone()).remove(schema)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct InterfaceFieldArgumentDefinitionPosition {
     pub(crate) type_name: Name,
@@ -4624,6 +4771,20 @@ impl InterfaceFieldArgumentDefinitionPosition {
             .make_mut()
             .directives
             .retain(|other_directive| other_directive.name != name);
+    }
+
+    fn insert(
+        &self,
+        schema: &mut FederationSchema,
+        argument: Node<InputValueDefinition>,
+    ) -> Result<(), FederationError> {
+        let parent = self.parent().make_mut(&mut schema.schema)?;
+        if parent.argument_by_name(&argument.name).is_some() {
+            bail!(r#"Interface field argument "{self}" already exists in schema"#);
+        }
+        self.insert_references(&argument, &mut schema.referencers)?;
+        parent.make_mut().arguments.push(argument);
+        Ok(())
     }
 
     fn insert_references(
@@ -6729,6 +6890,45 @@ impl Display for DirectiveDefinitionPosition {
     }
 }
 
+impl HasArguments for DirectiveDefinitionPosition {
+    type ArgumentPosition = DirectiveArgumentDefinitionPosition;
+
+    fn argument_position(&self, name: Name) -> Self::ArgumentPosition {
+        self.argument(name)
+    }
+
+    fn get_argument<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        name: &Name,
+    ) -> Option<&'schema Node<InputValueDefinition>> {
+        self.argument_position(name.clone()).try_get(&schema.schema)
+    }
+
+    fn get_arguments<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema Vec<Node<InputValueDefinition>>, FederationError> {
+        Ok(&self.get(&schema.schema)?.arguments)
+    }
+
+    fn insert_argument(
+        &self,
+        schema: &mut FederationSchema,
+        arg: Node<InputValueDefinition>,
+    ) -> Result<(), FederationError> {
+        self.argument_position(arg.name.clone()).insert(schema, arg)
+    }
+
+    fn remove_argument(
+        &self,
+        schema: &mut FederationSchema,
+        name: &Name,
+    ) -> Result<(), FederationError> {
+        self.argument_position(name.clone()).remove(schema)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct DirectiveArgumentDefinitionPosition {
     pub(crate) directive_name: Name,
@@ -6860,6 +7060,20 @@ impl DirectiveArgumentDefinitionPosition {
             .make_mut()
             .directives
             .retain(|other_directive| other_directive.name != name);
+    }
+
+    fn insert(
+        &self,
+        schema: &mut FederationSchema,
+        argument: Node<InputValueDefinition>,
+    ) -> Result<(), FederationError> {
+        let parent = self.parent().make_mut(&mut schema.schema)?;
+        if parent.argument_by_name(&argument.name).is_some() {
+            bail!(r#"Directive argument "{self}" already exists in schema"#);
+        }
+        self.insert_references(&argument, &mut schema.referencers)?;
+        parent.make_mut().arguments.push(argument);
+        Ok(())
     }
 
     fn insert_references(
