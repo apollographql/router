@@ -6717,7 +6717,9 @@ impl InputObjectFieldDefinitionPosition {
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if is_graphql_reserved_name(&self.field_name) {
-            bail!(r#"Cannot insert reserved input object field "{self}""#);
+            // Skip invalid fields using a reserved name.
+            // - GraphQL validation will catch them later.
+            return Ok(());
         }
         validate_node_directives(field.directives.deref())?;
         for directive_reference in field.directives.iter() {
