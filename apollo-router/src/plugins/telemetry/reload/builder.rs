@@ -4,6 +4,7 @@ use tower::ServiceExt;
 
 use crate::Endpoint;
 use crate::ListenAddr;
+use crate::metrics::aggregation::MeterProviderType;
 use crate::plugins::telemetry::apollo;
 use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config::Conf;
@@ -63,7 +64,12 @@ impl<'a> Builder<'a> {
             let mut builder = MetricsBuilder::new(self.config);
             builder.configure(&self.config.exporters.metrics.prometheus)?;
             builder.configure(&self.config.exporters.metrics.otlp)?;
-            let (prometheus_registry, meter_providers) = builder.build();
+
+            // Set up the views for this
+            for metric_view in builder.metrics_common().views.clone() {
+                builder.with_view(MeterProviderType::Public, metric_view.try_into()?);
+            }
+            let (prometheus_registry, meter_providers, _) = builder.build();
             self.activation
                 .with_prometheus_registry(prometheus_registry);
             self.activation.add_meter_providers(meter_providers);
@@ -111,6 +117,9 @@ impl<'a> Builder<'a> {
         // have a custom sender and this MUST be populated on every reload
         let mut builder = MetricsBuilder::new(self.config);
         builder.configure(&self.config.apollo)?;
+        let (_, meter_providers, sender) = builder.build();
+        self.activation.add_meter_providers(meter_providers);
+        self.apollo_sender = sender;
         Ok(())
     }
 

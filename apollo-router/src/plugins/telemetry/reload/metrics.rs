@@ -34,6 +34,7 @@ impl<'a> MetricsBuilder<'a> {
     ) -> (
         Option<Registry>,
         HashMap<MeterProviderType, FilterMeterProvider>,
+        Sender,
     ) {
         (
             self.prometheus_registry,
@@ -55,6 +56,7 @@ impl<'a> MetricsBuilder<'a> {
                     )
                 })
                 .collect(),
+            self.apollo_metrics_sender,
         )
     }
 

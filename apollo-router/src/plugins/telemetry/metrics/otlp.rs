@@ -37,9 +37,7 @@ impl MetricsConfigurator for super::super::otlp::Config {
                 .with_timeout(self.batch_processor.max_export_timeout)
                 .build(),
         );
-        for metric_view in builder.metrics_common().views.clone() {
-            builder.with_view(MeterProviderType::Public, metric_view.try_into()?);
-        }
+
         Ok(())
     }
 }
