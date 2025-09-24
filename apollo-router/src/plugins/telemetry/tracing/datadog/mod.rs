@@ -7,31 +7,8 @@ use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::time::Duration;
 
-pub(crate) use agent_sampling::DatadogAgentSampling;
-use ahash::HashMap;
-use ahash::HashMapExt;
-use futures::future::BoxFuture;
-use http::Uri;
-use opentelemetry::Key;
-use opentelemetry::KeyValue;
-use opentelemetry::Value;
-use opentelemetry::trace::SpanContext;
-use opentelemetry::trace::SpanKind;
-use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::export::trace::ExportResult;
-use opentelemetry_sdk::export::trace::SpanData;
-use opentelemetry_sdk::export::trace::SpanExporter;
-use opentelemetry_sdk::trace::Builder;
-use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
-use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
-use schemars::JsonSchema;
-use serde::Deserialize;
-pub(crate) use span_processor::DatadogSpanProcessor;
-use tower::BoxError;
-
-use crate::plugins::telemetry::config::GenericWith;
-use crate::plugins::telemetry::config::TracingCommon;
-use crate::plugins::telemetry::config_new::spans::Spans;
+use crate::plugins::telemetry::builder::TracingBuilder;
+use crate::plugins::telemetry::config::{Conf, GenericWith};
 use crate::plugins::telemetry::consts::BUILT_IN_SPAN_NAMES;
 use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::OTEL_ORIGINAL_NAME;
@@ -48,6 +25,26 @@ use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::plugins::telemetry::tracing::datadog_exporter;
 use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
+pub(crate) use agent_sampling::DatadogAgentSampling;
+use ahash::HashMap;
+use ahash::HashMapExt;
+use futures::future::BoxFuture;
+use http::Uri;
+use opentelemetry::Key;
+use opentelemetry::KeyValue;
+use opentelemetry::Value;
+use opentelemetry::trace::SpanContext;
+use opentelemetry::trace::SpanKind;
+use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::export::trace::ExportResult;
+use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::export::trace::SpanExporter;
+use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
+use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
+use schemars::JsonSchema;
+use serde::Deserialize;
+pub(crate) use span_processor::DatadogSpanProcessor;
+use tower::BoxError;
 
 fn default_resource_mappings() -> HashMap<String, String> {
     let mut map = HashMap::with_capacity(7);
@@ -71,7 +68,7 @@ const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:8126";
 #[schemars(rename = "DatadogConfig")]
 pub(crate) struct Config {
     /// Enable datadog
-    enabled: bool,
+    pub(crate) enabled: bool,
 
     /// The endpoint to send to
     #[serde(default)]
@@ -118,18 +115,17 @@ fn default_true() -> bool {
 }
 
 impl TracingConfigurator for Config {
+    fn config(conf: &Conf) -> &Self {
+        &conf.exporters.tracing.datadog
+    }
+
     fn enabled(&self) -> bool {
         self.enabled
     }
 
-    fn apply(
-        &self,
-        builder: Builder,
-        trace: &TracingCommon,
-        _spans_config: &Spans,
-    ) -> Result<Builder, BoxError> {
+    fn apply(&self, builder: &mut TracingBuilder) -> Result<(), BoxError> {
         tracing::info!("Configuring Datadog tracing: {}", self.batch_processor);
-        let common: opentelemetry_sdk::trace::Config = trace.into();
+        let common: opentelemetry_sdk::trace::Config = builder.tracing_common().into();
 
         // Precompute representation otel Keys for the mappings so that we don't do heap allocation for each span
         let resource_mappings = self.enable_span_mapping.then(|| {
@@ -231,13 +227,16 @@ impl TracingConfigurator for Config {
         .build()
         .filtered();
 
-        Ok(
-            if trace.preview_datadog_agent_sampling.unwrap_or_default() {
-                builder.with_span_processor(batch_processor.always_sampled())
-            } else {
-                builder.with_span_processor(batch_processor)
-            },
-        )
+        if builder
+            .tracing_common()
+            .preview_datadog_agent_sampling
+            .unwrap_or_default()
+        {
+            builder.with_span_processor(batch_processor.always_sampled())
+        } else {
+            builder.with_span_processor(batch_processor)
+        }
+        Ok(())
     }
 }
 

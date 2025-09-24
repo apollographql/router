@@ -34,7 +34,6 @@ use opentelemetry::metrics::MeterProvider;
 use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::propagation::Injector;
-use opentelemetry::propagation::TextMapCompositePropagator;
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::propagation::text_map_propagator::FieldIter;
 use opentelemetry::trace::SpanContext;
@@ -43,7 +42,6 @@ use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceId;
 use opentelemetry::trace::TraceState;
-use opentelemetry_sdk::trace::Builder;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
@@ -68,7 +66,6 @@ use self::config::TraceIdFormat;
 use self::config_new::instruments::Instrumented;
 use self::config_new::router::events::RouterEvents;
 use self::config_new::router::instruments::RouterInstruments;
-use self::config_new::spans::Spans;
 use self::config_new::subgraph::events::SubgraphEvents;
 use self::config_new::subgraph::instruments::SubgraphInstruments;
 use self::config_new::supergraph::events::SupergraphEvents;
@@ -88,8 +85,6 @@ use crate::context::OPERATION_NAME;
 use crate::graphql::ResponseVisitor;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::instrument::InstrumentLayer;
-use crate::metrics::aggregation::MeterProviderType;
-use crate::metrics::filter::FilterMeterProvider;
 use crate::metrics::meter_provider;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
@@ -97,8 +92,6 @@ use crate::plugins::telemetry::apollo::ForwardHeaders;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
 use crate::plugins::telemetry::config::AttributeValue;
-use crate::plugins::telemetry::config::MetricsCommon;
-use crate::plugins::telemetry::config::TracingCommon;
 use crate::plugins::telemetry::config_new::DatadogId;
 use crate::plugins::telemetry::config_new::apollo::instruments::ApolloConnectorInstruments;
 use crate::plugins::telemetry::config_new::apollo::instruments::ApolloSubgraphInstruments;
@@ -120,7 +113,6 @@ use crate::plugins::telemetry::error_counter::count_router_errors;
 use crate::plugins::telemetry::error_counter::count_subgraph_errors;
 use crate::plugins::telemetry::error_counter::count_supergraph_errors;
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
-use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::metrics::apollo::histogram::ListLengthHistogram;
 use crate::plugins::telemetry::metrics::apollo::studio::LocalTypeStat;
@@ -129,7 +121,6 @@ use crate::plugins::telemetry::metrics::apollo::studio::SinglePathErrorStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleStatsReport;
-use crate::plugins::telemetry::metrics::prometheus::PrometheusService;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
@@ -158,6 +149,7 @@ pub(crate) mod activation;
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
 pub(crate) mod apollo_otlp_exporter;
+mod builder;
 pub(crate) mod config;
 pub(crate) mod config_new;
 pub(crate) mod consts;
@@ -220,31 +212,8 @@ pub(crate) struct Telemetry {
     apollo_metrics_sender: apollo_exporter::Sender,
     field_level_instrumentation_ratio: f64,
     builtin_instruments: RwLock<BuiltinInstruments>,
-    configurator: Mutex<Option<Activation>>,
+    activation: Mutex<Option<Activation>>,
     enabled_features: EnabledFeatures,
-}
-
-fn setup_tracing<T: TracingConfigurator>(
-    mut builder: Builder,
-    configurator: &T,
-    tracing_config: &TracingCommon,
-    spans_config: &Spans,
-) -> Result<Builder, BoxError> {
-    if configurator.enabled() {
-        builder = configurator.apply(builder, tracing_config, spans_config)?;
-    }
-    Ok(builder)
-}
-
-fn setup_metrics_exporter<T: MetricsConfigurator>(
-    mut builder: MetricsBuilder,
-    configurator: &T,
-    metrics_common: &MetricsCommon,
-) -> Result<MetricsBuilder, BoxError> {
-    if configurator.enabled() {
-        builder = configurator.apply(builder, metrics_common)?;
-    }
-    Ok(builder)
 }
 
 /// When observed, it reports the most recently stored value (give or take atomicity looseness).
@@ -365,9 +334,11 @@ impl PluginPrivate for Telemetry {
 
         let field_level_instrumentation_ratio =
             config.calculate_field_level_instrumentation_ratio()?;
-        let metrics_builder = Self::create_metrics_builder(&config)?;
-        let tracer_provider = Self::create_tracer_provider(&config)?;
 
+        let (activation, custom_endpoints, apollo_metrics_sender) =
+            builder::build(&init.previous_config, &config)?;
+
+        ::tracing::info!("custom endpoints {:?}", custom_endpoints);
         if config.instrumentation.spans.mode == SpanMode::Deprecated {
             ::tracing::warn!(
                 "telemetry.instrumentation.spans.mode is currently set to 'deprecated', either explicitly or via defaulting. Set telemetry.instrumentation.spans.mode explicitly in your router.yaml to 'spec_compliant' for log and span attributes that follow OpenTelemetry semantic conventions. This option will be defaulted to 'spec_compliant' in a future release and eventually removed altogether"
@@ -382,54 +353,12 @@ impl PluginPrivate for Telemetry {
         let enabled_features = Self::extract_enabled_features(full_config);
         ::tracing::debug!("Enabled scale features: {:?}", enabled_features);
 
-        // Only set the meter provider id things have actually changed.
-        // For prometheus we need to get hold of the last registry if things have not changed.
-
-        let mut activation = Activation::new();
-
-        activation.with_tracer_provider(tracer_provider);
-        activation.with_meter_provider(
-            MeterProviderType::Public,
-            FilterMeterProvider::public(metrics_builder.public_meter_provider_builder.build()),
-        );
-        activation.with_meter_provider(
-            MeterProviderType::Apollo,
-            FilterMeterProvider::private(metrics_builder.apollo_meter_provider_builder.build()),
-        );
-        activation.with_meter_provider(
-            MeterProviderType::ApolloRealtime,
-            FilterMeterProvider::private_realtime(
-                metrics_builder
-                    .apollo_realtime_meter_provider_builder
-                    .build(),
-            ),
-        );
-        activation.with_tracer_propagator(Self::create_propagator(&config));
-
-        if let Some(registry) = metrics_builder.prometheus_registry {
-            activation.with_prometheus_registry(registry);
-        }
-
-        let custom_endpoints = if let Some(registry) = activation.prometheus_registry() {
-            let mut endpoints = MultiMap::new();
-            endpoints.insert(
-                config.exporters.metrics.prometheus.listen.clone(),
-                Endpoint::from_router_service(
-                    config.exporters.metrics.prometheus.path.clone(),
-                    PrometheusService { registry }.boxed(),
-                ),
-            );
-            endpoints
-        } else {
-            Default::default()
-        };
-
         Ok(Telemetry {
             custom_endpoints,
-            apollo_metrics_sender: metrics_builder.apollo_metrics_sender,
+            apollo_metrics_sender,
             supergraph_schema_id: init.supergraph_schema_id,
             field_level_instrumentation_ratio,
-            configurator: Mutex::new(Some(activation)),
+            activation: Mutex::new(Some(activation)),
             builtin_instruments: RwLock::new(create_builtin_instruments(
                 &config.instrumentation.instruments,
             )),
@@ -1177,7 +1106,7 @@ impl PluginPrivate for Telemetry {
 
     fn activate(&self) {
         // Telemetry may get activation called multiple times during startup
-        if let Some(activation) = self.configurator.lock().take() {
+        if let Some(activation) = self.activation.lock().take() {
             activation.commit();
             *self.builtin_instruments.write() =
                 create_builtin_instruments(&self.config.instrumentation.instruments);
@@ -1187,77 +1116,6 @@ impl PluginPrivate for Telemetry {
 }
 
 impl Telemetry {
-    fn create_propagator(config: &config::Conf) -> TextMapCompositePropagator {
-        let propagation = &config.exporters.tracing.propagation;
-
-        let tracing = &config.exporters.tracing;
-
-        let mut propagators: Vec<Box<dyn TextMapPropagator + Send + Sync + 'static>> = Vec::new();
-        // TLDR the jaeger propagator MUST BE the first one because the version of opentelemetry_jaeger is buggy.
-        // It overrides the current span context with an empty one if it doesn't find the corresponding headers.
-        // Waiting for the >=0.16.1 release
-        if propagation.jaeger {
-            propagators.push(Box::<opentelemetry_jaeger_propagator::Propagator>::default());
-        }
-        if propagation.baggage {
-            propagators.push(Box::<opentelemetry_sdk::propagation::BaggagePropagator>::default());
-        }
-        if propagation.trace_context || tracing.otlp.enabled {
-            propagators
-                .push(Box::<opentelemetry_sdk::propagation::TraceContextPropagator>::default());
-        }
-        if propagation.zipkin || tracing.zipkin.enabled {
-            propagators.push(Box::<opentelemetry_zipkin::Propagator>::default());
-        }
-        if propagation.datadog || tracing.datadog.enabled() {
-            propagators.push(Box::<tracing::datadog_exporter::DatadogPropagator>::default());
-        }
-        if propagation.aws_xray {
-            propagators.push(Box::<opentelemetry_aws::trace::XrayPropagator>::default());
-        }
-
-        // This propagator MUST come last because the user is trying to override the default behavior of the
-        // other propagators.
-        if let Some(from_request_header) = &propagation.request.header_name {
-            propagators.push(Box::new(CustomTraceIdPropagator::new(
-                from_request_header.to_string(),
-                propagation.request.format.clone(),
-            )));
-        }
-
-        TextMapCompositePropagator::new(propagators)
-    }
-
-    fn create_tracer_provider(
-        config: &config::Conf,
-    ) -> Result<opentelemetry_sdk::trace::TracerProvider, BoxError> {
-        let tracing_config = &config.exporters.tracing;
-        let spans_config = &config.instrumentation.spans;
-        let common = &tracing_config.common;
-
-        let mut builder =
-            opentelemetry_sdk::trace::TracerProvider::builder().with_config((common).into());
-
-        builder = setup_tracing(builder, &tracing_config.zipkin, common, spans_config)?;
-        builder = setup_tracing(builder, &tracing_config.datadog, common, spans_config)?;
-        builder = setup_tracing(builder, &tracing_config.otlp, common, spans_config)?;
-        builder = setup_tracing(builder, &config.apollo, common, spans_config)?;
-
-        let tracer_provider = builder.build();
-        Ok(tracer_provider)
-    }
-
-    fn create_metrics_builder(config: &config::Conf) -> Result<MetricsBuilder, BoxError> {
-        let metrics_config = &config.exporters.metrics;
-        let metrics_common_config = &metrics_config.common;
-        let mut builder = MetricsBuilder::new(config);
-        builder = setup_metrics_exporter(builder, &config.apollo, metrics_common_config)?;
-        builder =
-            setup_metrics_exporter(builder, &metrics_config.prometheus, metrics_common_config)?;
-        builder = setup_metrics_exporter(builder, &metrics_config.otlp, metrics_common_config)?;
-        Ok(builder)
-    }
-
     fn filter_variables_values(
         variables: &Map<ByteString, Value>,
         forward_rules: &ForwardValues,

@@ -2,24 +2,22 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::time::Duration;
 
+use super::formatters::APOLLO_CONNECTOR_PREFIX;
+use super::formatters::APOLLO_PRIVATE_PREFIX;
+use crate::plugins::telemetry::builder::TracingBuilder;
+use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::tracing::datadog::DatadogSpanProcessor;
 use opentelemetry::Context;
 use opentelemetry::trace::TraceResult;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::trace::BatchConfig;
 use opentelemetry_sdk::trace::BatchConfigBuilder;
-use opentelemetry_sdk::trace::Builder;
 use opentelemetry_sdk::trace::Span;
 use opentelemetry_sdk::trace::SpanProcessor;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
-
-use super::config_new::spans::Spans;
-use super::formatters::APOLLO_CONNECTOR_PREFIX;
-use super::formatters::APOLLO_PRIVATE_PREFIX;
-use crate::plugins::telemetry::config::TracingCommon;
-use crate::plugins::telemetry::tracing::datadog::DatadogSpanProcessor;
 
 pub(crate) mod apollo;
 pub(crate) mod apollo_telemetry;
@@ -31,13 +29,9 @@ pub(crate) mod reload;
 pub(crate) mod zipkin;
 
 pub(crate) trait TracingConfigurator {
+    fn config(conf: &Conf) -> &Self;
     fn enabled(&self) -> bool;
-    fn apply(
-        &self,
-        builder: Builder,
-        common: &TracingCommon,
-        spans: &Spans,
-    ) -> Result<Builder, BoxError>;
+    fn apply(&self, builder: &mut TracingBuilder) -> Result<(), BoxError>;
 }
 
 #[derive(Debug)]

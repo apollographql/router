@@ -93,14 +93,14 @@ impl FilterMeterProvider {
             .expect("regex should have been valid")
     }
 
-    pub(crate) fn private_realtime<T: Into<MeterProvider>>(delegate: T) -> Self {
+    pub(crate) fn apollo_realtime<T: Into<MeterProvider>>(delegate: T) -> Self {
         FilterMeterProvider::builder()
             .delegate(delegate)
             .allow(Self::get_private_realtime_regex().clone())
             .build()
     }
 
-    pub(crate) fn private<T: Into<MeterProvider>>(delegate: T) -> Self {
+    pub(crate) fn apollo<T: Into<MeterProvider>>(delegate: T) -> Self {
         FilterMeterProvider::builder()
             .delegate(delegate)
             .allow(
@@ -267,7 +267,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_private_metrics() {
         let exporter = InMemoryMetricsExporter::default();
-        let meter_provider = FilterMeterProvider::private(
+        let meter_provider = FilterMeterProvider::apollo(
             MeterProviderBuilder::default()
                 .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
                 .build(),
@@ -375,7 +375,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_description_and_unit() {
         let exporter = InMemoryMetricsExporter::default();
-        let meter_provider = FilterMeterProvider::private(
+        let meter_provider = FilterMeterProvider::apollo(
             MeterProviderBuilder::default()
                 .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
                 .build(),
@@ -494,7 +494,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_private_realtime_metrics() {
         let exporter = InMemoryMetricsExporter::default();
-        let meter_provider = FilterMeterProvider::private_realtime(
+        let meter_provider = FilterMeterProvider::apollo_realtime(
             MeterProviderBuilder::default()
                 .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
                 .build(),

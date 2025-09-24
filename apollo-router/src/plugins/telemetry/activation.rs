@@ -47,13 +47,13 @@ impl Activation {
     pub(crate) fn with_tracer_propagator(&mut self, tracer_propagator: TextMapCompositePropagator) {
         self.tracer_propagator = Some(tracer_propagator);
     }
-    pub(crate) fn with_meter_provider(
+    pub(crate) fn add_meter_providers(
         &mut self,
-        meter_provider_type: MeterProviderType,
-        provider: FilterMeterProvider,
+        meter_providers: impl Iterator<Item = (MeterProviderType, FilterMeterProvider)>,
     ) {
-        self.meter_providers.insert(meter_provider_type, provider);
+        self.meter_providers.extend(meter_providers);
     }
+
     pub(crate) fn with_tracer_provider(
         &mut self,
         tracer_provider: opentelemetry_sdk::trace::TracerProvider,
@@ -61,12 +61,12 @@ impl Activation {
         self.tracer_provider = Some(tracer_provider);
     }
 
-    pub(crate) fn with_prometheus_registry(&mut self, prometheus_registry: Registry) {
-        self.prometheus_registry = Some(prometheus_registry);
+    pub(crate) fn with_prometheus_registry(&mut self, prometheus_registry: Option<Registry>) {
+        self.prometheus_registry = prometheus_registry;
     }
 
     pub(crate) fn prometheus_registry(&self) -> Option<Registry> {
-        REGISTRY.lock().clone()
+        self.prometheus_registry.clone()
     }
 }
 

@@ -1,52 +1,20 @@
-use ::prometheus::Registry;
 use opentelemetry_sdk::metrics::Aggregation;
 use opentelemetry_sdk::metrics::InstrumentKind;
 use opentelemetry_sdk::metrics::reader::AggregationSelector;
 use tower::BoxError;
 
-use crate::plugins::telemetry::apollo_exporter::Sender;
+use crate::plugins::telemetry::builder::MetricsBuilder;
 use crate::plugins::telemetry::config::Conf;
-use crate::plugins::telemetry::config::MetricsCommon;
-use crate::plugins::telemetry::resource::ConfigResource;
 
 pub(crate) mod apollo;
 pub(crate) mod local_type_stats;
 pub(crate) mod otlp;
 pub(crate) mod prometheus;
 
-pub(crate) struct MetricsBuilder {
-    pub(crate) public_meter_provider_builder: opentelemetry_sdk::metrics::MeterProviderBuilder,
-    pub(crate) apollo_meter_provider_builder: opentelemetry_sdk::metrics::MeterProviderBuilder,
-    pub(crate) apollo_realtime_meter_provider_builder:
-        opentelemetry_sdk::metrics::MeterProviderBuilder,
-    pub(crate) apollo_metrics_sender: Sender,
-    pub(crate) prometheus_registry: Option<Registry>,
-}
-
-impl MetricsBuilder {
-    pub(crate) fn new(config: &Conf) -> Self {
-        let resource = config.exporters.metrics.common.to_resource();
-
-        Self {
-            public_meter_provider_builder: opentelemetry_sdk::metrics::SdkMeterProvider::builder()
-                .with_resource(resource.clone()),
-            apollo_meter_provider_builder: opentelemetry_sdk::metrics::SdkMeterProvider::builder(),
-            apollo_realtime_meter_provider_builder:
-                opentelemetry_sdk::metrics::SdkMeterProvider::builder(),
-            apollo_metrics_sender: Sender::default(),
-            prometheus_registry: None,
-        }
-    }
-}
-
 pub(crate) trait MetricsConfigurator {
+    fn config(conf: &Conf) -> &Self;
     fn enabled(&self) -> bool;
-
-    fn apply(
-        &self,
-        builder: MetricsBuilder,
-        metrics_config: &MetricsCommon,
-    ) -> Result<MetricsBuilder, BoxError>;
+    fn apply<'a>(&self, builder: &mut MetricsBuilder<'a>) -> Result<(), BoxError>;
 }
 
 #[derive(Clone, Default, Debug)]

@@ -13,11 +13,11 @@ use tower::BoxError;
 use tower_service::Service;
 
 use crate::ListenAddr;
-use crate::plugins::telemetry::config::MetricsCommon;
+use crate::metrics::aggregation::MeterProviderType;
+use crate::plugins::telemetry::builder::MetricsBuilder;
+use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::metrics::CustomAggregationSelector;
-use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
-use crate::router_factory::Endpoint;
 use crate::services::router;
 
 /// Prometheus configuration
@@ -66,21 +66,21 @@ impl Default for Config {
 }
 
 impl MetricsConfigurator for Config {
+    fn config(conf: &Conf) -> &Self {
+        &conf.exporters.metrics.prometheus
+    }
+
     fn enabled(&self) -> bool {
         self.enabled
     }
 
-    fn apply(
-        &self,
-        mut builder: MetricsBuilder,
-        metrics_config: &MetricsCommon,
-    ) -> Result<MetricsBuilder, BoxError> {
+    fn apply(&self, builder: &mut MetricsBuilder) -> Result<(), BoxError> {
         let registry = Registry::new();
 
         let exporter = opentelemetry_prometheus::exporter()
             .with_aggregation_selector(
                 CustomAggregationSelector::builder()
-                    .boundaries(metrics_config.buckets.clone())
+                    .boundaries(builder.metrics_common().buckets.clone())
                     .record_min_max(true)
                     .build(),
             )
@@ -88,9 +88,8 @@ impl MetricsConfigurator for Config {
             .with_registry(registry.clone())
             .build()?;
 
-        builder.public_meter_provider_builder =
-            builder.public_meter_provider_builder.with_reader(exporter);
-        builder.prometheus_registry = Some(registry);
+        builder.with_reader(MeterProviderType::Public, exporter);
+        builder.with_prometheus_registry(registry);
 
         tracing::info!(
             "Prometheus endpoint exposed at {}{}",
@@ -98,11 +97,10 @@ impl MetricsConfigurator for Config {
             self.path
         );
 
-        Ok(builder)
+        Ok(())
     }
 }
 
-#[derive(Clone)]
 pub(crate) struct PrometheusService {
     pub(crate) registry: Registry,
 }
