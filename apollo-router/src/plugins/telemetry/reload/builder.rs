@@ -4,6 +4,7 @@ use tower::ServiceExt;
 
 use crate::Endpoint;
 use crate::ListenAddr;
+use crate::plugins::telemetry::apollo;
 use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
@@ -89,7 +90,7 @@ impl<'a> Builder<'a> {
         if self.tracing_config_changed::<otlp::Config>()
             || self.tracing_config_changed::<datadog::Config>()
             || self.tracing_config_changed::<zipkin::Config>()
-        //|| self.tracing_config_changed::<apollo::Config>() //TODO FIXME!
+            || self.tracing_config_changed::<apollo::Config>()
         {
             let mut builder = TracingBuilder::new(self.config);
             builder.configure(&self.config.exporters.tracing.otlp)?;
@@ -103,6 +104,8 @@ impl<'a> Builder<'a> {
     }
 
     fn setup_apollo_metrics(&mut self) -> Result<(), BoxError> {
+        // There is no change detection for apollo metrics because we
+        // have a custom sender and this MUST be populated on every reload
         let mut builder = MetricsBuilder::new(self.config);
         builder.configure(&self.config.apollo)?;
         Ok(())

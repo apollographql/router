@@ -281,7 +281,7 @@ pub(crate) enum ApolloSignatureNormalizationAlgorithm {
 }
 
 /// Apollo usage report reference generation modes.
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema, Copy)]
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema, Copy, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub(crate) enum ApolloMetricsReferenceMode {
     /// Use the extended mode to report input object fields and enum value references as well as object fields.
