@@ -50,10 +50,11 @@ pub(super) trait CacheStorage {
     /// `self.insert_timeout()`.
     async fn insert(&self, document: Document, subgraph_name: &str) -> StorageResult<()> {
         let now = Instant::now();
-        let result = self
-            .internal_insert(document, subgraph_name)
-            .timeout(self.insert_timeout())
-            .await;
+        let result = flatten_storage_error(
+            self.internal_insert(document, subgraph_name)
+                .timeout(self.insert_timeout())
+                .await,
+        );
 
         f64_histogram_with_unit!(
             "apollo.router.operations.response_cache.insert",
@@ -63,7 +64,8 @@ pub(super) trait CacheStorage {
             "subgraph.name" = subgraph_name.to_string(),
             "kind" = "single"
         );
-        result?
+
+        result
     }
 
     #[doc(hidden)]
@@ -83,10 +85,11 @@ pub(super) trait CacheStorage {
         let batch_size = batch_size_str(documents.len());
 
         let now = Instant::now();
-        let result = self
-            .internal_insert_in_batch(documents, subgraph_name)
-            .timeout(self.insert_timeout())
-            .await;
+        let result = flatten_storage_error(
+            self.internal_insert_in_batch(documents, subgraph_name)
+                .timeout(self.insert_timeout())
+                .await,
+        );
 
         f64_histogram_with_unit!(
             "apollo.router.operations.response_cache.insert",
@@ -97,7 +100,7 @@ pub(super) trait CacheStorage {
             "kind" = "batch",
             "batch.size" = batch_size
         );
-        result?
+        result
     }
 
     #[doc(hidden)]
@@ -106,10 +109,11 @@ pub(super) trait CacheStorage {
     /// Fetch the value belonging to `cache_key`. Command will be timed out after `self.fetch_timeout()`.
     async fn fetch(&self, cache_key: &str, subgraph_name: &str) -> StorageResult<CacheEntry> {
         let now = Instant::now();
-        let result = self
-            .internal_fetch(cache_key)
-            .timeout(self.fetch_timeout())
-            .await;
+        let result = flatten_storage_error(
+            self.internal_fetch(cache_key)
+                .timeout(self.fetch_timeout())
+                .await,
+        );
 
         f64_histogram_with_unit!(
             "apollo.router.operations.response_cache.fetch",
@@ -120,7 +124,7 @@ pub(super) trait CacheStorage {
             "kind" = "single"
         );
 
-        result?
+        result
     }
 
     #[doc(hidden)]
@@ -138,10 +142,11 @@ pub(super) trait CacheStorage {
         let batch_size = batch_size_str(cache_keys.len());
 
         let now = Instant::now();
-        let result = self
-            .internal_fetch_multiple(cache_keys)
-            .timeout(self.fetch_timeout())
-            .await;
+        let result = flatten_storage_error(
+            self.internal_fetch_multiple(cache_keys)
+                .timeout(self.fetch_timeout())
+                .await,
+        );
 
         f64_histogram_with_unit!(
             "apollo.router.operations.response_cache.fetch",
@@ -152,7 +157,7 @@ pub(super) trait CacheStorage {
             "kind" = "batch",
             "batch.size" = batch_size
         );
-        result?
+        result
     }
 
     #[doc(hidden)]
@@ -165,10 +170,11 @@ pub(super) trait CacheStorage {
     /// `self.invalidate_timeout()`.
     async fn invalidate_by_subgraphs(&self, subgraph_names: Vec<String>) -> StorageResult<u64> {
         let now = Instant::now();
-        let result = self
-            .internal_invalidate_by_subgraphs(subgraph_names)
-            .timeout(self.invalidate_timeout())
-            .await;
+        let result = flatten_storage_error(
+            self.internal_invalidate_by_subgraphs(subgraph_names)
+                .timeout(self.invalidate_timeout())
+                .await,
+        );
 
         f64_histogram_with_unit!(
             "apollo.router.operations.response_cache.invalidation",
@@ -177,7 +183,7 @@ pub(super) trait CacheStorage {
             now.elapsed().as_secs_f64(),
             "kind" = "subgraph"
         );
-        result?
+        result
     }
 
     #[doc(hidden)]
@@ -195,10 +201,11 @@ pub(super) trait CacheStorage {
         subgraph_names: Vec<String>,
     ) -> StorageResult<HashMap<String, u64>> {
         let now = Instant::now();
-        let result = self
-            .internal_invalidate(invalidation_keys, subgraph_names)
-            .timeout(self.invalidate_timeout())
-            .await;
+        let result = flatten_storage_error(
+            self.internal_invalidate(invalidation_keys, subgraph_names)
+                .timeout(self.invalidate_timeout())
+                .await,
+        );
 
         f64_histogram_with_unit!(
             "apollo.router.operations.response_cache.invalidation",
@@ -207,7 +214,7 @@ pub(super) trait CacheStorage {
             now.elapsed().as_secs_f64(),
             "kind" = "invalidation_keys"
         );
-        result?
+        result
     }
 
     #[cfg(all(
@@ -228,4 +235,11 @@ fn batch_size_str(batch_size: usize) -> &'static str {
     } else {
         "50+"
     }
+}
+
+fn flatten_storage_error<V, E>(value: Result<Result<V, error::Error>, E>) -> Result<V, error::Error>
+where
+    E: Into<error::Error>,
+{
+    value.map_err(Into::into).flatten()
 }
