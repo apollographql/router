@@ -59,9 +59,10 @@ pub(super) fn nom_error_message(
     // provides the dynamic context needed to interpret the static message.
     message: impl Into<String>,
 ) -> nom::Err<nom::error::Error<Span>> {
+    let offset = suffix.location_offset();
     nom::Err::Error(nom::error::Error::from_error_kind(
         suffix.map_extra(|extra| SpanExtra {
-            errors: vec_push(extra.errors, message.into()),
+            errors: vec_push(extra.errors, (message.into(), offset)),
             ..extra
         }),
         nom::error::ErrorKind::IsNot,
@@ -76,9 +77,10 @@ pub(super) fn nom_fail_message(
     suffix: Span,
     message: impl Into<String>,
 ) -> nom::Err<nom::error::Error<Span>> {
+    let offset = suffix.location_offset();
     nom::Err::Failure(nom::error::Error::from_error_kind(
         suffix.map_extra(|extra| SpanExtra {
-            errors: vec_push(extra.errors, message.into()),
+            errors: vec_push(extra.errors, (message.into(), offset)),
             ..extra
         }),
         nom::error::ErrorKind::IsNot,
@@ -203,15 +205,35 @@ impl JSONSelection {
                 if fragment.is_empty() && !produced_errors {
                     Ok(selection)
                 } else {
-                    let mut message = remainder.extra.errors.join("\n");
+                    let mut message = remainder
+                        .extra
+                        .errors
+                        .iter()
+                        .map(|(msg, _offset)| msg.as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+
+                    // Use offset and fragment from first error if available
+                    let (error_offset, error_fragment) =
+                        if let Some((_, first_error_offset)) = remainder.extra.errors.first() {
+                            let error_span =
+                                new_span_with_spec(input, spec).slice(*first_error_offset..);
+                            (
+                                error_span.location_offset(),
+                                error_span.fragment().to_string(),
+                            )
+                        } else {
+                            (remainder.location_offset(), fragment.to_string())
+                        };
+
                     if !fragment.is_empty() {
                         message
                             .push_str(&format!("\nUnexpected trailing characters: {}", fragment));
                     }
                     Err(JSONSelectionParseError {
                         message,
-                        fragment: fragment.to_string(),
-                        offset: remainder.location_offset(),
+                        fragment: error_fragment,
+                        offset: error_offset,
                         spec: remainder.extra.spec,
                     })
                 }
@@ -226,7 +248,7 @@ impl JSONSelection {
                             .extra
                             .errors
                             .iter()
-                            .map(|s| s.to_string())
+                            .map(|(msg, _offset)| msg.clone())
                             .join("\n")
                     },
                     fragment: e.input.fragment().to_string(),
@@ -636,9 +658,10 @@ impl NamedSelection {
             .map(|(mut remainder, (_spaces, spread, path))| {
                 let prefix = if let Some(spread) = spread {
                     if spec <= ConnectSpec::V0_3 {
-                        remainder.extra.errors.push(
+                        remainder.extra.errors.push((
                             "Spread syntax (...) is planned for connect/v0.4".to_string(),
-                        );
+                            input.location_offset(),
+                        ));
                     }
                     // An explicit ... spread token was used, so we record
                     // NamingPrefix::Spread(Some(_)). If the path produces
@@ -2585,7 +2608,7 @@ mod tests {
                         e.input.extra,
                         SpanExtra {
                             spec: ConnectSpec::latest(),
-                            errors: vec![expected_message],
+                            errors: vec![(expected_message, expected_offset)],
                         }
                     );
                 }
@@ -4037,6 +4060,36 @@ mod tests {
         } else {
             panic!("Expected a valid selection, got error: {sum_a_plus_b_plus_c:?}");
         }
+    }
+
+    #[test]
+    fn test_disallowed_spread_syntax_error() {
+        assert_eq!(
+            JSONSelection::parse_with_spec("id ...names", ConnectSpec::V0_2),
+            Err(JSONSelectionParseError {
+                message: "nom::error::ErrorKind::Eof".to_string(),
+                fragment: "...names".to_string(),
+                offset: 3,
+                spec: ConnectSpec::V0_2,
+            }),
+        );
+
+        assert_eq!(
+            JSONSelection::parse_with_spec("id ...names", ConnectSpec::V0_3),
+            Err(JSONSelectionParseError {
+                message: "Spread syntax (...) is planned for connect/v0.4".to_string(),
+                // This is the fragment and offset we should get, but we need to
+                // store error offsets in SpanExtra::errors to provide that
+                // information.
+                fragment: "...names".to_string(),
+                offset: 3,
+                spec: ConnectSpec::V0_3,
+            }),
+        );
+
+        // This will fail when we promote v0.3 to latest and create v0.4, which
+        // is your signal to consider reenabling the tests below.
+        assert_eq!(ConnectSpec::V0_3, ConnectSpec::next());
     }
 
     // TODO Reenable these tests in ConnectSpec::V0_4 when we support ... spread
