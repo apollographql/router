@@ -561,7 +561,7 @@ impl Merger {
             // leading to that type. But the error here is a bit more "direct"/user friendly than what post-merging
             // validation would return, so we make this a hard error, not just a warning.
             if !found_interface {
-                self.error_reporter.add_error(CompositionError::InterfaceObjectUsageError { message: format!(
+                self.error_reporter.add_error(CompositionError::InterfaceObjectUsageError {message: format!(
                     "Type \"{}\" is declared with @interfaceObject in all the subgraphs in which it is defined (it is defined in {} but should be defined as an interface in at least one subgraph)",
                     type_.type_name(),
                     human_readable_subgraph_names(subgraphs_with_type.iter())
@@ -848,7 +848,7 @@ impl Merger {
         Ok(())
     }
 
-    fn validate_override<T>(
+    pub(crate) fn validate_override<T>(
         &self,
         _sources: &Sources<T>,
         _dest: &ObjectOrInterfaceFieldDefinitionPosition,
@@ -902,7 +902,7 @@ impl Merger {
         }))
     }
 
-    fn hint_on_inconsistent_value_type_field<T>(
+    pub(crate) fn hint_on_inconsistent_value_type_field<T>(
         &mut self,
         sources: &Sources<T>,
         dest: &ObjectOrInterfaceTypeDefinitionPosition,
@@ -1033,10 +1033,6 @@ impl Merger {
             );
         }
         Ok(!source_as_entity.is_empty())
-    }
-
-    pub(crate) fn merge_interface(&mut self, _itf: InterfaceTypeDefinitionPosition) {
-        todo!("Implement merge_interface")
     }
 
     pub(crate) fn merge_input_object(&mut self, _io: InputObjectTypeDefinitionPosition) {
