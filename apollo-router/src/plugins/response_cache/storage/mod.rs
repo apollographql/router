@@ -1,15 +1,20 @@
-pub(super) mod error;
+mod error;
 pub(super) mod postgres;
 
 use std::collections::HashMap;
 use std::time::Duration;
 use std::time::Instant;
 
+pub(super) use error::Error;
 use tokio_util::future::FutureExt;
 
 use super::cache_control::CacheControl;
+use crate::plugins::response_cache::metrics::record_fetch_duration;
+use crate::plugins::response_cache::metrics::record_fetch_error;
+use crate::plugins::response_cache::metrics::record_insert_duration;
+use crate::plugins::response_cache::metrics::record_insert_error;
 
-type StorageResult<T> = Result<T, error::Error>;
+type StorageResult<T> = Result<T, Error>;
 
 /// A `Document` is a unit of data to be stored in the cache, including any invalidation keys, its
 /// TTL, cache control information, etc.
@@ -56,16 +61,8 @@ pub(super) trait CacheStorage {
                 .await,
         );
 
-        f64_histogram_with_unit!(
-            "apollo.router.operations.response_cache.insert",
-            "Time to insert new data in cache",
-            "s",
-            now.elapsed().as_secs_f64(),
-            "subgraph.name" = subgraph_name.to_string(),
-            "kind" = "single"
-        );
-
-        result
+        record_insert_duration(now.elapsed(), subgraph_name, 1);
+        result.inspect_err(|err| record_insert_error(err, subgraph_name))
     }
 
     #[doc(hidden)]
@@ -82,7 +79,7 @@ pub(super) trait CacheStorage {
         documents: Vec<Document>,
         subgraph_name: &str,
     ) -> StorageResult<()> {
-        let batch_size = batch_size_str(documents.len());
+        let batch_size = documents.len();
 
         let now = Instant::now();
         let result = flatten_storage_error(
@@ -91,16 +88,8 @@ pub(super) trait CacheStorage {
                 .await,
         );
 
-        f64_histogram_with_unit!(
-            "apollo.router.operations.response_cache.insert",
-            "Time to insert new data in cache",
-            "s",
-            now.elapsed().as_secs_f64(),
-            "subgraph.name" = subgraph_name.to_string(),
-            "kind" = "batch",
-            "batch.size" = batch_size
-        );
-        result
+        record_insert_duration(now.elapsed(), subgraph_name, batch_size);
+        result.inspect_err(|err| record_insert_error(err, subgraph_name))
     }
 
     #[doc(hidden)]
@@ -115,16 +104,8 @@ pub(super) trait CacheStorage {
                 .await,
         );
 
-        f64_histogram_with_unit!(
-            "apollo.router.operations.response_cache.fetch",
-            "Time to fetch data from cache",
-            "s",
-            now.elapsed().as_secs_f64(),
-            "subgraph.name" = subgraph_name.to_string(),
-            "kind" = "single"
-        );
-
-        result
+        record_fetch_duration(now.elapsed(), subgraph_name, 1);
+        result.inspect_err(|err| record_fetch_error(err, subgraph_name))
     }
 
     #[doc(hidden)]
@@ -139,7 +120,7 @@ pub(super) trait CacheStorage {
         cache_keys: &[&str],
         subgraph_name: &str,
     ) -> StorageResult<Vec<Option<CacheEntry>>> {
-        let batch_size = batch_size_str(cache_keys.len());
+        let batch_size = cache_keys.len();
 
         let now = Instant::now();
         let result = flatten_storage_error(
@@ -148,16 +129,8 @@ pub(super) trait CacheStorage {
                 .await,
         );
 
-        f64_histogram_with_unit!(
-            "apollo.router.operations.response_cache.fetch",
-            "Time to fetch data from cache",
-            "s",
-            now.elapsed().as_secs_f64(),
-            "subgraph.name" = subgraph_name.to_string(),
-            "kind" = "batch",
-            "batch.size" = batch_size
-        );
-        result
+        record_fetch_duration(now.elapsed(), subgraph_name, batch_size);
+        result.inspect_err(|err| record_fetch_error(err, subgraph_name))
     }
 
     #[doc(hidden)]
@@ -169,6 +142,8 @@ pub(super) trait CacheStorage {
     /// Invalidate all data associated with `subgraph_names`. Command will be timed out after
     /// `self.invalidate_timeout()`.
     async fn invalidate_by_subgraphs(&self, subgraph_names: Vec<String>) -> StorageResult<u64> {
+        const INVALIDATION_KIND: &str = "subgraph";
+
         let now = Instant::now();
         let result = flatten_storage_error(
             self.internal_invalidate_by_subgraphs(subgraph_names)
@@ -181,7 +156,7 @@ pub(super) trait CacheStorage {
             "Time to get invalidate data in cache",
             "s",
             now.elapsed().as_secs_f64(),
-            "kind" = "subgraph"
+            "kind" = INVALIDATION_KIND
         );
         result
     }
@@ -199,10 +174,11 @@ pub(super) trait CacheStorage {
         &self,
         invalidation_keys: Vec<String>,
         subgraph_names: Vec<String>,
+        invalidation_kind: &'static str,
     ) -> StorageResult<HashMap<String, u64>> {
         let now = Instant::now();
         let result = flatten_storage_error(
-            self.internal_invalidate(invalidation_keys, subgraph_names)
+            self.internal_invalidate(invalidation_keys, subgraph_names.clone())
                 .timeout(self.invalidate_timeout())
                 .await,
         );
@@ -212,8 +188,9 @@ pub(super) trait CacheStorage {
             "Time to get invalidate data in cache",
             "s",
             now.elapsed().as_secs_f64(),
-            "kind" = "invalidation_keys"
+            "kind" = invalidation_kind
         );
+
         result
     }
 
@@ -224,22 +201,9 @@ pub(super) trait CacheStorage {
     async fn truncate_namespace(&self) -> StorageResult<()>;
 }
 
-/// Restrict `batch_size` cardinality so that it can be used as a metric attribute.
-fn batch_size_str(batch_size: usize) -> &'static str {
-    if batch_size <= 10 {
-        "1-10"
-    } else if batch_size <= 20 {
-        "11-20"
-    } else if batch_size <= 50 {
-        "21-50"
-    } else {
-        "50+"
-    }
-}
-
-fn flatten_storage_error<V, E>(value: Result<Result<V, error::Error>, E>) -> Result<V, error::Error>
+fn flatten_storage_error<V, E>(value: Result<Result<V, Error>, E>) -> Result<V, Error>
 where
-    E: Into<error::Error>,
+    E: Into<Error>,
 {
     value.map_err(Into::into).flatten()
 }

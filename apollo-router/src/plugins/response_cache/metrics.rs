@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider;
@@ -9,6 +10,8 @@ use tokio_stream::StreamExt;
 use tokio_stream::wrappers::IntervalStream;
 
 use crate::metrics::meter_provider;
+use crate::plugins::response_cache::ErrorCode;
+use crate::plugins::response_cache::storage;
 use crate::plugins::response_cache::storage::postgres::Storage;
 
 pub(crate) const CACHE_INFO_SUBGRAPH_CONTEXT_KEY: &str =
@@ -79,5 +82,64 @@ pub(super) async fn expired_data_task(
                 expired_data_count.store(exp_data, Ordering::Relaxed);
             }
         }
+    }
+}
+
+pub(super) fn record_fetch_error(error: &storage::Error, subgraph_name: &str) {
+    u64_counter_with_unit!(
+        "apollo.router.operations.response_cache.fetch.error",
+        "Errors when fetching data from cache",
+        "{error}",
+        1,
+        "subgraph.name" = subgraph_name.to_string(),
+        "code" = error.code()
+    );
+    tracing::debug!(error = %error, "unable to fetch data from response cache");
+}
+
+pub(super) fn record_fetch_duration(duration: Duration, subgraph_name: &str, batch_size: usize) {
+    f64_histogram_with_unit!(
+        "apollo.router.operations.response_cache.fetch",
+        "Time to fetch data from cache",
+        "s",
+        duration.as_secs_f64(),
+        "subgraph.name" = subgraph_name.to_string(),
+        "batch.size" = batch_size_str(batch_size)
+    );
+}
+
+pub(super) fn record_insert_error(error: &storage::Error, subgraph_name: &str) {
+    u64_counter_with_unit!(
+        "apollo.router.operations.response_cache.insert.error",
+        "Errors when inserting data in cache",
+        "{error}",
+        1,
+        "subgraph.name" = subgraph_name.to_string(),
+        "code" = error.code()
+    );
+    tracing::debug!(error = %error, "unable to insert data in response cache");
+}
+
+pub(super) fn record_insert_duration(duration: Duration, subgraph_name: &str, batch_size: usize) {
+    f64_histogram_with_unit!(
+        "apollo.router.operations.response_cache.insert",
+        "Time to insert new data in cache",
+        "s",
+        duration.as_secs_f64(),
+        "subgraph.name" = subgraph_name.to_string(),
+        "batch.size" = batch_size_str(batch_size)
+    );
+}
+
+/// Restrict `batch_size` cardinality so that it can be used as a metric attribute.
+fn batch_size_str(batch_size: usize) -> &'static str {
+    if batch_size <= 10 {
+        "1-10"
+    } else if batch_size <= 20 {
+        "11-20"
+    } else if batch_size <= 50 {
+        "21-50"
+    } else {
+        "50+"
     }
 }

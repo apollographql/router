@@ -30,7 +30,7 @@ pub(super) enum InvalidationError {
     #[error("error")]
     Misc(#[from] anyhow::Error),
     #[error("caching database error")]
-    Storage(#[from] storage::error::Error),
+    Storage(#[from] storage::Error),
     #[error("several errors")]
     Errors(#[from] InvalidationErrors),
 }
@@ -123,7 +123,7 @@ impl Invalidation {
                 r#type: graphql_type,
             } => {
                 let subgraph_counts = storage
-                    .invalidate(vec![invalidation_key], vec![subgraph.clone()])
+                    .invalidate(vec![invalidation_key], vec![subgraph.clone()], "type")
                     .await
                     .inspect_err(|err| {
                         u64_counter_with_unit!(
@@ -161,6 +161,7 @@ impl Invalidation {
                     .invalidate(
                         vec![cache_tag.clone()],
                         subgraphs.clone().into_iter().collect(),
+                        "cache_tag",
                     )
                     .await
                     .inspect_err(|err| {

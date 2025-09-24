@@ -7,6 +7,9 @@ pub(crate) enum Error {
     #[error("{0}")]
     Database(#[from] sqlx::Error),
 
+    #[error("NO_STORAGE")]
+    NoStorage,
+
     #[error("{0}")]
     Serialize(#[from] serde_json::Error),
 
@@ -18,7 +21,7 @@ impl Error {
     pub(crate) fn is_row_not_found(&self) -> bool {
         match self {
             Error::Database(err) => matches!(err, &sqlx::Error::RowNotFound),
-            Error::Serialize(_) | Error::Timeout(_) => false,
+            Error::NoStorage | Error::Serialize(_) | Error::Timeout(_) => false,
         }
     }
 }
@@ -27,6 +30,7 @@ impl ErrorCode for Error {
     fn code(&self) -> &'static str {
         match self {
             Error::Database(err) => err.code(),
+            Error::NoStorage => "NO_STORAGE",
             Error::Serialize(err) => match err.classify() {
                 Category::Io => "Serialize::IO",
                 Category::Syntax => "Serialize::Syntax",

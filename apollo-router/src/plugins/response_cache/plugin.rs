@@ -44,6 +44,7 @@ use super::invalidation_endpoint::InvalidationEndpointConfig;
 use super::invalidation_endpoint::InvalidationService;
 use super::invalidation_endpoint::SubgraphInvalidationConfig;
 use super::metrics::CacheMetricContextKey;
+use super::metrics::record_fetch_error;
 use crate::Context;
 use crate::Endpoint;
 use crate::ListenAddr;
@@ -60,7 +61,6 @@ use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::mock_subgraphs::execution::input_coercion::coerce_argument_values;
-use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::response_cache::cache_key::PrimaryCacheKeyEntity;
 use crate::plugins::response_cache::cache_key::PrimaryCacheKeyRoot;
 use crate::plugins::response_cache::cache_key::hash_additional_data;
@@ -139,10 +139,8 @@ pub(crate) struct StorageInterface {
 
 impl StorageInterface {
     pub(crate) fn get(&self, subgraph: &str) -> Option<&Storage> {
-        match self.subgraphs.get(subgraph) {
-            Some(subgraph) => subgraph.get(),
-            None => self.all.as_ref().and_then(|s| s.get()),
-        }
+        let storage = self.subgraphs.get(subgraph).or(self.all.as_ref())?;
+        storage.get()
     }
 
     async fn migrate(&self) -> anyhow::Result<()> {
@@ -777,18 +775,14 @@ impl CacheService {
         mut self,
         request: subgraph::Request,
     ) -> Result<subgraph::Response, BoxError> {
-        let storage = match self.storage.get(&self.name) {
-            Some(storage) => storage.clone(),
-            None => {
-                u64_counter_with_unit!(
-                    "apollo.router.operations.response_cache.fetch.error",
-                    "Errors when fetching data from cache",
-                    "{error}",
-                    1,
-                    "subgraph.name" = self.name.clone(),
-                    "code" = "NO_STORAGE"
-                );
-
+        let storage = match self
+            .storage
+            .get(&self.name)
+            .ok_or(storage::Error::NoStorage)
+        {
+            Ok(storage) => storage.clone(),
+            Err(err) => {
+                record_fetch_error(&err, &self.name);
                 return self
                     .service
                     .map_response(move |response: subgraph::Response| {
@@ -1374,15 +1368,6 @@ async fn cache_lookup_root(
             let span = Span::current();
             if !err.is_row_not_found() {
                 span.mark_as_error(format!("cannot get cache entry: {err}"));
-
-                u64_counter_with_unit!(
-                    "apollo.router.operations.response_cache.fetch.error",
-                    "Errors when fetching data from cache",
-                    "{error}",
-                    1,
-                    "subgraph.name" = name,
-                    "code" = err.code()
-                );
             }
 
             span.set_span_dyn_attribute(
@@ -1558,18 +1543,9 @@ async fn cache_lookup_entities(
             })
             .collect(),
         Err(err) => {
-            let span = Span::current();
             if !err.is_row_not_found() {
+                let span = Span::current();
                 span.mark_as_error(format!("cannot get cache entry: {err}"));
-
-                u64_counter_with_unit!(
-                    "apollo.router.operations.response_cache.fetch.error",
-                    "Errors when fetching data from cache",
-                    "{error}",
-                    1,
-                    "subgraph.name" = name.clone(),
-                    "code" = err.code()
-                );
             }
 
             std::iter::repeat_n(None, keys_len).collect()
@@ -1710,34 +1686,24 @@ async fn cache_store_root_from_response(
                         .map(|s| s.to_owned()),
                 );
             }
-            let data = data.clone();
+
+            let document = Document {
+                key: cache_key,
+                data: data.clone(),
+                control: cache_control,
+                invalidation_keys,
+                expire: ttl,
+            };
 
             let subgraph_name = response.subgraph_name.clone();
             let span = tracing::info_span!("response_cache.store", "kind" = "root", "subgraph.name" = subgraph_name.clone(), "ttl" = ?ttl);
-            // Write to cache in a non-awaited task so it’s on in the request’s critical path
+
+            // Write to cache in a non-awaited task so that it's not on the request’s critical path
             tokio::spawn(async move {
-                let document = Document {
-                    key: cache_key,
-                    data,
-                    control: cache_control,
-                    invalidation_keys,
-                    expire: ttl,
-                };
-                if let Err(err) = cache
+                let _ = cache
                     .insert(document, &subgraph_name)
                     .instrument(span)
-                    .await
-                {
-                    u64_counter_with_unit!(
-                        "apollo.router.operations.response_cache.insert.error",
-                        "Errors when inserting data in cache",
-                        "{error}",
-                        1,
-                        "subgraph.name" = subgraph_name.clone(),
-                        "code" = err.code()
-                    );
-                    tracing::debug!(error = %err, "cannot insert data in cache");
-                }
+                    .await;
             });
         }
     }
@@ -2427,25 +2393,14 @@ async fn insert_entities_in_result(
     if !to_insert.is_empty() {
         let batch_size = to_insert.len();
         let span = tracing::info_span!("response_cache.store", "kind" = "entity", "subgraph.name" = subgraph_name, "ttl" = ?ttl, "batch.size" = %batch_size);
-
         let subgraph_name = subgraph_name.to_string();
-        // Write to cache in a non-awaited task so it’s on in the request’s critical path
+
+        // Write to cache in a non-awaited task so that it's not on the request’s critical path
         tokio::spawn(async move {
-            if let Err(err) = cache
+            let _ = cache
                 .insert_in_batch(to_insert, &subgraph_name)
                 .instrument(span)
-                .await
-            {
-                u64_counter_with_unit!(
-                    "apollo.router.operations.response_cache.insert.error",
-                    "Errors when inserting data in cache",
-                    "{error}",
-                    1,
-                    "subgraph.name" = subgraph_name.clone(),
-                    "code" = err.code()
-                );
-                tracing::debug!(error = %err, "cannot insert data in cache");
-            }
+                .await;
         });
     }
 
