@@ -1,4 +1,11 @@
-//! Telemetry plugin lifecycle management.
+//! Activation is used to collect all the information that is needed when telemetry activate() is called.
+//! It contains:
+//! * meter providers
+//! * tracer provider
+//! * propagation
+//! * tracking of the most recent prometheus registry
+//! *
+//!
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -22,10 +29,10 @@ use crate::plugins::telemetry::reload::otel::reload_fmt;
 /// This struct tracks active providers and handles their shutdown.
 pub(crate) struct Activation {
     /// The new tracer provider. None means leave the existing one
-    tracer_provider: Option<opentelemetry_sdk::trace::TracerProvider>,
+    trace_provider: Option<opentelemetry_sdk::trace::TracerProvider>,
 
     /// The new tracer propagator. None means leave the existing one
-    tracer_propagator: Option<TextMapCompositePropagator>,
+    trace_propagator: Option<TextMapCompositePropagator>,
 
     /// The new metrics providers. Absent means leave the existing one
     meter_providers: HashMap<MeterProviderType, FilterMeterProvider>,
@@ -46,8 +53,8 @@ static REGISTRY: LazyLock<Mutex<Option<Registry>>> = LazyLock::new(Default::defa
 impl Activation {
     pub(crate) fn new() -> Activation {
         Activation {
-            tracer_provider: Default::default(),
-            tracer_propagator: Default::default(),
+            trace_provider: Default::default(),
+            trace_propagator: Default::default(),
             meter_providers: Default::default(),
             // We can remove this is we allow state to be maintained across plugin reloads
             prometheus_registry: REGISTRY.lock().clone(),
@@ -63,7 +70,7 @@ impl Activation {
     }
 
     pub(crate) fn with_tracer_propagator(&mut self, tracer_propagator: TextMapCompositePropagator) {
-        self.tracer_propagator = Some(tracer_propagator);
+        self.trace_propagator = Some(tracer_propagator);
     }
 
     pub(crate) fn add_meter_providers(
@@ -77,7 +84,7 @@ impl Activation {
         &mut self,
         tracer_provider: opentelemetry_sdk::trace::TracerProvider,
     ) {
-        self.tracer_provider = Some(tracer_provider);
+        self.trace_provider = Some(tracer_provider);
     }
 
     pub(crate) fn with_prometheus_registry(&mut self, prometheus_registry: Option<Registry>) {
@@ -92,6 +99,7 @@ impl Activation {
 impl Activation {
     pub(crate) fn commit(mut self) {
         self.reload_tracing();
+        self.reload_trace_propagation();
         self.reload_metrics();
         self.reload_logging();
         *REGISTRY.lock() = self.prometheus_registry.clone();
@@ -101,7 +109,7 @@ impl Activation {
         // Only apply things if we were executing in the context of a vanilla the Apollo executable.
         // Users that are rolling their own routers will need to set up telemetry themselves.
         if let Some(hot_tracer) = OPENTELEMETRY_TRACER_HANDLE.get() {
-            if let Some(tracer_provider) = self.tracer_provider.take() {
+            if let Some(tracer_provider) = self.trace_provider.take() {
                 let tracer = tracer_provider
                     .tracer_builder(GLOBAL_TRACER_NAME)
                     .with_version(env!("CARGO_PKG_VERSION"))
@@ -112,9 +120,6 @@ impl Activation {
                 checked_spawn_task(Box::new(move || {
                     drop(last_provider);
                 }));
-            }
-            if let Some(propagator) = self.tracer_propagator.take() {
-                opentelemetry::global::set_text_map_propagator(propagator);
             }
         }
     }
@@ -137,11 +142,15 @@ impl Activation {
     }
 
     fn reload_logging(&mut self) {
-        reload_fmt(
-            self.logging_fmt_layer
-                .take()
-                .expect("logging must have been initialized"),
-        );
+        if let Some(fmt_layer) = self.logging_fmt_layer.take() {
+            reload_fmt(fmt_layer);
+        }
+    }
+
+    fn reload_trace_propagation(&mut self) {
+        if let Some(propagator) = self.trace_propagator.take() {
+            opentelemetry::global::set_text_map_propagator(propagator);
+        }
     }
 }
 
@@ -156,7 +165,7 @@ impl Drop for Activation {
             }));
         }
 
-        if let Some(tracer_provider) = self.tracer_provider.take() {
+        if let Some(tracer_provider) = self.trace_provider.take() {
             checked_spawn_task(Box::new(move || {
                 drop(tracer_provider);
             }));
