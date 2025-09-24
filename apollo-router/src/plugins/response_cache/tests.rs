@@ -3936,7 +3936,7 @@ async fn failure_mode_reconnect() {
             .unwrap();
 
         response_cache
-            .storage.replace_all(storage).expect("must be able to replace");
+            .storage.replace_storage(storage).expect("must be able to replace");
 
         let request = supergraph::Request::fake_builder()
             .query(query)

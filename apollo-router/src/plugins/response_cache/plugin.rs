@@ -199,7 +199,11 @@ impl StorageInterface {
     any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
 ))]
 impl StorageInterface {
-    pub(crate) fn replace_all(&self, storage: Storage) -> Option<()> {
+    /// Replace the `all` storage layer in this struct.
+    ///
+    /// This supports tests which initialize the `StorageInterface` without a backing database
+    /// and then add one later, simulating a delayed storage connection.
+    pub(crate) fn replace_storage(&self, storage: Storage) -> Option<()> {
         self.all.as_ref()?.set(storage).ok()
     }
 }
