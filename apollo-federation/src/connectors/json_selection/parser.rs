@@ -199,11 +199,17 @@ impl JSONSelection {
         match JSONSelection::parse_span(span) {
             Ok((remainder, selection)) => {
                 let fragment = remainder.fragment();
-                if fragment.is_empty() {
+                let produced_errors = !remainder.extra.errors.is_empty();
+                if fragment.is_empty() && !produced_errors {
                     Ok(selection)
                 } else {
+                    let mut message = remainder.extra.errors.join("\n");
+                    if !fragment.is_empty() {
+                        message
+                            .push_str(&format!("\nUnexpected trailing characters: {}", fragment));
+                    }
                     Err(JSONSelectionParseError {
-                        message: "Unexpected trailing characters".to_string(),
+                        message,
                         fragment: fragment.to_string(),
                         offset: remainder.location_offset(),
                         spec: remainder.extra.spec,
