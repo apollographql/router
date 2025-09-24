@@ -1165,7 +1165,8 @@ async fn no_store_from_request() {
                     "organization".to_string(),
                     "currentUser".to_string()
                 ],
-                vec!["orga".to_string(), "user".to_string()]
+                vec!["orga".to_string(), "user".to_string()],
+                "cache_tag"
             )
             .await
             .unwrap()
@@ -1237,7 +1238,8 @@ async fn no_store_from_request() {
                     "organization".to_string(),
                     "currentUser".to_string()
                 ],
-                vec!["orga".to_string(), "user".to_string()]
+                vec!["orga".to_string(), "user".to_string()],
+                "cache_tag"
             )
             .await
             .unwrap()
