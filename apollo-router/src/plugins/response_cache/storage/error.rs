@@ -16,8 +16,7 @@ impl Error {
     pub(crate) fn is_row_not_found(&self) -> bool {
         match self {
             Error::Database(err) => matches!(err, &sqlx::Error::RowNotFound),
-            Error::Serialize(_) => false,
-            Error::Timeout => false,
+            Error::Serialize(_) | Error::Timeout => false,
         }
     }
 }
