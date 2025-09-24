@@ -1,21 +1,10 @@
 use opentelemetry_sdk::metrics::Aggregation;
 use opentelemetry_sdk::metrics::InstrumentKind;
 use opentelemetry_sdk::metrics::reader::AggregationSelector;
-use tower::BoxError;
-
-use crate::plugins::telemetry::config::Conf;
-use crate::plugins::telemetry::reload::builder::MetricsBuilder;
-
 pub(crate) mod apollo;
 pub(crate) mod local_type_stats;
 pub(crate) mod otlp;
 pub(crate) mod prometheus;
-
-pub(crate) trait MetricsConfigurator {
-    fn config(conf: &Conf) -> &Self;
-    fn enabled(&self) -> bool;
-    fn apply<'a>(&self, builder: &mut MetricsBuilder<'a>) -> Result<(), BoxError>;
-}
 
 #[derive(Clone, Default, Debug)]
 pub(crate) struct CustomAggregationSelector {

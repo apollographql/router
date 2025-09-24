@@ -1,12 +1,3 @@
-//! Activation is used to collect all the information that is needed when telemetry activate() is called.
-//! It contains:
-//! * meter providers
-//! * tracer provider
-//! * propagation
-//! * tracking of the most recent prometheus registry
-//! *
-//!
-
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
@@ -25,8 +16,19 @@ use crate::plugins::telemetry::reload::otel::LayeredTracer;
 use crate::plugins::telemetry::reload::otel::OPENTELEMETRY_TRACER_HANDLE;
 use crate::plugins::telemetry::reload::otel::reload_fmt;
 
-/// Manages the lifecycle of telemetry providers (tracing and metrics).
-/// This struct tracks active providers and handles their shutdown.
+/// Activation is used to collect all the information that is needed when telemetry activate() is called.
+/// It contains:
+/// * meter providers
+/// * trace provider
+/// * trace propagation
+/// * tracking of the most recent prometheus registry
+/// * log format
+///
+/// This module correctly handles dropping of otel structures that may block in their own `Drop` implementation.
+/// Meter and tracing providers must be dropped in a spawn blocking, therefore if activation is dropped
+/// any such structs must be moved onto a blocking task.
+/// Similarly, when apply is called we need to make sure that the providers that are being replaced
+/// are also shut down in a safe way.
 pub(crate) struct Activation {
     /// The new tracer provider. None means leave the existing one
     trace_provider: Option<opentelemetry_sdk::trace::TracerProvider>,
@@ -75,7 +77,7 @@ impl Activation {
 
     pub(crate) fn add_meter_providers(
         &mut self,
-        meter_providers: impl Iterator<Item = (MeterProviderType, FilterMeterProvider)>,
+        meter_providers: impl IntoIterator<Item = (MeterProviderType, FilterMeterProvider)>,
     ) {
         self.meter_providers.extend(meter_providers);
     }
@@ -108,27 +110,23 @@ impl Activation {
     fn reload_tracing(&mut self) {
         // Only apply things if we were executing in the context of a vanilla the Apollo executable.
         // Users that are rolling their own routers will need to set up telemetry themselves.
-        if let Some(hot_tracer) = OPENTELEMETRY_TRACER_HANDLE.get() {
-            if let Some(tracer_provider) = self.trace_provider.take() {
-                let tracer = tracer_provider
-                    .tracer_builder(GLOBAL_TRACER_NAME)
-                    .with_version(env!("CARGO_PKG_VERSION"))
-                    .build();
-                hot_tracer.reload(tracer);
+        if let Some(hot_tracer) = OPENTELEMETRY_TRACER_HANDLE.get()
+            && let Some(tracer_provider) = self.trace_provider.take()
+        {
+            let tracer = tracer_provider
+                .tracer_builder(GLOBAL_TRACER_NAME)
+                .with_version(env!("CARGO_PKG_VERSION"))
+                .build();
+            hot_tracer.reload(tracer);
 
-                let last_provider = opentelemetry::global::set_tracer_provider(tracer_provider);
-                checked_spawn_task(Box::new(move || {
-                    drop(last_provider);
-                }));
-            }
+            let last_provider = opentelemetry::global::set_tracer_provider(tracer_provider);
+            checked_spawn_task(Box::new(move || {
+                drop(last_provider);
+            }));
         }
     }
 
-    /// Reloads metrics providers, shutting down old ones and installing new ones.
-    /// With the new semantics:
-    /// - If a field contains Some(meter_provider), we install that meter provider
-    /// - If a field contains None, we ignore it
-    /// - None is never passed to set() in this method since we always want to update all types
+    /// Reloads metrics providers, installing new ones and storing the old ones for safe shutdown on drop.
     pub(crate) fn reload_metrics(&mut self) {
         let global_meter_provider = meter_provider_internal();
         // Note that we are essentially swapping the new meter providers with the old.
@@ -155,6 +153,8 @@ impl Activation {
 }
 
 /// When dropping activation we have to be careful to drop inside spawn tasks
+/// Otel structures will perform blocking IO, so if drop happens in an async thread then it can cause issues.
+/// The solution to this is to move the structs into a blocking task so that they can shut down safely.
 impl Drop for Activation {
     fn drop(&mut self) {
         for (meter_provider_type, meter_provider) in std::mem::take(&mut self.meter_providers) {

@@ -112,7 +112,6 @@ use crate::plugins::telemetry::error_counter::count_execution_errors;
 use crate::plugins::telemetry::error_counter::count_router_errors;
 use crate::plugins::telemetry::error_counter::count_subgraph_errors;
 use crate::plugins::telemetry::error_counter::count_supergraph_errors;
-use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::metrics::apollo::histogram::ListLengthHistogram;
 use crate::plugins::telemetry::metrics::apollo::studio::LocalTypeStat;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
@@ -121,6 +120,7 @@ use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleStatsReport;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
+use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
@@ -1104,6 +1104,9 @@ impl PluginPrivate for Telemetry {
         // plugins are initialized
         if let Some(activation) = self.activation.lock().take() {
             activation.commit();
+            // The reason this exist here is that these instruments use the global meter provider when created.
+            // In future, we should directly use the meter provider from activation rather than the global
+            // meter provider, this will eliminate the brittle sequencing of instrument creation.
             *self.builtin_instruments.write() =
                 create_builtin_instruments(&self.config.instrumentation.instruments);
         }

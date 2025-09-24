@@ -17,7 +17,7 @@ use tower::BoxError;
 use super::formatters::APOLLO_CONNECTOR_PREFIX;
 use super::formatters::APOLLO_PRIVATE_PREFIX;
 use crate::plugins::telemetry::config::Conf;
-use crate::plugins::telemetry::reload::builder::TracingBuilder;
+use crate::plugins::telemetry::reload::tracing::TracingBuilder;
 use crate::plugins::telemetry::tracing::datadog::DatadogSpanProcessor;
 
 pub(crate) mod apollo;
