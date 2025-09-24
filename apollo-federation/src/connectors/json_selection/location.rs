@@ -25,7 +25,10 @@ pub(crate) type Span<'a> = LocatedSpan<&'a str, SpanExtra>;
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub(crate) struct SpanExtra {
     pub(super) spec: ConnectSpec,
-    pub(super) errors: Vec<String>,
+    /// A list of (message, offset) tuples representing errors encountered
+    /// during parsing. The offset is relative to the start of the original
+    /// input string.
+    pub(super) errors: Vec<(String, usize)>,
 }
 
 #[cfg(test)]
