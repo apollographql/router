@@ -2,11 +2,6 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::time::Duration;
 
-use super::formatters::APOLLO_CONNECTOR_PREFIX;
-use super::formatters::APOLLO_PRIVATE_PREFIX;
-use crate::plugins::telemetry::config::Conf;
-use crate::plugins::telemetry::reload::builder::TracingBuilder;
-use crate::plugins::telemetry::tracing::datadog::DatadogSpanProcessor;
 use opentelemetry::Context;
 use opentelemetry::trace::TraceResult;
 use opentelemetry_sdk::Resource;
@@ -18,6 +13,12 @@ use opentelemetry_sdk::trace::SpanProcessor;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
+
+use super::formatters::APOLLO_CONNECTOR_PREFIX;
+use super::formatters::APOLLO_PRIVATE_PREFIX;
+use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::reload::builder::TracingBuilder;
+use crate::plugins::telemetry::tracing::datadog::DatadogSpanProcessor;
 
 pub(crate) mod apollo;
 pub(crate) mod apollo_telemetry;

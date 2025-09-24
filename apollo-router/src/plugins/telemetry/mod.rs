@@ -46,6 +46,8 @@ use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
 use rand::Rng;
+use reload::activation::Activation;
+use reload::otel::reload_fmt;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
@@ -141,10 +143,6 @@ use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::operation_limits::OperationLimits;
-use reload::otel::reload_fmt;
-
-use reload::activation::Activation;
-use reload::builder;
 
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;

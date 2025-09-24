@@ -1,13 +1,14 @@
+use opentelemetry_otlp::MetricsExporterBuilder;
+use opentelemetry_sdk::metrics::PeriodicReader;
+use opentelemetry_sdk::runtime;
+use tower::BoxError;
+
 use crate::metrics::aggregation::MeterProviderType;
 use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::metrics::CustomAggregationSelector;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::plugins::telemetry::reload::builder::MetricsBuilder;
-use opentelemetry_otlp::MetricsExporterBuilder;
-use opentelemetry_sdk::metrics::PeriodicReader;
-use opentelemetry_sdk::runtime;
-use tower::BoxError;
 
 impl MetricsConfigurator for super::super::otlp::Config {
     fn config(conf: &Conf) -> &Self {

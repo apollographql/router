@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::mem;
 use std::sync::Arc;
 
-use crate::metrics::filter::FilterMeterProvider;
 use derive_more::From;
 use itertools::Itertools;
 use opentelemetry::KeyValue;
@@ -29,7 +28,11 @@ use opentelemetry::metrics::UpDownCounter;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use parking_lot::Mutex;
 use strum::EnumCount;
-use strum_macros::{Display, EnumCount, EnumIter};
+use strum_macros::Display;
+use strum_macros::EnumCount;
+use strum_macros::EnumIter;
+
+use crate::metrics::filter::FilterMeterProvider;
 
 // This meter provider enables us to combine multiple meter providers. The reasons we need this are:
 // 1. Prometheus meters are special. To dispose a meter is to dispose the entire registry. This means we need to make a best effort to keep them around.
@@ -168,7 +171,7 @@ impl AggregateMeterProvider {
     /// Invalidate all the cached instruments
     #[cfg(test)]
     pub(crate) fn invalidate(&self) {
-        if let Some(mut inner) = self.inner.lock() {
+        if let Some(inner) = self.inner.lock().as_mut() {
             inner.invalidate();
         }
     }
@@ -203,6 +206,7 @@ impl AggregateMeterProvider {
     pub(crate) fn registered_instruments(&self) -> usize {
         self.inner
             .lock()
+            .as_ref()
             .expect("cannot use meter provider after shutdown")
             .registered_instruments
             .len()

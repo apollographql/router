@@ -1,19 +1,21 @@
 //! Configuration for zipkin tracing.
 use std::sync::LazyLock;
 
-use crate::plugins::telemetry::config::{Conf, GenericWith};
-use crate::plugins::telemetry::endpoint::UriEndpoint;
-use crate::plugins::telemetry::otel::named_runtime_channel::NamedTokioRuntime;
-use crate::plugins::telemetry::reload::builder::TracingBuilder;
-use crate::plugins::telemetry::tracing::BatchProcessorConfig;
-use crate::plugins::telemetry::tracing::SpanProcessorExt;
-use crate::plugins::telemetry::tracing::TracingConfigurator;
 use http::Uri;
 use opentelemetry_sdk::trace::BatchSpanProcessor;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
+
+use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::config::GenericWith;
+use crate::plugins::telemetry::endpoint::UriEndpoint;
+use crate::plugins::telemetry::otel::named_runtime_channel::NamedTokioRuntime;
+use crate::plugins::telemetry::reload::builder::TracingBuilder;
+use crate::plugins::telemetry::tracing::BatchProcessorConfig;
+use crate::plugins::telemetry::tracing::SpanProcessorExt;
+use crate::plugins::telemetry::tracing::TracingConfigurator;
 
 static DEFAULT_ENDPOINT: LazyLock<Uri> =
     LazyLock::new(|| Uri::from_static("http://127.0.0.1:9411/api/v2/spans"));

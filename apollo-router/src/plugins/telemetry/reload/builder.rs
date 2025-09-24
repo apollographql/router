@@ -1,24 +1,37 @@
 /// This module contains low level otel stuff to support hot reloading
-use crate::_private::telemetry::ConfigResource;
-use crate::metrics::aggregation::MeterProviderType;
-use crate::metrics::filter::FilterMeterProvider;
-use crate::plugins::telemetry::apollo_exporter::Sender;
-use crate::plugins::telemetry::config::{Conf, MetricsCommon, TracingCommon};
-use crate::plugins::telemetry::config_new::spans::Spans;
-use crate::plugins::telemetry::metrics::MetricsConfigurator;
-use crate::plugins::telemetry::metrics::prometheus::PrometheusService;
-use crate::plugins::telemetry::reload::activation::Activation;
-use crate::plugins::telemetry::tracing::{TracingConfigurator, datadog, zipkin};
-use crate::plugins::telemetry::{CustomTraceIdPropagator, apollo_exporter, metrics, otlp};
-use crate::{Endpoint, ListenAddr};
 use ahash::HashMap;
 use multimap::MultiMap;
-use opentelemetry::propagation::{TextMapCompositePropagator, TextMapPropagator};
+use opentelemetry::propagation::TextMapCompositePropagator;
+use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::metrics::{MeterProviderBuilder, SdkMeterProvider, View};
-use opentelemetry_sdk::trace::{SpanProcessor, TracerProvider};
+use opentelemetry_sdk::metrics::MeterProviderBuilder;
+use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_sdk::metrics::View;
+use opentelemetry_sdk::trace::SpanProcessor;
+use opentelemetry_sdk::trace::TracerProvider;
 use prometheus::Registry;
-use tower::{BoxError, ServiceExt};
+use tower::BoxError;
+use tower::ServiceExt;
+
+use crate::_private::telemetry::ConfigResource;
+use crate::Endpoint;
+use crate::ListenAddr;
+use crate::metrics::aggregation::MeterProviderType;
+use crate::metrics::filter::FilterMeterProvider;
+use crate::plugins::telemetry::CustomTraceIdPropagator;
+use crate::plugins::telemetry::apollo_exporter::Sender;
+use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::config::MetricsCommon;
+use crate::plugins::telemetry::config::TracingCommon;
+use crate::plugins::telemetry::config_new::spans::Spans;
+use crate::plugins::telemetry::metrics;
+use crate::plugins::telemetry::metrics::MetricsConfigurator;
+use crate::plugins::telemetry::metrics::prometheus::PrometheusService;
+use crate::plugins::telemetry::otlp;
+use crate::plugins::telemetry::reload::activation::Activation;
+use crate::plugins::telemetry::tracing::TracingConfigurator;
+use crate::plugins::telemetry::tracing::datadog;
+use crate::plugins::telemetry::tracing::zipkin;
 
 /// This builder is responsible for collecting
 pub(super) struct Builder<'a> {
@@ -55,7 +68,7 @@ impl<'a> Builder<'a> {
             || self.metrics_config_changed::<otlp::Config>()
         {
             ::tracing::info!("setting up metrics exporter");
-            let mut builder = MetricsBuilder::new(&self.config);
+            let mut builder = MetricsBuilder::new(self.config);
             builder.configure(&self.config.exporters.metrics.prometheus)?;
             builder.configure(&self.config.exporters.metrics.otlp)?;
             self.activation
@@ -98,7 +111,7 @@ impl<'a> Builder<'a> {
     }
 
     fn setup_apollo_metrics(&mut self) -> Result<(), BoxError> {
-        let mut builder = MetricsBuilder::new(&self.config);
+        let mut builder = MetricsBuilder::new(self.config);
         builder.configure(&self.config.apollo)?;
         Ok(())
     }
@@ -245,7 +258,7 @@ impl<'a> MetricsBuilder<'a> {
         }
     }
     pub(crate) fn metrics_common(&self) -> &MetricsCommon {
-        &self.metrics_common
+        self.metrics_common
     }
     pub(crate) fn with_prometheus_registry(&mut self, prometheus_registry: Registry) -> &mut Self {
         self.prometheus_registry = Some(prometheus_registry);

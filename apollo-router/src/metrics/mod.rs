@@ -1480,7 +1480,6 @@ mod test {
     use opentelemetry::metrics::MeterProvider;
 
     use crate::metrics::FutureMetricsExt;
-    use crate::metrics::aggregation::MeterProviderType;
     use crate::metrics::meter_provider;
     use crate::metrics::meter_provider_internal;
 

@@ -1,17 +1,19 @@
 //! Telemetry plugin lifecycle management.
 
+use std::collections::HashMap;
+use std::sync::LazyLock;
+
+use opentelemetry::propagation::TextMapCompositePropagator;
+use opentelemetry::trace::TracerProvider;
+use parking_lot::Mutex;
+use prometheus::Registry;
+use tokio::runtime::Handle;
+
 use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
 use crate::metrics::meter_provider_internal;
 use crate::plugins::telemetry::GLOBAL_TRACER_NAME;
 use crate::plugins::telemetry::reload::otel::OPENTELEMETRY_TRACER_HANDLE;
-use opentelemetry::propagation::TextMapCompositePropagator;
-use opentelemetry::trace::TracerProvider;
-use parking_lot::Mutex;
-use prometheus::Registry;
-use std::collections::HashMap;
-use std::sync::LazyLock;
-use tokio::runtime::Handle;
 
 /// Manages the lifecycle of telemetry providers (tracing and metrics).
 /// This struct tracks active providers and handles their shutdown.
@@ -31,7 +33,7 @@ pub(crate) struct Activation {
 
 /// Allows us to keep track of the last registry that was used. Not ideal. Plugins would be better to have state
 /// that can be maintained across reloads.
-static REGISTRY: LazyLock<Mutex<Option<Registry>>> = LazyLock::new(|| Default::default());
+static REGISTRY: LazyLock<Mutex<Option<Registry>>> = LazyLock::new(Default::default);
 
 impl Activation {
     pub(crate) fn new() -> Activation {

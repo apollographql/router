@@ -1,27 +1,35 @@
+use std::io::IsTerminal;
+
+use anyhow::anyhow;
+use once_cell::sync::OnceCell;
+use opentelemetry::Context;
+use opentelemetry::trace::SpanContext;
+use opentelemetry::trace::SpanId;
+use opentelemetry::trace::TraceContextExt;
+use opentelemetry::trace::TraceFlags;
+use opentelemetry::trace::TraceState;
+use opentelemetry::trace::TracerProvider;
+use opentelemetry_sdk::trace::Tracer;
+use tower::BoxError;
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::Layer;
+use tracing_subscriber::Registry;
+use tracing_subscriber::layer::Layered;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::registry::SpanRef;
+use tracing_subscriber::reload::Handle;
+use tracing_subscriber::util::SubscriberInitExt;
+
 /// This module contains low level otel stuff to support hot reloading
 use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
 use crate::plugins::telemetry::fmt_layer::FmtLayer;
 use crate::plugins::telemetry::formatters::json::Json;
 use crate::plugins::telemetry::formatters::text::Text;
 use crate::plugins::telemetry::otel;
-use crate::plugins::telemetry::otel::{OpenTelemetryLayer, PreSampledTracer};
+use crate::plugins::telemetry::otel::OpenTelemetryLayer;
+use crate::plugins::telemetry::otel::PreSampledTracer;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 use crate::tracer::TraceId;
-use anyhow::anyhow;
-use once_cell::sync::OnceCell;
-use opentelemetry::Context;
-use opentelemetry::trace::{
-    SpanContext, SpanId, TraceContextExt, TraceFlags, TraceState, TracerProvider,
-};
-use opentelemetry_sdk::trace::Tracer;
-
-use std::io::IsTerminal;
-use tower::BoxError;
-use tracing_subscriber::layer::{Layered, SubscriberExt};
-use tracing_subscriber::registry::SpanRef;
-use tracing_subscriber::reload::Handle;
-use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{EnvFilter, Layer, Registry};
 
 pub(crate) type LayeredRegistry = Layered<DynAttributeLayer, Registry>;
 pub(in crate::plugins::telemetry) type LayeredTracer =
