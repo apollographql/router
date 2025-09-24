@@ -47,7 +47,6 @@ use parking_lot::Mutex;
 use parking_lot::RwLock;
 use rand::Rng;
 use reload::activation::Activation;
-use reload::otel::reload_fmt;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
@@ -113,7 +112,6 @@ use crate::plugins::telemetry::error_counter::count_execution_errors;
 use crate::plugins::telemetry::error_counter::count_router_errors;
 use crate::plugins::telemetry::error_counter::count_subgraph_errors;
 use crate::plugins::telemetry::error_counter::count_supergraph_errors;
-use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::metrics::apollo::histogram::ListLengthHistogram;
 use crate::plugins::telemetry::metrics::apollo::studio::LocalTypeStat;
@@ -1102,12 +1100,12 @@ impl PluginPrivate for Telemetry {
     }
 
     fn activate(&self) {
-        // Telemetry may get activation called multiple times during startup
+        // activation called multiple times during startup due to telemetry needed to be initialized before
+        // plugins are initialized
         if let Some(activation) = self.activation.lock().take() {
             activation.commit();
             *self.builtin_instruments.write() =
                 create_builtin_instruments(&self.config.instrumentation.instruments);
-            reload_fmt(create_fmt_layer(&self.config));
         }
     }
 }

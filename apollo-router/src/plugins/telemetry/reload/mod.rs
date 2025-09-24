@@ -1,3 +1,17 @@
+//! Reload support for telemetry
+//!
+//! Telemetry reloading is difficult because it modifies global state. Plugins may error as they are
+//! initialized so it is not possible to modify the global state there without risking that a
+//! later plugin may cause the new pipeline to fail.
+//!
+//! Instead, once all plugins are intialised activate on `PluginPrivate` is called which commits the
+//! telemtry changes. `activate ` is not failable, so we are good to commit to global state.
+//!
+//! This module is divided into three submodules:
+//! * otel - deals with global state + legacy metrics layer (to be removed in 3.0)
+//! * activation - state to be applied when activate is called. Will set meter and tracing providers.
+//! * builder - from config determines what has changed and pulls together information needed to serve
+//!   telemetry if activate is reached.
 use multimap::MultiMap;
 use tower::BoxError;
 

@@ -20,7 +20,6 @@ use tracing_subscriber::registry::SpanRef;
 use tracing_subscriber::reload::Handle;
 use tracing_subscriber::util::SubscriberInitExt;
 
-/// This module contains low level otel stuff to support hot reloading
 use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
 use crate::plugins::telemetry::fmt_layer::FmtLayer;
 use crate::plugins::telemetry::formatters::json::Json;
@@ -169,6 +168,7 @@ const LEGACY_METRIC_PREFIX_COUNTER: &str = "counter.";
 const LEGACY_METRIC_PREFIX_HISTOGRAM: &str = "histogram.";
 const LEGACY_METRIC_PREFIX_VALUE: &str = "value.";
 
+/// REMOVE in 3.0
 /// Detects use of the 1.x `tracing`-based metrics events, which are no longer supported in 2.x.
 struct WarnLegacyMetricsLayer;
 

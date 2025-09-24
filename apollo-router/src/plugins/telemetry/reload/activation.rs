@@ -8,20 +8,25 @@ use opentelemetry::trace::TracerProvider;
 use parking_lot::Mutex;
 use prometheus::Registry;
 use tokio::runtime::Handle;
+use tracing_subscriber::Layer;
 
 use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
 use crate::metrics::meter_provider_internal;
 use crate::plugins::telemetry::GLOBAL_TRACER_NAME;
+use crate::plugins::telemetry::reload::otel::LayeredTracer;
 use crate::plugins::telemetry::reload::otel::OPENTELEMETRY_TRACER_HANDLE;
+use crate::plugins::telemetry::reload::otel::reload_fmt;
 
 /// Manages the lifecycle of telemetry providers (tracing and metrics).
 /// This struct tracks active providers and handles their shutdown.
 pub(crate) struct Activation {
     /// The new tracer provider. None means leave the existing one
     tracer_provider: Option<opentelemetry_sdk::trace::TracerProvider>,
+
     /// The new tracer propagator. None means leave the existing one
     tracer_propagator: Option<TextMapCompositePropagator>,
+
     /// The new metrics providers. Absent means leave the existing one
     meter_providers: HashMap<MeterProviderType, FilterMeterProvider>,
 
@@ -29,6 +34,9 @@ pub(crate) struct Activation {
     /// This will be defaulted to the last applied registry via static unfortunately
     /// We can further remove this if eventually we have a facility for plugins to maintain state across reloads.
     prometheus_registry: Option<Registry>,
+
+    /// The new format layer
+    logging_fmt_layer: Option<Box<dyn Layer<LayeredTracer> + Send + Sync>>,
 }
 
 /// Allows us to keep track of the last registry that was used. Not ideal. Plugins would be better to have state
@@ -43,12 +51,21 @@ impl Activation {
             meter_providers: Default::default(),
             // We can remove this is we allow state to be maintained across plugin reloads
             prometheus_registry: REGISTRY.lock().clone(),
+            logging_fmt_layer: Default::default(),
         }
+    }
+
+    pub(crate) fn with_logging(
+        &mut self,
+        logging_layer: Box<dyn Layer<LayeredTracer> + Send + Sync>,
+    ) {
+        self.logging_fmt_layer = Some(logging_layer);
     }
 
     pub(crate) fn with_tracer_propagator(&mut self, tracer_propagator: TextMapCompositePropagator) {
         self.tracer_propagator = Some(tracer_propagator);
     }
+
     pub(crate) fn add_meter_providers(
         &mut self,
         meter_providers: impl Iterator<Item = (MeterProviderType, FilterMeterProvider)>,
@@ -76,6 +93,7 @@ impl Activation {
     pub(crate) fn commit(mut self) {
         self.reload_tracing();
         self.reload_metrics();
+        self.reload_logging();
         *REGISTRY.lock() = self.prometheus_registry.clone();
     }
 
@@ -116,6 +134,14 @@ impl Activation {
                 global_meter_provider.set(meter_provider_type, meter_provider),
             );
         }
+    }
+
+    fn reload_logging(&mut self) {
+        reload_fmt(
+            self.logging_fmt_layer
+                .take()
+                .expect("logging must have been initialized"),
+        );
     }
 }
 

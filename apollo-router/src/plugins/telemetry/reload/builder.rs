@@ -1,4 +1,3 @@
-/// This module contains low level otel stuff to support hot reloading
 use ahash::HashMap;
 use multimap::MultiMap;
 use opentelemetry::propagation::TextMapCompositePropagator;
@@ -24,6 +23,7 @@ use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::TracingCommon;
 use crate::plugins::telemetry::config_new::spans::Spans;
+use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
 use crate::plugins::telemetry::metrics;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::metrics::prometheus::PrometheusService;
@@ -56,10 +56,11 @@ impl<'a> Builder<'a> {
     pub(super) fn build(
         mut self,
     ) -> Result<(Activation, MultiMap<ListenAddr, Endpoint>, Sender), BoxError> {
+        self.setup_logging();
         self.setup_public_tracing()?;
         self.setup_public_metrics()?;
         self.setup_apollo_metrics()?;
-        self.activation.with_tracer_propagator(self.propagation());
+        self.setup_propagation();
         Ok((self.activation, self.endpoints, self.apollo_sender))
     }
 
@@ -134,7 +135,7 @@ impl<'a> Builder<'a> {
         }
     }
 
-    fn propagation(&self) -> TextMapCompositePropagator {
+    fn setup_propagation(&mut self) {
         let propagation = &self.config.exporters.tracing.propagation;
 
         let tracing = &self.config.exporters.tracing;
@@ -171,7 +172,12 @@ impl<'a> Builder<'a> {
             )));
         }
 
-        TextMapCompositePropagator::new(propagators)
+        self.activation
+            .with_tracer_propagator(TextMapCompositePropagator::new(propagators));
+    }
+
+    fn setup_logging(&mut self) {
+        self.activation.with_logging(create_fmt_layer(self.config));
     }
 }
 
