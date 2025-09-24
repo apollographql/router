@@ -588,8 +588,10 @@ impl NamedSelection {
         })
     }
 
+    // TODO Reenable ... in ConnectSpec::V0_4, to support abstract types.
     // NamedSelection ::= (Alias | "...")? PathSelection | Alias SubSelection
     fn parse_v0_3(input: Span) -> ParseResult<Self> {
+        let spec = get_connect_spec(&input);
         let (after_alias, alias) = opt(Alias::parse)(input.clone())?;
 
         if let Some(alias) = alias {
@@ -631,8 +633,13 @@ impl NamedSelection {
                 opt(ranged_span("...")),
                 PathSelection::parse,
             ))(input.clone())
-            .map(|(remainder, (_spaces, spread, path))| {
+            .map(|(mut remainder, (_spaces, spread, path))| {
                 let prefix = if let Some(spread) = spread {
+                    if spec <= ConnectSpec::V0_3 {
+                        remainder.extra.errors.push(
+                            "Spread syntax (...) is planned for connect/v0.4".to_string(),
+                        );
+                    }
                     // An explicit ... spread token was used, so we record
                     // NamingPrefix::Spread(Some(_)). If the path produces
                     // something other than an object or null, we will catch
@@ -4032,7 +4039,9 @@ mod tests {
         }
     }
 
-    #[cfg(test)]
+    // TODO Reenable these tests in ConnectSpec::V0_4 when we support ... spread
+    // syntax and abstract types.
+    /** #[cfg(test)]
     mod spread_parsing {
         use crate::connectors::ConnectSpec;
         use crate::connectors::json_selection::PrettyPrintable;
@@ -4047,7 +4056,7 @@ mod tests {
 
     #[test]
     fn test_basic_spread_parsing_one_field() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "... a";
         spread_parsing::check(spec, "...a", expected);
         spread_parsing::check(spec, "... a", expected);
@@ -4060,7 +4069,7 @@ mod tests {
 
     #[test]
     fn test_spread_parsing_spread_a_spread_b() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "... a\n... b";
         spread_parsing::check(spec, "...a...b", expected);
         spread_parsing::check(spec, "... a ... b", expected);
@@ -4072,7 +4081,7 @@ mod tests {
 
     #[test]
     fn test_spread_parsing_a_spread_b() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "a\n... b";
         spread_parsing::check(spec, "a...b", expected);
         spread_parsing::check(spec, "a ... b", expected);
@@ -4087,7 +4096,7 @@ mod tests {
 
     #[test]
     fn test_spread_parsing_spread_a_b() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "... a\nb";
         spread_parsing::check(spec, "...a b", expected);
         spread_parsing::check(spec, "... a b", expected);
@@ -4100,7 +4109,7 @@ mod tests {
 
     #[test]
     fn test_spread_parsing_spread_a_b_c() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "... a\nb\nc";
         spread_parsing::check(spec, "...a b c", expected);
         spread_parsing::check(spec, "... a b c", expected);
@@ -4114,7 +4123,7 @@ mod tests {
 
     #[test]
     fn test_spread_parsing_spread_spread_a_sub_b() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "... a {\n  b\n}";
         spread_parsing::check(spec, "...a{b}", expected);
         spread_parsing::check(spec, "... a { b }", expected);
@@ -4129,7 +4138,7 @@ mod tests {
 
     #[test]
     fn test_spread_parsing_spread_a_sub_b_c() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "... a {\n  b\n  c\n}";
         spread_parsing::check(spec, "...a{b c}", expected);
         spread_parsing::check(spec, "... a { b c }", expected);
@@ -4145,7 +4154,7 @@ mod tests {
 
     #[test]
     fn test_spread_parsing_spread_a_sub_b_spread_c() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "... a {\n  b\n  ... c\n}";
         spread_parsing::check(spec, "...a{b...c}", expected);
         spread_parsing::check(spec, "... a { b ... c }", expected);
@@ -4161,7 +4170,7 @@ mod tests {
 
     #[test]
     fn test_spread_parsing_spread_a_sub_b_spread_c_d() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "... a {\n  b\n  ... c\n  d\n}";
         spread_parsing::check(spec, "...a{b...c d}", expected);
         spread_parsing::check(spec, "... a { b ... c d }", expected);
@@ -4177,7 +4186,7 @@ mod tests {
 
     #[test]
     fn test_spread_parsing_spread_a_sub_spread_b_c_d_spread_e() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "... a {\n  ... b\n  c\n  d\n  ... e\n}";
         spread_parsing::check(spec, "...a{...b c d...e}", expected);
         spread_parsing::check(spec, "... a { ... b c d ... e }", expected);
@@ -4190,6 +4199,7 @@ mod tests {
         spread_parsing::check(spec, "...\na {...\nb\nc d ...\ne }", expected);
         assert_debug_snapshot!(selection!("...a{...b c d...e}", spec));
     }
+    **/
 
     #[test]
     fn should_parse_null_coalescing_in_connect_0_3() {
