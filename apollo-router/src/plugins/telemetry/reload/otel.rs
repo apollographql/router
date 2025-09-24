@@ -1,52 +1,42 @@
-use std::io::IsTerminal;
-
-use anyhow::Result;
+/// This module contains low level otel stuff to support hot reloading
+use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
+use crate::plugins::telemetry::fmt_layer::FmtLayer;
+use crate::plugins::telemetry::formatters::json::Json;
+use crate::plugins::telemetry::formatters::text::Text;
+use crate::plugins::telemetry::otel;
+use crate::plugins::telemetry::otel::{OpenTelemetryLayer, PreSampledTracer};
+use crate::plugins::telemetry::tracing::reload::ReloadTracer;
+use crate::tracer::TraceId;
 use anyhow::anyhow;
 use once_cell::sync::OnceCell;
 use opentelemetry::Context;
-use opentelemetry::trace::SpanContext;
-use opentelemetry::trace::SpanId;
-use opentelemetry::trace::TraceContextExt;
-use opentelemetry::trace::TraceFlags;
-use opentelemetry::trace::TraceState;
-use opentelemetry::trace::TracerProvider;
+use opentelemetry::trace::{
+    SpanContext, SpanId, TraceContextExt, TraceFlags, TraceState, TracerProvider,
+};
 use opentelemetry_sdk::trace::Tracer;
+
+use std::io::IsTerminal;
 use tower::BoxError;
-use tracing_subscriber::EnvFilter;
-use tracing_subscriber::Registry;
-use tracing_subscriber::layer::Layer;
-use tracing_subscriber::layer::Layered;
-use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::layer::{Layered, SubscriberExt};
 use tracing_subscriber::registry::SpanRef;
 use tracing_subscriber::reload::Handle;
 use tracing_subscriber::util::SubscriberInitExt;
-
-use super::dynamic_attribute::DynAttributeLayer;
-use super::fmt_layer::FmtLayer;
-use super::formatters::json::Json;
-use crate::plugins::telemetry::formatters::text::Text;
-use crate::plugins::telemetry::otel;
-use crate::plugins::telemetry::otel::OpenTelemetryLayer;
-use crate::plugins::telemetry::otel::PreSampledTracer;
-use crate::plugins::telemetry::tracing::reload::ReloadTracer;
-use crate::tracer::TraceId;
+use tracing_subscriber::{EnvFilter, Layer, Registry};
 
 pub(crate) type LayeredRegistry = Layered<DynAttributeLayer, Registry>;
-
-pub(super) type LayeredTracer =
+pub(in crate::plugins::telemetry) type LayeredTracer =
     Layered<OpenTelemetryLayer<LayeredRegistry, ReloadTracer<Tracer>>, LayeredRegistry>;
 
 // These handles allow hot tracing of layers. They have complex type definitions because tracing has
 // generic types in the layer definition.
-pub(super) static OPENTELEMETRY_TRACER_HANDLE: OnceCell<
+pub(in crate::plugins::telemetry) static OPENTELEMETRY_TRACER_HANDLE: OnceCell<
     ReloadTracer<opentelemetry_sdk::trace::Tracer>,
 > = OnceCell::new();
-
 static FMT_LAYER_HANDLE: OnceCell<
     Handle<Box<dyn Layer<LayeredTracer> + Send + Sync>, LayeredTracer>,
 > = OnceCell::new();
 
-pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
+pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
     let hot_tracer = ReloadTracer::new(
         opentelemetry_sdk::trace::TracerProvider::default()
             .tracer_builder("noop")
@@ -89,7 +79,9 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn reload_fmt(layer: Box<dyn Layer<LayeredTracer> + Send + Sync>) {
+pub(in crate::plugins::telemetry) fn reload_fmt(
+    layer: Box<dyn Layer<LayeredTracer> + Send + Sync>,
+) {
     if let Some(handle) = FMT_LAYER_HANDLE.get() {
         handle.reload(layer).expect("fmt layer reload must succeed");
     }

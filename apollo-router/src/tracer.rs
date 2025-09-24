@@ -11,7 +11,7 @@ use tracing_subscriber::Registry;
 use tracing_subscriber::registry::LookupSpan;
 
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
-use crate::plugins::telemetry::reload::IsSampled;
+use crate::plugins::telemetry::reload::otel::IsSampled;
 
 /// Trace ID
 #[cfg_attr(test, derive(Default))]

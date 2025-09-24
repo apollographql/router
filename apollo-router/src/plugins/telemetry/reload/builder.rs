@@ -1,12 +1,13 @@
+/// This module contains low level otel stuff to support hot reloading
 use crate::_private::telemetry::ConfigResource;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
-use crate::plugins::telemetry::activation::Activation;
 use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config::{Conf, MetricsCommon, TracingCommon};
 use crate::plugins::telemetry::config_new::spans::Spans;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::metrics::prometheus::PrometheusService;
+use crate::plugins::telemetry::reload::activation::Activation;
 use crate::plugins::telemetry::tracing::{TracingConfigurator, datadog, zipkin};
 use crate::plugins::telemetry::{CustomTraceIdPropagator, apollo_exporter, metrics, otlp};
 use crate::{Endpoint, ListenAddr};
@@ -20,52 +21,28 @@ use prometheus::Registry;
 use tower::{BoxError, ServiceExt};
 
 /// This builder is responsible for collecting
-pub(crate) struct Builder<'a> {
-    previous_config: &'a Option<super::config::Conf>,
-    config: &'a super::config::Conf,
+pub(super) struct Builder<'a> {
+    previous_config: &'a Option<Conf>,
+    config: &'a Conf,
     activation: Activation,
     endpoints: MultiMap<ListenAddr, Endpoint>,
-    apollo_sender: apollo_exporter::Sender,
-}
-
-pub(crate) fn build(
-    previous_config: &Option<super::config::Conf>,
-    config: &super::config::Conf,
-) -> Result<
-    (
-        Activation,
-        MultiMap<ListenAddr, Endpoint>,
-        apollo_exporter::Sender,
-    ),
-    BoxError,
-> {
-    Builder::new(previous_config, config).build()
+    apollo_sender: Sender,
 }
 
 impl<'a> Builder<'a> {
-    fn new(
-        previous_config: &'a Option<super::config::Conf>,
-        config: &'a super::config::Conf,
-    ) -> Self {
+    pub(super) fn new(previous_config: &'a Option<Conf>, config: &'a Conf) -> Self {
         Self {
             previous_config,
             config,
             activation: Activation::new(),
             endpoints: Default::default(),
-            apollo_sender: apollo_exporter::Sender::Noop,
+            apollo_sender: Sender::Noop,
         }
     }
 
-    fn build(
+    pub(super) fn build(
         mut self,
-    ) -> Result<
-        (
-            Activation,
-            MultiMap<ListenAddr, Endpoint>,
-            apollo_exporter::Sender,
-        ),
-        BoxError,
-    > {
+    ) -> Result<(Activation, MultiMap<ListenAddr, Endpoint>, Sender), BoxError> {
         self.setup_public_tracing()?;
         self.setup_public_metrics()?;
         self.setup_apollo_metrics()?;

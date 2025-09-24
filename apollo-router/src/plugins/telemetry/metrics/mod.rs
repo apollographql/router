@@ -3,8 +3,8 @@ use opentelemetry_sdk::metrics::InstrumentKind;
 use opentelemetry_sdk::metrics::reader::AggregationSelector;
 use tower::BoxError;
 
-use crate::plugins::telemetry::builder::MetricsBuilder;
 use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::reload::builder::MetricsBuilder;
 
 pub(crate) mod apollo;
 pub(crate) mod local_type_stats;

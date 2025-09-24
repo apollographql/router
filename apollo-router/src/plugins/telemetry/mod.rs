@@ -70,7 +70,6 @@ use self::config_new::subgraph::events::SubgraphEvents;
 use self::config_new::subgraph::instruments::SubgraphInstruments;
 use self::config_new::supergraph::events::SupergraphEvents;
 use self::metrics::apollo::studio::SingleTypeStat;
-use self::reload::reload_fmt;
 pub(crate) use self::span_factory::SpanMode;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use self::tracing::apollo_telemetry::CLIENT_NAME_KEY;
@@ -142,14 +141,14 @@ use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::operation_limits::OperationLimits;
+use reload::otel::reload_fmt;
 
-use self::activation::Activation;
+use reload::activation::Activation;
+use reload::builder;
 
-pub(crate) mod activation;
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
 pub(crate) mod apollo_otlp_exporter;
-mod builder;
 pub(crate) mod config;
 pub(crate) mod config_new;
 pub(crate) mod consts;
@@ -336,7 +335,7 @@ impl PluginPrivate for Telemetry {
             config.calculate_field_level_instrumentation_ratio()?;
 
         let (activation, custom_endpoints, apollo_metrics_sender) =
-            builder::build(&init.previous_config, &config)?;
+            reload::prepare(&init.previous_config, &config)?;
 
         ::tracing::info!("custom endpoints {:?}", custom_endpoints);
         if config.instrumentation.spans.mode == SpanMode::Deprecated {

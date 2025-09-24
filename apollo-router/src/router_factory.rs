@@ -30,7 +30,7 @@ use crate::plugin::PluginFactory;
 use crate::plugin::PluginInit;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::Subscription;
-use crate::plugins::telemetry::reload::apollo_opentelemetry_initialized;
+use crate::plugins::telemetry::reload::otel::apollo_opentelemetry_initialized;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::query_planner::QueryPlannerService;

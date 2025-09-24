@@ -14,10 +14,10 @@ use tower_service::Service;
 
 use crate::ListenAddr;
 use crate::metrics::aggregation::MeterProviderType;
-use crate::plugins::telemetry::builder::MetricsBuilder;
 use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::metrics::CustomAggregationSelector;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
+use crate::plugins::telemetry::reload::builder::MetricsBuilder;
 use crate::services::router;
 
 /// Prometheus configuration

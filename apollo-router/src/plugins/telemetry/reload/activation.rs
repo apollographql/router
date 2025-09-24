@@ -4,7 +4,7 @@ use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
 use crate::metrics::meter_provider_internal;
 use crate::plugins::telemetry::GLOBAL_TRACER_NAME;
-use crate::plugins::telemetry::reload::OPENTELEMETRY_TRACER_HANDLE;
+use crate::plugins::telemetry::reload::otel::OPENTELEMETRY_TRACER_HANDLE;
 use opentelemetry::propagation::TextMapCompositePropagator;
 use opentelemetry::trace::TracerProvider;
 use parking_lot::Mutex;
