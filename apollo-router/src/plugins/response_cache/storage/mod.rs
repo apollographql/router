@@ -178,7 +178,7 @@ pub(super) trait CacheStorage {
     ) -> StorageResult<HashMap<String, u64>> {
         let now = Instant::now();
         let result = flatten_storage_error(
-            self.internal_invalidate(invalidation_keys, subgraph_names.clone())
+            self.internal_invalidate(invalidation_keys, subgraph_names)
                 .timeout(self.invalidate_timeout())
                 .await,
         );
