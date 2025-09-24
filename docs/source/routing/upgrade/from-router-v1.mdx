@@ -57,8 +57,8 @@ Multiple metrics have been removed in router v2.x as part of evolving towards Op
   `http.server.request.duration` metric for requests from clients to router and
   `http.client.request.duration` for requests from router to subgraphs.
 
-- Removed `apollo_router_session_count_total`. This does not have an equivalent in 2.0.0,
-  though one may be introduced in a point release.
+- Removed `apollo_router_session_count_total`. This is replaced by
+  `apollo.router.open_connections`, which was introduced in v2.1.0.
 
 - Removed `apollo_router_session_count_active`. This is replaced by
   `http.server.active_requests`.
