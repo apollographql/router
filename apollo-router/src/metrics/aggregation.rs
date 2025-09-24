@@ -25,6 +25,7 @@ use opentelemetry::metrics::SyncGauge;
 use opentelemetry::metrics::SyncHistogram;
 use opentelemetry::metrics::SyncUpDownCounter;
 use opentelemetry::metrics::UpDownCounter;
+use opentelemetry::metrics::noop::NoopMeterProvider;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use parking_lot::Mutex;
 use strum::EnumCount;
@@ -270,10 +271,12 @@ impl MeterProvider for AggregateMeterProvider {
         attributes: Option<Vec<KeyValue>>,
     ) -> Meter {
         let mut inner = self.inner.lock();
-        inner
-            .as_mut()
-            .expect("meter provider used after shutdown")
-            .versioned_meter(name, version, schema_url, attributes)
+        if let Some(inner) = inner.as_mut() {
+            inner.versioned_meter(name, version, schema_url, attributes)
+        } else {
+            // The meter was used after shutdown. Default to Noop the instrument cannot actually be used
+            NoopMeterProvider::default().versioned_meter(name, version, schema_url, attributes)
+        }
     }
 }
 
