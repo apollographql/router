@@ -69,13 +69,16 @@ impl<'a> Builder<'a> {
             self.activation.add_meter_providers(meter_providers);
         }
         // If we didn't change telemetry then we will get the old prom registry. Otherwise the new registry will take effect
+        // The only time this will be None is if prometheus is not configured
         if let Some(prometheus_registry) = self.activation.prometheus_registry() {
-            ::tracing::info!("setting up prometheus registry");
+            let listen = self.config.exporters.metrics.prometheus.listen.clone();
+            let path = self.config.exporters.metrics.prometheus.path.clone();
+            tracing::info!("Prometheus endpoint exposed at {}{}", listen, path);
 
             self.endpoints.insert(
-                self.config.exporters.metrics.prometheus.listen.clone(),
+                listen,
                 Endpoint::from_router_service(
-                    self.config.exporters.metrics.prometheus.path.clone(),
+                    path,
                     PrometheusService {
                         registry: prometheus_registry.clone(),
                     }

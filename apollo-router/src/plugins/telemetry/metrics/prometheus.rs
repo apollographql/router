@@ -90,13 +90,6 @@ impl MetricsConfigurator for Config {
 
         builder.with_reader(MeterProviderType::Public, exporter);
         builder.with_prometheus_registry(registry);
-
-        tracing::info!(
-            "Prometheus endpoint exposed at {}{}",
-            self.listen,
-            self.path
-        );
-
         Ok(())
     }
 }
