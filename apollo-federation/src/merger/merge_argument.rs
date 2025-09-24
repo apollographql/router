@@ -189,7 +189,7 @@ impl Merger {
                         })
                         .collect();
 
-                    self.error_reporter.report_mismatch_hint::<T::ArgumentPosition, ()>(
+                    self.error_reporter.report_mismatch_hint::<T::ArgumentPosition, T::ArgumentPosition, ()>(
                         HintCode::InconsistentArgumentPresence,
                         format!(
                             "Optional argument \"{}\" will not be included in the supergraph as it does not appear in all subgraphs: ",
@@ -197,10 +197,10 @@ impl Merger {
                         ),
                         &dest_arg_pos,
                         &arg_sources,
+                        |_elt| Some("yes".to_string()),
                         |_elt, _| Some("yes".to_string()),
                         |_, subgraphs| format!("it is defined in {}", subgraphs.unwrap_or_default()),
                         |_, subgraphs| format!(" but not in {}", subgraphs),
-                        None::<fn(Option<&T::ArgumentPosition>) -> bool>,
                         true,
                         false,
                     );
