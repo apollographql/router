@@ -651,7 +651,7 @@ async fn integration_test_basic() -> Result<(), BoxError> {
         .next_response()
         .await
         .unwrap();
-    dbg!(&response);
+
     insta::assert_json_snapshot!(response, {
         ".extensions.apolloCacheDebugging.data[].cacheControl.created" => 0
     });
