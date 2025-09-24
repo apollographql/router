@@ -121,7 +121,6 @@ use crate::plugins::telemetry::metrics::apollo::studio::SingleStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleStatsReport;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
-use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::query_planner::OperationKind;
@@ -141,6 +140,7 @@ use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::operation_limits::OperationLimits;
+use reload::tracing::TracingConfigurator;
 
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;

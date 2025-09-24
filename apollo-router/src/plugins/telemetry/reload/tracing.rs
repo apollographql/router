@@ -10,7 +10,6 @@ use crate::plugins::telemetry::config::Propagation;
 use crate::plugins::telemetry::config::Tracing;
 use crate::plugins::telemetry::config::TracingCommon;
 use crate::plugins::telemetry::config_new::spans::Spans;
-use crate::plugins::telemetry::tracing::TracingConfigurator;
 
 pub(crate) struct TracingBuilder<'a> {
     common: &'a TracingCommon,
@@ -88,4 +87,10 @@ pub(crate) fn create_propagator(
         )));
     }
     TextMapCompositePropagator::new(propagators)
+}
+
+pub(crate) trait TracingConfigurator {
+    fn config(conf: &Conf) -> &Self;
+    fn enabled(&self) -> bool;
+    fn apply(&self, builder: &mut TracingBuilder) -> Result<(), BoxError>;
 }

@@ -15,8 +15,8 @@ use crate::plugins::telemetry::reload::activation::Activation;
 use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
 use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::reload::tracing::TracingBuilder;
+use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
 use crate::plugins::telemetry::reload::tracing::create_propagator;
-use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::plugins::telemetry::tracing::datadog;
 use crate::plugins::telemetry::tracing::zipkin;
 

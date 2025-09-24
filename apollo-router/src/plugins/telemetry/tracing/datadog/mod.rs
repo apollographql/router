@@ -42,9 +42,9 @@ use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::otel::named_runtime_channel::NamedTokioRuntime;
 use crate::plugins::telemetry::reload::tracing::TracingBuilder;
+use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
-use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::plugins::telemetry::tracing::datadog_exporter;
 use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
 

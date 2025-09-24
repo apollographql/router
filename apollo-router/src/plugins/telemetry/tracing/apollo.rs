@@ -9,8 +9,8 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
 use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::otel::named_runtime_channel::NamedTokioRuntime;
 use crate::plugins::telemetry::reload::tracing::TracingBuilder;
+use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
 use crate::plugins::telemetry::span_factory::SpanMode;
-use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::plugins::telemetry::tracing::apollo_telemetry;
 
 impl TracingConfigurator for Config {

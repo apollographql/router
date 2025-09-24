@@ -9,8 +9,8 @@ use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::otel::named_runtime_channel::NamedTokioRuntime;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::plugins::telemetry::reload::tracing::TracingBuilder;
+use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
-use crate::plugins::telemetry::tracing::TracingConfigurator;
 
 impl TracingConfigurator for super::super::otlp::Config {
     fn config(conf: &Conf) -> &Self {

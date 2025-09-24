@@ -13,9 +13,9 @@ use crate::plugins::telemetry::config::GenericWith;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::otel::named_runtime_channel::NamedTokioRuntime;
 use crate::plugins::telemetry::reload::tracing::TracingBuilder;
+use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
-use crate::plugins::telemetry::tracing::TracingConfigurator;
 
 static DEFAULT_ENDPOINT: LazyLock<Uri> =
     LazyLock::new(|| Uri::from_static("http://127.0.0.1:9411/api/v2/spans"));

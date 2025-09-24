@@ -29,12 +29,6 @@ pub(crate) mod otlp;
 pub(crate) mod reload;
 pub(crate) mod zipkin;
 
-pub(crate) trait TracingConfigurator {
-    fn config(conf: &Conf) -> &Self;
-    fn enabled(&self) -> bool;
-    fn apply(&self, builder: &mut TracingBuilder) -> Result<(), BoxError>;
-}
-
 #[derive(Debug)]
 struct ApolloFilterSpanProcessor<T: SpanProcessor> {
     delegate: T,
