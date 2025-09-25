@@ -16,6 +16,8 @@ use serde::Serialize;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
+use tokio_stream::StreamExt;
+use tokio_util::future::FutureExt;
 use tower::BoxError;
 
 use crate::cache::redis::RedisCacheStorage;
@@ -158,11 +160,12 @@ impl Storage {
         // NB: `cache_tag` already includes namespace
         let cutoff = now() - 1;
 
-        // TODO: timeout for this?
         let now = Instant::now();
-        let removed_items_result = self
-            .remove_keys_from_cache_tag_by_cutoff(cache_tag, cutoff as f64)
-            .await;
+        let removed_items_result = super::flatten_storage_error(
+            self.remove_keys_from_cache_tag_by_cutoff(cache_tag, cutoff as f64)
+                .timeout(self.maintenance_timeout())
+                .await,
+        );
         let elapsed = now.elapsed();
         f64_histogram_with_unit!(
             "apollo.router.operations.response_cache.storage.maintenance",
@@ -229,6 +232,10 @@ impl Storage {
 
         cache_tags
     }
+
+    fn maintenance_timeout(&self) -> Duration {
+        self.timeout
+    }
 }
 
 impl CacheStorage for Storage {
@@ -258,7 +265,7 @@ impl CacheStorage for Storage {
         //   1 - update potential keys to include namespace etc so that we don't have to do it in each phase
         //   2 - update each cache tag with new keys
         //   3 - update each key
-        // a failure in any phase will cause the function to return, that prevents invalid states
+        // a failure in any phase will cause the function to return, which prevents invalid states
 
         // TODO:
         //  * break these into separate fns
@@ -368,7 +375,7 @@ impl CacheStorage for Storage {
     }
 
     async fn internal_fetch(&self, cache_key: &str) -> StorageResult<CacheEntry> {
-        // don't need make_key for gets etc as the storage layer already runs it
+        // NB: don't need `make_key` for `get` - the storage layer already runs it
         let value: RedisValue<CacheValue> = self.reader_storage.get(RedisKey(cache_key)).await?;
         Ok(CacheEntry::from((cache_key, value.0)))
     }
