@@ -51,7 +51,7 @@ async fn wait_for_cache(storage: &Storage, keys: Vec<String>) {
     let mut interval_stream =
         IntervalStream::new(tokio::time::interval(Duration::from_millis(100))).take(50);
 
-    while let Some(_) = interval_stream.next().await {
+    while interval_stream.next().await.is_some() {
         if let Ok(values) = storage.fetch_multiple(&keys_strs, "").await
             && values.iter().all(Option::is_some)
         {
