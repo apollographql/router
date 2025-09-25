@@ -287,7 +287,7 @@ impl PluginPrivate for ResponseCache {
             );
         }
 
-        let mut storage_interface = Arc::new(StorageInterface::default());
+        let mut storage_interface = StorageInterface::default();
 
         let (abort_tx, abort_rx) = tokio::sync::broadcast::channel(2);
         if let Some(config) = init.config.subgraph.all.redis.clone() {
@@ -297,7 +297,7 @@ impl PluginPrivate for ResponseCache {
         }
 
         for (subgraph, subgraph_config) in &init.config.subgraph.subgraphs {
-            if let Some(config) = subgraph_config.redis {
+            if let Some(config) = subgraph_config.redis.clone() {
                 let storage = Arc::new(OnceLock::new());
                 storage_interface
                     .subgraphs
@@ -306,6 +306,7 @@ impl PluginPrivate for ResponseCache {
             }
         }
 
+        let storage_interface = Arc::new(storage_interface);
         let invalidation = Invalidation::new(storage_interface.clone()).await?;
 
         Ok(Self {
@@ -2393,10 +2394,10 @@ async fn connect_or_spawn_reconnection_task(
     config: storage::redis::Config,
     storage: Arc<OnceLock<Storage>>,
     abort_signal: Receiver<()>,
-) -> Result<(), storage::Error> {
+) -> Result<(), BoxError> {
     match attempt_connection(&config, storage.clone()).await {
         Ok(()) => Ok(()),
-        Err(err) if config.required_to_start => Err(err.into()),
+        Err(err) if config.required_to_start => Err(err),
         Err(_) => {
             tokio::spawn(reattempt_connection(config.clone(), storage, abort_signal));
             Ok(())
@@ -2407,7 +2408,7 @@ async fn connect_or_spawn_reconnection_task(
 async fn attempt_connection(
     config: &storage::redis::Config,
     cache_storage: Arc<OnceLock<Storage>>,
-) -> Result<(), storage::Error> {
+) -> Result<(), BoxError> {
     let storage = Storage::new(config).await.inspect_err(|err| {
         tracing::error!(
             cache = "response",
