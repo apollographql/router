@@ -3,7 +3,6 @@ use std::time::Duration;
 use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::response_cache::invalidation::InvalidationKind;
 use crate::plugins::response_cache::storage;
-use crate::plugins::response_cache::storage::redis::Storage;
 
 pub(crate) const CACHE_INFO_SUBGRAPH_CONTEXT_KEY: &str =
     "apollo::router::response_cache::cache_info_subgraph";

@@ -20,7 +20,6 @@ use crate::metrics::FutureMetricsExt;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::MockSubgraphService;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
-use crate::plugins::response_cache::metrics;
 use crate::plugins::response_cache::plugin::CACHE_DEBUG_HEADER_NAME;
 use crate::plugins::response_cache::plugin::CacheKeysContext;
 use crate::plugins::response_cache::plugin::Subgraph;
@@ -1046,21 +1045,19 @@ async fn no_store_from_request() {
     "#);
 
     // Just to make sure it doesn't invalidate anything, which means nothing has been stored
-    assert!(
-        storage
-            .invalidate(
-                vec![
-                    "user".to_string(),
-                    "organization".to_string(),
-                    "currentUser".to_string()
-                ],
-                vec!["orga".to_string(), "user".to_string()],
-                "test_bulk_invalidate"
-            )
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    let invalidations_by_subgraph = storage
+        .invalidate(
+            vec![
+                "user".to_string(),
+                "organization".to_string(),
+                "currentUser".to_string(),
+            ],
+            vec!["orga".to_string(), "user".to_string()],
+            "test_bulk_invalidate",
+        )
+        .await
+        .unwrap();
+    assert_eq!(invalidations_by_subgraph.into_values().sum::<u64>(), 0);
 }
 
 #[tokio::test]

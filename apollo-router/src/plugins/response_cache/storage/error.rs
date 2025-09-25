@@ -5,7 +5,7 @@ use crate::plugins::response_cache::ErrorCode;
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
     #[error("{0}")]
-    Database(#[from] sqlx::Error),
+    Database(#[from] fred::error::Error),
 
     #[error("{0}")]
     Join(#[from] tokio::task::JoinError),
