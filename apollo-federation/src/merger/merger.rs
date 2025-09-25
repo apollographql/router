@@ -912,7 +912,8 @@ impl Merger {
         _sources: &Sources<T>,
         _dest: &ObjectOrInterfaceFieldDefinitionPosition,
     ) -> Result<FieldMergeContext, FederationError> {
-        todo!("Implement validate_override")
+        // TODO(FED-555)
+        Ok(Default::default())
     }
 
     fn validate_subscription_field<T>(
