@@ -157,11 +157,9 @@ impl Activation {
 /// The solution to this is to move the structs into a blocking task so that they can shut down safely.
 impl Drop for Activation {
     fn drop(&mut self) {
-        for (meter_provider_type, meter_provider) in std::mem::take(&mut self.meter_providers) {
+        for (_, meter_provider) in std::mem::take(&mut self.meter_providers) {
             checked_spawn_task(Box::new(move || {
-                if let Err(e) = meter_provider.shutdown() {
-                    ::tracing::error!(error = %e, "meter.provider.type" = %meter_provider_type, "failed to shutdown meter provider")
-                }
+                drop(meter_provider);
             }));
         }
 

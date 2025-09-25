@@ -128,6 +128,7 @@ impl FilterMeterProvider {
         FilterMeterProvider::builder().delegate(delegate).build()
     }
 
+    #[allow(dead_code)]
     pub(crate) fn shutdown(&self) -> opentelemetry::metrics::Result<()> {
         self.delegate.shutdown()
     }

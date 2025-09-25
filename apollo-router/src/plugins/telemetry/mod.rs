@@ -1976,15 +1976,12 @@ mod tests {
             .with_deserialized_config()
             .expect("unable to deserialize telemetry config");
 
-        let plugin = crate::plugin::plugins()
+        crate::plugin::plugins()
             .find(|factory| factory.name == "apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(init)
             .await
-            .expect("unable to create telemetry plugin");
-
-        plugin.activate();
-        plugin
+            .expect("unable to create telemetry plugin")
     }
 
     async fn get_prometheus_metrics(plugin: &dyn DynPlugin) -> String {
@@ -2923,6 +2920,7 @@ mod tests {
         async {
             let plugin =
                 create_plugin_with_config(include_str!("testdata/prometheus.router.yaml")).await;
+            plugin.activate();
             u64_histogram!("apollo.test.histo", "it's a test", 1u64);
 
             make_supergraph_request(plugin.as_ref()).await;
@@ -2939,6 +2937,7 @@ mod tests {
                 "testdata/prometheus_custom_buckets.router.yaml"
             ))
             .await;
+            plugin.activate();
             u64_histogram!("apollo.test.histo", "it's a test", 1u64);
 
             make_supergraph_request(plugin.as_ref()).await;
@@ -2955,6 +2954,7 @@ mod tests {
                 "testdata/prometheus_custom_buckets_specific_metrics.router.yaml"
             ))
             .await;
+            plugin.activate();
             make_supergraph_request(plugin.as_ref()).await;
             u64_histogram!("apollo.test.histo", "it's a test", 1u64);
             assert_prometheus_metrics!(plugin);
@@ -2982,9 +2982,9 @@ mod tests {
         async {
             let plugin =
                 create_plugin_with_config(include_str!("testdata/prometheus.router.yaml")).await;
+            plugin.activate();
             u64_histogram_with_unit!("apollo.test.histo1", "no unit", "{request}", 1u64);
             f64_histogram_with_unit!("apollo.test.histo2", "unit", "s", 1f64);
-
             make_supergraph_request(plugin.as_ref()).await;
             assert_prometheus_metrics!(plugin);
         }
