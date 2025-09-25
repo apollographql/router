@@ -3894,7 +3894,9 @@ mod tests {
         );
     }
 
-    #[cfg(test)]
+    // TODO Reenable these tests in ConnectSpec::V0_4 when we support ... spread
+    // syntax and abstract typs.
+    /** #[cfg(test)]
     mod spread {
         use serde_json_bytes::Value as JSON;
         use serde_json_bytes::json;
@@ -3935,7 +3937,7 @@ mod tests {
 
     #[test]
     fn test_spread_syntax_spread_a() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let spread::SetupItems {
             data: a_b_data,
             shape_context,
@@ -3955,6 +3957,7 @@ mod tests {
             "{ phonetic: \"ay\" }",
         );
     }
+    **/
 
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
@@ -4102,9 +4105,12 @@ mod tests {
         );
     }
 
+    // TODO Reenable these tests in ConnectSpec::V0_4 when we support ... spread
+    // syntax and abstract types.
+    /**
     #[test]
     fn test_spread_syntax_a_spread_b() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let spread::SetupItems {
             data: a_b_data,
             shape_context,
@@ -4133,7 +4139,7 @@ mod tests {
 
     #[test]
     fn test_spread_syntax_spread_a_b() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let spread::SetupItems {
             data: a_b_data,
             shape_context,
@@ -4162,7 +4168,7 @@ mod tests {
 
     #[test]
     fn test_spread_match_none() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
 
         let sel = selection!(
             "before ...condition->match([true, { matched: true }]) after",
@@ -4264,7 +4270,7 @@ mod tests {
 
     #[test]
     fn test_spread_with_match_book() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let sel = spread_with_match::get_selection(spec);
 
         let book_data = json!({
@@ -4289,7 +4295,7 @@ mod tests {
 
     #[test]
     fn test_spread_with_match_movie() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let sel = spread_with_match::get_selection(spec);
 
         let movie_data = json!({
@@ -4314,7 +4320,7 @@ mod tests {
 
     #[test]
     fn test_spread_with_match_magazine() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let sel = spread_with_match::get_selection(spec);
 
         let magazine_data = json!({
@@ -4339,7 +4345,7 @@ mod tests {
 
     #[test]
     fn test_spread_with_match_dummy() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let sel = spread_with_match::get_selection(spec);
 
         let dummy_data = json!({
@@ -4359,7 +4365,7 @@ mod tests {
 
     #[test]
     fn test_spread_with_match_unknown() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let sel = spread_with_match::get_selection(spec);
 
         let unknown_data = json!({
@@ -4373,7 +4379,7 @@ mod tests {
 
     #[test]
     fn test_spread_null() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         assert_eq!(
             selection!("...$(null)", spec).apply_to(&json!({ "ignored": "data" })),
             (Some(json!(null)), vec![]),
@@ -4394,7 +4400,7 @@ mod tests {
 
     #[test]
     fn test_spread_missing() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
 
         assert_eq!(
             selection!("a ...missing z", spec).apply_to(&json!({ "a": "ay", "z": "zee" })),
@@ -4447,7 +4453,7 @@ mod tests {
 
     #[test]
     fn test_spread_invalid_numbers() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
 
         assert_eq!(
             selection!("...invalid", spec).apply_to(&json!({ "invalid": 123 })),
@@ -4478,7 +4484,7 @@ mod tests {
 
     #[test]
     fn test_spread_invalid_bools() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
 
         assert_eq!(
             selection!("...invalid", spec).apply_to(&json!({ "invalid": true })),
@@ -4509,7 +4515,7 @@ mod tests {
 
     #[test]
     fn test_spread_invalid_strings() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
 
         assert_eq!(
             selection!("...invalid", spec).apply_to(&json!({ "invalid": "string" })),
@@ -4540,7 +4546,7 @@ mod tests {
 
     #[test]
     fn test_spread_invalid_arrays() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
 
         // The ... operator only works for objects for now, as it spreads their
         // keys into some larger object. We may support array spreading in the
@@ -4575,7 +4581,7 @@ mod tests {
 
     #[test]
     fn test_spread_output_shapes() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
 
         assert_eq!(selection!("...a", spec).shape().pretty_print(), "$root.*.a");
         assert_eq!(
@@ -4601,6 +4607,7 @@ mod tests {
             "All<$root.*.b, { a: $root.*.a, c: $root.*.c }>",
         );
     }
+    **/
 
     #[test]
     fn null_coalescing_should_return_left_when_left_not_null() {
@@ -4886,9 +4893,12 @@ mod tests {
         );
     }
 
+    // TODO Reenable this test in ConnectSpec::V0_4 when we support ... spread
+    // syntax and abstract types.
+    /**
     #[test]
     fn none_coalescing_should_allow_defaulting_match() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
 
         assert_eq!(
             selection!("a ...b->match(['match', { b: 'world' }])", spec)
@@ -4917,7 +4927,7 @@ mod tests {
 
     #[test]
     fn nullish_coalescing_chains_should_have_predictable_shape() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
 
         let chain = selection!("$(1 ?? true ?? null)", spec);
         assert_eq!(chain.shape().pretty_print(), "One<1, true, null>",);
@@ -4951,6 +4961,7 @@ mod tests {
             "One<{ __typename: \"Good\", message: $root.*.message }, { __typename: \"Bad\", error: $root.*.error }, None>",
         );
     }
+    **/
 
     #[test]
     fn wtf_operator_should_not_exclude_null_from_nullable_union_shape() {

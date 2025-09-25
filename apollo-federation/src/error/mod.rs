@@ -178,6 +178,8 @@ pub enum CompositionError {
     #[error("{message}")]
     InterfaceObjectUsageError { message: String },
     #[error("{message}")]
+    InterfaceKeyMissingImplementationType { message: String },
+    #[error("{message}")]
     TypeKindMismatch { message: String },
     #[error("{message}")]
     ShareableHasMismatchedRuntimeTypes { message: String },
@@ -281,6 +283,9 @@ impl CompositionError {
             Self::DirectiveDefinitionInvalid { .. } => ErrorCode::DirectiveDefinitionInvalid,
             Self::TypeDefinitionInvalid { .. } => ErrorCode::TypeDefinitionInvalid,
             Self::InterfaceObjectUsageError { .. } => ErrorCode::InterfaceObjectUsageError,
+            Self::InterfaceKeyMissingImplementationType { .. } => {
+                ErrorCode::InterfaceKeyMissingImplementationType
+            }
             Self::TypeKindMismatch { .. } => ErrorCode::TypeKindMismatch,
             Self::ShareableHasMismatchedRuntimeTypes { .. } => {
                 ErrorCode::ShareableHasMismatchedRuntimeTypes
@@ -355,6 +360,11 @@ impl CompositionError {
             Self::InterfaceObjectUsageError { message } => Self::InterfaceObjectUsageError {
                 message: format!("{message}{appendix}"),
             },
+            Self::InterfaceKeyMissingImplementationType { message } => {
+                Self::InterfaceKeyMissingImplementationType {
+                    message: format!("{message}{appendix}"),
+                }
+            }
             Self::TypeKindMismatch { message } => Self::TypeKindMismatch {
                 message: format!("{message}{appendix}"),
             },

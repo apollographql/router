@@ -59,9 +59,10 @@ pub(super) fn nom_error_message(
     // provides the dynamic context needed to interpret the static message.
     message: impl Into<String>,
 ) -> nom::Err<nom::error::Error<Span>> {
+    let offset = suffix.location_offset();
     nom::Err::Error(nom::error::Error::from_error_kind(
         suffix.map_extra(|extra| SpanExtra {
-            errors: vec_push(extra.errors, message.into()),
+            errors: vec_push(extra.errors, (message.into(), offset)),
             ..extra
         }),
         nom::error::ErrorKind::IsNot,
@@ -76,9 +77,10 @@ pub(super) fn nom_fail_message(
     suffix: Span,
     message: impl Into<String>,
 ) -> nom::Err<nom::error::Error<Span>> {
+    let offset = suffix.location_offset();
     nom::Err::Failure(nom::error::Error::from_error_kind(
         suffix.map_extra(|extra| SpanExtra {
-            errors: vec_push(extra.errors, message.into()),
+            errors: vec_push(extra.errors, (message.into(), offset)),
             ..extra
         }),
         nom::error::ErrorKind::IsNot,
@@ -199,13 +201,39 @@ impl JSONSelection {
         match JSONSelection::parse_span(span) {
             Ok((remainder, selection)) => {
                 let fragment = remainder.fragment();
-                if fragment.is_empty() {
+                let produced_errors = !remainder.extra.errors.is_empty();
+                if fragment.is_empty() && !produced_errors {
                     Ok(selection)
                 } else {
+                    let mut message = remainder
+                        .extra
+                        .errors
+                        .iter()
+                        .map(|(msg, _offset)| msg.as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+
+                    // Use offset and fragment from first error if available
+                    let (error_offset, error_fragment) =
+                        if let Some((_, first_error_offset)) = remainder.extra.errors.first() {
+                            let error_span =
+                                new_span_with_spec(input, spec).slice(*first_error_offset..);
+                            (
+                                error_span.location_offset(),
+                                error_span.fragment().to_string(),
+                            )
+                        } else {
+                            (remainder.location_offset(), fragment.to_string())
+                        };
+
+                    if !fragment.is_empty() {
+                        message
+                            .push_str(&format!("\nUnexpected trailing characters: {}", fragment));
+                    }
                     Err(JSONSelectionParseError {
-                        message: "Unexpected trailing characters".to_string(),
-                        fragment: fragment.to_string(),
-                        offset: remainder.location_offset(),
+                        message,
+                        fragment: error_fragment,
+                        offset: error_offset,
                         spec: remainder.extra.spec,
                     })
                 }
@@ -220,7 +248,7 @@ impl JSONSelection {
                             .extra
                             .errors
                             .iter()
-                            .map(|s| s.to_string())
+                            .map(|(msg, _offset)| msg.clone())
                             .join("\n")
                     },
                     fragment: e.input.fragment().to_string(),
@@ -582,8 +610,10 @@ impl NamedSelection {
         })
     }
 
+    // TODO Reenable ... in ConnectSpec::V0_4, to support abstract types.
     // NamedSelection ::= (Alias | "...")? PathSelection | Alias SubSelection
     fn parse_v0_3(input: Span) -> ParseResult<Self> {
+        let spec = get_connect_spec(&input);
         let (after_alias, alias) = opt(Alias::parse)(input.clone())?;
 
         if let Some(alias) = alias {
@@ -625,8 +655,14 @@ impl NamedSelection {
                 opt(ranged_span("...")),
                 PathSelection::parse,
             ))(input.clone())
-            .map(|(remainder, (_spaces, spread, path))| {
+            .map(|(mut remainder, (_spaces, spread, path))| {
                 let prefix = if let Some(spread) = spread {
+                    if spec <= ConnectSpec::V0_3 {
+                        remainder.extra.errors.push((
+                            "Spread syntax (...) is planned for connect/v0.4".to_string(),
+                            input.location_offset(),
+                        ));
+                    }
                     // An explicit ... spread token was used, so we record
                     // NamingPrefix::Spread(Some(_)). If the path produces
                     // something other than an object or null, we will catch
@@ -2572,7 +2608,7 @@ mod tests {
                         e.input.extra,
                         SpanExtra {
                             spec: ConnectSpec::latest(),
-                            errors: vec![expected_message],
+                            errors: vec![(expected_message, expected_offset)],
                         }
                     );
                 }
@@ -4026,7 +4062,39 @@ mod tests {
         }
     }
 
-    #[cfg(test)]
+    #[test]
+    fn test_disallowed_spread_syntax_error() {
+        assert_eq!(
+            JSONSelection::parse_with_spec("id ...names", ConnectSpec::V0_2),
+            Err(JSONSelectionParseError {
+                message: "nom::error::ErrorKind::Eof".to_string(),
+                fragment: "...names".to_string(),
+                offset: 3,
+                spec: ConnectSpec::V0_2,
+            }),
+        );
+
+        assert_eq!(
+            JSONSelection::parse_with_spec("id ...names", ConnectSpec::V0_3),
+            Err(JSONSelectionParseError {
+                message: "Spread syntax (...) is planned for connect/v0.4".to_string(),
+                // This is the fragment and offset we should get, but we need to
+                // store error offsets in SpanExtra::errors to provide that
+                // information.
+                fragment: "...names".to_string(),
+                offset: 3,
+                spec: ConnectSpec::V0_3,
+            }),
+        );
+
+        // This will fail when we promote v0.3 to latest and create v0.4, which
+        // is your signal to consider reenabling the tests below.
+        assert_eq!(ConnectSpec::V0_3, ConnectSpec::next());
+    }
+
+    // TODO Reenable these tests in ConnectSpec::V0_4 when we support ... spread
+    // syntax and abstract types.
+    /** #[cfg(test)]
     mod spread_parsing {
         use crate::connectors::ConnectSpec;
         use crate::connectors::json_selection::PrettyPrintable;
@@ -4041,7 +4109,7 @@ mod tests {
 
     #[test]
     fn test_basic_spread_parsing_one_field() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "... a";
         spread_parsing::check(spec, "...a", expected);
         spread_parsing::check(spec, "... a", expected);
@@ -4054,7 +4122,7 @@ mod tests {
 
     #[test]
     fn test_spread_parsing_spread_a_spread_b() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "... a\n... b";
         spread_parsing::check(spec, "...a...b", expected);
         spread_parsing::check(spec, "... a ... b", expected);
@@ -4066,7 +4134,7 @@ mod tests {
 
     #[test]
     fn test_spread_parsing_a_spread_b() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "a\n... b";
         spread_parsing::check(spec, "a...b", expected);
         spread_parsing::check(spec, "a ... b", expected);
@@ -4081,7 +4149,7 @@ mod tests {
 
     #[test]
     fn test_spread_parsing_spread_a_b() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "... a\nb";
         spread_parsing::check(spec, "...a b", expected);
         spread_parsing::check(spec, "... a b", expected);
@@ -4094,7 +4162,7 @@ mod tests {
 
     #[test]
     fn test_spread_parsing_spread_a_b_c() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "... a\nb\nc";
         spread_parsing::check(spec, "...a b c", expected);
         spread_parsing::check(spec, "... a b c", expected);
@@ -4108,7 +4176,7 @@ mod tests {
 
     #[test]
     fn test_spread_parsing_spread_spread_a_sub_b() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "... a {\n  b\n}";
         spread_parsing::check(spec, "...a{b}", expected);
         spread_parsing::check(spec, "... a { b }", expected);
@@ -4123,7 +4191,7 @@ mod tests {
 
     #[test]
     fn test_spread_parsing_spread_a_sub_b_c() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "... a {\n  b\n  c\n}";
         spread_parsing::check(spec, "...a{b c}", expected);
         spread_parsing::check(spec, "... a { b c }", expected);
@@ -4139,7 +4207,7 @@ mod tests {
 
     #[test]
     fn test_spread_parsing_spread_a_sub_b_spread_c() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "... a {\n  b\n  ... c\n}";
         spread_parsing::check(spec, "...a{b...c}", expected);
         spread_parsing::check(spec, "... a { b ... c }", expected);
@@ -4155,7 +4223,7 @@ mod tests {
 
     #[test]
     fn test_spread_parsing_spread_a_sub_b_spread_c_d() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "... a {\n  b\n  ... c\n  d\n}";
         spread_parsing::check(spec, "...a{b...c d}", expected);
         spread_parsing::check(spec, "... a { b ... c d }", expected);
@@ -4171,7 +4239,7 @@ mod tests {
 
     #[test]
     fn test_spread_parsing_spread_a_sub_spread_b_c_d_spread_e() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "... a {\n  ... b\n  c\n  d\n  ... e\n}";
         spread_parsing::check(spec, "...a{...b c d...e}", expected);
         spread_parsing::check(spec, "... a { ... b c d ... e }", expected);
@@ -4184,6 +4252,7 @@ mod tests {
         spread_parsing::check(spec, "...\na {...\nb\nc d ...\ne }", expected);
         assert_debug_snapshot!(selection!("...a{...b c d...e}", spec));
     }
+    **/
 
     #[test]
     fn should_parse_null_coalescing_in_connect_0_3() {
