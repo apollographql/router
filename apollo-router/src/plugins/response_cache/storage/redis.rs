@@ -25,6 +25,9 @@ use crate::cache::redis::RedisValue;
 use crate::cache::storage::KeyType;
 use crate::cache::storage::ValueType;
 use crate::plugins::response_cache::cache_control::CacheControl;
+use crate::plugins::response_cache::metrics::record_maintenance_duration;
+use crate::plugins::response_cache::metrics::record_maintenance_error;
+use crate::plugins::response_cache::metrics::record_maintenance_success;
 use crate::plugins::response_cache::storage::CacheEntry;
 use crate::plugins::response_cache::storage::CacheStorage;
 use crate::plugins::response_cache::storage::Document;
@@ -165,26 +168,11 @@ impl Storage {
                 .timeout(self.maintenance_timeout())
                 .await,
         );
-        let elapsed = now.elapsed();
-        f64_histogram_with_unit!(
-            "apollo.router.operations.response_cache.storage.maintenance",
-            "Time to perform maintenance on a cache tag",
-            "s",
-            elapsed.as_secs_f64()
-        );
+        record_maintenance_duration(now.elapsed());
 
         match removed_items_result {
-            Ok(removed_items) => {
-                u64_counter_with_unit!(
-                    "apollo.router.operations.response_cache.storage.maintenance.removed_cache_tag_entries",
-                    "Counter for removed items",
-                    "{entry}",
-                    removed_items
-                );
-            }
-            Err(err) => {
-                tracing::debug!("Caught error while performing maintenance: {err:?}");
-            }
+            Ok(removed_items) => record_maintenance_success(removed_items),
+            Err(err) => record_maintenance_error(&err),
         }
     }
 

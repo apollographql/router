@@ -67,6 +67,35 @@ pub(super) fn record_insert_duration(duration: Duration, subgraph_name: &str, ba
     );
 }
 
+pub(super) fn record_maintenance_success(entries: u64) {
+    u64_counter_with_unit!(
+        "apollo.router.operations.response_cache.maintenance.removed_cache_tag_entries",
+        "Counter for removed items",
+        "{entry}",
+        entries
+    );
+}
+
+pub(super) fn record_maintenance_error(error: &storage::Error) {
+    u64_counter_with_unit!(
+        "apollo.router.operations.response_cache.maintenance.error",
+        "Errors while removing expired entries from cache tag set",
+        "{error}",
+        1,
+        "code" = error.code()
+    );
+    tracing::debug!(error = %error, "unable to perform maintenance on cache tag set in response cache");
+}
+
+pub(super) fn record_maintenance_duration(duration: Duration) {
+    f64_histogram_with_unit!(
+        "apollo.router.operations.response_cache.maintenance",
+        "Time to remove expired entries from cache tag set",
+        "s",
+        duration.as_secs_f64()
+    );
+}
+
 pub(super) fn record_invalidation_duration(
     duration: Duration,
     invalidation_kind: InvalidationKind,
