@@ -25,8 +25,7 @@ use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use tokio::sync::RwLock;
-use tokio::sync::broadcast::Receiver;
-use tokio::sync::broadcast::Sender;
+use tokio::sync::broadcast;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::IntervalStream;
 use tower::BoxError;
@@ -114,7 +113,7 @@ pub(crate) struct ResponseCache {
     subgraph_enums: Arc<HashMap<String, String>>,
     lru_size_instrument: LruSizeInstrument,
     /// Sender to tell spawned tasks to abort when this struct is dropped
-    abort_tx: Sender<()>,
+    drop_tx: broadcast::Sender<()>,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -289,11 +288,11 @@ impl PluginPrivate for ResponseCache {
 
         let mut storage_interface = StorageInterface::default();
 
-        let (abort_tx, abort_rx) = tokio::sync::broadcast::channel(2);
+        let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
         if let Some(config) = init.config.subgraph.all.redis.clone() {
             let storage = Arc::new(OnceLock::new());
             storage_interface.all = Some(storage.clone());
-            connect_or_spawn_reconnection_task(config, storage, abort_rx).await?;
+            connect_or_spawn_reconnection_task(config, storage, drop_rx).await?;
         }
 
         for (subgraph, subgraph_config) in &init.config.subgraph.subgraphs {
@@ -302,7 +301,7 @@ impl PluginPrivate for ResponseCache {
                 storage_interface
                     .subgraphs
                     .insert(subgraph.clone(), storage.clone());
-                connect_or_spawn_reconnection_task(config, storage, abort_tx.subscribe()).await?;
+                connect_or_spawn_reconnection_task(config, storage, drop_tx.subscribe()).await?;
             }
         }
 
@@ -323,7 +322,7 @@ impl PluginPrivate for ResponseCache {
             subgraph_enums: Arc::new(get_subgraph_enums(&init.supergraph_schema)),
             supergraph_schema: init.supergraph_schema,
             lru_size_instrument: LruSizeInstrument::new(LRU_PRIVATE_QUERIES_INSTRUMENT_NAME),
-            abort_tx,
+            drop_tx,
         })
     }
 
@@ -471,6 +470,7 @@ impl ResponseCache {
         subgraphs: HashMap<String, Subgraph>,
         supergraph_schema: Arc<Valid<Schema>>,
         truncate_namespace: bool,
+        drop_tx: broadcast::Sender<()>,
     ) -> Result<Self, BoxError>
     where
         Self: Sized,
@@ -487,7 +487,6 @@ impl ResponseCache {
             subgraphs: HashMap::new(),
         });
         let invalidation = Invalidation::new(storage.clone()).await?;
-        let (abort_tx, abort_rx) = tokio::sync::broadcast::channel(2);
         Ok(Self {
             storage,
             entity_type: None,
@@ -515,7 +514,7 @@ impl ResponseCache {
             subgraph_enums: Arc::new(get_subgraph_enums(&supergraph_schema)),
             supergraph_schema,
             lru_size_instrument: LruSizeInstrument::new(LRU_PRIVATE_QUERIES_INSTRUMENT_NAME),
-            abort_tx,
+            drop_tx,
         })
     }
     #[cfg(all(
@@ -539,7 +538,7 @@ impl ResponseCache {
             subgraphs: HashMap::new(),
         });
         let invalidation = Invalidation::new(storage.clone()).await?;
-        let (abort_tx, abort_rx) = tokio::sync::broadcast::channel(2);
+        let (drop_tx, _drop_rx) = broadcast::channel(2);
 
         Ok(Self {
             storage,
@@ -568,7 +567,7 @@ impl ResponseCache {
             subgraph_enums: Arc::new(get_subgraph_enums(&supergraph_schema)),
             supergraph_schema,
             lru_size_instrument: LruSizeInstrument::new(LRU_PRIVATE_QUERIES_INSTRUMENT_NAME),
-            abort_tx,
+            drop_tx,
         })
     }
 
@@ -600,7 +599,7 @@ impl ResponseCache {
 
 impl Drop for ResponseCache {
     fn drop(&mut self) {
-        let _ = self.abort_tx.send(());
+        let _ = self.drop_tx.send(());
     }
 }
 
@@ -2393,9 +2392,9 @@ impl Ord for CacheKeySource {
 async fn connect_or_spawn_reconnection_task(
     config: storage::redis::Config,
     storage: Arc<OnceLock<Storage>>,
-    abort_signal: Receiver<()>,
+    abort_signal: broadcast::Receiver<()>,
 ) -> Result<(), BoxError> {
-    match attempt_connection(&config, storage.clone()).await {
+    match attempt_connection(&config, storage.clone(), abort_signal.resubscribe()).await {
         Ok(()) => Ok(()),
         Err(err) if config.required_to_start => Err(err),
         Err(_) => {
@@ -2408,14 +2407,17 @@ async fn connect_or_spawn_reconnection_task(
 async fn attempt_connection(
     config: &storage::redis::Config,
     cache_storage: Arc<OnceLock<Storage>>,
+    abort_signal: broadcast::Receiver<()>,
 ) -> Result<(), BoxError> {
-    let storage = Storage::new(config).await.inspect_err(|err| {
-        tracing::error!(
-            cache = "response",
-            error = %err,
-            "could not open connection to Redis for caching",
-        )
-    })?;
+    let storage = Storage::new(config, abort_signal)
+        .await
+        .inspect_err(|err| {
+            tracing::error!(
+                cache = "response",
+                error = %err,
+                "could not open connection to Redis for caching",
+            )
+        })?;
     let _ = cache_storage.set(storage);
 
     Ok(())
@@ -2424,7 +2426,7 @@ async fn attempt_connection(
 async fn reattempt_connection(
     config: storage::redis::Config,
     cache_storage: Arc<OnceLock<Storage>>,
-    abort_signal: Receiver<()>,
+    abort_signal: broadcast::Receiver<()>,
 ) {
     let mut interval = IntervalStream::new(tokio::time::interval(Duration::from_secs(30)));
     let mut abort_signal = abort_signal.resubscribe();
@@ -2435,7 +2437,7 @@ async fn reattempt_connection(
                 break;
             }
             _ = interval.next() => {
-                if attempt_connection(&config, cache_storage.clone()).await.is_ok() {
+                if attempt_connection(&config, cache_storage.clone(), abort_signal.resubscribe()).await.is_ok() {
                     break;
                 }
             }
@@ -2452,6 +2454,7 @@ mod tests {
     use std::time::Duration;
 
     use apollo_compiler::Schema;
+    use tokio::sync::broadcast;
 
     use super::Subgraph;
     use super::Ttl;
@@ -2465,7 +2468,8 @@ mod tests {
     #[tokio::test]
     async fn test_subgraph_enabled() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
-        let storage = Storage::new(&Config::test(false, "test_subgraph_enabled"))
+        let (drop_tx, drop_rx) = broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false, "test_subgraph_enabled"), drop_rx)
             .await
             .unwrap();
         let map = serde_json::json!({
@@ -2487,6 +2491,7 @@ mod tests {
             serde_json::from_value(map).unwrap(),
             valid_schema.clone(),
             true,
+            drop_tx,
         )
         .await
         .unwrap();
@@ -2508,7 +2513,8 @@ mod tests {
     #[tokio::test]
     async fn test_subgraph_ttl() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
-        let storage = Storage::new(&Config::test(false, "test_subgraph_ttl"))
+        let (drop_tx, drop_rx) = broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false, "test_subgraph_ttl"), drop_rx)
             .await
             .unwrap();
         let map = serde_json::json!({
@@ -2532,6 +2538,7 @@ mod tests {
             serde_json::from_value(map).unwrap(),
             valid_schema.clone(),
             true,
+            drop_tx,
         )
         .await
         .unwrap();

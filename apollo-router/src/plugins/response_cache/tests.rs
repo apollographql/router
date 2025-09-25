@@ -160,7 +160,8 @@ async fn insert() {
         },
     });
 
-    let storage = Storage::new(&Config::test(false, "test_insert_simple"))
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, "test_insert_simple"), drop_rx)
         .await
         .unwrap();
     let map = [
@@ -187,9 +188,10 @@ async fn insert() {
     ]
     .into_iter()
     .collect();
-    let response_cache = ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true)
-        .await
-        .unwrap();
+    let response_cache =
+        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
+            .await
+            .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
@@ -325,7 +327,8 @@ async fn insert_without_debug_header() {
         },
     });
 
-    let storage = Storage::new(&Config::test(false, "insert_without_debug_header"))
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, "insert_without_debug_header"), drop_rx)
         .await
         .unwrap();
     let map = [
@@ -352,9 +355,10 @@ async fn insert_without_debug_header() {
     ]
     .into_iter()
     .collect();
-    let response_cache = ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true)
-        .await
-        .unwrap();
+    let response_cache =
+        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
+            .await
+            .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({
@@ -477,7 +481,8 @@ async fn insert_with_requires() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build())
     ].into_iter().collect());
 
-    let storage = Storage::new(&Config::test(false, "test_insert_with_requires"))
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, "test_insert_with_requires"), drop_rx)
         .await
         .unwrap();
     let map: HashMap<String, Subgraph> = [
@@ -504,10 +509,15 @@ async fn insert_with_requires() {
     ]
     .into_iter()
     .collect();
-    let response_cache =
-        ResponseCache::for_test(storage.clone(), map.clone(), valid_schema.clone(), true)
-            .await
-            .unwrap();
+    let response_cache = ResponseCache::for_test(
+        storage.clone(),
+        map.clone(),
+        valid_schema.clone(),
+        true,
+        drop_tx,
+    )
+    .await
+    .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -635,9 +645,13 @@ async fn insert_with_nested_field_set() {
         }
     });
 
-    let storage = Storage::new(&Config::test(false, "test_insert_with_nested_field_set"))
-        .await
-        .unwrap();
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(
+        &Config::test(false, "test_insert_with_nested_field_set"),
+        drop_rx,
+    )
+    .await
+    .unwrap();
     let map = [
         (
             "products".to_string(),
@@ -662,9 +676,10 @@ async fn insert_with_nested_field_set() {
     ]
     .into_iter()
     .collect();
-    let response_cache = ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true)
-        .await
-        .unwrap();
+    let response_cache =
+        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
+            .await
+            .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -801,13 +816,19 @@ async fn no_cache_control() {
         },
     });
 
-    let storage = Storage::new(&Config::test(false, "test_no_cache_control"))
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, "test_no_cache_control"), drop_rx)
         .await
         .unwrap();
-    let response_cache =
-        ResponseCache::for_test(storage.clone(), HashMap::new(), valid_schema.clone(), false)
-            .await
-            .unwrap();
+    let response_cache = ResponseCache::for_test(
+        storage.clone(),
+        HashMap::new(),
+        valid_schema.clone(),
+        false,
+        drop_tx,
+    )
+    .await
+    .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -922,13 +943,19 @@ async fn no_store_from_request() {
         },
     });
 
-    let storage = Storage::new(&Config::test(false, "test_no_store_from_client"))
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, "test_no_store_from_client"), drop_rx)
         .await
         .unwrap();
-    let response_cache =
-        ResponseCache::for_test(storage.clone(), HashMap::new(), valid_schema.clone(), false)
-            .await
-            .unwrap();
+    let response_cache = ResponseCache::for_test(
+        storage.clone(),
+        HashMap::new(),
+        valid_schema.clone(),
+        false,
+        drop_tx,
+    )
+    .await
+    .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone(), "headers": {
@@ -1093,7 +1120,8 @@ async fn private_only() {
             },
         });
 
-        let storage = Storage::new(&Config::test(false,"private_only"))
+        let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false,"private_only"), drop_rx)
             .await
             .unwrap();
         let map = [
@@ -1121,7 +1149,7 @@ async fn private_only() {
             .into_iter()
             .collect();
         let response_cache =
-            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true)
+            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
                 .await
                 .unwrap();
 
@@ -1294,7 +1322,8 @@ async fn private_and_public() {
         },
     });
 
-    let storage = Storage::new(&Config::test(false, "private_and_public"))
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, "private_and_public"), drop_rx)
         .await
         .unwrap();
     let map = [
@@ -1321,9 +1350,10 @@ async fn private_and_public() {
     ]
     .into_iter()
     .collect();
-    let response_cache = ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true)
-        .await
-        .unwrap();
+    let response_cache =
+        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
+            .await
+            .unwrap();
 
     let mut service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -1501,7 +1531,8 @@ async fn polymorphic_private_and_public() {
             },
         });
 
-        let storage = Storage::new(&Config::test(false,"polymorphic_private_and_public"))
+        let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false,"polymorphic_private_and_public"), drop_rx)
             .await
             .unwrap();
         let map = [
@@ -1529,7 +1560,7 @@ async fn polymorphic_private_and_public() {
             .into_iter()
             .collect();
         let response_cache =
-            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true)
+            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
                 .await
                 .unwrap();
 
@@ -1887,7 +1918,8 @@ async fn private_without_private_id() {
             },
         });
 
-        let storage = Storage::new(&Config::test(false,"private_without_private_id"))
+        let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false,"private_without_private_id"), drop_rx)
             .await
             .unwrap();
         let map = [
@@ -1913,7 +1945,7 @@ async fn private_without_private_id() {
             .into_iter()
             .collect();
         let response_cache =
-            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true)
+            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
                 .await
                 .unwrap();
 
@@ -2057,7 +2089,10 @@ async fn no_data() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
     ].into_iter().collect());
 
-    let storage = Storage::new(&Config::test(false, "no_data")).await.unwrap();
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, "no_data"), drop_rx)
+        .await
+        .unwrap();
     let map = [
         (
             "user".to_string(),
@@ -2082,9 +2117,11 @@ async fn no_data() {
     ]
     .into_iter()
     .collect();
-    let response_cache = ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true)
-        .await
-        .unwrap();
+
+    let response_cache =
+        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
+            .await
+            .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -2292,9 +2329,6 @@ async fn missing_entities() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
     ].into_iter().collect());
 
-    let storage = Storage::new(&Config::test(false, "missing_entities"))
-        .await
-        .unwrap();
     let map = [
         (
             "user".to_string(),
@@ -2319,9 +2353,15 @@ async fn missing_entities() {
     ]
     .into_iter()
     .collect();
-    let response_cache = ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true)
+
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, "missing_entities"), drop_rx)
         .await
         .unwrap();
+    let response_cache =
+        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
+            .await
+            .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -2347,10 +2387,19 @@ async fn missing_entities() {
     assert!(remove_debug_extensions_key(&mut response));
     insta::assert_json_snapshot!(response);
 
-    let response_cache =
-        ResponseCache::for_test(storage.clone(), HashMap::new(), valid_schema.clone(), false)
-            .await
-            .unwrap();
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, "missing_entities"), drop_rx)
+        .await
+        .unwrap();
+    let response_cache = ResponseCache::for_test(
+        storage.clone(),
+        HashMap::new(),
+        valid_schema.clone(),
+        false,
+        drop_tx,
+    )
+    .await
+    .unwrap();
 
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
@@ -2448,7 +2497,8 @@ async fn invalidate_by_cache_tag() {
             },
         });
 
-        let storage = Storage::new(&Config::test(false,"test_invalidate_by_cache_tag"))
+        let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false,"test_invalidate_by_cache_tag"), drop_rx)
             .await
             .unwrap();
         let map = [
@@ -2476,7 +2526,7 @@ async fn invalidate_by_cache_tag() {
             .into_iter()
             .collect();
         let response_cache =
-            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true)
+            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
                 .await
                 .unwrap();
 
@@ -2662,7 +2712,8 @@ async fn invalidate_by_type() {
             },
         });
 
-        let storage = Storage::new(&Config::test(false,"test_invalidate_by_subgraph"))
+        let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false,"test_invalidate_by_subgraph"), drop_rx)
             .await
             .unwrap();
         let map = [
@@ -2690,7 +2741,7 @@ async fn invalidate_by_type() {
             .into_iter()
             .collect();
         let response_cache =
-            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true)
+            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
                 .await
                 .unwrap();
 
@@ -3071,7 +3122,8 @@ async fn failure_mode_reconnect() {
         ]
             .into_iter()
             .collect();
-        let storage = Storage::new(&Config::test(false,"failure_mode_reconnect"))
+        let (_drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false,"failure_mode_reconnect"), drop_rx)
             .await
             .unwrap();
         storage.truncate_namespace().await.unwrap();

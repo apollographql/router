@@ -260,6 +260,7 @@ fn validate_shared_key(
 mod tests {
     use std::collections::HashMap;
 
+    use tokio::sync::broadcast;
     use tower::ServiceExt;
 
     use super::*;
@@ -269,10 +270,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key() {
-        let storage = Storage::new(&Config::test(
-            false,
-            "test_invalidation_service_bad_shared_key",
-        ))
+        let (_drop_tx, drop_rx) = broadcast::channel(2);
+        let storage = Storage::new(
+            &Config::test(false, "test_invalidation_service_bad_shared_key"),
+            drop_rx,
+        )
         .await
         .unwrap();
         let storage = Arc::new(StorageInterface::from(storage));
@@ -319,10 +321,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key_subgraph() {
-        let storage = Storage::new(&Config::test(
-            false,
-            "test_invalidation_service_bad_shared_key_subgraph",
-        ))
+        let (_drop_tx, drop_rx) = broadcast::channel(2);
+        let storage = Storage::new(
+            &Config::test(false, "test_invalidation_service_bad_shared_key_subgraph"),
+            drop_rx,
+        )
         .await
         .unwrap();
         let storage = Arc::new(StorageInterface::from(storage));
@@ -378,10 +381,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key_subgraphs() {
-        let storage = Storage::new(&Config::test(
-            false,
-            "test_invalidation_service_bad_shared_key_subgraphs",
-        ))
+        let (_drop_tx, drop_rx) = broadcast::channel(2);
+        let storage = Storage::new(
+            &Config::test(false, "test_invalidation_service_bad_shared_key_subgraphs"),
+            drop_rx,
+        )
         .await
         .unwrap();
         let storage = Arc::new(StorageInterface::from(storage));
@@ -457,10 +461,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation_service_good_shared_key_subgraphs() {
-        let storage = Storage::new(&Config::test(
-            false,
-            "test_invalidation_service_good_shared_key_subgraphs",
-        ))
+        let (_drop_tx, drop_rx) = broadcast::channel(2);
+        let storage = Storage::new(
+            &Config::test(false, "test_invalidation_service_good_shared_key_subgraphs"),
+            drop_rx,
+        )
         .await
         .unwrap();
         let storage = Arc::new(StorageInterface::from(storage));

@@ -13,6 +13,7 @@ use fred::types::Value;
 use fred::types::sorted_sets::Ordering;
 use serde::Deserialize;
 use serde::Serialize;
+use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tower::BoxError;
@@ -57,7 +58,10 @@ pub(crate) struct Storage {
 }
 
 impl Storage {
-    pub(crate) async fn new(config: &Config) -> Result<Self, BoxError> {
+    pub(crate) async fn new(
+        config: &Config,
+        drop_rx: broadcast::Receiver<()>,
+    ) -> Result<Self, BoxError> {
         let pool_size = (config.pool_size / 2).max(1);
         let config = Config {
             pool_size,
@@ -68,13 +72,14 @@ impl Storage {
             RedisCacheStorage::new(config.clone(), "response-cache-reader").await?;
         let writer_storage =
             RedisCacheStorage::new(config.clone(), "response-cache-writer").await?;
-        Self::from_storage(reader_storage, writer_storage, config.timeout).await
+        Self::from_storage(reader_storage, writer_storage, config.timeout, drop_rx).await
     }
 
     async fn from_storage(
         reader_storage: RedisCacheStorage,
         writer_storage: RedisCacheStorage,
         timeout: Duration,
+        drop_rx: broadcast::Receiver<()>,
     ) -> Result<Self, BoxError> {
         // NB: sorted set cleanup happens via an async task, reading from `cache_tag_rx`.
         //  Items are added to it via `try_send` to avoid blocking, but this does mean that some items
@@ -94,7 +99,7 @@ impl Storage {
             writer_storage,
             cache_tag_tx,
         };
-        s.perform_periodic_maintenance(cache_tag_rx).await;
+        s.perform_periodic_maintenance(cache_tag_rx, drop_rx).await;
         Ok(s)
     }
 
@@ -133,43 +138,52 @@ impl Storage {
     pub(crate) async fn perform_periodic_maintenance(
         &self,
         mut cache_tag_rx: mpsc::Receiver<String>,
+        mut drop_rx: broadcast::Receiver<()>,
     ) {
         let storage = self.clone();
 
         // spawn a task that reads from cache_tag_rx and uses `zremrangebyscore` on each cache tag
         tokio::spawn(async move {
-            while let Some(cache_tag) = cache_tag_rx.recv().await {
-                // NB: `cache_tag` already includes namespace
-                let cutoff = now() - 1;
-
-                // TODO: timeout for this?
-                let now = Instant::now();
-                let removed_items_result = storage
-                    .remove_keys_from_cache_tag_by_cutoff(cache_tag, cutoff as f64)
-                    .await;
-                let elapsed = now.elapsed();
-                f64_histogram_with_unit!(
-                    "apollo.router.operations.response_cache.storage.maintenance",
-                    "Time to perform maintenance on a cache tag",
-                    "s",
-                    elapsed.as_secs_f64()
-                );
-
-                match removed_items_result {
-                    Ok(removed_items) => {
-                        u64_counter_with_unit!(
-                            "apollo.router.operations.response_cache.storage.maintenance.removed_cache_tag_entries",
-                            "Counter for removed items",
-                            "{entry}",
-                            removed_items
-                        );
-                    }
-                    Err(err) => {
-                        tracing::debug!("Caught error while performing maintenance: {err:?}");
-                    }
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = drop_rx.recv() => break,
+                    Some(cache_tag) = cache_tag_rx.recv() => storage.perform_maintenance_on_cache_tag(cache_tag).await
                 }
             }
         });
+    }
+
+    async fn perform_maintenance_on_cache_tag(&self, cache_tag: String) {
+        // NB: `cache_tag` already includes namespace
+        let cutoff = now() - 1;
+
+        // TODO: timeout for this?
+        let now = Instant::now();
+        let removed_items_result = self
+            .remove_keys_from_cache_tag_by_cutoff(cache_tag, cutoff as f64)
+            .await;
+        let elapsed = now.elapsed();
+        f64_histogram_with_unit!(
+            "apollo.router.operations.response_cache.storage.maintenance",
+            "Time to perform maintenance on a cache tag",
+            "s",
+            elapsed.as_secs_f64()
+        );
+
+        match removed_items_result {
+            Ok(removed_items) => {
+                u64_counter_with_unit!(
+                    "apollo.router.operations.response_cache.storage.maintenance.removed_cache_tag_entries",
+                    "Counter for removed items",
+                    "{entry}",
+                    removed_items
+                );
+            }
+            Err(err) => {
+                tracing::debug!("Caught error while performing maintenance: {err:?}");
+            }
+        }
     }
 
     async fn remove_keys_from_cache_tag_by_cutoff(
@@ -464,6 +478,7 @@ impl Storage {
         is_cluster: bool,
         reader_mock: std::sync::Arc<dyn fred::mocks::Mocks>,
         writer_mock: std::sync::Arc<dyn fred::mocks::Mocks>,
+        drop_rx: broadcast::Receiver<()>,
     ) -> Result<Storage, BoxError> {
         let reader_storage = RedisCacheStorage::from_mocks_and_config(
             reader_mock,
@@ -479,7 +494,7 @@ impl Storage {
             is_cluster,
         )
         .await?;
-        Self::from_storage(reader_storage, writer_storage, config.timeout).await
+        Self::from_storage(reader_storage, writer_storage, config.timeout, drop_rx).await
     }
 
     async fn all_keys_in_namespace(&self) -> Result<Vec<String>, BoxError> {
@@ -549,6 +564,7 @@ mod tests {
 
     use insta::assert_debug_snapshot;
     use itertools::Itertools;
+    use tokio::sync::broadcast;
     use tower::BoxError;
     use uuid::Uuid;
 
@@ -599,9 +615,16 @@ mod tests {
             namespace: namespace.map(ToString::to_string),
             ..redis_config(false)
         };
-        let storage = Storage::mocked(&config, false, mock_storage.clone(), mock_storage.clone())
-            .await
-            .expect("could not build storage");
+        let (_drop_tx, drop_rx) = broadcast::channel(2);
+        let storage = Storage::mocked(
+            &config,
+            false,
+            mock_storage.clone(),
+            mock_storage.clone(),
+            drop_rx,
+        )
+        .await
+        .expect("could not build storage");
 
         let invalidation_keys: Vec<String> = invalidation_keys
             .into_iter()
@@ -622,6 +645,7 @@ mod tests {
         use std::time::Duration;
 
         use itertools::Itertools;
+        use tokio::sync::broadcast;
         use tower::BoxError;
 
         use super::SUBGRAPH_NAME;
@@ -634,7 +658,8 @@ mod tests {
         #[tokio::test]
         #[rstest::rstest]
         async fn single_document(#[values(true, false)] clustered: bool) -> Result<(), BoxError> {
-            let storage = Storage::new(&redis_config(clustered)).await?;
+            let (_drop_tx, drop_rx) = broadcast::channel(2);
+            let storage = Storage::new(&redis_config(clustered), drop_rx).await?;
             storage.truncate_namespace().await?;
 
             // every element of this namespace must have a TTL associated with it, and the TTL of the
@@ -683,7 +708,8 @@ mod tests {
         async fn multiple_documents(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
-            let storage = Storage::new(&redis_config(clustered)).await?;
+            let (_drop_tx, drop_rx) = broadcast::channel(2);
+            let storage = Storage::new(&redis_config(clustered), drop_rx).await?;
             storage.truncate_namespace().await?;
 
             // set up two documents with a shared key and different TTLs
@@ -797,7 +823,8 @@ mod tests {
         async fn cache_tag_ttl_will_only_increase(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
-            let storage = Storage::new(&redis_config(clustered)).await?;
+            let (_drop_tx, drop_rx) = broadcast::channel(2);
+            let storage = Storage::new(&redis_config(clustered), drop_rx).await?;
             storage.truncate_namespace().await?;
 
             let document = Document {
@@ -845,7 +872,8 @@ mod tests {
         async fn cache_tag_score_will_not_decrease(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
-            let storage = Storage::new(&redis_config(clustered)).await?;
+            let (_drop_tx, drop_rx) = broadcast::channel(2);
+            let storage = Storage::new(&redis_config(clustered), drop_rx).await?;
             storage.truncate_namespace().await?;
 
             let document = Document {
@@ -912,7 +940,8 @@ mod tests {
         async fn cache_tag_score_will_increase(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
-            let storage = Storage::new(&redis_config(clustered)).await?;
+            let (_drop_tx, drop_rx) = broadcast::channel(2);
+            let storage = Storage::new(&redis_config(clustered), drop_rx).await?;
             storage.truncate_namespace().await?;
 
             let document = Document {
@@ -974,6 +1003,7 @@ mod tests {
         use fred::prelude::Expiration;
         use fred::prelude::Value;
         use parking_lot::RwLock;
+        use tokio::sync::broadcast;
         use tower::BoxError;
 
         use super::SUBGRAPH_NAME;
@@ -987,8 +1017,9 @@ mod tests {
         #[tokio::test]
         #[rstest::rstest]
         async fn type_failure(#[values(true, false)] clustered: bool) -> Result<(), BoxError> {
+            let (_drop_tx, drop_rx) = broadcast::channel(2);
             let config = redis_config(clustered);
-            let storage = Storage::new(&config).await?;
+            let storage = Storage::new(&config, drop_rx).await?;
             storage.truncate_namespace().await?;
 
             let document = common_document();
@@ -1078,12 +1109,14 @@ mod tests {
                 }
             }
 
+            let (_drop_tx, drop_rx) = broadcast::channel(2);
             let mock_redis = Arc::new(MockStorage::default());
             let storage = Storage::mocked(
                 &redis_config(clustered),
                 clustered,
                 mock_redis.clone(),
                 mock_redis.clone(),
+                drop_rx,
             )
             .await?;
 
@@ -1110,7 +1143,8 @@ mod tests {
     async fn maintenance_removes_expired_data(
         #[values(true, false)] clustered: bool,
     ) -> Result<(), BoxError> {
-        let storage = Storage::new(&redis_config(clustered)).await?;
+        let (_drop_tx, drop_rx) = broadcast::channel(2);
+        let storage = Storage::new(&redis_config(clustered), drop_rx).await?;
         storage.truncate_namespace().await?;
 
         // set up two documents with a shared key and different TTLs
@@ -1178,6 +1212,7 @@ mod tests {
     }
 
     mod invalidation {
+        use tokio::sync::broadcast;
         use tower::BoxError;
 
         use super::common_document;
@@ -1191,7 +1226,8 @@ mod tests {
         async fn invalidation_by_subgraph_removes_everything_associated_with_that_subgraph(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
-            let storage = Storage::new(&redis_config(clustered)).await?;
+            let (_drop_tx, drop_rx) = broadcast::channel(2);
+            let storage = Storage::new(&redis_config(clustered), drop_rx).await?;
             storage.truncate_namespace().await?;
 
             let document1 = Document {
@@ -1235,7 +1271,8 @@ mod tests {
         ) -> Result<(), BoxError> {
             // invalidate takes a list of invalidation keys and a list of subgraphs; the two are combined
             // to form a list of cache tags to remove from
-            let storage = Storage::new(&redis_config(clustered)).await?;
+            let (_drop_tx, drop_rx) = broadcast::channel(2);
+            let storage = Storage::new(&redis_config(clustered), drop_rx).await?;
             storage.truncate_namespace().await?;
 
             let document1 = Document {
@@ -1278,7 +1315,8 @@ mod tests {
         async fn invalidating_missing_subgraph_will_not_error(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
-            let storage = Storage::new(&redis_config(clustered)).await?;
+            let (_drop_tx, drop_rx) = broadcast::channel(2);
+            let storage = Storage::new(&redis_config(clustered), drop_rx).await?;
             storage.truncate_namespace().await?;
 
             storage.insert(common_document(), "S1").await?;
@@ -1300,7 +1338,8 @@ mod tests {
         async fn invalidating_missing_invalidation_key_will_not_error(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
-            let storage = Storage::new(&redis_config(clustered)).await?;
+            let (_drop_tx, drop_rx) = broadcast::channel(2);
+            let storage = Storage::new(&redis_config(clustered), drop_rx).await?;
             storage.truncate_namespace().await?;
 
             storage.insert(common_document(), "S1").await?;
@@ -1319,7 +1358,8 @@ mod tests {
         async fn invalidation_is_idempotent(
             #[values(true, false)] clustered: bool,
         ) -> Result<(), BoxError> {
-            let storage = Storage::new(&redis_config(clustered)).await?;
+            let (_drop_tx, drop_rx) = broadcast::channel(2);
+            let storage = Storage::new(&redis_config(clustered), drop_rx).await?;
             storage.truncate_namespace().await?;
 
             let document = common_document();
