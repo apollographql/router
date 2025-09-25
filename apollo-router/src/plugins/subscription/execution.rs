@@ -1,3 +1,5 @@
+//! Tests for this functionality are still mostly in the `crate::services::supergraph::tests` module.
+
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Instant;

@@ -1,4 +1,6 @@
 //! Subgraph-side implementation of subscriptions.
+//!
+//! Tests for this functionality are still mostly in the `crate::services::subgraph_service::tests` module.
 
 use std::ops::ControlFlow;
 use std::sync::Arc;
