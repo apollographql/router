@@ -29,6 +29,8 @@ pub(crate) struct SpanExtra {
     /// during parsing. The offset is relative to the start of the original
     /// input string.
     pub(super) errors: Vec<(String, usize)>,
+    /// Names of local variables currently bound by the `->as($var)` method.
+    pub(super) local_vars: Vec<String>,
 }
 
 #[cfg(test)]
@@ -37,6 +39,7 @@ pub(crate) fn new_span(input: &str) -> Span<'_> {
         input,
         SpanExtra {
             spec: super::JSONSelection::default_connect_spec(),
+            local_vars: Vec::new(),
             errors: Vec::new(),
         },
     )
@@ -47,6 +50,7 @@ pub(crate) fn new_span_with_spec(input: &str, spec: ConnectSpec) -> Span<'_> {
         input,
         SpanExtra {
             spec,
+            local_vars: Vec::new(),
             errors: Vec::new(),
         },
     )
@@ -54,6 +58,19 @@ pub(crate) fn new_span_with_spec(input: &str, spec: ConnectSpec) -> Span<'_> {
 
 pub(super) fn get_connect_spec(input: &Span) -> ConnectSpec {
     input.extra.spec
+}
+
+impl SpanExtra {
+    pub(super) fn is_local_var(&self, name: &String) -> bool {
+        self.local_vars.contains(name)
+    }
+
+    pub(super) fn with_local_var(mut self, name: String) -> Self {
+        if !self.local_vars.contains(&name) {
+            self.local_vars.push(name);
+        }
+        self
+    }
 }
 
 // Some parsed AST structures, like PathSelection and NamedSelection, can

@@ -1,0 +1,99 @@
+extend schema @link(
+  url: "https://specs.apollo.dev/connect/v0.3"
+  import: ["@connect"]
+)
+
+type Query {
+  validAsNameBinding: JSON @connect(
+    http: { GET: "http://127.0.0.1" }
+    selection: """
+    person->as($name, @.name)->echo({ hello: $name })
+    """
+  )
+
+  validSubSelection: JSON @connect(
+    http: { GET: "http://127.0.0.1" }
+    selection: """
+    product->as($name, @.name) {
+      upc
+      name: $name
+    }
+    """
+  )
+
+  validThisShadowing: JSON @connect(
+    http: { GET: "http://127.0.0.1" }
+    selection: """
+    scope->as($this) { scope: $this }
+    """
+  )
+
+  validBodyBinding(input: String!): JSON @connect(
+    http: {
+      POST: "http://127.0.0.1"
+      body: "$args.input->as($input, @->slice(0, 100)) { sliced: $input }"
+    }
+    selection: "sliced"
+  )
+
+  validHeaderBinding(input: String!): JSON @connect(
+    http: {
+      POST: "http://127.0.0.1"
+      headers: [
+        { name: "x-input", value: "$args.input->as($input, @->slice(0, 100))" }
+      ]
+    }
+    selection: "sliced"
+  )
+
+  validIsSuccessBinding(input: String!): JSON @connect(
+    http: {
+      POST: "http://127.0.0.1"
+    }
+    isSuccess: "$status->as($s)->echo($s->eq(200))"
+    selection: "$"
+  )
+
+  validPathBinding(path: [String!]!): JSON @connect(
+    http: {
+      GET: "http://127.0.0.1"
+      path: "$args->as($args).path"
+    }
+    selection: "$"
+  )
+
+  validQueryParamsBinding(input: String!): JSON @connect(
+    http: {
+      GET: "http://127.0.0.1"
+      queryParams: "$({ name: 'input', value: $args.input->as($input, @->slice(0, 100) ) })"
+    }
+    selection: "sliced"
+  )
+
+  validErrorsBinding: JSON @connect(
+    http: { GET: "http://127.0.0.1" }
+    isError: "$status->as($s)->echo($s->ne(200))"
+    errors: {
+      message: "body->as($b, @.errorMessage)->echo($b)"
+      extensions: "$({ code: $status->as($s)->echo($s) })"
+    }
+    selection: "$"
+  )
+
+  invalidAsNameBinding: JSON @connect(
+    http: { GET: "http://127.0.0.1" }
+    selection: """
+    $->as($typo, @.name)->echo({ hello: $name })
+    """
+  )
+
+  invalidSubSelection: JSON @connect(
+    http: { GET: "http://127.0.0.1" }
+    selection: """
+    product->as($name, @.name) {
+      upc
+      name: $typo
+    }
+    """
+  )
+}
