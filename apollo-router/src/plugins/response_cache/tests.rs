@@ -14,13 +14,13 @@ use super::plugin::ResponseCache;
 use crate::Context;
 use crate::MockedSubgraphs;
 use crate::TestHarness;
+use crate::graphql;
 use crate::metrics::FutureMetricsExt;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::MockSubgraphService;
 use crate::plugins::response_cache::cache_control::CacheControl;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
 use crate::plugins::response_cache::metrics;
-use crate::plugins::response_cache::plugin::CACHE_DEBUG_EXTENSIONS_KEY;
 use crate::plugins::response_cache::plugin::CACHE_DEBUG_HEADER_NAME;
 use crate::plugins::response_cache::plugin::CONTEXT_DEBUG_CACHE_KEYS;
 use crate::plugins::response_cache::plugin::CacheKeysContext;
@@ -36,6 +36,15 @@ const SCHEMA: &str = include_str!("../../testdata/orga_supergraph_cache_key.grap
 const SCHEMA_REQUIRES: &str = include_str!("../../testdata/supergraph_cache_key.graphql");
 const SCHEMA_NESTED_KEYS: &str =
     include_str!("../../testdata/supergraph_nested_fields_cache_key.graphql");
+
+/// Removes `CACHE_DEBUG_EXTENSIONS_KEY` to avoid messing up snapshots. Returns true to indicate
+/// that the key was present.
+fn remove_debug_extensions_key(response: &mut graphql::Response) -> bool {
+    response
+        .extensions
+        .remove(super::plugin::CACHE_DEBUG_EXTENSIONS_KEY)
+        .is_some()
+}
 
 #[tokio::test]
 async fn insert() {
@@ -158,12 +167,7 @@ async fn insert() {
             .contains(",public"),
     );
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
     insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
@@ -235,12 +239,7 @@ async fn insert() {
     });
 
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
     insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
@@ -368,12 +367,7 @@ async fn insert_without_debug_header() {
             .contains(",public"),
     );
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_none()
-    );
+    assert!(!remove_debug_extensions_key(&mut response));
     insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
@@ -434,12 +428,7 @@ async fn insert_without_debug_header() {
     );
 
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_none()
-    );
+    assert!(!remove_debug_extensions_key(&mut response));
     insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
@@ -587,12 +576,7 @@ async fn insert_with_requires() {
             .contains(",public"),
     );
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
     insta::assert_json_snapshot!(response, @r#"
     {
@@ -663,12 +647,7 @@ async fn insert_with_requires() {
     );
 
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
     insta::assert_json_snapshot!(response, @r#"
     {
@@ -801,12 +780,7 @@ async fn insert_with_nested_field_set() {
     );
 
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
     insta::assert_json_snapshot!(response, @r#"
     {
@@ -881,12 +855,7 @@ async fn insert_with_nested_field_set() {
     });
 
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
     insta::assert_json_snapshot!(response, @r#"
     {
@@ -980,12 +949,7 @@ async fn no_cache_control() {
         "no-store"
     );
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
     insta::assert_json_snapshot!(response, @r#"
     {
@@ -1033,12 +997,7 @@ async fn no_cache_control() {
         "no-store"
     );
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
     insta::assert_json_snapshot!(response, @r#"
     {
@@ -1349,12 +1308,7 @@ async fn private_only() {
         assert_gauge!("apollo.router.response_cache.private_queries.lru.size", 1);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
         insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
@@ -1416,12 +1370,7 @@ async fn private_only() {
         insta::assert_json_snapshot!(cache_keys);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
         insta::assert_json_snapshot!(response, @r#"
         {
@@ -1474,12 +1423,7 @@ async fn private_only() {
         insta::assert_json_snapshot!(cache_keys);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
         insta::assert_json_snapshot!(response, @r#"
         {
@@ -1606,12 +1550,7 @@ async fn private_and_public() {
     insta::assert_json_snapshot!(cache_keys);
 
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
     insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
@@ -1676,12 +1615,7 @@ async fn private_and_public() {
     insta::assert_json_snapshot!(cache_keys);
 
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
     insta::assert_json_snapshot!(response, @r#"
     {
@@ -1737,12 +1671,7 @@ async fn private_and_public() {
     insta::assert_json_snapshot!(cache_keys);
 
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
     insta::assert_json_snapshot!(response, @r#"
     {
@@ -1876,12 +1805,7 @@ async fn polymorphic_private_and_public() {
         });
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
         insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
@@ -1979,12 +1903,7 @@ async fn polymorphic_private_and_public() {
         insta::assert_json_snapshot!(cache_keys);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
         insta::assert_json_snapshot!(response, @r#"
         {
@@ -2050,12 +1969,7 @@ async fn polymorphic_private_and_public() {
         insta::assert_json_snapshot!(cache_keys);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
         insta::assert_json_snapshot!(response, @r#"
         {
@@ -2120,12 +2034,7 @@ async fn polymorphic_private_and_public() {
         insta::assert_json_snapshot!(cache_keys);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
         insta::assert_json_snapshot!(response, @r#"
         {
@@ -2183,12 +2092,7 @@ async fn polymorphic_private_and_public() {
         insta::assert_json_snapshot!(cache_keys);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
         insta::assert_json_snapshot!(response, @r#"
         {
@@ -2253,12 +2157,7 @@ async fn polymorphic_private_and_public() {
         insta::assert_json_snapshot!(cache_keys);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
         insta::assert_json_snapshot!(response, @r#"
         {
@@ -2391,12 +2290,7 @@ async fn private_without_private_id() {
         assert_gauge!("apollo.router.response_cache.private_queries.lru.size", 1);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
         insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
@@ -2457,12 +2351,7 @@ async fn private_without_private_id() {
         insta::assert_json_snapshot!(cache_keys);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
         insta::assert_json_snapshot!(response, @r#"
         {
@@ -2600,12 +2489,7 @@ async fn no_data() {
     });
 
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
     insta::assert_json_snapshot!(response, @r#"
     {
@@ -2699,12 +2583,7 @@ async fn no_data() {
     cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
     insta::assert_json_snapshot!(cache_keys);
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
     insta::assert_json_snapshot!(response, @r#"
     {
@@ -2846,12 +2725,7 @@ async fn missing_entities() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
     insta::assert_json_snapshot!(response);
 
     let response_cache = ResponseCache::for_test(
@@ -2923,12 +2797,7 @@ async fn missing_entities() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
     insta::assert_json_snapshot!(response);
 }
@@ -3048,12 +2917,7 @@ async fn invalidate_by_cache_tag() {
                 .contains(",public"),
         );
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
         insta::assert_json_snapshot!(response, @r#"
         {
@@ -3123,12 +2987,7 @@ async fn invalidate_by_cache_tag() {
                 .contains(",public"),
         );
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
         assert_histogram_sum!("apollo.router.operations.response_cache.fetch.entity", 2u64, "subgraph.name" = "orga", "graphql.type" = "Organization");
 
         insta::assert_json_snapshot!(response, @r#"
@@ -3208,12 +3067,7 @@ async fn invalidate_by_cache_tag() {
                 .contains(",public"),
         );
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
         insta::assert_json_snapshot!(response, @r#"
         {
@@ -3349,12 +3203,7 @@ async fn invalidate_by_type() {
                 .contains(",public"),
         );
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
         insta::assert_json_snapshot!(response, @r#"
         {
@@ -3422,12 +3271,7 @@ async fn invalidate_by_type() {
                 .contains(",public"),
         );
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
         insta::assert_json_snapshot!(response, @r#"
         {
@@ -3503,12 +3347,7 @@ async fn invalidate_by_type() {
                 .contains(",public"),
         );
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
         insta::assert_json_snapshot!(response, @r#"
         {
@@ -3967,12 +3806,7 @@ async fn failure_mode_reconnect() {
         });
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
         insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
@@ -4042,12 +3876,7 @@ async fn failure_mode_reconnect() {
         });
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
         insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
