@@ -123,8 +123,10 @@ impl Storage {
             .delete_from_scan_result(all_keys.into_iter().map(fred::types::Key::from))
             .await?;
 
-        // NOTE: we don't delete elements from the cache tag sorted sets. doing so could get us in trouble
-        // with race conditions, etc. it's safer to just rely on the TTL-based cleanup.
+        // NOTE: we don't delete elements from the cache tag sorted sets. if we did, we would likely
+        // encounter a race condition - if another router inserted a value associated with this cache
+        // tag between when we run the `zrange` and the `delete`.
+        // it's safer to just rely on the TTL-based cleanup.
         Ok(deleted as u64)
     }
 
