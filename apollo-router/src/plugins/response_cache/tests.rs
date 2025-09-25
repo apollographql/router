@@ -3,10 +3,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use apollo_compiler::Schema;
+use futures::StreamExt;
 use http::HeaderName;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
 use tokio::sync::broadcast;
+use tokio_stream::wrappers::IntervalStream;
 use tower::Service;
 use tower::ServiceExt;
 
@@ -35,6 +37,44 @@ const SCHEMA: &str = include_str!("../../testdata/orga_supergraph_cache_key.grap
 const SCHEMA_REQUIRES: &str = include_str!("../../testdata/supergraph_cache_key.graphql");
 const SCHEMA_NESTED_KEYS: &str =
     include_str!("../../testdata/supergraph_nested_fields_cache_key.graphql");
+
+/// Cache inserts happen asynchronously, so there's no way to wait for a cache insert based on the
+/// `TestHarness` service return value.
+///
+/// Instead, we wait for up to 5 seconds for the keys we expected to be present in the cache storage.
+async fn wait_for_cache(storage: &Storage, keys: Vec<String>) {
+    if keys.is_empty() {
+        return;
+    }
+
+    let keys_strs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+    let mut interval_stream =
+        IntervalStream::new(tokio::time::interval(Duration::from_millis(100))).take(50);
+
+    while let Some(_) = interval_stream.next().await {
+        if let Ok(values) = storage.fetch_multiple(&keys_strs, "").await
+            && values.iter().all(Option::is_some)
+        {
+            return;
+        }
+    }
+
+    panic!("insert not complete");
+}
+
+/// Extracts a list of cache keys from `CacheKeysContext` that we expect to be cached. This is
+/// mostly used in `wait_for_cache_population`.
+///
+/// NB: this is not always accurate! For example, a key might not be stored if it's private but
+/// wasn't passed the private ID. But it's a good approximation for most test cases.
+fn expected_cached_keys(cache_keys_context: &CacheKeysContext) -> Vec<String> {
+    cache_keys_context
+        .iter()
+        .filter(|context| context.cache_control.max_age.is_some())
+        .filter(|context| !context.cache_control.no_store)
+        .map(|context| context.key.clone())
+        .collect()
+}
 
 /// Extract `CacheKeysContext` from `supergraph::Response` and prepare it for a snapshot, sorting
 /// the invalidation keys and setting `created` to zero.
@@ -207,6 +247,7 @@ async fn insert() {
     }
     "#);
 
+    wait_for_cache(&storage, expected_cached_keys(&cache_keys)).await;
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
@@ -527,6 +568,7 @@ async fn insert_with_requires() {
     }
     "#);
 
+    wait_for_cache(&storage, expected_cached_keys(&cache_keys)).await;
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
@@ -687,6 +729,7 @@ async fn insert_with_nested_field_set() {
     }
     "#);
 
+    wait_for_cache(&storage, expected_cached_keys(&cache_keys)).await;
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
         .unwrap()
@@ -2517,8 +2560,8 @@ async fn invalidate_by_cache_tag() {
         "#);
         assert_histogram_sum!("apollo.router.operations.response_cache.fetch.entity", 1u64, "subgraph.name" = "orga", "graphql.type" = "Organization");
 
-
         // Now testing without any mock subgraphs, all the data should come from the cache
+        wait_for_cache(&storage, expected_cached_keys(&cache_keys)).await;
         let service = TestHarness::builder()
             .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
             .unwrap()
@@ -2731,6 +2774,7 @@ async fn invalidate_by_type() {
         "#);
 
         // Now testing without any mock subgraphs, all the data should come from the cache
+        wait_for_cache(&storage, expected_cached_keys(&cache_keys)).await;
         let service = TestHarness::builder()
             .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
             .unwrap()
@@ -2752,6 +2796,7 @@ async fn invalidate_by_type() {
         let mut response = service.clone().oneshot(request).await.unwrap();
         let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
+
         let cache_control_header = get_cache_control_header(&response).expect("missing header");
         assert!(cache_control_contains_max_age(&cache_control_header));
         assert!(cache_control_contains_public(&cache_control_header));
