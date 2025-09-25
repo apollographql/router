@@ -22,7 +22,6 @@ use crate::plugins::response_cache::cache_control::CacheControl;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
 use crate::plugins::response_cache::metrics;
 use crate::plugins::response_cache::plugin::CACHE_DEBUG_HEADER_NAME;
-use crate::plugins::response_cache::plugin::CONTEXT_DEBUG_CACHE_KEYS;
 use crate::plugins::response_cache::plugin::CacheKeysContext;
 use crate::plugins::response_cache::plugin::Subgraph;
 use crate::plugins::response_cache::storage::CacheStorage;
@@ -36,6 +35,21 @@ const SCHEMA: &str = include_str!("../../testdata/orga_supergraph_cache_key.grap
 const SCHEMA_REQUIRES: &str = include_str!("../../testdata/supergraph_cache_key.graphql");
 const SCHEMA_NESTED_KEYS: &str =
     include_str!("../../testdata/supergraph_nested_fields_cache_key.graphql");
+
+/// Extract `CacheKeysContext` from `supergraph::Response` and prepare it for a snapshot, sorting
+/// the invalidation keys and setting `created` to zero.
+fn get_cache_keys_context(response: &supergraph::Response) -> Option<CacheKeysContext> {
+    let mut cache_keys: CacheKeysContext = response
+        .context
+        .get(super::plugin::CONTEXT_DEBUG_CACHE_KEYS)
+        .ok()??;
+    cache_keys.iter_mut().for_each(|ck| {
+        ck.invalidation_keys.sort();
+        ck.cache_control.created = 0;
+    });
+    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    Some(cache_keys)
+}
 
 /// Removes `CACHE_DEBUG_EXTENSIONS_KEY` to avoid messing up snapshots. Returns true to indicate
 /// that the key was present.
@@ -132,16 +146,7 @@ async fn insert() {
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
     insta::with_settings!({
         description => "Make sure everything is in status 'new' and we have all the entities and root fields"
     }, {
@@ -222,16 +227,7 @@ async fn insert() {
             .unwrap()
             .contains(",public"),
     );
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
     insta::with_settings!({
         description => "Make sure everything is in status 'cached' and we have all the entities and root fields"
     }, {
@@ -339,14 +335,7 @@ async fn insert_without_debug_header() {
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
-    assert!(
-        response
-            .context
-            .get::<_, CacheKeysContext>(CONTEXT_DEBUG_CACHE_KEYS)
-            .ok()
-            .flatten()
-            .is_none()
-    );
+    assert!(get_cache_keys_context(&response).is_none());
 
     assert!(
         response
@@ -418,14 +407,7 @@ async fn insert_without_debug_header() {
             .unwrap()
             .contains(",public"),
     );
-    assert!(
-        response
-            .context
-            .get::<_, CacheKeysContext>(CONTEXT_DEBUG_CACHE_KEYS)
-            .ok()
-            .flatten()
-            .is_none()
-    );
+    assert!(get_cache_keys_context(&response).is_none());
 
     let mut response = response.next_response().await.unwrap();
     assert!(!remove_debug_extensions_key(&mut response));
@@ -541,16 +523,7 @@ async fn insert_with_requires() {
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
     insta::with_settings!({
         description => "Make sure everything is in status 'new' and we have all the entities and root fields"
     }, {
@@ -612,16 +585,7 @@ async fn insert_with_requires() {
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
     insta::with_settings!({
         description => "Make sure everything is in status 'cached' and we have all the entities and root fields"
     }, {
@@ -744,16 +708,7 @@ async fn insert_with_nested_field_set() {
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
     insta::with_settings!({
         description => "Make sure everything is in status 'new' and we have all the entities and root fields"
     }, {
@@ -838,16 +793,7 @@ async fn insert_with_nested_field_set() {
             .unwrap()
             .contains(",public"),
     );
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
     insta::with_settings!({
         description => "Make sure everything is in status 'cached' and we have all the entities and root fields"
     }, {
@@ -1293,16 +1239,7 @@ async fn private_only() {
             .build()
             .unwrap();
         let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
 
         assert_gauge!("apollo.router.response_cache.private_queries.lru.size", 1);
@@ -1357,16 +1294,7 @@ async fn private_only() {
                 .unwrap()
                 .contains("private")
         );
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
 
         let mut response = response.next_response().await.unwrap();
@@ -1410,16 +1338,7 @@ async fn private_only() {
                 .unwrap()
                 .contains("private")
         );
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
 
         let mut response = response.next_response().await.unwrap();
@@ -1537,16 +1456,7 @@ async fn private_and_public() {
         .build()
         .unwrap();
     let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
     insta::assert_json_snapshot!(cache_keys);
 
     let mut response = response.next_response().await.unwrap();
@@ -1602,16 +1512,7 @@ async fn private_and_public() {
             .unwrap()
             .contains("private")
     );
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
     insta::assert_json_snapshot!(cache_keys);
 
     let mut response = response.next_response().await.unwrap();
@@ -1658,16 +1559,7 @@ async fn private_and_public() {
             .unwrap()
             .contains("private")
     );
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
     insta::assert_json_snapshot!(cache_keys);
 
     let mut response = response.next_response().await.unwrap();
@@ -1788,16 +1680,7 @@ async fn polymorphic_private_and_public() {
             .build()
             .unwrap();
         let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::with_settings!({
             description => "Make sure everything is in status 'new' and we have all the entities and root fields"
         }, {
@@ -1890,16 +1773,7 @@ async fn polymorphic_private_and_public() {
                 .unwrap()
                 .contains("public")
         );
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
 
         let mut response = response.next_response().await.unwrap();
@@ -1956,16 +1830,7 @@ async fn polymorphic_private_and_public() {
                 .unwrap()
                 .contains("private")
         );
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
 
         let mut response = response.next_response().await.unwrap();
@@ -2021,16 +1886,7 @@ async fn polymorphic_private_and_public() {
                 .unwrap()
                 .contains("public")
         );
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
 
         let mut response = response.next_response().await.unwrap();
@@ -2079,16 +1935,7 @@ async fn polymorphic_private_and_public() {
                 .unwrap()
                 .contains("private")
         );
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
 
         let mut response = response.next_response().await.unwrap();
@@ -2144,16 +1991,7 @@ async fn polymorphic_private_and_public() {
                 .unwrap()
                 .contains("public")
         );
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
 
         let mut response = response.next_response().await.unwrap();
@@ -2275,16 +2113,7 @@ async fn private_without_private_id() {
                 .unwrap()
                 .contains("private")
         );
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
 
         assert_gauge!("apollo.router.response_cache.private_queries.lru.size", 1);
@@ -2338,16 +2167,7 @@ async fn private_without_private_id() {
                 .unwrap()
                 .contains("private")
         );
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
 
         let mut response = response.next_response().await.unwrap();
@@ -2469,16 +2289,7 @@ async fn no_data() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
 
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
     insta::assert_json_snapshot!(cache_keys, {
         "[].cache_control" => insta::dynamic_redaction(|value, _path| {
             let cache_control = value.as_str().unwrap().to_string();
@@ -2571,16 +2382,7 @@ async fn no_data() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
 
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
     insta::assert_json_snapshot!(cache_keys);
     let mut response = response.next_response().await.unwrap();
     assert!(remove_debug_extensions_key(&mut response));
@@ -2887,16 +2689,7 @@ async fn invalidate_by_cache_tag() {
             .build()
             .unwrap();
         let mut response = service.oneshot(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
         assert!(
             response
@@ -2957,16 +2750,7 @@ async fn invalidate_by_cache_tag() {
             .build()
             .unwrap();
         let mut response = service.clone().oneshot(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
         assert!(
             response
@@ -3037,16 +2821,7 @@ async fn invalidate_by_cache_tag() {
             .build()
             .unwrap();
         let mut response = service.clone().oneshot(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
         assert!(
             response
@@ -3173,16 +2948,7 @@ async fn invalidate_by_type() {
             .build()
             .unwrap();
         let mut response = service.oneshot(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
         assert!(
             response
@@ -3241,16 +3007,7 @@ async fn invalidate_by_type() {
             .build()
             .unwrap();
         let mut response = service.clone().oneshot(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
         assert!(
             response
@@ -3317,16 +3074,7 @@ async fn invalidate_by_type() {
             .build()
             .unwrap();
         let mut response = service.clone().oneshot(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
         assert!(
             response
@@ -3789,16 +3537,7 @@ async fn failure_mode_reconnect() {
             .build()
             .unwrap();
         let mut response = service.oneshot(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::with_settings!({
             description => "Make sure everything is in status 'new' and we have all the entities and root fields"
         }, {
@@ -3859,16 +3598,7 @@ async fn failure_mode_reconnect() {
             .build()
             .unwrap();
         let mut response = service.oneshot(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::with_settings!({
             description => "Make sure everything is in status 'cached' and we have all the entities and root fields"
         }, {
