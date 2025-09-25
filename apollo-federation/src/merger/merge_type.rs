@@ -160,12 +160,13 @@ impl Merger {
             if keys.is_empty() {
                 // If there are no keys, we apply a single `@join__type` for this type.
                 let directive = self.join_spec_definition.type_directive(
+                    &self.merged,
                     name,
                     None,
                     None,
                     None,
                     is_interface_object.then_some(is_interface_object),
-                );
+                )?;
                 dest.insert_directive(&mut self.merged, Component::new(directive))?;
             } else {
                 // If this type has keys, we apply a `@join__type` for each key.
@@ -189,12 +190,13 @@ impl Merger {
                     // supergraph schema. This generates smaller schemas and makes it easier to
                     // check equality between schemas which may not support some of the arguments.
                     let directive = self.join_spec_definition.type_directive(
+                        &self.merged,
                         name.clone(),
                         key_fields.cloned(),
                         extension.then_some(extension),
                         key_resolvable.and_then(|v| v.to_bool()),
                         is_interface_object.then_some(is_interface_object),
-                    );
+                    )?;
                     dest.insert_directive(&mut self.merged, Component::new(directive))?;
                 }
             }

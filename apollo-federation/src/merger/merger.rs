@@ -846,18 +846,22 @@ impl Merger {
                 ExtendedType::Object(obj) => {
                     for implemented_itf in obj.implements_interfaces.iter() {
                         implemented.insert(implemented_itf.clone());
-                        let join_implements = self
-                            .join_spec_definition
-                            .implements_directive(graph_name.clone(), implemented_itf);
+                        let join_implements = self.join_spec_definition.implements_directive(
+                            &self.merged,
+                            graph_name.clone(),
+                            implemented_itf,
+                        )?;
                         dest.insert_directive(&mut self.merged, Component::new(join_implements))?;
                     }
                 }
                 ExtendedType::Interface(itf) => {
                     for implemented_itf in itf.implements_interfaces.iter() {
                         implemented.insert(implemented_itf.clone());
-                        let join_implements = self
-                            .join_spec_definition
-                            .implements_directive(graph_name.clone(), implemented_itf);
+                        let join_implements = self.join_spec_definition.implements_directive(
+                            &self.merged,
+                            graph_name.clone(),
+                            implemented_itf,
+                        )?;
                         dest.insert_directive(&mut self.merged, Component::new(join_implements))?;
                     }
                 }
@@ -1713,11 +1717,13 @@ impl Merger {
 
         for (name, args_to_graphs_map) in joins_by_directive_name {
             for (args, graphs) in args_to_graphs_map {
-                dest.insert_directive(
-                    &mut self.merged,
-                    self.join_spec_definition
-                        .directive_directive(&name, graphs, args),
+                let join_directive = self.join_spec_definition.directive_directive(
+                    &self.merged,
+                    &name,
+                    graphs,
+                    args,
                 )?;
+                dest.insert_directive(&mut self.merged, join_directive)?;
             }
         }
 
