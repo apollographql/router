@@ -1172,7 +1172,7 @@ impl Merger {
     }
 
     fn add_missing_interface_object_fields_to_implementations(&mut self) {
-        todo!("Implement adding missing interface object fields to implementations")
+        // TODO(FED-795)
     }
 
     fn post_merge_validations(&mut self) {
