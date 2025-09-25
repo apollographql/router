@@ -82,13 +82,15 @@ pub(super) fn record_invalidation_duration(
 
 /// Restrict `batch_size` cardinality so that it can be used as a metric attribute.
 fn batch_size_str(batch_size: usize) -> &'static str {
-    if batch_size <= 10 {
+    if batch_size == 0 {
+        "0"
+    } else if batch_size <= 10 {
         "1-10"
     } else if batch_size <= 20 {
         "11-20"
     } else if batch_size <= 50 {
         "21-50"
     } else {
-        "50+"
+        "51+"
     }
 }
