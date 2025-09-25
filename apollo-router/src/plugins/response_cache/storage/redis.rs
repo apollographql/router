@@ -216,8 +216,7 @@ impl Storage {
         document_invalidation_keys: &[String],
         subgraph_name: &str,
     ) -> Vec<String> {
-        // TODO: test this
-        let mut cache_tags = Vec::new();
+        let mut cache_tags = Vec::with_capacity(1 + 2 * document_invalidation_keys.len());
         cache_tags.push(format!("subgraph-{subgraph_name}"));
         for invalidation_key in document_invalidation_keys {
             cache_tags.push(format!("key-{invalidation_key}"));
