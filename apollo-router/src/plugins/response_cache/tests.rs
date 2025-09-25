@@ -1166,7 +1166,7 @@ async fn no_store_from_request() {
                     "currentUser".to_string()
                 ],
                 vec!["orga".to_string(), "user".to_string()],
-                "cache_tag"
+                "test_bulk_invalidation"
             )
             .await
             .unwrap()
@@ -1239,7 +1239,7 @@ async fn no_store_from_request() {
                     "currentUser".to_string()
                 ],
                 vec!["orga".to_string(), "user".to_string()],
-                "cache_tag"
+                "test_bulk_invalidation"
             )
             .await
             .unwrap()

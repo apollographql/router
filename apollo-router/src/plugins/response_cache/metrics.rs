@@ -11,6 +11,7 @@ use tokio_stream::wrappers::IntervalStream;
 
 use crate::metrics::meter_provider;
 use crate::plugins::response_cache::ErrorCode;
+use crate::plugins::response_cache::invalidation::InvalidationKind;
 use crate::plugins::response_cache::storage;
 use crate::plugins::response_cache::storage::postgres::Storage;
 
@@ -131,7 +132,10 @@ pub(super) fn record_insert_duration(duration: Duration, subgraph_name: &str, ba
     );
 }
 
-pub(super) fn record_invalidation_duration(duration: Duration, invalidation_kind: &'static str) {
+pub(super) fn record_invalidation_duration(
+    duration: Duration,
+    invalidation_kind: InvalidationKind,
+) {
     f64_histogram_with_unit!(
         "apollo.router.operations.response_cache.invalidation",
         "Time to invalidate data in cache",

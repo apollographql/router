@@ -9,6 +9,7 @@ pub(super) use error::Error;
 use tokio_util::future::FutureExt;
 
 use super::cache_control::CacheControl;
+use crate::plugins::response_cache::invalidation::InvalidationKind;
 use crate::plugins::response_cache::metrics::record_fetch_duration;
 use crate::plugins::response_cache::metrics::record_fetch_error;
 use crate::plugins::response_cache::metrics::record_insert_duration;
@@ -139,9 +140,11 @@ pub(super) trait CacheStorage {
 
     /// Invalidate all data associated with `subgraph_names`. Command will be timed out after
     /// `self.invalidate_timeout()`.
-    async fn invalidate_by_subgraph(&self, subgraph_name: String) -> StorageResult<u64> {
-        const INVALIDATION_KIND: &str = "subgraph";
-
+    async fn invalidate_by_subgraph(
+        &self,
+        subgraph_name: String,
+        invalidation_kind: InvalidationKind,
+    ) -> StorageResult<u64> {
         let now = Instant::now();
         let result = flatten_storage_error(
             self.internal_invalidate_by_subgraph(subgraph_name)
@@ -149,7 +152,7 @@ pub(super) trait CacheStorage {
                 .await,
         );
 
-        record_invalidation_duration(now.elapsed(), INVALIDATION_KIND);
+        record_invalidation_duration(now.elapsed(), invalidation_kind);
         result
     }
 
@@ -166,7 +169,7 @@ pub(super) trait CacheStorage {
         &self,
         invalidation_keys: Vec<String>,
         subgraph_names: Vec<String>,
-        invalidation_kind: &'static str,
+        invalidation_kind: InvalidationKind,
     ) -> StorageResult<HashMap<String, u64>> {
         let now = Instant::now();
         let result = flatten_storage_error(

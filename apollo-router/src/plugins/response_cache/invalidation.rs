@@ -95,7 +95,7 @@ impl Invalidation {
         let (count, subgraphs) = match request {
             InvalidationRequest::Subgraph { subgraph } => {
                 let count = storage
-                    .invalidate_by_subgraph(subgraph.clone())
+                    .invalidate_by_subgraph(subgraph.clone(), request.kind())
                     .await
                     .inspect_err(|err| {
                         u64_counter_with_unit!(
@@ -123,7 +123,11 @@ impl Invalidation {
                 r#type: graphql_type,
             } => {
                 let subgraph_counts = storage
-                    .invalidate(vec![invalidation_key], vec![subgraph.clone()], "type")
+                    .invalidate(
+                        vec![invalidation_key],
+                        vec![subgraph.clone()],
+                        request.kind(),
+                    )
                     .await
                     .inspect_err(|err| {
                         u64_counter_with_unit!(
@@ -161,7 +165,7 @@ impl Invalidation {
                     .invalidate(
                         vec![cache_tag.clone()],
                         subgraphs.clone().into_iter().collect(),
-                        "cache_tag",
+                        request.kind(),
                     )
                     .await
                     .inspect_err(|err| {
@@ -264,6 +268,8 @@ impl Invalidation {
     }
 }
 
+pub(super) type InvalidationKind = &'static str;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum InvalidationRequest {
@@ -304,7 +310,7 @@ impl InvalidationRequest {
         }
     }
 
-    pub(super) fn kind(&self) -> &'static str {
+    pub(super) fn kind(&self) -> InvalidationKind {
         match self {
             InvalidationRequest::Subgraph { .. } => "subgraph",
             InvalidationRequest::Type { .. } => "type",
