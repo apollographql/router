@@ -38,15 +38,13 @@ struct CacheValue {
 
 impl ValueType for CacheValue {}
 
-impl TryFrom<(&str, CacheValue)> for CacheEntry {
-    type Error = serde_json::Error;
-
-    fn try_from((cache_key, cache_value): (&str, CacheValue)) -> Result<Self, Self::Error> {
-        Ok(CacheEntry {
+impl From<(&str, CacheValue)> for CacheEntry {
+    fn from((cache_key, cache_value): (&str, CacheValue)) -> Self {
+        CacheEntry {
             key: cache_key.to_string(),
             data: cache_value.data,
             control: cache_value.cache_control,
-        })
+        }
     }
 }
 
@@ -359,7 +357,7 @@ impl CacheStorage for Storage {
     async fn internal_fetch(&self, cache_key: &str) -> StorageResult<CacheEntry> {
         // don't need make_key for gets etc as the storage layer already runs it
         let value: RedisValue<CacheValue> = self.reader_storage.get(RedisKey(cache_key)).await?;
-        Ok(CacheEntry::try_from((cache_key, value.0))?)
+        Ok(CacheEntry::from((cache_key, value.0)))
     }
 
     async fn internal_fetch_multiple(
@@ -376,12 +374,8 @@ impl CacheStorage for Storage {
         let entries = values
             .into_iter()
             .zip(cache_keys)
-            .map(|(value, cache_key)| {
-                if let Some(value) = value {
-                    CacheEntry::try_from((*cache_key, value.0)).ok()
-                } else {
-                    None
-                }
+            .map(|(opt_value, cache_key)| {
+                opt_value.map(|value| CacheEntry::from((*cache_key, value.0)))
             })
             .collect();
 

@@ -1,5 +1,3 @@
-use serde_json::error::Category;
-
 use crate::plugins::response_cache::ErrorCode;
 
 #[derive(Debug, thiserror::Error)]
@@ -12,9 +10,6 @@ pub(crate) enum Error {
 
     #[error("NO_STORAGE")]
     NoStorage,
-
-    #[error("{0}")]
-    Serialize(#[from] serde_json::Error),
 
     #[error("TIMED_OUT")]
     Timeout(#[from] tokio::time::error::Elapsed),
@@ -38,12 +33,6 @@ impl ErrorCode for Error {
                 }
             }
             Error::NoStorage => "NO_STORAGE",
-            Error::Serialize(err) => match err.classify() {
-                Category::Io => "Serialize::IO",
-                Category::Syntax => "Serialize::Syntax",
-                Category::Data => "Serialize::Data",
-                Category::Eof => "Serialize::EOF",
-            },
             Error::Timeout(_) => "TIMED_OUT",
         }
     }
