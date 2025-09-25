@@ -31,6 +31,7 @@ use crate::error::FederationError;
 use crate::error::SubgraphLocation;
 use crate::internal_error;
 use crate::link::DEFAULT_LINK_NAME;
+use crate::link::Import;
 use crate::link::Link;
 use crate::link::federation_spec_definition::FEDERATION_OPERATION_TYPES;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
@@ -410,7 +411,7 @@ impl Merger {
         }
 
         // Add core features to the merged schema
-        self.add_core_features();
+        self.add_core_features()?;
 
         // Create empty objects for all types and directive definitions
         self.add_types_shallow()?;
@@ -488,10 +489,46 @@ impl Merger {
         }
     }
 
-    // Methods called directly by merge() - implemented with todo!() for now
-
-    fn add_core_features(&mut self) {
-        todo!("Implement adding core features to merged schema")
+    fn add_core_features(&mut self) -> Result<(), FederationError> {
+        for (feature, directives) in self
+            .compose_directive_manager
+            .all_composed_core_features()
+            .iter()
+        {
+            let Some(feature_definition) = SPEC_REGISTRY.get_definition(&feature.url) else {
+                continue;
+            };
+            let imports = directives
+                .iter()
+                .map(|(alias, original)| {
+                    if *alias == *original {
+                        Import {
+                            alias: None,
+                            element: original.clone(),
+                            is_directive: true,
+                        }
+                    } else {
+                        Import {
+                            alias: Some(alias.clone()),
+                            element: original.clone(),
+                            is_directive: true,
+                        }
+                    }
+                })
+                .collect_vec();
+            self.link_spec_definition.apply_feature_to_schema(
+                &mut self.merged,
+                *feature_definition,
+                None,
+                feature_definition.purpose(),
+                if imports.is_empty() {
+                    None
+                } else {
+                    Some(imports)
+                },
+            )?;
+        }
+        Ok(())
     }
 
     fn add_types_shallow(&mut self) -> Result<(), FederationError> {
