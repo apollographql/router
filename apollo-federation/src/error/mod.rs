@@ -464,7 +464,9 @@ impl CompositionError {
             | Self::RequiredArgumentMissingInSomeSubgraph { locations, .. }
             | Self::RequiredInputFieldMissingInSomeSubgraph { locations, .. }
             | Self::EmptyMergedInputType { locations, .. }
-            | Self::InvalidFieldSharing { locations, .. } => locations,
+            | Self::InvalidFieldSharing { locations, .. }
+            | Self::ArgumentDefaultMismatch { locations, .. }
+            | Self::InputFieldDefaultMismatch { locations, .. } => locations,
             _ => &[],
         }
     }
