@@ -424,11 +424,10 @@ impl Merger {
             dest,
         } in self.applied_directives_to_merge.drain(..).collect_vec()
         {
-            // There is some cases where we had to call the method that records directives to merged
-            // on a `dest` that ended up being removed from the ouptut (typically because we needed
-            // to known if that `dest` was @inaccessible before deciding if it should be kept or
-            // not). So check that the `dest` is still there (still "attached") and skip it entirely
-            // otherwise.
+            // There are some cases where we recorded directives to be merged on a `dest` that ended
+            // up being removed from the ouptut. This is typically because we needed to known if that
+            // `dest` was @inaccessible before deciding if it should be kept or not. If it no
+            // longer exists in the schema, then we skip this destination.
             if !dest.exists_in(&self.merged) {
                 continue;
             }
