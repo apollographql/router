@@ -22,6 +22,7 @@ use crate::connectors::JSONSelection;
 use crate::connectors::Namespace;
 use crate::connectors::id::ConnectedElement;
 use crate::connectors::id::ObjectCategory;
+use crate::connectors::json_selection::VarPaths;
 use crate::connectors::string_template::Expression;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
@@ -384,10 +385,23 @@ fn resolve_shape(
                 if !key_str.is_empty() {
                     key_str = format!("`{key_str}` ");
                 }
+
+                let locals_suffix = {
+                    let local_vars = expression.expression.local_var_names();
+                    if local_vars.is_empty() {
+                        "".to_string()
+                    } else {
+                        format!(
+                            ", {}",
+                            local_vars.into_iter().collect::<Vec<_>>().join(", ")
+                        )
+                    }
+                };
+
                 return Err(Message {
                     code: context.code,
                     message: format!(
-                        "{key_str}must start with one of {namespaces}",
+                        "{key_str}must start with one of {namespaces}{locals_suffix}",
                         namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", "),
                     ),
                     locations: transform_locations(

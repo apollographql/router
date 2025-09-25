@@ -88,8 +88,43 @@ pub(super) fn nom_fail_message(
     ))
 }
 
-pub(crate) trait ExternalVarPaths {
-    fn external_var_paths(&self) -> Vec<&PathSelection>;
+pub(crate) trait VarPaths {
+    /// Implementers of `VarPaths` must implement this `var_paths` method, which
+    /// should return all variable-referencing paths where the variable is a
+    /// `KnownVariable::External(String)` or `KnownVariable::Local(String)`
+    /// (that is, not internal variable references like `$` or `@`).
+    fn var_paths(&self) -> Vec<&PathSelection>;
+
+    fn external_var_paths(&self) -> Vec<&PathSelection> {
+        self.var_paths()
+            .into_iter()
+            .filter(|var_path| {
+                if let PathList::Var(known_var, _) = var_path.path.as_ref() {
+                    matches!(known_var.as_ref(), KnownVariable::External(_))
+                } else {
+                    false
+                }
+            })
+            .collect()
+    }
+
+    /// Returns all locally bound variable names in the selection, without
+    /// regard for which ones are available where.
+    fn local_var_names(&self) -> IndexSet<String> {
+        self.var_paths()
+            .into_iter()
+            .flat_map(|var_path| {
+                if let PathList::Var(known_var, _) = var_path.path.as_ref() {
+                    match known_var.as_ref() {
+                        KnownVariable::Local(var_name) => Some(var_name.to_string()),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
 }
 
 // JSONSelection     ::= PathSelection | NakedSubSelection
@@ -407,11 +442,11 @@ impl JSONSelection {
     }
 }
 
-impl ExternalVarPaths for JSONSelection {
-    fn external_var_paths(&self) -> Vec<&PathSelection> {
+impl VarPaths for JSONSelection {
+    fn var_paths(&self) -> Vec<&PathSelection> {
         match &self.inner {
-            TopLevelSelection::Named(subselect) => subselect.external_var_paths(),
-            TopLevelSelection::Path(path) => path.external_var_paths(),
+            TopLevelSelection::Named(subselect) => subselect.var_paths(),
+            TopLevelSelection::Path(path) => path.var_paths(),
         }
     }
 }
@@ -722,9 +757,9 @@ impl NamedSelection {
     }
 }
 
-impl ExternalVarPaths for NamedSelection {
-    fn external_var_paths(&self) -> Vec<&PathSelection> {
-        self.path.external_var_paths()
+impl VarPaths for NamedSelection {
+    fn var_paths(&self) -> Vec<&PathSelection> {
+        self.path.var_paths()
     }
 }
 
@@ -813,18 +848,25 @@ impl PathSelection {
     }
 }
 
-impl ExternalVarPaths for PathSelection {
-    fn external_var_paths(&self) -> Vec<&PathSelection> {
+impl VarPaths for PathSelection {
+    fn var_paths(&self) -> Vec<&PathSelection> {
         let mut paths = Vec::new();
         match self.path.as_ref() {
             PathList::Var(var_name, tail) => {
-                if matches!(var_name.as_ref(), KnownVariable::External(_)) {
+                // At this point, we're collecting both external and local
+                // variable references (but not references to internal variables
+                // like $ and @). These mixed variables will be filtered in
+                // VarPaths::external_var_paths and ::local_var_paths.
+                if matches!(
+                    var_name.as_ref(),
+                    KnownVariable::External(_) | KnownVariable::Local(_)
+                ) {
                     paths.push(self);
                 }
-                paths.extend(tail.external_var_paths());
+                paths.extend(tail.var_paths());
             }
             other => {
-                paths.extend(other.external_var_paths());
+                paths.extend(other.var_paths());
             }
         };
         paths
@@ -1299,35 +1341,35 @@ impl PathList {
     }
 }
 
-impl ExternalVarPaths for PathList {
-    fn external_var_paths(&self) -> Vec<&PathSelection> {
+impl VarPaths for PathList {
+    fn var_paths(&self) -> Vec<&PathSelection> {
         let mut paths = Vec::new();
         match self {
-            // PathSelection::external_var_paths is responsible for adding all
+            // PathSelection::var_paths is responsible for adding all
             // variable &PathSelection items to the set, since this
             // PathList::Var case cannot be sure it's looking at the beginning
-            // of the path. However, we call rest.external_var_paths()
+            // of the path. However, we call rest.var_paths()
             // recursively because the tail of the list could contain other full
             // PathSelection variable references.
             PathList::Var(_, rest) | PathList::Key(_, rest) => {
-                paths.extend(rest.external_var_paths());
+                paths.extend(rest.var_paths());
             }
             PathList::Expr(expr, rest) => {
-                paths.extend(expr.external_var_paths());
-                paths.extend(rest.external_var_paths());
+                paths.extend(expr.var_paths());
+                paths.extend(rest.var_paths());
             }
             PathList::Method(_, opt_args, rest) => {
                 if let Some(args) = opt_args {
                     for lit_arg in &args.args {
-                        paths.extend(lit_arg.external_var_paths());
+                        paths.extend(lit_arg.var_paths());
                     }
                 }
-                paths.extend(rest.external_var_paths());
+                paths.extend(rest.var_paths());
             }
             PathList::Question(rest) => {
-                paths.extend(rest.external_var_paths());
+                paths.extend(rest.var_paths());
             }
-            PathList::Selection(sub) => paths.extend(sub.external_var_paths()),
+            PathList::Selection(sub) => paths.extend(sub.var_paths()),
             PathList::Empty => {}
         }
         paths
@@ -1439,11 +1481,11 @@ impl SubSelection {
     }
 }
 
-impl ExternalVarPaths for SubSelection {
-    fn external_var_paths(&self) -> Vec<&PathSelection> {
+impl VarPaths for SubSelection {
+    fn var_paths(&self) -> Vec<&PathSelection> {
         let mut paths = Vec::new();
         for selection in &self.selections {
-            paths.extend(selection.external_var_paths());
+            paths.extend(selection.var_paths());
         }
         paths
     }
@@ -3460,6 +3502,19 @@ mod tests {
                 vec![&start_path, &end_path, &args_type_path]
             );
         }
+    }
+
+    #[test]
+    fn test_local_var_paths() {
+        let spec = ConnectSpec::V0_3;
+        let name_selection = selection!(
+            "person->as($name, @.name)->as($stray, 123)->echo({ hello: $name })",
+            spec
+        );
+        let local_var_names = name_selection.local_var_names();
+        assert_eq!(local_var_names.len(), 2);
+        assert!(local_var_names.contains("$name"));
+        assert!(local_var_names.contains("$stray"));
     }
 
     #[test]
