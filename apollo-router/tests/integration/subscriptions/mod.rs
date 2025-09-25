@@ -86,8 +86,8 @@ pub fn create_sub_query(interval_ms: u64, nb_events: usize) -> String {
 /// # Parameters
 /// - `interval_ms` - time between subscription events
 /// - `complete_subscription` - make the server immediately close the subscription when all events
-/// are sent. If `false`, the subscription remains open, which is useful for testing
-/// client-initiated closing.
+///   are sent. If `false`, the subscription remains open, which is useful for testing
+///   client-initiated closing.
 /// - `is_closed` - the server sets this to `true` when any WS connection has closed
 pub async fn start_subscription_server_with_payloads(
     payloads: Vec<serde_json::Value>,
@@ -427,10 +427,11 @@ async fn handle_websocket_legacy(socket: WebSocket, config: SubscriptionServerCo
                                 debug!("Sent subscription event {}/{}", i, payloads.len());
                             }
 
-                            if config.complete_subscription {
-                                // Send completion
-                                // TODO(@goto-bus-stop): only when client did not proactively close
-                                // subscription
+                            if subscription_close_rx.is_terminated() {
+                                info!(
+                                    "Sent {i} subscription events, and client closed the subscription"
+                                );
+                            } else if config.complete_subscription {
                                 let complete = json!({
                                     "id": id,
                                     "type": "complete"
@@ -610,10 +611,11 @@ async fn handle_websocket_modern(socket: WebSocket, config: SubscriptionServerCo
                                 debug!("Sent subscription event {}/{}", i, payloads.len());
                             }
 
-                            if config.complete_subscription {
-                                // Send completion
-                                // TODO(@goto-bus-stop): only when client did not proactively close
-                                // subscription
+                            if subscription_close_rx.is_terminated() {
+                                info!(
+                                    "Sent {i} subscription events, and client closed the subscription"
+                                );
+                            } else if config.complete_subscription {
                                 let complete = json!({
                                     "id": id,
                                     "type": "complete"
