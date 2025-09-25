@@ -63,7 +63,7 @@ async fn wait_for_cache(storage: &Storage, keys: Vec<String>) {
 }
 
 /// Extracts a list of cache keys from `CacheKeysContext` that we expect to be cached. This is
-/// mostly used in `wait_for_cache_population`.
+/// mostly used in `wait_for_cache`.
 ///
 /// NB: this is not always accurate! For example, a key might not be stored if it's private but
 /// wasn't passed the private ID. But it's a good approximation for most test cases.
