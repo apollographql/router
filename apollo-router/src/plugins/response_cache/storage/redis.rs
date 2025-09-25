@@ -27,6 +27,7 @@ use crate::cache::storage::ValueType;
 use crate::plugins::response_cache::cache_control::CacheControl;
 use crate::plugins::response_cache::metrics::record_maintenance_duration;
 use crate::plugins::response_cache::metrics::record_maintenance_error;
+use crate::plugins::response_cache::metrics::record_maintenance_queue_error;
 use crate::plugins::response_cache::metrics::record_maintenance_success;
 use crate::plugins::response_cache::storage::CacheEntry;
 use crate::plugins::response_cache::storage::CacheStorage;
@@ -115,7 +116,7 @@ impl Storage {
         let pipeline = self.writer_storage.pipeline();
         for invalidation_key in &invalidation_keys {
             let invalidation_key = self.make_key(format!("cache-tag:{invalidation_key}"));
-            let _ = self.cache_tag_tx.try_send(invalidation_key.clone());
+            self.send_to_maintenance_queue(invalidation_key.clone());
             let _: () = pipeline
                 .zrange(invalidation_key.clone(), 0, -1, None, false, None, false)
                 .await?;
@@ -137,6 +138,12 @@ impl Storage {
         // tag between when we run the `zrange` and the `delete`.
         // it's safer to just rely on the TTL-based cleanup.
         Ok(deleted as u64)
+    }
+
+    fn send_to_maintenance_queue(&self, cache_tag_key: String) {
+        if let Err(err) = self.cache_tag_tx.try_send(cache_tag_key) {
+            record_maintenance_queue_error(&err);
+        }
     }
 
     pub(crate) async fn perform_periodic_maintenance(
@@ -286,8 +293,7 @@ impl CacheStorage for Storage {
         // pipelines anyway
         let pipeline = self.writer_storage.client().pipeline();
         for (cache_tag_key, elements) in cache_tags_to_pcks.into_iter() {
-            // NB: send this key to the queue for cleanup
-            let _ = self.cache_tag_tx.try_send(cache_tag_key.clone());
+            self.send_to_maintenance_queue(cache_tag_key.clone());
 
             // NB: expiry time being max + 1 is important! if you use a volatile TTL eviction policy,
             // Redis will evict the keys with the shortest TTLs - we have to make sure that the cache

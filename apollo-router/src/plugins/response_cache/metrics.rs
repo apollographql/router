@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use tokio::sync::mpsc::error::TrySendError;
+
 use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::response_cache::invalidation::InvalidationKind;
 use crate::plugins::response_cache::storage;
@@ -93,6 +95,20 @@ pub(super) fn record_maintenance_duration(duration: Duration) {
         "Time to remove expired entries from cache tag set",
         "s",
         duration.as_secs_f64()
+    );
+}
+
+pub(super) fn record_maintenance_queue_error<T>(error: &TrySendError<T>) {
+    let kind = match error {
+        TrySendError::Closed(_) => "channel closed",
+        TrySendError::Full(_) => "channel full",
+    };
+    u64_counter_with_unit!(
+        "apollo.router.operations.response_cache.maintenance.queue.error",
+        "Error while sending cache tag to maintenance queue",
+        "{error}",
+        1,
+        "error" = kind
     );
 }
 
