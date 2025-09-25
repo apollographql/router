@@ -154,3 +154,393 @@ impl<'a> Builder<'a> {
         self.activation.with_logging(create_fmt_layer(self.config));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plugins::telemetry::apollo;
+    use crate::plugins::telemetry::config::Exporters;
+    use crate::plugins::telemetry::config::Instrumentation;
+    use crate::plugins::telemetry::config::Metrics;
+    use crate::plugins::telemetry::config::Tracing;
+
+    fn create_default_config() -> Conf {
+        Conf {
+            apollo: apollo::Config::default(),
+            exporters: Exporters {
+                metrics: Metrics {
+                    common: Default::default(),
+                    otlp: Default::default(),
+                    prometheus: Default::default(),
+                },
+                tracing: Tracing::default(),
+                logging: Default::default(),
+            },
+            instrumentation: Instrumentation::default(),
+        }
+    }
+
+    fn create_config_with_prometheus_enabled() -> Conf {
+        let mut config = create_default_config();
+        config.exporters.metrics.prometheus.enabled = true;
+        config
+    }
+
+    fn create_config_with_otlp_metrics_enabled() -> Conf {
+        let mut config = create_default_config();
+        config.exporters.metrics.otlp.enabled = true;
+        config
+    }
+
+    fn create_config_with_otlp_tracing_enabled() -> Conf {
+        let mut config = create_default_config();
+        config.exporters.tracing.otlp.enabled = true;
+        config
+    }
+
+    fn create_config_with_apollo_enabled() -> Conf {
+        let mut config = create_default_config();
+        config.apollo.apollo_key = Some("test-key".to_string());
+        config.apollo.apollo_graph_ref = Some("test@current".to_string());
+        config
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_no_reload_when_configs_identical() {
+        let config = create_default_config();
+        let previous_config = Some(config.clone());
+
+        let builder = Builder::new(&previous_config, &config);
+        let (activation, _endpoints, _sender) = builder.build().unwrap();
+
+        // When configs are identical, only certain things should be set
+        let instr = activation.test_instrumentation();
+        assert!(
+            !instr.tracer_provider_set,
+            "Tracer provider should not reload when configs identical"
+        );
+        assert!(
+            !instr.prometheus_registry_set,
+            "Prometheus registry should not reload when configs identical"
+        );
+        // Apollo metrics should not be added when not configured (no apollo key/graph ref)
+        assert!(
+            instr.meter_providers_added.is_empty(),
+            "No meter providers should be added when configs identical and apollo not configured"
+        );
+        // Logging and propagation always get set
+        assert!(instr.logging_layer_set, "Logging should always be set");
+        assert!(
+            instr.tracer_propagator_set,
+            "Propagator should always be set"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_metrics_reload_on_prometheus_change() {
+        let previous_config = Some(create_default_config());
+        let config = create_config_with_prometheus_enabled();
+
+        let builder = Builder::new(&previous_config, &config);
+        let (activation, _endpoints, _sender) = builder.build().unwrap();
+
+        let instr = activation.test_instrumentation();
+        // Prometheus config changed, so metrics should reload
+        assert!(
+            instr.prometheus_registry_set,
+            "Prometheus registry should be set when config changes"
+        );
+        assert!(
+            instr
+                .meter_providers_added
+                .contains(&MeterProviderType::Public),
+            "Public meter provider should be added"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_metrics_reload_on_otlp_change() {
+        let previous_config = Some(create_default_config());
+        let config = create_config_with_otlp_metrics_enabled();
+
+        let builder = Builder::new(&previous_config, &config);
+        let (activation, _endpoints, _sender) = builder.build().unwrap();
+
+        let instr = activation.test_instrumentation();
+        // OTLP metrics config changed, so metrics should reload
+        assert!(
+            instr
+                .meter_providers_added
+                .contains(&MeterProviderType::Public),
+            "Public meter provider should be added when OTLP metrics changes"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_tracing_reload_on_otlp_change() {
+        let previous_config = Some(create_default_config());
+        let config = create_config_with_otlp_tracing_enabled();
+
+        let builder = Builder::new(&previous_config, &config);
+        let (activation, _endpoints, _sender) = builder.build().unwrap();
+
+        let instr = activation.test_instrumentation();
+        // OTLP tracing config changed, so tracing should reload
+        assert!(
+            instr.tracer_provider_set,
+            "Tracer provider should be set when OTLP tracing changes"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_apollo_metrics_always_rebuild_when_enabled() {
+        let config = create_config_with_apollo_enabled();
+        let previous_config = Some(config.clone());
+
+        let builder = Builder::new(&previous_config, &config);
+        let (activation, _endpoints, _sender) = builder.build().unwrap();
+
+        let instr = activation.test_instrumentation();
+        // Apollo metrics should always rebuild when apollo is configured
+        assert!(
+            instr
+                .meter_providers_added
+                .contains(&MeterProviderType::Apollo)
+                || instr
+                    .meter_providers_added
+                    .contains(&MeterProviderType::ApolloRealtime),
+            "Apollo metrics should always rebuild when apollo is configured"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_first_run_builds_everything() {
+        let config = create_default_config();
+        let previous_config = None; // First run, no previous config
+
+        let builder = Builder::new(&previous_config, &config);
+        let (activation, _endpoints, _sender) = builder.build().unwrap();
+
+        let instr = activation.test_instrumentation();
+        // First run should build everything
+        assert!(
+            instr.tracer_provider_set,
+            "First run should build tracer provider"
+        );
+        assert!(
+            instr.tracer_propagator_set,
+            "First run should set tracer propagator"
+        );
+        assert!(
+            instr.logging_layer_set,
+            "First run should set logging layer"
+        );
+        // But no meter providers get added if nothing is configured
+        assert!(
+            instr.meter_providers_added.is_empty(),
+            "No meter providers added on first run when nothing enabled"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_first_run_with_apollo_enabled() {
+        let config = create_config_with_apollo_enabled();
+        let previous_config = None; // First run, no previous config
+
+        let builder = Builder::new(&previous_config, &config);
+        let (activation, _endpoints, _sender) = builder.build().unwrap();
+
+        let instr = activation.test_instrumentation();
+        // First run with apollo enabled should build apollo meters
+        assert!(
+            instr.tracer_provider_set,
+            "First run should build tracer provider"
+        );
+        assert!(
+            instr.tracer_propagator_set,
+            "First run should set tracer propagator"
+        );
+        assert!(
+            instr.logging_layer_set,
+            "First run should set logging layer"
+        );
+        // Apollo meter providers should be added on first run when apollo is enabled
+        assert!(
+            instr
+                .meter_providers_added
+                .contains(&MeterProviderType::Apollo)
+                || instr
+                    .meter_providers_added
+                    .contains(&MeterProviderType::ApolloRealtime),
+            "First run should add apollo meter providers when apollo enabled"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_metrics_common_change_triggers_reload() {
+        let previous_config = create_config_with_prometheus_enabled();
+        let mut config = create_config_with_prometheus_enabled();
+        config.exporters.metrics.common.service_name = Some("new-service".to_string());
+
+        let previous_config_opt = Some(previous_config);
+        let builder = Builder::new(&previous_config_opt, &config);
+        let (activation, _endpoints, _sender) = builder.build().unwrap();
+
+        let instr = activation.test_instrumentation();
+        // Common config changed, so metrics should reload even when only common settings change
+        assert!(
+            instr
+                .meter_providers_added
+                .contains(&MeterProviderType::Public),
+            "Public meter provider should reload when common config changes"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_tracing_common_change_triggers_reload() {
+        let previous_config = create_config_with_otlp_tracing_enabled();
+        let mut config = create_config_with_otlp_tracing_enabled();
+        config.exporters.tracing.common.service_name = Some("new-service".to_string());
+
+        let previous_config_opt = Some(previous_config);
+        let builder = Builder::new(&previous_config_opt, &config);
+        let (activation, _endpoints, _sender) = builder.build().unwrap();
+
+        let instr = activation.test_instrumentation();
+        // Common config changed, so tracing should reload even when only common settings change
+        assert!(
+            instr.tracer_provider_set,
+            "Tracer provider should reload when common config changes"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_metrics_common_service_namespace_change() {
+        let previous_config = create_config_with_prometheus_enabled();
+        let mut config = create_config_with_prometheus_enabled();
+        config.exporters.metrics.common.service_namespace = Some("new-namespace".to_string());
+
+        let previous_config_opt = Some(previous_config);
+        let builder = Builder::new(&previous_config_opt, &config);
+        let (activation, _endpoints, _sender) = builder.build().unwrap();
+
+        let instr = activation.test_instrumentation();
+        assert!(
+            instr
+                .meter_providers_added
+                .contains(&MeterProviderType::Public),
+            "Public meter provider should reload when service_namespace changes"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_metrics_common_resource_change() {
+        let previous_config = create_config_with_prometheus_enabled();
+        let mut config = create_config_with_prometheus_enabled();
+        config.exporters.metrics.common.resource.insert(
+            "deployment.environment".to_string(),
+            crate::plugins::telemetry::config::AttributeValue::String("staging".to_string()),
+        );
+
+        let previous_config_opt = Some(previous_config);
+        let builder = Builder::new(&previous_config_opt, &config);
+        let (activation, _endpoints, _sender) = builder.build().unwrap();
+
+        let instr = activation.test_instrumentation();
+        assert!(
+            instr
+                .meter_providers_added
+                .contains(&MeterProviderType::Public),
+            "Public meter provider should reload when resource attributes change"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_metrics_common_buckets_change() {
+        let previous_config = create_config_with_prometheus_enabled();
+        let mut config = create_config_with_prometheus_enabled();
+        config.exporters.metrics.common.buckets = vec![0.1, 0.5, 1.0, 2.5, 5.0, 10.0];
+
+        let previous_config_opt = Some(previous_config);
+        let builder = Builder::new(&previous_config_opt, &config);
+        let (activation, _endpoints, _sender) = builder.build().unwrap();
+
+        let instr = activation.test_instrumentation();
+        assert!(
+            instr
+                .meter_providers_added
+                .contains(&MeterProviderType::Public),
+            "Public meter provider should reload when histogram buckets change"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_tracing_common_service_namespace_change() {
+        let previous_config = create_config_with_otlp_tracing_enabled();
+        let mut config = create_config_with_otlp_tracing_enabled();
+        config.exporters.tracing.common.service_namespace = Some("new-namespace".to_string());
+
+        let previous_config_opt = Some(previous_config);
+        let builder = Builder::new(&previous_config_opt, &config);
+        let (activation, _endpoints, _sender) = builder.build().unwrap();
+
+        let instr = activation.test_instrumentation();
+        assert!(
+            instr.tracer_provider_set,
+            "Tracer provider should reload when service_namespace changes"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_tracing_common_sampler_change() {
+        let previous_config = create_config_with_otlp_tracing_enabled();
+        let mut config = create_config_with_otlp_tracing_enabled();
+        config.exporters.tracing.common.sampler =
+            crate::plugins::telemetry::config::SamplerOption::TraceIdRatioBased(0.5);
+
+        let previous_config_opt = Some(previous_config);
+        let builder = Builder::new(&previous_config_opt, &config);
+        let (activation, _endpoints, _sender) = builder.build().unwrap();
+
+        let instr = activation.test_instrumentation();
+        assert!(
+            instr.tracer_provider_set,
+            "Tracer provider should reload when sampler changes"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_tracing_common_parent_based_sampler_change() {
+        let previous_config = create_config_with_otlp_tracing_enabled();
+        let mut config = create_config_with_otlp_tracing_enabled();
+        config.exporters.tracing.common.parent_based_sampler = false;
+
+        let previous_config_opt = Some(previous_config);
+        let builder = Builder::new(&previous_config_opt, &config);
+        let (activation, _endpoints, _sender) = builder.build().unwrap();
+
+        let instr = activation.test_instrumentation();
+        assert!(
+            instr.tracer_provider_set,
+            "Tracer provider should reload when parent_based_sampler changes"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_tracing_common_span_limits_change() {
+        let previous_config = create_config_with_otlp_tracing_enabled();
+        let mut config = create_config_with_otlp_tracing_enabled();
+        config.exporters.tracing.common.max_events_per_span = 256;
+        config.exporters.tracing.common.max_attributes_per_span = 64;
+
+        let previous_config_opt = Some(previous_config);
+        let builder = Builder::new(&previous_config_opt, &config);
+        let (activation, _endpoints, _sender) = builder.build().unwrap();
+
+        let instr = activation.test_instrumentation();
+        assert!(
+            instr.tracer_provider_set,
+            "Tracer provider should reload when span limits change"
+        );
+    }
+}

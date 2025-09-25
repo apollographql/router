@@ -46,6 +46,20 @@ pub(crate) struct Activation {
 
     /// The new format layer
     logging_fmt_layer: Option<Box<dyn Layer<LayeredTracer> + Send + Sync>>,
+
+    /// Test instrumentation to track what components were set
+    #[cfg(test)]
+    test_instrumentation: TestInstrumentation,
+}
+
+#[cfg(test)]
+#[derive(Default, Debug, Clone)]
+pub(crate) struct TestInstrumentation {
+    pub(crate) tracer_provider_set: bool,
+    pub(crate) tracer_propagator_set: bool,
+    pub(crate) meter_providers_added: std::collections::HashSet<MeterProviderType>,
+    pub(crate) prometheus_registry_set: bool,
+    pub(crate) logging_layer_set: bool,
 }
 
 /// Allows us to keep track of the last registry that was used. Not ideal. Plugins would be better to have state
@@ -61,6 +75,8 @@ impl Activation {
             // We can remove this is we allow state to be maintained across plugin reloads
             prometheus_registry: REGISTRY.lock().clone(),
             logging_fmt_layer: Default::default(),
+            #[cfg(test)]
+            test_instrumentation: Default::default(),
         }
     }
 
@@ -69,17 +85,34 @@ impl Activation {
         logging_layer: Box<dyn Layer<LayeredTracer> + Send + Sync>,
     ) {
         self.logging_fmt_layer = Some(logging_layer);
+        #[cfg(test)]
+        {
+            self.test_instrumentation.logging_layer_set = true;
+        }
     }
 
     pub(crate) fn with_tracer_propagator(&mut self, tracer_propagator: TextMapCompositePropagator) {
         self.trace_propagator = Some(tracer_propagator);
+        #[cfg(test)]
+        {
+            self.test_instrumentation.tracer_propagator_set = true;
+        }
     }
 
     pub(crate) fn add_meter_providers(
         &mut self,
         meter_providers: impl IntoIterator<Item = (MeterProviderType, FilterMeterProvider)>,
     ) {
-        self.meter_providers.extend(meter_providers);
+        for (meter_provider_type, meter_provider) in meter_providers {
+            self.meter_providers
+                .insert(meter_provider_type, meter_provider);
+            #[cfg(test)]
+            {
+                self.test_instrumentation
+                    .meter_providers_added
+                    .insert(meter_provider_type);
+            }
+        }
     }
 
     pub(crate) fn with_tracer_provider(
@@ -87,14 +120,27 @@ impl Activation {
         tracer_provider: opentelemetry_sdk::trace::TracerProvider,
     ) {
         self.trace_provider = Some(tracer_provider);
+        #[cfg(test)]
+        {
+            self.test_instrumentation.tracer_provider_set = true;
+        }
     }
 
     pub(crate) fn with_prometheus_registry(&mut self, prometheus_registry: Option<Registry>) {
         self.prometheus_registry = prometheus_registry;
+        #[cfg(test)]
+        {
+            self.test_instrumentation.prometheus_registry_set = true;
+        }
     }
 
     pub(crate) fn prometheus_registry(&self) -> Option<Registry> {
         self.prometheus_registry.clone()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_instrumentation(&self) -> &TestInstrumentation {
+        &self.test_instrumentation
     }
 }
 
