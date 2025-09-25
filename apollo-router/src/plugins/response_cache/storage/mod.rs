@@ -135,19 +135,16 @@ pub(super) trait CacheStorage {
     }
 
     #[doc(hidden)]
-    async fn internal_invalidate_by_subgraphs(
-        &self,
-        subgraph_names: Vec<String>,
-    ) -> StorageResult<u64>;
+    async fn internal_invalidate_by_subgraph(&self, subgraph_name: String) -> StorageResult<u64>;
 
     /// Invalidate all data associated with `subgraph_names`. Command will be timed out after
     /// `self.invalidate_timeout()`.
-    async fn invalidate_by_subgraphs(&self, subgraph_names: Vec<String>) -> StorageResult<u64> {
+    async fn invalidate_by_subgraph(&self, subgraph_name: String) -> StorageResult<u64> {
         const INVALIDATION_KIND: &str = "subgraph";
 
         let now = Instant::now();
         let result = flatten_storage_error(
-            self.internal_invalidate_by_subgraphs(subgraph_names)
+            self.internal_invalidate_by_subgraph(subgraph_name)
                 .timeout(self.invalidate_timeout())
                 .await,
         );

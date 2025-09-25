@@ -441,10 +441,7 @@ impl CacheStorage for Storage {
             .collect())
     }
 
-    async fn internal_invalidate_by_subgraphs(
-        &self,
-        subgraph_names: Vec<String>,
-    ) -> StorageResult<u64> {
+    async fn internal_invalidate_by_subgraph(&self, subgraph_name: String) -> StorageResult<u64> {
         let rec = sqlx::query!(
             r#"WITH deleted AS
             (DELETE
@@ -453,7 +450,7 @@ impl CacheStorage for Storage {
                 WHERE invalidation_key.cache_key_id = cache.id  AND invalidation_key.subgraph_name = ANY($1::text[]) RETURNING cache.cache_key, cache.expires_at
             )
         SELECT COUNT(*) AS count FROM deleted WHERE deleted.expires_at >= NOW()"#,
-            &subgraph_names
+            &vec![subgraph_name]
         )
             .fetch_one(&self.pg_pool)
             .await?;

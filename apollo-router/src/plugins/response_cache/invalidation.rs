@@ -95,7 +95,7 @@ impl Invalidation {
         let (count, subgraphs) = match request {
             InvalidationRequest::Subgraph { subgraph } => {
                 let count = storage
-                    .invalidate_by_subgraphs(vec![subgraph.clone()])
+                    .invalidate_by_subgraph(subgraph.clone())
                     .await
                     .inspect_err(|err| {
                         u64_counter_with_unit!(
