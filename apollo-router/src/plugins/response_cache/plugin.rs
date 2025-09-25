@@ -25,6 +25,10 @@ use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use tokio::sync::RwLock;
+use tokio::sync::broadcast::Receiver;
+use tokio::sync::broadcast::Sender;
+use tokio_stream::StreamExt;
+use tokio_stream::wrappers::IntervalStream;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -109,6 +113,8 @@ pub(crate) struct ResponseCache {
     /// map containing the enum GRAPH
     subgraph_enums: Arc<HashMap<String, String>>,
     lru_size_instrument: LruSizeInstrument,
+    /// Sender to tell spawned tasks to abort when this struct is dropped
+    abort_tx: Sender<()>,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -117,7 +123,7 @@ struct PrivateQueryKey {
     has_private_id: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub(crate) struct StorageInterface {
     all: Option<Arc<OnceLock<Storage>>>,
     subgraphs: HashMap<String, Arc<OnceLock<Storage>>>,
@@ -252,49 +258,6 @@ impl PluginPrivate for ResponseCache {
             .as_ref()
             .map(|q| q.name.to_string());
 
-        let mut all = None;
-        if let Some(config) = &init.config.subgraph.all.redis {
-            let required_to_start = config.required_to_start;
-            all = match Storage::new(config).await {
-                Ok(storage) => Some(Arc::new(OnceLock::from(storage))),
-                Err(e) => {
-                    tracing::error!(
-                        cache = "response",
-                        error = %e,
-                        "could not open connection to Redis for caching",
-                    );
-                    if required_to_start {
-                        return Err(e);
-                    } else {
-                        let storage = Arc::new(OnceLock::new());
-                        Some(storage)
-                    }
-                }
-            };
-        }
-        let mut subgraph_storages = HashMap::new();
-        for (subgraph, subgraph_config) in &init.config.subgraph.subgraphs {
-            if let Some(config) = &subgraph_config.redis {
-                let required_to_start = config.required_to_start;
-                let storage = match Storage::new(config).await {
-                    Ok(storage) => Arc::new(OnceLock::from(storage)),
-                    Err(e) => {
-                        tracing::error!(
-                            cache = "response",
-                            error = %e,
-                            "could not open connection to Redis for caching",
-                        );
-                        if required_to_start {
-                            return Err(e);
-                        } else {
-                            Arc::new(OnceLock::new())
-                        }
-                    }
-                };
-                subgraph_storages.insert(subgraph.clone(), storage);
-            }
-        }
-
         if init.config.subgraph.all.ttl.is_none()
             && init
                 .config
@@ -324,15 +287,29 @@ impl PluginPrivate for ResponseCache {
             );
         }
 
-        let storage = Arc::new(StorageInterface {
-            all,
-            subgraphs: subgraph_storages,
-        });
+        let mut storage_interface = Arc::new(StorageInterface::default());
 
-        let invalidation = Invalidation::new(storage.clone()).await?;
+        let (abort_tx, abort_rx) = tokio::sync::broadcast::channel(2);
+        if let Some(config) = init.config.subgraph.all.redis.clone() {
+            let storage = Arc::new(OnceLock::new());
+            storage_interface.all = Some(storage.clone());
+            connect_or_spawn_reconnection_task(config, storage, abort_rx).await?;
+        }
+
+        for (subgraph, subgraph_config) in &init.config.subgraph.subgraphs {
+            if let Some(config) = subgraph_config.redis {
+                let storage = Arc::new(OnceLock::new());
+                storage_interface
+                    .subgraphs
+                    .insert(subgraph.clone(), storage.clone());
+                connect_or_spawn_reconnection_task(config, storage, abort_tx.subscribe()).await?;
+            }
+        }
+
+        let invalidation = Invalidation::new(storage_interface.clone()).await?;
 
         Ok(Self {
-            storage,
+            storage: storage_interface,
             entity_type,
             enabled: init.config.enabled,
             debug: init.config.debug,
@@ -345,6 +322,7 @@ impl PluginPrivate for ResponseCache {
             subgraph_enums: Arc::new(get_subgraph_enums(&init.supergraph_schema)),
             supergraph_schema: init.supergraph_schema,
             lru_size_instrument: LruSizeInstrument::new(LRU_PRIVATE_QUERIES_INSTRUMENT_NAME),
+            abort_tx,
         })
     }
 
@@ -508,6 +486,7 @@ impl ResponseCache {
             subgraphs: HashMap::new(),
         });
         let invalidation = Invalidation::new(storage.clone()).await?;
+        let (abort_tx, abort_rx) = tokio::sync::broadcast::channel(2);
         Ok(Self {
             storage,
             entity_type: None,
@@ -535,6 +514,7 @@ impl ResponseCache {
             subgraph_enums: Arc::new(get_subgraph_enums(&supergraph_schema)),
             supergraph_schema,
             lru_size_instrument: LruSizeInstrument::new(LRU_PRIVATE_QUERIES_INSTRUMENT_NAME),
+            abort_tx,
         })
     }
     #[cfg(all(
@@ -558,6 +538,7 @@ impl ResponseCache {
             subgraphs: HashMap::new(),
         });
         let invalidation = Invalidation::new(storage.clone()).await?;
+        let (abort_tx, abort_rx) = tokio::sync::broadcast::channel(2);
 
         Ok(Self {
             storage,
@@ -586,6 +567,7 @@ impl ResponseCache {
             subgraph_enums: Arc::new(get_subgraph_enums(&supergraph_schema)),
             supergraph_schema,
             lru_size_instrument: LruSizeInstrument::new(LRU_PRIVATE_QUERIES_INSTRUMENT_NAME),
+            abort_tx,
         })
     }
 
@@ -612,6 +594,12 @@ impl ResponseCache {
             .clone()
             .map(|t| t.0)
             .or_else(|| self.subgraphs.all.ttl.clone().map(|ttl| ttl.0))
+    }
+}
+
+impl Drop for ResponseCache {
+    fn drop(&mut self) {
+        let _ = self.abort_tx.send(());
     }
 }
 
@@ -2397,6 +2385,59 @@ impl Ord for CacheKeySource {
             (CacheKeySource::Subgraph, CacheKeySource::Cache) => std::cmp::Ordering::Greater,
             (CacheKeySource::Cache, CacheKeySource::Subgraph) => std::cmp::Ordering::Less,
             (CacheKeySource::Cache, CacheKeySource::Cache) => std::cmp::Ordering::Equal,
+        }
+    }
+}
+
+async fn connect_or_spawn_reconnection_task(
+    config: storage::redis::Config,
+    storage: Arc<OnceLock<Storage>>,
+    abort_signal: Receiver<()>,
+) -> Result<(), storage::Error> {
+    match attempt_connection(&config, storage.clone()).await {
+        Ok(()) => Ok(()),
+        Err(err) if config.required_to_start => Err(err.into()),
+        Err(_) => {
+            tokio::spawn(reattempt_connection(config.clone(), storage, abort_signal));
+            Ok(())
+        }
+    }
+}
+
+async fn attempt_connection(
+    config: &storage::redis::Config,
+    cache_storage: Arc<OnceLock<Storage>>,
+) -> Result<(), storage::Error> {
+    let storage = Storage::new(config).await.inspect_err(|err| {
+        tracing::error!(
+            cache = "response",
+            error = %err,
+            "could not open connection to Redis for caching",
+        )
+    })?;
+    let _ = cache_storage.set(storage);
+
+    Ok(())
+}
+
+async fn reattempt_connection(
+    config: storage::redis::Config,
+    cache_storage: Arc<OnceLock<Storage>>,
+    abort_signal: Receiver<()>,
+) {
+    let mut interval = IntervalStream::new(tokio::time::interval(Duration::from_secs(30)));
+    let mut abort_signal = abort_signal.resubscribe();
+    loop {
+        tokio::select! {
+            biased;
+            _ = abort_signal.recv() => {
+                break;
+            }
+            _ = interval.next() => {
+                if attempt_connection(&config, cache_storage.clone()).await.is_ok() {
+                    break;
+                }
+            }
         }
     }
 }

@@ -281,6 +281,7 @@ impl RedisCacheStorage {
             is_cluster,
             caller,
             config.metrics_interval,
+            config.required_to_start,
         )
         .await
     }
@@ -326,6 +327,7 @@ impl RedisCacheStorage {
             is_cluster,
             caller,
             config.metrics_interval,
+            true,
         )
         .await
     }
@@ -341,6 +343,7 @@ impl RedisCacheStorage {
         is_cluster: bool,
         caller: &'static str,
         metrics_interval: Duration,
+        required_to_start: bool,
     ) -> Result<Self, BoxError> {
         let pooled_client = Builder::from_config(client_config)
             .with_connection_config(|config| {
@@ -431,7 +434,10 @@ impl RedisCacheStorage {
 
         // NB: error is not recorded here as it will be observed by the task following `client.error_rx()`
         let client_handles = pooled_client.connect_pool();
-        pooled_client.wait_for_connect().await?;
+        if required_to_start {
+            pooled_client.wait_for_connect().await?;
+            tracing::trace!("redis connections established");
+        }
 
         tokio::spawn(async move {
             // the handles will resolve when the clients finish terminating. per the `fred` docs:
@@ -452,7 +458,6 @@ impl RedisCacheStorage {
         let metrics_collector =
             RedisMetricsCollector::new(pooled_client_arc.clone(), caller, metrics_interval);
 
-        tracing::trace!("redis connection established");
         Ok(Self {
             inner: Arc::new(DropSafeRedisPool {
                 pool: pooled_client_arc,
