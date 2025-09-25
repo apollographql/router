@@ -607,7 +607,7 @@ mod tests {
     #[rstest::rstest]
     async fn test_invalidation_key_permutations(
         #[values(None, Some("test"))] namespace: Option<&str>,
-        #[values(vec![], vec!["invalidation_key"], vec!["invalidation_key1", "invalidation_key2", "invalidation_key3"])]
+        #[values(vec![], vec!["invalidation"], vec!["invalidation1", "invalidation2", "invalidation3"])]
         invalidation_keys: Vec<&str>,
     ) {
         // Set up insta snapshot to support test parameterization
