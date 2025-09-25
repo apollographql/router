@@ -2,7 +2,6 @@ use derivative::Derivative;
 use futures::TryFutureExt;
 use futures::future;
 use futures::future::BoxFuture;
-use opentelemetry::InstrumentationLibrary;
 use opentelemetry::InstrumentationScope;
 use opentelemetry::KeyValue;
 use opentelemetry::trace::Event;
@@ -15,6 +14,7 @@ use opentelemetry_otlp::WithTonicConfig;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::export::trace::ExportResult;
 use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::export::trace::SpanExporter as SdkSpanExporter;
 use opentelemetry_otlp::SpanExporter;
 
 use opentelemetry_sdk::trace::SpanEvents;
@@ -101,7 +101,7 @@ impl ApolloOtlpExporter {
                     "{}@{}",
                     std::env!("CARGO_PKG_NAME"),
                     std::env!("CARGO_PKG_VERSION")
-                ),
+                )
             ),
             KeyValue::new("apollo.client.host", hostname()?),
             KeyValue::new("apollo.client.uname", get_uname()?),
@@ -250,7 +250,7 @@ impl ApolloOtlpExporter {
             events: Self::extract_span_events(&span),
             links: SpanLinks::default(),
             status,
-            instrumentation_scope: self.intrumentation_library.clone(),
+            instrumentation_scope: self.instrumentation_scope.clone(),
             dropped_attributes_count: span.droppped_attribute_count,
         }
     }

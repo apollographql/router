@@ -9,6 +9,8 @@ use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
+use opentelemetry::trace::TracerProvider as OtherTracerProvider;
+use opentelemetry::InstrumentationScope;
 use opentelemetry_sdk::trace::Tracer;
 use tower::BoxError;
 use tracing_subscriber::EnvFilter;
@@ -48,8 +50,7 @@ static FMT_LAYER_HANDLE: OnceCell<
 pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     let hot_tracer = ReloadTracer::new(
         opentelemetry_sdk::trace::TracerProvider::default()
-            .tracer_builder("noop")
-            .build(),
+            .tracer("noop"),
     );
     let opentelemetry_layer = otel::layer().with_tracer(hot_tracer.clone());
 

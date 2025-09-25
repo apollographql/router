@@ -174,7 +174,7 @@ impl Config {
                 if let Some(endpoint) = maybe_endpoint {
                     otlp_exporter = otlp_exporter.with_endpoint(endpoint);
                 }
-                otlp_exporter.build()??
+                otlp_exporter.build()?
             }
         };
         let default_reader = PeriodicReader::builder(exporter, runtime::Tokio)

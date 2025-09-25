@@ -7,7 +7,7 @@ use derivative::Derivative;
 use num_traits::ToPrimitive;
 use opentelemetry::Array;
 use opentelemetry::Value;
-use opentelemetry::metrics::MetricsError;
+use opentelemetry_sdk::metrics::MetricError;
 use opentelemetry_sdk::metrics::Aggregation;
 use opentelemetry_sdk::metrics::Instrument;
 use opentelemetry_sdk::metrics::Stream;
@@ -156,7 +156,7 @@ pub(crate) struct MetricView {
 }
 
 impl TryInto<Box<dyn View>> for MetricView {
-    type Error = MetricsError;
+    type Error = MetricError;
 
     fn try_into(self) -> Result<Box<dyn View>, Self::Error> {
         let aggregation = self.aggregation.map(|aggregation| match aggregation {

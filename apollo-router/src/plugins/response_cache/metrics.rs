@@ -60,7 +60,7 @@ pub(super) async fn expired_data_task(
                 &attributes,
             );
         })
-        .init();
+        .build();
 
     loop {
         tokio::select! {
