@@ -449,7 +449,7 @@ impl Merger {
         }
 
         // Merge directive definitions
-        self.merge_directive_definitions();
+        self.merge_directive_definitions()?;
 
         // Merge enum types last
         for enum_type in &enum_types {
@@ -1054,8 +1054,30 @@ impl Merger {
         Ok(())
     }
 
-    fn merge_directive_definitions(&mut self) {
-        todo!("Implement directive definition merging")
+    fn merge_directive_definitions(&mut self) -> Result<(), FederationError> {
+        // We should skip the supergraph specific directives, that is the @core and @join directives.
+        for directive_name in self
+            .merged
+            .schema()
+            .directive_definitions
+            .keys()
+            .cloned()
+            .collect_vec()
+        {
+            if self
+                .link_spec_definition
+                .is_spec_directive_name(&self.merged, &directive_name)
+                .unwrap_or(false)
+                || self
+                    .join_spec_definition
+                    .is_spec_directive_name(&self.merged, &directive_name)
+                    .unwrap_or(false)
+            {
+                continue;
+            }
+            self.merge_directive_definition(&directive_name)?;
+        }
+        Ok(())
     }
 
     fn validate_query_root(&mut self) {
