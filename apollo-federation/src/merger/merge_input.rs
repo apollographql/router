@@ -246,7 +246,7 @@ impl Merger {
         sources: &Sources<InputObjectFieldDefinitionPosition>,
     ) -> Result<(), FederationError> {
         self.merge_description(sources, dest_field)?;
-        self.record_applied_directives_to_merge(sources, dest_field);
+        self.record_applied_directives_to_merge(sources, dest_field)?;
         let all_types_equal = self.merge_type_reference(sources, dest_field, true)?;
         let directive_sources: Sources<DirectiveTargetPosition> = sources
             .iter()

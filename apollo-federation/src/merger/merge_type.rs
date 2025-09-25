@@ -31,7 +31,7 @@ impl Merger {
         self.check_for_extension_with_no_base(&sources, &dest);
         self.merge_description(&sources, &dest)?;
         self.add_join_type(&sources, &dest)?;
-        self.record_applied_directives_to_merge(&sources, &dest);
+        self.record_applied_directives_to_merge(&sources, &dest)?;
         self.add_join_directive_directives(&sources, &dest)?;
         match dest {
             TypeDefinitionPosition::Scalar(_) => {
