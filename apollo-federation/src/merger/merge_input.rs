@@ -267,7 +267,7 @@ impl Merger {
             &merge_context,
         )?;
 
-        self.merge_default_value(sources, dest_field, "Input field");
+        self.merge_default_value(sources, dest_field)?;
         Ok(())
     }
 }

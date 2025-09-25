@@ -250,6 +250,16 @@ pub enum CompositionError {
     OverrideSourceHasOverride { message: String },
     #[error("{message}")]
     QueryRootMissing { message: String },
+    #[error("{message}")]
+    ArgumentDefaultMismatch {
+        message: String,
+        locations: Locations,
+    },
+    #[error("{message}")]
+    InputFieldDefaultMismatch {
+        message: String,
+        locations: Locations,
+    },
 }
 
 impl CompositionError {
@@ -313,6 +323,8 @@ impl CompositionError {
             Self::OverrideOnInterface { .. } => ErrorCode::OverrideOnInterface,
             Self::OverrideSourceHasOverride { .. } => ErrorCode::OverrideSourceHasOverride,
             Self::QueryRootMissing { .. } => ErrorCode::QueryRootMissing,
+            Self::ArgumentDefaultMismatch { .. } => ErrorCode::FieldArgumentDefaultMismatch,
+            Self::InputFieldDefaultMismatch { .. } => ErrorCode::InputFieldDefaultMismatch,
         }
     }
 
@@ -428,6 +440,16 @@ impl CompositionError {
                     locations,
                 }
             }
+            Self::ArgumentDefaultMismatch { message, locations } => Self::ArgumentDefaultMismatch {
+                message: format!("{message}{appendix}"),
+                locations,
+            },
+            Self::InputFieldDefaultMismatch { message, locations } => {
+                Self::InputFieldDefaultMismatch {
+                    message: format!("{message}{appendix}"),
+                    locations,
+                }
+            }
             // Remaining errors do not have an obvious way to appending a message, so we just return self.
             Self::SubgraphError { .. }
             | Self::InvalidGraphQLName(..)
@@ -452,7 +474,9 @@ impl CompositionError {
             | Self::RequiredArgumentMissingInSomeSubgraph { locations, .. }
             | Self::RequiredInputFieldMissingInSomeSubgraph { locations, .. }
             | Self::EmptyMergedInputType { locations, .. }
-            | Self::InvalidFieldSharing { locations, .. } => locations,
+            | Self::InvalidFieldSharing { locations, .. }
+            | Self::ArgumentDefaultMismatch { locations, .. }
+            | Self::InputFieldDefaultMismatch { locations, .. } => locations,
             _ => &[],
         }
     }
