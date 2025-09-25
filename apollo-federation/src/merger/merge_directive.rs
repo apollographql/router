@@ -4,7 +4,6 @@ use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::ast::DirectiveLocation;
-use apollo_compiler::collections::HashSet;
 use indexmap::IndexSet;
 use itertools::Itertools;
 
@@ -21,7 +20,7 @@ use crate::supergraph::EXECUTABLE_DIRECTIVE_LOCATIONS;
 
 #[derive(Clone)]
 pub(crate) struct AppliedDirectiveToMergeEntry {
-    pub names: HashSet<Name>,
+    pub names: IndexSet<Name>,
     pub sources: Sources<DirectiveTargetPosition>,
     pub dest: DirectiveTargetPosition,
 }
@@ -66,7 +65,7 @@ impl Merger {
         }
         self.applied_directives_to_merge
             .push(AppliedDirectiveToMergeEntry {
-                names: names.into_iter().collect(),
+                names,
                 sources: directive_sources,
                 dest,
             });
