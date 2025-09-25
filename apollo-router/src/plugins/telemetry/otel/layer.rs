@@ -28,7 +28,6 @@ use tracing_subscriber::registry::SpanRef;
 
 use super::OtelData;
 use super::PreSampledTracer;
-use crate::error;
 use crate::plugins::cache::invalidation_endpoint::INVALIDATION_ENDPOINT_SPAN_NAME;
 use crate::plugins::telemetry::consts::FIELD_EXCEPTION_MESSAGE;
 use crate::plugins::telemetry::consts::FIELD_EXCEPTION_STACKTRACE;
