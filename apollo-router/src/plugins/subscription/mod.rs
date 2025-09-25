@@ -29,6 +29,7 @@ use crate::services::SubgraphResponse;
 
 mod callback;
 mod execution;
+mod fetch;
 pub(crate) mod notification;
 // Only pub(crate) for tests: tests that rely on subscription internals should probably
 // be moved into the plugin.
@@ -37,6 +38,7 @@ pub(crate) mod subgraph;
 pub(crate) use callback::SUBSCRIPTION_CALLBACK_HMAC_KEY;
 pub(crate) use execution::SubscriptionExecutionLayer;
 pub(crate) use execution::SubscriptionTaskParams;
+pub(crate) use fetch::fetch_service_handle_subscription;
 
 pub(crate) const APOLLO_SUBSCRIPTION_PLUGIN: &str = "apollo.subscription";
 pub(crate) const APOLLO_SUBSCRIPTION_PLUGIN_NAME: &str = "subscription";

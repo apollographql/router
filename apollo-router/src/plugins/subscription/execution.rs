@@ -1,10 +1,3 @@
-//! The execution-side end of the subscriptions side-channel, which propagates messages from the
-//! subgraph to the client.
-//!
-//! This end receives the messages from the subgraph, executes query plans to resolve federated
-//! data in those messages, and sends the response back on a channel that is part of the eventual
-//! response.
-
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
@@ -45,6 +38,8 @@ const SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE: &str = "SUBSCRIPTION_SCHEMA_REL
 const SUBSCRIPTION_JWT_EXPIRED_EXTENSION_CODE: &str = "SUBSCRIPTION_JWT_EXPIRED";
 const SUBSCRIPTION_EXECUTION_ERROR_EXTENSION_CODE: &str = "SUBSCRIPTION_EXECUTION_ERROR";
 
+/// The execution side of the subscriptions implementation starts up a side-channel task used to
+/// handle messages received from the subgraph that we subscribed to.
 pub(crate) struct SubscriptionExecutionLayer {
     notify: Notify<String, graphql::Response>,
 }
@@ -142,6 +137,12 @@ fn subscription_fatal_error(message: impl Into<String>, extension_code: &str) ->
         .build()
 }
 
+/// The execution-side end of the subscriptions side-channel, which propagates messages from the
+/// subgraph to the client.
+///
+/// This end receives the messages from the subgraph, executes query plans to resolve federated
+/// data in those messages, and sends the response back on a channel that is part of the eventual
+/// response.
 async fn subscription_task(
     execution_service: impl Service<
         ExecutionRequest,
