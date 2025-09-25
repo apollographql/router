@@ -275,7 +275,9 @@ impl CacheStorage for Storage {
         }
 
         // phase 2
-        let mut cache_tags_to_pcks: HashMap<String, Vec<(f64, String)>> = HashMap::default();
+        let num_cache_tags_estimate = 2 * batch_docs.len();
+        let mut cache_tags_to_pcks: HashMap<String, Vec<(f64, String)>> =
+            HashMap::with_capacity(num_cache_tags_estimate);
         for document in &mut batch_docs {
             for cache_tag_key in document.invalidation_keys.drain(..) {
                 let entry = cache_tags_to_pcks.entry(cache_tag_key).or_default();
@@ -413,7 +415,7 @@ impl CacheStorage for Storage {
             join_set.spawn(async move { (subgraph_name, storage.invalidate_internal(keys).await) });
         }
 
-        let mut counts = HashMap::default();
+        let mut counts = HashMap::with_capacity(subgraph_names.len());
         while let Some(result) = join_set.join_next().await {
             let (subgraph_name, count) = result?;
             counts.insert(subgraph_name, count.unwrap_or(0));
