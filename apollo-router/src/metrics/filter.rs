@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use buildstructor::buildstructor;
+use opentelemetry::InstrumentationScope;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Gauge;
@@ -13,6 +14,7 @@ use opentelemetry::metrics::ObservableCounter;
 use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
 use opentelemetry::metrics::UpDownCounter;
+use opentelemetry_sdk::metrics::MeterProviderBuilder;
 use regex::Regex;
 
 #[derive(Clone)]
@@ -28,26 +30,31 @@ impl MeterProvider {
         schema_url: Option<impl Into<Cow<'static, str>>>,
         attributes: Option<Vec<KeyValue>>,
     ) -> Meter {
+        let mut scope_builder = InstrumentationScope::builder(name);
+        if let Some(v) = version {
+            scope_builder = scope_builder.with_version(v);
+        };
+        if let Some(url) = schema_url {
+            scope_builder = scope_builder.with_schema_url(url);
+        };
+        if let Some(attrs) = attributes {
+            scope_builder = scope_builder.with_attributes(attrs);
+        };
+
+        let scope = scope_builder.build();
         match &self {
-            MeterProvider::Regular(provider) => {
-                provider.versioned_meter(name, version, schema_url, attributes)
-            }
-            MeterProvider::Global(provider) => {
-                provider.versioned_meter(name, version, schema_url, attributes)
-            }
+            MeterProvider::Regular(provider) => provider.meter_with_scope(scope),
         }
     }
     fn shutdown(&self) -> opentelemetry_sdk::metrics::MetricResult<()> {
         match self {
             MeterProvider::Regular(provider) => provider.shutdown(),
-            MeterProvider::Global(_provider) => Ok(()),
         }
     }
 
     fn force_flush(&self) -> opentelemetry_sdk::metrics::MetricResult<()> {
         match self {
             MeterProvider::Regular(provider) => provider.force_flush(),
-            MeterProvider::Global(_provider) => Ok(()),
         }
     }
 }
@@ -147,13 +154,14 @@ macro_rules! filter_instrument_fn {
                 (_, _) => {
                     let mut instrument_builder = self.delegate.$name(builder.name);
                     if let Some(ref description) = builder.description {
-                        instrument_builder = instrument_builder.with_description(description.clone());
+                        instrument_builder =
+                            instrument_builder.with_description(description.clone());
                     }
                     if let Some(ref unit) = builder.unit {
                         instrument_builder = instrument_builder.with_unit(unit.clone());
                     }
                     instrument_builder.build()
-                },
+                }
             }
         }
     };
@@ -173,13 +181,14 @@ macro_rules! filter_histogram_fn {
                 (_, _) => {
                     let mut instrument_builder = self.delegate.$name(builder.name);
                     if let Some(ref description) = builder.description {
-                        instrument_builder = instrument_builder.with_description(description.clone());
+                        instrument_builder =
+                            instrument_builder.with_description(description.clone());
                     }
                     if let Some(ref unit) = builder.unit {
                         instrument_builder = instrument_builder.with_unit(unit.clone());
                     }
                     instrument_builder.build()
-                },
+                }
             }
         }
     };
@@ -202,13 +211,14 @@ macro_rules! filter_observable_instrument_fn {
                         instrument_builder = instrument_builder.with_callback(callback);
                     }
                     if let Some(ref description) = builder.description {
-                        instrument_builder = instrument_builder.with_description(description.clone());
+                        instrument_builder =
+                            instrument_builder.with_description(description.clone());
                     }
                     if let Some(ref unit) = builder.unit {
                         instrument_builder = instrument_builder.with_unit(unit.clone());
                     }
                     instrument_builder.build()
-                },
+                }
             }
         }
     };
@@ -251,7 +261,7 @@ impl opentelemetry::metrics::MeterProvider for FilterMeterProvider {
         }))
     }
     fn meter_with_scope(&self, scope: opentelemetry::InstrumentationScope) -> Meter {
-        let provider = MeterProvider::default();
+        let provider = MeterProviderBuilder::default().build();
         provider.meter_with_scope(scope)
     }
 }
