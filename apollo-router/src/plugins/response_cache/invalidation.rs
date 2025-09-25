@@ -85,7 +85,7 @@ impl Invalidation {
     async fn handle_request(
         &self,
         storage: &Storage,
-        request: &mut InvalidationRequest,
+        request: &InvalidationRequest,
     ) -> Result<u64, InvalidationError> {
         let invalidation_key = request.invalidation_key();
         tracing::debug!(
@@ -241,9 +241,9 @@ impl Invalidation {
             };
 
             for storage in storages {
-                let mut request = request.clone();
+                let request = request.clone();
                 let f = async move {
-                    self.handle_request(storage, &mut request)
+                    self.handle_request(storage, &request)
                         .instrument(tracing::info_span!("cache.invalidation.request"))
                         .await
                 };
