@@ -348,7 +348,7 @@ impl CacheStorage for Storage {
             let _: () = pipeline
                 .set::<(), _, _>(
                     document.key,
-                    &serde_json::to_string(&value).unwrap(),
+                    &serde_json::to_string(&value)?,
                     Some(Expiration::EXAT((now + document.expire.as_secs()) as i64)),
                     None,
                     false,
