@@ -112,19 +112,15 @@ impl Storage {
                 .await?;
         }
 
-        let mut all_keys = HashSet::new();
-        let result_vec: Vec<Result<Vec<String>, _>> = pipeline.try_all().await;
-        for result in result_vec {
-            all_keys.extend(result?.into_iter().map(fred::types::Key::from))
-        }
-
+        let results: Vec<Vec<String>> = pipeline.all().await?;
+        let all_keys: HashSet<String> = results.into_iter().flatten().collect();
         if all_keys.is_empty() {
             return Ok(0);
         }
 
         let deleted = self
             .writer_storage
-            .delete_from_scan_result(all_keys.into_iter().collect())
+            .delete_from_scan_result(all_keys.into_iter().map(fred::types::Key::from))
             .await?;
 
         // NOTE: we don't delete elements from the cache tag sorted sets. doing so could get us in trouble
