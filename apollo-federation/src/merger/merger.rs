@@ -438,6 +438,12 @@ impl Merger {
         self.merge_schema_definition()?;
 
         // Merge non-union and non-enum types
+        for type_def in &object_types {
+            self.merge_type(type_def)?;
+        }
+        for type_def in &interface_types {
+            self.merge_type(type_def)?;
+        }
         for type_def in &scalar_types {
             self.merge_type(type_def)?;
         }
@@ -796,14 +802,30 @@ impl Merger {
     }
 
     fn should_merge_type(&self, name: &Name) -> bool {
-        !self
+        if self
+            .merged
+            .schema()
+            .types
+            .get(name)
+            .is_some_and(|ty| ty.is_built_in())
+        {
+            return false;
+        }
+        if self
             .link_spec_definition
             .is_spec_type_name(&self.merged, name)
             .unwrap_or(false)
-            && !self
-                .join_spec_definition
-                .is_spec_type_name(&self.merged, name)
-                .unwrap_or(false)
+        {
+            return false;
+        }
+        if self
+            .join_spec_definition
+            .is_spec_type_name(&self.merged, name)
+            .unwrap_or(false)
+        {
+            return false;
+        }
+        true
     }
 
     fn merge_implements(&mut self, type_def: &Name) -> Result<(), FederationError> {
