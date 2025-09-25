@@ -72,7 +72,18 @@ impl Merger {
                 self.merge_enum(sources, &en)?;
             }
             TypeDefinitionPosition::InputObject(io) => {
-                self.merge_input_object(io);
+                let sources = sources
+                    .iter()
+                    .map(|(idx, pos)| {
+                        if let Some(TypeDefinitionPosition::InputObject(p)) = pos {
+                            let schema = self.subgraphs[*idx].schema().schema();
+                            (*idx, p.get(schema).ok().cloned())
+                        } else {
+                            (*idx, None)
+                        }
+                    })
+                    .collect();
+                self.merge_input(&sources, &io)?;
             }
         }
 

@@ -58,7 +58,6 @@ use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::HasDescription;
 use crate::schema::position::HasType;
-use crate::schema::position::InputObjectTypeDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
@@ -1067,10 +1066,6 @@ impl Merger {
             );
         }
         Ok(!source_as_entity.is_empty())
-    }
-
-    pub(crate) fn merge_input_object(&mut self, _io: InputObjectTypeDefinitionPosition) {
-        todo!("Implement merge_input_object")
     }
 
     fn merge_schema_definition(&mut self) -> Result<(), FederationError> {
