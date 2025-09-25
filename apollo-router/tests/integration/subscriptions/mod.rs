@@ -34,7 +34,7 @@ pub mod ws_passthrough;
 struct SubscriptionServerConfig {
     payloads: Vec<serde_json::Value>,
     interval_ms: u64,
-    terminate_subscription: bool,
+    complete_subscription: bool,
     is_closed: Arc<AtomicBool>,
 }
 
@@ -80,16 +80,25 @@ pub fn create_sub_query(interval_ms: u64, nb_events: usize) -> String {
     )
 }
 
+/// Set up a WebSocket server that sends the given JSON payloads to clients over either of the
+/// GraphQL-over-WS subscription protocols.
+///
+/// # Parameters
+/// - `interval_ms` - time between subscription events
+/// - `complete_subscription` - make the server immediately close the subscription when all events
+/// are sent. If `false`, the subscription remains open, which is useful for testing
+/// client-initiated closing.
+/// - `is_closed` - the server sets this to `true` when any WS connection has closed
 pub async fn start_subscription_server_with_payloads(
     payloads: Vec<serde_json::Value>,
     interval_ms: u64,
-    terminate_subscription: bool,
+    complete_subscription: bool,
     is_closed: Arc<AtomicBool>,
 ) -> (SocketAddr, wiremock::MockServer) {
     let config = SubscriptionServerConfig {
         payloads,
         interval_ms,
-        terminate_subscription,
+        complete_subscription,
         is_closed,
     };
 
@@ -418,7 +427,7 @@ async fn handle_websocket_legacy(socket: WebSocket, config: SubscriptionServerCo
                                 debug!("Sent subscription event {}/{}", i, payloads.len());
                             }
 
-                            if config.terminate_subscription {
+                            if config.complete_subscription {
                                 // Send completion
                                 // TODO(@goto-bus-stop): only when client did not proactively close
                                 // subscription
@@ -601,7 +610,7 @@ async fn handle_websocket_modern(socket: WebSocket, config: SubscriptionServerCo
                                 debug!("Sent subscription event {}/{}", i, payloads.len());
                             }
 
-                            if config.terminate_subscription {
+                            if config.complete_subscription {
                                 // Send completion
                                 // TODO(@goto-bus-stop): only when client did not proactively close
                                 // subscription
