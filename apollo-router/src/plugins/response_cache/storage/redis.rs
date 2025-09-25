@@ -413,6 +413,8 @@ impl CacheStorage for Storage {
         subgraph_names: Vec<String>,
     ) -> StorageResult<HashMap<String, u64>> {
         let mut join_set = JoinSet::default();
+        let num_subgraphs = subgraph_names.len();
+
         for subgraph_name in subgraph_names {
             let keys: Vec<String> = invalidation_keys
                 .iter()
@@ -422,7 +424,7 @@ impl CacheStorage for Storage {
             join_set.spawn(async move { (subgraph_name, storage.invalidate_internal(keys).await) });
         }
 
-        let mut counts = HashMap::with_capacity(subgraph_names.len());
+        let mut counts = HashMap::with_capacity(num_subgraphs);
         while let Some(result) = join_set.join_next().await {
             let (subgraph_name, count) = result?;
             counts.insert(subgraph_name, count.unwrap_or(0));
