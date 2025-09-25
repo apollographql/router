@@ -59,13 +59,13 @@ impl<'a> MetricsBuilder<'a> {
             self.apollo_metrics_sender,
         )
     }
-
     pub(crate) fn configure<T: MetricsConfigurator>(&mut self, config: &T) -> Result<(), BoxError> {
         if config.enabled() {
             return config.apply(self);
         }
         Ok(())
     }
+
     pub(crate) fn new(config: &'a Conf) -> Self {
         let resource = config.exporters.metrics.common.to_resource();
 
@@ -91,7 +91,6 @@ impl<'a> MetricsBuilder<'a> {
         self.apollo_metrics_sender = apollo_metrics_sender;
         self
     }
-
     pub(crate) fn with_reader<T: opentelemetry_sdk::metrics::reader::MetricReader>(
         &mut self,
         meter_provider_type: MeterProviderType,
@@ -139,5 +138,15 @@ impl<'a> MetricsBuilder<'a> {
                 MeterProviderType::Apollo => SdkMeterProvider::builder(),
                 MeterProviderType::ApolloRealtime => SdkMeterProvider::builder(),
             })
+    }
+
+    pub(crate) fn apply_views(
+        &mut self,
+        meter_provider_type: MeterProviderType,
+    ) -> Result<(), BoxError> {
+        for metric_view in self.metrics_common().views.clone() {
+            self.with_view(meter_provider_type, metric_view.try_into()?);
+        }
+        Ok(())
     }
 }

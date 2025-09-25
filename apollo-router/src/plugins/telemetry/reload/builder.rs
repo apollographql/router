@@ -64,11 +64,8 @@ impl<'a> Builder<'a> {
             let mut builder = MetricsBuilder::new(self.config);
             builder.configure(&self.config.exporters.metrics.prometheus)?;
             builder.configure(&self.config.exporters.metrics.otlp)?;
+            builder.apply_views(MeterProviderType::Public)?;
 
-            // Set up the views for this
-            for metric_view in builder.metrics_common().views.clone() {
-                builder.with_view(MeterProviderType::Public, metric_view.try_into()?);
-            }
             let (prometheus_registry, meter_providers, _) = builder.build();
             self.activation
                 .with_prometheus_registry(prometheus_registry);
