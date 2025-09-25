@@ -131,6 +131,16 @@ pub(super) fn record_insert_duration(duration: Duration, subgraph_name: &str, ba
     );
 }
 
+pub(super) fn record_invalidation_duration(duration: Duration, invalidation_kind: &'static str) {
+    f64_histogram_with_unit!(
+        "apollo.router.operations.response_cache.invalidation",
+        "Time to invalidate data in cache",
+        "s",
+        duration.as_secs_f64(),
+        "kind" = invalidation_kind
+    );
+}
+
 /// Restrict `batch_size` cardinality so that it can be used as a metric attribute.
 fn batch_size_str(batch_size: usize) -> &'static str {
     if batch_size <= 10 {

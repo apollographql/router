@@ -13,6 +13,7 @@ use crate::plugins::response_cache::metrics::record_fetch_duration;
 use crate::plugins::response_cache::metrics::record_fetch_error;
 use crate::plugins::response_cache::metrics::record_insert_duration;
 use crate::plugins::response_cache::metrics::record_insert_error;
+use crate::plugins::response_cache::metrics::record_invalidation_duration;
 
 type StorageResult<T> = Result<T, Error>;
 
@@ -151,13 +152,7 @@ pub(super) trait CacheStorage {
                 .await,
         );
 
-        f64_histogram_with_unit!(
-            "apollo.router.operations.response_cache.invalidation",
-            "Time to get invalidate data in cache",
-            "s",
-            now.elapsed().as_secs_f64(),
-            "kind" = INVALIDATION_KIND
-        );
+        record_invalidation_duration(now.elapsed(), INVALIDATION_KIND);
         result
     }
 
@@ -183,14 +178,7 @@ pub(super) trait CacheStorage {
                 .await,
         );
 
-        f64_histogram_with_unit!(
-            "apollo.router.operations.response_cache.invalidation",
-            "Time to get invalidate data in cache",
-            "s",
-            now.elapsed().as_secs_f64(),
-            "kind" = invalidation_kind
-        );
-
+        record_invalidation_duration(now.elapsed(), invalidation_kind);
         result
     }
 
