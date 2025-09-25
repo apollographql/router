@@ -20,15 +20,53 @@ Standard router instruments are different than OpenTelemetry (OTel) instruments 
 
 The rest of this reference lists the available standard router instruments.
 
-### Measuring router overhead
+### Router overhead
 
-Measuring overhead in the router can be challenging because it consists of multiple components, each executing tasks in parallel. Subgraph latency, cache performance, and plugins influence performance and have the potential to cause back pressure. Limitations to CPU, memory, and network bandwidth can all create bottlenecks that hinder request processing. External factors such as request rate and operation complexity heavily affect the router’s overall load.
+`apollo.router.overhead` - time spent in the router not waiting for pending subgraph requests.
 
-You can find the activity of a particular request in its trace spans. Spans have the following attributes:
-  - <code>busy_ns</code> - time in which the span is actively executing
-  - <code>idle_ns</code> - time in which the span is alive, but not actively executing
+Measuring router overhead is a crucial part of observability coverage. Time spent in the router directly impacts every single request to the API gateway.
 
-These attributes represent how a span spends time (in nanoseconds) over its lifetime. Your APM provider can likely use this trace data to generate synthetic metrics which you can then create an approximation of.
+Many factors influence the router’s ability to perform at peak efficiency:
+- Flow and Backpressure
+  - If there's congestion (too many requests or slow subgraphs), backpressure can occur, slowing down the entire system.
+- Interconnectedness
+  - The various components of the router are interconnected, and a problem in one area can affect the entire system’s performance. Similarly, the router's performance is deeply intertwined with subgraph latency, cache performance, and the number of concurrent requests.
+- Capacity and Bottlenecks
+  - Each component in the router has a capacity limit. If a component approaches or exceeds its limit, it can cause delays or timeouts throughout the system. Limitations to CPU, memory, and network bandwidth can create bottlenecks that hinder request processing.
+- Load and Response Time
+  - As more requests need to be processed in parallel, the pressure and time it takes to resolve them increase. Higher request loads lead to increased response times.
+- External Factors
+  - System load is heavily influenced by external factors such as the complexity of incoming operations or the responsiveness of connected services.
+- TODO: telemetry impact?
+
+- TODO: should we bother explaining the variability of a single operation? Example
+- The performance of the same operation hitting the router under different conditions can vary. Depending on different factors, an operation may or may not need to:
+  - spend time authenticating or checking authorization
+  - load data from source (and possibly cache what's retrievd)
+  - access cached data or responses (many layers of caching to account for and measure)
+  - spend time query planning, or access a pre-calculated query plan (cache performance)
+  - spend time in customizations like Coprocessors or Rhai scripts (this can happen at various stages of the request lifecycle, pre and post processing of subgraphs)
+  - make a request to a subgraph, or skip via response caching
+
+- TODO: 
+  - runbook
+  - guidance on cpu and other router resources
+  - when to scale
+
+- example runbook
+  - Your apollo.router.overhead has changed, this guide will help you understand the potential reasons for this which could include:
+
+  - Request concurrency - The larger the number of requests in flght the more time will be spent in the router juggling those requests. This will increase the overhead of the router for all requests, even those that are not currently waiting for subgraphs.
+
+  - Subgraph payloads - larger subgraph payloads will require more compute to deal with, if data being queried is not uniform across all requests then you will see fluctuations in overhead.  
+
+  - CPU saturation - If the CPU is saturated then the overhead metric will report wildly varying results. To effectively use the overhead metric it is advised that CPU does not go above 50% 
+
+  - Throttling - If the router is throttled in a distributed environment the router overhead will spike as it will not have the resource to do work.
+
+  - Changes in router performance - Performance of the router may change version over version. There may be a correctness bug fix or a required architectural change the affects performance. We will always do our best to flag when this happens.
+
+  - Changes in query planning - We do not guarantee that query plans will be identical version over version. Changes in query plans can change the way that data is fetched from subgraph services and therefore router overhead.
 
 ### GraphQL
 
