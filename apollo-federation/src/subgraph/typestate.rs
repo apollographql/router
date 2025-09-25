@@ -1609,7 +1609,10 @@ mod tests {
         // This test used to panic.
         // The `_Entity` type is not expected to be defined, but defined.
         let schema_doc = r#"
-            union _Entity = Int
+            type X {
+                data: Int!
+            }
+            union _Entity = X
         "#;
         Subgraph::parse("subgraph", "subgraph.graphql", schema_doc)
             .expect("parses schema")
