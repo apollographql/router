@@ -60,7 +60,7 @@ impl<'a> Builder<'a> {
         if self.metrics_config_changed::<metrics::prometheus::Config>()
             || self.metrics_config_changed::<otlp::Config>()
         {
-            ::tracing::info!("setting up metrics exporter");
+            ::tracing::debug!("configuring metrics");
             let mut builder = MetricsBuilder::new(self.config);
             builder.configure(&self.config.exporters.metrics.prometheus)?;
             builder.configure(&self.config.exporters.metrics.otlp)?;
@@ -76,8 +76,6 @@ impl<'a> Builder<'a> {
         if let Some(prometheus_registry) = self.activation.prometheus_registry() {
             let listen = self.config.exporters.metrics.prometheus.listen.clone();
             let path = self.config.exporters.metrics.prometheus.path.clone();
-            tracing::info!("Prometheus endpoint exposed at {}{}", listen, path);
-
             self.endpoints.insert(
                 listen,
                 Endpoint::from_router_service(
@@ -98,6 +96,7 @@ impl<'a> Builder<'a> {
             || self.tracing_config_changed::<zipkin::Config>()
             || self.tracing_config_changed::<apollo::Config>()
         {
+            ::tracing::debug!("configuring tracing");
             let mut builder = TracingBuilder::new(self.config);
             builder.configure(&self.config.exporters.tracing.otlp)?;
             builder.configure(&self.config.exporters.tracing.zipkin)?;
@@ -110,6 +109,7 @@ impl<'a> Builder<'a> {
     }
 
     fn setup_apollo_metrics(&mut self) -> Result<(), BoxError> {
+        ::tracing::debug!("configuring Apollo metrics");
         // There is no change detection for apollo metrics because we
         // have a custom sender and this MUST be populated on every reload
         let mut builder = MetricsBuilder::new(self.config);
@@ -151,6 +151,7 @@ impl<'a> Builder<'a> {
     }
 
     fn setup_logging(&mut self) {
+        ::tracing::debug!("configuring logging");
         self.activation.with_logging(create_fmt_layer(self.config));
     }
 }
