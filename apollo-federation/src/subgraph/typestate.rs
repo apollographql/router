@@ -164,12 +164,15 @@ impl Subgraph<Initial> {
         url: &str,
         schema_str: &str,
     ) -> Result<Subgraph<Initial>, SubgraphError> {
-        let schema = Schema::builder()
+        let mut schema = Schema::builder()
             .adopt_orphan_extensions()
             .ignore_builtin_redefinitions()
             .parse(schema_str, name)
             .build()
             .map_err(|e| SubgraphError::from_diagnostic_list(name, e.errors))?;
+
+        // Simulate graphql-js behavior accepting duplicate argument definitions.
+        parser_backward_compatibility::remove_duplicate_arguments(&mut schema);
 
         Ok(Self::new(name, url, schema))
     }
@@ -240,6 +243,57 @@ impl Subgraph<Initial> {
             url: self.url,
             state: Expanded { schema, metadata },
         })
+    }
+}
+
+mod parser_backward_compatibility {
+    use apollo_compiler::Schema;
+    use apollo_compiler::collections::IndexMap;
+    use apollo_compiler::schema::ExtendedType;
+
+    use super::*;
+
+    /// Remove duplicate argument definitions in the schema
+    /// * If same argument is defined multiple times, keep the last one.
+    /// * Note: This was the legacy graphql-js behavior before 2025 GraphQL spec revision
+    ///   invalidated duplicate arguments.
+    pub(super) fn remove_duplicate_arguments(schema: &mut Schema) {
+        for (_, type_def) in &mut schema.types {
+            match type_def {
+                ExtendedType::Object(obj) => {
+                    let obj_mut = obj.make_mut();
+                    remove_duplicate_arguments_in_fields(&mut obj_mut.fields);
+                }
+                ExtendedType::Interface(interface) => {
+                    let interface_mut = interface.make_mut();
+                    remove_duplicate_arguments_in_fields(&mut interface_mut.fields);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn remove_duplicate_arguments_in_fields(
+        fields: &mut IndexMap<Name, Component<ast::FieldDefinition>>,
+    ) {
+        for (_, field) in fields {
+            let unique_arguments = deduped_arguments(field.arguments.iter().cloned());
+            if unique_arguments.len() != field.arguments.len() {
+                let field_mut = field.make_mut();
+                field_mut.arguments = unique_arguments;
+            }
+        }
+    }
+
+    /// If same argument is defined multiple times, keep the last one.
+    fn deduped_arguments(
+        arguments: impl Iterator<Item = Node<ast::InputValueDefinition>>,
+    ) -> Vec<Node<ast::InputValueDefinition>> {
+        let mut last_defs = IndexMap::default();
+        for arg in arguments {
+            _ = last_defs.insert(arg.name.clone(), arg);
+        }
+        last_defs.into_values().collect()
     }
 }
 
@@ -1587,5 +1641,28 @@ mod tests {
             .expect("parses schema")
             .expand_links()
             .expect("expands links");
+    }
+
+    #[test]
+    fn accept_duplicate_argument_definitions() {
+        // Check if we simulate graphql-js behavior of accepting duplicate argument definitions.
+        let schema_doc = r#"
+            type Query {
+                test_root_field(
+                    arg1: Boolean
+
+                    "some description"
+                    arg1: Boolean # duplicate
+                ): Int
+            }
+        "#;
+        // This test used to fail to validate.
+        Subgraph::parse("subgraph", "subgraph.graphql", schema_doc)
+            .expect("parses schema")
+            .expand_links()
+            .expect("expands links")
+            .assume_upgraded()
+            .validate()
+            .expect("validate subgraph");
     }
 }
