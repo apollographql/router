@@ -1,0 +1,36 @@
+---
+title: Response caching customization for the GraphOS Router
+description: Response caching customization for GraphOS Router with GraphOS Enterprise.
+minVersion: Router v2.8.0
+releaseStage: preview
+---
+
+
+## Customize Redis cache key
+
+If you need to store data for a particular request in different cache entries, you can configure the cache key through the `apollo::response_cache::key` context entry.
+
+This entry contains an object with the `all` field to affect all subgraph requests under one client request, and fields named after subgraph operation names to affect individual subgraph queries. The field's value can be any valid JSON value (object, string, etc).
+
+```json
+{
+    "all": 1,
+    "subgraph_operation1": "key1",
+    "subgraph_operation2": {
+      "data": "key2"
+    }
+}
+```
+
+Example in Rhai:
+
+```rhai title="main.rhai"
+fn supergraph_service(service) {
+  let request_callback = |request| {
+    // Include the request header value of "x-my-new-header" in the primary cache key hash to create an unique cache entry for every values of this header
+    request.context[Router.APOLLO_RESPONSE_CACHE_KEY]["all"] = request.headers["x-my-new-header"]; // Applied on all subgraphs
+  };
+
+  service.map_request(request_callback);
+}
+```

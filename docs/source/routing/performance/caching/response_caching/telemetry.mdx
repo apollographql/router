@@ -1,0 +1,34 @@
+---
+title: Response caching telemetry for the GraphOS Router
+description: Response caching telemetry for GraphOS Router with GraphOS Enterprise. across queries.
+minVersion: Router v2.8.0
+releaseStage: preview
+---
+
+## Metrics
+
+| Name | Description | Unit |
+| --- | --- | --- |
+| `apollo.router.response_cache.data.expired` | Count of expired data entries still in database | `{entry}` |
+| `apollo.router.operations.response_cache.fetch.error` | Errors when fetching data from cache | `{error}` |
+| `apollo.router.operations.response_cache.fetch` | Time to fetch data from cache | `s` |
+| `apollo.router.operations.response_cache.insert.error` | Errors when inserting data in cache | `{error}` |
+| `apollo.router.operations.response_cache.insert` | Time to insert new data in cache | `s` |
+| `apollo.router.operations.response_cache.fetch.entity` | Number of entities per subgraph fetch node | `{entity}` |
+| `apollo.router.response_cache.reconnection` | Number of reconnections to the cache storage | `{retry}` |
+| `apollo.router.operations.response_cache.invalidation.event` | Response cache received a batch of invalidation requests | `{request}` |
+| `apollo.router.operations.response_cache.invalidation.error` | Errors when invalidating data in cache | `{error}` |
+| `apollo.router.operations.response_cache.invalidation.entry` | Response cache counter for invalidated entries | `{entry}` |
+| `apollo.router.operations.response_cache.invalidation.request.entry` | Number of invalidated entries per invalidation request. | `{entry}` |
+| `apollo.router.operations.response_cache.invalidation.duration` | Duration of the invalidation event execution, in seconds. | `s` |
+| `apollo.router.response_cache.private_queries.lru.size` | LRU cache size for private queries fetched | `{query}` |
+
+//TODO add all metrics for Redis
+
+## Traces
+
+// TODO
+
+## Logs
+
+//TODO

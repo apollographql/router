@@ -1,0 +1,29 @@
+---
+title: Response caching FAQ for the GraphOS Router
+description: Response caching FAQ for GraphOS Router with GraphOS Enterprise.
+minVersion: Router v2.8.0
+releaseStage: preview
+---
+
+// TODO turn it into FAQ
+## Implementation notes
+
+### Cache-Control header requirement
+
+The Router currently cannot know which types or fields should be cached, so it requires the subgraph to set a `Cache-Control` header in its response to indicate that it should be stored.
+
+### Responses with errors not cached
+
+To prevent transient errors from affecting the cache for a long duration, subgraph responses with errors are not cached.
+
+### Cached entities with unavailable subgraph
+
+If some entities were obtained from the cache, but the subgraphs that provided them are unavailable, the router will return a response with the cached entities, and the other entities nullified (schema permitting), along with an error message for the nullified entities.
+
+### Authorization and entity caching
+
+When used alongside the router's [authorization directives](/router/configuration/authorization), cache entries are separated by authorization context. If a query contains fields that need a specific scope, the requests providing that scope have different cache entries from those not providing the scope. This means that data requiring authorization can still be safely cached and even shared across users, without needing invalidation when a user's roles change because their requests are automatically directed to a different part of the cache.
+
+### Schema updates and entity caching
+
+On schema updates, the router ensures that queries unaffected (it's unaffected if the subgraph schema doesn't change) by the changes keep their cache entries. Queries with affected fields need to be cached again to ensure the router doesn't serve invalid data from before the update.

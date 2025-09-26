@@ -1,0 +1,53 @@
+---
+title: Response caching TTLs for the GraphOS Router
+description: Response caching TTLs for GraphOS Router with GraphOS Enterprise.
+minVersion: Router v2.8.0
+releaseStage: preview
+---
+
+## Configure time to live (TTL)
+
+Besides configuring a global TTL for all the entries in Redis, the GraphOS Router also honors the [`Cache-Control` header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control) returned with the subgraph response. It generates a `Cache-Control` header for the client response by aggregating the TTL information from all response parts.
+A TTL has to be configured for all subgraphs using entity caching, either defined in the per subgraph configuration or inherited from the global configuration, in case the subgraph returns a `Cache-Control` header without a `max-age`.
+
+
+If you're using Apollo server for your subgraph you can benefit from [`@cacheControl` directive](https://www.apollographql.com/docs/apollo-server/api/plugin/cache-control) available as a plugin called `ApolloServerPluginCacheControl`. This plugin will let you mark data in your subgraph schema to set custom TTL which will be translated into `Cache-Control` header.
+
+Here is an example of schema using both `@cacheTag` and `@cacheControl` directives:
+
+```graphql
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/federation/v2.12"
+    import: ["@key", "@requires", "@external", "@cacheTag"]
+  )
+
+enum CacheControlScope {
+  PUBLIC
+  PRIVATE
+}
+directive @cacheControl(
+  maxAge: Int
+  scope: CacheControlScope
+  inheritMaxAge: Boolean
+) on FIELD_DEFINITION | OBJECT | INTERFACE | UNION
+
+type Query {
+  user(id: ID!): User
+  users: [User!]!
+}
+
+type User @key(fields: "id") @cacheTag(format: "user-{$key.id}") @cacheControl(maxAge: 10) {
+  id: ID!
+  name: String!
+  email: String!
+  posts: [Post!]! @external
+}
+
+type Post @key(fields: "id") {
+  id: ID!
+  content: String! @external
+}
+```
+
+In this example you'll have the type `User` with a TTL set to 10 seconds and a cache tag set to `user-42` if user id is `42`.

@@ -18,7 +18,7 @@ Learn how the GraphOS Router can cache subgraph query responses using Redis to i
 
 ## Overview
 
-An entity gets its fields from one or more subgraphs. To respond to a client request for an entity, the GraphOS Router must make multiple subgraph requests. Different clients requesting the same entity can make redundant, identical subgraph requests. 
+An entity gets its fields from one or more subgraphs. To respond to a client request for an entity, the GraphOS Router must make multiple subgraph requests. Different clients requesting the same entity can make redundant, identical subgraph requests.
 
 Entity caching enables the router to respond to identical subgraph queries with cached subgraph responses. The router uses Redis to cache data from subgraph query responses. Because cached data is keyed per subgraph and entity, different clients making the same client query&mdash;with the same or different query arguments&mdash;hit the same cache entries of subgraph response data.
 
@@ -26,7 +26,7 @@ Entity caching enables the router to respond to identical subgraph queries with 
 
 Compared to caching entire client responses, entity caching supports finer control over:
 - the time to live (TTL) of cached data
-- the amount of data being cached 
+- the amount of data being cached
 
 When caching an entire client response, the router must store it with a shorter TTL because application data can change often. Real-time data needs more frequent updates.
 
@@ -83,7 +83,7 @@ flowchart RL
 			&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&quot;quantity&quot;: &quot;250&quot;
 			&emsp;&emsp;&emsp;&emsp;},
 			&emsp;&emsp;&emsp;&emsp;...
-			&emsp;&emsp;]		
+			&emsp;&emsp;]
 		}"]
     end
 
@@ -367,7 +367,7 @@ Invalidation requests are defined as JSON objects with the following format:
 
 <Note>
 
-The key field is the same argument as defined in the subgraph's `@key` directive. If a subgraph has multiple keys defined and the entity is being invalidated, it is likely you'll need to send a request for each key definition. 
+The key field is the same argument as defined in the subgraph's `@key` directive. If a subgraph has multiple keys defined and the entity is being invalidated, it is likely you'll need to send a request for each key definition.
 
 </Note>
 
@@ -441,7 +441,7 @@ Entity caching will greatly reduce traffic to subgraphs. Should there be an avai
 
 #### Scalability and performance
 
-The scalability and performance of entity cache invalidation is based on its implementation with the Redis [`SCAN` command](https://redis.io/docs/latest/commands/scan/). The `SCAN` command provides a cursor for iterating over the entire key space and returns a list of keys matching a pattern. When executing an invalidation request, the router first runs a series of `SCAN` calls and then it runs [`DEL`](https://redis.io/docs/latest/commands/del/) calls for any matching keys. 
+The scalability and performance of entity cache invalidation is based on its implementation with the Redis [`SCAN` command](https://redis.io/docs/latest/commands/scan/). The `SCAN` command provides a cursor for iterating over the entire key space and returns a list of keys matching a pattern. When executing an invalidation request, the router first runs a series of `SCAN` calls and then it runs [`DEL`](https://redis.io/docs/latest/commands/del/) calls for any matching keys.
 
 The time complexity of a single invalidation request grows linearly with the number of entries, as each entry requires `SCAN` to iterate over. The router can also execute multiple invalidation requests simultaneously. This lowers latency but might increase the load on Redis instances.
 
@@ -582,4 +582,4 @@ When used alongside the router's [authorization directives](/router/configuratio
 
 ### Schema updates and entity caching
 
-On schema updates, the router ensures that queries unaffected by the changes keep their cache entries. Queries with affected fields need to be cached again to ensure the router doesn't serve invalid data from before the update.
+On schema updates, the router ensures that queries unaffected (it's unaffected if the subgraph schema doesn't change) by the changes keep their cache entries. Queries with affected fields need to be cached again to ensure the router doesn't serve invalid data from before the update.
