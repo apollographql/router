@@ -1729,6 +1729,52 @@ expression: "&schema"
     },
     "Config6": {
       "additionalProperties": false,
+      "description": "Configuration for response caching",
+      "properties": {
+        "debug": {
+          "default": false,
+          "description": "Enable debug mode for the debugger",
+          "type": "boolean"
+        },
+        "enabled": {
+          "default": false,
+          "description": "Enable or disable the response caching feature",
+          "type": "boolean"
+        },
+        "invalidation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/InvalidationEndpointConfig2"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Global invalidation configuration"
+        },
+        "private_queries_buffer_size": {
+          "default": 2048,
+          "description": "Buffer size for known private queries (default: 2048)",
+          "format": "uint",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "subgraph": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/SubgraphSubgraphConfiguration2"
+            }
+          ],
+          "description": "Configure invalidation per subgraph"
+        }
+      },
+      "required": [
+        "subgraph"
+      ],
+      "type": "object"
+    },
+    "Config7": {
+      "additionalProperties": false,
       "description": "Postgres cache configuration",
       "properties": {
         "acquire_timeout": {
@@ -1816,52 +1862,6 @@ expression: "&schema"
       },
       "required": [
         "url"
-      ],
-      "type": "object"
-    },
-    "Config7": {
-      "additionalProperties": false,
-      "description": "Configuration for response caching",
-      "properties": {
-        "debug": {
-          "default": false,
-          "description": "Enable debug mode for the debugger",
-          "type": "boolean"
-        },
-        "enabled": {
-          "default": false,
-          "description": "Enable or disable the response caching feature",
-          "type": "boolean"
-        },
-        "invalidation": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/InvalidationEndpointConfig2"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Global invalidation configuration"
-        },
-        "private_queries_buffer_size": {
-          "default": 2048,
-          "description": "Buffer size for known private queries (default: 2048)",
-          "format": "uint",
-          "minimum": 1,
-          "type": "integer"
-        },
-        "subgraph": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/SubgraphSubgraphConfiguration2"
-            }
-          ],
-          "description": "Configure invalidation per subgraph"
-        }
-      },
-      "required": [
-        "subgraph"
       ],
       "type": "object"
     },
@@ -8677,18 +8677,6 @@ expression: "&schema"
           "default": null,
           "description": "Invalidation configuration"
         },
-        "postgres": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Config6"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "PostgreSQL configuration"
-        },
         "private_id": {
           "default": null,
           "description": "Context key used to separate cache sections per user",
@@ -8751,7 +8739,7 @@ expression: "&schema"
         "postgres": {
           "anyOf": [
             {
-              "$ref": "#/definitions/PostgresCacheConfig"
+              "$ref": "#/definitions/Config7"
             },
             {
               "type": "null"
@@ -11618,7 +11606,6 @@ expression: "&schema"
       "description": "Plugin configuration"
     },
     "preview_entity_cache": {
-      "$ref": "#/definitions/Config7"
       "$ref": "#/definitions/Config5"
     },
     "preview_file_uploads": {
