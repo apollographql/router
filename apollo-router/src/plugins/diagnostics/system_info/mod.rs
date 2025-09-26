@@ -508,15 +508,15 @@ async fn detect_effective_cpu_count(system_cpus: u64) -> (&'static str, u64) {
             // cgroup v1: read from separate quota and period files
             let quota = tokio::fs::read_to_string("/sys/fs/cgroup/cpu/cpu.cfs_quota_us")
                 .await
-                .map(|s| s.trim().to_string())
                 .ok();
             let period = tokio::fs::read_to_string("/sys/fs/cgroup/cpu/cpu.cfs_period_us")
                 .await
-                .map(|s| s.trim().to_string())
                 .ok();
 
             match (quota, period) {
                 (Some(quota), Some(period)) => {
+                    let quota = quota.trim();
+                    let period = period.trim();
                     if quota == "-1" {
                         ("system", system_cpus)
                     } else {
