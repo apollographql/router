@@ -601,7 +601,7 @@ async fn integration_test_basic() -> Result<(), BoxError> {
     });
     let supergraph = apollo_router::TestHarness::builder()
         .configuration_json(json!({
-            "experimental_response_cache": {
+            "preview_response_cache": {
                 "enabled": true,
                 "debug": true,
                 "invalidation": {
@@ -669,7 +669,7 @@ async fn integration_test_basic() -> Result<(), BoxError> {
 
     let supergraph = apollo_router::TestHarness::builder()
         .configuration_json(json!({
-            "experimental_response_cache": {
+            "preview_response_cache": {
                 "enabled": true,
                 "debug": true,
                 "invalidation": {
@@ -730,7 +730,7 @@ async fn integration_test_basic() -> Result<(), BoxError> {
     const SECRET_SHARED_KEY: &str = "supersecret";
     let http_service = apollo_router::TestHarness::builder()
         .configuration_json(json!({
-            "experimental_response_cache": {
+            "preview_response_cache": {
                 "enabled": true,
                 "invalidation": {
                     "listen": "127.0.0.1:4000",
@@ -886,7 +886,7 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
 
     let supergraph = apollo_router::TestHarness::builder()
         .configuration_json(json!({
-            "experimental_response_cache": {
+            "preview_response_cache": {
                 "enabled": true,
                 "debug": true,
                 "invalidation": {
@@ -943,7 +943,7 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
 
     let supergraph = apollo_router::TestHarness::builder()
         .configuration_json(json!({
-            "experimental_response_cache": {
+            "preview_response_cache": {
                 "enabled": true,
                 "debug": true,
                 "invalidation": {
@@ -1003,7 +1003,7 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
     const SECRET_SHARED_KEY: &str = "supersecret";
     let http_service = apollo_router::TestHarness::builder()
         .configuration_json(json!({
-            "experimental_response_cache": {
+            "preview_response_cache": {
                 "enabled": true,
                 "debug": true,
                 "invalidation": {
