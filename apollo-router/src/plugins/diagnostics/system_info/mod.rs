@@ -217,20 +217,7 @@ async fn collect_cpu_info(info: &mut String, system: &System) {
 async fn collect_enhanced_container_cpu_info(info: &mut String, system: &System) {
     info.push_str("\nContainer/Kubernetes CPU Information:\n");
 
-    let system_cpus = system.cpus().len() as u64;
-    let (detection_method, effective_cpu_count) = detect_effective_cpu_count(system_cpus).await;
-
-    info.push_str(&format!(
-        "Effective CPU Count: {} (detected via: {})\n",
-        effective_cpu_count, detection_method
-    ));
-
-    if effective_cpu_count != system_cpus {
-        info.push_str(&format!(
-            "Note: System reports {} CPUs, but container is limited to {}\n",
-            system_cpus, effective_cpu_count
-        ));
-    }
+    collect_effective_cpu_count(info, system).await;
 
     // Check CPU shares/weight (relative priority)
     collect_cpu_priority_info(info).await;
@@ -464,6 +451,24 @@ pub(crate) fn get_normalized_arch() -> &'static str {
         "powerpc" => "ppc32",
         "powerpc64" => "ppc64",
         arch => arch,
+    }
+}
+
+/// Collect effective CPU count information
+async fn collect_effective_cpu_count(info: &mut String, system: &System) {
+    let system_cpus = system.cpus().len() as u64;
+    let (detection_method, effective_cpu_count) = detect_effective_cpu_count(system_cpus).await;
+
+    info.push_str(&format!(
+        "Effective CPU Count: {} (detected via: {})\n",
+        effective_cpu_count, detection_method
+    ));
+
+    if effective_cpu_count != system_cpus {
+        info.push_str(&format!(
+            "Note: System reports {} CPUs, but container is limited to {}\n",
+            system_cpus, effective_cpu_count
+        ));
     }
 }
 
