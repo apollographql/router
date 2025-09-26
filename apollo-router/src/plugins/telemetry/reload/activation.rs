@@ -166,9 +166,9 @@ impl Activation {
             hot_tracer.reload(tracer);
 
             let last_provider = opentelemetry::global::set_tracer_provider(tracer_provider);
-            checked_spawn_task(Box::new(move || {
+            spawn_blocking_safe_task(move || {
                 drop(last_provider);
-            }));
+            });
         }
     }
 
@@ -204,15 +204,15 @@ impl Activation {
 impl Drop for Activation {
     fn drop(&mut self) {
         for (_, meter_provider) in std::mem::take(&mut self.meter_providers) {
-            checked_spawn_task(Box::new(move || {
+            spawn_blocking_safe_task(move || {
                 drop(meter_provider);
-            }));
+            });
         }
 
         if let Some(tracer_provider) = self.trace_provider.take() {
-            checked_spawn_task(Box::new(move || {
+            spawn_blocking_safe_task(move || {
                 drop(tracer_provider);
-            }));
+            });
         }
     }
 }
@@ -226,7 +226,7 @@ impl Drop for Activation {
 ///    cause the thread to terminate which isn't ideal. Let's just run it in the current
 ///    thread. This won't affect router performance since that will always be within the
 ///    context of tokio.
-fn checked_spawn_task(task: Box<dyn FnOnce() + Send + 'static>) {
+fn spawn_blocking_safe_task<F: FnOnce() + Send + 'static>(task: F) {
     match Handle::try_current() {
         Ok(hdl) => {
             hdl.spawn_blocking(move || {
