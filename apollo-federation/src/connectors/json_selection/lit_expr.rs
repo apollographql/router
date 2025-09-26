@@ -17,9 +17,9 @@ use nom::sequence::pair;
 use nom::sequence::preceded;
 use nom::sequence::tuple;
 
-use super::ExternalVarPaths;
 use super::ParseResult;
 use super::PathList;
+use super::VarPaths;
 use super::helpers::spaces_or_comments;
 use super::location::Ranged;
 use super::location::Span;
@@ -421,31 +421,31 @@ impl LitExpr {
     }
 }
 
-impl ExternalVarPaths for LitExpr {
-    fn external_var_paths(&self) -> Vec<&PathSelection> {
+impl VarPaths for LitExpr {
+    fn var_paths(&self) -> Vec<&PathSelection> {
         let mut paths = vec![];
         match self {
             Self::String(_) | Self::Number(_) | Self::Bool(_) | Self::Null => {}
             Self::Object(map) => {
                 for value in map.values() {
-                    paths.extend(value.external_var_paths());
+                    paths.extend(value.var_paths());
                 }
             }
             Self::Array(vec) => {
                 for value in vec {
-                    paths.extend(value.external_var_paths());
+                    paths.extend(value.var_paths());
                 }
             }
             Self::Path(path) => {
-                paths.extend(path.external_var_paths());
+                paths.extend(path.var_paths());
             }
             Self::LitPath(literal, subpath) => {
-                paths.extend(literal.external_var_paths());
-                paths.extend(subpath.external_var_paths());
+                paths.extend(literal.var_paths());
+                paths.extend(subpath.var_paths());
             }
             Self::OpChain(_, operands) => {
                 for operand in operands {
-                    paths.extend(operand.external_var_paths());
+                    paths.extend(operand.var_paths());
                 }
             }
         }

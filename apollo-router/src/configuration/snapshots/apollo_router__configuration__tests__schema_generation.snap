@@ -1682,6 +1682,53 @@ expression: "&schema"
     },
     "Config5": {
       "additionalProperties": false,
+      "description": "Configuration for entity caching",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Enable or disable the entity caching feature",
+          "type": "boolean"
+        },
+        "expose_keys_in_context": {
+          "default": false,
+          "description": "Expose cache keys in context",
+          "type": "boolean"
+        },
+        "invalidation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/InvalidationEndpointConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Global invalidation configuration"
+        },
+        "metrics": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Metrics"
+            }
+          ],
+          "description": "Entity caching evaluation metrics"
+        },
+        "subgraph": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/SubgraphSubgraphConfiguration"
+            }
+          ],
+          "description": "Configure invalidation per subgraph"
+        }
+      },
+      "required": [
+        "subgraph"
+      ],
+      "type": "object"
+    },
+    "Config6": {
+      "additionalProperties": false,
       "description": "Configuration for response caching",
       "properties": {
         "debug": {
@@ -1697,7 +1744,7 @@ expression: "&schema"
         "invalidation": {
           "anyOf": [
             {
-              "$ref": "#/definitions/InvalidationEndpointConfig"
+              "$ref": "#/definitions/InvalidationEndpointConfig2"
             },
             {
               "type": "null"
@@ -1715,7 +1762,7 @@ expression: "&schema"
         "subgraph": {
           "allOf": [
             {
-              "$ref": "#/definitions/SubgraphSubgraphConfiguration"
+              "$ref": "#/definitions/SubgraphSubgraphConfiguration2"
             }
           ],
           "description": "Configure invalidation per subgraph"
@@ -1726,7 +1773,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config6": {
+    "Config7": {
       "additionalProperties": false,
       "description": "Configuration for entity caching",
       "properties": {
@@ -1770,6 +1817,94 @@ expression: "&schema"
       },
       "required": [
         "subgraph"
+      ],
+      "description": "Postgres cache configuration",
+      "properties": {
+        "acquire_timeout": {
+          "default": {
+            "nanos": 50000000,
+            "secs": 0
+          },
+          "description": "PostgreSQL the maximum amount of time to spend waiting for a connection (default: 50ms)",
+          "type": "string"
+        },
+        "batch_size": {
+          "default": 100,
+          "description": "The size of batch when inserting cache entries in PG (default: 100)",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cleanup_interval": {
+          "default": {
+            "nanos": 0,
+            "secs": 3600
+          },
+          "description": "Specifies the interval between cache cleanup operations (e.g., \"2 hours\", \"30min\"). Default: 1 hour",
+          "type": "string"
+        },
+        "idle_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 60
+          },
+          "description": "PostgreSQL maximum idle duration for individual connection (default: 1min)",
+          "type": "string"
+        },
+        "namespace": {
+          "default": null,
+          "description": "Useful when running tests in parallel to avoid conflicts",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "password": {
+          "description": "PostgreSQL password if not provided in the URLs. This field takes precedence over the password in the URL",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pool_size": {
+          "default": 5,
+          "description": "The size of the PostgreSQL connection pool",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "required_to_start": {
+          "default": false,
+          "description": "Prevents the router from starting if it cannot connect to PostgreSQL",
+          "type": "boolean"
+        },
+        "tls": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/TlsConfig"
+            }
+          ],
+          "default": {
+            "certificate_authorities": null,
+            "client_authentication": null
+          },
+          "description": "Postgres TLS client configuration"
+        },
+        "url": {
+          "description": "List of URL to Postgres",
+          "format": "uri",
+          "type": "string"
+        },
+        "username": {
+          "description": "PostgreSQL username if not provided in the URLs. This field takes precedence over the username in the URL",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "url"
       ],
       "type": "object"
     },
@@ -5723,28 +5858,6 @@ expression: "&schema"
     "InvalidationEndpointConfig": {
       "additionalProperties": false,
       "properties": {
-        "listen": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/ListenAddr"
-            }
-          ],
-          "description": "Listen address on which the invalidation endpoint must listen."
-        },
-        "path": {
-          "description": "Specify on which path you want to listen for invalidation endpoint.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "path",
-        "listen"
-      ],
-      "type": "object"
-    },
-    "InvalidationEndpointConfig2": {
-      "additionalProperties": false,
-      "properties": {
         "concurrent_requests": {
           "default": 10,
           "description": "Number of concurrent invalidation requests",
@@ -5770,6 +5883,28 @@ expression: "&schema"
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "listen"
+      ],
+      "type": "object"
+    },
+    "InvalidationEndpointConfig2": {
+      "additionalProperties": false,
+      "properties": {
+        "listen": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ListenAddr"
+            }
+          ],
+          "description": "Listen address on which the invalidation endpoint must listen."
+        },
+        "path": {
+          "description": "Specify on which path you want to listen for invalidation endpoint.",
+          "type": "string"
         }
       },
       "required": [
@@ -6180,7 +6315,7 @@ expression: "&schema"
         "ttl": {
           "anyOf": [
             {
-              "$ref": "#/definitions/Ttl2"
+              "$ref": "#/definitions/Ttl"
             },
             {
               "type": "null"
@@ -8563,7 +8698,7 @@ expression: "&schema"
     },
     "Subgraph": {
       "additionalProperties": false,
-      "description": "Per subgraph configuration for response caching",
+      "description": "Per subgraph configuration for entity caching",
       "properties": {
         "enabled": {
           "default": true,
@@ -8622,7 +8757,7 @@ expression: "&schema"
     },
     "Subgraph2": {
       "additionalProperties": false,
-      "description": "Per subgraph configuration for entity caching",
+      "description": "Per subgraph configuration for response caching",
       "properties": {
         "enabled": {
           "default": true,
@@ -8644,6 +8779,18 @@ expression: "&schema"
           "default": null,
           "description": "Invalidation configuration"
         },
+        "postgres": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Config7"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "PostgreSQL configuration"
+        },
         "private_id": {
           "default": null,
           "description": "Context key used to separate cache sections per user",
@@ -8651,18 +8798,6 @@ expression: "&schema"
             "string",
             "null"
           ]
-        },
-        "redis": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/RedisCache"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Redis configuration"
         },
         "ttl": {
           "anyOf": [
@@ -9811,8 +9946,8 @@ expression: "&schema"
           "default": {
             "enabled": true,
             "invalidation": null,
+            "postgres": null,
             "private_id": null,
-            "redis": null,
             "ttl": null
           },
           "description": "options applying to all subgraphs"
@@ -10972,11 +11107,11 @@ expression: "&schema"
       "type": "object"
     },
     "Ttl": {
-      "description": "Per subgraph configuration for response caching",
+      "description": "Per subgraph configuration for entity caching",
       "type": "string"
     },
     "Ttl2": {
-      "description": "Per subgraph configuration for entity caching",
+      "description": "Per subgraph configuration for response caching",
       "type": "string"
     },
     "TypeName": {
@@ -11283,8 +11418,8 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "^experimental_response_cache$": {
-      "$ref": "#/definitions/Config5"
+    "^preview_response_cache$": {
+      "$ref": "#/definitions/Config6"
     }
   },
   "properties": {

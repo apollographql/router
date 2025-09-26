@@ -41,7 +41,7 @@ impl Merger {
                 self.merge_object(obj)?;
             }
             TypeDefinitionPosition::Interface(itf) => {
-                self.merge_interface(itf);
+                self.merge_interface(itf)?;
             }
             TypeDefinitionPosition::Union(un) => {
                 let sources = sources
