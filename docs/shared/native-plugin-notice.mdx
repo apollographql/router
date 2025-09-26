@@ -4,7 +4,7 @@
 - Native plugins require familiarity with programming in Rust.
 - Native plugins require compiling a custom router binary from source, which can introduce unexpected behavior in your router that's difficult to diagnose and support.
 
-The recommended approach for router customizations is to use a [Rhai script](https://www.apollographql.com/docs/graphos/routing/customization/rhai/) or an [external coprocessor](https://www.apollographql.com/docs/router/customizations/coprocessor). Both options are officially supported by Apollo and provide strong separation of concerns and fault isolation.
+The recommended approach for router customizations is to use a [Rhai script](https://www.apollographql.com/docs/graphos/routing/customization/rhai/). For more advanced use cases, you can use an [external coprocessor](https://www.apollographql.com/docs/router/customizations/coprocessor). Both options are officially supported by Apollo and provide strong separation of concerns and fault isolation.
 
 Although you can still use native plugins and custom router binaries, Apollo Support can't provide troubleshooting support or fixes for these customizations.
 
