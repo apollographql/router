@@ -12,14 +12,8 @@ use sysinfo::System;
 
 use crate::plugins::diagnostics::DiagnosticsResult;
 
-/// Collect system information
-///
-/// SECURITY WARNING: This function collects extensive system information that may be sensitive:
-/// - Process IDs, memory layout, CPU details, container environment
-/// - Environment variables, filesystem paths, system architecture
-/// - Should only be used in development/debugging environments with proper access controls
-pub(crate) async fn collect() -> DiagnosticsResult<String> {
-    let mut info = String::new();
+/// Collect basic system information
+fn collect_basic_system_info(info: &mut String) {
     info.push_str("SYSTEM INFORMATION\n");
     info.push_str("==================\n\n");
 
@@ -40,6 +34,11 @@ pub(crate) async fn collect() -> DiagnosticsResult<String> {
     // Consider whether this is necessary for diagnostic purposes
     info.push_str(&format!("Process ID: {}\n", std::process::id()));
 
+    info.push('\n');
+}
+
+/// Collect Rust and Cargo information
+fn collect_rust_info(info: &mut String) {
     // Rust/Cargo info
     info.push_str(&format!("Router Version: {}\n", env!("CARGO_PKG_VERSION")));
     info.push_str(&format!(
@@ -48,33 +47,19 @@ pub(crate) async fn collect() -> DiagnosticsResult<String> {
     ));
 
     // Build and debug information
-    collect_build_info(&mut info);
-
-    // SECURITY NOTE: Environment variable exposure
-    // Only expose build-related variables, not runtime secrets
-    if let Ok(cargo_target_dir) = std::env::var("CARGO_TARGET_DIR") {
-        info.push_str(&format!("Cargo Target Dir: {}\n", cargo_target_dir));
-    }
+    collect_build_info(info);
 
     info.push('\n');
+}
 
-    // Create a single System instance for all system info collection
-    let mut system = System::new();
-    system.refresh_all();
-
-    // Memory information
-    info.push_str("MEMORY INFORMATION\n");
-    info.push_str("------------------\n");
-    collect_memory_info(&mut info, &system).await;
-
-    info.push('\n');
-
+/// Collect jemalloc memory statistics
+fn collect_jemalloc_info(info: &mut String) {
     // Jemalloc memory statistics (if available) - placed after system memory info
     #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     {
         info.push_str("JEMALLOC MEMORY STATISTICS\n");
         info.push_str("-------------------------\n");
-        collect_jemalloc_stats(&mut info);
+        collect_jemalloc_stats(info);
         info.push('\n');
     }
 
@@ -85,23 +70,40 @@ pub(crate) async fn collect() -> DiagnosticsResult<String> {
         info.push_str("Jemalloc statistics: not available on this platform\n");
         info.push('\n');
     }
+}
+
+/// Collect system information
+///
+/// SECURITY WARNING: This function collects extensive system information that may be sensitive:
+/// - Process IDs, memory layout, CPU details, container environment
+/// - Environment variables, filesystem paths, system architecture
+/// - Should only be used in development/debugging environments with proper access controls
+pub(crate) async fn collect() -> DiagnosticsResult<String> {
+    let mut info = String::new();
+
+    // Basic system information
+    collect_basic_system_info(&mut info);
+
+    // Rust and Cargo information
+    collect_rust_info(&mut info);
+
+    // Create a single System instance for all system info collection
+    let mut system = System::new();
+    system.refresh_all();
+
+    // Memory information
+    collect_memory_info(&mut info, &system).await;
+
+    // Jemalloc memory statistics
+    collect_jemalloc_info(&mut info);
 
     // CPU information
-    info.push_str("CPU INFORMATION\n");
-    info.push_str("---------------\n");
     collect_cpu_info(&mut info, &system).await;
 
-    info.push('\n');
-
-    // System uptime and load (cross-platform)
-    info.push_str("SYSTEM LOAD\n");
-    info.push_str("-----------\n");
+    // System load information
     collect_system_load_info(&mut info, &mut system).await;
-    info.push('\n');
 
     // Environment variables
-    info.push_str("RELEVANT ENVIRONMENT VARIABLES\n");
-    info.push_str("------------------------------\n");
     collect_env_info(&mut info);
 
     Ok(info)
@@ -109,6 +111,8 @@ pub(crate) async fn collect() -> DiagnosticsResult<String> {
 
 /// Collect memory information using sysinfo for cross-platform support
 async fn collect_memory_info(info: &mut String, system: &System) {
+    info.push_str("MEMORY INFORMATION\n");
+    info.push_str("------------------\n");
     let total_memory = system.total_memory();
     let available_memory = system.available_memory();
     let used_memory = system.used_memory();
@@ -174,10 +178,14 @@ async fn collect_memory_info(info: &mut String, system: &System) {
     {
         info.push_str("\nDetailed Memory Information: not available on this platform\n");
     }
+
+    info.push('\n');
 }
 
 /// Collect CPU information using sysinfo and improved cgroup detection
 async fn collect_cpu_info(info: &mut String, system: &System) {
+    info.push_str("CPU INFORMATION\n");
+    info.push_str("---------------\n");
     let cpus = system.cpus();
     let cpu_count = cpus.len();
 
@@ -211,6 +219,8 @@ async fn collect_cpu_info(info: &mut String, system: &System) {
 
     // Improved container/cgroup CPU information
     collect_enhanced_container_cpu_info(info, system).await;
+
+    info.push('\n');
 }
 
 /// Enhanced container/Kubernetes CPU resource information with improved cgroup detection
@@ -231,6 +241,8 @@ async fn collect_enhanced_container_cpu_info(info: &mut String, system: &System)
 
 /// Collect system load information (cross-platform)
 async fn collect_system_load_info(info: &mut String, system: &mut System) {
+    info.push_str("SYSTEM LOAD\n");
+    info.push_str("-----------\n");
     // Use sysinfo's cross-platform load average if available
     let load_avg = System::load_average();
     if load_avg.one.is_finite() && load_avg.one >= 0.0 {
@@ -301,6 +313,8 @@ async fn collect_system_load_info(info: &mut String, system: &mut System) {
             info.push_str(&format!("Total CPU Usage (average): {:.1}%\n", avg_usage));
         }
     }
+
+    info.push('\n');
 }
 
 /// Collect build and debug symbol information
@@ -404,6 +418,8 @@ fn collect_jemalloc_stats(info: &mut String) {
 /// Only expose specifically allowlisted environment variables that are safe for diagnostics.
 /// Never expose variables that might contain secrets, tokens, passwords, or API keys.
 fn collect_env_info(info: &mut String) {
+    info.push_str("RELEVANT ENVIRONMENT VARIABLES\n");
+    info.push_str("------------------------------\n");
     // SECURITY: Explicit allowlist of safe environment variables
     // Only Apollo-specific configuration variables are included
     // DO NOT add variables that might contain secrets (API keys, passwords, etc.)
@@ -429,6 +445,8 @@ fn collect_env_info(info: &mut String) {
     if !relevant_vars.iter().any(|var| std::env::var(var).is_ok()) {
         info.push_str("No relevant Apollo environment variables set\n");
     }
+
+    info.push('\n');
 }
 
 /// Get normalized OS name for better cross-platform reporting
