@@ -278,6 +278,11 @@ pub async fn verify_subscription_events(
     subscription_events
 }
 
+/// The WS subprotocol name for the modern graphql-ws protocol.
+const SUBPROTOCOL_GRAPHQL_WS: &str = "graphql-transport-ws";
+/// The WS subprotocol name for the legacy subscriptions-transport-ws protocol.
+const SUBPROTOCOL_SUBSCRIPTIONS_TRANSPORT_WS: &str = "graphql-ws";
+
 async fn websocket_handler(
     State(config): State<SubscriptionServerConfig>,
     ws: WebSocketUpgrade,
@@ -286,15 +291,16 @@ async fn websocket_handler(
     debug!("WebSocket upgrade requested");
     debug!("Headers: {:?}", headers);
     // Speak both protocols
-    ws.protocols(["graphql-ws", "graphql-transport-ws"])
+    ws.protocols([SUBPROTOCOL_GRAPHQL_WS, SUBPROTOCOL_SUBSCRIPTIONS_TRANSPORT_WS])
         .on_upgrade(async move |socket| {
             match socket
                 .protocol()
                 .expect("must have been provided due to `ws.protocols()` call")
-                .as_bytes()
+                .to_str()
+                .expect("always utf8")
             {
-                b"graphql-transport-ws" => handle_websocket_modern(socket, config).await,
-                b"graphql-ws" => handle_websocket_legacy(socket, config).await,
+                SUBPROTOCOL_GRAPHQL_WS => handle_graphql_ws(socket, config).await,
+                SUBPROTOCOL_SUBSCRIPTIONS_TRANSPORT_WS => handle_subscriptions_transport_ws(socket, config).await,
                 _ => unreachable!("other protocols rejected by `ws.protocols()` call"),
             }
         })
@@ -305,12 +311,12 @@ fn json_message<T: serde::Serialize>(data: &T) -> axum::extract::ws::Message {
     axum::extract::ws::Message::text(serde_json::to_string(data).unwrap())
 }
 
-/// Handle a WebSocket connection according to the legacy protocol described in:
+/// Handle a WebSocket connection according to the legacy subscriptions-transport-ws protocol described in:
 /// https://github.com/apollographql/subscriptions-transport-ws/blob/36f3f6f780acc1a458b768db13fd39c65e5e6518/PROTOCOL.md
 ///
 /// Note this is a subgraph server, and its purpose is to validate that the router speaks the
 /// right protocol. For this reason, it has strict assertions throughout.
-async fn handle_websocket_legacy(socket: WebSocket, config: SubscriptionServerConfig) {
+async fn handle_subscriptions_transport_ws(socket: WebSocket, config: SubscriptionServerConfig) {
     info!("WebSocket connection established");
 
     let mut subscriptions = HashMap::new();
@@ -489,9 +495,9 @@ async fn handle_websocket_legacy(socket: WebSocket, config: SubscriptionServerCo
         .store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// Handle a WebSocket connection according to the modern protocol.
+/// Handle a WebSocket connection according to the modern graphql-ws protocol.
 /// Spec URL: https://github.com/enisdenjo/graphql-ws/blob/0c0eb499c3a0278c6d9cc799064f22c5d24d2f60/PROTOCOL.md
-async fn handle_websocket_modern(socket: WebSocket, config: SubscriptionServerConfig) {
+async fn handle_graphql_ws(socket: WebSocket, config: SubscriptionServerConfig) {
     info!("WebSocket connection established");
 
     let mut subscriptions = HashMap::new();
