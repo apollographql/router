@@ -1,4 +1,5 @@
 use multimap::MultiMap;
+use tokio::task::block_in_place;
 use tower::BoxError;
 use tower::ServiceExt;
 
@@ -48,12 +49,16 @@ impl<'a> Builder<'a> {
     pub(super) fn build(
         mut self,
     ) -> Result<(Activation, MultiMap<ListenAddr, Endpoint>, Sender), BoxError> {
-        self.setup_logging();
-        self.setup_public_tracing()?;
-        self.setup_public_metrics()?;
-        self.setup_apollo_metrics()?;
-        self.setup_propagation();
-        Ok((self.activation, self.endpoints, self.apollo_sender))
+        // We can't guarantee that exporters from external libraries will not perform blocking io during or after construction.
+        // Use block_in_place to avoid any chance of blocking the main rt threads
+        block_in_place(|| {
+            self.setup_logging();
+            self.setup_public_tracing()?;
+            self.setup_public_metrics()?;
+            self.setup_apollo_metrics()?;
+            self.setup_propagation();
+            Ok((self.activation, self.endpoints, self.apollo_sender))
+        })
     }
 
     fn setup_public_metrics(&mut self) -> Result<(), BoxError> {

@@ -5,7 +5,7 @@ use opentelemetry::propagation::TextMapCompositePropagator;
 use opentelemetry::trace::TracerProvider;
 use parking_lot::Mutex;
 use prometheus::Registry;
-use tokio::runtime::Handle;
+use tokio::task::block_in_place;
 use tracing_subscriber::Layer;
 
 use crate::metrics::aggregation::MeterProviderType;
@@ -166,7 +166,7 @@ impl Activation {
             hot_tracer.reload(tracer);
 
             let last_provider = opentelemetry::global::set_tracer_provider(tracer_provider);
-            spawn_blocking_safe_task(move || {
+            block_in_place(move || {
                 drop(last_provider);
             });
         }
@@ -204,38 +204,15 @@ impl Activation {
 impl Drop for Activation {
     fn drop(&mut self) {
         for (_, meter_provider) in std::mem::take(&mut self.meter_providers) {
-            spawn_blocking_safe_task(move || {
+            block_in_place(move || {
                 drop(meter_provider);
             });
         }
 
         if let Some(tracer_provider) = self.trace_provider.take() {
-            spawn_blocking_safe_task(move || {
+            block_in_place(move || {
                 drop(tracer_provider);
             });
-        }
-    }
-}
-
-/// If we are in an tokio async context, use `spawn_blocking()`, if not just execute the
-/// task.
-/// Note:
-///  - If we use spawn_blocking, then tokio looks after waiting for the task to
-///    terminate
-///  - We could spawn a thread to execute the task, but if the process terminated that would
-///    cause the thread to terminate which isn't ideal. Let's just run it in the current
-///    thread. This won't affect router performance since that will always be within the
-///    context of tokio.
-fn spawn_blocking_safe_task<F: FnOnce() + Send + 'static>(task: F) {
-    match Handle::try_current() {
-        Ok(hdl) => {
-            hdl.spawn_blocking(move || {
-                task();
-            });
-            // We don't join here since we can't await or block_on()
-        }
-        Err(_err) => {
-            task();
         }
     }
 }

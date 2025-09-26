@@ -282,7 +282,7 @@ mod test {
     use crate::query_planner::OperationKind;
     use crate::services::SupergraphRequest;
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_disabled() -> Result<(), BoxError> {
         let config = r#"
             telemetry:

@@ -2063,12 +2063,12 @@ mod tests {
             .unwrap();
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn config_serialization() {
         create_plugin_with_config(include_str!("testdata/config.router.yaml")).await;
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_enabled_features() {
         // Explicitly enabled
         let plugin = create_plugin_with_config(include_str!(
@@ -2146,7 +2146,7 @@ mod tests {
             .enabled_features
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_supergraph_metrics_ok() {
         async {
             let plugin =
@@ -2168,7 +2168,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_supergraph_metrics_bad_request() {
         async {
             let plugin =
@@ -2218,7 +2218,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_custom_router_instruments() {
         async {
             let plugin =
@@ -2294,7 +2294,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_custom_router_instruments_with_requirement_level() {
         async {
             let plugin = create_plugin_with_config(include_str!(
@@ -2384,7 +2384,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_custom_supergraph_instruments() {
         async {
             let plugin =
@@ -2487,7 +2487,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_custom_subgraph_instruments_level() {
         async {
             let plugin = create_plugin_with_config(include_str!(
@@ -2589,7 +2589,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_custom_subgraph_instruments() {
         async {
             let plugin = Box::new(
@@ -2690,7 +2690,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_field_instrumentation_sampler_with_preview_datadog_agent_sampling() {
         let plugin = create_plugin_with_config(include_str!(
             "testdata/config.field_instrumentation_sampler.router.yaml"
@@ -2747,7 +2747,7 @@ mod tests {
         assert_eq!(ftv1_counter.load(Ordering::Relaxed), 10);
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_metrics_ok() {
         async {
             let plugin =
@@ -2821,7 +2821,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_metrics_http_error() {
         async {
             let plugin =
@@ -2880,7 +2880,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_wrong_endpoint() {
         async {
             let plugin =
@@ -3139,7 +3139,7 @@ mod tests {
             .unwrap();
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_demand_control_delta_filter() {
         async {
             let plugin = create_plugin_with_config(include_str!(
@@ -3163,7 +3163,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_demand_control_result_filter() {
         async {
             let plugin = create_plugin_with_config(include_str!(
@@ -3187,7 +3187,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_demand_control_result_attributes() {
         async {
             let plugin = create_plugin_with_config(include_str!(
