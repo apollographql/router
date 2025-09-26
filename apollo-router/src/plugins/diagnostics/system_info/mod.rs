@@ -65,7 +65,7 @@ pub(crate) async fn collect() -> DiagnosticsResult<String> {
     // Memory information
     info.push_str("MEMORY INFORMATION\n");
     info.push_str("------------------\n");
-    collect_memory_info(&mut info, &system);
+    collect_memory_info(&mut info, &system).await;
 
     info.push('\n');
 
@@ -89,7 +89,7 @@ pub(crate) async fn collect() -> DiagnosticsResult<String> {
     // CPU information
     info.push_str("CPU INFORMATION\n");
     info.push_str("---------------\n");
-    collect_cpu_info(&mut info, &system);
+    collect_cpu_info(&mut info, &system).await;
 
     info.push('\n');
 
@@ -108,7 +108,7 @@ pub(crate) async fn collect() -> DiagnosticsResult<String> {
 }
 
 /// Collect memory information using sysinfo for cross-platform support
-fn collect_memory_info(info: &mut String, system: &System) {
+async fn collect_memory_info(info: &mut String, system: &System) {
     let total_memory = system.total_memory();
     let available_memory = system.available_memory();
     let used_memory = system.used_memory();
@@ -155,7 +155,7 @@ fn collect_memory_info(info: &mut String, system: &System) {
     // Add Linux-specific detailed info if available
     #[cfg(target_family = "unix")]
     {
-        if let Ok(meminfo) = std::fs::read_to_string("/proc/meminfo") {
+        if let Ok(meminfo) = tokio::fs::read_to_string("/proc/meminfo").await {
             info.push_str("\nDetailed Memory Information (Linux /proc/meminfo):\n");
             for line in meminfo.lines().take(15) {
                 if line.starts_with("Buffers:")
@@ -177,7 +177,7 @@ fn collect_memory_info(info: &mut String, system: &System) {
 }
 
 /// Collect CPU information using sysinfo and improved cgroup detection
-fn collect_cpu_info(info: &mut String, system: &System) {
+async fn collect_cpu_info(info: &mut String, system: &System) {
     let cpus = system.cpus();
     let cpu_count = cpus.len();
 
@@ -210,15 +210,15 @@ fn collect_cpu_info(info: &mut String, system: &System) {
     }
 
     // Improved container/cgroup CPU information
-    collect_enhanced_container_cpu_info(info, system);
+    collect_enhanced_container_cpu_info(info, system).await;
 }
 
 /// Enhanced container/Kubernetes CPU resource information with improved cgroup detection
-fn collect_enhanced_container_cpu_info(info: &mut String, system: &System) {
+async fn collect_enhanced_container_cpu_info(info: &mut String, system: &System) {
     info.push_str("\nContainer/Kubernetes CPU Information:\n");
 
     let system_cpus = system.cpus().len() as u64;
-    let (detection_method, effective_cpu_count) = detect_effective_cpu_count(system_cpus);
+    let (detection_method, effective_cpu_count) = detect_effective_cpu_count(system_cpus).await;
 
     info.push_str(&format!(
         "Effective CPU Count: {} (detected via: {})\n",
@@ -233,13 +233,13 @@ fn collect_enhanced_container_cpu_info(info: &mut String, system: &System) {
     }
 
     // Check CPU shares/weight (relative priority)
-    collect_cpu_priority_info(info);
+    collect_cpu_priority_info(info).await;
 
     // Check for Kubernetes downward API environment variables
     collect_k8s_cpu_info(info);
 
     // Enhanced container detection
-    collect_container_environment_info(info);
+    collect_container_environment_info(info).await;
 }
 
 /// Collect system load information (cross-platform)
@@ -469,17 +469,20 @@ pub(crate) fn get_normalized_arch() -> &'static str {
 
 /// Detect effective CPU count considering cgroup limits (improved from fleet detector)
 #[cfg(not(target_os = "linux"))]
-fn detect_effective_cpu_count(system_cpus: u64) -> (&'static str, u64) {
+async fn detect_effective_cpu_count(system_cpus: u64) -> (&'static str, u64) {
     ("system", system_cpus)
 }
 
 #[cfg(target_os = "linux")]
-fn detect_effective_cpu_count(system_cpus: u64) -> (&'static str, u64) {
+async fn detect_effective_cpu_count(system_cpus: u64) -> (&'static str, u64) {
     // Determine cgroup version first
-    match std::fs::read_to_string("/proc/filesystems").map(|fs| detect_cgroup_version(&fs)) {
+    match tokio::fs::read_to_string("/proc/filesystems")
+        .await
+        .map(|fs| detect_cgroup_version(&fs))
+    {
         Ok(CGroupVersion::CGroup2) => {
             // cgroup v2: read from cpu.max
-            match std::fs::read_to_string("/sys/fs/cgroup/cpu.max") {
+            match tokio::fs::read_to_string("/sys/fs/cgroup/cpu.max").await {
                 Ok(contents) => {
                     if contents.starts_with("max") {
                         ("system", system_cpus)
@@ -498,10 +501,12 @@ fn detect_effective_cpu_count(system_cpus: u64) -> (&'static str, u64) {
         }
         Ok(CGroupVersion::CGroup) => {
             // cgroup v1: read from separate quota and period files
-            let quota = std::fs::read_to_string("/sys/fs/cgroup/cpu/cpu.cfs_quota_us")
+            let quota = tokio::fs::read_to_string("/sys/fs/cgroup/cpu/cpu.cfs_quota_us")
+                .await
                 .map(|s| s.trim().to_string())
                 .ok();
-            let period = std::fs::read_to_string("/sys/fs/cgroup/cpu/cpu.cfs_period_us")
+            let period = tokio::fs::read_to_string("/sys/fs/cgroup/cpu/cpu.cfs_period_us")
+                .await
                 .map(|s| s.trim().to_string())
                 .ok();
 
@@ -562,16 +567,17 @@ fn calculate_cpu_count_with_default(default: u64, quota: &str, period: &str) -> 
 }
 
 /// Collect CPU priority information (shares/weight)
-fn collect_cpu_priority_info(info: &mut String) {
+async fn collect_cpu_priority_info(info: &mut String) {
     #[cfg(target_os = "linux")]
     {
         // cgroup v1 shares
-        if let Ok(cpu_shares) = std::fs::read_to_string("/sys/fs/cgroup/cpu/cpu.shares") {
+        if let Ok(cpu_shares) = tokio::fs::read_to_string("/sys/fs/cgroup/cpu/cpu.shares").await {
             let shares = cpu_shares.trim();
             info.push_str(&format!("CPU Shares (cgroup v1): {}\n", shares));
         }
         // cgroup v2 weight
-        else if let Ok(cpu_weight) = std::fs::read_to_string("/sys/fs/cgroup/cpu.weight") {
+        else if let Ok(cpu_weight) = tokio::fs::read_to_string("/sys/fs/cgroup/cpu.weight").await
+        {
             let weight = cpu_weight.trim();
             info.push_str(&format!("CPU Weight (cgroup v2): {}\n", weight));
         }
@@ -594,7 +600,7 @@ fn collect_k8s_cpu_info(info: &mut String) {
 }
 
 /// Enhanced container environment detection
-fn collect_container_environment_info(info: &mut String) {
+async fn collect_container_environment_info(info: &mut String) {
     let mut container_indicators = Vec::new();
 
     // Docker
