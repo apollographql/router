@@ -80,6 +80,8 @@ traffic_shaping:
     timeout: 50s # If subgraph requests take more than 50 seconds, cancel the request (30 seconds by default)
 ```
 
+Router timeouts apply to the overall incoming request, whereas subgraph timeouts apply to **each individual subgraph fetch request**. There can be multiple subgraph requests, even to the same subgraph, within a single router request.
+
 When configuring timeouts, set your router timeout to be greater than or equal to your subgraph timeouts. This allows the router to properly handle subgraph timeouts and return appropriate error responses to clients. Ideally, subgraph timeouts should be slightly lower than the router timeout to provide a buffer for the router to process the timeout response.
 
 For example, a well-configured timeout hierarchy might look like:
@@ -89,7 +91,7 @@ traffic_shaping:
   router:
     timeout: 60s # Router: 60 seconds
   all:
-    timeout: 30s # Default subgraph: 30 seconds (lower than router)
+    timeout: 30s # Default for any subgraphs not explicitly named below
   subgraphs:
     products:
       timeout: 45s # Products subgraph: 45 seconds (still lower than router)
