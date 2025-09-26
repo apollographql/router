@@ -56,8 +56,7 @@ impl From<(&str, CacheValue)> for CacheEntry {
 
 #[derive(Clone)]
 pub(crate) struct Storage {
-    reader_storage: RedisCacheStorage,
-    writer_storage: RedisCacheStorage,
+    storage: RedisCacheStorage,
     cache_tag_tx: mpsc::Sender<String>,
     timeout: Duration,
 }
@@ -67,22 +66,12 @@ impl Storage {
         config: &Config,
         drop_rx: broadcast::Receiver<()>,
     ) -> Result<Self, BoxError> {
-        let pool_size = (config.pool_size / 2).max(1);
-        let config = Config {
-            pool_size,
-            ..config.clone()
-        };
-
-        let reader_storage =
-            RedisCacheStorage::new(config.clone(), "response-cache-reader").await?;
-        let writer_storage =
-            RedisCacheStorage::new(config.clone(), "response-cache-writer").await?;
-        Self::from_storage(reader_storage, writer_storage, config.timeout, drop_rx).await
+        let storage = RedisCacheStorage::new(config.clone(), "response-cache").await?;
+        Self::from_storage(storage, config.timeout, drop_rx).await
     }
 
     async fn from_storage(
-        reader_storage: RedisCacheStorage,
-        writer_storage: RedisCacheStorage,
+        storage: RedisCacheStorage,
         timeout: Duration,
         drop_rx: broadcast::Receiver<()>,
     ) -> Result<Self, BoxError> {
@@ -100,8 +89,7 @@ impl Storage {
         let (cache_tag_tx, cache_tag_rx) = mpsc::channel(10000);
         let s = Self {
             timeout,
-            reader_storage,
-            writer_storage,
+            storage,
             cache_tag_tx,
         };
         s.perform_periodic_maintenance(cache_tag_rx, drop_rx).await;
@@ -109,11 +97,11 @@ impl Storage {
     }
 
     fn make_key<K: KeyType>(&self, key: K) -> String {
-        self.reader_storage.make_key(RedisKey(key))
+        self.storage.make_key(RedisKey(key))
     }
 
     async fn invalidate_internal(&self, invalidation_keys: Vec<String>) -> StorageResult<u64> {
-        let pipeline = self.writer_storage.pipeline();
+        let pipeline = self.storage.pipeline();
         for invalidation_key in &invalidation_keys {
             let invalidation_key = self.make_key(format!("cache-tag:{invalidation_key}"));
             self.send_to_maintenance_queue(invalidation_key.clone());
@@ -129,7 +117,7 @@ impl Storage {
         }
 
         let deleted = self
-            .writer_storage
+            .storage
             .delete_from_scan_result(all_keys.into_iter().map(fred::types::Key::from))
             .await?;
 
@@ -190,7 +178,7 @@ impl Storage {
     ) -> StorageResult<u64> {
         // Returns number of items removed
         Ok(self
-            .writer_storage
+            .storage
             .client()
             .zremrangebyscore(&cache_tag_key, f64::NEG_INFINITY, cutoff_time)
             .await?)
@@ -291,7 +279,7 @@ impl CacheStorage for Storage {
 
         // NB: spawn separate tasks in case sets are on different shards, as fred will multiplex into
         // pipelines anyway
-        let pipeline = self.writer_storage.client().pipeline();
+        let pipeline = self.storage.client().pipeline();
         for (cache_tag_key, elements) in cache_tags_to_pcks.into_iter() {
             self.send_to_maintenance_queue(cache_tag_key.clone());
 
@@ -339,7 +327,7 @@ impl CacheStorage for Storage {
         }
 
         // phase 3
-        let pipeline = self.writer_storage.client().pipeline();
+        let pipeline = self.storage.client().pipeline();
         for document in batch_docs.into_iter() {
             let value = CacheValue {
                 data: document.data,
@@ -369,7 +357,7 @@ impl CacheStorage for Storage {
 
     async fn internal_fetch(&self, cache_key: &str) -> StorageResult<CacheEntry> {
         // NB: don't need `make_key` for `get` - the storage layer already runs it
-        let value: RedisValue<CacheValue> = self.reader_storage.get(RedisKey(cache_key)).await?;
+        let value: RedisValue<CacheValue> = self.storage.get(RedisKey(cache_key)).await?;
         Ok(CacheEntry::from((cache_key, value.0)))
     }
 
@@ -381,8 +369,7 @@ impl CacheStorage for Storage {
             .iter()
             .map(|key| RedisKey(key.to_string()))
             .collect();
-        let values: Vec<Option<RedisValue<CacheValue>>> =
-            self.reader_storage.get_multiple(keys).await;
+        let values: Vec<Option<RedisValue<CacheValue>>> = self.storage.get_multiple(keys).await;
 
         let entries = values
             .into_iter()
@@ -431,7 +418,7 @@ impl CacheStorage for Storage {
         any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
     ))]
     async fn truncate_namespace(&self) -> StorageResult<()> {
-        self.writer_storage.truncate_namespace().await?;
+        self.storage.truncate_namespace().await?;
         Ok(())
     }
 }
@@ -483,21 +470,21 @@ impl Storage {
         writer_mock: std::sync::Arc<dyn fred::mocks::Mocks>,
         drop_rx: broadcast::Receiver<()>,
     ) -> Result<Storage, BoxError> {
-        let reader_storage = RedisCacheStorage::from_mocks_and_config(
+        let storage = RedisCacheStorage::from_mocks_and_config(
             reader_mock,
             config.clone(),
             "response-cache-reader",
             is_cluster,
         )
         .await?;
-        let writer_storage = RedisCacheStorage::from_mocks_and_config(
+        let storage = RedisCacheStorage::from_mocks_and_config(
             writer_mock,
             config.clone(),
             "response-cache-writer",
             is_cluster,
         )
         .await?;
-        Self::from_storage(reader_storage, writer_storage, config.timeout, drop_rx).await
+        Self::from_storage(storage, config.timeout, drop_rx).await
     }
 
     async fn all_keys_in_namespace(&self) -> Result<Vec<String>, BoxError> {
@@ -505,7 +492,7 @@ impl Storage {
         use tokio_stream::StreamExt;
 
         let mut scan_stream = self
-            .reader_storage
+            .storage
             .scan_with_namespaced_results(String::from("*"), None);
         let mut keys = Vec::default();
         while let Some(result) = scan_stream.next().await {
@@ -522,38 +509,30 @@ impl Storage {
     }
 
     async fn ttl(&self, key: &str) -> StorageResult<i64> {
-        Ok(self.reader_storage.client().ttl(key).await?)
+        Ok(self.storage.client().ttl(key).await?)
     }
 
     async fn expire_time(&self, key: &str) -> StorageResult<i64> {
-        Ok(self.reader_storage.client().expire_time(key).await?)
+        Ok(self.storage.client().expire_time(key).await?)
     }
 
     async fn zscore(&self, sorted_set_key: &str, member: &str) -> Result<i64, BoxError> {
-        let score: String = self
-            .reader_storage
-            .client()
-            .zscore(sorted_set_key, member)
-            .await?;
+        let score: String = self.storage.client().zscore(sorted_set_key, member).await?;
         Ok(score.parse()?)
     }
 
     async fn zcard(&self, sorted_set_key: &str) -> StorageResult<u64> {
-        let cardinality = self.reader_storage.client().zcard(sorted_set_key).await?;
+        let cardinality = self.storage.client().zcard(sorted_set_key).await?;
         Ok(cardinality)
     }
 
     async fn zexists(&self, sorted_set_key: &str, member: &str) -> StorageResult<bool> {
-        let score: Option<String> = self
-            .reader_storage
-            .client()
-            .zscore(sorted_set_key, member)
-            .await?;
+        let score: Option<String> = self.storage.client().zscore(sorted_set_key, member).await?;
         Ok(score.is_some())
     }
 
     async fn exists(&self, key: &str) -> StorageResult<bool> {
-        Ok(self.reader_storage.client().exists(key).await?)
+        Ok(self.storage.client().exists(key).await?)
     }
 }
 
@@ -1033,14 +1012,14 @@ mod tests {
             let insert_invalid_cache_tag = |key: String| async {
                 let expiration = config.ttl.map(|ttl| Expiration::EX(ttl.as_secs() as i64));
                 let _: () = storage
-                    .writer_storage
+                    .storage
                     .client()
                     .set(key, 1, expiration, None, false)
                     .await?;
                 Ok::<(), BoxError>(())
             };
             let inserted_data = |key: String| async {
-                let exists = storage.reader_storage.client().exists(key).await?;
+                let exists = storage.storage.client().exists(key).await?;
                 Ok::<bool, BoxError>(exists)
             };
 
