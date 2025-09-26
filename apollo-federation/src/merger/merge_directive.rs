@@ -383,26 +383,6 @@ impl Merger {
         self.applied_directives_to_merge.clear();
         Ok(())
     }
-
-    fn get_sources_for_directive(
-        &self,
-        name: &Name,
-    ) -> Result<Sources<Node<DirectiveDefinition>>, FederationError> {
-        let sources = self
-            .subgraphs
-            .iter()
-            .enumerate()
-            .filter_map(|(index, subgraph)| {
-                subgraph
-                    .schema()
-                    .schema()
-                    .directive_definitions
-                    .get(name)
-                    .map(|directive_def| (index, Some(directive_def.clone())))
-            })
-            .collect();
-        Ok(sources)
-    }
 }
 
 fn extract_executable_locations(source: &Node<DirectiveDefinition>) -> Vec<DirectiveLocation> {
