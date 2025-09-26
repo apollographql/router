@@ -291,19 +291,24 @@ async fn websocket_handler(
     debug!("WebSocket upgrade requested");
     debug!("Headers: {:?}", headers);
     // Speak both protocols
-    ws.protocols([SUBPROTOCOL_GRAPHQL_WS, SUBPROTOCOL_SUBSCRIPTIONS_TRANSPORT_WS])
-        .on_upgrade(async move |socket| {
-            match socket
-                .protocol()
-                .expect("must have been provided due to `ws.protocols()` call")
-                .to_str()
-                .expect("always utf8")
-            {
-                SUBPROTOCOL_GRAPHQL_WS => handle_graphql_ws(socket, config).await,
-                SUBPROTOCOL_SUBSCRIPTIONS_TRANSPORT_WS => handle_subscriptions_transport_ws(socket, config).await,
-                _ => unreachable!("other protocols rejected by `ws.protocols()` call"),
+    ws.protocols([
+        SUBPROTOCOL_GRAPHQL_WS,
+        SUBPROTOCOL_SUBSCRIPTIONS_TRANSPORT_WS,
+    ])
+    .on_upgrade(async move |socket| {
+        match socket
+            .protocol()
+            .expect("must have been provided due to `ws.protocols()` call")
+            .to_str()
+            .expect("always utf8")
+        {
+            SUBPROTOCOL_GRAPHQL_WS => handle_graphql_ws(socket, config).await,
+            SUBPROTOCOL_SUBSCRIPTIONS_TRANSPORT_WS => {
+                handle_subscriptions_transport_ws(socket, config).await
             }
-        })
+            _ => unreachable!("other protocols rejected by `ws.protocols()` call"),
+        }
+    })
 }
 
 /// Create a WebSocket message from a JSON value.
