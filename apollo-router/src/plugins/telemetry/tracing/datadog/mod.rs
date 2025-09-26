@@ -68,6 +68,7 @@ const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:8126";
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields)]
+#[schemars(rename = "DatadogConfig")]
 pub(crate) struct Config {
     /// Enable datadog
     enabled: bool,

@@ -30,6 +30,7 @@ use crate::services::router;
 /// Prometheus configuration
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
+#[schemars(rename = "PrometheusMetricsConfig")]
 pub(crate) struct Config {
     /// Set to true to enable
     pub(crate) enabled: bool,

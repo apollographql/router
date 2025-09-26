@@ -24,6 +24,7 @@ use http::HeaderMap;
 use http::HeaderValue;
 use http::StatusCode;
 use http::header;
+use http::header::CACHE_CONTROL;
 use metrics::apollo::studio::SingleLimitsStats;
 use metrics::local_type_stats::LocalTypeStatRecorder;
 use multimap::MultiMap;
@@ -211,6 +212,7 @@ pub(crate) const GRAPHQL_OPERATION_NAME_ATTRIBUTE: &str = "graphql.operation.nam
 pub(crate) const GRAPHQL_OPERATION_TYPE_ATTRIBUTE: &str = "graphql.operation.type";
 pub(crate) const APOLLO_OPERATION_ID_ATTRIBUTE: &str = "apollo.operation.id";
 pub(crate) const APOLLO_HAS_ERRORS_ATTRIBUTE: &str = "has_errors";
+pub(crate) const APOLLO_CONNECTOR_SOURCE_ATTRIBUTE: &str = "connector.source";
 
 #[doc(hidden)] // Only public for integration tests
 pub(crate) struct Telemetry {
@@ -366,6 +368,20 @@ impl PluginPrivate for Telemetry {
     type Config = config::Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        // Log whether we received previous configuration for testing
+        // In a followup PR we will be detecting if exporters need to be refreshed, and at this point
+        // this debug logging will disappear.
+        match &init.previous_config {
+            Some(_prev_config) => {
+                ::tracing::debug!("Telemetry plugin reload detected with previous configuration");
+            }
+            None => {
+                ::tracing::debug!(
+                    "Telemetry plugin initial startup without previous configuration"
+                );
+            }
+        }
+
         opentelemetry::global::set_error_handler(handle_error)
             .expect("otel error handler lock poisoned, fatal");
 
@@ -608,25 +624,34 @@ impl PluginPrivate for Telemetry {
                             custom_instruments.on_response(response);
                             custom_events.on_response(response);
 
+                            let mut headers: HashMap<String, Vec<String>> =
+                                HashMap::with_capacity(2);
                             if expose_trace_id.enabled {
                                 let header_name = expose_trace_id
                                     .header_name
                                     .as_ref()
                                     .unwrap_or(&DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME);
-                                let mut headers: HashMap<String, Vec<String>> =
-                                    HashMap::with_capacity(1);
+
                                 if let Some(value) = response.response.headers().get(header_name) {
                                     headers.insert(
                                         header_name.to_string(),
                                         vec![value.to_str().unwrap_or_default().to_string()],
                                     );
-                                    let response_headers =
-                                        serde_json::to_string(&headers).unwrap_or_default();
-                                    span.record(
-                                        "apollo_private.http.response_headers",
-                                        &response_headers,
-                                    );
                                 }
+                            }
+                            if let Some(value) = response.response.headers().get(&CACHE_CONTROL) {
+                                headers.insert(
+                                    CACHE_CONTROL.to_string(),
+                                    vec![value.to_str().unwrap_or_default().to_string()],
+                                );
+                            }
+                            if !headers.is_empty() {
+                                let response_headers =
+                                    serde_json::to_string(&headers).unwrap_or_default();
+                                span.record(
+                                    "apollo_private.http.response_headers",
+                                    &response_headers,
+                                );
                             }
 
                             if response.context.extensions().with_lock(|lock| {
@@ -2044,7 +2069,7 @@ impl CustomTraceIdPropagator {
         let trace_id = match opentelemetry::trace::TraceId::from_hex(&trace_id) {
             Ok(trace_id) => trace_id,
             Err(err) => {
-                ::tracing::error!("cannot generate custom trace_id: {err}");
+                ::tracing::error!(trace_id = %trace_id, error = %err, "cannot generate custom trace_id");
                 return None;
             }
         };
@@ -3274,6 +3299,29 @@ mod tests {
         let span = propagator.extract_span_context(&headers);
         assert!(span.is_some());
         assert_eq!(span.unwrap().trace_id().to_string(), expected_trace_id);
+    }
+
+    #[test]
+    fn test_custom_trace_id_propagator_invalid_hex_characters() {
+        use crate::test_harness::tracing_test;
+        let _guard = tracing_test::dispatcher_guard();
+
+        let header = String::from("x-trace-id");
+        let invalid_trace_id = String::from("invalidhexchars");
+
+        let propagator = CustomTraceIdPropagator::new(header.clone(), TraceIdFormat::Uuid);
+        let mut headers: HashMap<String, String> = HashMap::new();
+        headers.insert(header, invalid_trace_id.clone());
+
+        let span = propagator.extract_span_context(&headers);
+
+        assert!(span.is_none());
+
+        assert!(tracing_test::logs_contain(
+            "cannot generate custom trace_id"
+        ));
+
+        assert!(tracing_test::logs_contain(&invalid_trace_id));
     }
 
     #[test]

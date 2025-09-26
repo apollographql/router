@@ -1,6 +1,11 @@
+use std::collections::HashMap;
+use std::collections::HashSet;
+
 use apollo_compiler::Node;
+use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::ast::Type;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::schema::Component;
 use apollo_compiler::schema::InputObjectType;
 
 use crate::error::CompositionError;
@@ -10,6 +15,7 @@ use crate::merger::hints::HintCode;
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
 use crate::merger::merge_field::FieldMergeContext;
+use crate::merger::merge_field::PLACEHOLDER_TYPE_NAME;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::InputObjectFieldDefinitionPosition;
 use crate::schema::position::InputObjectTypeDefinitionPosition;
@@ -24,7 +30,7 @@ impl Merger {
     ) -> Result<(), FederationError> {
         // Like for other inputs, we add all the fields found in any subgraphs initially as a simple mean to have a complete list of
         // field to iterate over, but we will remove those that are not in all subgraphs.
-        let added = self.add_input_fields_shallow(sources, dest);
+        let added = self.add_input_fields_shallow(sources, dest)?;
 
         for (dest_field, subgraph_fields) in added {
             // We merge the details of the field first, even if we may remove it afterwards because 1) this ensure we always checks type
@@ -114,18 +120,15 @@ impl Merger {
                         }
                     }
 
-                    self.error_reporter.report_mismatch_hint::<InputObjectFieldDefinitionPosition, ()>(
+                    self.error_reporter.report_mismatch_hint::<InputObjectFieldDefinitionPosition, InputObjectFieldDefinitionPosition, ()>(
                             HintCode::InconsistentDescription,
                             format!("Input object field \"{}\" will not be added to \"{}\" in the supergraph as it does not appear in all subgraphs: it is ",
                                 dest_field.field_name, dest.type_name
                             ),
                             &dest_field,
                             &subgraph_fields,
-                            {
-                                |_, _is_supergraph| {
-                                    Some("yes".to_string())
-                                }
-                            },
+                            |_| Some("yes".to_string()),
+                            |_, _| Some("yes".to_string()),
                             |_, subgraphs| {
                                 format!(
                                     "it is defined in {}", subgraphs.unwrap_or_else(|| "undefined".to_string())
@@ -137,7 +140,6 @@ impl Merger {
                                     subgraphs,
                                 )
                             },
-                            None::<fn(Option<&InputObjectFieldDefinitionPosition>) -> bool>,
                             true,
                             false,
                         );
@@ -163,16 +165,79 @@ impl Merger {
         Ok(())
     }
 
-    // TODO: FED-549
+    /// Adds a shallow copy of each field in an InputObject type to the supergraph schema. This is
+    /// an implementation of `addFieldsShallow` from the JS implementation, but specialized to
+    /// InputObject fields. As such, any logic specific to Object and Interface types is removed in
+    /// this implementation. See [Merger::add_fields_shallow] for the equivalent implementation for
+    /// those types.
     fn add_input_fields_shallow(
         &mut self,
-        _sources: &Sources<Node<InputObjectType>>,
-        _dest: &InputObjectTypeDefinitionPosition,
-    ) -> IndexMap<InputObjectFieldDefinitionPosition, Sources<InputObjectFieldDefinitionPosition>>
-    {
-        // TODO: Implement proper field merging logic
-        // For now, return empty to allow compilation
-        IndexMap::default()
+        sources: &Sources<Node<InputObjectType>>,
+        dest: &InputObjectTypeDefinitionPosition,
+    ) -> Result<
+        IndexMap<InputObjectFieldDefinitionPosition, Sources<InputObjectFieldDefinitionPosition>>,
+        FederationError,
+    > {
+        let mut added: IndexMap<
+            InputObjectFieldDefinitionPosition,
+            Sources<InputObjectFieldDefinitionPosition>,
+        > = Default::default();
+        let mut fields_to_add: HashMap<usize, HashSet<InputObjectFieldDefinitionPosition>> =
+            Default::default();
+        let mut extra_sources: Sources<InputObjectFieldDefinitionPosition> = Default::default();
+
+        for (idx, source) in sources {
+            if let Some(source) = source {
+                for field_name in source.fields.keys() {
+                    fields_to_add.entry(*idx).or_default().insert(
+                        InputObjectFieldDefinitionPosition {
+                            type_name: dest.type_name.clone(),
+                            field_name: field_name.clone(),
+                        },
+                    );
+                }
+            }
+
+            if self.subgraphs[*idx]
+                .schema()
+                .try_get_type(dest.type_name.clone())
+                .is_some()
+            {
+                // Our needsJoinField logic adds @join__field if any subgraphs define
+                // the parent type containing the field but not the field itself. In
+                // those cases, for each field we add, we need to add undefined entries
+                // for each subgraph that defines the parent object/interface/input
+                // type. We do this by populating extraSources with undefined entries
+                // here, then create each new Sources map from that starting set (see
+                // `new Map(extraSources)` below).
+                extra_sources.insert(*idx, None);
+            }
+        }
+
+        for (idx, field_set) in fields_to_add {
+            for field in field_set {
+                // While the JS implementation checked `isMergedField` here, that would always
+                // return true for input fields, so we omit that check.
+                if !added.contains_key(&field) {
+                    field.insert(
+                        &mut self.merged,
+                        Component::new(InputValueDefinition {
+                            description: None,
+                            name: field.field_name.clone(),
+                            default_value: None,
+                            ty: Node::new(Type::Named(PLACEHOLDER_TYPE_NAME)),
+                            directives: Default::default(),
+                        }),
+                    )?;
+                }
+                added
+                    .entry(field.clone())
+                    .or_insert_with(|| extra_sources.clone())
+                    .insert(idx, Some(field));
+            }
+        }
+
+        Ok(added)
     }
 
     fn merge_input_field(
@@ -180,37 +245,15 @@ impl Merger {
         dest_field: &InputObjectFieldDefinitionPosition,
         sources: &Sources<InputObjectFieldDefinitionPosition>,
     ) -> Result<(), FederationError> {
-        self.merge_description(sources, dest_field);
+        self.merge_description(sources, dest_field)?;
         self.record_applied_directives_to_merge(sources, dest_field);
-
-        let type_sources: Sources<Type> = sources
-            .iter()
-            .map(|(&idx, source_opt)| {
-                let type_ref = source_opt.as_ref().and_then(|source| {
-                    source
-                        .get(self.merged.schema())
-                        .ok()
-                        .map(|field_def| (*field_def.ty).clone())
-                });
-                (idx, type_ref)
-            })
-            .collect();
-
-        let mut field_def = dest_field.get(self.merged.schema())?.clone();
-        let field_def_mut = field_def.make_mut();
-        let all_types_equal = self.merge_type_reference(
-            &type_sources,
-            field_def_mut,
-            true,
-            dest_field.parent().type_name.as_ref(),
-        )?;
-        dest_field.insert(&mut self.merged, field_def)?;
+        let all_types_equal = self.merge_type_reference(sources, dest_field, true)?;
         let directive_sources: Sources<DirectiveTargetPosition> = sources
             .iter()
             .map(|(&idx, source_opt)| {
                 let directive_pos = source_opt
-                    .as_ref()
-                    .map(|_| DirectiveTargetPosition::InputObjectField(dest_field.clone()));
+                    .clone()
+                    .map(DirectiveTargetPosition::InputObjectField);
                 (idx, directive_pos)
             })
             .collect();
@@ -224,7 +267,7 @@ impl Merger {
             &merge_context,
         )?;
 
-        self.merge_default_value(sources, dest_field, "Input field");
+        self.merge_default_value(sources, dest_field)?;
         Ok(())
     }
 }

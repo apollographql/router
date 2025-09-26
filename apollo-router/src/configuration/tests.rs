@@ -8,7 +8,7 @@ use http::Uri;
 use insta::assert_json_snapshot;
 use regex::Regex;
 use rust_embed::RustEmbed;
-use schemars::r#gen::SchemaSettings;
+use schemars::generate::SchemaSettings;
 use serde_json::json;
 use walkdir::DirEntry;
 use walkdir::WalkDir;
@@ -33,6 +33,12 @@ fn schema_generation() {
         json_schema.len() < 500 * 1024,
         "schema must be less than 500kb"
     );
+}
+
+#[test]
+fn schema_is_valid() {
+    let schema = generate_config_schema();
+    jsonschema::draft7::meta::validate(schema.as_value()).expect("generated schema must be valid");
 }
 
 #[test]
@@ -705,8 +711,16 @@ fn upgrade_old_minor_configuration() {
 
 #[test]
 fn all_properties_are_documented() {
-    let schema = serde_json::to_value(generate_config_schema())
-        .expect("must be able to convert the schema to json");
+    // Not using `generate_config_schema` here because of custom configuration.
+    // By inlining all sub-schemas we don't have to resolve references.
+    let generator = SchemaSettings::draft07()
+        .with(|s| {
+            s.inline_subschemas = true;
+        })
+        .into_generator();
+
+    let schema = generator.into_root_schema_for::<Configuration>();
+    let schema = serde_json::to_value(schema).expect("must be able to convert the schema to json");
 
     let mut errors = Vec::new();
     visit_schema("", &schema, &mut errors);
@@ -721,6 +735,14 @@ fn all_properties_are_documented() {
 #[test]
 fn default_config_has_defaults() {
     insta::assert_yaml_snapshot!(Configuration::default().validated_yaml);
+}
+
+#[rstest::rstest]
+#[case("")]
+#[case("plugins:")]
+fn unusual_configs_validate(#[case] input: &str) {
+    validate_yaml_configuration(input, Expansion::builder().build(), Mode::NoUpgrade)
+        .expect("should be valid configuration");
 }
 
 fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
@@ -858,8 +880,6 @@ impl Default for PluginConfig {
 #[test]
 fn test_subgraph_override() {
     let settings = SchemaSettings::draft2019_09().with(|s| {
-        s.option_nullable = true;
-        s.option_add_null_type = false;
         s.inline_subschemas = true;
     });
     let generator = settings.into_generator();
@@ -1246,4 +1266,43 @@ fn find_struct_name(lines: &[&str], line_number: usize) -> Option<String> {
             })
         })
         .next()
+}
+
+#[test]
+fn it_prevents_enablement_of_both_subgraph_caching_plugins() {
+    let make_config = |response_cache_enabled, entity_cache_enabled| {
+        let mut config = json!({});
+        if let Some(enabled) = response_cache_enabled {
+            config.as_object_mut().unwrap().insert(
+                "preview_response_cache".to_string(),
+                json!({"enabled": enabled}),
+            );
+        }
+        if let Some(enabled) = entity_cache_enabled {
+            config.as_object_mut().unwrap().insert(
+                "preview_entity_cache".to_string(),
+                json!({"enabled": enabled}),
+            );
+        }
+        config
+    };
+
+    let _: Configuration =
+        serde_json::from_value(make_config(None, None)).expect("neither plugin configured");
+
+    let _: Configuration = serde_json::from_value(make_config(Some(true), None))
+        .expect("response cache plugin configured");
+
+    let _: Configuration = serde_json::from_value(make_config(Some(true), Some(false)))
+        .expect("response cache plugin configured");
+
+    let _: Configuration = serde_json::from_value(make_config(None, Some(true)))
+        .expect("entity cache plugin configured");
+
+    let _: Configuration = serde_json::from_value(make_config(Some(false), Some(true)))
+        .expect("entity cache plugin configured");
+
+    let config_result: Result<Configuration, _> =
+        serde_json::from_value(make_config(Some(true), Some(true)));
+    config_result.expect_err("both plugins configured");
 }

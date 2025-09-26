@@ -22,6 +22,7 @@ use crate::connectors::JSONSelection;
 use crate::connectors::Namespace;
 use crate::connectors::id::ConnectedElement;
 use crate::connectors::id::ObjectCategory;
+use crate::connectors::json_selection::VarPaths;
 use crate::connectors::string_template::Expression;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
@@ -85,6 +86,7 @@ impl<'schema> Context<'schema> {
             } => {
                 let mut var_lookup: IndexMap<Namespace, Shape> = [
                     (Namespace::Args, shape_for_arguments(field_def)),
+                    // TODO Should these be Dict<Unknown> instead of Unknown?
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Request, REQUEST_SHAPE.clone()),
@@ -383,10 +385,23 @@ fn resolve_shape(
                 if !key_str.is_empty() {
                     key_str = format!("`{key_str}` ");
                 }
+
+                let locals_suffix = {
+                    let local_vars = expression.expression.local_var_names();
+                    if local_vars.is_empty() {
+                        "".to_string()
+                    } else {
+                        format!(
+                            ", {}",
+                            local_vars.into_iter().collect::<Vec<_>>().join(", ")
+                        )
+                    }
+                };
+
                 return Err(Message {
                     code: context.code,
                     message: format!(
-                        "{key_str}must start with one of {namespaces}",
+                        "{key_str}must start with one of {namespaces}{locals_suffix}",
                         namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", "),
                     ),
                     locations: transform_locations(
@@ -760,6 +775,8 @@ mod tests {
     #[case::first("$args.array->first.bool")]
     #[case::last("$args.array->last.bool")]
     #[case::multi_level_input("$args.multiLevel.inner.nested")]
+    #[case::entries_when_type_unknown("$config.something->entries->first.value")]
+    #[case::methods_with_unknown_input(r#"$config->get("something")->slice(0, 1)"#)]
     fn valid_expressions(#[case] selection: &str) {
         // If this fails, another ConnectSpec version has probably been added,
         // and should be accounted for in the loop below.
@@ -822,6 +839,54 @@ mod tests {
             !err.err().unwrap().locations.is_empty(),
             "Every error should have at least one location"
         );
+    }
+
+    #[rstest]
+    #[case::args_object_as_echo_bool("$args.object->as($o)->echo($o.bool)")]
+    #[case::args_object_as_echo_bool("$args.object->as($o)->echo(@.bool->eq($o.bool))")]
+    #[case::args_object_as_echo_bool(
+        "$->as($true, false->not)->as($false, true->not)->echo($true->or($false))"
+    )]
+    #[case::method_math("$([1, 2, 3])->as($arr)->first->add($arr->last)")]
+    #[case::redundant_as("$args.object->as($o)->as($o)->echo($o.bool)")]
+    #[case::unnecessary_as("$args.object->as($obj)->as($o)->echo($o.bool)")]
+    #[case::as_int_addition("$args.int->as($i)->add(1, $i, $i)")]
+    #[case::as_string_concat(
+        "$args.string->as($s, @->slice(0, 100))->echo({ full: @, first100: $s })->jsonStringify"
+    )]
+    fn valid_as_var_bindings(#[case] selection: &str) {
+        let spec = ConnectSpec::V0_3;
+        validate_with_context(selection, scalars(), spec).unwrap();
+    }
+
+    #[rstest]
+    #[case::args_object_as_echo_bool_var_mismatch("$args.object->as($obj)->echo($o.bool)")]
+    #[case::args_object_as_echo_missing_string("$args.object->as($o)->echo($o.string)")]
+    #[case::args_object_as_echo_missing_int("$args.object->as($o)->echo($o.int)")]
+    #[case::as_without_args("$args.object->as")]
+    #[case::as_with_no_args("$args.object->as()")]
+    #[case::as_with_non_variable("$args.object->as(true)")]
+    #[case::as_with_wrong_args("$args.object->as(1, 2, 3)")]
+    #[case::as_with_reused_var("$([1, 2, 3])->as($o, $o)->echo($o)")]
+    fn invalid_expressions_with_as_var_binding(#[case] selection: &str) {
+        let spec = ConnectSpec::V0_3;
+        let err = validate_with_context(selection, scalars(), spec);
+        assert!(err.is_err());
+        assert!(
+            !err.err().unwrap().locations.is_empty(),
+            "Every error should have at least one location"
+        );
+    }
+
+    #[test]
+    fn coalescing() {
+        let spec = ConnectSpec::V0_3;
+        validate_with_context(
+            r#"$($args.string ?? "unknown error")"#,
+            Shape::string([]),
+            spec,
+        )
+        .expect("coalescing type checks in expressions");
     }
 
     #[test]

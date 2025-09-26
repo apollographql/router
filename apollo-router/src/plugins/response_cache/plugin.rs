@@ -14,10 +14,10 @@ use apollo_compiler::parser::Parser;
 use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::StringTemplate;
 use http::HeaderValue;
-use http::header;
 use http::header::CACHE_CONTROL;
 use lru::LruCache;
 use multimap::MultiMap;
+use opentelemetry::Array;
 use opentelemetry::Key;
 use opentelemetry::StringValue;
 use schemars::JsonSchema;
@@ -45,7 +45,6 @@ use super::invalidation_endpoint::InvalidationEndpointConfig;
 use super::invalidation_endpoint::InvalidationService;
 use super::invalidation_endpoint::SubgraphInvalidationConfig;
 use super::metrics::CacheMetricContextKey;
-use super::metrics::CacheMetricsService;
 use super::postgres::BatchDocument;
 use super::postgres::CacheEntry;
 use super::postgres::PostgresCacheConfig;
@@ -100,7 +99,7 @@ const DEFAULT_LRU_PRIVATE_QUERIES_SIZE: NonZeroUsize = NonZeroUsize::new(2048).u
 const LRU_PRIVATE_QUERIES_INSTRUMENT_NAME: &str =
     "apollo.router.response_cache.private_queries.lru.size";
 
-register_private_plugin!("apollo", "experimental_response_cache", ResponseCache);
+register_private_plugin!("apollo", "preview_response_cache", ResponseCache);
 
 #[derive(Clone)]
 pub(crate) struct ResponseCache {
@@ -109,7 +108,6 @@ pub(crate) struct ResponseCache {
     subgraphs: Arc<SubgraphConfiguration<Subgraph>>,
     entity_type: Option<String>,
     enabled: bool,
-    metrics: Metrics,
     debug: bool,
     private_queries: Arc<RwLock<LruCache<PrivateQueryKey, ()>>>,
     pub(crate) invalidation: Invalidation,
@@ -214,10 +212,6 @@ pub(crate) struct Config {
     /// Global invalidation configuration
     invalidation: Option<InvalidationEndpointConfig>,
 
-    /// Response caching evaluation metrics
-    #[serde(default)]
-    metrics: Metrics,
-
     /// Buffer size for known private queries (default: 2048)
     #[serde(default = "default_lru_private_queries_size")]
     private_queries_buffer_size: NonZeroUsize,
@@ -267,20 +261,6 @@ pub(crate) struct Ttl(
     #[schemars(with = "String")]
     pub(crate) Duration,
 );
-
-/// Per subgraph configuration for response caching
-#[derive(Clone, Debug, Default, JsonSchema, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-struct Metrics {
-    /// enables metrics evaluating the benefits of response caching
-    #[serde(default)]
-    pub(crate) enabled: bool,
-    /// Metrics counter TTL
-    pub(crate) ttl: Option<Ttl>,
-    /// Adds the entity type name to attributes. This can greatly increase the cardinality
-    #[serde(default)]
-    pub(crate) separate_per_type: bool,
-}
 
 #[derive(Default, Serialize, Deserialize, Debug)]
 #[serde(default)]
@@ -419,7 +399,6 @@ impl PluginPrivate for ResponseCache {
             debug: init.config.debug,
             endpoint_config: init.config.invalidation.clone().map(Arc::new),
             subgraphs: Arc::new(init.config.subgraph),
-            metrics: init.config.metrics,
             private_queries: Arc::new(RwLock::new(LruCache::new(
                 init.config.private_queries_buffer_size,
             ))),
@@ -470,11 +449,7 @@ impl PluginPrivate for ResponseCache {
             .boxed()
     }
 
-    fn subgraph_service(
-        &self,
-        name: &str,
-        mut service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         let subgraph_ttl = self
             .subgraph_ttl(name)
             .unwrap_or_else(|| Duration::from_secs(60 * 60 * 24)); // The unwrap should not happen because it's checked when creating the plugin
@@ -482,15 +457,6 @@ impl PluginPrivate for ResponseCache {
         let private_id = self.subgraphs.get(name).private_id.clone();
 
         let name = name.to_string();
-
-        if self.metrics.enabled {
-            service = CacheMetricsService::create(
-                name.to_string(),
-                service,
-                self.metrics.ttl.as_ref(),
-                self.metrics.separate_per_type,
-            );
-        }
 
         if subgraph_enabled {
             let private_queries = self.private_queries.clone();
@@ -628,7 +594,6 @@ impl ResponseCache {
                 },
                 subgraphs,
             }),
-            metrics: Metrics::default(),
             private_queries: Arc::new(RwLock::new(LruCache::new(DEFAULT_LRU_PRIVATE_QUERIES_SIZE))),
             endpoint_config: Some(Arc::new(InvalidationEndpointConfig {
                 path: String::from("/invalidation"),
@@ -682,7 +647,6 @@ impl ResponseCache {
                 },
                 subgraphs,
             }),
-            metrics: Metrics::default(),
             private_queries: Arc::new(RwLock::new(LruCache::new(DEFAULT_LRU_PRIVATE_QUERIES_SIZE))),
             endpoint_config: Some(Arc::new(InvalidationEndpointConfig {
                 path: String::from("/invalidation"),
@@ -965,7 +929,8 @@ impl CacheService {
                     "graphql.type" = self.entity_type.as_deref().unwrap_or_default(),
                     debug = self.debug,
                     private = is_known_private,
-                    contains_private_id = private_id.is_some()
+                    contains_private_id = private_id.is_some(),
+                    "cache.key" = ::tracing::field::Empty,
                 ))
                 .await?
                 {
@@ -975,6 +940,7 @@ impl CacheService {
                             CacheMetricContextKey::new(response.subgraph_name.clone()),
                             CacheSubgraph(cache_hit),
                         );
+
                         Ok(response)
                     }
                     ControlFlow::Continue((request, mut root_cache_key, invalidation_keys)) => {
@@ -1306,6 +1272,8 @@ async fn cache_lookup_root(
     );
     invalidation_keys.extend(invalidation_cache_keys);
 
+    Span::current().record("cache.key", key.clone());
+
     let now = Instant::now();
     let cache_result = cache.get(&key).await;
     f64_histogram_with_unit!(
@@ -1551,15 +1519,20 @@ async fn cache_lookup_entities(
     let keys_len = cache_metadata.len();
 
     let now = Instant::now();
-    let cache_result = cache
-        .get_multiple(
-            &cache_metadata
-                .iter()
-                .map(|k| k.cache_key.as_str())
-                .collect::<Vec<&str>>(),
-        )
-        .await;
-
+    let cache_keys = cache_metadata
+        .iter()
+        .map(|k| k.cache_key.as_str())
+        .collect::<Vec<&str>>();
+    let cache_result = cache.get_multiple(&cache_keys).await;
+    Span::current().set_span_dyn_attribute(
+        "cache.keys".into(),
+        opentelemetry::Value::Array(Array::String(
+            cache_keys
+                .into_iter()
+                .map(|ck| StringValue::from(ck.to_string()))
+                .collect(),
+        )),
+    );
     f64_histogram_with_unit!(
         "apollo.router.operations.response_cache.fetch",
         "Time to fetch data from cache",
@@ -1570,18 +1543,13 @@ async fn cache_lookup_entities(
     );
 
     let cache_result: Vec<Option<CacheEntry>> = match cache_result {
-        Ok(res) => {
-            Span::current().set_span_dyn_attribute(
-                opentelemetry::Key::new("cache.status"),
-                opentelemetry::Value::String("hit".into()),
-            );
-            res.into_iter()
-                .map(|v| match v {
-                    Some(v) if v.control.can_use() => Some(v),
-                    _ => None,
-                })
-                .collect()
-        }
+        Ok(res) => res
+            .into_iter()
+            .map(|v| match v {
+                Some(v) if v.control.can_use() => Some(v),
+                _ => None,
+            })
+            .collect(),
         Err(err) => {
             let span = Span::current();
             if !matches!(err, sqlx::Error::RowNotFound) {
@@ -1596,10 +1564,6 @@ async fn cache_lookup_entities(
                     "code" = err.code()
                 );
             }
-            span.set_span_dyn_attribute(
-                opentelemetry::Key::new("cache.status"),
-                opentelemetry::Value::String("miss".into()),
-            );
 
             std::iter::repeat_n(None, keys_len).collect()
         }
@@ -1703,7 +1667,8 @@ fn update_cache_control(context: &Context, cache_control: &CacheControl) {
             // Go through the "merge" algorithm even with a single value
             // in order to keep single-fetch queries consistent between cache hit and miss,
             // and with multi-fetch queries.
-            lock.insert(cache_control.merge(cache_control));
+            let new_cache_control = cache_control.merge(cache_control);
+            lock.insert(new_cache_control);
         }
     })
 }
@@ -1857,29 +1822,6 @@ async fn cache_store_entities_from_response(
     }
 
     Ok(())
-}
-
-pub(crate) fn hash_vary_headers(headers: &http::HeaderMap) -> String {
-    let mut digest = blake3::Hasher::new();
-
-    for vary_header_value in headers.get_all(header::VARY).into_iter() {
-        if vary_header_value == "*" {
-            return String::from("*");
-        } else {
-            let header_names = match vary_header_value.to_str() {
-                Ok(header_val) => header_val.split(", "),
-                Err(_) => continue,
-            };
-            header_names.for_each(|header_name| {
-                if let Some(header_value) = headers.get(header_name).and_then(|h| h.to_str().ok()) {
-                    digest.update(header_value.as_bytes());
-                    digest.update(&[0u8; 1][..]);
-                }
-            });
-        }
-    }
-
-    digest.finalize().to_hex().to_string()
 }
 
 // build a cache key for the root operation
@@ -2582,7 +2524,7 @@ async fn check_pg_connection(
             _ = interval.next() => {
                 u64_counter_with_unit!(
                     "apollo.router.response_cache.reconnection",
-                    "Response cache counter for invalidated entries",
+                    "Number of reconnections to the cache storage",
                     "{retry}",
                     1,
                     "subgraph.name" = subgraph_name.clone().unwrap_or_default()

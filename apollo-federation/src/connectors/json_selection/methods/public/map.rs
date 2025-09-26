@@ -118,6 +118,8 @@ fn map_shape(
 mod tests {
     use serde_json_bytes::json;
 
+    use crate::connectors::ConnectSpec;
+    use crate::connectors::json_selection::ApplyToError;
     use crate::selection;
 
     #[test]
@@ -190,4 +192,33 @@ mod tests {
         //     assert_eq!(output_shape.pretty_print(), "List<String>");
         // }
     }*/
+
+    #[rstest::rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn map_should_handle_none_elements_gracefully(#[case] spec: ConnectSpec) {
+        // When individual elements in map return None, they become null in the result
+        assert_eq!(
+            selection!("$.a->map(@.missing)", spec).apply_to(&json!({
+                "a": [{}, {"missing": "value"}, {}],
+            })),
+            (
+                Some(json!([null, "value", null])),
+                vec![
+                    ApplyToError::from_json(&json!({
+                        "message": "Property .missing not found in object",
+                        "path": ["a", "->map", 0, "missing"],
+                        "range": [11, 18],
+                        "spec": spec.to_string(),
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "Property .missing not found in object",
+                        "path": ["a", "->map", 2, "missing"],
+                        "range": [11, 18],
+                        "spec": spec.to_string(),
+                    }))
+                ]
+            ),
+        );
+    }
 }

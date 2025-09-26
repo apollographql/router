@@ -61,19 +61,6 @@ fn concurrent_requests_count() -> u32 {
     10
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub(crate) enum InvalidationType {
-    EntityType,
-}
-
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct InvalidationKey {
-    pub(crate) id: String,
-    pub(crate) field: String,
-}
-
 #[derive(Clone)]
 pub(crate) struct InvalidationService {
     config: Arc<SubgraphConfiguration<Subgraph>>,
