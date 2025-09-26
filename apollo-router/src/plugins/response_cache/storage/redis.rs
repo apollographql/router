@@ -456,12 +456,11 @@ impl Storage {
     async fn mocked(
         config: &Config,
         is_cluster: bool,
-        reader_mock: std::sync::Arc<dyn fred::mocks::Mocks>,
-        writer_mock: std::sync::Arc<dyn fred::mocks::Mocks>,
+        mock_storage: std::sync::Arc<dyn fred::mocks::Mocks>,
         drop_rx: broadcast::Receiver<()>,
     ) -> Result<Storage, BoxError> {
         let storage = RedisCacheStorage::from_mocks_and_config(
-            reader_mock,
+            mock_storage,
             config.clone(),
             "response-cache",
             is_cluster,
@@ -581,15 +580,9 @@ mod tests {
             ..redis_config(false)
         };
         let (_drop_tx, drop_rx) = broadcast::channel(2);
-        let storage = Storage::mocked(
-            &config,
-            false,
-            mock_storage.clone(),
-            mock_storage.clone(),
-            drop_rx,
-        )
-        .await
-        .expect("could not build storage");
+        let storage = Storage::mocked(&config, false, mock_storage, drop_rx)
+            .await
+            .expect("could not build storage");
 
         let invalidation_keys: Vec<String> = invalidation_keys
             .into_iter()
@@ -1075,12 +1068,11 @@ mod tests {
             }
 
             let (_drop_tx, drop_rx) = broadcast::channel(2);
-            let mock_redis = Arc::new(MockStorage::default());
+            let mock_storage = Arc::new(MockStorage::default());
             let storage = Storage::mocked(
                 &redis_config(clustered),
                 clustered,
-                mock_redis.clone(),
-                mock_redis.clone(),
+                mock_storage.clone(),
                 drop_rx,
             )
             .await?;
@@ -1093,7 +1085,7 @@ mod tests {
             assert!(matches!(error, StorageError::Database(e) if e.details() == "timeout"));
 
             // make sure the insert function did not try to operate on the document key
-            for command in mock_redis.0.read().iter() {
+            for command in mock_storage.0.read().iter() {
                 if command.cmd.contains("SET") && command.args.contains(&document_key) {
                     panic!("Command {command:?} set the document key");
                 }
