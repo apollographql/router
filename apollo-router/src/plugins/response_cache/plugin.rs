@@ -68,6 +68,11 @@ use crate::plugins::response_cache::storage::CacheEntry;
 use crate::plugins::response_cache::storage::CacheStorage;
 use crate::plugins::response_cache::storage::Document;
 use crate::plugins::response_cache::storage::redis::Storage;
+use crate::plugins::response_cache::storage;
+use crate::plugins::response_cache::storage::CacheEntry;
+use crate::plugins::response_cache::storage::CacheStorage;
+use crate::plugins::response_cache::storage::Document;
+use crate::plugins::response_cache::storage::postgres::Storage;
 use crate::plugins::telemetry::LruSizeInstrument;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::span_ext::SpanMarkError;
@@ -132,6 +137,33 @@ impl StorageInterface {
     pub(crate) fn get(&self, subgraph: &str) -> Option<&Storage> {
         let storage = self.subgraphs.get(subgraph).or(self.all.as_ref())?;
         storage.get()
+    }
+}
+
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
+impl StorageInterface {
+    /// Replace the `all` storage layer in this struct.
+    ///
+    /// This supports tests which initialize the `StorageInterface` without a backing database
+    /// and then add one later, simulating a delayed storage connection.
+    pub(crate) fn replace_storage(&self, storage: Storage) -> Option<()> {
+        self.all.as_ref()?.set(storage).ok()
+    }
+}
+
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
+impl From<Storage> for StorageInterface {
+    fn from(storage: Storage) -> Self {
+        Self {
+            all: Some(Arc::new(storage.into())),
+            subgraphs: HashMap::new(),
+        }
     }
 }
 

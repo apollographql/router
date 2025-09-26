@@ -10,11 +10,11 @@ pub(crate) enum Error {
     #[error("{0}")]
     Join(#[from] tokio::task::JoinError),
 
-    #[error("{0}")]
-    Serialize(#[from] serde_json::Error),
-
     #[error("NO_STORAGE")]
     NoStorage,
+
+    #[error("{0}")]
+    Serialize(#[from] serde_json::Error),
 
     #[error("TIMED_OUT")]
     Timeout(#[from] tokio::time::error::Elapsed),
