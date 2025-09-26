@@ -92,7 +92,7 @@ If the subgraph-level timeout is hit, the router returns a [GraphQL-compliant HT
 
 #### Timeout hierarchy
 
-Set your router timeout to be greater than your subgraph timeouts. This enables the router to properly handle subgraph timeouts and return appropriate error responses to clients. Configure subgraph timeouts to be lower than the router timeout to provide processing buffer time.
+Set your router timeout to be greater than your subgraph timeouts. This difference provides a processing buffer, which enables the router to properly handle subgraph timeouts and return appropriate error responses to clients.
 
 A properly configured timeout hierarchy:
 
