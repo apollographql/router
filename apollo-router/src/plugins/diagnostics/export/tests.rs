@@ -165,10 +165,7 @@ async fn test_create_main_manifest() {
     };
 
     let result = Exporter::create_main_manifest(&config);
-    assert!(result.is_ok(), "Manifest creation should succeed");
-
-    let manifest_data = result.unwrap();
-    let manifest_str = String::from_utf8(manifest_data).expect("Manifest should be valid UTF-8");
+    let manifest_str = result.expect("Manifest creation should succeed");
 
     // Check that manifest contains expected content
     assert!(

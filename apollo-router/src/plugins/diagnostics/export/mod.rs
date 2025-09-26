@@ -229,10 +229,7 @@ impl Exporter {
         config: &Config,
     ) -> DiagnosticsResult<()> {
         let manifest = Self::create_main_manifest(config)?;
-        let manifest_text = String::from_utf8(manifest)
-            .map_err(|e| DiagnosticsError::Internal(format!("Invalid UTF-8 in manifest: {}", e)))?;
-
-        ArchiveUtils::add_text_file(tar, "manifest.txt", &manifest_text).await
+        ArchiveUtils::add_text_file(tar, "manifest.txt", &manifest).await
     }
 
     /// Add the router configuration to the archive with async I/O
@@ -306,7 +303,7 @@ impl Exporter {
     }
 
     /// Creates the main manifest for the diagnostic archive
-    fn create_main_manifest(config: &Config) -> DiagnosticsResult<Vec<u8>> {
+    fn create_main_manifest(config: &Config) -> DiagnosticsResult<String> {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|e| {
@@ -336,7 +333,7 @@ impl Exporter {
             memory_profiling_info
         );
 
-        Ok(manifest.into_bytes())
+        Ok(manifest)
     }
 
     /// Get the configuration for testing purposes
