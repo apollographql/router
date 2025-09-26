@@ -162,33 +162,6 @@ impl From<Storage> for StorageInterface {
     }
 }
 
-#[cfg(all(
-    test,
-    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
-))]
-impl StorageInterface {
-    /// Replace the `all` storage layer in this struct.
-    ///
-    /// This supports tests which initialize the `StorageInterface` without a backing database
-    /// and then add one later, simulating a delayed storage connection.
-    pub(crate) fn replace_storage(&self, storage: Storage) -> Option<()> {
-        self.all.as_ref()?.set(storage).ok()
-    }
-}
-
-#[cfg(all(
-    test,
-    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
-))]
-impl From<Storage> for StorageInterface {
-    fn from(storage: Storage) -> Self {
-        Self {
-            all: Some(Arc::new(storage.into())),
-            subgraphs: HashMap::new(),
-        }
-    }
-}
-
 /// Configuration for response caching
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
