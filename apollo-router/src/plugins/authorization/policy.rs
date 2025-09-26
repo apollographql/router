@@ -144,7 +144,6 @@ impl traverse::Visitor for PolicyExtractionVisitor<'_> {
         node: &executable::Field,
     ) -> Result<(), BoxError> {
         self.get_policies_from_field(field_def);
-
         traverse::field(self, field_def, node)
     }
 
@@ -1333,6 +1332,192 @@ mod tests {
         b: String
     }
     "#;
+
+    #[test]
+    fn interface_with_implementor_not_defining_field_level_policy() {
+        static SCHEMA: &str = r#"
+        schema
+          @link(url: "https://specs.apollo.dev/link/v1.0")
+          @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+          @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY)
+        {
+          query: Query
+        }
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+        directive @policy(policies: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+        scalar link__Import
+        enum link__Purpose {
+          """
+          `SECURITY` features provide metadata necessary to securely resolve fields.
+          """
+          SECURITY
+        
+          """
+          `EXECUTION` features provide metadata necessary for operation execution.
+          """
+          EXECUTION
+        }
+        type Query {
+          index(id: ID!): ParentInterface
+        }
+        interface ParentInterface {
+          index: Int @policy(policies: [["read"]])
+        }
+        type LeftChildInterface implements ParentInterface {
+          index: Int @policy(policies: [["read"]])
+        }
+        type RightSiblingInterface implements ParentInterface {
+          index: Int @policy(policies: [["read"]])
+        }
+        # NOTE: this doesn't have a field-level @policy
+        type ChildInterface implements ParentInterface {
+          index: Int 
+        }
+    "#;
+
+        static QUERY: &str = r#"
+        query TestIssue {
+          index(id: "1") {
+            index
+          }
+        }
+    "#;
+        let extracted_policies = extract(SCHEMA, QUERY);
+        let read_policy: HashSet<String> = ["read".to_string()].into_iter().collect();
+        let (doc, paths) = filter(SCHEMA, QUERY, read_policy);
+        insta::assert_snapshot!(TestResult {
+            query: QUERY,
+            // this should have `read` as the extracted policy
+            extracted_policies: &extracted_policies,
+            successful_policies: vec!["read".to_string()],
+            result: doc,
+            paths
+        });
+    }
+
+    #[test]
+    fn interface_with_implementor_not_defining_field_level_policy_with_request_not_sending_policies()
+     {
+        static SCHEMA: &str = r#"
+        schema
+          @link(url: "https://specs.apollo.dev/link/v1.0")
+          @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+          @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY)
+        {
+          query: Query
+        }
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+        directive @policy(policies: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+        scalar link__Import
+        enum link__Purpose {
+          """
+          `SECURITY` features provide metadata necessary to securely resolve fields.
+          """
+          SECURITY
+        
+          """
+          `EXECUTION` features provide metadata necessary for operation execution.
+          """
+          EXECUTION
+        }
+        type Query {
+          index(id: ID!): ParentInterface
+        }
+        interface ParentInterface {
+          index: Int @policy(policies: [["read"]])
+        }
+        type LeftChildInterface implements ParentInterface {
+          index: Int @policy(policies: [["read"]])
+        }
+        type RightSiblingInterface implements ParentInterface {
+          index: Int @policy(policies: [["read"]])
+        }
+        # NOTE: this doesn't have a field-level @policy
+        type ChildInterface implements ParentInterface {
+          index: Int 
+        }
+    "#;
+
+        static QUERY: &str = r#"
+        query TestIssue {
+          index(id: "1") {
+            index
+          }
+        }
+    "#;
+        let extracted_policies = extract(SCHEMA, QUERY);
+        // an empty set of policies represents a request with _no_ policies
+        let (doc, paths) = filter(SCHEMA, QUERY, HashSet::new());
+        insta::assert_snapshot!(TestResult {
+            query: QUERY,
+            extracted_policies: &extracted_policies,
+            successful_policies: vec![],
+            result: doc,
+            paths
+        });
+    }
+
+    #[test]
+    fn interface_with_implementor_not_defining_type_level_policy() {
+        static SCHEMA: &str = r#"
+        schema
+          @link(url: "https://specs.apollo.dev/link/v1.0")
+          @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+          @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY)
+        {
+          query: Query
+        }
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+        directive @policy(policies: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+        scalar link__Import
+        enum link__Purpose {
+          """
+          `SECURITY` features provide metadata necessary to securely resolve fields.
+          """
+          SECURITY
+        
+          """
+          `EXECUTION` features provide metadata necessary for operation execution.
+          """
+          EXECUTION
+        }
+        type Query {
+          index(id: ID!): ParentInterface
+        }
+        interface ParentInterface {
+          index: Int @policy(policies: [["read"]])
+        }
+        type LeftChildInterface implements ParentInterface @policy(policies: [["read"]]){
+          index: Int @policy(policies: [["read"]])
+        }
+        type RightSiblingInterface implements ParentInterface @policy(policies: [["read"]]){
+          index: Int @policy(policies: [["read"]])
+        }
+        # NOTE: this doesn't have a type-level @policy
+        type ChildInterface implements ParentInterface {
+          index: Int 
+        }
+    "#;
+
+        static QUERY: &str = r#"
+        query TestIssue {
+          index(id: "1") {
+            index
+          }
+        }
+    "#;
+        let extracted_policies = extract(SCHEMA, QUERY);
+        let read_policy: HashSet<String> = ["read".to_string()].into_iter().collect();
+        let (doc, paths) = filter(SCHEMA, QUERY, read_policy);
+        insta::assert_snapshot!(TestResult {
+            query: QUERY,
+            // this should have `read` as the extracted policy
+            extracted_policies: &extracted_policies,
+            successful_policies: vec!["read".to_string()],
+            result: doc,
+            paths
+        });
+    }
 
     #[test]
     fn interface_field() {

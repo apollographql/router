@@ -263,34 +263,16 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
-    use crate::plugins::response_cache::plugin::Storage;
-    use crate::plugins::response_cache::postgres::PostgresCacheConfig;
-    use crate::plugins::response_cache::postgres::PostgresCacheStorage;
-    use crate::plugins::response_cache::postgres::default_batch_size;
-    use crate::plugins::response_cache::postgres::default_cleanup_interval;
-    use crate::plugins::response_cache::postgres::default_pool_size;
+    use crate::plugins::response_cache::plugin::StorageInterface;
+    use crate::plugins::response_cache::storage::postgres::Config;
+    use crate::plugins::response_cache::storage::postgres::Storage;
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key() {
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-            tls: Default::default(),
-            cleanup_interval: default_cleanup_interval(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(500),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from("test_invalidation_service_bad_shared_key")),
-        })
-        .await
-        .unwrap();
-        let storage = Arc::new(Storage {
-            all: Some(Arc::new(pg_cache.into())),
-            subgraphs: HashMap::new(),
-        });
+        let storage = Storage::new(&Config::test("test_invalidation_service_bad_shared_key"))
+            .await
+            .unwrap();
+        let storage = Arc::new(StorageInterface::from(storage));
         let invalidation = Invalidation::new(storage.clone()).await.unwrap();
 
         let config = Arc::new(SubgraphConfiguration {
@@ -334,27 +316,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key_subgraph() {
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-            tls: Default::default(),
-            cleanup_interval: default_cleanup_interval(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(500),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from(
-                "test_invalidation_service_bad_shared_key_subgraph",
-            )),
-        })
+        let storage = Storage::new(&Config::test(
+            "test_invalidation_service_bad_shared_key_subgraph",
+        ))
         .await
         .unwrap();
-        let storage = Arc::new(Storage {
-            all: Some(Arc::new(pg_cache.into())),
-            subgraphs: HashMap::new(),
-        });
+        let storage = Arc::new(StorageInterface::from(storage));
         let invalidation = Invalidation::new(storage.clone()).await.unwrap();
 
         let config = Arc::new(SubgraphConfiguration {
@@ -407,27 +374,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key_subgraphs() {
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-            tls: Default::default(),
-            cleanup_interval: default_cleanup_interval(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(500),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from(
-                "test_invalidation_service_bad_shared_key_subgraphs",
-            )),
-        })
+        let storage = Storage::new(&Config::test(
+            "test_invalidation_service_bad_shared_key_subgraphs",
+        ))
         .await
         .unwrap();
-        let storage = Arc::new(Storage {
-            all: Some(Arc::new(pg_cache.into())),
-            subgraphs: HashMap::new(),
-        });
+        let storage = Arc::new(StorageInterface::from(storage));
         let invalidation = Invalidation::new(storage.clone()).await.unwrap();
 
         let config = Arc::new(SubgraphConfiguration {
@@ -500,27 +452,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation_service_good_shared_key_subgraphs() {
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-            tls: Default::default(),
-            cleanup_interval: default_cleanup_interval(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(500),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from(
-                "test_invalidation_service_good_shared_key_subgraphs",
-            )),
-        })
+        let storage = Storage::new(&Config::test(
+            "test_invalidation_service_good_shared_key_subgraphs",
+        ))
         .await
         .unwrap();
-        let storage = Arc::new(Storage {
-            all: Some(Arc::new(pg_cache.into())),
-            subgraphs: HashMap::new(),
-        });
+        let storage = Arc::new(StorageInterface::from(storage));
         let invalidation = Invalidation::new(storage.clone()).await.unwrap();
 
         let config = Arc::new(SubgraphConfiguration {

@@ -1,5 +1,5 @@
 ---
-source: apollo-router/tests/integration/postgres.rs
+source: apollo-router/tests/integration/response_cache.rs
 expression: response
 ---
 {
@@ -45,7 +45,7 @@ expression: response
       "version": "1.0",
       "data": [
         {
-          "key": "version:1.0:subgraph:products:type:Query:hash:3ef0ac6d6bd5eee0eaef3e0485c803d51f63550bd9cbe4da120447592ead31e0:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+          "key": "version:1.0:subgraph:products:type:Query:hash:bf44683f0c222652b509d6efb8f324610c8671181de540a96a5016bd71daa7cc:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
           "invalidationKeys": [],
           "kind": {
             "rootFields": [
@@ -54,7 +54,7 @@ expression: response
           },
           "subgraphName": "products",
           "subgraphRequest": {
-            "query": "{ topProducts(first: 2) { __typename upc name } }"
+            "query": "{ topProducts { __typename upc name } }"
           },
           "source": "subgraph",
           "cacheControl": {
@@ -97,10 +97,23 @@ expression: response
           "subgraphRequest": {
             "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { reviews { body } } } }",
             "variables": {
-              "representations": []
+              "representations": [
+                {
+                  "upc": "1",
+                  "__typename": "Product"
+                },
+                {
+                  "upc": "2",
+                  "__typename": "Product"
+                },
+                {
+                  "upc": "3",
+                  "__typename": "Product"
+                }
+              ]
             }
           },
-          "source": "cache",
+          "source": "subgraph",
           "cacheControl": {
             "created": 0,
             "maxAge": 10,
@@ -129,10 +142,23 @@ expression: response
           "subgraphRequest": {
             "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { reviews { body } } } }",
             "variables": {
-              "representations": []
+              "representations": [
+                {
+                  "upc": "1",
+                  "__typename": "Product"
+                },
+                {
+                  "upc": "2",
+                  "__typename": "Product"
+                },
+                {
+                  "upc": "3",
+                  "__typename": "Product"
+                }
+              ]
             }
           },
-          "source": "cache",
+          "source": "subgraph",
           "cacheControl": {
             "created": 0,
             "maxAge": 10,
@@ -164,10 +190,23 @@ expression: response
           "subgraphRequest": {
             "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { reviews { body } } } }",
             "variables": {
-              "representations": []
+              "representations": [
+                {
+                  "upc": "1",
+                  "__typename": "Product"
+                },
+                {
+                  "upc": "2",
+                  "__typename": "Product"
+                },
+                {
+                  "upc": "3",
+                  "__typename": "Product"
+                }
+              ]
             }
           },
-          "source": "cache",
+          "source": "subgraph",
           "cacheControl": {
             "created": 0,
             "maxAge": 10,
