@@ -96,8 +96,7 @@ impl Storage {
         //  There are opportunities for improvement here to make sure that we don't try to do maintenance
         //  on the same cache tag multiple times a second, and perhaps a world where we actually want multiple
         //  consumers running at the same time.
-        // TODO: make channel size configurable?
-        let (cache_tag_tx, cache_tag_rx) = mpsc::channel(10000);
+        let (cache_tag_tx, cache_tag_rx) = mpsc::channel(1000);
         let s = Self {
             timeout,
             reader_storage,
