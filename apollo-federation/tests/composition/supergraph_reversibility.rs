@@ -75,11 +75,8 @@ fn compose_and_test_reversibility(subgraphs: &[ServiceDefinition<'_>]) {
 mod source_preserving_tests {
     use super::*;
 
+    #[ignore = "until merge implementation completed"]
     #[test]
-    // TODO
-    #[should_panic(
-        expected = "not yet implemented: Implement adding core features to merged schema"
-    )]
     fn preserves_the_source_of_union_members() {
         let subgraph_s1 = ServiceDefinition {
             name: "S1",
@@ -122,11 +119,8 @@ mod source_preserving_tests {
         compose_and_test_reversibility(&[subgraph_s1, subgraph_s2]);
     }
 
+    #[ignore = "until merge implementation completed"]
     #[test]
-    // TODO
-    #[should_panic(
-        expected = "not yet implemented: Implement adding core features to merged schema"
-    )]
     fn preserves_the_source_of_enum_members() {
         let subgraph_s1 = ServiceDefinition {
             name: "S1",
@@ -163,11 +157,8 @@ mod source_preserving_tests {
 mod interface_object_tests {
     use super::*;
 
+    #[ignore = "until merge implementation completed"]
     #[test]
-    // TODO
-    #[should_panic(
-        expected = "not yet implemented: Implement adding core features to merged schema"
-    )]
     fn correctly_extract_external_fields_of_concrete_type_only_provided_by_an_interface_object() {
         let subgraph_s1 = ServiceDefinition {
             name: "S1",

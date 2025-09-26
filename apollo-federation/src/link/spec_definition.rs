@@ -53,6 +53,23 @@ pub(crate) trait SpecDefinition {
         &self.url().version
     }
 
+    fn is_spec_directive_name(
+        &self,
+        schema: &FederationSchema,
+        name_in_schema: &Name,
+    ) -> Result<bool, FederationError> {
+        let Some(metadata) = schema.metadata() else {
+            return Err(SingleFederationError::Internal {
+                message: "Schema is not a core schema (add @link first)".to_owned(),
+            }
+            .into());
+        };
+        Ok(metadata
+            .source_link_of_directive(name_in_schema)
+            .map(|e| e.link.url.identity == *self.identity())
+            .unwrap_or(false))
+    }
+
     fn is_spec_type_name(
         &self,
         schema: &FederationSchema,

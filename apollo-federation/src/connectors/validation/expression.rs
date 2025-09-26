@@ -22,6 +22,7 @@ use crate::connectors::JSONSelection;
 use crate::connectors::Namespace;
 use crate::connectors::id::ConnectedElement;
 use crate::connectors::id::ObjectCategory;
+use crate::connectors::json_selection::VarPaths;
 use crate::connectors::string_template::Expression;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
@@ -384,10 +385,23 @@ fn resolve_shape(
                 if !key_str.is_empty() {
                     key_str = format!("`{key_str}` ");
                 }
+
+                let locals_suffix = {
+                    let local_vars = expression.expression.local_var_names();
+                    if local_vars.is_empty() {
+                        "".to_string()
+                    } else {
+                        format!(
+                            ", {}",
+                            local_vars.into_iter().collect::<Vec<_>>().join(", ")
+                        )
+                    }
+                };
+
                 return Err(Message {
                     code: context.code,
                     message: format!(
-                        "{key_str}must start with one of {namespaces}",
+                        "{key_str}must start with one of {namespaces}{locals_suffix}",
                         namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", "),
                     ),
                     locations: transform_locations(
@@ -818,6 +832,43 @@ mod tests {
         // and should probably be tested here in addition to v0.3.
         assert_eq!(ConnectSpec::next(), ConnectSpec::V0_3);
 
+        let spec = ConnectSpec::V0_3;
+        let err = validate_with_context(selection, scalars(), spec);
+        assert!(err.is_err());
+        assert!(
+            !err.err().unwrap().locations.is_empty(),
+            "Every error should have at least one location"
+        );
+    }
+
+    #[rstest]
+    #[case::args_object_as_echo_bool("$args.object->as($o)->echo($o.bool)")]
+    #[case::args_object_as_echo_bool("$args.object->as($o)->echo(@.bool->eq($o.bool))")]
+    #[case::args_object_as_echo_bool(
+        "$->as($true, false->not)->as($false, true->not)->echo($true->or($false))"
+    )]
+    #[case::method_math("$([1, 2, 3])->as($arr)->first->add($arr->last)")]
+    #[case::redundant_as("$args.object->as($o)->as($o)->echo($o.bool)")]
+    #[case::unnecessary_as("$args.object->as($obj)->as($o)->echo($o.bool)")]
+    #[case::as_int_addition("$args.int->as($i)->add(1, $i, $i)")]
+    #[case::as_string_concat(
+        "$args.string->as($s, @->slice(0, 100))->echo({ full: @, first100: $s })->jsonStringify"
+    )]
+    fn valid_as_var_bindings(#[case] selection: &str) {
+        let spec = ConnectSpec::V0_3;
+        validate_with_context(selection, scalars(), spec).unwrap();
+    }
+
+    #[rstest]
+    #[case::args_object_as_echo_bool_var_mismatch("$args.object->as($obj)->echo($o.bool)")]
+    #[case::args_object_as_echo_missing_string("$args.object->as($o)->echo($o.string)")]
+    #[case::args_object_as_echo_missing_int("$args.object->as($o)->echo($o.int)")]
+    #[case::as_without_args("$args.object->as")]
+    #[case::as_with_no_args("$args.object->as()")]
+    #[case::as_with_non_variable("$args.object->as(true)")]
+    #[case::as_with_wrong_args("$args.object->as(1, 2, 3)")]
+    #[case::as_with_reused_var("$([1, 2, 3])->as($o, $o)->echo($o)")]
+    fn invalid_expressions_with_as_var_binding(#[case] selection: &str) {
         let spec = ConnectSpec::V0_3;
         let err = validate_with_context(selection, scalars(), spec);
         assert!(err.is_err());

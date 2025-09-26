@@ -1774,6 +1774,98 @@ expression: "&schema"
       "type": "object"
     },
     "Config7": {
+      "additionalProperties": false,
+      "description": "Postgres cache configuration",
+      "properties": {
+        "acquire_timeout": {
+          "default": {
+            "nanos": 50000000,
+            "secs": 0
+          },
+          "description": "PostgreSQL the maximum amount of time to spend waiting for a connection (default: 50ms)",
+          "type": "string"
+        },
+        "batch_size": {
+          "default": 100,
+          "description": "The size of batch when inserting cache entries in PG (default: 100)",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cleanup_interval": {
+          "default": {
+            "nanos": 0,
+            "secs": 3600
+          },
+          "description": "Specifies the interval between cache cleanup operations (e.g., \"2 hours\", \"30min\"). Default: 1 hour",
+          "type": "string"
+        },
+        "idle_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 60
+          },
+          "description": "PostgreSQL maximum idle duration for individual connection (default: 1min)",
+          "type": "string"
+        },
+        "namespace": {
+          "default": null,
+          "description": "Useful when running tests in parallel to avoid conflicts",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "password": {
+          "description": "PostgreSQL password if not provided in the URLs. This field takes precedence over the password in the URL",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pool_size": {
+          "default": 5,
+          "description": "The size of the PostgreSQL connection pool",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "required_to_start": {
+          "default": false,
+          "description": "Prevents the router from starting if it cannot connect to PostgreSQL",
+          "type": "boolean"
+        },
+        "tls": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/TlsConfig"
+            }
+          ],
+          "default": {
+            "certificate_authorities": null,
+            "client_authentication": null
+          },
+          "description": "Postgres TLS client configuration"
+        },
+        "url": {
+          "description": "List of URL to Postgres",
+          "format": "uri",
+          "type": "string"
+        },
+        "username": {
+          "description": "PostgreSQL username if not provided in the URLs. This field takes precedence over the username in the URL",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
+    "Config8": {
       "description": "Configuration for the progressive override plugin",
       "type": "object"
     },
@@ -6774,98 +6866,6 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "PostgresCacheConfig": {
-      "additionalProperties": false,
-      "description": "Postgres cache configuration",
-      "properties": {
-        "acquire_timeout": {
-          "default": {
-            "nanos": 50000000,
-            "secs": 0
-          },
-          "description": "PostgreSQL the maximum amount of time to spend waiting for a connection (default: 50ms)",
-          "type": "string"
-        },
-        "batch_size": {
-          "default": 100,
-          "description": "The size of batch when inserting cache entries in PG (default: 100)",
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "cleanup_interval": {
-          "default": {
-            "nanos": 0,
-            "secs": 3600
-          },
-          "description": "Specifies the interval between cache cleanup operations (e.g., \"2 hours\", \"30min\"). Default: 1 hour",
-          "type": "string"
-        },
-        "idle_timeout": {
-          "default": {
-            "nanos": 0,
-            "secs": 60
-          },
-          "description": "PostgreSQL maximum idle duration for individual connection (default: 1min)",
-          "type": "string"
-        },
-        "namespace": {
-          "default": null,
-          "description": "Useful when running tests in parallel to avoid conflicts",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "password": {
-          "description": "PostgreSQL password if not provided in the URLs. This field takes precedence over the password in the URL",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "pool_size": {
-          "default": 5,
-          "description": "The size of the PostgreSQL connection pool",
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "required_to_start": {
-          "default": false,
-          "description": "Prevents the router from starting if it cannot connect to PostgreSQL",
-          "type": "boolean"
-        },
-        "tls": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/TlsConfig"
-            }
-          ],
-          "default": {
-            "certificate_authorities": null,
-            "client_authentication": null
-          },
-          "description": "Postgres TLS client configuration"
-        },
-        "url": {
-          "description": "List of URL to Postgres",
-          "format": "uri",
-          "type": "string"
-        },
-        "username": {
-          "description": "PostgreSQL username if not provided in the URLs. This field takes precedence over the username in the URL",
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "url"
-      ],
-      "type": "object"
-    },
     "PrometheusMetricsConfig": {
       "additionalProperties": false,
       "description": "Prometheus configuration",
@@ -7095,8 +7095,11 @@ expression: "&schema"
           "type": "boolean"
         },
         "timeout": {
-          "default": null,
-          "description": "Redis request timeout (default: 2ms)",
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Redis request timeout (default: 500ms)",
           "type": [
             "string",
             "null"
@@ -7378,8 +7381,11 @@ expression: "&schema"
           "type": "boolean"
         },
         "timeout": {
-          "default": null,
-          "description": "Redis request timeout (default: 2ms)",
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Redis request timeout (default: 500ms)",
           "type": [
             "string",
             "null"
@@ -8733,7 +8739,7 @@ expression: "&schema"
         "postgres": {
           "anyOf": [
             {
-              "$ref": "#/definitions/PostgresCacheConfig"
+              "$ref": "#/definitions/Config7"
             },
             {
               "type": "null"
@@ -11606,7 +11612,7 @@ expression: "&schema"
       "$ref": "#/definitions/FileUploadsConfig"
     },
     "progressive_override": {
-      "$ref": "#/definitions/Config7"
+      "$ref": "#/definitions/Config8"
     },
     "rhai": {
       "$ref": "#/definitions/RhaiConfig"
