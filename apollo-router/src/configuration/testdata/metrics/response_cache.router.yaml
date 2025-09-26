@@ -1,4 +1,4 @@
-experimental_response_cache:
+preview_response_cache:
   enabled: true
   debug: true
   invalidation:

@@ -35,7 +35,7 @@ fn base_config() -> Value {
         "include_subgraph_errors": {
             "all": true,
         },
-        "experimental_response_cache": {
+        "preview_response_cache": {
             "enabled": true,
             "subgraph": {
                 "all": {
@@ -65,7 +65,7 @@ fn failure_config() -> Value {
         "include_subgraph_errors": {
             "all": true,
         },
-        "experimental_response_cache": {
+        "preview_response_cache": {
             "enabled": true,
             "subgraph": {
                 "all": {

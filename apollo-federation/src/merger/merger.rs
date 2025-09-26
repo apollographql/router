@@ -561,7 +561,7 @@ impl Merger {
             // leading to that type. But the error here is a bit more "direct"/user friendly than what post-merging
             // validation would return, so we make this a hard error, not just a warning.
             if !found_interface {
-                self.error_reporter.add_error(CompositionError::InterfaceObjectUsageError { message: format!(
+                self.error_reporter.add_error(CompositionError::InterfaceObjectUsageError {message: format!(
                     "Type \"{}\" is declared with @interfaceObject in all the subgraphs in which it is defined (it is defined in {} but should be defined as an interface in at least one subgraph)",
                     type_.type_name(),
                     human_readable_subgraph_names(subgraphs_with_type.iter())
@@ -607,7 +607,7 @@ impl Merger {
                 )
             })
             .collect();
-        let type_kind_to_string = |type_def: &TypeDefinitionPosition, _| {
+        let type_kind_to_string = |type_def: &TypeDefinitionPosition| {
             let type_kind_description = if types_with_interface_object.contains(type_def) {
                 "Interface Object Type (Object Type with @interfaceObject)".to_string()
             } else {
@@ -615,9 +615,9 @@ impl Merger {
             };
             Some(type_kind_description)
         };
-        // TODO: Second type param is supposed to be representation of AST nodes
+        // TODO: Third type param is supposed to be representation of AST nodes
         self.error_reporter
-            .report_mismatch_error::<TypeDefinitionPosition, ()>(
+            .report_mismatch_error::<TypeDefinitionPosition, TypeDefinitionPosition, ()>(
                 CompositionError::TypeKindMismatch {
                     message: format!(
                         "Type \"{}\" has mismatched kind: it is defined as ",
@@ -627,6 +627,7 @@ impl Merger {
                 mismatched_type,
                 &sources,
                 type_kind_to_string,
+                |ty, _| type_kind_to_string(ty),
             );
     }
 
@@ -847,7 +848,7 @@ impl Merger {
         Ok(())
     }
 
-    fn validate_override<T>(
+    pub(crate) fn validate_override<T>(
         &self,
         _sources: &Sources<T>,
         _dest: &ObjectOrInterfaceFieldDefinitionPosition,
@@ -901,7 +902,7 @@ impl Merger {
         }))
     }
 
-    fn hint_on_inconsistent_value_type_field<T>(
+    pub(crate) fn hint_on_inconsistent_value_type_field<T>(
         &mut self,
         sources: &Sources<T>,
         dest: &ObjectOrInterfaceTypeDefinitionPosition,
@@ -947,7 +948,29 @@ impl Merger {
                             ExtendedType::Interface(itf.get(self.merged.schema())?.clone())
                         }
                     };
-                    self.error_reporter.report_mismatch_hint::<ExtendedType, ()>(
+                    fn print_ty_has_field(
+                        ty: &ExtendedType,
+                        field_pos: &ObjectOrInterfaceFieldDefinitionPosition,
+                    ) -> Option<String> {
+                        match ty {
+                            ExtendedType::Object(obj) => {
+                                if obj.fields.contains_key(field_pos.field_name()) {
+                                    Some("yes".to_string())
+                                } else {
+                                    Some("no".to_string())
+                                }
+                            }
+                            ExtendedType::Interface(itf) => {
+                                if itf.fields.contains_key(field_pos.field_name()) {
+                                    Some("yes".to_string())
+                                } else {
+                                    Some("no".to_string())
+                                }
+                            }
+                            _ => Some("no".to_string()),
+                        }
+                    }
+                    self.error_reporter.report_mismatch_hint::<ExtendedType, ExtendedType, ()>(
                         hint_id.clone(),
                         format!("Field \"{}.{}\" of {} type \"{}\" is defined in some but not all subgraphs that define \"{}\"",
                             dest.type_name(),
@@ -958,26 +981,10 @@ impl Merger {
                         ),
                         &dest_in_supergraph,
                         &printable_sources,
-                        |ty, _| match ty {
-                            ExtendedType::Object(obj) => {
-                                if obj.fields.contains_key(field_pos.field_name()) {
-                                    Some("yes".to_string())
-                                } else {
-                                    Some("no".to_string())
-                                }
-                            },
-                            ExtendedType::Interface(itf) => {
-                                if itf.fields.contains_key(field_pos.field_name()) {
-                                    Some("yes".to_string())
-                                } else {
-                                    Some("no".to_string())
-                                }
-                            },
-                            _ => Some("no".to_string()),
-                        },
+                        |ty| print_ty_has_field(ty, &field_pos),
+                        |ty, _| print_ty_has_field(ty, &field_pos),
                         |_, subgraphs| format!("\"{}.{}\" is defined in {}", field_pos.type_name(), field_pos.field_name(), subgraphs.unwrap_or_default()),
                         |_, subgraphs| format!(" but not in {}", subgraphs),
-                        None::<fn(Option<&ExtendedType>) -> bool>,
                         false,
                         false,
                     );
@@ -1010,26 +1017,22 @@ impl Merger {
         }
         let supergraph = 0;
         if !source_as_entity.is_empty() && !source_as_non_entity.is_empty() {
-            self.error_reporter.report_mismatch_hint::<usize, ()>(
-                        HintCode::InconsistentEntity,
-                        format!("Type \"{}\" is declared as an entity (has a @key applied) in some but all defining subgraphs: ",
-                            &obj.type_name,
-                        ),
-                        &supergraph,
-                        &sources,
-                        |idx, _| if source_as_entity.contains(idx) { Some("yes".to_string()) } else { Some("no".to_string()) },
-                        |_, subgraphs| format!("it has no @key in {}", subgraphs.unwrap_or_default()),
-                        |_, subgraphs| format!(" but has some @key in {}", subgraphs),
-                        None::<fn(Option<&usize>) -> bool>,
-                        false,
-                        false,
-                    );
+            self.error_reporter.report_mismatch_hint::<usize, usize, ()>(
+                HintCode::InconsistentEntity,
+                format!("Type \"{}\" is declared as an entity (has a @key applied) in some but all defining subgraphs: ",
+                    &obj.type_name,
+                ),
+                &supergraph,
+                &sources,
+                |idx| if source_as_entity.contains(idx) { Some("yes".to_string()) } else { Some("no".to_string()) },
+                |idx, _| if source_as_entity.contains(idx) { Some("yes".to_string()) } else { Some("no".to_string()) },
+                |_, subgraphs| format!("it has no @key in {}", subgraphs.unwrap_or_default()),
+                |_, subgraphs| format!(" but has some @key in {}", subgraphs),
+                false,
+                false,
+            );
         }
         Ok(!source_as_entity.is_empty())
-    }
-
-    pub(crate) fn merge_interface(&mut self, _itf: InterfaceTypeDefinitionPosition) {
-        todo!("Implement merge_interface")
     }
 
     pub(crate) fn merge_input_object(&mut self, _io: InputObjectTypeDefinitionPosition) {
@@ -1192,11 +1195,16 @@ impl Merger {
                 }
             };
 
-            self.error_reporter_mut().report_mismatch_error::<T, ()>(
+            self.error_reporter.report_mismatch_error::<Type, T, ()>(
                 error,
-                dest,
+                &ty,
                 sources,
-                |typ, _is_supergraph| Some(format!("type \"{typ}\"")), // TODO: Check this is correct now that dest has changed to a position
+                |d| Some(format!("type \"{d}\"")),
+                |s, idx| {
+                    s.get_type(self.subgraphs[idx].schema())
+                        .ok()
+                        .map(|t| format!("type \"{t}\""))
+                },
             );
 
             Ok(false)
@@ -1214,15 +1222,20 @@ impl Merger {
                 "subtypes"
             };
 
-            self.error_reporter_mut().report_mismatch_hint::<T, ()>(
+            self.error_reporter.report_mismatch_hint::<Type, T, ()>(
                 hint_code,
                 format!(
                     "Type of {element_kind} \"{dest}\" is inconsistent but compatible across subgraphs:",
 
                 ),
-                dest,
+                &ty,
                 sources,
-                |typ, _is_supergraph| Some(format!("type \"{typ}\"")),
+                |d| Some(format!("type \"{d}\"")),
+                |s, idx| {
+                    s.get_type(self.subgraphs[idx].schema())
+                        .ok()
+                        .map(|t| format!("type \"{t}\""))
+                },
                 |elt, subgraphs| {
                     format!(
                         "will use type \"{elt}\" (from {}) in supergraph but \"{dest}\" has ",
@@ -1230,7 +1243,6 @@ impl Merger {
                     )
                 },
                 |elt, subgraphs| format!("{type_class} \"{elt}\" in {subgraphs}"),
-                None::<fn(Option<&T>) -> bool>,
                 false,
                 false,
             );
@@ -1460,14 +1472,13 @@ impl Merger {
                 } else {
                     "The schema definition"
                 };
-                self.error_reporter.report_mismatch_hint::<T, ()>(
+                self.error_reporter.report_mismatch_hint::<T, T, ()>(
                     HintCode::InconsistentDescription,
                     format!("{name} has inconsistent descriptions across the subgraphs. "),
                     dest,
                     sources,
-                    |elem, _is_supergraph| {
-                        elem.description(&self.merged).map(|desc| desc.to_string())
-                    },
+                    |elem| elem.description(&self.merged).map(|desc| desc.to_string()),
+                    |elem, _| elem.description(&self.merged).map(|desc| desc.to_string()),
                     |desc, subgraphs| {
                         format!(
                             "The supergraph will use description (from {}):\n{}",
@@ -1482,13 +1493,6 @@ impl Merger {
                             Self::description_string(desc, "  ")
                         )
                     },
-                    Some(|elem: Option<&T>| {
-                        if let Some(el) = elem {
-                            el.description(&self.merged).is_none()
-                        } else {
-                            true
-                        }
-                    }),
                     false,
                     true,
                 );
@@ -1649,19 +1653,6 @@ impl Merger {
 
     fn should_use_join_directive_for_url(&self, url: &Url) -> bool {
         self.join_directive_identities.contains(&url.identity)
-    }
-
-    pub(in crate::merger) fn add_arguments_shallow<T>(&mut self, _sources: &Sources<T>, _dest: &T) {
-        todo!("Implement add_arguments_shallow")
-    }
-
-    pub(in crate::merger) fn merge_default_value<T>(
-        &mut self,
-        _sources: &Sources<T>,
-        _dest: &T,
-        _kind: &str,
-    ) {
-        todo!("Implement merge_default_value")
     }
 
     pub(in crate::merger) fn record_applied_directives_to_merge<T>(

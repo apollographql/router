@@ -6,22 +6,21 @@ pub(crate) enum KnownVariable {
     External(String),
     Dollar,
     AtSign,
+    /// The `input->as($var)` method binds `input` to the `$var` variable in the
+    /// remainder of the path. Since references to such variables are always
+    /// internal to the selection, neither referring to nor requiring external
+    /// data, we use a separate enum variant and leave KnownVariable::External
+    /// for variables that truly refer to external data.
+    Local(String),
 }
 
 impl KnownVariable {
-    pub(crate) fn from_str(var_name: &str) -> Self {
-        match var_name {
-            "$" => Self::Dollar,
-            "@" => Self::AtSign,
-            s => Self::External(s.to_string()),
-        }
-    }
-
     pub(crate) fn as_str(&self) -> &str {
         match self {
             Self::External(namespace) => namespace.as_str(),
             Self::Dollar => "$",
             Self::AtSign => "@",
+            Self::Local(namespace) => namespace.as_str(),
         }
     }
 
