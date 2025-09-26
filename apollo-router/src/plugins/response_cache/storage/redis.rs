@@ -259,12 +259,6 @@ impl CacheStorage for Storage {
         //   2 - update each cache tag with new keys
         //   3 - update each key
         // a failure in any phase will cause the function to return, which prevents invalid states
-
-        // TODO:
-        //  * break these into separate fns
-        //  * do things with metrics
-        //  * break up batches into smaller batches...?
-
         let now = now();
 
         // phase 1
@@ -288,21 +282,18 @@ impl CacheStorage for Storage {
             }
         }
 
-        // NB: spawn separate tasks in case sets are on different shards, as fred will multiplex into
-        // pipelines anyway
         let pipeline = self.writer_storage.client().pipeline();
         for (cache_tag_key, elements) in cache_tags_to_pcks.into_iter() {
             self.send_to_maintenance_queue(cache_tag_key.clone());
 
             // NB: expiry time being max + 1 is important! if you use a volatile TTL eviction policy,
             // Redis will evict the keys with the shortest TTLs - we have to make sure that the cache
-            // tag will outlive any of the keys it refers to
+            // tag will outlive any of the keys it refers to.
             let max_expiry_time = elements
                 .iter()
                 .map(|(exp_time, _)| *exp_time)
-                .reduce(f64::max)
-                .unwrap_or(now as f64)
-                + 1.0;
+                .fold(now as f64, f64::max);
+            let cache_tag_expiry_time = max_expiry_time as i64 + 1;
 
             let _: Result<(), _> = pipeline
                 .zadd(
@@ -324,7 +315,7 @@ impl CacheStorage for Storage {
             // that means we have to call `expire_at` twice :(
             for exp_opt in [ExpireOptions::NX, ExpireOptions::GT] {
                 let _: Result<(), _> = pipeline
-                    .expire_at(cache_tag_key.clone(), max_expiry_time as i64, Some(exp_opt))
+                    .expire_at(cache_tag_key.clone(), cache_tag_expiry_time, Some(exp_opt))
                     .await;
             }
         }
