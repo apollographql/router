@@ -134,6 +134,7 @@ fn slice_shape(
         }
         ShapeCase::String(_) => Shape::string(input_shape.locations),
         ShapeCase::Name(_, _) => input_shape, // TODO: add a way to validate inputs after name resolution
+        ShapeCase::Unknown => Shape::unknown(input_shape.locations),
         _ => Shape::error(
             format!(
                 "Method ->{} requires an array or string input",

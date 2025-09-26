@@ -1,0 +1,289 @@
+---
+title: OpenTelemetry in Apollo Federation
+sidebar_title: OpenTelemetry
+subtitle: Configure your federated graph to emit logs, traces, and metrics
+description: Learn how to configure your federated GraphQL services to generate and process telemetry data, including logs, traces, and metrics.
+context:
+  - telemetry
+redirectFrom:
+  - /graphos/routing/observability/otel
+---
+
+[OpenTelemetry](https://opentelemetry.io/) is a collection of open-source tools for generating and processing telemetry data (such as logs, traces, and metrics) from different systems in a generic and consistent way.
+
+You can configure your gateway, your individual subgraphs, or even a monolothic Apollo Server instance to emit telemetry related to processing GraphQL operations.
+
+Additionally, the `@apollo/gateway` library provides built-in OpenTelemetry instrumentation to emit [gateway-specific spans](#gateway-specific-spans) for operation traces.
+
+If you are using GraphOS Router, it comes [pre-built with support for OpenTelemetry](/graphos/routing/observability/telemetry).
+
+<Note>
+
+GraphOS Studio does not currently consume OpenTelemetry-formatted data. To push trace data to Studio, see [Federated trace data](/graphos/routing/observability/federated-trace-data).
+
+You should configure OpenTelemetry if you want to push trace data to an OpenTelemetry-compatible system, such as [Zipkin](https://zipkin.io/) or [Jaeger](https://www.jaegertracing.io/).
+
+</Note>
+
+## Setup
+
+### 1. Install required libraries
+
+To use OpenTelemetry in your application, you need to install a baseline set of `@opentelemetry` Node.js libraries. This set differs slightly depending on whether you're setting up your federated gateway or a subgraph/monolith.
+
+<ExpansionPanel title="Gateway libraries">
+
+```bash
+npm install \
+  @opentelemetry/api@1.0 \
+  @opentelemetry/core@1.0 \
+  @opentelemetry/resources@1.0 \
+  @opentelemetry/sdk-trace-base@1.0 \
+  @opentelemetry/sdk-trace-node@1.0 \
+  @opentelemetry/instrumentation-http@0.27 \
+  @opentelemetry/instrumentation-express@0.28
+```
+
+</ExpansionPanel>
+
+<ExpansionPanel title="Subgraph/monolith libraries">
+
+```bash
+npm install \
+  @opentelemetry/api@1.0 \
+  @opentelemetry/core@1.0 \
+  @opentelemetry/resources@1.0 \
+  @opentelemetry/sdk-trace-base@1.0 \
+  @opentelemetry/sdk-trace-node@1.0 \
+  @opentelemetry/instrumentation@0.27 \
+  @opentelemetry/instrumentation-http@0.27 \
+  @opentelemetry/instrumentation-express@0.28 \
+  @opentelemetry/instrumentation-graphql@0.27
+```
+
+</ExpansionPanel>
+
+Most importantly, subgraphs and monoliths must install `@opentelemetry/instrumentation-graphql`, and gateways must not install it.
+
+As shown above, most `@opentelemetry` libraries have reached `1.0`. The instrumentation packages listed above are compatible at the time of this writing.
+
+#### Update `@apollo/gateway`
+
+If you're using OpenTelemetry in your federated gateway, also update the `@apollo/gateway` library to version `0.31.1` or later to add support for [gateway-specific spans](#gateway-specific-spans).
+
+### 2. Configure instrumentation
+
+Next, update your application to configure your OpenTelemetry instrumentation as early as possible in your app's execution. This must occur before you even import `@apollo/server`, `express`, or `http`. Otherwise, your trace data will be incomplete.
+
+We recommend putting this configuration in its own file, which you import at the very top of `index.js`. A sample file is provided below (note the lines that should either be deleted or uncommented).
+
+```js title="open-telemetry.js"
+// Import required symbols
+const { Resource } = require('@opentelemetry/resources');
+const { SimpleSpanProcessor, ConsoleSpanExporter } = require ("@opentelemetry/sdk-trace-base");
+const { NodeTracerProvider } = require("@opentelemetry/sdk-trace-node");
+const { registerInstrumentations } = require('@opentelemetry/instrumentation');
+const { HttpInstrumentation } = require ('@opentelemetry/instrumentation-http');
+const { ExpressInstrumentation } = require ('@opentelemetry/instrumentation-express');
+// DELETE IF SETTING UP A GATEWAY, UNCOMMENT OTHERWISE
+// const { GraphQLInstrumentation } = require ('@opentelemetry/instrumentation-graphql');
+
+// Register server-related instrumentation
+registerInstrumentations({
+  instrumentations: [
+    new HttpInstrumentation(),
+    new ExpressInstrumentation(),
+    // DELETE IF SETTING UP A GATEWAY, UNCOMMENT OTHERWISE
+    //new GraphQLInstrumentation()
+  ]
+});
+
+// Initialize provider and identify this particular service
+// (in this case, we're implementing a federated gateway)
+const provider = new NodeTracerProvider({
+  resource: Resource.default().merge(new Resource({
+    // Replace with any string to identify this service in your system
+    "service.name": "gateway",
+  })),
+});
+
+// Configure a test exporter to print all traces to the console
+const consoleExporter = new ConsoleSpanExporter();
+provider.addSpanProcessor(
+  new SimpleSpanProcessor(consoleExporter)
+);
+
+// Register the provider to begin tracing
+provider.register();
+```
+
+For now, this code does not push trace data to an external system. Instead, it prints that data to the console for debugging purposes.
+
+
+After you make these changes to your app, start it up locally. It should begin printing trace data similar to the following:
+
+<ExpansionPanel title="Click to expand">
+
+```js
+{
+  traceId: '0ed36c42718622cc726a661a3328aa61',
+  parentId: undefined,
+  name: 'HTTP POST',
+  id: '36c6a3ae19563ec3',
+  kind: 1,
+  timestamp: 1624650903925787,
+  duration: 26793,
+  attributes: {
+    'http.url': 'http://localhost:4000/',
+    'http.host': 'localhost:4000',
+    'net.host.name': 'localhost',
+    'http.method': 'POST',
+    'http.route': '',
+    'http.target': '/',
+    'http.user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36',
+    'http.request_content_length_uncompressed': 1468,
+    'http.flavor': '1.1',
+    'net.transport': 'ip_tcp',
+    'net.host.ip': '::1',
+    'net.host.port': 4000,
+    'net.peer.ip': '::1',
+    'net.peer.port': 39722,
+    'http.status_code': 200,
+    'http.status_text': 'OK'
+  },
+  status: { code: 1 },
+  events: []
+}
+
+{
+  traceId: '0ed36c42718622cc726a661a3328aa61',
+  parentId: '36c6a3ae19563ec3',
+  name: 'middleware - <anonymous>',
+  id: '3776786d86f24124',
+  kind: 0,
+  timestamp: 1624650903934147,
+  duration: 63,
+  attributes: {
+    'http.route': '/',
+    'express.name': '<anonymous>',
+    'express.type': 'middleware'
+  },
+  status: { code: 0 },
+  events: []
+}
+```
+
+</ExpansionPanel>
+
+Nice! Next, we can modify this code to begin pushing trace data to an external service, such as Zipkin or Jaeger.
+
+### 3. Push trace data to a tracing system
+
+Next, let's modify the code in the [previous step](#2-configure-instrumentation) to instead push traces to a locally running instance of [Zipkin](https://zipkin.io/).
+
+<Note>
+
+To run Zipkin locally, [see the quickstart](https://zipkin.io/pages/quickstart.html). If you want to use a different tracing system, consult the documentation for that system.
+
+</Note>
+
+First, we need to replace our `ConsoleSpanExporter` (which prints traces to the terminal) with a `ZipkinExporter`, which specifically pushes trace data to a running Zipkin instance.
+
+Install the following additional library:
+
+```bash
+npm install @opentelemetry/exporter-zipkin@1.0
+```
+
+Then, import the `ZipkinExporter` in your dedicated OpenTelemetry file:
+
+```js title="open-telemetry.js"
+const { ZipkinExporter } = require("@opentelemetry/exporter-zipkin");
+```
+
+Now we can replace our `ConsoleSpanExporter` with a `ZipkinExporter`. Replace lines 31-34 of the code in [the previous step](#2-configure-instrumentation) with the following:
+
+```js
+// Configure an exporter that pushes all traces to Zipkin
+// (This assumes Zipkin is running on localhost at the 
+// default port of 9411)
+const zipkinExporter = new ZipkinExporter({
+  // url: set_this_if_not_running_zipkin_locally
+});
+provider.addSpanProcessor(
+  new SimpleSpanProcessor(zipkinExporter)
+);
+```
+
+Now, open Zipkin in your browser at `http://localhost:9411`. You should now be able to query recent trace data in the UI!
+
+You can show the details of any operation and see a breakdown of its processing timeline by span.
+
+### 4. Update for production readiness
+
+Our example telemetry configuration assumes that Zipkin is running locally, and that we want to process every span individually as it's emitted.
+
+To prepare for production, we'll want to optimize performance by sending our traces to an [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) using the `OTLPTraceExporter` and replace our `SimpleSpanProcessor` with a `BatchSpanProcessor`.
+The Collector should be deployed as a local sidecar agent to buffer traces before they're sent along to their final destination.
+See the [getting started docs](https://opentelemetry.io/docs/collector/getting-started/) for an overview.
+
+```bash
+npm install @opentelemetry/exporter-trace-otlp-http@0.27
+```
+
+Then, import the `OTLPTraceExporter` and `BatchSpanProcessor` in your dedicated OpenTelemetry file:
+
+
+```js:title=open-telemetry.js
+const { OTLPTraceExporter } = require("@opentelemetry/exporter-trace-otlp-http");
+const { BatchSpanProcessor } = require("@opentelemetry/sdk-trace-base");
+```
+
+Now we can replace our `ZipkinExporter` with an `OTLPTraceExporter`. We can also replace our `SimpleSpanProcessor` with a `BatchSpanProcessor`. Replace lines 4-9 of the code in [the previous step](#3-push-trace-data-to-a-tracing-system) with the following:
+
+```js
+// Configure an exporter that pushes all traces to a Collector
+// (This assumes the Collector is running on the default url
+// of http://localhost:4318/v1/traces)
+const collectorTraceExporter = new OTLPTraceExporter();
+provider.addSpanProcessor(
+  new BatchSpanProcessor(collectorTraceExporter, {
+    maxQueueSize: 1000,
+    scheduledDelayMillis: 1000,
+  }),
+);
+```
+
+You can learn more about using the `OTLPTraceExporter` in the [instrumentation docs](https://opentelemetry.io/docs/instrumentation/js/exporters/).
+
+## GraphQL-specific spans
+
+The `@opentelemetry/instrumentation-graphql` library enables subgraphs and monoliths to emit the following spans as part of [OpenTelemetry traces](https://opentelemetry.io/docs/concepts/data-sources/#traces):
+
+| Name | Description |
+|------|-------------|
+| `graphql.parse` | The amount of time the server spent parsing an operation string. |
+| `graphql.validate` | The amount of time the server spent validating an operation string. |
+| `graphql.execute` | The total amount of time the server spent executing an operation. |
+| `graphql.resolve` | The amount of time the server spent resolving a particular field. |
+
+Note that not every GraphQL span appears in every operation trace. This is because Apollo server can skip parsing or validating an operation string if that string is available in the operation cache.
+
+<Note>
+
+Federated gateways must not install the `@opentelemetry/instrumentation-graphql` library, so these spans are not included in its traces.
+
+</Note>
+
+## Gateway-specific spans
+
+The `@apollo/gateway` library emits the following spans as part of [OpenTelemetry traces](https://opentelemetry.io/docs/concepts/data-sources/#traces):
+
+| Name | Description |
+|------|-------------|
+| `gateway.request` | The total amount of time the gateway spent serving a request. |
+| `gateway.validate` | The amount of time the gateway spent validating a GraphQL operation string. |
+| `gateway.plan` | The amount of time the gateway spent generating a query plan for a validated operation. |
+| `gateway.execute` | The amount of time the gateway spent executing operations on subgraphs. | 
+| `gateway.fetch` | The amount of time the gateway spent fetching data from a particular subgraph. |
+| `gateway.postprocessing` | The amount of time the gateway spent composing a complete response from individual subgraph responses. |  

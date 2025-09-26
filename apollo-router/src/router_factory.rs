@@ -168,21 +168,29 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                 .cloned();
             if let Some(plugin_config) = &mut telemetry_config {
                 inject_schema_id(schema.schema_id.as_str(), plugin_config);
-                match factory
-                    .create_instance(
-                        PluginInit::builder()
-                            .config(plugin_config.clone())
-                            .supergraph_sdl(schema.raw_sdl.clone())
-                            .supergraph_schema_id(schema.schema_id.clone().into_inner())
-                            .supergraph_schema(Arc::new(schema.supergraph_schema().clone()))
-                            .notify(configuration.notify.clone())
-                            .license(license.clone())
-                            .full_config(configuration.validated_yaml.clone())
-                            .and_original_config_yaml(configuration.original_yaml.clone())
-                            .build(),
-                    )
-                    .await
-                {
+                // Extract previous telemetry config for hot reload comparison
+                let previous_telemetry_config = previous_router.and_then(|router| {
+                    router
+                        .configuration
+                        .apollo_plugins
+                        .plugins
+                        .get("telemetry")
+                        .cloned()
+                });
+
+                let telemetry_init = PluginInit::builder()
+                    .config(plugin_config.clone())
+                    .and_previous_config(previous_telemetry_config)
+                    .supergraph_sdl(schema.raw_sdl.clone())
+                    .supergraph_schema_id(schema.schema_id.clone().into_inner())
+                    .supergraph_schema(Arc::new(schema.supergraph_schema().clone()))
+                    .notify(configuration.notify.clone())
+                    .license(license.clone())
+                    .full_config(configuration.validated_yaml.clone())
+                    .and_original_config_yaml(configuration.original_yaml.clone())
+                    .build();
+
+                match factory.create_instance(telemetry_init).await {
                     Ok(plugin) => {
                         if let Some(telemetry) = plugin
                             .as_any()
@@ -228,6 +236,7 @@ impl YamlRouterFactory {
                 initial_telemetry_plugin,
                 extra_plugins,
                 license,
+                previous_router,
             )
             .await?;
 
@@ -288,6 +297,7 @@ impl YamlRouterFactory {
         initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
         license: Arc<LicenseState>,
+        previous_router: Option<&crate::services::router::service::RouterCreator>,
     ) -> Result<SupergraphCreator, BoxError> {
         let query_planner_span = tracing::info_span!("query_planner_creation");
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
@@ -314,6 +324,7 @@ impl YamlRouterFactory {
                 initial_telemetry_plugin,
                 extra_plugins,
                 license,
+                previous_router,
             )
             .instrument(span)
             .await?
@@ -523,6 +534,7 @@ pub(crate) async fn add_plugin(
     name: String,
     factory: &PluginFactory,
     plugin_config: &Value,
+    previous_plugin_config: Option<&Value>,
     schema: Arc<String>,
     schema_id: Arc<String>,
     supergraph_schema: Arc<Valid<apollo_compiler::Schema>>,
@@ -535,23 +547,21 @@ pub(crate) async fn add_plugin(
     full_config: Option<Value>,
     original_config_yaml: Option<Arc<String>>,
 ) {
-    match factory
-        .create_instance(
-            PluginInit::builder()
-                .config(plugin_config.clone())
-                .supergraph_sdl(schema)
-                .supergraph_schema_id(schema_id)
-                .supergraph_schema(supergraph_schema)
-                .subgraph_schemas(subgraph_schemas)
-                .launch_id(launch_id)
-                .notify(notify.clone())
-                .license(license)
-                .and_full_config(full_config)
-                .and_original_config_yaml(original_config_yaml)
-                .build(),
-        )
-        .await
-    {
+    let plugin_init = PluginInit::builder()
+        .config(plugin_config.clone())
+        .and_previous_config(previous_plugin_config.cloned())
+        .supergraph_sdl(schema)
+        .supergraph_schema_id(schema_id)
+        .supergraph_schema(supergraph_schema)
+        .subgraph_schemas(subgraph_schemas)
+        .launch_id(launch_id)
+        .notify(notify.clone())
+        .license(license)
+        .and_full_config(full_config)
+        .and_original_config_yaml(original_config_yaml)
+        .build();
+
+    match factory.create_instance(plugin_init).await {
         Ok(plugin) => {
             let _ = plugin_instances.insert(name, plugin);
         }
@@ -569,11 +579,38 @@ pub(crate) async fn create_plugins(
     initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     license: Arc<LicenseState>,
+    previous_router: Option<&crate::services::router::service::RouterCreator>,
 ) -> Result<Plugins, BoxError> {
     let supergraph_schema = Arc::new(schema.supergraph_schema().clone());
     let supergraph_schema_id = schema.schema_id.clone().into_inner();
     let mut apollo_plugins_config = configuration.apollo_plugins.clone().plugins;
     let user_plugins_config = configuration.plugins.clone().plugins.unwrap_or_default();
+
+    // Extract previous plugin configurations for hot reload previous config detection
+    let (previous_apollo_plugins_config, previous_user_plugins_config) = match previous_router {
+        Some(router) => {
+            // Extract apollo plugin configs from the previous router's stored configuration
+            let prev_apollo_configs: HashMap<&str, &Value> = router
+                .configuration
+                .apollo_plugins
+                .plugins
+                .iter()
+                .map(|(k, v)| (k.as_str(), v))
+                .collect();
+
+            // Extract user plugin configs from the previous router's stored configuration
+            let prev_user_configs: HashMap<String, &Value> = router
+                .configuration
+                .plugins
+                .plugins
+                .as_ref()
+                .map(|plugins| plugins.iter().map(|(k, v)| (k.clone(), v)).collect())
+                .unwrap_or_default();
+
+            (prev_apollo_configs, prev_user_configs)
+        }
+        None => (HashMap::new(), HashMap::new()),
+    };
     let extra = extra_plugins.unwrap_or_default();
     let plugin_registry = &*crate::plugin::PLUGINS;
     let apollo_telemetry_plugin_mandatory = apollo_opentelemetry_initialized();
@@ -596,11 +633,12 @@ pub(crate) async fn create_plugins(
 
     // Use function-like macros to avoid borrow conflicts of captures
     macro_rules! add_plugin {
-        ($name: expr, $factory: expr, $plugin_config: expr, $maybe_full_config: expr) => {{
+        ($name: expr, $factory: expr, $plugin_config: expr, $maybe_full_config: expr, $previous_plugin_config: expr) => {{
             add_plugin(
                 $name,
                 $factory,
                 &$plugin_config,
+                $previous_plugin_config,
                 schema.as_string().clone(),
                 supergraph_schema_id.clone(),
                 supergraph_schema.clone(),
@@ -636,7 +674,14 @@ pub(crate) async fn create_plugins(
                         // Only the telemetry plugin should have access to the full configuration
                         full_config = configuration.validated_yaml.clone();
                     }
-                    add_plugin!(name.to_string(), factory, plugin_config, full_config);
+                    let previous_config = previous_apollo_plugins_config.get($name).copied();
+                    add_plugin!(
+                        name.to_string(),
+                        factory,
+                        plugin_config,
+                        full_config,
+                        previous_config
+                    );
                 }
             }
             .instrument(span)
@@ -658,7 +703,8 @@ pub(crate) async fn create_plugins(
                     match AllowedFeature::from_plugin_name($name) {
                         Some(allowed_feature) => {
                             if allowed_features.contains(&allowed_feature) {
-                                add_plugin!(name.to_string(), factory, plugin_config, None);
+                                let previous_config = previous_apollo_plugins_config.get($name).copied();
+                                add_plugin!(name.to_string(), factory, plugin_config, None, previous_config);
                             } else {
                                 tracing::warn!(
                                     "{name} plugin is not registered, {name} is a restricted feature that requires a license"
@@ -667,7 +713,8 @@ pub(crate) async fn create_plugins(
                         }
                         None => {
                             // If the plugin name did not map to an allowed feature we add it
-                            add_plugin!(name.to_string(), factory, plugin_config, None);
+                            let previous_config = previous_apollo_plugins_config.get($name).copied();
+                            add_plugin!(name.to_string(), factory, plugin_config, None, previous_config);
                         }
                     }
                 }
@@ -687,7 +734,14 @@ pub(crate) async fn create_plugins(
                     .unwrap_or_else(|| panic!("Apollo plugin not registered: {name}"));
                 if let Some(plugin_config) = $opt_plugin_config {
                     // We add oss plugins without a license check
-                    add_plugin!(name.to_string(), factory, plugin_config, None);
+                    let previous_config = previous_apollo_plugins_config.get($name).copied();
+                    add_plugin!(
+                        name.to_string(),
+                        factory,
+                        plugin_config,
+                        None,
+                        previous_config
+                    );
                     return;
                 }
             }
@@ -730,7 +784,8 @@ pub(crate) async fn create_plugins(
                     if let Some(factory) =
                         plugin_registry.iter().find(|factory| factory.name == name)
                     {
-                        add_plugin!(name, factory, plugin_config, None);
+                        let previous_config = previous_user_plugins_config.get(&name).copied();
+                        add_plugin!(name, factory, plugin_config, None, previous_config);
                     } else {
                         errors.push(ConfigurationError::PluginUnknown(name))
                     }
@@ -795,7 +850,7 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("authentication");
     add_oss_apollo_plugin!("preview_file_uploads");
     add_optional_apollo_plugin!("preview_entity_cache");
-    add_oss_apollo_plugin!("experimental_response_cache");
+    add_oss_apollo_plugin!("preview_response_cache");
     add_mandatory_apollo_plugin!("progressive_override");
     add_optional_apollo_plugin!("demand_control");
 
@@ -918,7 +973,7 @@ mod test {
     const OSS_PLUGINS: &[&str] = &[
         "apollo.forbid_mutations",
         "apollo.override_subgraph_url",
-        "apollo.experimental_response_cache",
+        "apollo.preview_response_cache",
         "apollo.connectors",
     ];
 
@@ -1105,7 +1160,7 @@ mod test {
                 debug_extensions: false
                 "#
             }
-            "experimental_response_cache" => {
+            "preview_response_cache" => {
                 r#"
                 enabled: true
                 subgraph: {}
@@ -1210,16 +1265,15 @@ mod test {
                 .unwrap();
         let connectors_config =
             serde_yaml::from_str::<serde_json::Value>(get_plugin_config("connectors")).unwrap();
-        let response_cache_config = serde_yaml::from_str::<serde_json::Value>(get_plugin_config(
-            "experimental_response_cache",
-        ))
-        .unwrap();
+        let response_cache_config =
+            serde_yaml::from_str::<serde_json::Value>(get_plugin_config("preview_response_cache"))
+                .unwrap();
 
         let router_config = Configuration::builder()
             .apollo_plugin("forbid_mutations", forbid_mutations_config)
             .apollo_plugin("override_subgraph_url", override_subgraph_url_config)
             .apollo_plugin("connectors", connectors_config)
-            .apollo_plugin("experimental_response_cache", response_cache_config)
+            .apollo_plugin("preview_response_cache", response_cache_config)
             .build()
             .unwrap();
 
@@ -1534,7 +1588,7 @@ mod test {
     #[case::authentication("authentication")]
     #[case::file_upload("preview_file_uploads")]
     #[case::entity_cache("preview_entity_cache")]
-    #[case::response_cache("experimental_response_cache")]
+    #[case::response_cache("preview_response_cache")]
     #[case::demand_control("demand_control")]
     #[case::connectors("connectors")]
     #[case::coprocessor("coprocessor")]
@@ -1604,8 +1658,7 @@ mod test {
     #[case::authorization("authorization")]
     #[case::authentication("authentication")]
     #[case::file_upload("preview_file_uploads")]
-    #[case::entity_cache("preview_entity_cache")]
-    #[case::response_cache("experimental_response_cache")]
+    #[case::response_cache("preview_response_cache")]
     #[case::demand_control("demand_control")]
     #[case::connectors("connectors")]
     #[case::coprocessor("coprocessor")]
@@ -1635,16 +1688,15 @@ mod test {
                 .unwrap();
         let connectors_config =
             serde_yaml::from_str::<serde_json::Value>(get_plugin_config("connectors")).unwrap();
-        let response_cache_config = serde_yaml::from_str::<serde_json::Value>(get_plugin_config(
-            "experimental_response_cache",
-        ))
-        .unwrap();
+        let response_cache_config =
+            serde_yaml::from_str::<serde_json::Value>(get_plugin_config("preview_response_cache"))
+                .unwrap();
 
         let router_config = Configuration::builder()
             .apollo_plugin("forbid_mutations", forbid_mutations_config)
             .apollo_plugin("override_subgraph_url", override_subgraph_url_config)
             .apollo_plugin("connectors", connectors_config)
-            .apollo_plugin("experimental_response_cache", response_cache_config)
+            .apollo_plugin("preview_response_cache", response_cache_config)
             .apollo_plugin(plugin, plugin_config)
             .build()
             .unwrap();

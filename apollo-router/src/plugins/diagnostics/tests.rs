@@ -22,6 +22,7 @@ async fn test_diagnostics() {
 
     let init = PluginInit {
         config,
+        previous_config: None,
         supergraph_sdl: Arc::new("schema".to_string()),
         supergraph_schema_id: Arc::new("id".to_string()),
         supergraph_schema: Arc::new(apollo_compiler::validation::Valid::assume_valid(
@@ -57,6 +58,7 @@ async fn test_diagnostics_disabled() {
 
     let init = PluginInit {
         config,
+        previous_config: None,
         supergraph_sdl: Arc::new("schema".to_string()),
         supergraph_schema_id: Arc::new("id".to_string()),
         supergraph_schema: Arc::new(apollo_compiler::validation::Valid::assume_valid(

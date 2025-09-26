@@ -173,8 +173,7 @@ pub struct Opt {
     apollo_uplink_endpoints: Option<String>,
 
     /// An OCI reference to an image that contains the supergraph schema for the router.
-    #[clap(long, env, action = ArgAction::Append)]
-    // TODO: Update name to be final public name
+    #[clap(long, env = "APOLLO_GRAPH_ARTIFACT_REFERENCE", action = ArgAction::Append)]
     graph_artifact_reference: Option<String>,
 
     /// Disable sending anonymous usage information to Apollo.
@@ -243,11 +242,25 @@ impl Opt {
                 .apollo_key
                 .clone()
                 .ok_or(Self::err_require_opt("APOLLO_KEY"))?,
-            reference: self
-                .graph_artifact_reference
-                .clone()
-                .ok_or(Self::err_require_opt(" GRAPH_ARTIFACT_REFERENCE"))?,
+            reference: Self::validate_oci_reference(
+                &self
+                    .graph_artifact_reference
+                    .clone()
+                    .ok_or(Self::err_require_opt("APOLLO_GRAPH_ARTIFACT_REFERENCE"))?,
+            )?,
         })
+    }
+
+    pub fn validate_oci_reference(reference: &str) -> std::result::Result<String, anyhow::Error> {
+        // Currently only shas are allowed to be passed as graph artifact references
+        // TODO Update when tag reloading is implemented
+        let valid_regex = Regex::new(r"@sha256:[0-9a-fA-F]{64}$").unwrap();
+        if valid_regex.is_match(reference) {
+            tracing::debug!("validated OCI configuration");
+            Ok(reference.to_string())
+        } else {
+            Err(anyhow!("invalid graph artifact reference: {reference}"))
+        }
     }
 
     fn parse_endpoints(endpoints: &str) -> std::result::Result<Endpoints, anyhow::Error> {
@@ -488,7 +501,7 @@ impl Executable {
         // 1. Cli --supergraph
         // 2. Env APOLLO_ROUTER_SUPERGRAPH_PATH
         // 3. Env APOLLO_ROUTER_SUPERGRAPH_URLS
-        // 4. Env APOLLO_KEY and  GRAPH_ARTIFACT_REFERENCE
+        // 4. Env APOLLO_KEY and APOLLO_GRAPH_ARTIFACT_REFERENCE
         // 5. Env APOLLO_KEY and APOLLO_GRAPH_REF
         #[cfg(unix)]
         let akp = &opt.apollo_key_path;
@@ -807,5 +820,79 @@ mod tests {
             add_log_filter("apollo_router::plugins=debug").unwrap(),
             "info,apollo_router::plugins=debug"
         );
+    }
+
+    #[test]
+    fn test_validate_oci_reference_valid_cases() {
+        // Test valid OCI references with different hash values
+        let valid_hashes = vec![
+            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            "@sha256:ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890",
+            "@sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+            "@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            "@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        ];
+
+        for hash in valid_hashes {
+            let result = super::Opt::validate_oci_reference(hash);
+            assert!(result.is_ok(), "Hash '{}' should be valid", hash);
+            assert_eq!(result.unwrap(), hash);
+        }
+    }
+
+    #[test]
+    fn test_validate_oci_reference_invalid_cases() {
+        let invalid_references = vec![
+            // Missing @sha256: prefix
+            "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            // Wrong prefix
+            "@sha1:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            "@sha512:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            // Too short
+            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcde",
+            // Too long
+            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1",
+            // Invalid characters
+            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdeg",
+            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcde!",
+            // Empty string
+            "",
+            // Just the prefix
+            "@sha256:",
+            // Hash with spaces
+            "@sha256: 1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef ",
+            // Hash with dashes
+            "@sha256:12345678-90abcdef-12345678-90abcdef-12345678-90abcdef-12345678-90abcdef",
+            // Hash with colons
+            "@sha256:12345678:90abcdef:12345678:90abcdef:12345678:90abcdef:12345678:90abcdef",
+            // Missing hash entirely
+            "@sha256",
+            // Wrong format entirely
+            "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            // Extra characters at the end
+            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef:latest",
+            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef@tag",
+        ];
+
+        for reference in invalid_references {
+            let result = super::Opt::validate_oci_reference(reference);
+            assert!(
+                result.is_err(),
+                "Reference '{}' should be invalid",
+                reference
+            );
+            let error_msg = result.unwrap_err().to_string();
+            assert!(
+                error_msg.contains("invalid graph artifact reference"),
+                "Error message should contain 'invalid graph artifact reference' for '{}'",
+                reference
+            );
+            assert!(
+                error_msg.contains(reference),
+                "Error message should contain the invalid reference '{}'",
+                reference
+            );
+        }
     }
 }

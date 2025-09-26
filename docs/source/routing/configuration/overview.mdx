@@ -35,4 +35,4 @@ This example command would be for a router with a GraphOS-managed graph and a cu
 APOLLO_KEY="..." APOLLO_GRAPH_REF="..." router --config myrouter.yaml
 ```
 
-> The router can hot-reload updated configuration. When enabled, changes in `router.yaml` trigger the router to restart with its updated configuration.
+> The router can hot-reload updated configuration. When enabled, changes in `router.yaml` trigger the router to reload with the updated configuration.  Existing requests will finish using the existing configuration and new requests will start using the new configuration.

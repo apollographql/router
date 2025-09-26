@@ -144,6 +144,11 @@ pub enum CompositionError {
         locations: Locations,
     },
     #[error("{message}")]
+    ContextualArgumentNotContextualInAllSubgraphs {
+        message: String,
+        locations: Locations,
+    },
+    #[error("{message}")]
     EmptyMergedEnumType {
         message: String,
         locations: Locations,
@@ -172,6 +177,8 @@ pub enum CompositionError {
     TypeDefinitionInvalid { message: String },
     #[error("{message}")]
     InterfaceObjectUsageError { message: String },
+    #[error("{message}")]
+    InterfaceKeyMissingImplementationType { message: String },
     #[error("{message}")]
     TypeKindMismatch { message: String },
     #[error("{message}")]
@@ -208,6 +215,11 @@ pub enum CompositionError {
     #[error("{message}")]
     InconsistentInputObjectField { message: String },
     #[error("{message}")]
+    RequiredArgumentMissingInSomeSubgraph {
+        message: String,
+        locations: Locations,
+    },
+    #[error("{message}")]
     RequiredInputFieldMissingInSomeSubgraph {
         message: String,
         locations: Locations,
@@ -236,12 +248,27 @@ pub enum CompositionError {
     OverrideOnInterface { message: String },
     #[error("{message}")]
     OverrideSourceHasOverride { message: String },
+    #[error("{message}")]
+    QueryRootMissing { message: String },
+    #[error("{message}")]
+    ArgumentDefaultMismatch {
+        message: String,
+        locations: Locations,
+    },
+    #[error("{message}")]
+    InputFieldDefaultMismatch {
+        message: String,
+        locations: Locations,
+    },
 }
 
 impl CompositionError {
     pub fn code(&self) -> ErrorCode {
         match self {
             Self::SubgraphError { error, .. } => error.code(),
+            Self::ContextualArgumentNotContextualInAllSubgraphs { .. } => {
+                ErrorCode::ContextualArgumentNotContextualInAllSubgraphs
+            }
             Self::EmptyMergedEnumType { .. } => ErrorCode::EmptyMergedEnumType,
             Self::EnumValueMismatch { .. } => ErrorCode::EnumValueMismatch,
             Self::ExternalTypeMismatch { .. } => ErrorCode::ExternalTypeMismatch,
@@ -256,6 +283,9 @@ impl CompositionError {
             Self::DirectiveDefinitionInvalid { .. } => ErrorCode::DirectiveDefinitionInvalid,
             Self::TypeDefinitionInvalid { .. } => ErrorCode::TypeDefinitionInvalid,
             Self::InterfaceObjectUsageError { .. } => ErrorCode::InterfaceObjectUsageError,
+            Self::InterfaceKeyMissingImplementationType { .. } => {
+                ErrorCode::InterfaceKeyMissingImplementationType
+            }
             Self::TypeKindMismatch { .. } => ErrorCode::TypeKindMismatch,
             Self::ShareableHasMismatchedRuntimeTypes { .. } => {
                 ErrorCode::ShareableHasMismatchedRuntimeTypes
@@ -273,6 +303,9 @@ impl CompositionError {
             Self::LinkImportNameMismatch { .. } => ErrorCode::LinkImportNameMismatch,
             Self::InvalidFieldSharing { .. } => ErrorCode::InvalidFieldSharing,
             Self::InconsistentInputObjectField { .. } => ErrorCode::Internal, // This is for hints, not errors
+            Self::RequiredArgumentMissingInSomeSubgraph { .. } => {
+                ErrorCode::RequiredArgumentMissingInSomeSubgraph
+            }
             Self::RequiredInputFieldMissingInSomeSubgraph { .. } => {
                 ErrorCode::RequiredInputFieldMissingInSomeSubgraph
             }
@@ -289,6 +322,9 @@ impl CompositionError {
             Self::OverrideLabelInvalid { .. } => ErrorCode::OverrideLabelInvalid,
             Self::OverrideOnInterface { .. } => ErrorCode::OverrideOnInterface,
             Self::OverrideSourceHasOverride { .. } => ErrorCode::OverrideSourceHasOverride,
+            Self::QueryRootMissing { .. } => ErrorCode::QueryRootMissing,
+            Self::ArgumentDefaultMismatch { .. } => ErrorCode::FieldArgumentDefaultMismatch,
+            Self::InputFieldDefaultMismatch { .. } => ErrorCode::InputFieldDefaultMismatch,
         }
     }
 
@@ -324,6 +360,11 @@ impl CompositionError {
             Self::InterfaceObjectUsageError { message } => Self::InterfaceObjectUsageError {
                 message: format!("{message}{appendix}"),
             },
+            Self::InterfaceKeyMissingImplementationType { message } => {
+                Self::InterfaceKeyMissingImplementationType {
+                    message: format!("{message}{appendix}"),
+                }
+            }
             Self::TypeKindMismatch { message } => Self::TypeKindMismatch {
                 message: format!("{message}{appendix}"),
             },
@@ -367,6 +408,12 @@ impl CompositionError {
             Self::InconsistentInputObjectField { message } => Self::InconsistentInputObjectField {
                 message: format!("{message}{appendix}"),
             },
+            Self::RequiredArgumentMissingInSomeSubgraph { message, locations } => {
+                Self::RequiredArgumentMissingInSomeSubgraph {
+                    message: format!("{message}{appendix}"),
+                    locations,
+                }
+            }
             Self::RequiredInputFieldMissingInSomeSubgraph { message, locations } => {
                 Self::RequiredInputFieldMissingInSomeSubgraph {
                     message: format!("{message}{appendix}"),
@@ -387,6 +434,22 @@ impl CompositionError {
             Self::FieldTypeMismatch { message } => Self::FieldTypeMismatch {
                 message: format!("{message}{appendix}"),
             },
+            Self::ContextualArgumentNotContextualInAllSubgraphs { message, locations } => {
+                Self::ContextualArgumentNotContextualInAllSubgraphs {
+                    message: format!("{message}{appendix}"),
+                    locations,
+                }
+            }
+            Self::ArgumentDefaultMismatch { message, locations } => Self::ArgumentDefaultMismatch {
+                message: format!("{message}{appendix}"),
+                locations,
+            },
+            Self::InputFieldDefaultMismatch { message, locations } => {
+                Self::InputFieldDefaultMismatch {
+                    message: format!("{message}{appendix}"),
+                    locations,
+                }
+            }
             // Remaining errors do not have an obvious way to appending a message, so we just return self.
             Self::SubgraphError { .. }
             | Self::InvalidGraphQLName(..)
@@ -397,7 +460,8 @@ impl CompositionError {
             | Self::OverrideFromSelfError { .. }
             | Self::OverrideLabelInvalid { .. }
             | Self::OverrideOnInterface { .. }
-            | Self::OverrideSourceHasOverride { .. } => self,
+            | Self::OverrideSourceHasOverride { .. }
+            | Self::QueryRootMissing { .. } => self,
         }
     }
 
@@ -407,9 +471,12 @@ impl CompositionError {
             | Self::EmptyMergedEnumType { locations, .. }
             | Self::InputFieldMergeFailed { locations, .. }
             | Self::ExtensionWithNoBase { locations, .. }
+            | Self::RequiredArgumentMissingInSomeSubgraph { locations, .. }
             | Self::RequiredInputFieldMissingInSomeSubgraph { locations, .. }
             | Self::EmptyMergedInputType { locations, .. }
-            | Self::InvalidFieldSharing { locations, .. } => locations,
+            | Self::InvalidFieldSharing { locations, .. }
+            | Self::ArgumentDefaultMismatch { locations, .. }
+            | Self::InputFieldDefaultMismatch { locations, .. } => locations,
             _ => &[],
         }
     }
@@ -749,6 +816,8 @@ pub enum SingleFederationError {
     ListSizeInvalidSizedField { message: String },
     #[error("{message}")]
     InvalidTagName { message: String },
+    #[error("{message}")]
+    QueryRootMissing { message: String },
 }
 
 impl SingleFederationError {
@@ -973,6 +1042,7 @@ impl SingleFederationError {
             #[allow(unused)]
             SingleFederationError::InvalidFieldSharing { .. } => ErrorCode::InvalidFieldSharing,
             SingleFederationError::InvalidTagName { .. } => ErrorCode::InvalidTagName,
+            SingleFederationError::QueryRootMissing { .. } => ErrorCode::QueryRootMissing,
         }
     }
 
@@ -2269,6 +2339,29 @@ static INVALID_TAG_NAME: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     )
 });
 
+static CONTEXTUAL_ARGUMENT_NOT_CONTEXTUAL_IN_ALL_SUBGRAPHS: LazyLock<ErrorCodeDefinition> =
+    LazyLock::new(|| {
+        ErrorCodeDefinition::new(
+            "CONTEXTUAL_ARGUMENT_NOT_CONTEXTUAL_IN_ALL_SUBGRAPHS".to_owned(),
+            "Argument on field is marked contextual in only some subgraphs".to_owned(),
+            Some(ErrorCodeMetadata {
+                added_in: "2.7.0",
+                replaces: &[],
+            }),
+        )
+    });
+
+static QUERY_ROOT_MISSING: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "QUERY_ROOT_MISSING".to_owned(),
+        "The schema has no query root type.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.0.0",
+            replaces: &[],
+        }),
+    )
+});
+
 #[derive(Debug, PartialEq, strum_macros::EnumIter)]
 pub enum ErrorCode {
     ErrorCodeMissing,
@@ -2369,6 +2462,8 @@ pub enum ErrorCode {
     ContextSelectionInvalid,
     InvalidTagName,
     OverrideLabelInvalid,
+    ContextualArgumentNotContextualInAllSubgraphs,
+    QueryRootMissing,
 }
 
 impl ErrorCode {
@@ -2488,6 +2583,10 @@ impl ErrorCode {
             ErrorCode::InvalidTagName => &INVALID_TAG_NAME,
             ErrorCode::ErrorCodeMissing => &ERROR_CODE_MISSING,
             ErrorCode::OverrideLabelInvalid => &OVERRIDE_LABEL_INVALID,
+            ErrorCode::ContextualArgumentNotContextualInAllSubgraphs => {
+                &CONTEXTUAL_ARGUMENT_NOT_CONTEXTUAL_IN_ALL_SUBGRAPHS
+            }
+            ErrorCode::QueryRootMissing => &QUERY_ROOT_MISSING,
         }
     }
 }
