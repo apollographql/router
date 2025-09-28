@@ -22,6 +22,10 @@ use hyper_rustls::ConfigBuilderExt;
 use hyper_rustls::HttpsConnector;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
+#[cfg(unix)]
+use hyperlocal::UnixConnector;
+#[cfg(unix)]
+use tower::util::Either;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -73,7 +77,7 @@ const COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION: &str = "EXTERNAL_DESERIALIZAT
 
 type MapFn = fn(http::Response<hyper::body::Incoming>) -> http::Response<RouterBody>;
 
-type HTTPClientService = tower::util::MapResponse<
+type CoprocessorHttpClient = tower::util::MapResponse<
     tower::timeout::Timeout<
         hyper_util::client::legacy::Client<
             HttpsConnector<HttpConnector<AsyncHyperResolver>>,
@@ -82,6 +86,19 @@ type HTTPClientService = tower::util::MapResponse<
     >,
     MapFn,
 >;
+
+#[cfg(unix)]
+type CoprocessorUnixClient = tower::util::MapResponse<
+    tower::timeout::Timeout<
+        hyper_util::client::legacy::Client<UnixConnector, RouterBody>
+    >,
+    MapFn,
+>;
+
+#[cfg(unix)]
+type HTTPClientService = Either<CoprocessorHttpClient, CoprocessorUnixClient>;
+#[cfg(not(unix))]
+type HTTPClientService = CoprocessorHttpClient;
 
 #[async_trait::async_trait]
 impl Plugin for CoprocessorPlugin<HTTPClientService> {
@@ -176,6 +193,7 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
             );
         }
 
+        // Create HTTP client with connection pooling
         let http_client = ServiceBuilder::new()
             .map_response(
                 |http_response: http::Response<hyper::body::Incoming>| -> http::Response<RouterBody> {
@@ -190,7 +208,32 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
                     .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
                     .build(connector),
             );
-        CoprocessorPlugin::new(http_client, init.config, init.supergraph_sdl)
+
+        #[cfg(unix)]
+        let mixed_client = {
+            // Check if URL uses unix:// scheme
+            if init.config.url.starts_with("unix://") {
+                // Create Unix client without connection pooling (like subgraph implementation)
+                let unix_client = ServiceBuilder::new()
+                    .map_response(
+                        |http_response: http::Response<hyper::body::Incoming>| -> http::Response<RouterBody> {
+                            let (parts, body) = http_response.into_parts();
+                            http::Response::from_parts(parts, body.map_err(axum::Error::new).boxed_unsync())
+                        } as MapFn,
+                    )
+                    .layer(TimeoutLayer::new(init.config.timeout))
+                    .service(
+                        hyper_util::client::legacy::Client::builder(TokioExecutor::new())
+                            .build(UnixConnector),
+                    );
+                Either::Right(unix_client)
+            } else {
+                Either::Left(http_client)
+            }
+        };
+        #[cfg(not(unix))]
+        let mixed_client = http_client;
+        CoprocessorPlugin::new(mixed_client, init.config, init.supergraph_sdl)
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
@@ -395,7 +438,7 @@ pub(super) struct SubgraphResponseConf {
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "CoprocessorConfig")]
 struct Conf {
-    /// The url you'd like to offload processing to
+    /// The url you'd like to offload processing to. Supports HTTP (http://127.0.0.1:8081/urlpath) and Unix Domain Socket (unix:///path/to/socket) URLs.
     url: String,
     client: Option<Client>,
     /// The timeout for external requests
