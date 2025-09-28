@@ -4,4 +4,4 @@ Many of Apollo's customers using coprocessor will co-locate their coprocessor wi
 
 This PR brings parity to coprocessor communication with the Unix Domain Sockets support that subgraphs have had for some time. Bypassing the full tcp/ip network stack and allowing data transfer between processing using memory space can significantly reduce latency compared to HTTP.
 
-By [@theJC](https://github.com/theJC) in https://github.com/apollographql/router/pull/8348
+By [Jon Christiansen](https://github.com/theJC) in https://github.com/apollographql/router/pull/8348
