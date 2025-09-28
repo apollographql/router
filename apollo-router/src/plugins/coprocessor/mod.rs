@@ -24,8 +24,6 @@ use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 #[cfg(unix)]
 use hyperlocal::UnixConnector;
-#[cfg(unix)]
-use tower::util::Either;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -33,6 +31,8 @@ use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower::timeout::TimeoutLayer;
+#[cfg(unix)]
+use tower::util::Either;
 use tower::util::MapFutureLayer;
 
 use crate::Context;
@@ -89,9 +89,7 @@ type CoprocessorHttpClient = tower::util::MapResponse<
 
 #[cfg(unix)]
 type CoprocessorUnixClient = tower::util::MapResponse<
-    tower::timeout::Timeout<
-        hyper_util::client::legacy::Client<UnixConnector, RouterBody>
-    >,
+    tower::timeout::Timeout<hyper_util::client::legacy::Client<UnixConnector, RouterBody>>,
     MapFn,
 >;
 

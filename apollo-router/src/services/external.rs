@@ -290,15 +290,19 @@ where
 
         // Handle Unix socket URL conversion (similar to subgraph implementation)
         #[cfg(unix)]
-        let (converted_uri, is_unix_socket, unix_path) = if let Some(path) = uri.strip_prefix("unix://") {
-            tracing::debug!("using Unix domain socket transport to coprocessor: {}", path);
-            // Convert unix:// URL to hyperlocal format that UnixConnector can understand
-            let hyperlocal_uri: http::Uri = hyperlocal::Uri::new(path, "/").into();
-            (hyperlocal_uri, true, Some(path))
-        } else {
-            tracing::debug!("using HTTP transport to coprocessor: {}", uri);
-            (uri.parse()?, false, None)
-        };
+        let (converted_uri, is_unix_socket, unix_path) =
+            if let Some(path) = uri.strip_prefix("unix://") {
+                tracing::debug!(
+                    "using Unix domain socket transport to coprocessor: {}",
+                    path
+                );
+                // Convert unix:// URL to hyperlocal format that UnixConnector can understand
+                let hyperlocal_uri: http::Uri = hyperlocal::Uri::new(path, "/").into();
+                (hyperlocal_uri, true, Some(path))
+            } else {
+                tracing::debug!("using HTTP transport to coprocessor: {}", uri);
+                (uri.parse()?, false, None)
+            };
         #[cfg(not(unix))]
         let (converted_uri, is_unix_socket, unix_path) = {
             tracing::debug!("using HTTP transport to coprocessor: {}", uri);
@@ -484,7 +488,10 @@ mod test {
             let service = service_fn(|req: http::Request<RouterBody>| async move {
                 tracing::info!("got unix socket request");
                 // Verify the URI was converted to hyperlocal format
-                assert!(req.uri().host().is_some(), "Unix socket URI should have encoded host");
+                assert!(
+                    req.uri().host().is_some(),
+                    "Unix socket URI should have encoded host"
+                );
                 Ok::<_, BoxError>(
                     Response::builder()
                         .status(200)
@@ -500,9 +507,7 @@ mod test {
                 .build();
 
             // Make the call with a Unix socket URL which should create proper tracing
-            let _ = externalizable
-                .call(service, "unix:///tmp/test.sock")
-                .await;
+            let _ = externalizable.call(service, "unix:///tmp/test.sock").await;
         }
         .with_subscriber(assert_snapshot_subscriber!())
         .await;

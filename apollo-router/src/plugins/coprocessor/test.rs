@@ -3945,7 +3945,8 @@ mod tests {
             let is_unix = url.starts_with("unix://");
             assert_eq!(
                 is_unix, should_be_unix,
-                "URL '{}' unix detection failed", url
+                "URL '{}' unix detection failed",
+                url
             );
         }
     }
@@ -3986,7 +3987,10 @@ mod tests {
                 .build_router()
                 .await;
 
-            assert!(test_harness.is_ok(), "Legacy HTTP configuration should load successfully");
+            assert!(
+                test_harness.is_ok(),
+                "Legacy HTTP configuration should load successfully"
+            );
         }
     }
 }
