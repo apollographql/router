@@ -489,3 +489,69 @@ mod on_graphql_error_selector {
         Ok(())
     }
 }
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_unix_domain_socket() -> Result<(), tower::BoxError> {
+    use std::path::PathBuf;
+    use tokio::net::UnixListener;
+    use hyper_util::rt::TokioExecutor;
+    use hyper_util::rt::TokioIo;
+
+    if !crate::integration::common::graph_os_enabled() {
+        return Ok(());
+    }
+
+    // Create a temporary Unix socket path
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut sock_path = PathBuf::from(dir.path());
+    sock_path.push("coprocessor.sock");
+    let _ = std::fs::remove_file(&sock_path);
+
+    // Start a minimal Unix domain socket HTTP server that echoes the JSON body back
+    let uds = UnixListener::bind(&sock_path).expect("bind uds");
+    tokio::spawn(async move {
+        loop {
+            let (stream, _) = uds.accept().await.expect("accept");
+            let io = TokioIo::new(stream);
+            let svc = hyper::service::service_fn(|req: http::Request<hyper::body::Incoming>| async move {
+                let bytes = http_body_util::BodyExt::collect(req.into_body())
+                    .await
+                    .unwrap()
+                    .to_bytes();
+                Ok::<_, std::convert::Infallible>(
+                    http::Response::builder()
+                        .status(200)
+                        .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.essence_str())
+                        .body(axum::body::Body::from(bytes))
+                        .unwrap(),
+                )
+            });
+            if let Err(err) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                .serve_connection_with_upgrades(io, svc)
+                .await
+            {
+                eprintln!("uds server error: {err}");
+            }
+        }
+    });
+
+    // Configure router to use the unix:// coprocessor URL
+    let uds_url = format!("unix://{}", sock_path.display());
+    let mut router = crate::integration::IntegrationTest::builder()
+        .config(
+            include_str!("fixtures/coprocessor.router.yaml")
+                .replace("<replace>", &uds_url),
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), 200);
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
