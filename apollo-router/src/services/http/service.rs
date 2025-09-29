@@ -18,6 +18,7 @@ use hyper_util::client::legacy::connect::HttpConnector;
 use hyperlocal::UnixConnector;
 use opentelemetry::global;
 use rustls::ClientConfig;
+use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use rustls::RootCertStore;
 use schemars::JsonSchema;
 use tower::BoxError;
@@ -316,6 +317,11 @@ impl tower::Service<HttpRequest> for HttpClientService {
             //"apollo.subgraph.name" = %service_name,
             //"graphql.operation.name" = %operation_name,
         );
+        
+        // Apply any attributes that were stored by telemetry middleware
+        if let Some(attributes) = context.extensions().with_lock(|lock| lock.get::<Vec<opentelemetry::KeyValue>>().cloned()) {
+            http_req_span.set_span_dyn_attributes(attributes);
+        }
         get_text_map_propagator(|propagator| {
             propagator.inject_context(
                 &prepare_context(http_req_span.context()),
@@ -353,15 +359,13 @@ impl tower::Service<HttpRequest> for HttpClientService {
                 http_request
             };
 
-            let http_response = do_fetch(client, &service_name, http_request)
-                .instrument(http_req_span)
-                .await?;
+            let http_response = do_fetch(client, &service_name, http_request).await?;
 
             Ok(HttpResponse {
                 http_response,
                 context,
             })
-        })
+        }.instrument(http_req_span))
     }
 }
 

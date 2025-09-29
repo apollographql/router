@@ -1247,7 +1247,10 @@ async fn call_http(
             })?
     } else {
         tracing::debug!("we called http");
+        tracing::info!("we called http");
         let client = client_factory.create(service_name);
+
+        tracing::info!("client: {:?}", client);
         call_single_http(request, body, context, client, service_name).await
     }
 }
