@@ -169,6 +169,8 @@ items:
             href: "./performance/caching/distributed"
           - label: "Entity Caching"
             href: "./performance/caching/entity"
+          - label: "Response Caching"
+            href: "./performance/caching/response_caching"
       - label: "Performance and Scaling"
         children:
           - label: "Overview"
