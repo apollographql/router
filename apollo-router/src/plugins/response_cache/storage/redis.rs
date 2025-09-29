@@ -99,7 +99,7 @@ impl Storage {
         self.storage.make_key(RedisKey(key))
     }
 
-    async fn invalidate_internal(&self, invalidation_keys: Vec<String>) -> StorageResult<u64> {
+    async fn invalidate_keys(&self, invalidation_keys: Vec<String>) -> StorageResult<u64> {
         let pipeline = self.storage.pipeline();
         for invalidation_key in &invalidation_keys {
             let invalidation_key = self.make_key(format!("cache-tag:{invalidation_key}"));
@@ -376,7 +376,7 @@ impl CacheStorage for Storage {
     }
 
     async fn internal_invalidate_by_subgraph(&self, subgraph_name: &str) -> StorageResult<u64> {
-        self.invalidate_internal(vec![format!("subgraph-{subgraph_name}")])
+        self.invalidate_keys(vec![format!("subgraph-{subgraph_name}")])
             .await
     }
 
@@ -394,7 +394,7 @@ impl CacheStorage for Storage {
                 .map(|invalidation_key| format!("subgraph-{subgraph_name}:key-{invalidation_key}"))
                 .collect();
             let storage = self.clone();
-            join_set.spawn(async move { (subgraph_name, storage.invalidate_internal(keys).await) });
+            join_set.spawn(async move { (subgraph_name, storage.invalidate_keys(keys).await) });
         }
 
         let mut counts = HashMap::with_capacity(num_subgraphs);
