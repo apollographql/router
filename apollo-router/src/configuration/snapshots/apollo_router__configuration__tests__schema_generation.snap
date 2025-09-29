@@ -3863,19 +3863,6 @@ expression: "&schema"
       "additionalProperties": {
         "$ref": "#/definitions/ConditionalHttpClientSelector"
       },
-      "properties": {
-        "http.request.method": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/StandardAttribute"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "HTTP request method.\nExamples:\n\n* GET\n* POST\n* HEAD\n\nRequirement level: Required"
-        }
-      },
       "type": "object"
     },
     "ExtendedRouterAttributesWithConditionalRouterSelector": {
