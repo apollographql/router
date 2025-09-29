@@ -188,22 +188,19 @@ impl Storage {
     /// For a given subgraph `s` and invalidation keys `i1`, `i2`, ..., we need to store the
     /// following subgraph-invalidation-key permutations:
     /// * `subgraph-{s}` (whole subgraph)
-    /// * `key-{i1}`, `key-{i2}`, ... (whole invalidation key)
     /// * `subgraph-{s}:key-{i1}`, `subgraph-{s}:key-{i2}`, ... (invalidation key per subgraph)
     ///
     /// These are then turned into redis keys by adding the namespace and a `cache-tag:` prefix, ie:
     /// * `{namespace}:cache-tag:subgraph-{s}`
-    /// * `{namespace}:cache-tag:key-{i1}`, ...
     /// * `{namespace}:cache-tag:subgraph-{s}:key-{i1}`, ...
     fn namespaced_cache_tags(
         &self,
         document_invalidation_keys: &[String],
         subgraph_name: &str,
     ) -> Vec<String> {
-        let mut cache_tags = Vec::with_capacity(1 + 2 * document_invalidation_keys.len());
+        let mut cache_tags = Vec::with_capacity(1 + document_invalidation_keys.len());
         cache_tags.push(format!("subgraph-{subgraph_name}"));
         for invalidation_key in document_invalidation_keys {
-            cache_tags.push(format!("key-{invalidation_key}"));
             cache_tags.push(format!("subgraph-{subgraph_name}:key-{invalidation_key}"));
         }
 
@@ -635,7 +632,7 @@ mod tests {
             for key in &expected_cache_tag_keys {
                 assert!(keys.contains(key), "missing {key}");
             }
-            assert_eq!(keys.len(), 4);
+            assert_eq!(keys.len(), 3); // 1 document + 2 cache tags
 
             // extract the TTL for each key. the TTL for the document must be less than the TTL for each
             // of the invalidation keys.
@@ -732,7 +729,7 @@ mod tests {
             for expected_cache_tag_key in &all_expected_cache_tag_keys {
                 assert!(keys.contains(expected_cache_tag_key));
             }
-            assert_eq!(keys.len(), 9);
+            assert_eq!(keys.len(), 6); // 2 documents + 4 cache tags
 
             // extract all TTLs
             let mut ttls: HashMap<String, i64> = HashMap::default();
