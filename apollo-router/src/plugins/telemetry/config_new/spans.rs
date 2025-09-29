@@ -38,7 +38,7 @@ pub(crate) struct Spans {
     pub(crate) connector: ConnectorSpans,
 
     /// Attributes to include on the HTTP client span.
-    /// HTTP client spans contain information about HTTP requests made to subgraphs and therefore contain HTTP client specific attributes.
+    /// HTTP client spans contain information about HTTP requests made to subgraphs, including any changes made by Rhai scripts.
     pub(crate) http_client: HttpClientSpans,
 }
 

@@ -359,13 +359,15 @@ impl tower::Service<HttpRequest> for HttpClientService {
                 http_request
             };
 
-            let http_response = do_fetch(client, &service_name, http_request).await?;
+            let http_response = do_fetch(client, &service_name, http_request)
+                .instrument(http_req_span)
+                .await?;
 
             Ok(HttpResponse {
                 http_response,
                 context,
             })
-        }.instrument(http_req_span))
+        })
     }
 }
 

@@ -1179,20 +1179,16 @@ impl PluginPrivate for Telemetry {
 
     fn http_client_service(
         &self,
-        subgraph_name: &str,
+        _subgraph_name: &str, // todo config per subgraph
         service: crate::services::http::BoxService,
     ) -> crate::services::http::BoxService {
         let req_fn_config = self.config.clone();
         let res_fn_config = self.config.clone();
-        let subgraph_name = subgraph_name.to_string();
 
         ServiceBuilder::new()
             .map_request(move |request: crate::services::http::HttpRequest| {
-                // Generate the attributes that should be applied to the http_request span
+                // Get and store attributes so that they can be applied later after the span is created
                 let attributes = req_fn_config.instrumentation.spans.http_client.attributes.on_request(&request);
-                
-                // Store the attributes in the request context so they can be applied later
-                // when the http_request span is active
                 request.context.extensions().with_lock(|lock| {
                     lock.insert(attributes);
                 });
@@ -1200,13 +1196,8 @@ impl PluginPrivate for Telemetry {
                 request
             })
             .map_response(move |response: crate::services::http::HttpResponse| {
-                // Get the current span
-                let span = ::tracing::Span::current();
-                
-                // Apply http_client attributes from config to the current span
                 let attributes = res_fn_config.instrumentation.spans.http_client.attributes.on_response(&response);
-                span.set_span_dyn_attributes(attributes);
-
+                ::tracing::Span::current().set_span_dyn_attributes(attributes);
                 response
             })
             .service(service)

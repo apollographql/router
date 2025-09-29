@@ -4,10 +4,8 @@ use serde::Deserialize;
 use tower::BoxError;
 
 use crate::Context;
-use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::Stage;
-use crate::plugins::telemetry::config_new::ToOtelValue;
 use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
 use crate::plugins::telemetry::config_new::instruments::Standard;
 use crate::services::http;
@@ -32,12 +30,6 @@ impl From<&HttpClientValue> for InstrumentValue<HttpClientSelector> {
 #[serde(deny_unknown_fields, untagged)]
 #[derivative(Debug, PartialEq)]
 pub(crate) enum HttpClientSelector {
-    /// A static field value
-    StaticField {
-        /// The static value.
-        #[serde(rename = "static")]
-        r#static: AttributeValue,
-    },
     /// A header from the HTTP request
     HttpClientRequestHeader {
         /// The name of the HTTP client request header.
@@ -69,7 +61,6 @@ impl Selector for HttpClientSelector {
 
     fn on_request(&self, request: &http::HttpRequest) -> Option<opentelemetry::Value> {
         match self {
-            HttpClientSelector::StaticField { r#static } => r#static.maybe_to_otel_value(),
             HttpClientSelector::HttpClientRequestHeader {
                 http_client_request_header,
                 default,
@@ -90,7 +81,6 @@ impl Selector for HttpClientSelector {
 
     fn on_response(&self, response: &http::HttpResponse) -> Option<opentelemetry::Value> {
         match self {
-            HttpClientSelector::StaticField { r#static } => r#static.maybe_to_otel_value(),
             HttpClientSelector::HttpClientRequestHeader { default, .. } => {
                 default.clone().map(opentelemetry::Value::from)
             }
@@ -111,7 +101,6 @@ impl Selector for HttpClientSelector {
 
     fn on_error(&self, _error: &BoxError, _ctx: &Context) -> Option<opentelemetry::Value> {
         match self {
-            HttpClientSelector::StaticField { r#static } => r#static.maybe_to_otel_value(),
             HttpClientSelector::HttpClientRequestHeader { default, .. } => {
                 default.clone().map(opentelemetry::Value::from)
             }
@@ -123,7 +112,6 @@ impl Selector for HttpClientSelector {
 
     fn is_active(&self, stage: Stage) -> bool {
         match self {
-            HttpClientSelector::StaticField { .. } => true,
             HttpClientSelector::HttpClientRequestHeader { .. } => matches!(stage, Stage::Request),
             HttpClientSelector::HttpClientResponseHeader { .. } => matches!(stage, Stage::Response),
         }
@@ -134,29 +122,6 @@ impl Selector for HttpClientSelector {
 mod test {
     use super::*;
     use crate::Context;
-
-    #[test]
-    fn test_http_client_static_field() {
-        let selector = HttpClientSelector::StaticField {
-            r#static: AttributeValue::String("test_value".to_string()),
-        };
-
-        let http_request = ::http::Request::builder()
-            .method(::http::Method::GET)
-            .uri("http://localhost/graphql")
-            .body(crate::services::router::body::empty())
-            .unwrap();
-
-        let request = http::HttpRequest {
-            http_request,
-            context: Context::new(),
-        };
-
-        assert_eq!(
-            selector.on_request(&request),
-            Some(opentelemetry::Value::String("test_value".to_string().into()))
-        );
-    }
 
     #[test]
     fn test_http_client_request_header() {

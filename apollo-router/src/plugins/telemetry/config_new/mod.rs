@@ -239,21 +239,6 @@ macro_rules! impl_to_otel_value {
 impl_to_otel_value!(serde_json_bytes::Value);
 impl_to_otel_value!(serde_json::Value);
 
-impl ToOtelValue for AttributeValue {
-    fn maybe_to_otel_value(&self) -> Option<opentelemetry::Value> {
-        match self {
-            AttributeValue::Bool(value) => Some((*value).into()),
-            AttributeValue::I64(value) => Some((*value).into()),
-            AttributeValue::F64(value) => Some((*value).into()),
-            AttributeValue::String(value) => Some(value.clone().into()),
-            AttributeValue::Array(value) => {
-                // Convert array to opentelemetry value
-                Some(opentelemetry::Value::Array(value.clone().into()))
-            }
-        }
-    }
-}
-
 impl From<opentelemetry::Value> for AttributeValue {
     fn from(value: opentelemetry::Value) -> Self {
         match value {
