@@ -5407,13 +5407,13 @@ expression: "&schema"
                 "null"
               ]
             },
-            "http_client_request_header": {
-              "description": "The name of the HTTP client request header.",
+            "request_header": {
+              "description": "The name of the request header.",
               "type": "string"
             }
           },
           "required": [
-            "http_client_request_header"
+            "request_header"
           ],
           "type": "object"
         },
@@ -5428,13 +5428,13 @@ expression: "&schema"
                 "null"
               ]
             },
-            "http_client_response_header": {
-              "description": "The name of the HTTP client response header.",
+            "response_header": {
+              "description": "The name of the response header.",
               "type": "string"
             }
           },
           "required": [
-            "http_client_response_header"
+            "response_header"
           ],
           "type": "object"
         }

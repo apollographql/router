@@ -14,7 +14,7 @@ telemetry:
       http_client:
         attributes:
           http.request.header.some_rhai_request_header:
-            http_client_request_header: "some_rhai_request_header"
+            request_header: "some_rhai_request_header"
 ```
 
 By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/8349

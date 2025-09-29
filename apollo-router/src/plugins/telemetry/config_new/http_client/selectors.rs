@@ -32,8 +32,8 @@ impl From<&HttpClientValue> for InstrumentValue<HttpClientSelector> {
 pub(crate) enum HttpClientSelector {
     /// A header from the HTTP request
     HttpClientRequestHeader {
-        /// The name of the HTTP client request header.
-        http_client_request_header: String,
+        /// The name of the request header.
+        request_header: String,
         #[serde(skip)]
         #[allow(dead_code)]
         /// Optional redaction pattern.
@@ -43,8 +43,8 @@ pub(crate) enum HttpClientSelector {
     },
     /// A header from the HTTP response
     HttpClientResponseHeader {
-        /// The name of the HTTP client response header.
-        http_client_response_header: String,
+        /// The name of the response header.
+        response_header: String,
         #[serde(skip)]
         #[allow(dead_code)]
         /// Optional redaction pattern.
@@ -62,13 +62,13 @@ impl Selector for HttpClientSelector {
     fn on_request(&self, request: &http::HttpRequest) -> Option<opentelemetry::Value> {
         match self {
             HttpClientSelector::HttpClientRequestHeader {
-                http_client_request_header,
+                request_header,
                 default,
                 ..
             } => request
                 .http_request
                 .headers()
-                .get(http_client_request_header)
+                .get(request_header)
                 .and_then(|h| h.to_str().ok())
                 .map(|h| h.to_string())
                 .or_else(|| default.clone())
@@ -85,13 +85,13 @@ impl Selector for HttpClientSelector {
                 default.clone().map(opentelemetry::Value::from)
             }
             HttpClientSelector::HttpClientResponseHeader {
-                http_client_response_header,
+                response_header,
                 default,
                 ..
             } => response
                 .http_response
                 .headers()
-                .get(http_client_response_header)
+                .get(response_header)
                 .and_then(|h| h.to_str().ok())
                 .map(|h| h.to_string())
                 .or_else(|| default.clone())
@@ -126,7 +126,7 @@ mod test {
     #[test]
     fn test_http_client_request_header() {
         let selector = HttpClientSelector::HttpClientRequestHeader {
-            http_client_request_header: "content-type".to_string(),
+            request_header: "content-type".to_string(),
             redact: None,
             default: None,
         };
@@ -154,7 +154,7 @@ mod test {
     #[test]
     fn test_http_client_response_header() {
         let selector = HttpClientSelector::HttpClientResponseHeader {
-            http_client_response_header: "content-length".to_string(),
+            response_header: "content-length".to_string(),
             redact: None,
             default: None,
         };
