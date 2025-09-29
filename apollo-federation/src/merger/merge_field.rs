@@ -35,6 +35,7 @@ use crate::link::federation_spec_definition::FEDERATION_USED_OVERRIDEN_ARGUMENT_
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
 use crate::merger::merge::map_sources;
+use crate::merger::merge_argument::HasArguments;
 use crate::schema::blueprint::FEDERATION_OPERATION_FIELDS;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::FieldDefinitionPosition;
@@ -259,24 +260,16 @@ impl Merger {
 
         self.merge_description(&without_external, dest)?;
         self.record_applied_directives_to_merge(&without_external, dest);
-        self.add_arguments_shallow(&without_external, dest)?;
-        let dest_field = dest.get(self.merged.schema())?;
-        let dest_arguments = dest_field.arguments.clone();
-        for dest_arg in dest_arguments.iter() {
+        let arg_names = self.add_arguments_shallow(&without_external, dest)?;
+
+        for arg_name in arg_names {
             let subgraph_args = map_sources(&without_external, |field| {
-                field.as_ref().and_then(|f| {
-                    let field_def = match f.get(self.merged.schema()) {
-                        Ok(def) => def,
-                        Err(_) => return None,
-                    };
-                    field_def
-                        .arguments
-                        .iter()
-                        .find(|arg| arg.name == dest_arg.name)
-                        .cloned()
-                })
+                field
+                    .as_ref()
+                    .map(|f| f.argument_position(arg_name.clone()))
             });
-            self.merge_argument(&subgraph_args, dest_arg)?;
+            let dest_arg = dest.argument_position(arg_name);
+            self.merge_argument(&subgraph_args, &dest_arg)?;
         }
 
         // Note that due to @interfaceObject, it's possible that `withoutExternal` is "empty" (has no
