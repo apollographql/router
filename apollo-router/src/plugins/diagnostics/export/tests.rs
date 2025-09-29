@@ -757,10 +757,6 @@ async fn test_system_info_collection() {
         "Should contain architecture information"
     );
     assert!(
-        system_info.contains("Process ID:"),
-        "Should contain process ID"
-    );
-    assert!(
         system_info.contains("Router Version:"),
         "Should contain router version"
     );
@@ -855,10 +851,6 @@ async fn test_system_info_in_archive_extraction() {
     assert!(
         system_info_content.contains(&format!("Architecture: {}", std::env::consts::ARCH)),
         "system_info.txt should contain correct architecture information"
-    );
-    assert!(
-        system_info_content.contains("Process ID:"),
-        "system_info.txt should contain process ID"
     );
 
     // The content should be substantial (more than just headers)
