@@ -19,6 +19,7 @@ use hyperlocal::UnixConnector;
 use opentelemetry::global;
 use rustls::ClientConfig;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
+use crate::plugins::telemetry::HttpClientAttributes;
 use rustls::RootCertStore;
 use schemars::JsonSchema;
 use tower::BoxError;
@@ -319,8 +320,8 @@ impl tower::Service<HttpRequest> for HttpClientService {
         );
         
         // Apply any attributes that were stored by telemetry middleware
-        if let Some(attributes) = context.extensions().with_lock(|lock| lock.get::<Vec<opentelemetry::KeyValue>>().cloned()) {
-            http_req_span.set_span_dyn_attributes(attributes);
+        if let Some(client_attributes) = context.extensions().with_lock(|lock| lock.get::<HttpClientAttributes>().cloned()) {
+            http_req_span.set_span_dyn_attributes(client_attributes.attributes);
         }
         get_text_map_propagator(|propagator| {
             propagator.inject_context(

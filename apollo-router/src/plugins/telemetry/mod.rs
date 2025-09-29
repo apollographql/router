@@ -363,6 +363,12 @@ impl EnabledFeatures {
     }
 }
 
+// Struct to hold request attributes for the http client in context
+#[derive(Clone, Debug)]
+pub(crate) struct HttpClientAttributes {
+    pub(crate) attributes: Vec<KeyValue>,
+}
+
 #[async_trait::async_trait]
 impl PluginPrivate for Telemetry {
     type Config = config::Conf;
@@ -1188,9 +1194,11 @@ impl PluginPrivate for Telemetry {
         ServiceBuilder::new()
             .map_request(move |request: crate::services::http::HttpRequest| {
                 // Get and store attributes so that they can be applied later after the span is created
-                let attributes = req_fn_config.instrumentation.spans.http_client.attributes.on_request(&request);
+                let client_attributes = HttpClientAttributes {
+                    attributes: req_fn_config.instrumentation.spans.http_client.attributes.on_request(&request),
+                };
                 request.context.extensions().with_lock(|lock| {
-                    lock.insert(attributes);
+                    lock.insert(client_attributes);
                 });
 
                 request
