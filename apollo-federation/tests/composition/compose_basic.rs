@@ -57,59 +57,6 @@ fn generates_a_valid_supergraph() {
 }
 
 #[test]
-#[ignore = "orderedPrintedDefintions not implemented. Ignore until implementation is completed. Even then you will need to invoke with that flag"]
-fn respects_given_compose_options() {
-    let subgraph1 = ServiceDefinition {
-        name: "Subgraph1",
-        type_defs: r#"
-        type Query {
-          t: T
-        }
-
-        type T @key(fields: "k") {
-          k: ID
-        }
-
-        type S {
-          x: Int
-        }
-
-        union U = S | T
-        "#,
-    };
-
-    let subgraph2 = ServiceDefinition {
-        name: "Subgraph2",
-        type_defs: r#"
-        type T @key(fields: "k") {
-          k: ID
-          a: Int
-          b: String
-        }
-
-        enum E {
-          V1
-          V2
-        }
-        "#,
-    };
-
-    // Note: CompositionOptions are not yet implemented in the Rust port
-    // This test currently behaves the same as the basic test
-    let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
-    let supergraph = result.expect("Expected composition to succeed");
-
-    // Test supergraph SDL with options (currently same as without options)
-    assert_snapshot!(print_sdl(supergraph.schema().schema()));
-
-    // Test API schema with print options (currently same as without options)
-    let api_schema = supergraph
-        .to_api_schema(Default::default())
-        .expect("Expected API schema generation to succeed");
-    assert_snapshot!(print_sdl(api_schema.schema()));
-}
-
-#[test]
 #[ignore = "until merge implementation completed"]
 fn preserves_descriptions() {
     let subgraph1 = ServiceDefinition {

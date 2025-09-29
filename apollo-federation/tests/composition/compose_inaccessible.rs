@@ -1,66 +1,9 @@
+use apollo_compiler::coord;
 use apollo_compiler::schema::ExtendedType;
-use apollo_federation::composition::Satisfiable;
-use apollo_federation::supergraph::Supergraph;
 
 use super::ServiceDefinition;
 use super::assert_composition_errors;
 use super::compose_as_fed2_subgraphs;
-
-/// Validates that @inaccessible directives are properly propagated to the supergraph schema
-fn validate_inaccessible_propagation(supergraph: &Supergraph<Satisfiable>) {
-    let schema = supergraph.schema().schema();
-
-    // Check for @inaccessible directive on Query.me field
-    if let Some(query_type_name) = &schema.schema_definition.query
-        && let Some(ExtendedType::Object(query_obj)) = schema.types.get(query_type_name.as_str())
-        && let Some(me_field) = query_obj.fields.get("me")
-    {
-        let inaccessible_directives: Vec<_> = me_field
-            .directives
-            .iter()
-            .filter(|d| d.name == "inaccessible")
-            .collect();
-        assert!(
-            !inaccessible_directives.is_empty(),
-            "Expected @inaccessible directive on Query.me field"
-        );
-    }
-
-    // Check for @inaccessible directive on User.age field
-    if let Some(ExtendedType::Object(user_type)) = schema.types.get("User")
-        && let Some(age_field) = user_type.fields.get("age")
-    {
-        let inaccessible_directives: Vec<_> = age_field
-            .directives
-            .iter()
-            .filter(|d| d.name == "inaccessible")
-            .collect();
-        assert!(
-            !inaccessible_directives.is_empty(),
-            "Expected @inaccessible directive on User.age field"
-        );
-    }
-}
-
-/// Validates that @inaccessible directives are properly merged on the same element
-fn validate_inaccessible_merging(supergraph: &Supergraph<Satisfiable>) {
-    let schema = supergraph.schema().schema();
-
-    // Check that @inaccessible directive is present on User.name field (merged from both subgraphs)
-    if let Some(ExtendedType::Object(user_type)) = schema.types.get("User")
-        && let Some(name_field) = user_type.fields.get("name")
-    {
-        let inaccessible_directives: Vec<_> = name_field
-            .directives
-            .iter()
-            .filter(|d| d.name == "inaccessible")
-            .collect();
-        assert!(
-            !inaccessible_directives.is_empty(),
-            "Expected @inaccessible directive on User.name field"
-        );
-    }
-}
 
 // =============================================================================
 // @inaccessible DIRECTIVE PROPAGATION - Tests for @inaccessible propagation
@@ -98,8 +41,24 @@ fn inaccessible_propagates_to_supergraph() {
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
     let supergraph = result.expect("Expected composition to succeed");
 
-    // Validate that @inaccessible directives are properly propagated to the supergraph schema
-    validate_inaccessible_propagation(&supergraph);
+    assert!(
+        coord!(Query.me)
+            .lookup_field(supergraph.schema().schema())
+            .expect("Query.me should exist")
+            .directives
+            .iter()
+            .any(|d| d.name == "inaccessible"),
+        "Expected @inaccessible directive on Query.me field"
+    );
+    assert!(
+        coord!(User.age)
+            .lookup_field(supergraph.schema().schema())
+            .expect("User.age should exist")
+            .directives
+            .iter()
+            .any(|d| d.name == "inaccessible"),
+        "Expected @inaccessible directive on User.age field"
+    );
 }
 
 #[test]
@@ -132,8 +91,15 @@ fn inaccessible_merges_on_same_element() {
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
     let supergraph = result.expect("Expected composition to succeed");
 
-    // Validate that @inaccessible directives are properly merged
-    validate_inaccessible_merging(&supergraph);
+    assert!(
+        coord!(User.name)
+            .lookup_field(supergraph.schema().schema())
+            .expect("User.name should exist")
+            .directives
+            .iter()
+            .any(|d| d.name == "inaccessible"),
+        "Expected @inaccessible directive on User.name field"
+    );
 }
 
 #[test]
@@ -251,19 +217,13 @@ fn inaccessible_succeeds_if_imported_under_same_non_default_name() {
             .fields
             .get("q1")
             .expect("Query.q1 should exist in supergraph");
-        assert!(q1
-            .directives
-            .iter()
-            .any(|d| d.name == "private"));
+        assert!(q1.directives.iter().any(|d| d.name == "private"));
 
         let q2 = query_obj
             .fields
             .get("q2")
             .expect("Query.q2 should exist in supergraph");
-        assert!(q2
-            .directives
-            .iter()
-            .any(|d| d.name == "private"));
+        assert!(q2.directives.iter().any(|d| d.name == "private"));
     }
 }
 
@@ -358,17 +318,26 @@ fn inaccessible_uses_security_core_purpose_in_supergraph() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a]);
     let supergraph = result.expect("Expected composition to succeed");
-    // Assert there is a @link with `for: SECURITY` on the supergraph schema
+    // Assert there is a @link to @inaccessible with `for: SECURITY` on the supergraph schema
     let schema = supergraph.schema().schema();
-    let has_security_purpose_link = schema.schema_definition.directives.iter().any(|d| {
-        d.name == "link"
-            && matches!(
-                d.argument_by_name("for", schema).map(|a| a.as_ref()),
-                Ok(apollo_compiler::ast::Value::Enum(enum_name)) if enum_name == "SECURITY"
-            )
-    });
+    let inaccessible_link = schema
+        .schema_definition
+        .directives
+        .iter()
+        .find(|d| {
+            d.name == "link"
+                && d.specified_argument_by_name("url").is_some_and(|url| {
+                    url.to_string()
+                        .contains("https://specs.apollo.dev/inaccessible")
+                })
+        })
+        .expect("Link to inaccessible spec should be present in supergraph schema");
+    let inaccessible_purpose = inaccessible_link
+        .specified_argument_by_name("purpose")
+        .expect("Link to inaccessible spec should have a purpose argument");
+
     assert!(
-        has_security_purpose_link,
+        matches!(inaccessible_purpose.as_ref(), apollo_compiler::ast::Value::Enum(enum_name) if enum_name == "SECURITY"),
         "Expected a @link with for: SECURITY in the supergraph schema",
     );
 }

@@ -1,3 +1,4 @@
+use apollo_compiler::coord;
 use apollo_compiler::schema::ExtendedType;
 use apollo_federation::composition::Satisfiable;
 use apollo_federation::composition::compose;
@@ -14,10 +15,7 @@ fn validate_tag_propagation(supergraph: &Supergraph<Satisfiable>) {
     let schema = supergraph.schema().schema();
 
     // Check for @tag directive on Query.users field
-    if let Some(query_type_name) = &schema.schema_definition.query
-        && let Some(ExtendedType::Object(query_obj)) = schema.types.get(query_type_name.as_str())
-        && let Some(users_field) = query_obj.fields.get("users")
-    {
+    if let Ok(users_field) = coord!(Query.users).lookup_field(schema) {
         let tag_directives: Vec<_> = users_field
             .directives
             .iter()
@@ -30,9 +28,8 @@ fn validate_tag_propagation(supergraph: &Supergraph<Satisfiable>) {
 
         // Check for the specific tag name "aTaggedOperation"
         let has_operation_tag = tag_directives.iter().any(|d| {
-            d.arguments
-                .iter()
-                .any(|arg| arg.name == "name" && arg.value.to_string().contains("aTaggedOperation"))
+            d.specified_argument_by_name("name")
+                .is_some_and(|arg| arg.to_string().contains("aTaggedOperation"))
         });
         assert!(
             has_operation_tag,
@@ -139,9 +136,7 @@ fn validate_tag_merging(supergraph: &Supergraph<Satisfiable>) {
     }
 
     // Check merged tags on Name.firstName field
-    if let Some(ExtendedType::Object(name_type)) = schema.types.get("Name")
-        && let Some(first_name_field) = name_type.fields.get("firstName")
-    {
+    if let Ok(first_name_field) = coord!(Name.firstName).lookup_field(schema) {
         let field_tag_directives: Vec<_> = first_name_field
             .directives
             .iter()
@@ -195,11 +190,12 @@ fn tag_propagates_to_supergraph_fed2_subgraphs() {
 }
 
 #[test]
-#[ignore = "until Fed1 composition mode is implemented"]
+#[ignore = "until merge implementation completed"]
 fn tag_propagates_to_supergraph_fed1_subgraphs() {
-    let _subgraph_a = ServiceDefinition {
-        name: "subgraphA",
-        type_defs: r#"
+    let subgraph_a = Subgraph::parse(
+        "subgraphA",
+        "",
+        r#"
         type Query {
           users: [User] @tag(name: "aTaggedOperation")
         }
@@ -209,31 +205,34 @@ fn tag_propagates_to_supergraph_fed1_subgraphs() {
           name: String! @tag(name: "aTaggedField")
         }
         "#,
-    };
+    )
+    .unwrap();
 
-    let _subgraph_b = ServiceDefinition {
-        name: "subgraphB",
-        type_defs: r#"
+    let subgraph_b = Subgraph::parse(
+        "subgraphB",
+        "",
+        r#"
         type User @key(fields: "id") @tag(name: "aTaggedType") {
           id: ID!
           birthdate: String!
           age: Int!
         }
         "#,
-    };
+    )
+    .unwrap();
 
-    // TODO: Implement Fed1 composition mode - this should use composeServices() equivalent
-    panic!(
-        "Fed1 composition mode not yet implemented - need compose_services() function equivalent to JS composeServices([subgraphA, subgraphB])"
-    );
+    let supergraph =
+        compose(vec![subgraph_a, subgraph_b]).expect("Expected composition to succeed");
+    validate_tag_propagation(&supergraph);
 }
 
 #[test]
-#[ignore = "until mixed Fed1/Fed2 composition mode is implemented"]
+#[ignore = "until merge implementation completed"]
 fn tag_propagates_to_supergraph_mixed_fed1_fed2_subgraphs() {
-    let _subgraph_a = ServiceDefinition {
-        name: "subgraphA",
-        type_defs: r#"
+    let subgraph_a = Subgraph::parse(
+        "subgraphA",
+        "",
+        r#"
         type Query {
           users: [User] @tag(name: "aTaggedOperation")
         }
@@ -243,23 +242,30 @@ fn tag_propagates_to_supergraph_mixed_fed1_fed2_subgraphs() {
           name: String! @tag(name: "aTaggedField")
         }
         "#,
-    };
+    )
+    .unwrap();
 
-    let _subgraph_b = ServiceDefinition {
-        name: "subgraphB",
-        type_defs: r#"
+    let subgraph_b = Subgraph::parse(
+        "subgraphB",
+        "",
+        r#"
         type User @key(fields: "id") @tag(name: "aTaggedType") {
           id: ID!
           birthdate: String!
           age: Int!
         }
         "#,
-    };
+    )
+    .unwrap()
+    .into_fed2_test_subgraph(true, false)
+    .unwrap();
 
-    // TODO: Implement mixed Fed1/Fed2 composition mode - this should use composeServices([subgraphA, asFed2Service(subgraphB)]) equivalent
-    panic!(
-        "Mixed Fed1/Fed2 composition mode not yet implemented - need compose_services() function equivalent to JS composeServices([subgraphA, asFed2Service(subgraphB)])"
-    );
+    let supergraph = compose(vec![
+        subgraph_a,
+        subgraph_b.into_fed2_test_subgraph(true, false).unwrap(),
+    ])
+    .expect("Expected composition to succeed");
+    validate_tag_propagation(&supergraph);
 }
 
 // =============================================================================
