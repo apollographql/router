@@ -15,8 +15,7 @@ use crate::services::http;
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, default)]
-pub(crate) struct HttpClientAttributes {
-}
+pub(crate) struct HttpClientAttributes {}
 
 impl DefaultForLevel for HttpClientAttributes {
     fn defaults_for_level(
