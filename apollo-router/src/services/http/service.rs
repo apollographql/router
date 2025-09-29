@@ -315,8 +315,6 @@ impl tower::Service<HttpRequest> for HttpClientService {
             "http.route" = %path,
             "http.url" = %schema_uri,
             "net.transport" = "ip_tcp",
-            //"apollo.subgraph.name" = %service_name,
-            //"graphql.operation.name" = %operation_name,
         );
 
         // Apply any attributes that were stored by telemetry middleware

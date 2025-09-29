@@ -1185,7 +1185,7 @@ impl PluginPrivate for Telemetry {
 
     fn http_client_service(
         &self,
-        _subgraph_name: &str, // todo config per subgraph
+        _subgraph_name: &str,
         service: crate::services::http::BoxService,
     ) -> crate::services::http::BoxService {
         let req_fn_config = self.config.clone();

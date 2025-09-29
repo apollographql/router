@@ -38,9 +38,6 @@ impl DefaultForLevel for HttpClientAttributes {
     ) {
         match requirement_level {
             DefaultAttributeRequirementLevel::Required => {
-                if self.http_request_method.is_none() {
-                    self.http_request_method = Some(StandardAttribute::Bool(true));
-                }
             }
             DefaultAttributeRequirementLevel::Recommended => {
                 if self.http_request_method.is_none() {
@@ -55,6 +52,7 @@ impl DefaultForLevel for HttpClientAttributes {
 impl Selectors<http::HttpRequest, http::HttpResponse, ()> for HttpClientAttributes {
     fn on_request(&self, request: &http::HttpRequest) -> Vec<KeyValue> {
         let mut attrs = Vec::new();
+
         if let Some(key) = self
             .http_request_method
             .as_ref()
