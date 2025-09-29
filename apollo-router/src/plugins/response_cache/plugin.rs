@@ -2415,7 +2415,7 @@ async fn attempt_connection(
             tracing::error!(
                 cache = "response",
                 error = %err,
-                "could not open connection to Redis for caching",
+                "could not open connection to Redis for response caching",
             )
         })?;
     let _ = cache_storage.set(storage);
