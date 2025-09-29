@@ -13,7 +13,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/env-vars.graph
     },
     Message {
         code: InvalidHeader,
-        message: "In `@source(http.headers:)`: `$env.foo` doesn't have a field named `bar`",
+        message: "In `@source(http.headers:)`: `$env.foo` doesn't have a field named `.bar`",
         locations: [
             20:45..20:48,
         ],
@@ -27,7 +27,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/env-vars.graph
     },
     Message {
         code: InvalidUrl,
-        message: "In `GET` in `@connect(http:)` on `Query.invalidPath`: `$env.foo` doesn't have a field named `bar`",
+        message: "In `GET` in `@connect(http:)` on `Query.invalidPath`: `$env.foo` doesn't have a field named `.bar`",
         locations: [
             41:53..41:56,
         ],

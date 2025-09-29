@@ -6,7 +6,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/url_properties
 [
     Message {
         code: InvalidUrlProperty,
-        message: "In `@source(name: \"v2\")`, the `path` argument is invalid: `*.bad` must start with one of $config, $context, $request, $env",
+        message: "In `@source(name: \"v2\")`, the `path` argument is invalid: `$root.*.bad` must start with one of $config, $context, $request, $env",
         locations: [
             13:70..13:73,
         ],
@@ -27,7 +27,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/url_properties
     },
     Message {
         code: InvalidUrlProperty,
-        message: "In `@connect` on `Query.resources`, the `path` argument is invalid: `*.bad` must start with one of $args, $config, $context, $request, $env",
+        message: "In `@connect` on `Query.resources`, the `path` argument is invalid: `$root.*.bad` must start with one of $args, $config, $context, $request, $env",
         locations: [
             35:53..35:56,
         ],

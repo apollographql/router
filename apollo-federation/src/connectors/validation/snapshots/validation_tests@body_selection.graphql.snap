@@ -6,14 +6,14 @@ input_file: apollo-federation/src/connectors/validation/test_data/body_selection
 [
     Message {
         code: InvalidBody,
-        message: "In `@connect(http: {body:})` on `Query.dollar`: must start with one of $args, $config, $context, $request, $env",
+        message: "In `@connect(http: {body:})` on `Query.dollar`: `$root` must start with one of $args, $config, $context, $request, $env",
         locations: [
             12:20..12:21,
         ],
     },
     Message {
         code: InvalidBody,
-        message: "In `@connect(http: {body:})` on `Query.dollarField`: `foo` must start with one of $args, $config, $context, $request, $env",
+        message: "In `@connect(http: {body:})` on `Query.dollarField`: `$root.foo` must start with one of $args, $config, $context, $request, $env",
         locations: [
             20:22..20:25,
         ],

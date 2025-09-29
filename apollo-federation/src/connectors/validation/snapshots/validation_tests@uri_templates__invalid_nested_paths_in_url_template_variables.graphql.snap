@@ -6,28 +6,28 @@ input_file: apollo-federation/src/connectors/validation/test_data/uri_templates/
 [
     Message {
         code: InvalidUrl,
-        message: "In `GET` in `@connect(http:)` on `Query.scalar`: `$args.scalar` doesn't have a field named `blah`",
+        message: "In `GET` in `@connect(http:)` on `Query.scalar`: `$args.scalar` doesn't have a field named `.blah`",
         locations: [
             10:62..10:66,
         ],
     },
     Message {
         code: InvalidUrl,
-        message: "In `GET` in `@connect(http:)` on `Query.object`: `InputObject` doesn't have a field named `fieldThatDoesntExist`",
+        message: "In `GET` in `@connect(http:)` on `Query.object`: `InputObject` doesn't have a field named `.fieldThatDoesntExist`",
         locations: [
             15:61..15:81,
         ],
     },
     Message {
         code: InvalidUrl,
-        message: "In `GET` in `@connect(http:)` on `Query.enum`: `Enum` doesn't have a field named `cantHaveFields`",
+        message: "In `GET` in `@connect(http:)` on `Query.enum`: `Enum` doesn't have a field named `.cantHaveFields`",
         locations: [
             20:58..20:72,
         ],
     },
     Message {
         code: InvalidUrl,
-        message: "In `GET` in `@connect(http:)` on `Object.newField`: `$this` doesn't have a field named `fieldThatDoesntExist`",
+        message: "In `GET` in `@connect(http:)` on `Object.newField`: `$this` doesn't have a field named `.fieldThatDoesntExist`",
         locations: [
             29:55..29:75,
         ],

@@ -373,7 +373,7 @@ fn resolve_shape(
             }
             Ok(Shape::all(inners, []))
         }
-        ShapeCase::Name(name, key) => {
+        ShapeCase::Name(name, subpath) => {
             let mut resolved = if name.value == "$root" {
                 // For response mapping, $root (aka the response body) is allowed so we will exit out early here
                 // However, $root is not allowed for requests so we will error below
@@ -381,7 +381,10 @@ fn resolve_shape(
                     return Ok(Shape::unknown([]));
                 }
 
-                let mut key_str = key.iter().map(|key| key.to_string()).join(".");
+                let mut key_str = "$root".to_string();
+                for key in subpath.iter() {
+                    key_str.push_str(key.to_string().as_str());
+                }
                 if !key_str.is_empty() {
                     key_str = format!("`{key_str}` ");
                 }
@@ -405,7 +408,7 @@ fn resolve_shape(
                         namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", "),
                     ),
                     locations: transform_locations(
-                        key.first()
+                        subpath.first()
                             .map(|key| &key.locations)
                             .unwrap_or(&shape.locations),
                         context,
@@ -447,9 +450,9 @@ fn resolve_shape(
             };
             resolved.locations.extend(shape.locations.iter().cloned());
             let mut path = name.value.clone();
-            for key in key {
+            for key in subpath {
                 let child = resolved.child(key.clone());
-                if child.is_none() {
+                if child.is_none() || child.is_never() {
                     let message = match key.value {
                         NamedShapePathKey::AnyIndex | NamedShapePathKey::Index(_) => {
                             format!("`{path}` is not an array or string")
@@ -457,6 +460,10 @@ fn resolve_shape(
 
                         NamedShapePathKey::AnyField | NamedShapePathKey::Field(_) => {
                             format!("`{path}` doesn't have a field named `{key}`")
+                        }
+
+                        NamedShapePathKey::Question | NamedShapePathKey::NotNone => {
+                            format!("`{path}{key}` evaluated to nothing")
                         }
                     };
                     return Err(Message {
@@ -466,7 +473,7 @@ fn resolve_shape(
                     });
                 }
                 resolved = child;
-                path = format!("{path}.{key}");
+                path = format!("{path}{key}");
             }
             resolve_shape(&resolved, context, expression)
         }
@@ -897,7 +904,7 @@ mod tests {
         let expected_location =
             location_of_expression("something", selection, ConnectSpec::latest());
         assert!(
-            err.message.contains("`something.blah`"),
+            err.message.contains("`$root.something.blah`"),
             "{} didn't reference missing arg",
             err.message
         );
@@ -939,7 +946,7 @@ mod tests {
             err.message
         );
         assert!(
-            err.message.contains("`unknown`"),
+            err.message.contains("`.unknown`"),
             "{} didn't reference field name",
             err.message
         );
