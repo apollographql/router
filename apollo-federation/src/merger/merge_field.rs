@@ -35,6 +35,7 @@ use crate::link::federation_spec_definition::FEDERATION_USED_OVERRIDEN_ARGUMENT_
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
 use crate::merger::merge::map_sources;
+use crate::merger::merge_argument::HasArguments;
 use crate::schema::blueprint::FEDERATION_OPERATION_FIELDS;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::FieldDefinitionPosition;
@@ -259,24 +260,16 @@ impl Merger {
 
         self.merge_description(&without_external, dest)?;
         self.record_applied_directives_to_merge(&without_external, dest);
-        self.add_arguments_shallow(&without_external, dest);
-        let dest_field = dest.get(self.merged.schema())?;
-        let dest_arguments = dest_field.arguments.clone();
-        for dest_arg in dest_arguments.iter() {
+        let arg_names = self.add_arguments_shallow(&without_external, dest)?;
+
+        for arg_name in arg_names {
             let subgraph_args = map_sources(&without_external, |field| {
-                field.as_ref().and_then(|f| {
-                    let field_def = match f.get(self.merged.schema()) {
-                        Ok(def) => def,
-                        Err(_) => return None,
-                    };
-                    field_def
-                        .arguments
-                        .iter()
-                        .find(|arg| arg.name == dest_arg.name)
-                        .cloned()
-                })
+                field
+                    .as_ref()
+                    .map(|f| f.argument_position(arg_name.clone()))
             });
-            self.merge_argument(&subgraph_args, dest_arg)?;
+            let dest_arg = dest.argument_position(arg_name);
+            self.merge_argument(&subgraph_args, &dest_arg)?;
         }
 
         // Note that due to @interfaceObject, it's possible that `withoutExternal` is "empty" (has no
@@ -496,8 +489,6 @@ impl Merger {
                 if dest_arg.ty != source_arg.ty && !arg_is_subtype {
                     invalid_args_types.insert(name.clone());
                 }
-                // TODO: Use valueEquals instead of != for proper GraphQL value comparison
-                // See: https://github.com/apollographql/federation/blob/4653320016ed4202a229d9ab5933ad3f13e5b6c0/composition-js/src/merging/merge.ts#L1877
                 if dest_arg.default_value != source_arg.default_value {
                     invalid_args_defaults.insert(name.clone());
                 }
@@ -506,19 +497,21 @@ impl Merger {
 
         // Phase 2: Reporting - report errors in groups, matching JS version order
         if has_invalid_types {
-            self.error_reporter.report_mismatch_error::<FieldDefinitionPosition, ()>(
+            self.error_reporter.report_mismatch_error::<FieldDefinition, FieldDefinitionPosition, ()>(
                 CompositionError::ExternalTypeMismatch {
                     message: format!(
                         "Type of field \"{dest}\" is incompatible across subgraphs (where marked @external): it has ",
                     ),
                 },
-                dest,
+                dest_field,
                 sources,
-                |source, _| Some(format!("type \"{source}\"")),
+                |d| Some(format!("type \"{}\"", d.ty)),
+                |s, idx| s.try_get(self.subgraphs[idx].schema().schema()).map(|f| format!("type \"{}\"", f.ty)),
             );
         }
 
         for arg_name in &invalid_args_presence {
+            // TODO: We need a more complete port of this on `ErrorReporter`
             self.report_mismatch_error_with_specifics(
                 CompositionError::ExternalArgumentMissing {
                     message: format!(
@@ -536,7 +529,7 @@ impl Merger {
                 field_name: dest.field_name().clone(),
                 argument_name: arg_name.clone(),
             };
-            self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ()>(
+            self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ObjectFieldArgumentDefinitionPosition, ()>(
                 CompositionError::ExternalArgumentTypeMismatch {
                     message: format!(
                         "Type of argument \"{argument_pos}\" is incompatible across subgraphs (where \"{dest}\" is marked @external): it has ",
@@ -544,7 +537,8 @@ impl Merger {
                 },
                 &argument_pos,
                 &self.argument_sources(sources, arg_name)?,
-                |source, _| Some(format!("type \"{source}\"")),
+                |d| d.try_get(self.merged.schema()).map(|a| format!("type \"{}\"", a.ty)),
+                |s, idx| s.try_get(self.subgraphs[idx].schema().schema()).map(|a| format!("type \"{}\"", a.ty)),
             );
         }
 
@@ -554,7 +548,7 @@ impl Merger {
                 field_name: dest.field_name().clone(),
                 argument_name: arg_name.clone(),
             };
-            self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ()>(
+            self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ObjectFieldArgumentDefinitionPosition, ()>(
                 CompositionError::ExternalArgumentDefaultMismatch {
                     message: format!(
                         "Argument \"{argument_pos}\" has incompatible defaults across subgraphs (where \"{dest}\" is marked @external): it has ",
@@ -562,7 +556,10 @@ impl Merger {
                 },
                 &argument_pos,
                 &self.argument_sources(sources, arg_name)?,
-                |source, _| Some(format!("default value {source:?}")), // TODO: Need proper value formatting
+                |d| d.try_get(self.merged.schema())
+                        .and_then(|f| Some(format!("default value {}", f.default_value.as_ref()?))), 
+                |s, idx| s.try_get(self.subgraphs[idx].schema().schema())
+                        .and_then(|f| Some(format!("default value {}", f.default_value.as_ref()?))),
             );
         }
 

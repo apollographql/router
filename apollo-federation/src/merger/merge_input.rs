@@ -120,18 +120,15 @@ impl Merger {
                         }
                     }
 
-                    self.error_reporter.report_mismatch_hint::<InputObjectFieldDefinitionPosition, ()>(
+                    self.error_reporter.report_mismatch_hint::<InputObjectFieldDefinitionPosition, InputObjectFieldDefinitionPosition, ()>(
                             HintCode::InconsistentDescription,
                             format!("Input object field \"{}\" will not be added to \"{}\" in the supergraph as it does not appear in all subgraphs: it is ",
                                 dest_field.field_name, dest.type_name
                             ),
                             &dest_field,
                             &subgraph_fields,
-                            {
-                                |_, _is_supergraph| {
-                                    Some("yes".to_string())
-                                }
-                            },
+                            |_| Some("yes".to_string()),
+                            |_, _| Some("yes".to_string()),
                             |_, subgraphs| {
                                 format!(
                                     "it is defined in {}", subgraphs.unwrap_or_else(|| "undefined".to_string())
@@ -143,7 +140,6 @@ impl Merger {
                                     subgraphs,
                                 )
                             },
-                            None::<fn(Option<&InputObjectFieldDefinitionPosition>) -> bool>,
                             true,
                             false,
                         );
@@ -271,7 +267,7 @@ impl Merger {
             &merge_context,
         )?;
 
-        self.merge_default_value(sources, dest_field, "Input field");
+        self.merge_default_value(sources, dest_field)?;
         Ok(())
     }
 }
