@@ -169,7 +169,7 @@ async fn test_diagnostics_endpoints_accessible() {
         .expect("valid request");
 
     let response = service.ready().await.unwrap().call(request).await.unwrap();
-    // Should be able to access the endpoint now (success or not implemented)
+    // Should be able to access the endpoint now (200 on Linux, 501 Not Implemented on other platforms)
     assert!(response.status().is_success() || response.status() == StatusCode::NOT_IMPLEMENTED);
 
     // Test invalid endpoint returns 404
