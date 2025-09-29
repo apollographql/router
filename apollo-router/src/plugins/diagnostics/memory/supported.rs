@@ -533,7 +533,7 @@ impl MemoryService {
                 let mut files = Vec::new();
                 while let Ok(Some(entry)) = entries.next_entry().await {
                     let path = entry.path();
-                    if path.is_file() && path.extension().map(|e| e == "prof").unwrap_or(false) {
+                    if path.is_file() && path.extension().is_some_and(|e| e == "prof") {
                         files.push(path);
                     }
                 }
