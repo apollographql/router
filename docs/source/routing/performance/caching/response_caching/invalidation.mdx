@@ -205,6 +205,13 @@ Invalidate a root field with parameters using dynamic cache tag. To set a cache 
 }]
 ```
 
+<Note>
+    There are existing limitations for `@cacheTag` directive in your schemas:
+    + You can only set a `@cacheTag` directive on either root fields query or an entity. If you try to add this directive on an Interface or another Type that doesn't already contain `@key` directive it won't work.
+    + When you set the `@cacheTag` directive on root fields it will allow for `{$args.XXX}` interpolation in the format, args is the map containing all the arguments on the corresponding root field. And for an entity it will be `{$key.XXX}`, containing a map of all entity keys for the corresponding type. Note that is you have `@key(fields: "id") @key(fields: "id name")` you'll only be able to have access to `{$key.id}` and not `name` because you can only use fields using in every `@key` directives.
+    + For more details please check our [FAQ](./faq.mdx)
+</Note>
+
 If you want to set your cache tags programmatically because it doesn't depend neither on the arguments for root fields nor entity key for an entity you can create your own cache tags directly from your subgraph and set it in response extensions.
 
 Example of response payload if you want to set cache tags for different entities returned by subgraph:

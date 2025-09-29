@@ -1,29 +1,54 @@
 ---
 title: Response caching telemetry for the GraphOS Router
-description: Response caching telemetry for GraphOS Router with GraphOS Enterprise. across queries.
+description: Response caching telemetry for GraphOS Router with GraphOS Enterprise.
 minVersion: Router v2.8.0
 releaseStage: preview
 ---
 
 ## Metrics
 
+### Fetch/insert
+
 | Name | Description | Unit |
 | --- | --- | --- |
-| `apollo.router.response_cache.data.expired` | Count of expired data entries still in database | `{entry}` |
 | `apollo.router.operations.response_cache.fetch.error` | Errors when fetching data from cache | `{error}` |
 | `apollo.router.operations.response_cache.fetch` | Time to fetch data from cache | `s` |
+| `apollo.router.operations.response_cache.fetch.entity` | Number of entities per subgraph fetch node | `{entity}` |
 | `apollo.router.operations.response_cache.insert.error` | Errors when inserting data in cache | `{error}` |
 | `apollo.router.operations.response_cache.insert` | Time to insert new data in cache | `s` |
-| `apollo.router.operations.response_cache.fetch.entity` | Number of entities per subgraph fetch node | `{entity}` |
-| `apollo.router.response_cache.reconnection` | Number of reconnections to the cache storage | `{retry}` |
+
+### Invalidation
+
+| Name | Description | Unit |
+| --- | --- | --- |
 | `apollo.router.operations.response_cache.invalidation.event` | Response cache received a batch of invalidation requests | `{request}` |
 | `apollo.router.operations.response_cache.invalidation.error` | Errors when invalidating data in cache | `{error}` |
 | `apollo.router.operations.response_cache.invalidation.entry` | Response cache counter for invalidated entries | `{entry}` |
 | `apollo.router.operations.response_cache.invalidation.request.entry` | Number of invalidated entries per invalidation request. | `{entry}` |
 | `apollo.router.operations.response_cache.invalidation.duration` | Duration of the invalidation event execution, in seconds. | `s` |
+
+### Internal
+| Name | Description | Unit |
+| --- | --- | --- |
+| `apollo.router.response_cache.reconnection` | Number of reconnections to the cache storage | `{retry}` |
 | `apollo.router.response_cache.private_queries.lru.size` | LRU cache size for private queries fetched | `{query}` |
 
-//TODO add all metrics for Redis
+
+### Redis
+The latency metrics are marked as experimental because we will change them if we have an upstream change in one of our depdencies.
+
+**Connection and performance metrics:**
+  - `apollo.router.cache.redis.connections`: Number of active Redis connections
+  - `apollo.router.cache.redis.command_queue_length`: Commands waiting to be sent to Redis
+  - `apollo.router.cache.redis.commands_executed`: Total number of Redis commands executed
+  - `apollo.router.cache.redis.redelivery_count`: Commands retried due to connection issues
+  - `apollo.router.cache.redis.errors`: Redis errors by type (auth, timeout, io, etc.)
+
+**Experimental redis performance metrics:**
+  - `experimental.apollo.router.cache.redis.network_latency_avg`: Average network latency to Redis
+  - `experimental.apollo.router.cache.redis.latency_avg`: Average Redis command execution time
+  - `experimental.apollo.router.cache.redis.request_size_avg`: Average request payload size
+  - `experimental.apollo.router.cache.redis.response_size_avg`: Average response payload size
 
 ## Traces
 
