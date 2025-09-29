@@ -147,17 +147,11 @@ impl SymbolResolver {
 
                 for &absolute_address in &addresses {
                     // Calculate relative address if we have a base address
-                    let address_for_resolution = if let Some(base) = base_address {
-                        // Convert absolute address to relative address
-                        if absolute_address >= base {
-                            absolute_address - base
-                        } else {
-                            // Address is below base, might be from a different library
-                            absolute_address
-                        }
-                    } else {
-                        absolute_address
-                    };
+                    let address_for_resolution = base_address
+                         // Convert absolute address to relative address
+                         // Note, address is below base thus might be from a different library
+                        .and_then(|base| absolute_address.checked_sub(base))
+                        .unwrap_or(absolute_address);
 
                     // Try to resolve symbol name for this address using find_symbol
                     // This works better than find_frames for symbol table lookups
