@@ -1182,22 +1182,23 @@ mod shape_tests {
     fn get_shape_should_return_unknown_for_object_with_unknown_key() {
         let fields = IndexMap::default();
         let input_shape = Shape::object(fields, Shape::none(), []);
+        let test_shape = get_test_shape(
+            vec![WithRange::new(
+                LitExpr::Path(PathSelection {
+                    path: PathList::Key(
+                        Key::field("a").into_with_range(),
+                        PathList::Empty.into_with_range(),
+                    )
+                    .into_with_range(),
+                }),
+                None
+            )],
+            input_shape.clone()
+        );
 
         assert_eq!(
-            get_test_shape(
-                vec![WithRange::new(
-                    LitExpr::Path(PathSelection {
-                        path: PathList::Key(
-                            Key::field("a").into_with_range(),
-                            PathList::Empty.into_with_range(),
-                        )
-                        .into_with_range(),
-                    }),
-                    None
-                )],
-                input_shape.clone()
-            ),
-            input_shape.any_field([])
+            test_shape,
+            input_shape.any_field(test_shape.locations.iter().cloned()),
         );
     }
 
