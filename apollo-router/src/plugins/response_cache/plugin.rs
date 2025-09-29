@@ -2426,10 +2426,9 @@ async fn attempt_connection(
 async fn reattempt_connection(
     config: storage::redis::Config,
     cache_storage: Arc<OnceLock<Storage>>,
-    abort_signal: broadcast::Receiver<()>,
+    mut abort_signal: broadcast::Receiver<()>,
 ) {
     let mut interval = IntervalStream::new(tokio::time::interval(Duration::from_secs(30)));
-    let mut abort_signal = abort_signal.resubscribe();
     loop {
         tokio::select! {
             biased;
