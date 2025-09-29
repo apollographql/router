@@ -5,8 +5,10 @@ use std::time::Instant;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use fred::interfaces::ClientLike;
 use fred::interfaces::KeysInterface;
 use fred::interfaces::SortedSetsInterface;
+use fred::prelude::Options;
 use fred::types::Expiration;
 use fred::types::ExpireOptions;
 use fred::types::Value;
@@ -19,6 +21,10 @@ use tokio::task::JoinSet;
 use tokio_util::future::FutureExt;
 use tower::BoxError;
 
+use super::CacheEntry;
+use super::CacheStorage;
+use super::Document;
+use super::StorageResult;
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
 use crate::cache::redis::RedisValue;
@@ -29,12 +35,8 @@ use crate::plugins::response_cache::metrics::record_maintenance_duration;
 use crate::plugins::response_cache::metrics::record_maintenance_error;
 use crate::plugins::response_cache::metrics::record_maintenance_queue_error;
 use crate::plugins::response_cache::metrics::record_maintenance_success;
-use crate::plugins::response_cache::storage::CacheEntry;
-use crate::plugins::response_cache::storage::CacheStorage;
-use crate::plugins::response_cache::storage::Document;
-use crate::plugins::response_cache::storage::StorageResult;
 
-pub(crate) type Config = crate::configuration::RedisCache;
+pub(crate) type Config = super::config::Config;
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
 struct CacheValue {
@@ -58,21 +60,15 @@ impl From<(&str, CacheValue)> for CacheEntry {
 pub(crate) struct Storage {
     storage: RedisCacheStorage,
     cache_tag_tx: mpsc::Sender<String>,
-    timeout: Duration,
+    fetch_timeout: Duration,
+    insert_timeout: Duration,
+    invalidate_timeout: Duration,
+    maintenance_timeout: Duration,
 }
 
 impl Storage {
     pub(crate) async fn new(
         config: &Config,
-        drop_rx: broadcast::Receiver<()>,
-    ) -> Result<Self, BoxError> {
-        let storage = RedisCacheStorage::new(config.clone(), "response-cache").await?;
-        Self::from_storage(storage, config.timeout, drop_rx).await
-    }
-
-    async fn from_storage(
-        storage: RedisCacheStorage,
-        timeout: Duration,
         drop_rx: broadcast::Receiver<()>,
     ) -> Result<Self, BoxError> {
         // NB: sorted set cleanup happens via an async task, reading from `cache_tag_rx`.
@@ -85,11 +81,16 @@ impl Storage {
         //  There are opportunities for improvement here to make sure that we don't try to do maintenance
         //  on the same cache tag multiple times a second, and perhaps a world where we actually want multiple
         //  consumers running at the same time.
+
+        let storage = RedisCacheStorage::new(config.into(), "response-cache").await?;
         let (cache_tag_tx, cache_tag_rx) = mpsc::channel(1000);
         let s = Self {
-            timeout,
             storage,
             cache_tag_tx,
+            fetch_timeout: config.fetch_timeout,
+            insert_timeout: config.insert_timeout,
+            invalidate_timeout: config.invalidate_timeout,
+            maintenance_timeout: config.maintenance_timeout,
         };
         s.perform_periodic_maintenance(cache_tag_rx, drop_rx).await;
         Ok(s)
@@ -100,7 +101,11 @@ impl Storage {
     }
 
     async fn invalidate_keys(&self, invalidation_keys: Vec<String>) -> StorageResult<u64> {
-        let pipeline = self.storage.pipeline();
+        let options = Options {
+            timeout: Some(self.invalidate_timeout()),
+            ..Options::default()
+        };
+        let pipeline = self.storage.pipeline().with_options(&options);
         for invalidation_key in &invalidation_keys {
             let invalidation_key = self.make_key(format!("cache-tag:{invalidation_key}"));
             self.send_to_maintenance_queue(invalidation_key.clone());
@@ -115,9 +120,10 @@ impl Storage {
             return Ok(0);
         }
 
+        let keys = all_keys.into_iter().map(fred::types::Key::from);
         let deleted = self
             .storage
-            .delete_from_scan_result(all_keys.into_iter().map(fred::types::Key::from))
+            .delete_from_scan_result_with_options(keys, options)
             .await?;
 
         // NOTE: we don't delete elements from the cache tag sorted sets. if we did, we would likely
@@ -176,9 +182,14 @@ impl Storage {
         cutoff_time: f64,
     ) -> StorageResult<u64> {
         // Returns number of items removed
+        let options = Options {
+            timeout: Some(self.maintenance_timeout()),
+            ..Options::default()
+        };
         Ok(self
             .storage
             .client()
+            .with_options(&options)
             .zremrangebyscore(&cache_tag_key, f64::NEG_INFINITY, cutoff_time)
             .await?)
     }
@@ -212,21 +223,21 @@ impl Storage {
     }
 
     fn maintenance_timeout(&self) -> Duration {
-        self.timeout
+        self.maintenance_timeout
     }
 }
 
 impl CacheStorage for Storage {
     fn insert_timeout(&self) -> Duration {
-        self.timeout
+        self.insert_timeout
     }
 
     fn fetch_timeout(&self) -> Duration {
-        self.timeout
+        self.fetch_timeout
     }
 
     fn invalidate_timeout(&self) -> Duration {
-        self.timeout
+        self.invalidate_timeout
     }
 
     async fn internal_insert(&self, document: Document, subgraph_name: &str) -> StorageResult<()> {
@@ -273,7 +284,11 @@ impl CacheStorage for Storage {
             }
         }
 
-        let pipeline = self.storage.client().pipeline();
+        let options = Options {
+            timeout: Some(self.insert_timeout()),
+            ..Options::default()
+        };
+        let pipeline = self.storage.client().pipeline().with_options(&options);
         for (cache_tag_key, elements) in cache_tags_to_pcks.into_iter() {
             self.send_to_maintenance_queue(cache_tag_key.clone());
 
@@ -320,7 +335,7 @@ impl CacheStorage for Storage {
         }
 
         // phase 3
-        let pipeline = self.storage.client().pipeline();
+        let pipeline = self.storage.client().pipeline().with_options(&options);
         for document in batch_docs.into_iter() {
             let value = CacheValue {
                 data: document.data,
@@ -350,7 +365,14 @@ impl CacheStorage for Storage {
 
     async fn internal_fetch(&self, cache_key: &str) -> StorageResult<CacheEntry> {
         // NB: don't need `make_key` for `get` - the storage layer already runs it
-        let value: RedisValue<CacheValue> = self.storage.get(RedisKey(cache_key)).await?;
+        let options = Options {
+            timeout: Some(self.fetch_timeout()),
+            ..Options::default()
+        };
+        let value: RedisValue<CacheValue> = self
+            .storage
+            .get_with_options(RedisKey(cache_key), options)
+            .await?;
         Ok(CacheEntry::from((cache_key, value.0)))
     }
 
@@ -362,7 +384,12 @@ impl CacheStorage for Storage {
             .iter()
             .map(|key| RedisKey(key.to_string()))
             .collect();
-        let values: Vec<Option<RedisValue<CacheValue>>> = self.storage.get_multiple(keys).await;
+        let options = Options {
+            timeout: Some(self.fetch_timeout()),
+            ..Options::default()
+        };
+        let values: Vec<Option<RedisValue<CacheValue>>> =
+            self.storage.get_multiple_with_options(keys, options).await;
 
         let entries = values
             .into_iter()
@@ -427,34 +454,6 @@ fn now() -> u64 {
     test,
     any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
 ))]
-impl Config {
-    pub(crate) fn test(clustered: bool, namespace: &str) -> Self {
-        let url = if clustered {
-            "redis-cluster://127.0.0.1:7000"
-        } else {
-            "redis://127.0.0.1:6379"
-        };
-
-        Self {
-            urls: vec![url.parse().unwrap()],
-            username: None,
-            password: None,
-            timeout: Duration::from_millis(500),
-            ttl: Some(Duration::from_secs(300)),
-            namespace: Some(namespace.to_string()),
-            tls: None,
-            required_to_start: true,
-            reset_ttl: false,
-            pool_size: 1,
-            metrics_interval: Duration::from_secs(1),
-        }
-    }
-}
-
-#[cfg(all(
-    test,
-    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
-))]
 impl Storage {
     async fn mocked(
         config: &Config,
@@ -464,12 +463,22 @@ impl Storage {
     ) -> Result<Storage, BoxError> {
         let storage = RedisCacheStorage::from_mocks_and_config(
             mock_storage,
-            config.clone(),
+            config.into(),
             "response-cache",
             is_cluster,
         )
         .await?;
-        Self::from_storage(storage, config.timeout, drop_rx).await
+        let (cache_tag_tx, cache_tag_rx) = mpsc::channel(100);
+        let s = Self {
+            storage,
+            cache_tag_tx,
+            fetch_timeout: config.fetch_timeout,
+            insert_timeout: config.insert_timeout,
+            invalidate_timeout: config.invalidate_timeout,
+            maintenance_timeout: config.maintenance_timeout,
+        };
+        s.perform_periodic_maintenance(cache_tag_rx, drop_rx).await;
+        Ok(s)
     }
 
     async fn all_keys_in_namespace(&self) -> Result<Vec<String>, BoxError> {

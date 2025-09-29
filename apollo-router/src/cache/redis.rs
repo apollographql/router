@@ -17,6 +17,7 @@ use fred::prelude::Error as RedisError;
 use fred::prelude::ErrorKind as RedisErrorKind;
 use fred::prelude::HeartbeatInterface;
 use fred::prelude::KeysInterface;
+use fred::prelude::Options;
 use fred::prelude::Pool as RedisPool;
 use fred::prelude::TcpConfig;
 use fred::types::Builder;
@@ -592,10 +593,18 @@ impl RedisCacheStorage {
         &self,
         key: RedisKey<K>,
     ) -> Result<RedisValue<V>, RedisError> {
+        self.get_with_options(key, Options::default()).await
+    }
+
+    pub(crate) async fn get_with_options<K: KeyType, V: ValueType>(
+        &self,
+        key: RedisKey<K>,
+        options: Options,
+    ) -> Result<RedisValue<V>, RedisError> {
         let key = self.make_key(key);
         match self.ttl {
             Some(ttl) if self.reset_ttl => {
-                let pipeline = self.pipeline();
+                let pipeline = self.pipeline().with_options(&options);
                 let _: () = pipeline
                     .get(&key)
                     .await
@@ -609,17 +618,25 @@ impl RedisCacheStorage {
                     pipeline.all().await.inspect_err(|e| self.record_error(e))?;
                 Ok(value)
             }
-            _ => self
-                .inner
-                .get(key)
-                .await
-                .inspect_err(|e| self.record_error(e)),
+            _ => {
+                let client = self.inner.next().with_options(&options);
+                client.get(key).await.inspect_err(|e| self.record_error(e))
+            }
         }
     }
 
     pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
         &self,
+        keys: Vec<RedisKey<K>>,
+    ) -> Vec<Option<RedisValue<V>>> {
+        self.get_multiple_with_options(keys, Options::default())
+            .await
+    }
+
+    pub(crate) async fn get_multiple_with_options<K: KeyType, V: ValueType>(
+        &self,
         mut keys: Vec<RedisKey<K>>,
+        options: Options,
     ) -> Vec<Option<RedisValue<V>>> {
         // NB: MGET is different from GET in that it returns `Option`s rather than `Result`s.
         //  > For every key that does not hold a string value or does not exist, the special value
@@ -630,8 +647,8 @@ impl RedisCacheStorage {
 
         if keys.len() == 1 {
             let key = self.make_key(keys.remove(0));
-            let res = self
-                .inner
+            let client = self.inner.next().with_options(&options);
+            let res = client
                 .get(key)
                 .await
                 .inspect_err(|e| self.record_error(e))
@@ -654,7 +671,7 @@ impl RedisCacheStorage {
             // then we query all the key groups at the same time
             let mut tasks = Vec::new();
             for (_shard, (indexes, keys)) in h {
-                let client = self.inner.next();
+                let client = self.inner.next().with_options(&options);
                 tasks.push(async move {
                     let result: Result<Vec<Option<RedisValue<V>>>, _> = client.mget(keys).await;
                     (indexes, result)
@@ -684,7 +701,8 @@ impl RedisCacheStorage {
                 .into_iter()
                 .map(|k| self.make_key(k))
                 .collect::<Vec<_>>();
-            self.inner
+            let client = self.inner.next().with_options(&options);
+            client
                 .mget(keys)
                 .await
                 .inspect_err(|e| self.record_error(e))
@@ -751,6 +769,20 @@ impl RedisCacheStorage {
     where
         I: Iterator<Item = fred::types::Key>,
     {
+        self.delete_from_scan_result_with_options(keys, Options::default())
+            .await
+    }
+
+    /// Delete keys *without* adding the `namespace` prefix because `keys` is from
+    /// `scan_with_namespaced_results` and already includes it.
+    pub(crate) async fn delete_from_scan_result_with_options<I>(
+        &self,
+        keys: I,
+        options: Options,
+    ) -> Result<u32, RedisError>
+    where
+        I: Iterator<Item = fred::types::Key>,
+    {
         let mut h: HashMap<u16, Vec<fred::types::Key>> = HashMap::new();
         for key in keys.into_iter() {
             let hash = ClusterRouting::hash_key(key.as_bytes());
@@ -759,8 +791,11 @@ impl RedisCacheStorage {
         }
 
         // then we query all the key groups at the same time
-        let results: Vec<Result<u32, RedisError>> =
-            join_all(h.into_values().map(|keys| self.inner.del(keys))).await;
+        let results: Vec<Result<u32, RedisError>> = join_all(h.into_values().map(|keys| async {
+            let client = self.inner.next().with_options(&options);
+            client.del(keys).await
+        }))
+        .await;
 
         let mut total = 0;
         for result in results {

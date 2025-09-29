@@ -1,3 +1,4 @@
+mod config;
 mod error;
 pub(super) mod redis;
 

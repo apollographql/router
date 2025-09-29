@@ -1774,6 +1774,132 @@ expression: "&schema"
       "type": "object"
     },
     "Config7": {
+      "additionalProperties": false,
+      "description": "Redis cache configuration",
+      "properties": {
+        "fetch_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Timeout for Redis fetch commands (default: 150ms)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "insert_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Timeout for Redis insert commands (default: 500ms)\n\nInserts are processed asynchronously, so this will not affect response duration.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "invalidate_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Timeout for Redis invalidation commands (default: 1s)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "maintenance_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Timeout for Redis maintenance commands (default: 500ms)\n\nMaintenance tasks are processed asynchronously, so this will not affect response duration.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "metrics_interval": {
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Interval for collecting Redis metrics (default: 1s)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "namespace": {
+          "description": "namespace used to prefix Redis keys",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "password": {
+          "description": "Redis password if not provided in the URLs. This field takes precedence over the password in the URL",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pool_size": {
+          "default": 5,
+          "description": "The size of the Redis connection pool (default: 5)",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "required_to_start": {
+          "default": false,
+          "description": "Prevents the router from starting if it cannot connect to Redis",
+          "type": "boolean"
+        },
+        "tls": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TlsClient"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "TLS client configuration"
+        },
+        "ttl": {
+          "default": null,
+          "description": "TTL for entries",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "urls": {
+          "description": "List of URLs to the Redis cluster",
+          "items": {
+            "format": "uri",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "username": {
+          "description": "Redis username if not provided in the URLs. This field takes precedence over the username in the URL",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "urls"
+      ],
+      "type": "object"
+    },
+    "Config8": {
       "description": "Configuration for the progressive override plugin",
       "type": "object"
     },
@@ -8655,7 +8781,7 @@ expression: "&schema"
         "redis": {
           "anyOf": [
             {
-              "$ref": "#/definitions/RedisCache"
+              "$ref": "#/definitions/Config7"
             },
             {
               "type": "null"
@@ -11476,7 +11602,7 @@ expression: "&schema"
       "$ref": "#/definitions/FileUploadsConfig"
     },
     "progressive_override": {
-      "$ref": "#/definitions/Config7"
+      "$ref": "#/definitions/Config8"
     },
     "rhai": {
       "$ref": "#/definitions/RhaiConfig"
