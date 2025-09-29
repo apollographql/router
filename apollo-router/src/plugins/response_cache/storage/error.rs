@@ -1,3 +1,4 @@
+use fred::error::ErrorKind;
 use serde_json::error::Category;
 
 use crate::plugins::response_cache::ErrorCode;
@@ -29,6 +30,9 @@ impl Error {
 impl ErrorCode for Error {
     fn code(&self) -> &'static str {
         match self {
+            Error::Database(err) if err.kind() == &ErrorKind::Timeout => "TIMEOUT",
+            Error::Timeout(_) => "TIMEOUT",
+
             Error::Database(err) => err.kind().to_str(),
             Error::Join(err) => {
                 if err.is_cancelled() {
@@ -44,7 +48,6 @@ impl ErrorCode for Error {
                 Category::Data => "Serialize::Data",
                 Category::Eof => "Serialize::EOF",
             },
-            Error::Timeout(_) => "TIMED_OUT",
         }
     }
 }
