@@ -1274,7 +1274,7 @@ fn it_prevents_enablement_of_both_subgraph_caching_plugins() {
         let mut config = json!({});
         if let Some(enabled) = response_cache_enabled {
             config.as_object_mut().unwrap().insert(
-                "experimental_response_cache".to_string(),
+                "preview_response_cache".to_string(),
                 json!({"enabled": enabled}),
             );
         }
