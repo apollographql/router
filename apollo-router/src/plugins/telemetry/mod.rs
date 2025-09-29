@@ -1195,7 +1195,12 @@ impl PluginPrivate for Telemetry {
             .map_request(move |request: crate::services::http::HttpRequest| {
                 // Get and store attributes so that they can be applied later after the span is created
                 let client_attributes = HttpClientAttributes {
-                    attributes: req_fn_config.instrumentation.spans.http_client.attributes.on_request(&request),
+                    attributes: req_fn_config
+                        .instrumentation
+                        .spans
+                        .http_client
+                        .attributes
+                        .on_request(&request),
                 };
                 request.context.extensions().with_lock(|lock| {
                     lock.insert(client_attributes);
@@ -1204,7 +1209,12 @@ impl PluginPrivate for Telemetry {
                 request
             })
             .map_response(move |response: crate::services::http::HttpResponse| {
-                let attributes = res_fn_config.instrumentation.spans.http_client.attributes.on_response(&response);
+                let attributes = res_fn_config
+                    .instrumentation
+                    .spans
+                    .http_client
+                    .attributes
+                    .on_response(&response);
                 ::tracing::Span::current().set_span_dyn_attributes(attributes);
                 response
             })

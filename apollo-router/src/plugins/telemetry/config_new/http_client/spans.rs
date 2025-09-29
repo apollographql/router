@@ -31,12 +31,12 @@ mod test {
     use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 
     use super::*;
+    use crate::Context;
     use crate::plugins::telemetry::config_new::DefaultForLevel;
     use crate::plugins::telemetry::config_new::Selectors;
     use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
     use crate::plugins::telemetry::otlp::TelemetryDataKind;
     use crate::services::http::HttpRequest;
-    use crate::Context;
 
     #[test]
     fn test_http_client_spans_level_none() {

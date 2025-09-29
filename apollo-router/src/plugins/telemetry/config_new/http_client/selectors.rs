@@ -145,7 +145,9 @@ mod test {
 
         assert_eq!(
             selector.on_request(&request),
-            Some(opentelemetry::Value::String("application/json".to_string().into()))
+            Some(opentelemetry::Value::String(
+                "application/json".to_string().into()
+            ))
         );
     }
 
