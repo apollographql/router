@@ -151,7 +151,7 @@ pub struct Configuration {
 
     /// The raw config before parsings and env expansion.
     #[serde(skip)]
-    pub(crate) original_yaml: Option<Arc<String>>,
+    pub(crate) original_yaml: Option<Arc<str>>,
 
     /// Health check configuration
     #[serde(default)]

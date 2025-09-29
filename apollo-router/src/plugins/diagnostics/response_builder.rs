@@ -3,6 +3,7 @@
 //! This module provides utilities to build consistent HTTP responses
 //! with standardized headers and error handling.
 
+use bytes::Bytes;
 use http::HeaderValue;
 use http::StatusCode;
 use http::header;
@@ -80,7 +81,7 @@ impl ResponseBuilder {
     pub(super) fn text_response(
         status: StatusCode,
         content_type: Mime,
-        body_text: String,
+        body_text: &str,
         cache_control: CacheControl,
         context: Context,
     ) -> DiagnosticsResult<Response> {
@@ -100,7 +101,7 @@ impl ResponseBuilder {
         Response::http_response_builder()
             .response(
                 response_builder
-                    .body(body::from_bytes(body_text.into_bytes()))
+                    .body(body::from_bytes(Bytes::copy_from_slice(body_text.as_bytes())))
                     .map_err(DiagnosticsError::Http)?,
             )
             .context(context)
@@ -215,7 +216,7 @@ mod tests {
         let response = ResponseBuilder::text_response(
             StatusCode::OK,
             TEXT_PLAIN_UTF_8,
-            "Hello, World!".to_string(),
+            "Hello, World!",
             CacheControl::NoCache,
             request.context.clone(),
         )

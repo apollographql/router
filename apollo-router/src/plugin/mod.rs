@@ -95,7 +95,7 @@ pub struct PluginInit<T> {
     pub(crate) full_config: Option<Value>,
 
     /// The full router yaml before it was parsed and env variables expanded
-    pub(crate) original_config_yaml: Option<Arc<String>>,
+    pub(crate) original_config_yaml: Option<Arc<str>>,
 }
 
 impl<T> PluginInit<T>
@@ -144,7 +144,7 @@ where
         notify: Notify<String, graphql::Response>,
         license: Arc<LicenseState>,
         full_config: Option<Value>,
-        original_config_yaml: Option<Arc<String>>,
+        original_config_yaml: Option<Arc<str>>,
     ) -> Self {
         PluginInit {
             config,
@@ -177,7 +177,7 @@ where
         notify: Notify<String, graphql::Response>,
         license: Arc<LicenseState>,
         full_config: Option<Value>,
-        original_config_yaml: Option<Arc<String>>,
+        original_config_yaml: Option<Arc<str>>,
     ) -> Result<Self, BoxError> {
         let config: T = serde_json::from_value(config)?;
         let previous_config = previous_config.map(serde_json::from_value).transpose()?;
@@ -209,7 +209,7 @@ where
         notify: Option<Notify<String, graphql::Response>>,
         license: Option<Arc<LicenseState>>,
         full_config: Option<Value>,
-        original_config_yaml: Option<Arc<String>>,
+        original_config_yaml: Option<Arc<str>>,
     ) -> Self {
         PluginInit {
             config,

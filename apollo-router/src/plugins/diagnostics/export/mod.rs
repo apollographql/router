@@ -80,7 +80,7 @@ mod tests;
 pub(super) struct Exporter {
     config: Config,
     supergraph_schema: Arc<String>,
-    router_config: Arc<String>,
+    router_config: Arc<str>,
 }
 
 impl Exporter {
@@ -88,7 +88,7 @@ impl Exporter {
     pub(super) fn new(
         config: Config,
         supergraph_schema: Arc<String>,
-        router_config: Arc<String>,
+        router_config: Arc<str>,
     ) -> Self {
         Self {
             config,
@@ -144,7 +144,7 @@ impl Exporter {
     async fn create_streaming_archive(
         config: Config,
         supergraph_schema: Arc<String>,
-        router_config: Arc<String>,
+        router_config: Arc<str>,
     ) -> impl futures::Stream<Item = Result<Bytes, BoxError>> {
         // Use tokio::io::simplex for unidirectional pipe with backpressure
         // 2MB buffer prevents OOM while maintaining good throughput

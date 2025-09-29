@@ -545,7 +545,7 @@ pub(crate) async fn add_plugin(
     errors: &mut Vec<ConfigurationError>,
     license: Arc<LicenseState>,
     full_config: Option<Value>,
-    original_config_yaml: Option<Arc<String>>,
+    original_config_yaml: Option<Arc<str>>,
 ) {
     let plugin_init = PluginInit::builder()
         .config(plugin_config.clone())

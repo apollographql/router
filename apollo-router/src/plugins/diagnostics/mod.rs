@@ -124,7 +124,7 @@ impl Default for Config {
 #[derive(Debug, Clone)]
 struct DiagnosticsPlugin {
     config: Config,
-    router_config: Arc<String>,
+    router_config: Arc<str>,
     supergraph_schema: Arc<String>,
 }
 
@@ -139,7 +139,7 @@ impl Plugin for DiagnosticsPlugin {
             // Many tests do not supply config, so just default it.
             router_config: init
                 .original_config_yaml
-                .unwrap_or(Arc::new("".to_string())),
+                .unwrap_or(Arc::from("")),
         })
     }
 

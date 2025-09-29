@@ -80,7 +80,7 @@ impl JsResourceHandler {
         Some(ResponseBuilder::text_response(
             StatusCode::OK,
             TEXT_JAVASCRIPT,
-            resource.content.to_string(),
+            resource.content,
             CacheControl::StaticResource,
             context,
         ))

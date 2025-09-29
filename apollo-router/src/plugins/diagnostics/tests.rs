@@ -33,7 +33,7 @@ async fn test_diagnostics() {
         notify: crate::notification::Notify::for_tests(),
         license: Arc::new(crate::uplink::license_enforcement::LicenseState::Unlicensed),
         full_config: None,
-        original_config_yaml: Some(Arc::new("test_config".to_string())),
+        original_config_yaml: Some(Arc::from("test_config")),
     };
 
     let result = DiagnosticsPlugin::new(init).await;
@@ -69,7 +69,7 @@ async fn test_diagnostics_disabled() {
         notify: crate::notification::Notify::for_tests(),
         license: Arc::new(crate::uplink::license_enforcement::LicenseState::Unlicensed),
         full_config: None,
-        original_config_yaml: Some(Arc::new("test_config".to_string())),
+        original_config_yaml: Some(Arc::from("test_config")),
     };
 
     let result = DiagnosticsPlugin::new(init).await;

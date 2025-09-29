@@ -34,7 +34,7 @@ pub(super) struct DiagnosticsService {
     memory: MemoryService,
     exporter: Exporter,
     js_resources: JsResourceHandler,
-    router_config: std::sync::Arc<String>,
+    router_config: std::sync::Arc<str>,
     supergraph_schema: std::sync::Arc<String>,
 }
 
@@ -42,7 +42,7 @@ impl DiagnosticsService {
     pub(super) fn new(
         output_directory: String,
         exporter: Exporter,
-        router_config: std::sync::Arc<String>,
+        router_config: std::sync::Arc<str>,
         supergraph_schema: std::sync::Arc<String>,
     ) -> Self {
         Self {
@@ -148,7 +148,7 @@ impl DiagnosticsService {
         ResponseBuilder::text_response(
             StatusCode::OK,
             TEXT_HTML_UTF_8,
-            html,
+            &html,
             CacheControl::NoCache,
             request.context.clone(),
         )
@@ -162,7 +162,7 @@ impl DiagnosticsService {
         ResponseBuilder::text_response(
             StatusCode::OK,
             TEXT_PLAIN_UTF_8,
-            system_info,
+            &system_info,
             CacheControl::NoCache,
             request.context.clone(),
         )
@@ -171,12 +171,10 @@ impl DiagnosticsService {
     /// Handle GET /diagnostics/router_config.yaml
     async fn handle_router_config(&self, request: Request) -> DiagnosticsResult<Response> {
         // Return the actual router configuration
-        let config_yaml = self.router_config.as_str().to_string();
-
         ResponseBuilder::text_response(
             StatusCode::OK,
             Mime::from_str("text/yaml").expect("valid mime type"),
-            config_yaml,
+            &self.router_config,
             CacheControl::NoCache,
             request.context.clone(),
         )
@@ -190,7 +188,7 @@ impl DiagnosticsService {
         ResponseBuilder::text_response(
             StatusCode::OK,
             TEXT_PLAIN_UTF_8,
-            schema,
+            &schema,
             CacheControl::NoCache,
             request.context.clone(),
         )
