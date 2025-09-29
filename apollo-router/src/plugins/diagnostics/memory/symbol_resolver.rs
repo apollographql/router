@@ -5,11 +5,9 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::fs::File;
-use std::io::BufRead;
-use std::io::BufReader;
 
 use log::debug;
+use regex::Regex;
 
 use crate::plugins::diagnostics::DiagnosticsError;
 use crate::plugins::diagnostics::DiagnosticsResult;
@@ -47,65 +45,53 @@ impl SymbolResolver {
         &self,
         input_path: &str,
     ) -> DiagnosticsResult<(HashSet<u64>, Option<u64>)> {
-        let file = File::open(input_path).map_err(|e| {
-            DiagnosticsError::Internal(format!("Failed to open heap profile {}: {}", input_path, e))
+        let content = std::fs::read_to_string(input_path).map_err(|e| {
+            DiagnosticsError::Internal(format!("Failed to read heap profile {}: {}", input_path, e))
         })?;
 
-        let reader = BufReader::new(file);
+        let addresses = self.extract_addresses(&content)?;
+        let base_address = self.extract_base_address(&content)?;
+
+        Ok((addresses, base_address))
+    }
+
+    /// Extract all hex addresses from heap profile content
+    fn extract_addresses(&self, content: &str) -> DiagnosticsResult<HashSet<u64>> {
         let mut addresses = HashSet::new();
-        let mut base_address: Option<u64> = None;
-        let mut in_stack_trace = false;
-        let mut in_mapped_libraries = false;
 
-        for line in reader.lines() {
-            let line = line.map_err(|e| {
-                DiagnosticsError::Internal(format!("Failed to read heap profile line: {}", e))
-            })?;
+        // Regex to find hex addresses (both 0x prefixed and raw hex)
+        let hex_regex = Regex::new(r"(?m)(?:^|\s)(?:0x)?([0-9a-fA-F]+)(?:\s|$|-[0-9a-fA-F]+)")
+            .expect("regex must be valid");
 
-            // Check for MAPPED_LIBRARIES section
-            if line == "MAPPED_LIBRARIES:" {
-                in_mapped_libraries = true;
-                continue;
-            }
-
-            if in_mapped_libraries {
-                // Look for the main binary mapping (contains our binary path)
-                if line.contains(&self.binary_path) {
-                    // Parse line like: 584070133000-5840703ed000 r--p 00000000 103:09 45112171  /path/to/router
-                    if let Some(addr_range) = line.split_whitespace().next()
-                        && let Some(start_addr_str) = addr_range.split('-').next()
-                        && let Ok(addr) = u64::from_str_radix(start_addr_str, 16)
-                    {
-                        base_address = Some(addr);
-                        tracing::debug!(
-                            "Parsed binary base address: 0x{:x} from line: {}",
-                            addr,
-                            line
-                        );
-                        break; // We found what we need
-                    }
-                }
-                continue;
-            }
-
-            // Look for stack trace lines starting with @
-            if line.starts_with('@') {
-                in_stack_trace = true;
-                // Parse addresses from the line: @ 0x5ed51a3c46e4 0x5ed51a3c4ca5 ...
-                for part in line.split_whitespace().skip(1) {
-                    // Skip the '@' symbol
-                    if let Some(addr_str) = part.strip_prefix("0x")
-                        && let Ok(addr) = u64::from_str_radix(addr_str, 16)
-                    {
-                        addresses.insert(addr);
-                    }
-                }
-            } else if in_stack_trace && line.trim().is_empty() {
-                in_stack_trace = false;
+        for cap in hex_regex.captures_iter(content) {
+            if let Ok(addr) = u64::from_str_radix(&cap[1], 16) {
+                addresses.insert(addr);
             }
         }
 
-        Ok((addresses, base_address))
+        Ok(addresses)
+    }
+
+    /// Extract base address from mapping lines containing the binary path
+    fn extract_base_address(&self, content: &str) -> DiagnosticsResult<Option<u64>> {
+        // Regex to find the first hex address on lines containing our binary path
+        let base_regex = Regex::new(&format!(
+            r"(?m)^([0-9a-fA-F]+)-[0-9a-fA-F]+\s+.*\s+{}",
+            regex::escape(&self.binary_path)
+        )).expect("regex must be valid");
+
+        if let Some(cap) = base_regex.captures(content) {
+            if let Ok(addr) = u64::from_str_radix(&cap[1], 16) {
+                tracing::debug!(
+                    "Parsed binary base address: 0x{:x} for binary: {}",
+                    addr,
+                    self.binary_path
+                );
+                return Ok(Some(addr));
+            }
+        }
+
+        Ok(None)
     }
 
     /// Resolve symbols for a set of addresses using addr2line
@@ -132,72 +118,71 @@ impl SymbolResolver {
         let loader_result = tokio::task::spawn_blocking({
             let binary_path = self.binary_path.clone();
             let addresses = addresses.clone();
+            move || {
+            // Use find_symbol API - this works for symbol table lookups
+            // find_frames requires DWARF debug info which may not be available for all symbols
 
-            move || -> Result<HashMap<u64, String>, String> {
-                // Use find_symbol API - this works for symbol table lookups
-                // find_frames requires DWARF debug info which may not be available for all symbols
+            // Use the simplified Loader API
+            let loader = addr2line::Loader::new(&binary_path)
+                .map_err(|e| format!("Failed to create addr2line loader: {}", e))?;
 
-                // Use the simplified Loader API
-                let loader = addr2line::Loader::new(&binary_path)
-                    .map_err(|e| format!("Failed to create addr2line loader: {}", e))?;
+            let mut resolved_symbols = HashMap::new();
+            let mut symbols_resolved = 0;
+            let mut symbols_failed = 0;
 
-                let mut resolved_symbols = HashMap::new();
-                let mut symbols_resolved = 0;
-                let mut symbols_failed = 0;
+            for &absolute_address in &addresses {
+                // Calculate relative address if we have a base address
+                let address_for_resolution = base_address
+                    // Convert absolute address to relative address
+                    // Note, address is below base thus might be from a different library
+                    .and_then(|base| absolute_address.checked_sub(base))
+                    .unwrap_or(absolute_address);
 
-                for &absolute_address in &addresses {
-                    // Calculate relative address if we have a base address
-                    let address_for_resolution = base_address
-                         // Convert absolute address to relative address
-                         // Note, address is below base thus might be from a different library
-                        .and_then(|base| absolute_address.checked_sub(base))
-                        .unwrap_or(absolute_address);
+                // Try to resolve symbol name for this address using find_symbol
+                // This works better than find_frames for symbol table lookups
+                match loader.find_symbol(address_for_resolution) {
+                    Some(symbol_name) => {
+                        // Demangle the symbol name using addr2line's auto-demangling
+                        let demangled_name = addr2line::demangle_auto(
+                            std::borrow::Cow::Borrowed(symbol_name),
+                            None, // Let it auto-detect the language
+                        );
 
-                    // Try to resolve symbol name for this address using find_symbol
-                    // This works better than find_frames for symbol table lookups
-                    match loader.find_symbol(address_for_resolution) {
-                        Some(symbol_name) => {
-                            // Demangle the symbol name using addr2line's auto-demangling
-                            let demangled_name = addr2line::demangle_auto(
-                                std::borrow::Cow::Borrowed(symbol_name),
-                                None, // Let it auto-detect the language
-                            );
+                        symbols_resolved += 1;
+                        // Use the absolute address as the key for the symbol map, store demangled name
+                        resolved_symbols.insert(absolute_address, demangled_name.to_string());
+                    }
+                    None => {
+                        symbols_failed += 1;
 
-                            symbols_resolved += 1;
-                            // Use the absolute address as the key for the symbol map, store demangled name
-                            resolved_symbols.insert(absolute_address, demangled_name.to_string());
-                        }
-                        None => {
-                            symbols_failed += 1;
-
-                            // Fall back to hex address if resolution fails
-                            resolved_symbols
-                                .insert(absolute_address, format!("0x{:x}", absolute_address));
-                        }
+                        // Fall back to hex address if resolution fails
+                        resolved_symbols
+                            .insert(absolute_address, format!("0x{:x}", absolute_address));
                     }
                 }
+            }
 
-                // Log detailed symbol resolution statistics
-                let total_addresses = addresses.len();
-                let success_rate = if total_addresses > 0 {
-                    (symbols_resolved as f64 / total_addresses as f64) * 100.0
-                } else {
-                    0.0
-                };
+            // Log detailed symbol resolution statistics
+            let total_addresses = addresses.len();
+            let success_rate = if total_addresses > 0 {
+                (symbols_resolved as f64 / total_addresses as f64) * 100.0
+            } else {
+                0.0
+            };
 
-                if symbols_resolved > 0 {
-                    debug!(
-                        "✅ Symbol resolution successful for {}/{} addresses ({:.1}%)",
-                        symbols_resolved, total_addresses, success_rate
-                    );
-                } else {
-                    debug!(
-                        "❌ No symbols resolved! All {}/{} addresses failed ({:.1}% success rate)",
-                        symbols_failed, total_addresses, success_rate
-                    );
-                }
+            if symbols_resolved > 0 {
+                debug!(
+                    "✅ Symbol resolution successful for {}/{} addresses ({:.1}%)",
+                    symbols_resolved, total_addresses, success_rate
+                );
+            } else {
+                debug!(
+                    "❌ No symbols resolved! All {}/{} addresses failed ({:.1}% success rate)",
+                    symbols_failed, total_addresses, success_rate
+                );
+            }
 
-                Ok(resolved_symbols)
+            Ok::<HashMap<u64, String>, String>(resolved_symbols)
             }
         })
         .await;
