@@ -399,3 +399,273 @@ async fn test_prom_reset_on_reload() {
         .await;
     router.graceful_shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_reloads_on_common_changes() {
+    // NOTE: the instrumentation changes here make the metrics easier to match on
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: required
+      router:
+        http.server.request.duration:
+          attributes:
+            server.port: false
+            server.address: false
+            http.response.status_code:
+              alias: status
+            error:
+              error: reason
+  exporters:
+    metrics:
+      prometheus:
+        listen: 127.0.0.1:4000
+        enabled: true
+        path: /metrics
+      common:
+        service_name: original-name
+"#,
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    router.execute_default_query().await;
+    router.execute_default_query().await;
+
+    router
+        .assert_metrics_contains(
+            r#"http_server_request_duration_seconds_count{http_request_method="POST",status="200",otel_scope_name="apollo/router"} 2"#,
+            None,
+        )
+        .await;
+
+    router
+        .update_config(
+            r#"
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: required
+      router:
+        http.server.request.duration:
+          attributes:
+            server.port: false
+            server.address: false
+            http.response.status_code:
+              alias: status
+            error:
+              error: reason
+  exporters:
+    metrics:
+      prometheus:
+        listen: 127.0.0.1:4000
+        enabled: true
+        path: /metrics
+      common:
+        service_name: new-name
+        "#,
+        )
+        .await;
+
+    router.assert_reloaded().await;
+    router.execute_default_query().await;
+
+    router
+        .assert_metrics_contains(
+            r#"http_server_request_duration_seconds_count{http_request_method="POST",status="200",otel_scope_name="apollo/router"} 1"#,
+            None,
+        )
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_reloads_on_otlp_changes() {
+    // NOTE: the instrumentation changes here make the metrics easier to match on
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: required
+      router:
+        http.server.request.duration:
+          attributes:
+            server.port: false
+            server.address: false
+            http.response.status_code:
+              alias: status
+            error:
+              error: reason
+  exporters:
+    metrics:
+      prometheus:
+        listen: 127.0.0.1:4000
+        enabled: true
+        path: /metrics
+      otlp:
+        enabled: true
+        endpoint: http://localhost:4318/v1/metrics
+"#,
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    router.execute_default_query().await;
+    router.execute_default_query().await;
+
+    router
+        .assert_metrics_contains(
+            r#"http_server_request_duration_seconds_count{http_request_method="POST",status="200",otel_scope_name="apollo/router"} 2"#,
+            None,
+        )
+        .await;
+
+    // NOTE: updating otlp.enabled to `false`
+    router
+        .update_config(
+            r#"
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: required
+      router:
+        http.server.request.duration:
+          attributes:
+            server.port: false
+            server.address: false
+            http.response.status_code:
+              alias: status
+            error:
+              error: reason
+  exporters:
+    metrics:
+      prometheus:
+        listen: 127.0.0.1:4000
+        enabled: true
+        path: /metrics
+      otlp:
+        enabled: false
+        endpoint: http://localhost:4318/v1/metrics
+"#,
+        )
+        .await;
+
+    router.assert_reloaded().await;
+    router.execute_default_query().await;
+
+    router
+        .assert_metrics_contains(
+            r#"http_server_request_duration_seconds_count{http_request_method="POST",status="200",otel_scope_name="apollo/router"} 1"#,
+            None,
+        )
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_reloads_on_tracing_changes() {
+    // NOTE: the instrumentation changes here make the metrics easier to match on
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: required
+      router:
+        http.server.request.duration:
+          attributes:
+            server.port: false
+            server.address: false
+            http.response.status_code:
+              alias: status
+            error:
+              error: reason
+  exporters:
+    metrics:
+      prometheus:
+        listen: 127.0.0.1:4000
+        enabled: true
+        path: /metrics
+    tracing:
+      otlp:
+        enabled: true
+        endpoint: http://localhost:4318/v1/traces
+"#,
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    router.execute_default_query().await;
+    router.execute_default_query().await;
+
+    router
+        .assert_metrics_contains(
+            r#"http_server_request_duration_seconds_count{http_request_method="POST",status="200",otel_scope_name="apollo/router"} 2"#,
+            None,
+        )
+        .await;
+
+    // NOTE: updating tracing.otlp.endpoint to a different string
+    router
+        .update_config(
+            r#"
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: required
+      router:
+        http.server.request.duration:
+          attributes:
+            server.port: false
+            server.address: false
+            http.response.status_code:
+              alias: status
+            error:
+              error: reason
+  exporters:
+    metrics:
+      prometheus:
+        listen: 127.0.0.1:4000
+        enabled: true
+        path: /metrics
+    tracing:
+      otlp:
+        enabled: true
+        endpoint: http://localhost:4318/v1/tracez
+"#,
+        )
+        .await;
+
+    router.assert_reloaded().await;
+    router.execute_default_query().await;
+
+    router.print_logs();
+
+    // NOTE: we don't get what we'd expect, 1, we get 3: http_server_request_duration_seconds_count{http_request_method="POST",status="200",otel_scope_name="apollo/router"} 3
+    // so, it looks like the reload (which I see logs for!) hasn't totally taken effect?
+    // this is also in the logs:
+    // {"timestamp":"2025-09-29T18:52:08.310758000Z","level":"ERROR","message":"OpenTelemetry trace
+    // error occurred: Exporter otlp encountered the following error(s): the grpc server returns
+    // error (The service is currently unavailable): , detailed error message: tcp connect
+    // error","target":"apollo_router::plugins::telemetry::error_handler","resource":{"service.version":"2.6.2","process.executable.name":"router","service.name":"unknown_service:router"}}
+
+    router
+        .assert_metrics_contains(
+            r#"http_server_request_duration_seconds_count{http_request_method="POST",status="200",otel_scope_name="apollo/router"} 1"#,
+            None,
+        )
+        .await;
+}

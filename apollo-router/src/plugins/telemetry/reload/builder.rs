@@ -198,6 +198,18 @@ mod tests {
         config
     }
 
+    fn create_config_with_datadog_tracing_enabled() -> Conf {
+        let mut config = create_default_config();
+        config.exporters.tracing.datadog.enabled = true;
+        config
+    }
+
+    fn create_config_with_zipkin_tracing_enabled() -> Conf {
+        let mut config = create_default_config();
+        config.exporters.tracing.zipkin.enabled = true;
+        config
+    }
+
     fn create_config_with_apollo_enabled() -> Conf {
         let mut config = create_default_config();
         config.apollo.apollo_key = Some("test-key".to_string());
@@ -289,6 +301,54 @@ mod tests {
         assert!(
             instr.tracer_provider_set,
             "Tracer provider should be set when OTLP tracing changes"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_tracing_reload_on_datadog_change() {
+        let previous_config = Some(create_default_config());
+        let config = create_config_with_datadog_tracing_enabled();
+
+        let builder = Builder::new(&previous_config, &config);
+        let (activation, _endpoints, _sender) = builder.build().unwrap();
+
+        let instr = activation.test_instrumentation();
+        // datadog tracing config changed, so tracing should reload
+        assert!(
+            instr.tracer_provider_set,
+            "Tracer provider should be set when DataDog tracing changes"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_tracing_reload_on_zipkin_change() {
+        let previous_config = Some(create_default_config());
+        let config = create_config_with_zipkin_tracing_enabled();
+
+        let builder = Builder::new(&previous_config, &config);
+        let (activation, _endpoints, _sender) = builder.build().unwrap();
+
+        let instr = activation.test_instrumentation();
+        // zipkin tracing config changed, so tracing should reload
+        assert!(
+            instr.tracer_provider_set,
+            "Tracer provider should be set when Zipkin tracing changes"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_tracing_reload_on_apollo_change() {
+        let previous_config = Some(create_default_config());
+        let config = create_config_with_apollo_enabled();
+
+        let builder = Builder::new(&previous_config, &config);
+        let (activation, _endpoints, _sender) = builder.build().unwrap();
+
+        let instr = activation.test_instrumentation();
+        // apollo  config changed, so tracing should reload
+        assert!(
+            instr.tracer_provider_set,
+            "Tracer provider should be set when Apollo config changes"
         );
     }
 
