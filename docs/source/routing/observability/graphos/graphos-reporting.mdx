@@ -426,7 +426,7 @@ The `code` refers to the specific type of error that was raised by the router, f
 #### Cardinality limitations
 
 At scale, some metrics are known to hit cardinality limitations in the OTel reporting agent. When this happens, some of the metrics' attributes may no longer
-be visible in Studio. To reduce cardinality warnings in your logs, adjust the Apollo metrics OTLP batch processor configuration to send reports more frequently. See the example below lowering the `scheduled_delay` to reduce cardinality stored in the router before the metric is flushed: 
+be visible in Studio. To reduce cardinality warnings in your logs, adjust the Apollo metrics OTLP batch processor configuration to send reports more frequently. You can lower the `scheduled_delay` to reduce the cardinality stored in the router before the metric is flushed, as shown in the example:
 
 ```yaml title="router.yaml"
 telemetry:
