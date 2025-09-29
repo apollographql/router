@@ -250,8 +250,8 @@ impl MemoryService {
         // Get the current binary path
         let binary_path = SymbolResolver::current_binary_path()?;
 
-        // Create enhanced processor
-        let processor = SymbolResolver::new(binary_path);
+        // Create enhanced processor (loads heap profile once)
+        let processor = SymbolResolver::new(binary_path, dump_path).await?;
 
         // Enhance profile in-place
         processor.enhance_heap_profile(dump_path).await?;

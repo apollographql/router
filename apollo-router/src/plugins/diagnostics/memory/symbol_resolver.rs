@@ -15,19 +15,23 @@ use crate::plugins::diagnostics::DiagnosticsResult;
 /// Enhanced heap profile processor that embeds symbols for standalone analysis
 pub(crate) struct SymbolResolver {
     binary_path: String,
+    content: String,
 }
 
 impl SymbolResolver {
-    /// Create a new enhanced heap processor for the given binary
-    pub(crate) fn new(binary_path: String) -> Self {
-        Self { binary_path }
+    /// Create a new enhanced heap processor for the given binary and heap profile
+    pub(crate) async fn new(binary_path: String, input_path: &str) -> DiagnosticsResult<Self> {
+        let content = std::fs::read_to_string(input_path).map_err(|e| {
+            DiagnosticsError::Internal(format!("Failed to read heap profile {}: {}", input_path, e))
+        })?;
+
+        Ok(Self { binary_path, content })
     }
 
     /// Process a raw heap profile and append symbols for in-place enhancement
     pub(crate) async fn enhance_heap_profile(&self, input_path: &str) -> DiagnosticsResult<()> {
         // Parse the heap profile to extract addresses and base address
-        let (addresses, base_address) =
-            self.extract_addresses_from_heap_profile(input_path).await?;
+        let (addresses, base_address) = self.extract_addresses_from_heap_profile()?;
 
         if addresses.is_empty() {
             return self.append_basic_symbol_section(input_path).await;
@@ -41,16 +45,9 @@ impl SymbolResolver {
     }
 
     /// Extract all unique addresses from a heap profile and find the binary base address
-    async fn extract_addresses_from_heap_profile(
-        &self,
-        input_path: &str,
-    ) -> DiagnosticsResult<(HashSet<u64>, Option<u64>)> {
-        let content = std::fs::read_to_string(input_path).map_err(|e| {
-            DiagnosticsError::Internal(format!("Failed to read heap profile {}: {}", input_path, e))
-        })?;
-
-        let addresses = self.extract_addresses(&content)?;
-        let base_address = self.extract_base_address(&content)?;
+    fn extract_addresses_from_heap_profile(&self) -> DiagnosticsResult<(HashSet<u64>, Option<u64>)> {
+        let addresses = self.extract_addresses(&self.content)?;
+        let base_address = self.extract_base_address(&self.content)?;
 
         Ok((addresses, base_address))
     }
