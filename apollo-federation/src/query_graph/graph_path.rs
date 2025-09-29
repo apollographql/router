@@ -1801,10 +1801,17 @@ where
                                     "Encountered non-root path with a subgraph-entering transition",
                                 ));
                             };
-                            self.graph
-                                .root_kinds_to_nodes_by_source(&edge_tail_weight.source)?
-                                .get(root_kind)
-                                .copied()
+                            // Since mutation options need to originate from the same subgraph, we
+                            // pretend we cannot find a root node  in another subgraph (effectively
+                            // skipping the optimization).
+                            if *root_kind == SchemaRootDefinitionKind::Mutation {
+                                None
+                            } else {
+                                self.graph
+                                    .root_kinds_to_nodes_by_source(&edge_tail_weight.source)?
+                                    .get(root_kind)
+                                    .copied()
+                            }
                         } else {
                             Some(last_subgraph_entering_edge_head)
                         };
