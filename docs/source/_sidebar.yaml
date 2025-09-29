@@ -170,7 +170,7 @@ items:
           - label: "Entity Caching"
             href: "./performance/caching/entity"
           - label: "Response Caching"
-            href: "./performance/caching/response_caching"
+            href: "./performance/caching/response_caching/quickstart"
       - label: "Performance and Scaling"
         children:
           - label: "Overview"
