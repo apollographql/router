@@ -240,10 +240,11 @@ impl CacheStorage for Storage {
         subgraph_name: &str,
     ) -> StorageResult<()> {
         // three phases:
-        //   1 - update potential keys to include namespace etc so that we don't have to do it in each phase
+        //   1 - update keys, cache tags to include namespace so that we don't have to do it in each phase
         //   2 - update each cache tag with new keys
         //   3 - update each key
         // a failure in any phase will cause the function to return, which prevents invalid states
+
         let now = now();
 
         // phase 1
@@ -259,11 +260,16 @@ impl CacheStorage for Storage {
             HashMap::with_capacity(num_cache_tags_estimate);
         for document in &mut batch_docs {
             for cache_tag_key in document.invalidation_keys.drain(..) {
-                let entry = cache_tags_to_pcks.entry(cache_tag_key).or_default();
-                entry.push((
+                let cache_tag_value = (
                     (now + document.expire.as_secs()) as f64,
                     document.key.clone(),
-                ));
+                );
+                // NB: performance concerns with `entry` API
+                if let Some(entry) = cache_tags_to_pcks.get_mut(&cache_tag_key) {
+                    entry.push(cache_tag_value);
+                } else {
+                    cache_tags_to_pcks.insert(cache_tag_key, vec![cache_tag_value]);
+                }
             }
         }
 
