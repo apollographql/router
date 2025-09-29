@@ -126,19 +126,28 @@ impl Merger {
                 // subgraphs. Adding it to the destination here allows the error reporter to
                 // determine which one we selected when it's looking through the sources.
                 pos.insert_directive(&mut self.merged, most_used_directive.clone())?;
-                self.error_reporter.report_mismatch_hint::<Directive, ()>(
+                fn print_arguments(elt: &Directive) -> Option<String> {
+                    if elt.arguments.is_empty() {
+                        Some("no arguments".to_string())
+                    } else {
+                        Some(format!(
+                            "arguments: [{}]",
+                            elt.arguments
+                                .iter()
+                                .map(|arg| format!("{}: {}", arg.name, arg.value))
+                                .join(", ")
+                        ))
+                    }
+                }
+                self.error_reporter.report_mismatch_hint::<Directive, Directive, ()>(
                     HintCode::InconsistentNonRepeatableDirectiveArguments,
                     format!("Non-repeatable directive @{name} is applied to \"{pos}\" in multiple subgraphs but with incompatible arguments. "),
                     &most_used_directive,
                     &directive_sources,
-                    |elt, _| if elt.arguments.is_empty() {
-                        Some("no arguments".to_string())
-                    } else {
-                        Some(format!("arguments: [{}]", elt.arguments.iter().map(|arg| format!("{}: {}", arg.name, arg.value)).join(", ")))
-                    },
+                    print_arguments,
+                    |d, _| print_arguments(d),
                     |application, subgraphs| format!("The supergraph will use {} (from {}), but found ", application, subgraphs.unwrap_or_else(|| "undefined".to_string())),
                     |application, subgraphs| format!("{application} in {subgraphs}"),
-                    None::<fn(Option<&Directive>) -> bool>,
                     false,
                     false,
                 );
@@ -242,15 +251,15 @@ impl Merger {
                 // An executable directive could appear in any place of a query and thus get to any subgraph, so we cannot keep an
                 // executable directive unless it is in all subgraphs. We use an 'intersection' strategy.
                 dest.remove(&mut self.merged)?;
-                self.error_reporter.report_mismatch_hint::<DirectiveDefinitionPosition, ()>(
+                self.error_reporter.report_mismatch_hint::<DirectiveDefinitionPosition, DirectiveDefinitionPosition,()>(
                     HintCode::InconsistentExecutableDirectivePresence,
                     format!("Executable directive \"{name}\" will not be part of the supergraph as it does not appear in all subgraphs: "),
                     &dest,
                     &position_sources,
-                    |_elt, _| Some("yes".to_string()),
+                    |_elt| Some("yes".to_string()),
+                    |_elt, _idx| Some("yes".to_string()),
                     |_, subgraphs| format!("it is defined in {}", subgraphs.unwrap_or_default()),
                     |_, subgraphs| format!(" but not in {subgraphs}"),
-                    None::<fn(Option<&DirectiveDefinitionPosition>) -> bool>,
                     false,
                     false,
                 );
@@ -276,15 +285,15 @@ impl Merger {
                 locations.retain(|loc| source_locations.contains(loc));
 
                 if locations.is_empty() {
-                    self.error_reporter.report_mismatch_hint::<Node<DirectiveDefinition>, ()>(
+                    self.error_reporter.report_mismatch_hint::<Node<DirectiveDefinition>, Node<DirectiveDefinition>, ()>(
                         HintCode::NoExecutableDirectiveLocationsIntersection,
                         format!("Executable directive \"{name}\" has no location that is common to all subgraphs: "),
                         &supergraph_dest,
                         sources,
-                        |elt, _| Some(location_string(&extract_executable_locations(elt))),
+                        |elt| Some(location_string(&extract_executable_locations(elt))),
+                        |elt, _idx| Some(location_string(&extract_executable_locations(elt))),
                         |_, _subgraphs| "it will not appear in the supergraph as there no intersection between ".to_string(),
                         |locs, subgraphs| format!("{locs} in {subgraphs}"),
-                        None::<fn(Option<&Node<DirectiveDefinition>>) -> bool>,
                         false,
                         false,
                     );
@@ -297,29 +306,34 @@ impl Merger {
         self.merge_description(&position_sources, &dest)?;
 
         if inconsistent_repeatable {
-            self.error_reporter.report_mismatch_hint::<Node<DirectiveDefinition>, ()>(
+            self.error_reporter.report_mismatch_hint::<Node<DirectiveDefinition>, Node<DirectiveDefinition>, ()>(
                 HintCode::InconsistentExecutableDirectiveRepeatable,
                 format!("Executable directive \"{name}\" will not be marked repeatable in the supergraph as it is inconsistently marked repeatable in subgraphs: "),
                 &supergraph_dest,
                 sources,
-                |elt, _| if elt.repeatable { Some("yes".to_string()) } else { Some("no".to_string()) },
+                |elt| if elt.repeatable { Some("yes".to_string()) } else { Some("no".to_string()) },
+                |elt, _idx| if elt.repeatable { Some("yes".to_string()) } else { Some("no".to_string()) },
                 |_, subgraphs| format!("it is not repeatable in {}", subgraphs.unwrap_or_default()),
                 |_, subgraphs| format!(" but is repeatable in {}", subgraphs),
-                None::<fn(Option<&Node<DirectiveDefinition>>) -> bool>,
                 false,
                 false,
             );
         }
         if inconsistent_locations {
-            self.error_reporter.report_mismatch_hint::<Node<DirectiveDefinition>, ()>(
+            self.error_reporter.report_mismatch_hint::<Node<DirectiveDefinition>, Node<DirectiveDefinition>, ()>(
                 HintCode::InconsistentExecutableDirectiveLocations,
-                format!("Executable directive \"{name}\" has inconsistent locations across subgraphs: "),
+                format!(
+                    "Executable directive \"{name}\" has inconsistent locations across subgraphs: "
+                ),
                 &supergraph_dest,
                 sources,
-                |elt, _| Some(location_string(&extract_executable_locations(elt))),
-                |_, _subgraphs| "it will not appear in the supergraph as there no intersection between ".to_string(),
+                |elt| Some(location_string(&extract_executable_locations(elt))),
+                |elt, _idx| Some(location_string(&extract_executable_locations(elt))),
+                |_, _subgraphs| {
+                    "it will not appear in the supergraph as there no intersection between "
+                        .to_string()
+                },
                 |locs, subgraphs| format!("{locs} in {subgraphs}"),
-                None::<fn(Option<&Node<DirectiveDefinition>>) -> bool>,
                 false,
                 false,
             );

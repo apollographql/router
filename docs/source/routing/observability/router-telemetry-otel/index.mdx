@@ -47,6 +47,10 @@ The router emits telemetry in the industry-standard OpenTelemetry Protocol (OTLP
 - Jaeger
 - Zipkin
 
+The router follows the [W3C Trace Context specification](https://www.w3.org/TR/trace-context/) for `trace_id` generation and propagation. OpenTelemetry uses 128-bit (32-character hexadecimal) trace IDs as defined in the W3C standard. When working with systems that don't follow this standard, the router provides format conversion options to ensure compatibility.
+
+When the router receives an incompatible or malformed `trace_id` in incoming requests (such as invalid hexadecimal characters, incorrect length, or non-standard formats), it logs an error message that includes the invalid trace ID value. This helps you diagnose tracing configuration issues more effectively.
+
 ### Attributes and selectors
 
 Attributes and selectors are key-value pairs that add contextual information from the router request lifecycle to telemetry data. You can use attributes and selectors to annotate events, metrics, and spans so they can help you filter and group data in your APMs.
