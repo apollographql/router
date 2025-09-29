@@ -240,8 +240,31 @@ fn inaccessible_succeeds_if_imported_under_same_non_default_name() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    let _supergraph =
+    let supergraph =
         result.expect("Expected composition to succeed with consistent @inaccessible import names");
+
+    let schema = supergraph.schema().schema();
+    if let Some(query_type_name) = &schema.schema_definition.query
+        && let Some(ExtendedType::Object(query_obj)) = schema.types.get(query_type_name.as_str())
+    {
+        let q1 = query_obj
+            .fields
+            .get("q1")
+            .expect("Query.q1 should exist in supergraph");
+        assert!(q1
+            .directives
+            .iter()
+            .any(|d| d.name == "private"));
+
+        let q2 = query_obj
+            .fields
+            .get("q2")
+            .expect("Query.q2 should exist in supergraph");
+        assert!(q2
+            .directives
+            .iter()
+            .any(|d| d.name == "private"));
+    }
 }
 
 #[test]
@@ -251,12 +274,12 @@ fn inaccessible_ignores_inaccessible_element_when_validating_composition() {
         name: "subgraphA",
         type_defs: r#"
         type Query {
-          user: User
+          origin: Point
         }
 
-        type User @key(fields: "id") {
-          id: ID!
-          name: String! @inaccessible
+        type Point @shareable {
+          x: Int
+          y: Int
         }
         "#,
     };
@@ -264,14 +287,18 @@ fn inaccessible_ignores_inaccessible_element_when_validating_composition() {
     let subgraph_b = ServiceDefinition {
         name: "subgraphB",
         type_defs: r#"
-        type User @key(fields: "id") {
-          id: ID!
+        type Point @shareable {
+          x: Int
+          y: Int
+          z: Int @inaccessible
         }
         "#,
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    let _supergraph = result.expect("Expected composition to succeed - @inaccessible fields should be ignored during validation");
+    let _supergraph = result.expect(
+        "Expected composition to succeed - @inaccessible fields should be ignored during validation",
+    );
 }
 
 #[test]
@@ -281,12 +308,13 @@ fn inaccessible_errors_if_subgraph_misuses_inaccessible() {
         name: "subgraphA",
         type_defs: r#"
         type Query {
-          user: User
+          q1: Int
+          q2: A
         }
 
-        type User @key(fields: "id") {
-          id: ID!
-          name: String! @inaccessible
+        type A @shareable {
+          x: Int
+          y: Int
         }
         "#,
     };
@@ -294,9 +322,9 @@ fn inaccessible_errors_if_subgraph_misuses_inaccessible() {
     let subgraph_b = ServiceDefinition {
         name: "subgraphB",
         type_defs: r#"
-        type User @key(fields: "id") {
-          id: ID!
-          name: String!
+        type A @shareable @inaccessible {
+          x: Int
+          y: Int
         }
         "#,
     };
@@ -305,8 +333,8 @@ fn inaccessible_errors_if_subgraph_misuses_inaccessible() {
     assert_composition_errors(
         &result,
         &[(
-            "INVALID_INACCESSIBLE_USAGE",
-            r#"Field "User.name" is marked @inaccessible in subgraph "subgraphA" but not in subgraph "subgraphB""#,
+            "REFERENCED_INACCESSIBLE",
+            r#"Type "A" is @inaccessible but is referenced by "Query.q2", which is in the API schema."#,
         )],
     );
 }

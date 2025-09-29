@@ -288,12 +288,9 @@ fn field_types_merges_complex_subtypes() {
           a: Int
           c: Int
         }
-
-        union U = A | B
-
         type T @key(fields: "id") {
           id: ID!
-          f: U @shareable
+          f: I @shareable
         }
         "#,
     };
@@ -301,18 +298,14 @@ fn field_types_merges_complex_subtypes() {
     let subgraph_b = ServiceDefinition {
         name: "subgraphB",
         type_defs: r#"
-        interface I {
-          a: Int
-        }
-
-        type A implements I @shareable {
+        type A @shareable {
           a: Int
           b: Int
         }
 
         type T @key(fields: "id") {
           id: ID!
-          f: I @shareable
+          f: A! @shareable
         }
         "#,
     };
@@ -351,11 +344,9 @@ fn field_types_merges_subtypes_within_lists() {
           c: Int
         }
 
-        union U = A | B
-
         type T @key(fields: "id") {
           id: ID!
-          f: [U!]! @shareable
+          f: [I] @shareable
         }
         "#,
     };
@@ -363,18 +354,14 @@ fn field_types_merges_subtypes_within_lists() {
     let subgraph_b = ServiceDefinition {
         name: "subgraphB",
         type_defs: r#"
-        interface I {
-          a: Int
-        }
-
-        type A implements I @shareable {
+        type A @shareable {
           a: Int
           b: Int
         }
 
         type T @key(fields: "id") {
           id: ID!
-          f: [I]! @shareable
+          f: [A!] @shareable
         }
         "#,
     };
@@ -413,11 +400,9 @@ fn field_types_merges_subtypes_within_non_nullable() {
           c: Int
         }
 
-        union U = A | B
-
         type T @key(fields: "id") {
           id: ID!
-          f: U! @shareable
+          f: I! @shareable
         }
         "#,
     };
@@ -425,18 +410,14 @@ fn field_types_merges_subtypes_within_non_nullable() {
     let subgraph_b = ServiceDefinition {
         name: "subgraphB",
         type_defs: r#"
-        interface I {
-          a: Int
-        }
-
-        type A implements I @shareable {
+        type A @shareable {
           a: Int
           b: Int
         }
 
         type T @key(fields: "id") {
           id: ID!
-          f: I @shareable
+          f: A! @shareable
         }
         "#,
     };
@@ -458,11 +439,11 @@ fn field_types_errors_on_incompatible_input_field_types_first() {
         name: "subgraphA",
         type_defs: r#"
         type Query {
-          f(input: MyInput): String
+          q: String
         }
 
-        input MyInput {
-          field: String
+        input T {
+          f: String
         }
         "#,
     };
@@ -470,8 +451,8 @@ fn field_types_errors_on_incompatible_input_field_types_first() {
     let subgraph_b = ServiceDefinition {
         name: "subgraphB",
         type_defs: r#"
-        input MyInput {
-          field: Int
+        input T {
+          f: Int
         }
         "#,
     };
@@ -481,7 +462,7 @@ fn field_types_errors_on_incompatible_input_field_types_first() {
         &result,
         &[(
             "FIELD_TYPE_MISMATCH",
-            r#"Type of field "MyInput.field" is incompatible across subgraphs"#,
+            r#"Type of field "T.f" is incompatible across subgraphs: it has type "String" in subgraph "subgraphA" but type "Int" in subgraph "subgraphB""#,
         )],
     );
 }
@@ -493,11 +474,11 @@ fn field_types_errors_on_incompatible_input_field_types_second() {
         name: "subgraphA",
         type_defs: r#"
         type Query {
-          f(input: MyInput): String
+          q: String
         }
 
-        input MyInput {
-          field: [String]
+        input T {
+          f: Int = 0
         }
         "#,
     };
@@ -505,8 +486,8 @@ fn field_types_errors_on_incompatible_input_field_types_second() {
     let subgraph_b = ServiceDefinition {
         name: "subgraphB",
         type_defs: r#"
-        input MyInput {
-          field: String
+        input T {
+          f: Int = 1
         }
         "#,
     };
@@ -515,8 +496,8 @@ fn field_types_errors_on_incompatible_input_field_types_second() {
     assert_composition_errors(
         &result,
         &[(
-            "FIELD_TYPE_MISMATCH",
-            r#"Type of field "MyInput.field" is incompatible across subgraphs"#,
+            "INPUT_FIELD_DEFAULT_MISMATCH",
+            r#"Input field "T.f" has incompatible default values across subgraphs: it has default value 0 in subgraph "subgraphA" but default value 1 in subgraph "subgraphB""#,
         )],
     );
 }
@@ -532,7 +513,12 @@ fn arguments_errors_on_incompatible_types() {
         name: "subgraphA",
         type_defs: r#"
         type Query {
-          field(arg: String): String
+          T: T!
+        }
+
+        type T @key(fields: "id") {
+          id: ID!
+          f(x: Int): Int @shareable
         }
         "#,
     };
@@ -540,8 +526,9 @@ fn arguments_errors_on_incompatible_types() {
     let subgraph_b = ServiceDefinition {
         name: "subgraphB",
         type_defs: r#"
-        type Query {
-          field(arg: Int): String
+        type T @key(fields: "id") {
+          id: ID!
+          f(x: String): Int @shareable
         }
         "#,
     };
@@ -551,7 +538,7 @@ fn arguments_errors_on_incompatible_types() {
         &result,
         &[(
             "FIELD_ARGUMENT_TYPE_MISMATCH",
-            r#"Type of argument "Query.field(arg:)" is incompatible across subgraphs"#,
+            r#"Type of argument "T.f(x:)" is incompatible across subgraphs: it has type "Int" in subgraph "subgraphA" but type "String" in subgraph "subgraphB""#,
         )],
     );
 }
@@ -563,7 +550,12 @@ fn arguments_errors_on_incompatible_argument_default() {
         name: "subgraphA",
         type_defs: r#"
         type Query {
-          field(arg: String = "a"): String
+          T: T!
+        }
+
+        type T @key(fields: "id") {
+          id: ID!
+          f(x: Int = 0): String @shareable
         }
         "#,
     };
@@ -571,8 +563,9 @@ fn arguments_errors_on_incompatible_argument_default() {
     let subgraph_b = ServiceDefinition {
         name: "subgraphB",
         type_defs: r#"
-        type Query {
-          field(arg: String = "b"): String
+        type T @key(fields: "id") {
+          id: ID!
+          f(x: Int = 1): String @shareable
         }
         "#,
     };
@@ -582,7 +575,7 @@ fn arguments_errors_on_incompatible_argument_default() {
         &result,
         &[(
             "FIELD_ARGUMENT_DEFAULT_MISMATCH",
-            r#"Default value of argument "Query.field(arg:)" is incompatible across subgraphs"#,
+            r#"Argument "T.f(x:)" has incompatible default values across subgraphs: it has default value 0 in subgraph "subgraphA" but default value 1 in subgraph "subgraphB""#,
         )],
     );
 }
@@ -594,12 +587,16 @@ fn arguments_errors_on_incompatible_argument_default_in_external_declaration() {
         name: "subgraphA",
         type_defs: r#"
         type Query {
-          t: T
+          T: T!
         }
 
-        type T @key(fields: "id") {
+        interface I {
+          f(x: Int): String
+        }
+
+        type T implements I @key(fields: "id") {
           id: ID!
-          field(arg: String = "a"): String @external
+          f(x: Int): String @external
         }
         "#,
     };
@@ -609,7 +606,7 @@ fn arguments_errors_on_incompatible_argument_default_in_external_declaration() {
         type_defs: r#"
         type T @key(fields: "id") {
           id: ID!
-          field(arg: String = "b"): String
+          f(x: Int = 1): String
         }
         "#,
     };
@@ -618,8 +615,8 @@ fn arguments_errors_on_incompatible_argument_default_in_external_declaration() {
     assert_composition_errors(
         &result,
         &[(
-            "FIELD_ARGUMENT_DEFAULT_MISMATCH",
-            r#"Default value of argument "T.field(arg:)" is incompatible across subgraphs"#,
+            "EXTERNAL_ARGUMENT_DEFAULT_MISMATCH",
+            r#"Argument "T.f(x:)" has incompatible defaults across subgraphs (where "T.f" is marked @external): it has default value 1 in subgraph "subgraphB" but no default value in subgraph "subgraphA""#,
         )],
     );
 }
@@ -631,7 +628,12 @@ fn arguments_errors_on_merging_list_with_non_list() {
         name: "subgraphA",
         type_defs: r#"
         type Query {
-          field(arg: String): String
+          T: T!
+        }
+
+        type T @key(fields: "id") {
+          id: ID!
+          f(x: String): String @shareable
         }
         "#,
     };
@@ -639,8 +641,9 @@ fn arguments_errors_on_merging_list_with_non_list() {
     let subgraph_b = ServiceDefinition {
         name: "subgraphB",
         type_defs: r#"
-        type Query {
-          field(arg: [String]): String
+        type T @key(fields: "id") {
+          id: ID!
+          f(x: [String]): String @shareable
         }
         "#,
     };
@@ -650,7 +653,7 @@ fn arguments_errors_on_merging_list_with_non_list() {
         &result,
         &[(
             "FIELD_ARGUMENT_TYPE_MISMATCH",
-            r#"Type of argument "Query.field(arg:)" is incompatible across subgraphs"#,
+            r#"Type of argument "T.f(x:)" is incompatible across subgraphs: it has type "String" in subgraph "subgraphA" but type "[String]" in subgraph "subgraphB""#,
         )],
     );
 }
@@ -662,7 +665,12 @@ fn arguments_merges_nullable_and_non_nullable() {
         name: "subgraphA",
         type_defs: r#"
         type Query {
-          field(arg: String!): String
+          T: T!
+        }
+
+        type T @key(fields: "id") {
+          id: ID!
+          f(x: String): String @shareable
         }
         "#,
     };
@@ -670,8 +678,9 @@ fn arguments_merges_nullable_and_non_nullable() {
     let subgraph_b = ServiceDefinition {
         name: "subgraphB",
         type_defs: r#"
-        type Query {
-          field(arg: String): String
+        type T @key(fields: "id") {
+          id: ID!
+          f(x: String!): String @shareable
         }
         "#,
     };
@@ -685,7 +694,12 @@ fn arguments_merges_nullable_and_non_nullable() {
     // Argument should merge to non-nullable (String!)
     assert_snapshot!(print_sdl(api_schema.schema()), @r###"
     type Query {
-      field(arg: String!): String
+      T: T!
+    }
+
+    type T {
+      id: ID!
+      f(x: String!): String
     }
     "###);
 }
@@ -697,22 +711,12 @@ fn arguments_merges_subtypes_within_lists() {
         name: "subgraphA",
         type_defs: r#"
         type Query {
-          field(arg: [MyInput!]!): String
+          T: T!
         }
 
-        interface InputI {
-          a: Int
-        }
-
-        type ConcreteInputType implements InputI {
-          a: Int
-          b: Int
-        }
-
-        union InputUnion = ConcreteInputType
-
-        input MyInput {
-          field: InputUnion!
+        type T @key(fields: "id") {
+          id: ID!
+          f(x: [Int]): Int @shareable
         }
         "#,
     };
@@ -720,21 +724,9 @@ fn arguments_merges_subtypes_within_lists() {
     let subgraph_b = ServiceDefinition {
         name: "subgraphB",
         type_defs: r#"
-        type Query {
-          field(arg: [MyInput]!): String
-        }
-
-        interface InputI {
-          a: Int
-        }
-
-        type ConcreteInputType implements InputI {
-          a: Int
-          b: Int
-        }
-
-        input MyInput {
-          field: InputI
+        type T @key(fields: "id") {
+          id: ID!
+          f(x: [Int!]): Int @shareable
         }
         "#,
     };
@@ -745,6 +737,15 @@ fn arguments_merges_subtypes_within_lists() {
         .to_api_schema(Default::default())
         .expect("Expected API schema generation to succeed");
 
-    // Should merge list element types and nullability
-    assert_snapshot!(print_sdl(api_schema.schema()));
+    // We expect the merged argument to be [Int!]
+    assert_snapshot!(print_sdl(api_schema.schema()), @r###"
+    type Query {
+      T: T!
+    }
+
+    type T {
+      id: ID!
+      f(x: [Int!]): Int
+    }
+    "###);
 }
