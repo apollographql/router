@@ -1,27 +1,28 @@
 //! Shared configuration for Otlp tracing and metrics.
 use std::collections::HashMap;
 
-use axum_extra::handler::Or;
 use http::Uri;
-use opentelemetry_otlp::HasExportConfig;
-use opentelemetry_otlp::HasHttpConfig;
-use opentelemetry_otlp::HasTonicConfig;
-use opentelemetry_otlp::SpanExporter;
-use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_otlp::WithHttpConfig;
-use opentelemetry_otlp::WithTonicConfig;
+//use opentelemetry_otlp::HasTonicConfig; uncomment this and other imports when we upgrade to v0.30.0
+// use opentelemetry_otlp::MetricExporter; 
+// use opentelemetry_otlp::SpanExporter;
+use opentelemetry_otlp::TonicExporterBuilder;
+use opentelemetry_otlp::HttpExporterBuilder;
+// use opentelemetry_otlp::WithExportConfig;
+// use opentelemetry_otlp::WithHttpConfig;
+// use opentelemetry_otlp::WithTonicConfig;
 use opentelemetry_sdk::metrics::Temporality as SdkTemporality;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
-use tonic::metadata::MetadataMap;
+// use tonic::metadata::MetadataMap;
 use tonic::transport::Certificate;
 use tonic::transport::ClientTlsConfig;
 use tonic::transport::Identity;
 use tower::BoxError;
 use url::Url;
 
+// use crate::plugins::telemetry::config::GenericWith;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
@@ -158,54 +159,53 @@ pub(super) fn process_endpoint(
 }
 
 impl Config {
-    pub(crate) fn exporter(
+    pub(crate) fn exporter<T: From<HttpExporterBuilder> + From<TonicExporterBuilder>>(
         &self,
-        kind: TelemetryDataKind,
-    ) -> Result<impl HasExportConfig, BoxError> // can change `impl HasExportConfig` to `SpanExporterBuilder` when we upgrade to v0.30.0
+        _kind: TelemetryDataKind,
+    ) -> Result<T, BoxError>
     {
-        match self.protocol {
-            Protocol::Grpc => {
-                let endpoint_opt = process_endpoint(&self.endpoint, &kind, &self.protocol)?;
-                // Figure out if we need to set tls config for our exporter
-                let tls_config_opt = if let Some(endpoint) = &endpoint_opt {
-                    if !endpoint.is_empty() {
-                        let tls_url = Uri::try_from(endpoint)?;
-                        Some(self.grpc.clone().to_tls_config(&tls_url)?)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
+        todo!("We can uncomment this when we upgrade to v0.30.0 since SpanExporterBuilder and MetricExporterBuilder will be publicly re-exported")
+        // match self.protocol {
+        //     Protocol::Grpc => {
+        //         let endpoint_opt = process_endpoint(&self.endpoint, &kind, &self.protocol)?;
+        //         // Figure out if we need to set tls config for our exporter
+        //         let tls_config_opt = if let Some(endpoint) = &endpoint_opt {
+        //             if !endpoint.is_empty() {
+        //                 let tls_url = Uri::try_from(endpoint)?;
+        //                 Some(self.grpc.clone().to_tls_config(&tls_url)?)
+        //             } else {
+        //                 None
+        //             }
+        //         } else {
+        //             None
+        //         };
 
-                let mut exporter = SpanExporter::builder()
-                    .with_tonic()
-                    .with_protocol(opentelemetry_otlp::Protocol::Grpc)
-                    .with_timeout(self.batch_processor.max_export_timeout)
-                    .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()));
-                if let Some(endpoint) = endpoint_opt {
-                    exporter = exporter.with_endpoint(endpoint);
-                }
-                if let Some(tls_config) = tls_config_opt {
-                    exporter = exporter.with_tls_config(tls_config);
-                }
-                Ok(exporter)
-            }
-            Protocol::Http => {
-                let endpoint_opt = process_endpoint(&self.endpoint, &kind, &self.protocol)?;
-                let headers = self.http.headers.clone();
-                let mut exporter = SpanExporter::builder()
-                    .with_http()
-                    .with_protocol(opentelemetry_otlp::Protocol::Grpc)
-                    .with_timeout(self.batch_processor.max_export_timeout)
-                    .with_headers(headers);
+        //         let mut exporter: TonicExporterBuilder  = TonicExporterBuilder::default()
+        //             .with_protocol(opentelemetry_otlp::Protocol::Grpc)
+        //             .with_timeout(self.batch_processor.max_export_timeout)
+        //             .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()));
+        //         if let Some(endpoint) = endpoint_opt {
+        //             exporter = exporter.with_endpoint(endpoint);
+        //         }
+        //         if let Some(tls_config) = tls_config_opt {
+        //             exporter = exporter.with_tls_config(tls_config);
+        //         }
+        //         Ok(exporter.into())
+        //     }
+        //     Protocol::Http => {
+        //         let endpoint_opt = process_endpoint(&self.endpoint, &kind, &self.protocol)?;
+        //         let headers = self.http.headers.clone();
+        //         let mut exporter: HttpExporterBuilder = HttpExporterBuilder::default()
+        //             .with_protocol(opentelemetry_otlp::Protocol::Grpc)
+        //             .with_timeout(self.batch_processor.max_export_timeout)
+        //             .with_headers(headers);
 
-                if let Some(endpoint) = endpoint_opt {
-                    exporter = exporter.with_endpoint(endpoint);
-                }
-                Ok(exporter)
-            }
-        }
+        //         if let Some(endpoint) = endpoint_opt {
+        //             exporter = exporter.with_endpoint(endpoint);
+        //         }
+        //         Ok(exporter.into())
+        //     }
+        // }
     }
 }
 
