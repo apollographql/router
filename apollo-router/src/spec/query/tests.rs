@@ -1819,7 +1819,7 @@ fn reformat_response_coersion_propagation_into_object() {
         .test();
 
     FormatTest::builder()
-       .schema(
+        .schema(
             r#"
             type Query {
                 thing: Thing
@@ -1866,7 +1866,7 @@ fn reformat_response_coersion_propagation_into_object() {
         .test();
 
     FormatTest::builder()
-       .schema(
+        .schema(
             r#"
             type Query {
                 thing: Thing!
@@ -1880,7 +1880,7 @@ fn reformat_response_coersion_propagation_into_object() {
             "#,
         )
         .query(r#"{ thing { a, b, c } }"#)
-        .response(json!({ }))
+        .response(json!({}))
         .expected_errors(json!([
         /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
          * does not produce these errors.
@@ -1909,38 +1909,265 @@ fn reformat_response_coersion_propagation_into_object() {
         .test();
 }
 
+// There are four cases we need to account for: the type info is(n't) queried and type info
+// is(n't) returned.
+//
+// We can only follow the spec/client expection of response validation if we have the type info. If
+// we get it (regardless of asking for it), our validation can follow the spec and we can act like
+// a normal GQL server. If we ask and don't receive it, we need to return an error stating this
+// issue regardless of validation issues. Validation without type info will lead to an unexpected
+// result for the client.
+//
+// Lastly, this test points out an underlying assumption for what the router needs to do in order
+// to appear as a normal GQL server: we always query type info. This assumption lies at the
+// router-QP boundary and needs to be tested elsewhere. This test is just for ensuring we can
+// follow the spec as closely as possible.
 #[test]
 fn reformat_response_coersion_propagation_into_union() {
+    let nullable_schema = r#"
+        type Query {
+            thing: Thing
+        }
+
+        union Thing = Bar | Foo
+
+        type Foo {
+            a: Int
+            b: Int
+            c: Int
+        }
+
+        type Bar {
+            bar: String
+        }"#;
+
+    let non_nullable_schema = r#"
+        type Query {
+            thing: Thing
+        }
+
+        union Thing = Bar | Foo
+
+        type Foo {
+            a: Int!
+            b: Int!
+            c: Int!
+        }
+
+        type Bar {
+            bar: String
+        }"#;
+
+    let query_wo_type_info = r#"{ thing { ... on Foo { a, b, c } } }"#;
+    let query_with_type_info = r#"{ thing { __typename ... on Foo { a, b, c } } }"#;
+
+    let resp_wo_type_info = json!({
+        "thing": {
+            "a": 1,
+            "b": 1.1,
+            "c": 1.2
+        }
+    });
+    let resp_with_type_info = json!({
+        "thing": {
+            "__typename": "Foo",
+            "a": 1,
+            "b": 1.1,
+            "c": 1.2
+        }
+    });
+
+    // Case 1: __typename isn't queried and isn't returned
     FormatTest::builder()
-        .schema(
-            r#"
-            type Query {
-                thing: Thing
+        .schema(nullable_schema)
+        .query(query_wo_type_info)
+        .response(resp_wo_type_info.clone())
+        .expected(json!({ "thing": { } }))
+        .expected_errors(json!([
+        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
+         * does not produce these errors.
+            {
+                "message": "Invalid value found for field Query.thing.b",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.thing.c",
+                "path": ["thing", "c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid values found for field of an abstract type without `__typename`, entire object must be nullified",
+                "path": ["thing"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
+        */
+        ]))
+        .test();
 
-            union Thing = Bar | Foo
+    FormatTest::builder()
+        .schema(non_nullable_schema)
+        .query(query_wo_type_info)
+        .response(resp_wo_type_info.clone())
+        // NOTE: This is seemingly strange behavior but is consistent. Because we can't *always*
+        // resolve the type of `thing`, we can't determine if the result is valid or not.
+        .expected(json!({ "thing": { } }))
+        .expected_errors(json!([
+        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
+         * does not produce these errors.
+         * FIXME(@TylerBloom): Should the `__typename` error be returned over the more general
+         * result coersion error?
+            {
+                "message": "Invalid value found for field Query.thing.b",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.thing.c",
+                "path": ["thing", "c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid values found for field of an abstract type without `__typename`, entire object must be nullified",
+                "path": ["thing"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        */
+        ]))
+        .test();
 
-            type Foo {
-                a: Int
-                b: Int
-                c: Int
-            }
-
-            type Bar {
-                bar: String
-            }
-            "#,
-        )
-        .query(r#"{ thing { __typename, ... on Foo { a, b, c } } }"#)
-        .response(json!({
-            "thing": {
-                "a": 1,
-                "b": 1.1,
-                "c": 1.2
-            }
-        }))
+    // Case 2: __typename isn't queried but is returned
+    FormatTest::builder()
+        .schema(nullable_schema)
+        .query(query_wo_type_info)
+        .response(resp_with_type_info.clone())
+        // NOTE: Since `__typename` is not requested, it is dropped from the actual response;
+        // however, we can still use it for the validation of `thing` as a `Foo`
         .expected(json!({
             "thing": {
+                "a": 1,
+                "b": null,
+                "c": null,
+            }
+        }))
+        .expected_errors(json!([
+        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
+         * does not produce these errors.
+            {
+                "message": "Invalid value found for field Query.thing.b",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.thing.c",
+                "path": ["thing", "c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        */
+        ]))
+        .test();
+
+    FormatTest::builder()
+        .schema(non_nullable_schema)
+        .query(query_wo_type_info)
+        .response(resp_with_type_info.clone())
+        .expected(json!({ "thing": null }))
+        .expected_errors(json!([
+        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
+         * does not produce these errors.
+            {
+                "message": "Invalid value found for field Query.thing.b",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.thing.c",
+                "path": ["thing", "c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        */
+        ]))
+        .test();
+
+    // Case 3: __typename is queried but isn't returned
+    FormatTest::builder()
+        .schema(nullable_schema)
+        .query(query_with_type_info)
+        .response(resp_wo_type_info.clone())
+        // FIXME(@TylerBloom): This is not expected. This should behave the same with(out)
+        // `__typename` being queried.
+        .expected(json!({ "thing": null }))
+        .expected_errors(json!([
+        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
+         * does not produce these errors.
+            {
+                "message": "Invalid value found for field Query.thing.b",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.thing.c",
+                "path": ["thing", "c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid values found for field of an abstract type without `__typename`
+                "path": ["thing"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "`__typename` was queried but not part of the response",
+                "path": ["thing"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        */
+        ]))
+        .test();
+
+    FormatTest::builder()
+        .schema(non_nullable_schema)
+        .query(query_with_type_info)
+        .response(resp_wo_type_info.clone())
+        // FIXME(@TylerBloom): This is not expected. This should behave the same with(out)
+        // `__typename` being queried.
+        .expected(json!({ "thing": null }))
+        .expected_errors(json!([
+        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
+         * does not produce these errors.
+         * FIXME(@TylerBloom): Should the `__typename` error be returned over the more general
+         * result coersion error?
+            {
+                "message": "Invalid value found for field Query.thing.b",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.thing.c",
+                "path": ["thing", "c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid values found for field of an abstract type without `__typename`, entire object must be nullified",
+                "path": ["thing"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "`__typename` was queried but not part of the response",
+                "path": ["thing"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        */
+        ]))
+        .test();
+
+    // Case 4: __typename is queried and is returned
+    FormatTest::builder()
+        .schema(nullable_schema)
+        .query(query_with_type_info)
+        .response(resp_with_type_info.clone())
+        .expected(json!({
+            "thing": {
+                "__typename": "Foo",
                 "a": 1,
                 "b": null,
                 "c": null
@@ -1958,42 +2185,116 @@ fn reformat_response_coersion_propagation_into_union() {
                 "message": "Invalid value found for field Query.thing.c",
                 "path": ["thing", "c"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
+            }
         */
         ]))
         .test();
 
     FormatTest::builder()
-        .schema(
-            r#"
-            type Query {
-                thing: Thing
+        .schema(non_nullable_schema)
+        .query(query_with_type_info)
+        .response(resp_with_type_info.clone())
+        .expected(json!({ "thing": null }))
+        .expected_errors(json!([
+        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
+         * does not produce these errors.
+            {
+                "message": "Invalid value found for field Query.thing.b",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.thing.c",
+                "path": ["thing", "c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid values found for field of an abstract type without `__typename`, entire object must be nullified",
+                "path": ["thing"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
+        */
+        ]))
+        .test();
+}
 
-            union Thing = Bar | Foo
+// This test covers similar cases to the union test. Without the type info of an interface, we can
+// get strange looking results from the prespective of the client. Without that info, we can not
+// properly identify the type of a return object. This leads to selection sets for any inlined
+// fragments to be coersed into empty object, not nullified sets or sets with null values.
+//
+// This behavior diverges from the spec. So, like the union tests, there are four cases we need to
+// account for: the type info is(n't) queried and type info is(n't) returned.
+//
+// Unlike the union tests, if a fragment is part of the query but type info is not
+// returned, the return fragment data is ignored, regardless of validity.
+#[test]
+fn reformat_response_coersion_propagation_into_interfaces() {
+    let nullable_schema = r#"
+        type Query {
+            thing: Thing
+        }
 
-            type Foo {
-                a: Int!
-                b: Int!
-                c: Int!
-            }
+        interface Thing {
+            a: Int
+        }
 
-            type Bar {
-                bar: String
-            }
-            "#,
-        )
-        .query(r#"{ thing { ... on Foo { a, b, c } } }"#)
-        .response(json!({
+        type Foo implements Thing {
+            a: Int
+            b: Int
+            c: Int
+        }
+
+        type Bar implements Thing {
+            a: Int
+            bar: String
+        }"#;
+
+    let non_nullable_schema = r#"
+        type Query {
+            thing: Thing
+        }
+
+        interface Thing {
+            a: Int!
+        }
+
+        type Foo implements Thing {
+            a: Int!
+            b: Int!
+            c: Int!
+        }
+
+        type Bar implements Thing {
+            a: Int!
+            bar: String!
+        }"#;
+
+    let query_wo_type_info = r#"{ thing { a ... on Foo { b, c } } }"#;
+    let query_with_type_info = r#"{ thing { __typename a ... on Foo { b, c } } }"#;
+
+    let resp_wo_type_info = json!({
             "thing": {
                 "a": 1,
                 "b": 1.1,
                 "c": 1.2
             }
-        }))
-        .expected(json!({
-            "thing": null
-        }))
+    });
+    let resp_with_type_info = json!({
+        "thing": {
+            "__typename": "Foo",
+            "a": 1,
+            "b": 1.1,
+            "c": 1.2
+        }
+    });
+
+    // Case 1: __typename isn't queried and isn't returned
+    FormatTest::builder()
+        .schema(nullable_schema)
+        .query(query_wo_type_info)
+        .response(resp_wo_type_info.clone())
+        .expected(json!({ "thing": { "a": 1 } }))
         .expected_errors(json!([
         /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
          * does not produce these errors.
@@ -2008,7 +2309,7 @@ fn reformat_response_coersion_propagation_into_union() {
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.thing",
+                "message": "Invalid values found for field of an abstract type without `__typename`
                 "path": ["thing"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
@@ -2017,27 +2318,44 @@ fn reformat_response_coersion_propagation_into_union() {
         .test();
 
     FormatTest::builder()
-        .schema(
-            r#"
-            type Query {
-                thing: Thing!
+        .schema(non_nullable_schema)
+        .query(query_wo_type_info)
+        .response(resp_wo_type_info.clone())
+        // NOTE: This is seemingly strange behavior but is consistent. Because we can't *always*
+        // resolve the type of `thing` with __typename, we can't determine if the result is valid
+        // or not. Thus, the nullification of the fragment doesn't "bubble up" to nullifying the
+        // either "thing".
+        .expected(json!({ "thing": { "a": 1 } }))
+        .expected_errors(json!([
+        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
+         * does not produce these errors.
+         * FIXME(@TylerBloom): Should the `__typename` error be returned over the more general
+         * result coersion error?
+            {
+                "message": "Invalid value found for field Query.thing.b",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.thing.c",
+                "path": ["thing", "c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid values found for field of an abstract type without `__typename`
+                "path": ["thing"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
+        */
+        ]))
+        .test();
 
-            union Thing = Bar | Foo
-
-            type Foo {
-                a: Int!
-                b: Int!
-                c: Int!
-            }
-
-            type Bar {
-                bar: String
-            }
-            "#,
-        )
-        .query(r#"{ thing { ... on Foo { a, b, c } } }"#)
-        .response(json!({ }))
+    // Case 2: __typename isn't queried but is returned
+    FormatTest::builder()
+        .schema(nullable_schema)
+        .query(query_wo_type_info)
+        .response(resp_with_type_info.clone())
+        .expected(json!({ "thing": { "a": 1, "b": null, "c": null } }))
         .expected_errors(json!([
         /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
          * does not produce these errors.
@@ -2052,13 +2370,153 @@ fn reformat_response_coersion_propagation_into_union() {
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.thing",
+                "message": "Invalid values found for field of an abstract type without `__typename`
                 "path": ["thing"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        */
+        ]))
+        .test();
+
+    FormatTest::builder()
+        .schema(non_nullable_schema)
+        .query(query_wo_type_info)
+        .response(resp_with_type_info.clone())
+        .expected(json!({ "thing": null }))
+        .expected_errors(json!([
+        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
+         * does not produce these errors.
+         * FIXME(@TylerBloom): Should the `__typename` error be returned over the more general
+         * result coersion error?
+            {
+                "message": "Invalid value found for field Query.thing.b",
+                "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query",
-                "path": [],
+                "message": "Invalid value found for field Query.thing.c",
+                "path": ["thing", "c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid values found for field of an abstract type without `__typename`
+                "path": ["thing"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        */
+        ]))
+        .test();
+
+    // Case 3: __typename is queried but isn't returned
+    FormatTest::builder()
+        .schema(nullable_schema)
+        .query(query_with_type_info)
+        .response(resp_wo_type_info.clone())
+        // FIXME(@TylerBloom): This is not expected. This should behave the same with(out)
+        // `__typename` being queried.
+        .expected(json!({ "thing": null }))
+        .expected_errors(json!([
+        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
+         * does not produce these errors.
+            {
+                "message": "Invalid value found for field Query.thing.b",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.thing.c",
+                "path": ["thing", "c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid values found for field of an abstract type without `__typename`
+                "path": ["thing"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        */
+        ]))
+        .test();
+
+    FormatTest::builder()
+        .schema(non_nullable_schema)
+        .query(query_with_type_info)
+        .response(resp_wo_type_info.clone())
+        .expected(json!({ "thing": null }))
+        .expected_errors(json!([
+        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
+         * does not produce these errors.
+         * FIXME(@TylerBloom): Should the `__typename` error be returned over the more general
+         * result coersion error?
+            {
+                "message": "Invalid value found for field Query.thing.b",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.thing.c",
+                "path": ["thing", "c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid values found for field of an abstract type without `__typename`
+                "path": ["thing"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        */
+        ]))
+        .test();
+
+    // Case 4: __typename is queried and is returned
+    FormatTest::builder()
+        .schema(nullable_schema)
+        .query(query_with_type_info)
+        .response(resp_with_type_info.clone())
+        .expected(json!({ "thing": { "__typename": "Foo", "a": 1, "b": null, "c": null } }))
+        .expected_errors(json!([
+        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
+         * does not produce these errors.
+            {
+                "message": "Invalid value found for field Query.thing.b",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.thing.c",
+                "path": ["thing", "c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid values found for field of an abstract type without `__typename`
+                "path": ["thing"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        */
+        ]))
+        .test();
+
+    FormatTest::builder()
+        .schema(non_nullable_schema)
+        .query(query_with_type_info)
+        .response(resp_with_type_info.clone())
+        .expected(json!({ "thing": null }))
+        .expected_errors(json!([
+        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
+         * does not produce these errors.
+         * FIXME(@TylerBloom): Should the `__typename` error be returned over the more general
+         * result coersion error?
+            {
+                "message": "Invalid value found for field Query.thing.b",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for field Query.thing.c",
+                "path": ["thing", "c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid values found for field of an abstract type without `__typename`
+                "path": ["thing"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
         */
