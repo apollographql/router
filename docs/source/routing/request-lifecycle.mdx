@@ -267,3 +267,7 @@ NextService["Next service"] -->|response| coreService
 Each request and response object contains a `Context` object, which is carried throughout the entire process. Each request's `Context` object is unique. You can use it to store plugin-specific information between the request and response or to communicate between different hook points. A plugin can be called at multiple steps of the request lifecycle.
 
 To learn how to hook in to the various lifecycle stages, including examples customizations, start with the [router customization overview](/graphos/routing/customization/overview), then refer to the [Rhai scripts](/graphos/routing/customization/rhai/) and [external coprocessing](/router/customizations/coprocessor/) docs.
+
+### Request termination and flow control
+
+Customizations can not only observe and modify requests but also control request flow by terminating requests at various lifecycle stages. This is particularly useful for implementing authorization checks, conditional subgraph skipping, and custom traffic management policies. For detailed guidance on implementing these patterns while maintaining proper GraphQL response structure, see the [Rhai reference documentation on request termination](/graphos/routing/customization/rhai/reference#terminating-client-requests).

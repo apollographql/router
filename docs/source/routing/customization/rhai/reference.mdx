@@ -152,6 +152,47 @@ fn supergraph_service(service) {
 }
 ```
 
+### Skipping subgraph calls while preserving query shape
+
+A common use case is conditionally preventing specific subgraph requests from executing (for example, when required headers are missing) while ensuring the GraphQL response maintains the proper shape for the client. The recommended approach is to throw a GraphQL-compatible response from the subgraph service.
+
+**Recommended pattern** for skipping subgraph calls:
+
+```rhai
+fn subgraph_service(service, subgraph) {
+    service.map_request(|request| {
+        // Check for required headers or other conditions
+        if !request.headers["x-required-header"] {
+            // Throw a proper GraphQL response to skip the subgraph call
+            // while maintaining response structure
+            throw #{
+                status: 200,
+                body: #{
+                    data: #{}, // Important: Use empty object, not null
+                    errors: [#{
+                        message: `Subgraph ${subgraph} skipped due to missing required header`,
+                        extensions: #{
+                            code: "SUBGRAPH_SKIPPED"
+                        }
+                    }]
+                }
+            };
+        }
+    });
+}
+```
+
+**Key considerations:**
+
+- **Use `data: #{}`** (empty object) rather than `data: null` to maintain proper GraphQL response shape
+- **Always include appropriate error messages** to help with debugging and client handling
+- **Use status 200** since this represents a valid GraphQL response (not an HTTP error)
+- **Consider the impact on federated vs single-subgraph requests** — the response structure affects how the router merges results
+
+**What happens differently:**
+- **Federated requests**: The empty data object allows other subgraphs to continue normally, and the router can merge their responses properly
+- **Single-subgraph requests**: The router handles the empty data object correctly and maintains the expected response shape
+
 Rhai throws at the `map_request` layer behave the same as `ControlFlow::Break`, which is explained in the [coprocessor section](/router/customizations/coprocessor/#terminating-a-client-request).
 
 If the supplied status code is not a valid HTTP status code, then a `500` response code will result.
