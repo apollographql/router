@@ -1,5 +1,7 @@
 use apollo_compiler::schema::ExtendedType;
 use apollo_federation::composition::Satisfiable;
+use apollo_federation::composition::compose;
+use apollo_federation::subgraph::typestate::Subgraph;
 use apollo_federation::supergraph::Supergraph;
 
 use super::ServiceDefinition;
@@ -309,11 +311,10 @@ fn tag_merges_multiple_tags_fed2_subgraphs() {
 }
 
 #[test]
-#[ignore = "until Fed1 composition mode is implemented"]
+#[ignore = "until merge implementation completed"]
 fn tag_merges_multiple_tags_fed1_subgraphs() {
-    let _subgraph_a = ServiceDefinition {
-        name: "subgraphA",
-        type_defs: r#"
+    let subgraph_a = Subgraph::parse("subgraphA", "", 
+        r#"
         type Query {
           user: [User]
         }
@@ -328,11 +329,10 @@ fn tag_merges_multiple_tags_fed1_subgraphs() {
           lastName: String @tag(name: "aMergedTagOnField")
         }
         "#,
-    };
+    ).unwrap();
 
-    let _subgraph_b = ServiceDefinition {
-        name: "subgraphB",
-        type_defs: r#"
+    let subgraph_b = Subgraph::parse( "subgraphB", "",
+        r#"
         type User @key(fields: "id") @tag(name: "aTagOnTypeFromSubgraphB") @tag(name: "aMergedTagOnType") {
           id: ID!
           name2: String!
@@ -343,20 +343,18 @@ fn tag_merges_multiple_tags_fed1_subgraphs() {
           lastName: String @tag(name: "aMergedTagOnField")
         }
         "#,
-    };
+    ).unwrap();
 
-    // TODO: Implement Fed1 composition mode - this should use composeServices() equivalent
-    panic!(
-        "Fed1 composition mode not yet implemented - need compose_services() function equivalent to JS composeServices([subgraphA, subgraphB])"
-    );
+    let supergraph =
+        compose(vec![subgraph_a, subgraph_b]).expect("Expected composition to succeed");
+    validate_tag_merging(&supergraph);
 }
 
 #[test]
-#[ignore = "until mixed Fed1/Fed2 composition mode is implemented"]
+#[ignore = "until merge implementation completed"]
 fn tag_merges_multiple_tags_mixed_fed1_fed2_subgraphs() {
-    let _subgraph_a = ServiceDefinition {
-        name: "subgraphA",
-        type_defs: r#"
+    let subgraph_a = Subgraph::parse("subgraphA", "", 
+        r#"
         type Query {
           user: [User]
         }
@@ -371,11 +369,10 @@ fn tag_merges_multiple_tags_mixed_fed1_fed2_subgraphs() {
           lastName: String @tag(name: "aMergedTagOnField")
         }
         "#,
-    };
+    ).unwrap();
 
-    let _subgraph_b = ServiceDefinition {
-        name: "subgraphB",
-        type_defs: r#"
+    let subgraph_b = Subgraph::parse( "subgraphB", "",
+        r#"
         type User @key(fields: "id") @tag(name: "aTagOnTypeFromSubgraphB") @tag(name: "aMergedTagOnType") {
           id: ID!
           name2: String!
@@ -386,14 +383,11 @@ fn tag_merges_multiple_tags_mixed_fed1_fed2_subgraphs() {
           lastName: String @tag(name: "aMergedTagOnField")
         }
         "#,
-    };
+    ).unwrap().into_fed2_test_subgraph(true, false).unwrap();
 
-    // TODO: Implement mixed Fed1/Fed2 composition mode with proper shareable handling
-    // This should use composeServices([subgraphA, updatedSubgraphB]) equivalent
-    // where subgraphB has been converted to Fed2 with @shareable applied to Name type
-    panic!(
-        "Mixed Fed1/Fed2 composition mode not yet implemented - need compose_services() function equivalent to JS composeServices([subgraphA, updatedSubgraphB])"
-    );
+    let supergraph =
+        compose(vec![subgraph_a, subgraph_b]).expect("Expected composition to succeed");
+    validate_tag_merging(&supergraph);
 }
 
 // =============================================================================
