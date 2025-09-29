@@ -9,21 +9,13 @@ redirectFrom:
 ---
 
 This guide walks through configuring the Apollo Router to send metrics to Datadog via the Datadog Agent.
+For an overview of all available connection methods, see [Connecting to Datadog](/graphos/routing/observability/router-telemetry-otel/apm-guides/datadog/connecting-to-datadog).
+
 This metrics exporter is a configuration of the [OTLP exporter](/router/configuration/telemetry/exporters/metrics/otlp) to use with [Datadog](https://www.datadoghq.com/).
 
 For general metrics configuration, refer to [Router Metrics Configuration](/router/configuration/telemetry/exporters/metrics/overview).
 For router instrumentation with Datadog-specific attributes, see the [Router Instrumentation guide](/graphos/routing/observability/router-telemetry-otel/apm-guides/datadog/router-instrumentation).
 
-## Connection methods
-
-Datadog supports multiple methods for ingesting OpenTelemetry data:
-
-- **[Datadog OpenTelemetry collector (DDOT)](https://docs.datadoghq.com/opentelemetry/setup/)** - Datadog's distribution of the OpenTelemetry Collector
-- **[OpenTelemetry collector](../otel-collector)** - Vendor-neutral telemetry pipeline with advanced processing ([guide available](../otel-collector))
-- **[Datadog agent](./datadog-agent-metrics)** - Direct connection with native Datadog features (this guide)
-- **[Agentless](https://docs.datadoghq.com/opentelemetry/setup/)** - Direct OTLP ingestion to Datadog
-
-For a comprehensive overview of all OpenTelemetry setup options with Datadog, see [Datadog's OpenTelemetry setup documentation](https://docs.datadoghq.com/opentelemetry/setup/).
 
 
 ## Configuration 

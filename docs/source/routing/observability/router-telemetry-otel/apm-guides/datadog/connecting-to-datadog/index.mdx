@@ -4,11 +4,9 @@ subtitle: Choose the right connection method for your infrastructure
 description: Overview of different methods to connect Apollo Router to Datadog for telemetry collection
 ---
 
-Connect your Apollo Router to Datadog using the method that best fits your infrastructure and requirements.
+This guide provides detailed configuration for the OpenTelemetry Collector and Datadog Agent methods.
 
 ## Connection methods
-
-This guide provides detailed configuration for the OpenTelemetry Collector and Datadog Agent methods.
 
 Datadog supports multiple methods for ingesting OpenTelemetry data: the most relevant are covered in this guide for your convenience, but there are others available.
 
@@ -19,14 +17,14 @@ Datadog supports multiple methods for ingesting OpenTelemetry data: the most rel
 
 For complete information on all connection methods including DDOT Collector and Agentless options, refer to [Datadog's OpenTelemetry setup documentation](https://docs.datadoghq.com/opentelemetry/setup/) and [compatibility guide](https://docs.datadoghq.com/opentelemetry/compatibility/).
 
-## Quick start
+## Choose a connection method
 
-For the fastest setup, choose one of the following methods based on your current Datadog setup:
+Choose one of the following methods based on your current Datadog setup:
 
-1. If you already have Datadog Agent running, use the [Datadog Agent](/graphos/routing/observability/router-telemetry-otel/apm-guides/datadog/connecting-to-datadog/datadog-agent/datadog-agent-traces).
-2. If you are setting up a new environment, use the [Datadog OpenTelemetry Collector (DDOT)](https://docs.datadoghq.com/opentelemetry/setup/) or the [OpenTelemetry Collector](/graphos/routing/observability/router-telemetry-otel/apm-guides/datadog/connecting-to-datadog/otel-collector).
-3. For containerized deployments, consider the [Apollo Runtime container](https://github.com/apollographql/apollo-runtime) which includes pre-configured examples for the OpenTelemetry Collector.
-4. For a direct connection with no agent deployment required, use the [Agentless](https://docs.datadoghq.com/opentelemetry/setup/) method.
+- If you are setting up a new environment, use the [Datadog OpenTelemetry Collector (DDOT)](https://docs.datadoghq.com/opentelemetry/setup/) or the [OpenTelemetry Collector](/graphos/routing/observability/router-telemetry-otel/apm-guides/datadog/connecting-to-datadog/otel-collector).
+- If you already have Datadog Agent running, use the [Datadog Agent](/graphos/routing/observability/router-telemetry-otel/apm-guides/datadog/connecting-to-datadog/datadog-agent/datadog-agent-traces).
+- For containerized deployments, consider the [Apollo Runtime container](https://github.com/apollographql/apollo-runtime) which includes pre-configured examples for the OpenTelemetry Collector.
+- For a direct connection with no agent deployment required, use the [Agentless](https://docs.datadoghq.com/opentelemetry/setup/) method.
 
 ### Datadog OpenTelemetry collector (Recommended)
 
@@ -46,7 +44,7 @@ The Datadog agent offers direct OTLP ingestion, integrating with Datadog's exist
 
 ### Agentless
 
-**[Agentless](https://docs.datadoghq.com/opentelemetry/setup/)** provides direct OTLP ingestion to Datadog without requiring additional infrastructure components.
+**[Agentless](https://docs.datadoghq.com/opentelemetry/setup/otlp_ingest/)** provides direct OTLP ingestion to Datadog without requiring additional infrastructure components.
 
 ## Next steps
 

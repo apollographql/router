@@ -7,39 +7,31 @@ context:
 ---
 
 This guide walks through configuring the Apollo Router to send telemetry data to Datadog via the OpenTelemetry Collector.
+For an overview of all available connection methods, see [Connecting to Datadog](/graphos/routing/observability/router-telemetry-otel/apm-guides/datadog/connecting-to-datadog).
 
-For general metrics configuration, refer to [Router Metrics Configuration](/router/configuration/telemetry/exporters/metrics/overview).
+For general metrics configuration, refer to [Router Metrics Configuration](/router/configuration/telemetry/exporters/metrics/overview).\
 For general tracing configuration, refer to [Router Tracing Configuration](/router/configuration/telemetry/exporters/tracing/overview).
 
 For router instrumentation with Datadog-specific attributes, see the [Router Instrumentation guide](/graphos/routing/observability/router-telemetry-otel/apm-guides/datadog/router-instrumentation).
 
-## Connection methods
-
-Datadog supports multiple methods for ingesting OpenTelemetry data:
-
-- **[Datadog OpenTelemetry collector (DDOT)](https://docs.datadoghq.com/opentelemetry/setup/)** - Datadog's distribution of the OpenTelemetry Collector
-- **[OpenTelemetry collector](./otel-collector)** - Vendor-neutral telemetry pipeline with advanced processing (this guide)
-- **[Datadog agent](./datadog-agent/datadog-agent-traces)** - Direct connection with native Datadog features ([guide available](./datadog-agent/datadog-agent-traces))
-- **[Agentless](https://docs.datadoghq.com/opentelemetry/setup/)** - Direct OTLP ingestion to Datadog
-
-For a comprehensive overview of all OpenTelemetry setup options with Datadog, see [Datadog's OpenTelemetry setup documentation](https://docs.datadoghq.com/opentelemetry/setup/).
 
 ## Prerequisites
 
-- Apollo Router installed and running - see [deployment options](/graphos/routing/self-hosted)
-- OpenTelemetry collector - see [installation options](https://opentelemetry.io/docs/collector/installation/)
-- Datadog account with an API key - see [how to generate an API key](https://docs.datadoghq.com/account_management/api-app-keys/)
-- OpenTelemetry integration installed in Datadog - [install from the integrations page](https://app.datadoghq.com/integrations?search=otel&integrationId=otel)
+- [Apollo Router](/graphos/routing/self-hosted) deployed
+- [OpenTelemetry collector](https://opentelemetry.io/docs/collector/installation/) installed 
+- [Datadog account](https://docs.datadoghq.com/account_management/api-app-keys/) with an API key
+- [OpenTelemetry integration installed in Datadog](https://app.datadoghq.com/integrations?search=otel&integrationId=otel)
 
-### Alternative: Apollo Runtime container
+<Note>
 
-For a simpler deployment, consider using the [Apollo Runtime container](https://github.com/apollographql/apollo-runtime) which packages both the router and OpenTelemetry Collector together. See the [Datadog example configuration](https://github.com/apollographql/apollo-runtime/tree/main/examples/datadog/otel-collector) for ready-to-use configuration.
+If you're using the [Apollo Runtime container](https://github.com/apollographql/apollo-runtime), see the [Datadog example configuration](https://github.com/apollographql/apollo-runtime/tree/main/examples/datadog/otel-collector) for ready-to-use configuration that implements this guide.
+
+</Note>
 
 ## Configure the router
 
 Configure your router to send telemetry to the OpenTelemetry Collector using OTLP.
 
-### Basic configuration
 
 Add telemetry exporters to your existing `router.yaml`. This configuration follows [Datadog's unified service tagging](https://docs.datadoghq.com/getting_started/tagging/unified_service_tagging/) approach:
 
@@ -101,7 +93,6 @@ flowchart LR
 
 For detailed configuration options, see [configuration basics](https://opentelemetry.io/docs/collector/configuration/) and [Datadog's collector exporter documentation](https://docs.datadoghq.com/opentelemetry/setup/collector_exporter/).
 
-### Basic collector configuration
 
 Create `otel-collector.yaml` with this minimal configuration. Set your Datadog API key as an environment variable: `export DD_API_KEY=your_datadog_api_key_here`:
 

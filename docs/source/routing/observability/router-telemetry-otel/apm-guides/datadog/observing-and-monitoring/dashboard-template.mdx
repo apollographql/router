@@ -5,11 +5,10 @@ description: Set up and use pre-configured Datadog dashboards for monitoring the
   - telemetry
 ---
 
-Start your observability journey with Datadog using Apollo's pre-configured dashboard template and router telemetry configuration.
+This guide walks through using Apollo's pre-configured template to create Datadog dashboards and monitor your Apollo Router.
 
 ## Install the dashboard template
 
-To install the dashboard template to your Datadog account, follow these steps:
 
 1. In your Datadog account, navigate to **Dashboards** > **New Dashboard** and create a new blank dashboard.
 2. Copy the JSON content from the [dashboard template](https://github.com/apollographql/apm-templates/blob/main/datadog/graphos-template.json).
@@ -20,7 +19,7 @@ To install the dashboard template to your Datadog account, follow these steps:
 
 ### Configure template variables
 
-After you install the template, configure the template variables to match the appropriate tag values for your Runtime instances and ensure the relevant telemetry data is being sent to Datadog.
+After you install the template, configure the template variables to match the appropriate tag values for your router instances and ensure the relevant telemetry data is being sent to Datadog.
 For details on that configuration, see the [Router Instrumentation guide](/graphos/routing/observability/router-telemetry-otel/apm-guides/datadog/router-instrumentation).
 
 The dashboard is pre-configured to use Datadog's [unified service tagging](https://docs.datadoghq.com/getting_started/tagging/unified_service_tagging) to filter the dashboard views. If you followed the instrumentation guide, these values are already configured.

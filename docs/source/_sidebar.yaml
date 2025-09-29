@@ -127,8 +127,6 @@ items:
                   children:
                     - label: "Overview"
                       href: "./observability/router-telemetry-otel/apm-guides/datadog"
-                    - label: "Router Instrumentation"
-                      href: "./observability/router-telemetry-otel/apm-guides/datadog/router-instrumentation"
                     - label: "Connecting to Datadog"
                       children:
                         - label: "Overview"
@@ -141,6 +139,8 @@ items:
                               href: "./observability/router-telemetry-otel/apm-guides/datadog/connecting-to-datadog/datadog-agent/datadog-agent-metrics"
                             - label: "Traces"
                               href: "./observability/router-telemetry-otel/apm-guides/datadog/connecting-to-datadog/datadog-agent/datadog-agent-traces"
+                    - label: "Router Instrumentation"
+                      href: "./observability/router-telemetry-otel/apm-guides/datadog/router-instrumentation"
                     - label: "Dashboard Template"
                       href: "./observability/router-telemetry-otel/apm-guides/datadog/observing-and-monitoring/dashboard-template"
                 - label: "New Relic"

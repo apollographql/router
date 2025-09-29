@@ -16,9 +16,6 @@ Jump to the [complete configuration example](#complete-configuration-example) fo
 
 Datadog uses specific attributes to organize its APM views. While `resource.name` and `operation.name` are not OpenTelemetry standard attributes, Datadog synthesizes them from other span attributes if not present. Setting them explicitly gives you control over how your traces appear in Datadog APM.
 
-Learn more:
-- [OpenTelemetry semantic mapping in Datadog](https://docs.datadoghq.com/opentelemetry/mapping/semantic_mapping/?tab=datadogexporter)
-- [Operation name mapping logic](https://docs.datadoghq.com/opentelemetry/migrate/migrate_operation_names/?tab=opentelemetrycollector#new-mapping-logic)
 
 ## Basic instrumentation
 
@@ -53,7 +50,7 @@ telemetry:
 ```
 
 <Caution>
-High Cardinality: The `operation_name` and `subgraph_operation_name` attributes can be unbounded and high-cardinality if your GraphQL operations have many unique operation names. This affects both APM views and trace metrics, because Datadog creates metrics for each unique `resource.name` value. Consider using a more bounded attribute like `operation_type` (query/mutation/subscription) or removing the `resource.name` attribute and letting Datadog calculate the resource name on its own if you experience cardinality issues in Datadog.
+    High Cardinality: The `operation_name` and `subgraph_operation_name` attributes can be unbounded and high-cardinality if your GraphQL operations have many unique operation names. This affects both APM views and trace metrics, because Datadog creates metrics for each unique `resource.name` value. Consider using a more bounded attribute like `operation_type` (query/mutation/subscription) or removing the `resource.name` attribute and letting Datadog calculate the resource name on its own if you experience cardinality issues in Datadog.
 </Caution>
 
 With these attributes configured, you can filter for operations in Datadog APM:
@@ -65,6 +62,9 @@ With these attributes configured, you can filter for operations in Datadog APM:
   width="600"
 />
 
+Learn more:
+- [OpenTelemetry semantic mapping in Datadog](https://docs.datadoghq.com/opentelemetry/mapping/semantic_mapping/?tab=datadogexporter)
+- [Operation name mapping logic](https://docs.datadoghq.com/opentelemetry/migrate/migrate_operation_names/?tab=opentelemetrycollector#new-mapping-logic)
 ## Error tracking
 
 Configure the `error.message` attribute to surface GraphQL errors and properly reflect them in Datadog APM.
