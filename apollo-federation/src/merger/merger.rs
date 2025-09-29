@@ -11,7 +11,6 @@ use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::ast::FieldDefinition;
-use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
@@ -55,7 +54,6 @@ use crate::merger::merge_enum::EnumTypeUsage;
 use crate::merger::merge_field::FieldMergeContext;
 use crate::schema::FederationSchema;
 use crate::schema::directive_location::DirectiveLocationExt;
-use crate::schema::position::DirectiveArgumentDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::FieldDefinitionPosition;
@@ -1822,30 +1820,6 @@ impl Merger {
             locations: self.source_locations(sources),
         };
         self.error_reporter.add_hint(hint);
-    }
-
-    /// Merge argument definitions from subgraphs
-    pub(in crate::merger) fn merge_argument(
-        &mut self,
-        _sources: &Sources<Node<InputValueDefinition>>,
-        _dest: &Node<InputValueDefinition>,
-    ) -> Result<(), FederationError> {
-        // TODO: Implement argument merging logic
-        // This should merge argument definitions from multiple subgraphs
-        // including type validation, default value merging, etc.
-        Ok(())
-    }
-
-    /// Merge argument definitions from subgraphs
-    pub(in crate::merger) fn merge_directive_argument(
-        &mut self,
-        _sources: &Sources<Node<InputValueDefinition>>,
-        _dest: &DirectiveArgumentDefinitionPosition,
-    ) -> Result<(), FederationError> {
-        // TODO: Implement argument merging logic
-        // This should merge argument definitions from multiple subgraphs
-        // including type validation, default value merging, etc.
-        Ok(())
     }
 
     pub(crate) fn source_locations<T>(&self, sources: &Sources<Node<T>>) -> Vec<SubgraphLocation> {
