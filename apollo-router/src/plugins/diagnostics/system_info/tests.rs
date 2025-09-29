@@ -64,30 +64,6 @@ async fn test_system_info_container_detection() {
     assert!(info.contains("detected") || info.contains("Not detected"));
 }
 
-#[test]
-fn test_normalization_functions() {
-    use super::get_normalized_arch;
-    use super::get_normalized_os;
-
-    // Test that normalization functions work
-    let normalized_os = get_normalized_os();
-    let normalized_arch = get_normalized_arch();
-
-    // Should return valid strings
-    assert!(!normalized_os.is_empty());
-    assert!(!normalized_arch.is_empty());
-
-    // Test specific mappings if on known platforms
-    #[cfg(target_os = "linux")]
-    assert_eq!(normalized_os, "linux");
-
-    #[cfg(target_arch = "x86_64")]
-    assert_eq!(normalized_arch, "amd64");
-
-    #[cfg(target_arch = "aarch64")]
-    assert_eq!(normalized_arch, "arm64");
-}
-
 #[tokio::test]
 async fn test_system_info_cpu_load_collection() {
     let result = system_info::collect().await;

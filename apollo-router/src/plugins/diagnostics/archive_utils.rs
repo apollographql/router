@@ -26,15 +26,7 @@ impl ArchiveHeaderBuilder {
         }
     }
 
-    /// Set the file permissions mode (defaults to 0o644)
-    #[allow(dead_code)]
-    pub(super) fn mode(mut self, mode: u32) -> Self {
-        self.mode = mode;
-        self
-    }
-
     /// Set a custom timestamp (defaults to current time)
-    #[allow(dead_code)]
     pub(super) fn timestamp(mut self, timestamp: u64) -> Self {
         self.timestamp = Some(timestamp);
         self
@@ -105,17 +97,6 @@ mod tests {
         assert_eq!(header.size().unwrap(), content.len() as u64);
         assert_eq!(header.mode().unwrap(), 0o644);
         assert!(header.mtime().unwrap() > 0); // Should have a timestamp
-    }
-
-    #[test]
-    fn test_archive_header_builder_custom_mode() {
-        let content = b"test content";
-        let header = ArchiveHeaderBuilder::new("script.sh")
-            .mode(0o755)
-            .build_for_content(content)
-            .unwrap();
-
-        assert_eq!(header.mode().unwrap(), 0o755);
     }
 
     #[test]

@@ -19,14 +19,12 @@ fn collect_basic_system_info(info: &mut String) {
 
     // Basic system info with better normalization
     info.push_str(&format!(
-        "Operating System: {} ({})\n",
+        "Operating System: {}\n",
         OS,
-        get_normalized_os()
     ));
     info.push_str(&format!(
-        "Architecture: {} ({})\n",
+        "Architecture: {}\n",
         ARCH,
-        get_normalized_arch()
     ));
     info.push_str(&format!("Target Family: {}\n", std::env::consts::FAMILY));
 
@@ -447,29 +445,6 @@ fn collect_env_info(info: &mut String) {
     }
 
     info.push('\n');
-}
-
-/// Get normalized OS name for better cross-platform reporting
-pub(crate) fn get_normalized_os() -> &'static str {
-    match OS {
-        "apple" => "darwin",
-        "dragonfly" => "dragonflybsd",
-        "macos" => "darwin",
-        "ios" => "darwin",
-        os => os,
-    }
-}
-
-/// Get normalized architecture name for better cross-platform reporting
-pub(crate) fn get_normalized_arch() -> &'static str {
-    match ARCH {
-        "x86_64" => "amd64",
-        "aarch64" => "arm64",
-        "arm" => "arm32",
-        "powerpc" => "ppc32",
-        "powerpc64" => "ppc64",
-        arch => arch,
-    }
 }
 
 /// Collect effective CPU count information
