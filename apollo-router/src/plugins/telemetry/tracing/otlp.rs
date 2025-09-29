@@ -5,7 +5,6 @@ use std::result::Result;
 // use opentelemetry_otlp::TonicExporterBuilder;
 // use opentelemetry_sdk::trace::BatchSpanProcessor;
 use opentelemetry_sdk::trace::Builder;
-use opentelemetry_stdout::MetricExporterBuilder;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::TracingCommon;
@@ -13,7 +12,7 @@ use crate::plugins::telemetry::config_new::spans::Spans;
 // use crate::plugins::telemetry::otel::named_runtime_channel::NamedTokioRuntime;
 // use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
-use crate::plugins::telemetry::otlp::TelemetryDataKind;
+// use crate::plugins::telemetry::otlp::TelemetryDataKind;
 
 impl TracingConfigurator for super::super::otlp::Config {
     fn enabled(&self) -> bool {
