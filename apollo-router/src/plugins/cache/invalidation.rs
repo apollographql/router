@@ -128,7 +128,7 @@ impl Invalidation {
                         && !keys.is_empty()
                     {
                         let deleted = redis_storage
-                            .delete_from_scan_result(keys)
+                            .delete_from_scan_result(keys.into_iter())
                             .await
                             .unwrap_or(0) as u64;
                         count += deleted;
