@@ -234,7 +234,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                     .notify(configuration.notify.clone())
                     .license(license.clone())
                     .full_config(configuration.validated_yaml.clone())
-                    .and_original_config_yaml(configuration.original_yaml.clone())
+                    .and_original_config_yaml(configuration.raw_yaml.clone())
                     .build();
 
                 match factory.create_instance(telemetry_init).await {
@@ -696,7 +696,7 @@ pub(crate) async fn create_plugins(
                 &mut errors,
                 license.clone(),
                 $maybe_full_config,
-                configuration.original_yaml.clone(),
+                configuration.raw_yaml.clone(),
             )
             .await;
         }};

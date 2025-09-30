@@ -151,7 +151,7 @@ pub struct Configuration {
 
     /// The full router yaml before it was parsed and env variables expanded
     #[serde(skip)]
-    pub(crate) original_yaml: Option<Arc<str>>,
+    pub(crate) raw_yaml: Option<Arc<str>>,
 
     /// Health check configuration
     #[serde(default)]
@@ -293,7 +293,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             notify,
             uplink: None,
             validated_yaml: None,
-            original_yaml: None,
+            raw_yaml: None,
         }
         .validate()
         .map_err(|e| serde::de::Error::custom(e.to_string()))
@@ -332,7 +332,7 @@ impl Configuration {
 
         let conf = Self {
             validated_yaml: Default::default(),
-            original_yaml: None,
+            raw_yaml: None,
             supergraph: supergraph.unwrap_or_default(),
             server: server.unwrap_or_default(),
             health_check: health_check.unwrap_or_default(),
@@ -499,7 +499,7 @@ impl Configuration {
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
             batching: batching.unwrap_or_default(),
-            original_yaml: None,
+            raw_yaml: None,
         };
 
         configuration.validate()
