@@ -18,7 +18,7 @@ pub(crate) mod network {
 
     /// Default diagnostics listen address (localhost only for security)
     pub(crate) fn default_listen_addr() -> SocketAddr {
-        SocketAddr::from_str(&format!("{}:{}", LOCALHOST_IP, DEFAULT_PORT))
+        SocketAddr::from_str(&format!("{LOCALHOST_IP}:{DEFAULT_PORT}"))
             .expect("Valid default diagnostics listen address")
     }
 }
