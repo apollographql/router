@@ -61,19 +61,18 @@ exporters:
     endpoint: '0.0.0.0:9464'
 
 connectors:
-  batch:
   spanmetrics:
-    metrics_exporter: prometheus
+    metrics_flush_interval: 15s
 
 service:
   pipelines:
     traces:
       receivers: [otlp]
-      connectors: [spanmetrics, batch]
+      processors: [spanmetrics, batch]
     metrics:
       receivers: [otlp/spanmetrics]
       exporters: [prometheus]
-      connectors: [batch]
+      processors: [batch]
 ```
 
 ## Apollo Server setup
