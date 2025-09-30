@@ -51,6 +51,9 @@ use super::html_generator::HtmlGenerator;
 use super::static_resources::StaticResourceHandler;
 use super::memory::MemoryService;
 
+#[cfg(test)]
+mod tests;
+
 /// MIME type for YAML content
 const TEXT_YAML: &str = "text/yaml; charset=utf-8";
 
