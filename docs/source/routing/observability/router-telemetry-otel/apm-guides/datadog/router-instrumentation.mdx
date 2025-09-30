@@ -14,7 +14,9 @@ Jump to the [complete configuration example](#complete-configuration-example) fo
 
 ## Override Datadog operation and resource names
 
-Datadog uses `operation.name` and `resource.name` to organize its APM views. While these are not OpenTelemetry standard attributes, Datadog synthesizes them from other span attributes if not explicitly set. The auto-generated defaults aren't always helpful for GraphQL operations, so this configuration explicitly overrides them to provide better organization in Datadog APM:
+Datadog uses `operation.name` and `resource.name` to organize its APM views. While these are not OpenTelemetry standard attributes, Datadog synthesizes them from other span attributes if not explicitly set. The auto-generated defaults aren't always helpful for GraphQL operations, so this configuration explicitly overrides them to provide better organization in Datadog APM.
+
+The example below sets these attributes for the `router`, `supergraph`, and `subgraph` stages of the router's request lifecycle:
 
 ```yaml title="router.yaml"
 telemetry:
