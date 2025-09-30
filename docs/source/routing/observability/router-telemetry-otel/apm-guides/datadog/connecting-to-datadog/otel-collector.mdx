@@ -42,7 +42,7 @@ telemetry:
     metrics:
       otlp:
         enabled: true
-        endpoint: http://localhost:4317
+        endpoint: 0.0.0.0:4317
         protocol: grpc
         temporality: delta  # Required for Datadog
       common:
