@@ -100,6 +100,7 @@ or ( binary_id(=apollo-router::integration_tests) & test(=integration::redis::qu
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::redis::query_planner_redis_update_query_fragments) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::redis::query_planner_redis_update_type_conditional_fetching) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::redis::test::connection_failure_blocks_startup) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::response_cache::cache_control_merging_multi_fetch) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::rhai::test_rhai_hot_reload_works) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::subgraph_response::test_invalid_error_locations_contains_negative_one_location) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::subgraph_response::test_valid_extensions_service_for_subgraph_error) )

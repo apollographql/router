@@ -36,6 +36,7 @@ use super::location::ranged_span;
 use crate::connectors::ConnectSpec;
 use crate::connectors::Namespace;
 use crate::connectors::json_selection::location::get_connect_spec;
+use crate::connectors::json_selection::methods::ArrowMethod;
 use crate::connectors::variable::VariableNamespace;
 use crate::connectors::variable::VariableReference;
 
@@ -59,9 +60,10 @@ pub(super) fn nom_error_message(
     // provides the dynamic context needed to interpret the static message.
     message: impl Into<String>,
 ) -> nom::Err<nom::error::Error<Span>> {
+    let offset = suffix.location_offset();
     nom::Err::Error(nom::error::Error::from_error_kind(
         suffix.map_extra(|extra| SpanExtra {
-            errors: vec_push(extra.errors, message.into()),
+            errors: vec_push(extra.errors, (message.into(), offset)),
             ..extra
         }),
         nom::error::ErrorKind::IsNot,
@@ -76,17 +78,53 @@ pub(super) fn nom_fail_message(
     suffix: Span,
     message: impl Into<String>,
 ) -> nom::Err<nom::error::Error<Span>> {
+    let offset = suffix.location_offset();
     nom::Err::Failure(nom::error::Error::from_error_kind(
         suffix.map_extra(|extra| SpanExtra {
-            errors: vec_push(extra.errors, message.into()),
+            errors: vec_push(extra.errors, (message.into(), offset)),
             ..extra
         }),
         nom::error::ErrorKind::IsNot,
     ))
 }
 
-pub(crate) trait ExternalVarPaths {
-    fn external_var_paths(&self) -> Vec<&PathSelection>;
+pub(crate) trait VarPaths {
+    /// Implementers of `VarPaths` must implement this `var_paths` method, which
+    /// should return all variable-referencing paths where the variable is a
+    /// `KnownVariable::External(String)` or `KnownVariable::Local(String)`
+    /// (that is, not internal variable references like `$` or `@`).
+    fn var_paths(&self) -> Vec<&PathSelection>;
+
+    fn external_var_paths(&self) -> Vec<&PathSelection> {
+        self.var_paths()
+            .into_iter()
+            .filter(|var_path| {
+                if let PathList::Var(known_var, _) = var_path.path.as_ref() {
+                    matches!(known_var.as_ref(), KnownVariable::External(_))
+                } else {
+                    false
+                }
+            })
+            .collect()
+    }
+
+    /// Returns all locally bound variable names in the selection, without
+    /// regard for which ones are available where.
+    fn local_var_names(&self) -> IndexSet<String> {
+        self.var_paths()
+            .into_iter()
+            .flat_map(|var_path| {
+                if let PathList::Var(known_var, _) = var_path.path.as_ref() {
+                    match known_var.as_ref() {
+                        KnownVariable::Local(var_name) => Some(var_name.to_string()),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
 }
 
 // JSONSelection     ::= PathSelection | NakedSubSelection
@@ -199,13 +237,39 @@ impl JSONSelection {
         match JSONSelection::parse_span(span) {
             Ok((remainder, selection)) => {
                 let fragment = remainder.fragment();
-                if fragment.is_empty() {
+                let produced_errors = !remainder.extra.errors.is_empty();
+                if fragment.is_empty() && !produced_errors {
                     Ok(selection)
                 } else {
+                    let mut message = remainder
+                        .extra
+                        .errors
+                        .iter()
+                        .map(|(msg, _offset)| msg.as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+
+                    // Use offset and fragment from first error if available
+                    let (error_offset, error_fragment) =
+                        if let Some((_, first_error_offset)) = remainder.extra.errors.first() {
+                            let error_span =
+                                new_span_with_spec(input, spec).slice(*first_error_offset..);
+                            (
+                                error_span.location_offset(),
+                                error_span.fragment().to_string(),
+                            )
+                        } else {
+                            (remainder.location_offset(), fragment.to_string())
+                        };
+
+                    if !fragment.is_empty() {
+                        message
+                            .push_str(&format!("\nUnexpected trailing characters: {}", fragment));
+                    }
                     Err(JSONSelectionParseError {
-                        message: "Unexpected trailing characters".to_string(),
-                        fragment: fragment.to_string(),
-                        offset: remainder.location_offset(),
+                        message,
+                        fragment: error_fragment,
+                        offset: error_offset,
                         spec: remainder.extra.spec,
                     })
                 }
@@ -220,7 +284,7 @@ impl JSONSelection {
                             .extra
                             .errors
                             .iter()
-                            .map(|s| s.to_string())
+                            .map(|(msg, _offset)| msg.clone())
                             .join("\n")
                     },
                     fragment: e.input.fragment().to_string(),
@@ -378,11 +442,11 @@ impl JSONSelection {
     }
 }
 
-impl ExternalVarPaths for JSONSelection {
-    fn external_var_paths(&self) -> Vec<&PathSelection> {
+impl VarPaths for JSONSelection {
+    fn var_paths(&self) -> Vec<&PathSelection> {
         match &self.inner {
-            TopLevelSelection::Named(subselect) => subselect.external_var_paths(),
-            TopLevelSelection::Path(path) => path.external_var_paths(),
+            TopLevelSelection::Named(subselect) => subselect.var_paths(),
+            TopLevelSelection::Path(path) => path.var_paths(),
         }
     }
 }
@@ -582,8 +646,10 @@ impl NamedSelection {
         })
     }
 
+    // TODO Reenable ... in ConnectSpec::V0_4, to support abstract types.
     // NamedSelection ::= (Alias | "...")? PathSelection | Alias SubSelection
     fn parse_v0_3(input: Span) -> ParseResult<Self> {
+        let spec = get_connect_spec(&input);
         let (after_alias, alias) = opt(Alias::parse)(input.clone())?;
 
         if let Some(alias) = alias {
@@ -625,8 +691,14 @@ impl NamedSelection {
                 opt(ranged_span("...")),
                 PathSelection::parse,
             ))(input.clone())
-            .map(|(remainder, (_spaces, spread, path))| {
+            .map(|(mut remainder, (_spaces, spread, path))| {
                 let prefix = if let Some(spread) = spread {
+                    if spec <= ConnectSpec::V0_3 {
+                        remainder.extra.errors.push((
+                            "Spread syntax (...) is planned for connect/v0.4".to_string(),
+                            input.location_offset(),
+                        ));
+                    }
                     // An explicit ... spread token was used, so we record
                     // NamingPrefix::Spread(Some(_)). If the path produces
                     // something other than an object or null, we will catch
@@ -685,9 +757,9 @@ impl NamedSelection {
     }
 }
 
-impl ExternalVarPaths for NamedSelection {
-    fn external_var_paths(&self) -> Vec<&PathSelection> {
-        self.path.external_var_paths()
+impl VarPaths for NamedSelection {
+    fn var_paths(&self) -> Vec<&PathSelection> {
+        self.path.var_paths()
     }
 }
 
@@ -776,18 +848,25 @@ impl PathSelection {
     }
 }
 
-impl ExternalVarPaths for PathSelection {
-    fn external_var_paths(&self) -> Vec<&PathSelection> {
+impl VarPaths for PathSelection {
+    fn var_paths(&self) -> Vec<&PathSelection> {
         let mut paths = Vec::new();
         match self.path.as_ref() {
             PathList::Var(var_name, tail) => {
-                if matches!(var_name.as_ref(), KnownVariable::External(_)) {
+                // At this point, we're collecting both external and local
+                // variable references (but not references to internal variables
+                // like $ and @). These mixed variables will be filtered in
+                // VarPaths::external_var_paths and ::local_var_paths.
+                if matches!(
+                    var_name.as_ref(),
+                    KnownVariable::External(_) | KnownVariable::Local(_)
+                ) {
                     paths.push(self);
                 }
-                paths.extend(tail.external_var_paths());
+                paths.extend(tail.var_paths());
             }
             other => {
-                paths.extend(other.external_var_paths());
+                paths.extend(other.var_paths());
             }
         };
         paths
@@ -924,7 +1003,14 @@ impl PathList {
                 let full_range = merge_ranges(dollar_range.clone(), rest.range());
                 return if let Some(var) = opt_var {
                     let full_name = format!("{}{}", dollar.as_ref(), var.as_str());
-                    let known_var = KnownVariable::from_str(full_name.as_str());
+                    // This KnownVariable::External variant may get remapped to
+                    // KnownVariable::Local if the variable was parsed as the
+                    // first argument of an input->as($var) method call.
+                    let known_var = if input.extra.is_local_var(&full_name) {
+                        KnownVariable::Local(full_name)
+                    } else {
+                        KnownVariable::External(full_name)
+                    };
                     let var_range = merge_ranges(dollar_range, var.range());
                     let ranged_known_var = WithRange::new(known_var, var_range);
                     Ok((
@@ -1082,9 +1168,65 @@ impl PathList {
             // parse_identifier tells us. since MethodArgs::parse is optional,
             // the absence of args will never trigger the error case.
             return match tuple((parse_identifier, opt(MethodArgs::parse)))(suffix) {
-                Ok((suffix, (method, args))) => {
-                    let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
+                Ok((suffix, (method, args_opt))) => {
+                    let mut local_var_name = None;
+
+                    // Convert the first argument of input->as($var) from
+                    // KnownVariable::External (the default for parsed named
+                    // variable references) to KnownVariable::Local, when we know
+                    // we're parsing an ->as($var) method invocation.
+                    let args = if let Some(args) = args_opt.as_ref()
+                        && ArrowMethod::lookup(method.as_ref()) == Some(ArrowMethod::As)
+                    {
+                        let new_args = if let Some(old_first_arg) = args.args.first()
+                            && let LitExpr::Path(path_selection) = old_first_arg.as_ref()
+                            && let PathList::Var(var_name, var_tail) = path_selection.path.as_ref()
+                            && let KnownVariable::External(var_str) | KnownVariable::Local(var_str) =
+                                var_name.as_ref()
+                        {
+                            let as_var = WithRange::new(
+                                // This is the key change: remap to KnownVariable::Local.
+                                KnownVariable::Local(var_str.clone()),
+                                var_name.range(),
+                            );
+
+                            local_var_name = Some(var_str.clone());
+
+                            let new_first_arg = WithRange::new(
+                                LitExpr::Path(PathSelection {
+                                    path: WithRange::new(
+                                        PathList::Var(as_var, var_tail.clone()),
+                                        path_selection.range(),
+                                    ),
+                                }),
+                                old_first_arg.range(),
+                            );
+
+                            let mut new_args = vec![new_first_arg];
+                            new_args.extend(args.args.iter().skip(1).cloned());
+                            new_args
+                        } else {
+                            args.args.clone()
+                        };
+
+                        Some(MethodArgs {
+                            args: new_args,
+                            range: args.range(),
+                        })
+                    } else {
+                        args_opt
+                    };
+
+                    let suffix_with_local_var = if let Some(var_name) = local_var_name {
+                        suffix.map_extra(|extra| extra.with_local_var(var_name))
+                    } else {
+                        suffix
+                    };
+
+                    let (remainder, rest) =
+                        Self::parse_with_depth(suffix_with_local_var, depth + 1)?;
                     let full_range = merge_ranges(arrow.range(), rest.range());
+
                     Ok((
                         remainder,
                         WithRange::new(Self::Method(method, args, rest), full_range),
@@ -1199,35 +1341,35 @@ impl PathList {
     }
 }
 
-impl ExternalVarPaths for PathList {
-    fn external_var_paths(&self) -> Vec<&PathSelection> {
+impl VarPaths for PathList {
+    fn var_paths(&self) -> Vec<&PathSelection> {
         let mut paths = Vec::new();
         match self {
-            // PathSelection::external_var_paths is responsible for adding all
+            // PathSelection::var_paths is responsible for adding all
             // variable &PathSelection items to the set, since this
             // PathList::Var case cannot be sure it's looking at the beginning
-            // of the path. However, we call rest.external_var_paths()
+            // of the path. However, we call rest.var_paths()
             // recursively because the tail of the list could contain other full
             // PathSelection variable references.
             PathList::Var(_, rest) | PathList::Key(_, rest) => {
-                paths.extend(rest.external_var_paths());
+                paths.extend(rest.var_paths());
             }
             PathList::Expr(expr, rest) => {
-                paths.extend(expr.external_var_paths());
-                paths.extend(rest.external_var_paths());
+                paths.extend(expr.var_paths());
+                paths.extend(rest.var_paths());
             }
             PathList::Method(_, opt_args, rest) => {
                 if let Some(args) = opt_args {
                     for lit_arg in &args.args {
-                        paths.extend(lit_arg.external_var_paths());
+                        paths.extend(lit_arg.var_paths());
                     }
                 }
-                paths.extend(rest.external_var_paths());
+                paths.extend(rest.var_paths());
             }
             PathList::Question(rest) => {
-                paths.extend(rest.external_var_paths());
+                paths.extend(rest.var_paths());
             }
-            PathList::Selection(sub) => paths.extend(sub.external_var_paths()),
+            PathList::Selection(sub) => paths.extend(sub.var_paths()),
             PathList::Empty => {}
         }
         paths
@@ -1339,11 +1481,11 @@ impl SubSelection {
     }
 }
 
-impl ExternalVarPaths for SubSelection {
-    fn external_var_paths(&self) -> Vec<&PathSelection> {
+impl VarPaths for SubSelection {
+    fn var_paths(&self) -> Vec<&PathSelection> {
         let mut paths = Vec::new();
         for selection in &self.selections {
-            paths.extend(selection.external_var_paths());
+            paths.extend(selection.var_paths());
         }
         paths
     }
@@ -2572,7 +2714,8 @@ mod tests {
                         e.input.extra,
                         SpanExtra {
                             spec: ConnectSpec::latest(),
-                            errors: vec![expected_message],
+                            errors: vec![(expected_message, expected_offset)],
+                            local_vars: Vec::new(),
                         }
                     );
                 }
@@ -3362,6 +3505,19 @@ mod tests {
     }
 
     #[test]
+    fn test_local_var_paths() {
+        let spec = ConnectSpec::V0_3;
+        let name_selection = selection!(
+            "person->as($name, @.name)->as($stray, 123)->echo({ hello: $name })",
+            spec
+        );
+        let local_var_names = name_selection.local_var_names();
+        assert_eq!(local_var_names.len(), 2);
+        assert!(local_var_names.contains("$name"));
+        assert!(local_var_names.contains("$stray"));
+    }
+
+    #[test]
     fn test_ranged_locations() {
         fn check(input: &str, expected: JSONSelection) {
             let parsed = JSONSelection::parse(input).unwrap();
@@ -4026,7 +4182,39 @@ mod tests {
         }
     }
 
-    #[cfg(test)]
+    #[test]
+    fn test_disallowed_spread_syntax_error() {
+        assert_eq!(
+            JSONSelection::parse_with_spec("id ...names", ConnectSpec::V0_2),
+            Err(JSONSelectionParseError {
+                message: "nom::error::ErrorKind::Eof".to_string(),
+                fragment: "...names".to_string(),
+                offset: 3,
+                spec: ConnectSpec::V0_2,
+            }),
+        );
+
+        assert_eq!(
+            JSONSelection::parse_with_spec("id ...names", ConnectSpec::V0_3),
+            Err(JSONSelectionParseError {
+                message: "Spread syntax (...) is planned for connect/v0.4".to_string(),
+                // This is the fragment and offset we should get, but we need to
+                // store error offsets in SpanExtra::errors to provide that
+                // information.
+                fragment: "...names".to_string(),
+                offset: 3,
+                spec: ConnectSpec::V0_3,
+            }),
+        );
+
+        // This will fail when we promote v0.3 to latest and create v0.4, which
+        // is your signal to consider reenabling the tests below.
+        assert_eq!(ConnectSpec::V0_3, ConnectSpec::next());
+    }
+
+    // TODO Reenable these tests in ConnectSpec::V0_4 when we support ... spread
+    // syntax and abstract types.
+    /** #[cfg(test)]
     mod spread_parsing {
         use crate::connectors::ConnectSpec;
         use crate::connectors::json_selection::PrettyPrintable;
@@ -4041,7 +4229,7 @@ mod tests {
 
     #[test]
     fn test_basic_spread_parsing_one_field() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "... a";
         spread_parsing::check(spec, "...a", expected);
         spread_parsing::check(spec, "... a", expected);
@@ -4054,7 +4242,7 @@ mod tests {
 
     #[test]
     fn test_spread_parsing_spread_a_spread_b() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "... a\n... b";
         spread_parsing::check(spec, "...a...b", expected);
         spread_parsing::check(spec, "... a ... b", expected);
@@ -4066,7 +4254,7 @@ mod tests {
 
     #[test]
     fn test_spread_parsing_a_spread_b() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "a\n... b";
         spread_parsing::check(spec, "a...b", expected);
         spread_parsing::check(spec, "a ... b", expected);
@@ -4081,7 +4269,7 @@ mod tests {
 
     #[test]
     fn test_spread_parsing_spread_a_b() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "... a\nb";
         spread_parsing::check(spec, "...a b", expected);
         spread_parsing::check(spec, "... a b", expected);
@@ -4094,7 +4282,7 @@ mod tests {
 
     #[test]
     fn test_spread_parsing_spread_a_b_c() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "... a\nb\nc";
         spread_parsing::check(spec, "...a b c", expected);
         spread_parsing::check(spec, "... a b c", expected);
@@ -4108,7 +4296,7 @@ mod tests {
 
     #[test]
     fn test_spread_parsing_spread_spread_a_sub_b() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "... a {\n  b\n}";
         spread_parsing::check(spec, "...a{b}", expected);
         spread_parsing::check(spec, "... a { b }", expected);
@@ -4123,7 +4311,7 @@ mod tests {
 
     #[test]
     fn test_spread_parsing_spread_a_sub_b_c() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "... a {\n  b\n  c\n}";
         spread_parsing::check(spec, "...a{b c}", expected);
         spread_parsing::check(spec, "... a { b c }", expected);
@@ -4139,7 +4327,7 @@ mod tests {
 
     #[test]
     fn test_spread_parsing_spread_a_sub_b_spread_c() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "... a {\n  b\n  ... c\n}";
         spread_parsing::check(spec, "...a{b...c}", expected);
         spread_parsing::check(spec, "... a { b ... c }", expected);
@@ -4155,7 +4343,7 @@ mod tests {
 
     #[test]
     fn test_spread_parsing_spread_a_sub_b_spread_c_d() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "... a {\n  b\n  ... c\n  d\n}";
         spread_parsing::check(spec, "...a{b...c d}", expected);
         spread_parsing::check(spec, "... a { b ... c d }", expected);
@@ -4171,7 +4359,7 @@ mod tests {
 
     #[test]
     fn test_spread_parsing_spread_a_sub_spread_b_c_d_spread_e() {
-        let spec = ConnectSpec::V0_3;
+        let spec = ConnectSpec::V0_4;
         let expected = "... a {\n  ... b\n  c\n  d\n  ... e\n}";
         spread_parsing::check(spec, "...a{...b c d...e}", expected);
         spread_parsing::check(spec, "... a { ... b c d ... e }", expected);
@@ -4184,6 +4372,7 @@ mod tests {
         spread_parsing::check(spec, "...\na {...\nb\nc d ...\ne }", expected);
         assert_debug_snapshot!(selection!("...a{...b c d...e}", spec));
     }
+    **/
 
     #[test]
     fn should_parse_null_coalescing_in_connect_0_3() {
@@ -4221,5 +4410,37 @@ mod tests {
         let result = JSONSelection::parse_with_spec("sum: $(a ?? $(b ?! c))", ConnectSpec::V0_3);
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn should_parse_local_vars_as_such() {
+        let spec = ConnectSpec::V0_3;
+        // No external variable references because $ and @ are internal, and
+        // $root is locally bound by the ->as method everywhere it's used.
+        let all_local = selection!("$->as($root, @.data)->echo([$root, $root])", spec);
+        assert!(all_local.external_var_paths().is_empty());
+        assert_debug_snapshot!(all_local);
+
+        // Introducing one external variable reference: $ext.
+        let ext = selection!("$->as($root, @.data)->echo([$root, $ext])", spec);
+        let external_vars = ext.external_var_paths();
+        assert_eq!(external_vars.len(), 1);
+
+        for ext_var in &external_vars {
+            match ext_var.path.as_ref() {
+                PathList::Var(var, _) => match var.as_ref() {
+                    KnownVariable::External(var_name) => {
+                        assert_eq!(var_name, "$ext");
+                    }
+                    _ => panic!("Expected external variable, got: {var:?}"),
+                },
+                _ => panic!(
+                    "Expected variable at start of path, got: {:?}",
+                    &ext_var.path
+                ),
+            };
+        }
+
+        assert_debug_snapshot!(ext);
     }
 }

@@ -66,7 +66,7 @@ The router applies a default timeout of 30 seconds for all requests, including t
 
 #### Router timeouts
 
-You can change the default timeout for client requests to the router like so:
+Configure timeout values for client requests to the router:
 
 ```yaml title="router.yaml"
 traffic_shaping:
@@ -77,7 +77,8 @@ traffic_shaping:
 If the router-level timeout is hit, the router returns a [HTTP 504 status code](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/504) to indicate a gateway timeout.
 
 #### Subgraph timeouts
-You can change the default timeout for all requests between the router and subgraphs like so:
+
+Configure timeout values for requests between the router and subgraphs:
 
 ```yaml title="router.yaml"
 traffic_shaping:
@@ -85,7 +86,28 @@ traffic_shaping:
     timeout: 50s # If subgraph requests take more than 50 seconds, cancel the request (30 seconds by default)
 ```
 
+Subgraph timeouts apply to each individual subgraph fetch request. There can be multiple subgraph requests, even to the same subgraph, within a single router request.
+
 If the subgraph-level timeout is hit, the router returns a [GraphQL-compliant HTTP 200 status code](https://graphql.github.io/graphql-over-http/). Because the router can handle multiple subgraph requests for one operation, the timeout of one subgraph doesn't immediately invalidate other requests in the query plan. Returning a 200 status code enables the router to return partial data from other requests that didn't timeout.
+
+#### Timeout hierarchy
+
+Set your router timeout to be greater than your subgraph timeouts. This difference provides a processing buffer, which enables the router to properly handle subgraph timeouts and return appropriate error responses to clients.
+
+A properly configured timeout hierarchy:
+
+```yaml title="router.yaml"
+traffic_shaping:
+  router:
+    timeout: 60s # Router: 60 seconds
+  all:
+    timeout: 30s # Default for any subgraphs not explicitly named below
+  subgraphs:
+    products:
+      timeout: 45s # Products subgraph: 45 seconds (lower than router)
+    inventory:
+      timeout: 20s # Inventory subgraph: 20 seconds
+```
 
 <Note>
 

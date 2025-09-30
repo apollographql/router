@@ -29,7 +29,7 @@ impl JSONSelection {
         // Ultimately, getting this completely right will require support from
         // the shape library tracking the names of all shapes.
 
-        use super::ExternalVarPaths;
+        use super::VarPaths;
         use crate::connectors::json_selection::TopLevelSelection;
         for path in self.external_var_paths() {
             if let PathList::Var(known_var, tail) = path.path.as_ref() {

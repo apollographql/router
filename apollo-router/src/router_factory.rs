@@ -845,7 +845,7 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("authentication");
     add_oss_apollo_plugin!("preview_file_uploads");
     add_optional_apollo_plugin!("preview_entity_cache");
-    add_oss_apollo_plugin!("experimental_response_cache");
+    add_oss_apollo_plugin!("preview_response_cache");
     add_mandatory_apollo_plugin!("progressive_override");
     add_optional_apollo_plugin!("demand_control");
 
@@ -968,7 +968,7 @@ mod test {
     const OSS_PLUGINS: &[&str] = &[
         "apollo.forbid_mutations",
         "apollo.override_subgraph_url",
-        "apollo.experimental_response_cache",
+        "apollo.preview_response_cache",
         "apollo.connectors",
     ];
 
@@ -1155,7 +1155,7 @@ mod test {
                 debug_extensions: false
                 "#
             }
-            "experimental_response_cache" => {
+            "preview_response_cache" => {
                 r#"
                 enabled: true
                 subgraph: {}
@@ -1260,16 +1260,15 @@ mod test {
                 .unwrap();
         let connectors_config =
             serde_yaml::from_str::<serde_json::Value>(get_plugin_config("connectors")).unwrap();
-        let response_cache_config = serde_yaml::from_str::<serde_json::Value>(get_plugin_config(
-            "experimental_response_cache",
-        ))
-        .unwrap();
+        let response_cache_config =
+            serde_yaml::from_str::<serde_json::Value>(get_plugin_config("preview_response_cache"))
+                .unwrap();
 
         let router_config = Configuration::builder()
             .apollo_plugin("forbid_mutations", forbid_mutations_config)
             .apollo_plugin("override_subgraph_url", override_subgraph_url_config)
             .apollo_plugin("connectors", connectors_config)
-            .apollo_plugin("experimental_response_cache", response_cache_config)
+            .apollo_plugin("preview_response_cache", response_cache_config)
             .build()
             .unwrap();
 
@@ -1584,7 +1583,7 @@ mod test {
     #[case::authentication("authentication")]
     #[case::file_upload("preview_file_uploads")]
     #[case::entity_cache("preview_entity_cache")]
-    #[case::response_cache("experimental_response_cache")]
+    #[case::response_cache("preview_response_cache")]
     #[case::demand_control("demand_control")]
     #[case::connectors("connectors")]
     #[case::coprocessor("coprocessor")]
@@ -1654,7 +1653,7 @@ mod test {
     #[case::authorization("authorization")]
     #[case::authentication("authentication")]
     #[case::file_upload("preview_file_uploads")]
-    #[case::response_cache("experimental_response_cache")]
+    #[case::response_cache("preview_response_cache")]
     #[case::demand_control("demand_control")]
     #[case::connectors("connectors")]
     #[case::coprocessor("coprocessor")]
@@ -1684,16 +1683,15 @@ mod test {
                 .unwrap();
         let connectors_config =
             serde_yaml::from_str::<serde_json::Value>(get_plugin_config("connectors")).unwrap();
-        let response_cache_config = serde_yaml::from_str::<serde_json::Value>(get_plugin_config(
-            "experimental_response_cache",
-        ))
-        .unwrap();
+        let response_cache_config =
+            serde_yaml::from_str::<serde_json::Value>(get_plugin_config("preview_response_cache"))
+                .unwrap();
 
         let router_config = Configuration::builder()
             .apollo_plugin("forbid_mutations", forbid_mutations_config)
             .apollo_plugin("override_subgraph_url", override_subgraph_url_config)
             .apollo_plugin("connectors", connectors_config)
-            .apollo_plugin("experimental_response_cache", response_cache_config)
+            .apollo_plugin("preview_response_cache", response_cache_config)
             .apollo_plugin(plugin, plugin_config)
             .build()
             .unwrap();

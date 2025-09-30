@@ -1816,7 +1816,7 @@ impl CustomTraceIdPropagator {
         let trace_id = match opentelemetry::trace::TraceId::from_hex(&trace_id) {
             Ok(trace_id) => trace_id,
             Err(err) => {
-                ::tracing::error!("cannot generate custom trace_id: {err}");
+                ::tracing::error!(trace_id = %trace_id, error = %err, "cannot generate custom trace_id");
                 return None;
             }
         };
@@ -3040,6 +3040,29 @@ mod tests {
         let span = propagator.extract_span_context(&headers);
         assert!(span.is_some());
         assert_eq!(span.unwrap().trace_id().to_string(), expected_trace_id);
+    }
+
+    #[test]
+    fn test_custom_trace_id_propagator_invalid_hex_characters() {
+        use crate::test_harness::tracing_test;
+        let _guard = tracing_test::dispatcher_guard();
+
+        let header = String::from("x-trace-id");
+        let invalid_trace_id = String::from("invalidhexchars");
+
+        let propagator = CustomTraceIdPropagator::new(header.clone(), TraceIdFormat::Uuid);
+        let mut headers: HashMap<String, String> = HashMap::new();
+        headers.insert(header, invalid_trace_id.clone());
+
+        let span = propagator.extract_span_context(&headers);
+
+        assert!(span.is_none());
+
+        assert!(tracing_test::logs_contain(
+            "cannot generate custom trace_id"
+        ));
+
+        assert!(tracing_test::logs_contain(&invalid_trace_id));
     }
 
     #[test]
