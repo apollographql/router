@@ -614,7 +614,7 @@ impl ContainerCpuInfo {
             .await
             .map(|fs| Self::detect_cgroup_version(&fs))
         {
-            Ok(CGroupVersion::CGroup2) => {
+            Ok(CGroupVersion::V2) => {
                 // cgroup v2: read from cpu.max
                 match tokio::fs::read_to_string("/sys/fs/cgroup/cpu.max").await {
                     Ok(contents) => {
@@ -637,7 +637,7 @@ impl ContainerCpuInfo {
                     Err(_) => ("system".to_string(), system_cpus),
                 }
             }
-            Ok(CGroupVersion::CGroup) => {
+            Ok(CGroupVersion::V1) => {
                 // cgroup v1: read from separate quota and period files
                 let quota = tokio::fs::read_to_string("/sys/fs/cgroup/cpu/cpu.cfs_quota_us")
                     .await
@@ -678,11 +678,11 @@ impl ContainerCpuInfo {
             .collect();
 
         if versions.contains("cgroup2") {
-            CGroupVersion::CGroup2
+            CGroupVersion::V2
         } else if versions.contains("cgroup") {
-            CGroupVersion::CGroup
+            CGroupVersion::V1
         } else {
-            CGroupVersion::None
+            CGroupVersion::NotDetected
         }
     }
 
@@ -937,9 +937,12 @@ pub(crate) async fn collect() -> DiagnosticsResult<String> {
 #[cfg(target_os = "linux")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CGroupVersion {
-    CGroup2,
-    CGroup,
-    None,
+    /// CGroups v2 (unified hierarchy)
+    V2,
+    /// CGroups v1 (legacy)
+    V1,
+    /// CGroups not detected or not available
+    NotDetected,
 }
 
 #[cfg(test)]
