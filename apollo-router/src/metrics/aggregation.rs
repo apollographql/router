@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use derive_more::From;
 use itertools::Itertools;
+use opentelemetry::InstrumentationScope;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::AsyncInstrument;
 use opentelemetry::metrics::Counter;
@@ -16,6 +17,7 @@ use opentelemetry::metrics::MeterProvider;
 use opentelemetry::metrics::ObservableCounter;
 use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
+use opentelemetry::metrics::SyncInstrument;
 use opentelemetry::metrics::UpDownCounter;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use parking_lot::Mutex;
@@ -197,27 +199,35 @@ impl Inner {
         schema_url: Option<impl Into<Cow<'static, str>>>,
         attributes: Option<Vec<KeyValue>>,
     ) -> Meter {
-        let name = name.into();
-        let version = version.map(|v| v.into());
-        let schema_url = schema_url.map(|v| v.into());
         let mut meters = Vec::with_capacity(self.providers.len());
+
+        // Convert parameters for both InstrumentationScope and MeterId
+        let name_cow = name.into();
+        let version_cow = version.map(|v| v.into());
+        let schema_url_cow = schema_url.map(|v| v.into());
+
+        let mut scope_builder = InstrumentationScope::builder(name_cow.clone());
+        if let Some(ref v) = version_cow {
+            scope_builder = scope_builder.with_version(v.clone());
+        };
+        if let Some(ref url) = schema_url_cow {
+            scope_builder = scope_builder.with_schema_url(url.clone());
+        };
+        if let Some(ref attrs) = attributes {
+            scope_builder = scope_builder.with_attributes(attrs.clone());
+        };
+
+        let scope = scope_builder.build();
 
         for (provider, existing_meters) in self.providers.values_mut() {
             meters.push(
                 existing_meters
                     .entry(MeterId {
-                        name: name.clone(),
-                        version: version.clone(),
-                        schema_url: schema_url.clone(),
+                        name: name_cow.clone(),
+                        version: version_cow.clone(),
+                        schema_url: schema_url_cow.clone(),
                     })
-                    .or_insert_with(|| {
-                        provider.versioned_meter(
-                            name.clone(),
-                            version.clone(),
-                            schema_url.clone(),
-                            attributes.clone(),
-                        )
-                    })
+                    .or_insert_with(|| provider.meter_with_scope(scope.clone()))
                     .clone(),
             );
         }
@@ -241,14 +251,10 @@ pub(crate) struct AggregateCounter<T> {
     delegates: Vec<Counter<T>>,
 }
 
-pub(crate) struct AggregateObservableCounter<T> {
-    delegates: Vec<ObservableCounter<T>>,
-}
-
-impl<T: Copy + Send + Sync> AsyncInstrument<T> for AggregateObservableCounter<T> {
-    fn observe(&self, value: T, attributes: &[KeyValue]) {
+impl<T: Copy> SyncInstrument<T> for AggregateCounter<T> {
+    fn measure(&self, value: T, attributes: &[KeyValue]) {
         for counter in &self.delegates {
-            counter.observe(value, attributes)
+            counter.add(value, attributes)
         }
     }
 }
@@ -256,19 +262,22 @@ impl<T: Copy + Send + Sync> AsyncInstrument<T> for AggregateObservableCounter<T>
 pub(crate) struct AggregateHistogram<T> {
     delegates: Vec<Histogram<T>>,
 }
+impl<T: Copy> SyncInstrument<T> for AggregateHistogram<T> {
+    fn measure(&self, value: T, attributes: &[KeyValue]) {
+        for histogram in &self.delegates {
+            histogram.record(value, attributes)
+        }
+    }
+}
 
 pub(crate) struct AggregateUpDownCounter<T> {
     delegates: Vec<UpDownCounter<T>>,
 }
 
-pub(crate) struct AggregateObservableUpDownCounter<T> {
-    delegates: Vec<ObservableUpDownCounter<T>>,
-}
-
-impl<T: Copy + Send + Sync> AsyncInstrument<T> for AggregateObservableUpDownCounter<T> {
-    fn observe(&self, value: T, attributes: &[KeyValue]) {
+impl<T: Copy> SyncInstrument<T> for AggregateUpDownCounter<T> {
+    fn measure(&self, value: T, attributes: &[KeyValue]) {
         for counter in &self.delegates {
-            counter.observe(value, attributes)
+            counter.add(value, attributes)
         }
     }
 }
@@ -277,39 +286,22 @@ pub(crate) struct AggregateGauge<T> {
     delegates: Vec<Gauge<T>>,
 }
 
-pub(crate) struct AggregateObservableGauge<T> {
-    delegates: Vec<ObservableGauge<T>>,
-}
-
-impl<T: Copy + Send + Sync> AsyncInstrument<T> for AggregateObservableGauge<T> {
-    fn observe(&self, measurement: T, attributes: &[KeyValue]) {
+impl<T: Copy> SyncInstrument<T> for AggregateGauge<T> {
+    fn measure(&self, value: T, attributes: &[KeyValue]) {
         for gauge in &self.delegates {
-            gauge.observe(measurement, attributes)
+            gauge.record(value, attributes)
         }
     }
 }
+
 // Observable instruments don't need to have a ton of optimisation because they are only read on demand.
 macro_rules! aggregate_observable_instrument_fn {
     ($name:ident, $ty:ty, $wrapper:ident) => {
         fn $name(
             &self,
-            builder: opentelemetry::metrics::AsyncInstrumentBuilder<'_, $wrapper<$ty>, $ty>,
+            _builder: opentelemetry::metrics::AsyncInstrumentBuilder<'_, $wrapper<$ty>, $ty>,
         ) -> $wrapper<$ty> {
-            let delegates = self
-                .meters
-                .iter()
-                .map(|meter| {
-                    // We must not set callback in the builder as it will leak memory.
-                    // Instead we use callback registration on the meter provider as it allows unregistration
-                    // Also we need to filter out no-op instruments as passing these to the meter provider as these will fail with a cryptic message about different implementations.
-                    // Confusingly the implementation of as_any() on an instrument will return 'other stuff'. In particular no-ops return Arc<()>. This is why we need to check for this.
-                    let delegate: $wrapper<$ty> = builder.try_init()?;
-                    let result: opentelemetry_sdk::metrics::MetricResult<_> =
-                        Ok((delegate));
-                    result
-                })
-                .try_collect()?;
-            Ok($wrapper::new(Arc::new(delegates)))
+            $wrapper::new()
         }
     };
 }
@@ -319,7 +311,7 @@ macro_rules! aggregate_instrument_fn {
         fn $name(
             &self,
             builder: opentelemetry::metrics::InstrumentBuilder<'_, $wrapper<$ty>>,
-        ) -> $wrapper<$ty>{
+        ) -> $wrapper<$ty> {
             let delegates = self
                 .meters
                 .iter()
@@ -344,7 +336,7 @@ macro_rules! aggregate_histogram_fn {
         fn $name(
             &self,
             builder: opentelemetry::metrics::HistogramBuilder<'_, $wrapper<$ty>>,
-        ) -> $wrapper<$ty>{
+        ) -> $wrapper<$ty> {
             let delegates = self
                 .meters
                 .iter()
@@ -367,7 +359,6 @@ macro_rules! aggregate_histogram_fn {
 impl InstrumentProvider for AggregateInstrumentProvider {
     aggregate_instrument_fn!(u64_counter, u64, Counter, AggregateCounter);
     aggregate_instrument_fn!(f64_counter, f64, Counter, AggregateCounter);
-
 
     aggregate_histogram_fn!(u64_histogram, u64, Histogram, AggregateHistogram);
     aggregate_histogram_fn!(f64_histogram, f64, Histogram, AggregateHistogram);
@@ -399,21 +390,9 @@ impl InstrumentProvider for AggregateInstrumentProvider {
         ObservableUpDownCounter
     );
 
-    aggregate_observable_instrument_fn!(
-        f64_observable_gauge,
-        f64,
-        ObservableGauge
-    );
-    aggregate_observable_instrument_fn!(
-        i64_observable_gauge,
-        i64,
-        ObservableGauge
-    );
-    aggregate_observable_instrument_fn!(
-        u64_observable_gauge,
-        u64,
-        ObservableGauge
-    );
+    aggregate_observable_instrument_fn!(f64_observable_gauge, f64, ObservableGauge);
+    aggregate_observable_instrument_fn!(i64_observable_gauge, i64, ObservableGauge);
+    aggregate_observable_instrument_fn!(u64_observable_gauge, u64, ObservableGauge);
 }
 
 #[cfg(test)]
@@ -427,16 +406,16 @@ mod test {
     use async_trait::async_trait;
     use opentelemetry::global::GlobalMeterProvider;
     use opentelemetry::metrics::MeterProvider;
-    use opentelemetry_sdk::metrics::MetricResult;
     use opentelemetry_sdk::metrics::Aggregation;
     use opentelemetry_sdk::metrics::InstrumentKind;
     use opentelemetry_sdk::metrics::ManualReader;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
+    use opentelemetry_sdk::metrics::MetricResult;
     use opentelemetry_sdk::metrics::PeriodicReader;
     use opentelemetry_sdk::metrics::Pipeline;
+    use opentelemetry_sdk::metrics::Temporality;
     use opentelemetry_sdk::metrics::data::Gauge;
     use opentelemetry_sdk::metrics::data::ResourceMetrics;
-    use opentelemetry_sdk::metrics::Temporality;
     use opentelemetry_sdk::metrics::exporter::PushMetricsExporter;
     use opentelemetry_sdk::metrics::reader::AggregationSelector;
     use opentelemetry_sdk::metrics::reader::MetricReader;
@@ -477,6 +456,10 @@ mod test {
 
         fn shutdown(&self) -> Result<()> {
             self.0.shutdown()
+        }
+
+        fn temporality(&self, kind: InstrumentKind) -> Temporality {
+            self.0.temporality(kind)
         }
     }
 

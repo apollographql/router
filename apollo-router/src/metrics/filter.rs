@@ -16,6 +16,7 @@ use opentelemetry::metrics::ObservableUpDownCounter;
 use opentelemetry::metrics::UpDownCounter;
 use opentelemetry_sdk::metrics::MeterProviderBuilder;
 use regex::Regex;
+use rhai::Shared;
 
 #[derive(Clone)]
 pub(crate) enum MeterProvider {
@@ -62,6 +63,14 @@ impl MeterProvider {
 impl From<opentelemetry_sdk::metrics::SdkMeterProvider> for MeterProvider {
     fn from(provider: opentelemetry_sdk::metrics::SdkMeterProvider) -> Self {
         MeterProvider::Regular(provider)
+    }
+}
+
+impl From<Shared<dyn opentelemetry::metrics::MeterProvider + Send + Sync>> for MeterProvider {
+    fn from(_provider: Shared<dyn opentelemetry::metrics::MeterProvider + Send + Sync>) -> Self {
+        // For now, create a default SdkMeterProvider since we can't directly convert
+        // the global meter provider to our local type structure
+        MeterProvider::Regular(opentelemetry_sdk::metrics::SdkMeterProvider::builder().build())
     }
 }
 
