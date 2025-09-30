@@ -19,6 +19,8 @@ use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::ObservableGauge;
 use parking_lot::Mutex;
 use serde_json_bytes::Value;
+#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
+use tikv_jemalloc_ctl::thread::allocatedp as thread_mem_allocated;
 use tower::Service;
 
 use super::PlanNode;
@@ -155,6 +157,8 @@ impl QueryPlannerService {
         let rust_planner = self.planner.clone();
         let job = move |status: compute_job::JobStatus<'_, _>| -> Result<_, QueryPlannerError> {
             let start = Instant::now();
+            #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
+            let start_allocated = thread_mem_allocated::read();
 
             let check = move || status.check_for_cooperative_cancellation();
             let query_plan_options = QueryPlanOptions {
@@ -197,6 +201,21 @@ impl QueryPlannerService {
 
             let plan = result?;
             let root_node = convert_root_query_plan_node(&plan);
+
+            #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
+            if let Ok(end_allocated) = thread_mem_allocated::read() {
+                if let Ok(start_allocated) = start_allocated {
+                    let starting_total = start_allocated.get();
+                    let memory_used = end_allocated.get().saturating_sub(starting_total);
+                    u64_histogram!(
+                        "apollo.router.query_planning.memory.allocated",
+                        "Memory allocated during query planning in bytes",
+                        memory_used,
+                        operation = operation.unwrap_or("".to_string())
+                    );
+                }
+            }
+
             Ok((plan, root_node))
         };
         let (plan, mut root_node) = compute_job::execute(compute_job_type, job)
@@ -279,6 +298,14 @@ impl QueryPlannerService {
 
         let (fragments, operation, defer_stats, schema_aware_hash) =
             Query::extract_query_information(&self.schema, &query, executable, operation_name)?;
+
+        let fragment_count = fragments.map.len() as u64;
+        u64_counter!(
+            "apollo.router.query_planning.expanded_fragments.total",
+            "Total number of expanded fragments in the query",
+            fragment_count // FIXME: escaped reference
+                           //operation = operation_name.unwrap_or("")
+        );
 
         let subselections = crate::spec::query::subselections::collect_subselections(
             &self.configuration,
