@@ -192,7 +192,25 @@ telemetry:
 
 ### Resource naming
 
-Choose `resource.name` attributes that provide meaningful grouping without high cardinality.
+You can omit the `resource.name` attribute entirely and let Datadog auto-generate it from other span attributes, or you can explicitly set it using available [selectors](/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/selectors) for each span type (router, supergraph, subgraph).
+
+If you choose to set `resource.name` explicitly, the goal is to find names that meaningfully group similar operations while keeping the total number of unique resource names manageable (typically hundreds).
+
+**Good examples (low cardinality):**
+- Operation type: `query`, `mutation`, `subscription` (using `operation_kind` selector)
+- HTTP method: `GET`, `POST` (using `request_method` selector)
+- Subgraph name: `users`, `products`, `reviews` (using `subgraph_name` selector)
+
+**Moderate cardinality (acceptable for many use cases):**
+- Named operations: `GetUser`, `CreateProduct`, `UpdateReview` (using `operation_name` or `subgraph_operation_name` selectors, assuming you have controlled, named operations)
+
+**Bad examples (high cardinality - avoid):**
+- Anonymous operations with field names: `query_user_posts_comments`
+- Including request IDs: `GetUser_req_12345`
+- Including parameters: `GetUser_userId_789`
+
+**Key consideration:**
+For high-traffic APIs with many unique operation names, use `operation_kind` or `subgraph_name` instead of `operation_name` to avoid high cardinality.
 
 ### Operation naming
 
@@ -201,26 +219,12 @@ Keep `operation.name` consistent and low-cardinality:
 - Don't include dynamic data in operation names
 - Use `resource.name` to provide the detailed grouping
 
-### Error handling
+### Error tracking
 
 Ensure errors are properly tracked:
 - Set `otel.status_code` to `ERROR` for GraphQL errors
 - Include `error.message` with the actual error text
 - Track errors in both spans and metrics for correlation
-
-## Troubleshooting
-
-### Spans not appearing in Datadog
-
-- Verify `service.name` is set in your exporter configuration
-- Check that `operation.name` is being set correctly
-- Ensure the OpenTelemetry integration is installed in Datadog
-
-### High cardinality warnings
-
-- Review `resource.name` attributes for high-cardinality values
-- Avoid using unique identifiers in span attributes
-- Consider grouping operations more broadly
 
 
 ## Next steps
