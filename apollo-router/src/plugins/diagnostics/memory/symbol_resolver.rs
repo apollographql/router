@@ -77,8 +77,8 @@ impl SymbolResolver {
             regex::escape(&self.binary_path)
         )).expect("regex must be valid");
 
-        if let Some(cap) = base_regex.captures(content) {
-            if let Ok(addr) = u64::from_str_radix(&cap[1], 16) {
+        if let Some(cap) = base_regex.captures(content)
+            && let Ok(addr) = u64::from_str_radix(&cap[1], 16) {
                 tracing::debug!(
                     "Parsed binary base address: 0x{:x} for binary: {}",
                     addr,
@@ -86,7 +86,6 @@ impl SymbolResolver {
                 );
                 return Ok(Some(addr));
             }
-        }
 
         Ok(None)
     }

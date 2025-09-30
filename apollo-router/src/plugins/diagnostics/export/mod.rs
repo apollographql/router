@@ -55,8 +55,10 @@
 use std::sync::Arc;
 
 use async_compression::tokio::write::GzipEncoder;
+use axum::body::Body;
 use bytes::Bytes;
 use futures::StreamExt;
+use http::Response;
 use http::StatusCode;
 use http::header;
 use tokio::io::AsyncWriteExt;
@@ -68,9 +70,6 @@ use super::DiagnosticsError;
 use super::DiagnosticsResult;
 use super::archive_utils::ArchiveUtils;
 use super::memory;
-use crate::services::router::Request;
-use crate::services::router::Response;
-use crate::services::router::body;
 
 #[cfg(test)]
 mod tests;
@@ -99,7 +98,7 @@ impl Exporter {
 
     /// Handle GET /diagnostics/export
     /// Creates a diagnostic archive by streaming data from all diagnostic modules
-    pub(super) async fn export(self, request: Request) -> Result<Response, DiagnosticsError> {
+    pub(super) async fn export(self) -> Result<Response<Body>, DiagnosticsError> {
         tracing::info!("Diagnostic export requested");
 
         // Generate filename with current timestamp
@@ -116,23 +115,17 @@ impl Exporter {
             Self::create_streaming_archive(self.config, self.supergraph_schema, self.router_config)
                 .await;
 
-        Response::http_response_builder()
-            .response(
-                http::Response::builder()
-                    .status(StatusCode::OK)
-                    .header(header::CONTENT_TYPE, "application/gzip")
-                    // Chunked encoding enables streaming without knowing total size upfront
-                    .header(header::TRANSFER_ENCODING, "chunked")
-                    .header(
-                        header::CONTENT_DISPOSITION,
-                        format!("attachment; filename=\"{}\"", filename),
-                    )
-                    .body(body::from_result_stream(data_stream))
-                    .map_err(DiagnosticsError::Http)?,
+        Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "application/gzip")
+            // Chunked encoding enables streaming without knowing total size upfront
+            .header(header::TRANSFER_ENCODING, "chunked")
+            .header(
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{}\"", filename),
             )
-            .context(request.context)
-            .build()
-            .map_err(|e| DiagnosticsError::Internal(e.to_string()))
+            .body(Body::from_stream(data_stream))
+            .map_err(DiagnosticsError::Http)
     }
 
     /// Creates a streaming diagnostic archive that yields chunks as they're created

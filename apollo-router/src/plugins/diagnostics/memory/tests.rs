@@ -4,7 +4,6 @@ use std::fs;
 use std::path::Path;
 
 use futures::TryStreamExt;
-use http::Method;
 use http::StatusCode;
 use http_body_util::BodyExt;
 use serde_json::Value;
@@ -12,15 +11,6 @@ use tempfile::tempdir;
 use tokio::io::AsyncReadExt;
 
 use super::*;
-use crate::services::router;
-
-fn create_test_request(method: Method, path: &str) -> router::Request {
-    router::Request::fake_builder()
-        .method(method)
-        .uri(path.parse::<http::Uri>().unwrap())
-        .build()
-        .unwrap()
-}
 
 #[cfg(target_family = "unix")]
 #[tokio::test]
@@ -29,16 +19,15 @@ async fn test_handle_status() {
     let output_path = temp_dir.path().to_str().unwrap().to_string();
 
     let service = MemoryService::new(output_path);
-    let request = create_test_request(Method::GET, "/diagnostics/memory/status");
 
-    let response = service.handle_status(request).await;
+    let response = service.handle_status().await;
     assert!(response.is_ok(), "Status request should succeed");
 
     let response = response.unwrap();
-    assert_eq!(response.response.status(), StatusCode::OK);
+    assert_eq!(response.status(), StatusCode::OK);
 
     // Check that response is valid JSON
-    let body_bytes = response.response.into_body();
+    let body_bytes = response.into_body();
     let body_data = body_bytes.collect().await.unwrap().to_bytes();
     let json: Value = serde_json::from_slice(&body_data).expect("Response should be valid JSON");
 
@@ -57,9 +46,8 @@ async fn test_handle_start() {
     let output_path = temp_dir.path().to_str().unwrap().to_string();
 
     let service = MemoryService::new(output_path);
-    let request = create_test_request(Method::POST, "/diagnostics/memory/start");
 
-    let response = service.handle_start(request).await;
+    let response = service.handle_start().await;
 
     // Note: This might fail on systems without jemalloc profiling enabled
     // but the test verifies the handler structure is correct
@@ -70,18 +58,18 @@ async fn test_handle_start() {
             #[cfg(all(target_family = "unix", feature = "global-allocator"))]
             {
                 assert!(
-                    resp.response.status() == StatusCode::OK
-                        || resp.response.status() == StatusCode::INTERNAL_SERVER_ERROR,
+                    resp.status() == StatusCode::OK
+                        || resp.status() == StatusCode::INTERNAL_SERVER_ERROR,
                     "Expected OK or INTERNAL_SERVER_ERROR, got: {}",
-                    resp.response.status()
+                    resp.status()
                 );
             }
             #[cfg(not(all(target_family = "unix", feature = "global-allocator")))]
             {
-                assert_eq!(resp.response.status(), StatusCode::NOT_IMPLEMENTED);
+                assert_eq!(resp.status(), StatusCode::NOT_IMPLEMENTED);
             }
 
-            let body_bytes = resp.response.into_body();
+            let body_bytes = resp.into_body();
             let body_data = body_bytes.collect().await.unwrap().to_bytes();
             let json: Value =
                 serde_json::from_slice(&body_data).expect("Response should be valid JSON");
@@ -103,9 +91,8 @@ async fn test_handle_stop() {
     let output_path = temp_dir.path().to_str().unwrap().to_string();
 
     let service = MemoryService::new(output_path);
-    let request = create_test_request(Method::POST, "/diagnostics/memory/stop");
 
-    let response = service.handle_stop(request).await;
+    let response = service.handle_stop().await;
 
     // Note: Similar to start, this might fail on systems without jemalloc profiling
     match response {
@@ -115,18 +102,18 @@ async fn test_handle_stop() {
             #[cfg(all(target_family = "unix", feature = "global-allocator"))]
             {
                 assert!(
-                    resp.response.status() == StatusCode::OK
-                        || resp.response.status() == StatusCode::INTERNAL_SERVER_ERROR,
+                    resp.status() == StatusCode::OK
+                        || resp.status() == StatusCode::INTERNAL_SERVER_ERROR,
                     "Expected OK or INTERNAL_SERVER_ERROR, got: {}",
-                    resp.response.status()
+                    resp.status()
                 );
             }
             #[cfg(not(all(target_family = "unix", feature = "global-allocator")))]
             {
-                assert_eq!(resp.response.status(), StatusCode::NOT_IMPLEMENTED);
+                assert_eq!(resp.status(), StatusCode::NOT_IMPLEMENTED);
             }
 
-            let body_bytes = resp.response.into_body();
+            let body_bytes = resp.into_body();
             let body_data = body_bytes.collect().await.unwrap().to_bytes();
             let json: Value =
                 serde_json::from_slice(&body_data).expect("Response should be valid JSON");
@@ -147,7 +134,6 @@ async fn test_handle_dump_creates_directory() {
     let output_path = temp_dir.path().to_str().unwrap().to_string();
 
     let service = MemoryService::new(output_path.clone());
-    let request = create_test_request(Method::POST, "/diagnostics/memory/dump");
 
     // Ensure memory directory doesn't exist initially
     let memory_path = Path::new(&output_path).join("memory");
@@ -156,7 +142,7 @@ async fn test_handle_dump_creates_directory() {
         "Memory directory should not exist initially"
     );
 
-    let response = service.handle_dump(request).await;
+    let response = service.handle_dump().await;
 
     // The dump might fail due to jemalloc configuration, but directory should be created
     // regardless of whether the actual dump succeeds
@@ -167,19 +153,19 @@ async fn test_handle_dump_creates_directory() {
             #[cfg(all(target_family = "unix", feature = "global-allocator"))]
             {
                 assert!(
-                    resp.response.status() == StatusCode::OK
-                        || resp.response.status() == StatusCode::INTERNAL_SERVER_ERROR,
+                    resp.status() == StatusCode::OK
+                        || resp.status() == StatusCode::INTERNAL_SERVER_ERROR,
                     "Expected OK or INTERNAL_SERVER_ERROR, got: {}",
-                    resp.response.status()
+                    resp.status()
                 );
             }
             #[cfg(not(all(target_family = "unix", feature = "global-allocator")))]
             {
-                assert_eq!(resp.response.status(), StatusCode::NOT_IMPLEMENTED);
+                assert_eq!(resp.status(), StatusCode::NOT_IMPLEMENTED);
             }
 
-            let status = resp.response.status();
-            let body_bytes = resp.response.into_body();
+            let status = resp.status();
+            let body_bytes = resp.into_body();
             let body_data = body_bytes.collect().await.unwrap().to_bytes();
             let json: Value =
                 serde_json::from_slice(&body_data).expect("Response should be valid JSON");

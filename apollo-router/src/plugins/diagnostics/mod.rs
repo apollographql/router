@@ -18,7 +18,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
-use tower::ServiceExt;
 
 use crate::Endpoint;
 use crate::configuration::ListenAddr;
@@ -38,8 +37,6 @@ pub(crate) mod system_info;
 
 #[cfg(test)]
 mod tests;
-
-use service::DiagnosticsService;
 
 /// Simplified error types for the diagnostics plugin
 #[derive(Debug, thiserror::Error)]
@@ -136,10 +133,7 @@ impl Plugin for DiagnosticsPlugin {
         Ok(Self {
             config: init.config,
             supergraph_schema: init.supergraph_sdl,
-            // Many tests do not supply config, so just default it.
-            router_config: init
-                .original_config_yaml
-                .unwrap_or(Arc::from("")),
+            router_config: init.original_config_yaml.unwrap_or(Arc::from("")),
         })
     }
 
@@ -148,41 +142,20 @@ impl Plugin for DiagnosticsPlugin {
             return MultiMap::new();
         }
 
-        let mut map = MultiMap::new();
-        let exporter = export::Exporter::new(
-            self.config.clone(),
-            self.supergraph_schema.clone(),
+        let router = service::create_router(
+            self.config.output_directory.clone(),
             self.router_config.clone(),
+            self.supergraph_schema.clone(),
         );
 
-        let wildcard_endpoint = Endpoint::from_router_service(
-            "/diagnostics/{*wildcard}".to_string(),
-            DiagnosticsService::new(
-                self.config.output_directory.clone(),
-                exporter.clone(),
-                self.router_config.clone(),
-                self.supergraph_schema.clone(),
-            )
-            .boxed(),
-        );
-
-        let root_endpoint = Endpoint::from_router_service(
-            "/diagnostics".to_string(),
-            DiagnosticsService::new(
-                self.config.output_directory.clone(),
-                exporter,
-                self.router_config.clone(),
-                self.supergraph_schema.clone(),
-            )
-            .boxed(),
-        );
+        let mut map = MultiMap::new();
+        let endpoint = Endpoint::from_router("/diagnostics".to_string(), router);
 
         tracing::info!(
             "Diagnostics endpoints at {}/diagnostics",
             self.config.listen
         );
-        map.insert(self.config.listen.clone(), wildcard_endpoint);
-        map.insert(self.config.listen.clone(), root_endpoint);
+        map.insert(self.config.listen.clone(), endpoint);
         map
     }
 }

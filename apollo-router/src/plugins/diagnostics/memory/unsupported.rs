@@ -1,13 +1,13 @@
 //! Memory profiling stub implementation for unsupported platforms
 
+use axum::body::Body;
+use http::Response;
 use http::StatusCode;
 use serde_json::json;
 
 use crate::plugins::diagnostics::DiagnosticsResult;
 use crate::plugins::diagnostics::response_builder::CacheControl;
 use crate::plugins::diagnostics::response_builder::ResponseBuilder;
-use crate::services::router::Request;
-use crate::services::router::Response;
 
 /// Memory profiling service stub for unsupported platforms
 #[derive(Clone)]
@@ -26,28 +26,26 @@ impl MemoryService {
         &self,
         status: StatusCode,
         data: serde_json::Value,
-        request: Request,
-    ) -> DiagnosticsResult<Response> {
+    ) -> DiagnosticsResult<Response<Body>> {
         ResponseBuilder::json_response(
             status,
             &data,
             CacheControl::NoCache,
-            request.context.clone(),
         )
     }
 
     /// Helper for unsupported platform response
-    fn unsupported_platform_response(&self, request: Request) -> DiagnosticsResult<Response> {
+    fn unsupported_platform_response(&self) -> DiagnosticsResult<Response<Body>> {
         let response = json!({
             "status": "not_supported",
             "message": format!("Memory profiling not supported: requires Linux platform with jemalloc global allocator enabled (current: {})", std::env::consts::OS),
             "platform": std::env::consts::OS
         });
-        self.json_response(StatusCode::NOT_IMPLEMENTED, response, request)
+        self.json_response(StatusCode::NOT_IMPLEMENTED, response)
     }
 
     /// Handle GET /diagnostics/memory/status
-    pub(crate) async fn handle_status(&self, request: Request) -> DiagnosticsResult<Response> {
+    pub(crate) async fn handle_status(&self) -> DiagnosticsResult<Response<Body>> {
         let status = json!({
             "profiling_active": false,
             "status": "not_available",
@@ -56,21 +54,21 @@ impl MemoryService {
             "message": "Memory profiling requires Linux platform with jemalloc global allocator enabled"
         });
 
-        self.json_response(StatusCode::OK, status, request)
+        self.json_response(StatusCode::OK, status)
     }
 
     /// Handle POST /diagnostics/memory/start
-    pub(crate) async fn handle_start(&self, request: Request) -> DiagnosticsResult<Response> {
-        self.unsupported_platform_response(request)
+    pub(crate) async fn handle_start(&self) -> DiagnosticsResult<Response<Body>> {
+        self.unsupported_platform_response()
     }
 
     /// Handle POST /diagnostics/memory/stop
-    pub(crate) async fn handle_stop(&self, request: Request) -> DiagnosticsResult<Response> {
-        self.unsupported_platform_response(request)
+    pub(crate) async fn handle_stop(&self) -> DiagnosticsResult<Response<Body>> {
+        self.unsupported_platform_response()
     }
 
     /// Handle POST /diagnostics/memory/dump
-    pub(crate) async fn handle_dump(&self, request: Request) -> DiagnosticsResult<Response> {
+    pub(crate) async fn handle_dump(&self) -> DiagnosticsResult<Response<Body>> {
         tracing::info!("Memory dump requested");
 
         let response = json!({
@@ -79,7 +77,7 @@ impl MemoryService {
             "platform": std::env::consts::OS
         });
 
-        self.json_response(StatusCode::NOT_IMPLEMENTED, response, request)
+        self.json_response(StatusCode::NOT_IMPLEMENTED, response)
     }
 
     /// Adds memory diagnostic data to an existing tar archive (stub implementation)
@@ -114,33 +112,30 @@ impl MemoryService {
     }
 
     /// Handle GET /diagnostics/memory/dumps - List dumps (unsupported)
-    pub(crate) async fn handle_list_dumps(&self, request: Request) -> DiagnosticsResult<Response> {
-        self.json_response(StatusCode::OK, serde_json::json!([]), request)
+    pub(crate) async fn handle_list_dumps(&self) -> DiagnosticsResult<Response<Body>> {
+        self.json_response(StatusCode::OK, serde_json::json!([]))
     }
 
     /// Handle GET /diagnostics/memory/dumps/{filename} - Download dump (unsupported)
     pub(crate) async fn handle_download_dump(
         &self,
-        request: Request,
         _filename: &str,
-    ) -> DiagnosticsResult<Response> {
-        self.unsupported_platform_response(request)
+    ) -> DiagnosticsResult<Response<Body>> {
+        self.unsupported_platform_response()
     }
 
     /// Handle DELETE /diagnostics/memory/dumps/{filename} - Delete dump (unsupported)
     pub(crate) async fn handle_delete_dump(
         &self,
-        request: Request,
         _filename: &str,
-    ) -> DiagnosticsResult<Response> {
-        self.unsupported_platform_response(request)
+    ) -> DiagnosticsResult<Response<Body>> {
+        self.unsupported_platform_response()
     }
 
     /// Handle DELETE /diagnostics/memory/dumps - Clear all dumps (unsupported)
     pub(crate) async fn handle_clear_all_dumps(
         &self,
-        request: Request,
-    ) -> DiagnosticsResult<Response> {
-        self.unsupported_platform_response(request)
+    ) -> DiagnosticsResult<Response<Body>> {
+        self.unsupported_platform_response()
     }
 }

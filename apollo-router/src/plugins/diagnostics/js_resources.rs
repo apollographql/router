@@ -2,17 +2,9 @@
 //!
 //! This module provides utilities for serving embedded JavaScript resources
 //! used by the diagnostics HTML interface. All JavaScript files are embedded
-//! at compile time and served with proper caching headers.
+//! at compile time.
 
-use http::StatusCode;
-use mime::TEXT_JAVASCRIPT;
-
-use super::DiagnosticsResult;
 use super::constants::routes::js_resources;
-use super::response_builder::CacheControl;
-use super::response_builder::ResponseBuilder;
-use crate::Context;
-use crate::services::router::Response;
 
 /// JavaScript resource definitions with their paths and content
 struct JsResource {
@@ -67,23 +59,12 @@ impl JsResourceHandler {
         }
     }
 
-    /// Handle a JavaScript resource request by path
-    pub(super) fn handle_request(
-        &self,
-        path: &str,
-        context: Context,
-    ) -> Option<DiagnosticsResult<Response>> {
-        // Find the resource by path
-        let resource = self.resources.iter().find(|r| r.path == path)?;
-
-        // Serve the JavaScript content with static resource caching
-        Some(ResponseBuilder::text_response(
-            StatusCode::OK,
-            TEXT_JAVASCRIPT,
-            resource.content,
-            CacheControl::StaticResource,
-            context,
-        ))
+    /// Get JavaScript resource content by path
+    pub(super) fn get_resource(&self, path: &str) -> Option<&'static str> {
+        self.resources
+            .iter()
+            .find(|r| r.path == path)
+            .map(|r| r.content)
     }
     /// Get all JavaScript resource paths
     #[cfg(test)]
@@ -100,19 +81,7 @@ impl Default for JsResourceHandler {
 
 #[cfg(test)]
 mod tests {
-    use http::Method;
-
     use super::*;
-    use crate::services::router::Request;
-    use crate::services::router::{self};
-
-    fn create_test_request() -> Request {
-        router::Request::fake_builder()
-            .method(Method::GET)
-            .uri(http::Uri::from_static("http://localhost/test"))
-            .build()
-            .unwrap()
-    }
 
     #[test]
     fn test_js_resource_handler_creation() {
@@ -120,35 +89,22 @@ mod tests {
         assert_eq!(handler.resources.len(), 7);
     }
 
-    #[tokio::test]
-    async fn test_handle_valid_resource() {
+    #[test]
+    fn test_get_valid_resource() {
         let handler = JsResourceHandler::new();
-        let request = create_test_request();
 
-        let result =
-            handler.handle_request(js_resources::BACKTRACE_PROCESSOR, request.context.clone());
+        let result = handler.get_resource(js_resources::BACKTRACE_PROCESSOR);
 
         assert!(result.is_some());
-        let response = result.unwrap().unwrap();
-        assert_eq!(response.response.status(), StatusCode::OK);
-
-        // Verify content-type header
-        assert_eq!(
-            response
-                .response
-                .headers()
-                .get(http::header::CONTENT_TYPE)
-                .unwrap(),
-            "text/javascript"
-        );
+        let content = result.unwrap();
+        assert!(!content.is_empty(), "Resource content should not be empty");
     }
 
-    #[tokio::test]
-    async fn test_handle_invalid_resource() {
+    #[test]
+    fn test_get_invalid_resource() {
         let handler = JsResourceHandler::new();
-        let request = create_test_request();
 
-        let result = handler.handle_request("/unknown.js", request.context.clone());
+        let result = handler.get_resource("/unknown.js");
         assert!(result.is_none());
     }
 

@@ -651,7 +651,7 @@ impl ContainerCpuInfo {
                         } else {
                             (
                                 "cgroup".to_string(),
-                                Self::calculate_cpu_count_with_default(system_cpus, &quota, &period),
+                                Self::calculate_cpu_count_with_default(system_cpus, quota, period),
                             )
                         }
                     }

@@ -4,14 +4,8 @@
 //! attacks such as path traversal and file type validation.
 
 use displaydoc::Display;
-use http::StatusCode;
-use serde_json::json;
 
-use super::DiagnosticsResult;
-use super::response_builder::CacheControl;
-use super::response_builder::ResponseBuilder;
-use crate::services::router::Request;
-use crate::services::router::Response;
+use super::DiagnosticsError;
 
 /// Security validation errors
 #[derive(Debug, thiserror::Error, Display)]
@@ -27,38 +21,10 @@ pub(super) enum SecurityError {
     FileNotFound { filename: String },
 }
 
-impl SecurityError {
-    /// Convert security error to HTTP response
-    pub(super) fn to_response(&self, request: Request) -> DiagnosticsResult<Response> {
-        let (status, error_type, message) = match &self {
-            SecurityError::PathTraversal { .. } => (
-                StatusCode::BAD_REQUEST,
-                "Invalid filename",
-                "Filename cannot contain path separators or '..' sequences".to_string(),
-            ),
-            SecurityError::InvalidFileType {
-                allowed_extensions, ..
-            } => (
-                StatusCode::BAD_REQUEST,
-                "Invalid file type",
-                format!("Only {} files are allowed", allowed_extensions.join(", ")),
-            ),
-            SecurityError::FileNotFound { filename } => (
-                StatusCode::NOT_FOUND,
-                "File not found",
-                format!("File '{}' not found", filename),
-            ),
-        };
-
-        ResponseBuilder::json_response(
-            status,
-            &json!({
-                "error": error_type,
-                "message": message
-            }),
-            CacheControl::NoCache,
-            request.context.clone(),
-        )
+// Convert SecurityError to DiagnosticsError
+impl From<SecurityError> for DiagnosticsError {
+    fn from(error: SecurityError) -> Self {
+        DiagnosticsError::Internal(error.to_string())
     }
 }
 

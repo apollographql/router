@@ -6,18 +6,17 @@ use std::mem;
 use std::path::Path;
 use std::ptr;
 
+use axum::body::Body;
+use http::Response;
 use http::StatusCode;
 use serde_json::json;
 
 use super::symbol_resolver::SymbolResolver;
-use crate::Context;
 use crate::plugins::diagnostics::DiagnosticsError;
 use crate::plugins::diagnostics::DiagnosticsResult;
 use crate::plugins::diagnostics::response_builder::CacheControl;
 use crate::plugins::diagnostics::response_builder::ResponseBuilder;
 use crate::plugins::diagnostics::security::SecurityValidator;
-use crate::services::router::Request;
-use crate::services::router::Response;
 
 /// Memory profiling service that handles memory operations
 #[derive(Clone)]
@@ -35,17 +34,12 @@ impl MemoryService {
         &self,
         status: StatusCode,
         data: serde_json::Value,
-        context: Context,
-    ) -> DiagnosticsResult<Response> {
-        ResponseBuilder::json_response(status, &data, CacheControl::NoCache, context)
+    ) -> DiagnosticsResult<Response<Body>> {
+        ResponseBuilder::json_response(status, &data, CacheControl::NoCache)
     }
 
     /// Helper to control jemalloc profiling (start/stop)
-    async fn control_profiling(
-        &self,
-        enable: bool,
-        request: Request,
-    ) -> DiagnosticsResult<Response> {
+    async fn control_profiling(&self, enable: bool) -> DiagnosticsResult<Response<Body>> {
         let operation = if enable { "start" } else { "stop" };
         let result = tokio::task::spawn_blocking(move || -> Result<(), String> {
             unsafe { tikv_jemalloc_ctl::raw::write::<bool>(b"prof.active\0", enable) }
@@ -87,11 +81,11 @@ impl MemoryService {
             ),
         };
 
-        self.json_response(status_code, response, request.context.clone())
+        self.json_response(status_code, response)
     }
 
     /// Handle GET /diagnostics/memory/status
-    pub(crate) async fn handle_status(&self, request: Request) -> DiagnosticsResult<Response> {
+    pub(crate) async fn handle_status(&self) -> DiagnosticsResult<Response<Body>> {
         let status = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
             // Read profiling status from jemalloc
             let profiling_active =
@@ -109,21 +103,21 @@ impl MemoryService {
         .map_err(|e| DiagnosticsError::Internal(format!("Task failed: {}", e)))
         .and_then(|r| r.map_err(DiagnosticsError::Memory))?;
 
-        self.json_response(StatusCode::OK, status, request.context.clone())
+        self.json_response(StatusCode::OK, status)
     }
 
     /// Handle POST /diagnostics/memory/start
-    pub(crate) async fn handle_start(&self, request: Request) -> DiagnosticsResult<Response> {
-        self.control_profiling(true, request).await
+    pub(crate) async fn handle_start(&self) -> DiagnosticsResult<Response<Body>> {
+        self.control_profiling(true).await
     }
 
     /// Handle POST /diagnostics/memory/stop
-    pub(crate) async fn handle_stop(&self, request: Request) -> DiagnosticsResult<Response> {
-        self.control_profiling(false, request).await
+    pub(crate) async fn handle_stop(&self) -> DiagnosticsResult<Response<Body>> {
+        self.control_profiling(false).await
     }
 
     /// Handle POST /diagnostics/memory/dump
-    pub(crate) async fn handle_dump(&self, request: Request) -> DiagnosticsResult<Response> {
+    pub(crate) async fn handle_dump(&self) -> DiagnosticsResult<Response<Body>> {
         tracing::info!("Memory dump requested");
 
         let base_output_directory = self.output_directory.clone();
@@ -140,7 +134,7 @@ impl MemoryService {
             ),
         };
 
-        self.json_response(status_code, response, request.context.clone())
+        self.json_response(status_code, response)
     }
 
     /// Create a heap dump using jemalloc profiling
@@ -360,7 +354,7 @@ impl MemoryService {
     }
 
     /// Handle GET /diagnostics/memory/dumps - List all available heap dump files
-    pub(crate) async fn handle_list_dumps(&self, request: Request) -> DiagnosticsResult<Response> {
+    pub(crate) async fn handle_list_dumps(&self) -> DiagnosticsResult<Response<Body>> {
         let output_directory = self.output_directory.clone();
 
         let dumps =
@@ -413,22 +407,14 @@ impl MemoryService {
             .map_err(|e| DiagnosticsError::Internal(format!("Task failed: {}", e)))
             .and_then(|r| r.map_err(DiagnosticsError::Internal))?;
 
-        self.json_response(
-            StatusCode::OK,
-            serde_json::json!(dumps),
-            request.context.clone(),
-        )
+        self.json_response(StatusCode::OK, serde_json::json!(dumps))
     }
 
     /// Handle GET /diagnostics/memory/dumps/{filename} - Download a specific heap dump file
-    pub(crate) async fn handle_download_dump(
-        &self,
-        request: Request,
-        filename: &str,
-    ) -> DiagnosticsResult<Response> {
+    pub(crate) async fn handle_download_dump(&self, filename: &str) -> DiagnosticsResult<Response<Body>> {
         // SECURITY: Critical security validation for file downloads
         if let Err(security_error) = SecurityValidator::validate_memory_dump_filename(filename) {
-            return security_error.to_response(request);
+            return Err(security_error.into());
         }
 
         let memory_path = Path::new(&self.output_directory)
@@ -439,7 +425,7 @@ impl MemoryService {
         if let Err(security_error) =
             SecurityValidator::validate_file_exists_and_is_file(&memory_path, filename)
         {
-            return security_error.to_response(request);
+            return Err(security_error.into());
         }
 
         // Read and serve the file
@@ -450,7 +436,6 @@ impl MemoryService {
                 file_contents,
                 Some(filename),
                 CacheControl::NoCache,
-                request.context.clone(),
             ),
             Err(e) => self.json_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -458,7 +443,6 @@ impl MemoryService {
                     "error": "Failed to read file",
                     "message": e.to_string()
                 }),
-                request.context.clone(),
             ),
         }
     }
@@ -466,9 +450,8 @@ impl MemoryService {
     /// Handle DELETE /diagnostics/memory/dumps/{filename} - Delete a specific heap dump file
     pub(crate) async fn handle_delete_dump(
         &self,
-        request: Request,
         filename: &str,
-    ) -> DiagnosticsResult<Response> {
+    ) -> DiagnosticsResult<Response<Body>> {
         let memory_path = Path::new(&self.output_directory)
             .join("memory")
             .join(filename);
@@ -477,7 +460,7 @@ impl MemoryService {
         if let Err(security_error) =
             SecurityValidator::validate_file_deletion(&memory_path, filename, &[".prof"])
         {
-            return security_error.to_response(request);
+            return Err(security_error.into());
         }
 
         // Delete the file
@@ -490,7 +473,6 @@ impl MemoryService {
                         "status": "deleted",
                         "message": format!("Heap dump '{}' deleted successfully", filename)
                     }),
-                    request.context.clone(),
                 )
             }
             Err(e) => {
@@ -501,7 +483,6 @@ impl MemoryService {
                         "error": "Failed to delete file",
                         "message": e.to_string()
                     }),
-                    request.context.clone(),
                 )
             }
         }
@@ -510,8 +491,7 @@ impl MemoryService {
     /// Handle DELETE /diagnostics/memory/dumps - clear all heap dump files
     pub(crate) async fn handle_clear_all_dumps(
         &self,
-        request: Request,
-    ) -> DiagnosticsResult<Response> {
+    ) -> DiagnosticsResult<Response<Body>> {
         let memory_path = Path::new(&self.output_directory).join("memory");
 
         // Create memory directory if it doesn't exist
@@ -523,7 +503,6 @@ impl MemoryService {
                     "error": "Failed to create memory directory",
                     "message": e.to_string()
                 }),
-                request.context.clone(),
             );
         }
 
@@ -547,7 +526,6 @@ impl MemoryService {
                         "error": "Failed to read memory directory",
                         "message": e.to_string()
                     }),
-                    request.context.clone(),
                 );
             }
         };
@@ -584,7 +562,6 @@ impl MemoryService {
                     "message": format!("Successfully deleted {} heap dump files", deleted_count),
                     "deleted_count": deleted_count
                 }),
-                request.context.clone(),
             )
         } else {
             self.json_response(
@@ -595,7 +572,6 @@ impl MemoryService {
                     "deleted_count": deleted_count,
                     "errors": errors
                 }),
-                request.context.clone(),
             )
         }
     }

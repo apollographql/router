@@ -26,12 +26,6 @@ impl ArchiveHeaderBuilder {
         }
     }
 
-    /// Set a custom timestamp (defaults to current time)
-    pub(super) fn timestamp(mut self, timestamp: u64) -> Self {
-        self.timestamp = Some(timestamp);
-        self
-    }
-
     /// Build a tar header for the given content
     pub(super) fn build_for_content(self, content: &[u8]) -> DiagnosticsResult<tokio_tar::Header> {
         let mut header = tokio_tar::Header::new_gnu();
@@ -97,19 +91,6 @@ mod tests {
         assert_eq!(header.size().unwrap(), content.len() as u64);
         assert_eq!(header.mode().unwrap(), 0o644);
         assert!(header.mtime().unwrap() > 0); // Should have a timestamp
-    }
-
-    #[test]
-    fn test_archive_header_builder_custom_timestamp() {
-        let content = b"test content";
-        let custom_timestamp = 1234567890;
-
-        let header = ArchiveHeaderBuilder::new("test.txt")
-            .timestamp(custom_timestamp)
-            .build_for_content(content)
-            .unwrap();
-
-        assert_eq!(header.mtime().unwrap(), custom_timestamp);
     }
 
     #[tokio::test]

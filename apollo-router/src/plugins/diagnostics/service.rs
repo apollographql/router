@@ -3,237 +3,269 @@
 //! **Platform Support**: This service is available on all platforms.
 //! Memory profiling features are available with graceful degradation on non-Linux platforms.
 
-use std::future::Future;
-use std::pin::Pin;
-use std::str::FromStr;
-use std::task::Context;
-use std::task::Poll;
+use std::sync::Arc;
 
-use http::Method;
+use axum::Extension;
+use axum::Router;
+use axum::extract::Path;
+use axum::response::IntoResponse;
+use axum::response::Response;
+use axum::routing::{get, post};
 use http::StatusCode;
-use mime::Mime;
 use mime::TEXT_HTML_UTF_8;
 use mime::TEXT_PLAIN_UTF_8;
-use tower::BoxError;
-use tower::Service;
 
-use super::DiagnosticsResult;
 use super::constants;
 use super::export::Exporter;
 use super::html_generator::HtmlGenerator;
 use super::js_resources::JsResourceHandler;
 use super::memory::MemoryService;
-use super::response_builder::CacheControl;
-use super::response_builder::ResponseBuilder;
-use crate::services::router::Request;
-use crate::services::router::Response;
 
-/// Internal service that handles diagnostics requests with routing
+/// MIME type for YAML content
+const TEXT_YAML: &str = "text/yaml; charset=utf-8";
+
+/// Shared state for all diagnostics handlers
 #[derive(Clone)]
-pub(super) struct DiagnosticsService {
+struct DiagnosticsState {
     memory: MemoryService,
-    exporter: Exporter,
     js_resources: JsResourceHandler,
-    router_config: std::sync::Arc<str>,
-    supergraph_schema: std::sync::Arc<String>,
+    router_config: Arc<str>,
+    supergraph_schema: Arc<String>,
+    output_directory: String,
 }
 
-impl DiagnosticsService {
-    pub(super) fn new(
-        output_directory: String,
-        exporter: Exporter,
-        router_config: std::sync::Arc<str>,
-        supergraph_schema: std::sync::Arc<String>,
-    ) -> Self {
-        Self {
-            memory: MemoryService::new(output_directory),
-            exporter,
-            js_resources: JsResourceHandler::new(),
-            router_config,
-            supergraph_schema,
-        }
-    }
+/// Creates the diagnostics router with all routes configured
+pub(super) fn create_router(
+    output_directory: String,
+    router_config: Arc<str>,
+    supergraph_schema: Arc<String>,
+) -> Router {
+    let state = DiagnosticsState {
+        memory: MemoryService::new(output_directory.clone()),
+        js_resources: JsResourceHandler::new(),
+        router_config,
+        supergraph_schema,
+        output_directory,
+    };
 
-    /// Route request to appropriate handler based on path
-    async fn route_request(&self, request: Request) -> DiagnosticsResult<Response> {
-        let full_path = request.router_request.uri().path();
-
-        // SECURITY: Safe path prefix stripping
-        // We strip the "/diagnostics/" prefix to get the internal route
-        // This is safe because we only match known routes below
-        let path = if full_path == constants::routes::BASE {
-            ""
-        } else {
-            full_path
-                .strip_prefix(&format!("{}/", constants::routes::BASE))
-                .unwrap_or(full_path)
-        };
-        let method = request.router_request.method();
-
-        // SECURITY: Extract filename for dump operations with controlled path parsing
-        // We use strip_prefix to safely extract just the filename portion
-        // Further validation happens in the dump handlers to prevent path traversal
-        let dump_filename = if path.starts_with(constants::routes::memory::DUMPS_PREFIX) {
-            path.strip_prefix(constants::routes::memory::DUMPS_PREFIX)
-                .map(|s| s.to_string())
-        } else {
-            None
-        };
-
-        // Check for JavaScript resources first before other routes
-        if method == Method::GET
-            && let Some(resource) = self
-                .js_resources
-                .handle_request(path, request.context.clone())
-        {
-            return resource;
-        }
-
-        match (method, path) {
-            (&Method::GET, "") => self.handle_dashboard(request).await,
-            (&Method::GET, constants::routes::memory::STATUS) => {
-                self.memory.handle_status(request).await
-            }
-            (&Method::GET, constants::routes::memory::DUMPS) => {
-                self.memory.handle_list_dumps(request).await
-            }
-            (&Method::DELETE, constants::routes::memory::DUMPS) => {
-                self.memory.handle_clear_all_dumps(request).await
-            }
-            (&Method::POST, constants::routes::memory::START) => {
-                self.memory.handle_start(request).await
-            }
-            (&Method::POST, constants::routes::memory::STOP) => {
-                self.memory.handle_stop(request).await
-            }
-            (&Method::POST, constants::routes::memory::DUMP) => {
-                self.memory.handle_dump(request).await
-            }
-            (&Method::GET, constants::routes::EXPORT) => {
-                self.exporter.clone().export(request).await
-            }
-            (&Method::GET, constants::routes::SYSTEM_INFO) => {
-                self.handle_system_info(request).await
-            }
-            (&Method::GET, constants::routes::ROUTER_CONFIG) => {
-                self.handle_router_config(request).await
-            }
-            (&Method::GET, constants::routes::SUPERGRAPH_SCHEMA) => {
-                self.handle_supergraph_schema(request).await
-            }
-            (&Method::GET, dump_path)
-                if dump_path.starts_with(constants::routes::memory::DUMPS_PREFIX) =>
-            {
-                self.handle_memory_dump_operation(request, dump_filename, false)
-                    .await
-            }
-            (&Method::DELETE, dump_path)
-                if dump_path.starts_with(constants::routes::memory::DUMPS_PREFIX) =>
-            {
-                self.handle_memory_dump_operation(request, dump_filename, true)
-                    .await
-            }
-            _ => self.error_response(StatusCode::NOT_FOUND, request),
-        }
-    }
-
-    /// Handle GET /diagnostics - serve interactive dashboard
-    async fn handle_dashboard(&self, request: Request) -> DiagnosticsResult<Response> {
-        // Create HTML generator on-demand for dashboard
-        let html_generator = HtmlGenerator::new()?;
-
-        // Generate dashboard HTML with separate script tags (not inlined)
-        let html = html_generator.generate_dashboard_html()?;
-
-        ResponseBuilder::text_response(
-            StatusCode::OK,
-            TEXT_HTML_UTF_8,
-            &html,
-            CacheControl::NoCache,
-            request.context.clone(),
+    Router::new()
+        // Dashboard
+        .route("/", get(handle_dashboard))
+        // System information and configuration
+        .route("/system_info.txt", get(handle_system_info))
+        .route("/router_config.yaml", get(handle_router_config))
+        .route("/supergraph.graphql", get(handle_supergraph_schema))
+        // Export
+        .route("/export", get(handle_export))
+        // Memory profiling endpoints
+        .route("/memory/status", get(handle_memory_status))
+        .route(
+            "/memory/dumps",
+            get(handle_memory_list_dumps).delete(handle_memory_clear_dumps),
         )
-    }
-
-    /// Handle GET /diagnostics/system_info.txt
-    async fn handle_system_info(&self, request: Request) -> DiagnosticsResult<Response> {
-        // Collect system information using the system_info module
-        let system_info = super::system_info::collect().await?;
-
-        ResponseBuilder::text_response(
-            StatusCode::OK,
-            TEXT_PLAIN_UTF_8,
-            &system_info,
-            CacheControl::NoCache,
-            request.context.clone(),
+        .route("/memory/start", post(handle_memory_start))
+        .route("/memory/stop", post(handle_memory_stop))
+        .route("/memory/dump", post(handle_memory_dump))
+        .route(
+            "/memory/dumps/{filename}",
+            get(handle_memory_download_dump).delete(handle_memory_delete_dump),
         )
-    }
+        // JavaScript resources - fallback for any unmatched routes
+        .fallback(handle_fallback)
+        .layer(Extension(state))
+}
 
-    /// Handle GET /diagnostics/router_config.yaml
-    async fn handle_router_config(&self, request: Request) -> DiagnosticsResult<Response> {
-        // Return the actual router configuration
-        ResponseBuilder::text_response(
+// ============================================================================
+// Handler Functions
+// ============================================================================
+
+/// GET / - Serve the interactive dashboard
+async fn handle_dashboard() -> Response {
+    match HtmlGenerator::new().and_then(|g| g.generate_dashboard_html()) {
+        Ok(html) => (
             StatusCode::OK,
-            Mime::from_str("text/yaml").expect("valid mime type"),
-            &self.router_config,
-            CacheControl::NoCache,
-            request.context.clone(),
+            [(http::header::CONTENT_TYPE, TEXT_HTML_UTF_8.as_ref())],
+            html,
         )
-    }
-
-    /// Handle GET /diagnostics/supergraph.graphql
-    async fn handle_supergraph_schema(&self, request: Request) -> DiagnosticsResult<Response> {
-        // Return the actual supergraph schema
-        let schema = self.supergraph_schema.as_str().to_string();
-
-        ResponseBuilder::text_response(
-            StatusCode::OK,
-            TEXT_PLAIN_UTF_8,
-            &schema,
-            CacheControl::NoCache,
-            request.context.clone(),
+            .into_response(),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to generate dashboard",
         )
-    }
-
-    /// Handle memory dump operations (GET or DELETE) with unified filename validation
-    async fn handle_memory_dump_operation(
-        &self,
-        request: Request,
-        dump_filename: Option<String>,
-        is_delete: bool,
-    ) -> DiagnosticsResult<Response> {
-        if let Some(filename) = dump_filename {
-            if is_delete {
-                self.memory.handle_delete_dump(request, &filename).await
-            } else {
-                self.memory.handle_download_dump(request, &filename).await
-            }
-        } else {
-            self.error_response(StatusCode::NOT_FOUND, request)
-        }
-    }
-
-    /// Create error response
-    fn error_response(&self, status: StatusCode, request: Request) -> DiagnosticsResult<Response> {
-        let message = match status {
-            StatusCode::NOT_FOUND => constants::messages::errors::NOT_FOUND,
-            _ => constants::messages::errors::INTERNAL_ERROR,
-        };
-
-        ResponseBuilder::error_response(status, message, request.context.clone())
+            .into_response(),
     }
 }
 
-impl Service<Request> for DiagnosticsService {
-    type Response = Response;
-    type Error = BoxError;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
-
-    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
+/// GET /system_info.txt - Collect and return system information
+async fn handle_system_info() -> Response {
+    match super::system_info::collect().await {
+        Ok(info) => (
+            StatusCode::OK,
+            [(http::header::CONTENT_TYPE, TEXT_PLAIN_UTF_8.as_ref())],
+            info,
+        )
+            .into_response(),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to collect system info",
+        )
+            .into_response(),
     }
+}
 
-    fn call(&mut self, req: Request) -> Self::Future {
-        let service = self.clone();
-        Box::pin(async move { service.route_request(req).await.map_err(|e| e.into()) })
+/// GET /router_config.yaml - Return router configuration
+async fn handle_router_config(Extension(state): Extension<DiagnosticsState>) -> Response {
+    (
+        StatusCode::OK,
+        [(http::header::CONTENT_TYPE, TEXT_YAML)],
+        state.router_config.to_string(),
+    )
+        .into_response()
+}
+
+/// GET /supergraph.graphql - Return supergraph schema
+async fn handle_supergraph_schema(Extension(state): Extension<DiagnosticsState>) -> Response {
+    (
+        StatusCode::OK,
+        [(http::header::CONTENT_TYPE, TEXT_PLAIN_UTF_8.as_ref())],
+        state.supergraph_schema.to_string(),
+    )
+        .into_response()
+}
+
+/// GET /export - Export diagnostics data
+async fn handle_export(Extension(state): Extension<DiagnosticsState>) -> Response {
+    // Create exporter on-demand since export() consumes self
+    let exporter = Exporter::new(
+        super::Config {
+            enabled: true,
+            listen: constants::network::default_listen_addr().into(),
+            output_directory: state.output_directory.clone(),
+        },
+        state.supergraph_schema.clone(),
+        state.router_config.clone(),
+    );
+
+    match exporter.export().await {
+        Ok(response) => response.into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Export failed: {}", e),
+        )
+            .into_response(),
+    }
+}
+
+/// GET /memory/status - Get memory profiling status
+async fn handle_memory_status(Extension(state): Extension<DiagnosticsState>) -> Response {
+    match state.memory.handle_status().await {
+        Ok(response) => response.into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to get memory status: {}", e),
+        )
+            .into_response(),
+    }
+}
+
+/// GET /memory/dumps - List all memory dumps
+async fn handle_memory_list_dumps(Extension(state): Extension<DiagnosticsState>) -> Response {
+    match state.memory.handle_list_dumps().await {
+        Ok(response) => response.into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to list dumps: {}", e),
+        )
+            .into_response(),
+    }
+}
+
+/// DELETE /memory/dumps - Clear all memory dumps
+async fn handle_memory_clear_dumps(Extension(state): Extension<DiagnosticsState>) -> Response {
+    match state.memory.handle_clear_all_dumps().await {
+        Ok(response) => response.into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to clear dumps: {}", e),
+        )
+            .into_response(),
+    }
+}
+
+/// POST /memory/start - Start memory profiling
+async fn handle_memory_start(Extension(state): Extension<DiagnosticsState>) -> Response {
+    match state.memory.handle_start().await {
+        Ok(response) => response.into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to start profiling: {}", e),
+        )
+            .into_response(),
+    }
+}
+
+/// POST /memory/stop - Stop memory profiling
+async fn handle_memory_stop(Extension(state): Extension<DiagnosticsState>) -> Response {
+    match state.memory.handle_stop().await {
+        Ok(response) => response.into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to stop profiling: {}", e),
+        )
+            .into_response(),
+    }
+}
+
+/// POST /memory/dump - Create a memory dump
+async fn handle_memory_dump(Extension(state): Extension<DiagnosticsState>) -> Response {
+    match state.memory.handle_dump().await {
+        Ok(response) => response.into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to create dump: {}", e),
+        )
+            .into_response(),
+    }
+}
+
+/// GET /memory/dumps/:filename - Download a specific memory dump
+async fn handle_memory_download_dump(
+    Extension(state): Extension<DiagnosticsState>,
+    Path(filename): Path<String>,
+) -> Response {
+    match state.memory.handle_download_dump(&filename).await {
+        Ok(response) => response.into_response(),
+        Err(e) => (StatusCode::NOT_FOUND, format!("Dump not found: {}", e)).into_response(),
+    }
+}
+
+/// DELETE /memory/dumps/:filename - Delete a specific memory dump
+async fn handle_memory_delete_dump(
+    Extension(state): Extension<DiagnosticsState>,
+    Path(filename): Path<String>,
+) -> Response {
+    match state.memory.handle_delete_dump(&filename).await {
+        Ok(response) => response.into_response(),
+        Err(e) => (StatusCode::NOT_FOUND, format!("Dump not found: {}", e)).into_response(),
+    }
+}
+
+/// Fallback handler for unmatched routes (JavaScript resources)
+async fn handle_fallback(
+    Extension(state): Extension<DiagnosticsState>,
+    uri: http::Uri,
+) -> Response {
+    // Since we're nested under /diagnostics, axum has already stripped that prefix
+    // We just need to remove the leading slash to match our resource paths
+    let path = uri.path().strip_prefix('/').unwrap_or(uri.path());
+
+    match state.js_resources.get_resource(path) {
+        Some(content) => (
+            StatusCode::OK,
+            [(http::header::CONTENT_TYPE, "application/javascript")],
+            content,
+        )
+            .into_response(),
+        None => (StatusCode::NOT_FOUND, "Not found").into_response(),
     }
 }

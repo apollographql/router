@@ -31,25 +31,6 @@ pub(crate) mod files {
 
 /// Route path constants
 pub(crate) mod routes {
-    /// Base diagnostics route
-    pub(crate) const BASE: &str = "/diagnostics";
-
-    /// Memory-related routes
-    pub(crate) mod memory {
-        pub(crate) const STATUS: &str = "memory/status";
-        pub(crate) const DUMPS: &str = "memory/dumps";
-        pub(crate) const START: &str = "memory/start";
-        pub(crate) const STOP: &str = "memory/stop";
-        pub(crate) const DUMP: &str = "memory/dump";
-        pub(crate) const DUMPS_PREFIX: &str = "memory/dumps/";
-    }
-
-    /// Export and data routes
-    pub(crate) const EXPORT: &str = "export";
-    pub(crate) const SYSTEM_INFO: &str = "system_info.txt";
-    pub(crate) const ROUTER_CONFIG: &str = "router_config.yaml";
-    pub(crate) const SUPERGRAPH_SCHEMA: &str = "supergraph.graphql";
-
     /// JavaScript resource files
     pub(crate) mod js_resources {
         pub(crate) const BACKTRACE_PROCESSOR: &str = "backtrace-processor.js";
@@ -59,14 +40,5 @@ pub(crate) mod routes {
         pub(crate) const DATA_ACCESS: &str = "data-access.js";
         pub(crate) const MAIN: &str = "main.js";
         pub(crate) const CUSTOM_ELEMENTS: &str = "custom_elements.js";
-    }
-}
-
-/// Error messages and descriptions
-pub(crate) mod messages {
-    /// Error messages for common scenarios
-    pub(crate) mod errors {
-        pub(crate) const NOT_FOUND: &str = "Endpoint not found. Available: GET /, GET export, GET memory/status, GET memory/dumps, DELETE memory/dumps, POST memory/start, POST memory/stop, POST memory/dump, GET memory/dumps/{filename}, DELETE memory/dumps/{filename}";
-        pub(crate) const INTERNAL_ERROR: &str = "Internal server error";
     }
 }
