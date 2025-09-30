@@ -1630,7 +1630,7 @@ async fn test_redis_emits_configuration_error_metric() {
         "include_subgraph_errors": {
             "all": true,
         },
-        "preview_entity_cache": {
+        "preview_response_cache": {
             "enabled": true,
             "subgraph": {
                 "all": {
@@ -1674,25 +1674,16 @@ async fn test_redis_emits_configuration_error_metric() {
         assert_eq!(response.status(), 200);
     }
 
-    router
-        .assert_metric_non_zero(
-            r#"apollo_router_cache_redis_errors_total{error_type="cluster",kind="entity",otel_scope_name="apollo/router"}"#,
-            None,
-        )
-        .await;
-
-    // LEFT OFF HERE: trying to figure out why we're getting `unknown` error type; trying to
-    // trigger an actual config error
-    router
-        .assert_metric_non_zero(
-            // NOTE: the `unknown` here should be `configuration`! it gets emitted from fred; so,
-            // maybe we need to trigger a config error in a different way; this test might actually
-            // test what happens with a config fred doesn't know how to use (eg, the schema isn't
-            // redis, rediss-cluster, etc)
-           r#"apollo_router_cache_redis_errors_total{error_type="unknown",kind="entity",otel_scope_name="apollo/router"}"#,
-            None,
-        )
-        .await;
+    // Metrics should show general redis errors and response cache fetch errors that indicate no valid
+    // configuration was supplied
+    let expected_metrics = [
+        r#"apollo_router_cache_redis_errors_total{error_type="config",kind="response-cache",otel_scope_name="apollo/router"}"#,
+        r#"apollo_router_operations_response_cache_fetch_error_total{code="NO_STORAGE",subgraph_name="products",otel_scope_name="apollo/router"}"#,
+        r#"apollo_router_operations_response_cache_fetch_error_total{code="NO_STORAGE",subgraph_name="reviews",otel_scope_name="apollo/router"}"#,
+    ];
+    for metric in expected_metrics {
+        router.assert_metric_non_zero(metric, None).await;
+    }
 
     router.graceful_shutdown().await;
 }

@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::error::Error;
 use std::fmt;
 use std::ops::Deref;
 use std::pin::Pin;
@@ -86,12 +85,6 @@ fn record_redis_error(error: &RedisError, caller: &'static str) {
         RedisErrorKind::Replica => "replica",
     };
 
-    tracing::error!(
-        "AWA :: error string: {}, details: {}, source: {:?}",
-        error.to_string(),
-        error.details(),
-        error.source()
-    );
     u64_counter_with_unit!(
         "apollo.router.cache.redis.errors",
         "Number of Redis errors by type",
@@ -254,8 +247,10 @@ where
 
 impl RedisCacheStorage {
     pub(crate) async fn new(config: RedisCache, caller: &'static str) -> Result<Self, BoxError> {
-        let url = Self::preprocess_urls(config.urls)?;
-        let mut client_config = RedisConfig::from_url(url.as_str())?;
+        let url = Self::preprocess_urls(config.urls)
+            .inspect_err(|err| record_redis_error(err, caller))?;
+        let mut client_config = RedisConfig::from_url(url.as_str())
+            .inspect_err(|err| record_redis_error(err, caller))?;
         let is_cluster = url.scheme() == "redis-cluster" || url.scheme() == "rediss-cluster";
 
         if let Some(username) = config.username {
@@ -513,20 +508,8 @@ impl RedisCacheStorage {
                 "empty Redis URL list",
             )),
             Some(first) => {
-                if url_len == 1 {
-                    return Ok(first.clone());
-                }
-
-                let username = first.username();
-                let password = first.password();
-
                 let scheme = first.scheme();
-
-                let mut result = first.clone();
-
-                if SUPPORTED_REDIS_SCHEMES.contains(&scheme) {
-                    let _ = result.set_scheme(scheme);
-                } else {
+                if !SUPPORTED_REDIS_SCHEMES.contains(&scheme) {
                     return Err(RedisError::new(
                         RedisErrorKind::Config,
                         format!(
@@ -535,6 +518,14 @@ impl RedisCacheStorage {
                     ));
                 }
 
+                if url_len == 1 {
+                    return Ok(first.clone());
+                }
+
+                let username = first.username();
+                let password = first.password();
+
+                let mut result = first.clone();
                 for mut url in urls_iter {
                     if url.username() != username {
                         return Err(RedisError::new(
@@ -924,16 +915,16 @@ mod test {
         for scheme in ["redis", "rediss"] {
             let url_s = format!("{scheme}://username:password@host:6666/database");
             let url = Url::parse(&url_s).expect("it's a valid url");
-            let urls = vec![url.clone(), url];
-            assert!(super::RedisCacheStorage::preprocess_urls(urls).is_ok());
+            assert!(super::RedisCacheStorage::preprocess_urls(vec![url.clone()]).is_ok());
+            assert!(super::RedisCacheStorage::preprocess_urls(vec![url.clone(), url]).is_ok());
         }
         // Cluster Format
         for scheme in ["redis-cluster", "rediss-cluster"] {
             let url_s =
                 format!("{scheme}://username:password@host:6666?node=host1:6667&node=host2:6668");
             let url = Url::parse(&url_s).expect("it's a valid url");
-            let urls = vec![url.clone(), url];
-            assert!(super::RedisCacheStorage::preprocess_urls(urls).is_ok());
+            assert!(super::RedisCacheStorage::preprocess_urls(vec![url.clone()]).is_ok());
+            assert!(super::RedisCacheStorage::preprocess_urls(vec![url.clone(), url]).is_ok());
         }
         // Sentinel Format
         for scheme in ["redis-sentinel", "rediss-sentinel"] {
@@ -941,15 +932,15 @@ mod test {
                 "{scheme}://username:password@host:6666?node=host1:6667&node=host2:6668&sentinelServiceName=myservice&sentinelUserName=username2&sentinelPassword=password2"
             );
             let url = Url::parse(&url_s).expect("it's a valid url");
-            let urls = vec![url.clone(), url];
-            assert!(super::RedisCacheStorage::preprocess_urls(urls).is_ok());
+            assert!(super::RedisCacheStorage::preprocess_urls(vec![url.clone()]).is_ok());
+            assert!(super::RedisCacheStorage::preprocess_urls(vec![url.clone(), url]).is_ok());
         }
         // Make sure it fails on sample invalid schemes
         for scheme in ["wrong", "something"] {
             let url_s = format!("{scheme}://username:password@host:6666/database");
             let url = Url::parse(&url_s).expect("it's a valid url");
-            let urls = vec![url.clone(), url];
-            assert!(super::RedisCacheStorage::preprocess_urls(urls).is_err());
+            assert!(super::RedisCacheStorage::preprocess_urls(vec![url.clone()]).is_err());
+            assert!(super::RedisCacheStorage::preprocess_urls(vec![url.clone(), url]).is_err());
         }
     }
 
@@ -963,42 +954,65 @@ mod test {
         let url_s1 = "redis://username:password@host:6666/database";
         let url_1 = Url::parse(url_s1).expect("it's a valid url");
         let urls = vec![url, url_1];
-        assert!(super::RedisCacheStorage::preprocess_urls(urls).is_ok());
+        assert!(super::RedisCacheStorage::preprocess_urls(urls.clone()).is_ok());
+        for url in urls {
+            assert!(super::RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
+        }
+
         // redis-cluster, redis
         let url_s = "redis-cluster://username:password@host:6666/database";
         let url = Url::parse(url_s).expect("it's a valid url");
         let url_s1 = "redis://username:password@host:6666/database";
         let url_1 = Url::parse(url_s1).expect("it's a valid url");
         let urls = vec![url, url_1];
-        assert!(super::RedisCacheStorage::preprocess_urls(urls).is_ok());
+        assert!(super::RedisCacheStorage::preprocess_urls(urls.clone()).is_ok());
+        for url in urls {
+            assert!(super::RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
+        }
+
         // redis, redis-cluster
         let url_s = "redis://username:password@host:6666/database";
         let url = Url::parse(url_s).expect("it's a valid url");
         let url_s1 = "redis-cluster://username:password@host:6666/database";
         let url_1 = Url::parse(url_s1).expect("it's a valid url");
         let urls = vec![url, url_1];
-        assert!(super::RedisCacheStorage::preprocess_urls(urls).is_err());
+        assert!(super::RedisCacheStorage::preprocess_urls(urls.clone()).is_err());
+        for url in urls {
+            assert!(super::RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
+        }
+
         // redis-sentinel, redis
         let url_s = "redis-sentinel://username:password@host:6666/database";
         let url = Url::parse(url_s).expect("it's a valid url");
         let url_s1 = "redis://username:password@host:6666/database";
         let url_1 = Url::parse(url_s1).expect("it's a valid url");
         let urls = vec![url, url_1];
-        assert!(super::RedisCacheStorage::preprocess_urls(urls).is_err());
+        assert!(super::RedisCacheStorage::preprocess_urls(urls.clone()).is_err());
+        for url in urls {
+            assert!(super::RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
+        }
+
         // redis, rediss
         let url_s = "redis://username:password@host:6666/database";
         let url = Url::parse(url_s).expect("it's a valid url");
         let url_s1 = "rediss://username:password@host:6666/database";
         let url_1 = Url::parse(url_s1).expect("it's a valid url");
         let urls = vec![url, url_1];
-        assert!(super::RedisCacheStorage::preprocess_urls(urls).is_err());
+        assert!(super::RedisCacheStorage::preprocess_urls(urls.clone()).is_err());
+        for url in urls {
+            assert!(super::RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
+        }
+
         // redis, rediss-cluster
         let url_s = "redis://username:password@host:6666/database";
         let url = Url::parse(url_s).expect("it's a valid url");
         let url_s1 = "rediss-cluster://username:password@host:6666/database";
         let url_1 = Url::parse(url_s1).expect("it's a valid url");
         let urls = vec![url, url_1];
-        assert!(super::RedisCacheStorage::preprocess_urls(urls).is_err());
+        assert!(super::RedisCacheStorage::preprocess_urls(urls.clone()).is_err());
+        for url in urls {
+            assert!(super::RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
+        }
     }
 
     /// Tests that `insert_multiple` and `get_multiple` are successful when run against clustered Redis.
