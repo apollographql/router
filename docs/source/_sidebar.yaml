@@ -131,7 +131,7 @@ items:
                       children:
                         - label: "Overview"
                           href: "./observability/router-telemetry-otel/apm-guides/datadog/connecting-to-datadog"
-                        - label: "OTel-Collector"
+                        - label: "OpenTelemetry Collector"
                           href: "./observability/router-telemetry-otel/apm-guides/datadog/connecting-to-datadog/otel-collector"
                         - label: "Datadog Agent"
                           children:
