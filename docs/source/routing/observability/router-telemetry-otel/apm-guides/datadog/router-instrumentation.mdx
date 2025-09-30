@@ -47,7 +47,7 @@ telemetry:
 ```
 
 <Caution>
-    High Cardinality: The `operation_name` and `subgraph_operation_name` attributes can be unbounded and high-cardinality if your GraphQL operations have many unique operation names. This affects both APM views and trace metrics, because Datadog creates metrics for each unique `resource.name` value. Consider using a more bounded attribute like `operation_type` (query/mutation/subscription) or removing the `resource.name` attribute and letting Datadog calculate the resource name on its own if you experience cardinality issues in Datadog.
+    High Cardinality: The `operation_name` and `subgraph_operation_name` attributes can be unbounded and have high-cardinality if your GraphQL operations have many unique operation names. This affects both APM views and trace metrics, because Datadog creates metrics for each unique `resource.name` value. Consider using a more bounded attribute like `operation_type` (query/mutation/subscription) or removing the `resource.name` attribute and letting Datadog calculate the resource name on its own if you experience cardinality issues in Datadog.
 </Caution>
 
 With these attributes configured, you can filter for operations in Datadog APM:
