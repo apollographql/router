@@ -52,6 +52,7 @@ use crate::merger::merge_enum::EnumExample;
 use crate::merger::merge_enum::EnumExampleAst;
 use crate::merger::merge_enum::EnumTypeUsage;
 use crate::merger::merge_field::FieldMergeContext;
+use crate::merger::merge_field::JoinFieldBuilder;
 use crate::schema::FederationSchema;
 use crate::schema::directive_location::DirectiveLocationExt;
 use crate::schema::position::DirectiveDefinitionPosition;
@@ -75,8 +76,6 @@ use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
 use crate::utils::human_readable::human_readable_subgraph_names;
 use crate::utils::iter_into_single_item;
-
-use super::merge_field::JoinFieldBuilder;
 
 static NON_MERGED_CORE_FEATURES: LazyLock<[Identity; 4]> = LazyLock::new(|| {
     [
