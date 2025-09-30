@@ -51,7 +51,7 @@ impl CorsLayer {
 
         // Validate origin configurations
         if let Some(policies) = &config.policies {
-            for policy in policies {
+            for policy in policies.iter() {
                 // Validate origin URLs
                 for origin in policy.origins.iter() {
                     http::HeaderValue::from_str(origin).map_err(|_| {
@@ -324,10 +324,8 @@ impl<S> CorsService<S> {
             );
         }
 
-        // FIXME: Do we always want to do this, even for preflight requests?
-        if let Some(pna) = policy
-            .map(|policy| policy.private_network_access.as_ref())
-            .flatten()
+        if is_preflight
+            && let Some(Some(pna)) = policy.map(|policy| policy.private_network_access.as_ref())
         {
             const ACCESS_CONTROL_PRIVATE_NETWORK: HeaderName =
                 HeaderName::from_static("access_control_private_network");
