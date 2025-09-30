@@ -59,14 +59,205 @@ preview_response_cache:
 ### Identify what data to cache
 
 Links to telemetry page with metrics and dashboard screenshots and studio insights
-// TODO
+In order to know what could highly benefit from caching you can enable metrics and add more granularity to this metrics to exactly know what you want to cache. It's granular because the more you add granularity to more it will generate high cardinality for this metric and will have a cost on your APM.
+
+Here is how to configure this metric:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      cache: # Cache instruments configuration
+        apollo.router.operations.response.cache: # A counter which counts the number of cache hit and miss for subgraph requests
+          attributes:
+            graphql.type.name: true # Include the entity type name. default: false
+            subgraph.name: # Custom attributes to include the subgraph name in the metric
+              subgraph_name: true
+            # supergraph.operation.name: # Add custom attribute to display the supergraph operation name
+            #   supergraph_operation_name: string
+            # You can add more custom attributes using subgraph selectors
+```
+
+Now you'll be able to use `apollo.router.operations.response.cache` metric and you should have a dashboard looking like this for example:
+
+<img
+  className="screenshot"
+  alt="Response cache metrics dashboard"
+  src="../../../../images/response-cache/cache_hit_miss_dashboard.png"
+/>
+
+On the left you have the number of cache hits per subgraph and types. No cache hits because you didn't return any `Cache-control` header from your subgraphs. On the right you can see the number of cache misses and so the potential cache hits you could have. If we look at this example it might be worth it to cache type `User` from subgraph `posts` as you have a lot of cache misses.
+
 
 ### Schema integration
-// TODO
-Demo with @cacheTag and @cacheControl directive
+Consider we have 2 subgraphs: users and posts.
 
-### Subgraph response integration
-Demo with cache-control response header and subgraph response extensions
+```graphql title="users.graphql"
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/federation/v2.12"
+    import: ["@key", "@external"]
+  )
+
+type Query {
+  user(id: ID!): User
+  users: [User!]!
+}
+
+type User @key(fields: "id") {
+  id: ID!
+  name: String!
+  email: String!
+  posts: [Post!]! @external
+}
+
+type Post @key(fields: "id") {
+  id: ID!
+  content: String! @external
+}
+```
+
+```graphql title="posts.graphql"
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.12", import: ["@key"])
+
+type Query {
+  posts: [Post!]
+  post(id: ID!): Post
+}
+
+type User @key(fields: "id") {
+  id: ID!
+  posts: [Post!]!
+}
+
+type Post @key(fields: "id") {
+  id: ID!
+  title: String!
+  content: String!
+  author: User!
+  featuredImage: String
+}
+```
+
+As I saw earlier with metrics I could highly benefit from caching by caching type `User` on subgraph `posts` I'm going to do it by using the `@cacheControl` directive.
+
+<Note>
+    This example using `@cacheControl` only works if you're using Apollo Server as subgraph. If you're using something else then you'll have to update your codebase to return the right `Cache-control` header and it will work properly.
+</Note>
+
+Here is the new version of the schema for subgraph `posts`:
+
+```graphql title="posts.graphql"
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.12", import: ["@key"])
+
+enum CacheControlScope {
+  PUBLIC
+  PRIVATE
+}
+directive @cacheControl(
+  maxAge: Int
+  scope: CacheControlScope
+  inheritMaxAge: Boolean
+) on FIELD_DEFINITION | OBJECT | INTERFACE | UNION
+
+type Query {
+  posts: [Post!] @cacheControl(maxAge: 60)
+  post(id: ID!): Post
+}
+
+type User @key(fields: "id") @cacheControl(maxAge: 60) {
+  id: ID!
+  posts: [Post!]!
+}
+
+type Post @key(fields: "id") @cacheControl(maxAge: 60) {
+  id: ID!
+  title: String!
+  content: String!
+  author: User!
+  featuredImage: String
+}
+```
+
+I set the cache control with TTL of 60 seconds so both the `Post` and `User` types will be in cached for 60 seconds.
+Now I enabled this you can see the difference on the previous dashboard, you now have cache hits and less cache misses.
+
+<img
+  className="screenshot"
+  alt="Response cache hit metrics dashboard"
+  src="../../../../images/response-cache/cache_hit_dashboard.png"
+/>
+
+And the response time will be faster as you can see on the right in the following screenshot:
+
+<img
+  className="screenshot"
+  alt="Response cache metrics dashboard"
+  src="../../../../images/response-cache/cache_resp_time.png"
+/>
 
 ### Invalidation
-// TODO
+
+Now you have cached data based on TTL maybe you would like to be able to increase these TTLs and automatically invalidate the data you want when you know there's a change on a specific data. By default we have several ways to invalidate data and to go further you can read the docs about [invalidation](./invalidation) but for this quickstart we will use cache tags which are like surrogate cache keys for REST APIs. You can tag some data on your schema to tag it and be able to only invalidate this data.
+
+To achieve this we will use `@cacheTag` directive introduced in federation v2.12. It takes a `format` as argument to create your cache tag. For type `User` and for root fields `posts` we will create different cache tags:
+
+
+```graphql title="posts.graphql"
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.12", import: ["@key", "@cacheTag"])
+
+enum CacheControlScope {
+  PUBLIC
+  PRIVATE
+}
+directive @cacheControl(
+  maxAge: Int
+  scope: CacheControlScope
+  inheritMaxAge: Boolean
+) on FIELD_DEFINITION | OBJECT | INTERFACE | UNION
+
+type Query {
+  posts: [Post!] @cacheControl(maxAge: 60) @cacheTag(format: "posts")
+  post(id: ID!): Post
+}
+
+type User @key(fields: "id") @cacheControl(maxAge: 60) @cacheTag(format: "user-{$key.id}") @cacheTag(format: "user") {
+  id: ID!
+  posts: [Post!]!
+}
+
+type Post @key(fields: "id") @cacheControl(maxAge: 60) {
+  id: ID!
+  title: String!
+  content: String!
+  author: User!
+  featuredImage: String
+}
+```
+
+You can see I tagged `User` with a static cache tag format `user` and a dynamic one involving variable interpolation and we use the entity key `id` to generate the cache tag. So for example if the `User` fetched has an `id` set to `42` it would generate `user-42` as a cache tag.
+
+Now we tagged our data we can invalidate it using a `curl` command to invalidate the user with id `42`:
+
+```
+curl --request POST \
+	--header "authorization: $INVALIDATION_SHARED_KEY" \
+	--header 'content-type: application/json' \
+	--url http://localhost:4000/invalidation \
+	--data '[{"kind":"cache_tag","subgraphs":["posts"],"cache_tag":"user-42"}]'
+```
+
+`INVALIDATION_SHARED_KEY` is an environment variable key you set containing a token used to call this endpoint, it has been used in router's configuration at the beginining of this page.
+
+This call will return the number of invalidated entries, for example if we only invalidated 1 entry with this request we would receive:
+
+```json
+{
+  "count": 1
+}
+```
+
+If you want to play with response caching and see what has been cached or not in a query I highly recommend you to use the cache debugger documented [here](./debugging)
