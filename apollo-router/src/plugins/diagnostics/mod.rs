@@ -50,7 +50,7 @@ mod archive_utils;
 mod constants;
 mod export;
 mod html_generator;
-mod js_resources;
+mod static_resources;
 mod memory;
 mod response_builder;
 mod security;

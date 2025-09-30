@@ -41,4 +41,9 @@ pub(crate) mod routes {
         pub(crate) const MAIN: &str = "main.js";
         pub(crate) const CUSTOM_ELEMENTS: &str = "custom_elements.js";
     }
+
+    /// CSS resource files
+    pub(crate) mod css_resources {
+        pub(crate) const STYLES: &str = "styles.css";
+    }
 }

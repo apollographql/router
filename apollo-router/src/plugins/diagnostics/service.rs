@@ -48,7 +48,7 @@ use mime::TEXT_PLAIN_UTF_8;
 use super::constants;
 use super::export::Exporter;
 use super::html_generator::HtmlGenerator;
-use super::js_resources::JsResourceHandler;
+use super::static_resources::StaticResourceHandler;
 use super::memory::MemoryService;
 
 /// MIME type for YAML content
@@ -58,7 +58,7 @@ const TEXT_YAML: &str = "text/yaml; charset=utf-8";
 #[derive(Clone)]
 struct DiagnosticsState {
     memory: MemoryService,
-    js_resources: JsResourceHandler,
+    static_resources: StaticResourceHandler,
     router_config: Arc<str>,
     supergraph_schema: Arc<String>,
     output_directory: String,
@@ -72,7 +72,7 @@ pub(super) fn create_router(
 ) -> Router {
     let state = DiagnosticsState {
         memory: MemoryService::new(output_directory.clone()),
-        js_resources: JsResourceHandler::new(),
+        static_resources: StaticResourceHandler::new(),
         router_config,
         supergraph_schema,
         output_directory,
@@ -100,7 +100,7 @@ pub(super) fn create_router(
             "/memory/dumps/{filename}",
             get(handle_memory_download_dump).delete(handle_memory_delete_dump),
         )
-        // JavaScript resources - fallback for any unmatched routes
+        // Static resources (JS/CSS) - fallback for any unmatched routes
         .fallback(handle_fallback)
         .layer(Extension(state))
 }
@@ -259,7 +259,7 @@ async fn handle_memory_delete_dump(
         .map_or_else(|e| not_found_response(format!("Dump not found: {}", e)), |r| r.into_response())
 }
 
-/// Fallback handler for unmatched routes (JavaScript resources)
+/// Fallback handler for unmatched routes (static resources: JS/CSS)
 async fn handle_fallback(
     Extension(state): Extension<DiagnosticsState>,
     uri: http::Uri,
@@ -268,10 +268,10 @@ async fn handle_fallback(
     // We just need to remove the leading slash to match our resource paths
     let path = uri.path().strip_prefix('/').unwrap_or(uri.path());
 
-    match state.js_resources.get_resource(path) {
-        Some(content) => (
+    match state.static_resources.get_resource(path) {
+        Some((content, content_type)) => (
             StatusCode::OK,
-            [(http::header::CONTENT_TYPE, "application/javascript")],
+            [(http::header::CONTENT_TYPE, content_type)],
             content,
         )
             .into_response(),
