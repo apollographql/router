@@ -1,15 +1,37 @@
-//! Diagnostics plugin
+//! Runtime diagnostics plugin for the Apollo Router
 //!
-//! Provides web endpoints for runtime diagnostics including memory profiling.
+//! Provides an interactive web dashboard and API endpoints for debugging and profiling router
+//! behavior in production or development environments. Useful for investigating performance issues,
+//! memory leaks, and understanding router configuration.
 //!
-//! This plugin exposes endpoints for:
-//! - Memory profiling control (cross-platform with graceful degradation)
-//! - Heap dump generation (Linux-only, requires jemalloc)
-//! - Profiling status monitoring
-//! - Diagnostic data export
+//! ## Use Cases
 //!
-//! **Platform Support**: This plugin is available on all platforms.
-//! Heap dump functionality is only available on Linux due to jemalloc requirements.
+//! - **Memory profiling**: Track heap allocations and identify memory leaks in long-running routers
+//! - **Configuration debugging**: Inspect active router configuration and supergraph schema
+//! - **System diagnostics**: Collect system information (OS, CPU, memory, network) for support tickets
+//! - **Diagnostic export**: Generate comprehensive snapshot archives for offline analysis
+//!
+//! ## Architecture
+//!
+//! The plugin exposes a nested Axum router under `/diagnostics` with three main subsystems:
+//!
+//! - **Dashboard** (`html_generator`): Interactive web UI for visualizing router state
+//! - **Memory Service** (`memory`): Jemalloc heap profiling with start/stop/dump control
+//! - **Export Service** (`export`): Bundles configuration, schema, system info, and memory dumps
+//!
+//! All endpoints return structured JSON or serve static resources. The memory service uses
+//! jemalloc's profiling API (Linux-only) with graceful degradation on other platforms.
+//!
+//! ## Security
+//!
+//! **⚠️ This plugin is disabled by default.** When enabled, it binds to `127.0.0.1:8089` to prevent
+//! network exposure. Only enable in trusted environments with proper network isolation, as endpoints
+//! expose sensitive configuration data and memory contents.
+//!
+//! ## Platform Support
+//!
+//! Available on all platforms. Memory profiling features require Linux with jemalloc allocator
+//! (enabled via `global-allocator` feature). Other diagnostic features work cross-platform.
 
 use std::sync::Arc;
 
