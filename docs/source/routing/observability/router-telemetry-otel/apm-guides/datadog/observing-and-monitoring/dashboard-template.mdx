@@ -7,8 +7,13 @@ description: Set up and use pre-configured Datadog dashboards for monitoring the
 
 This guide walks through using Apollo's pre-configured template to create Datadog dashboards and monitor your Apollo Router.
 
-## Install the dashboard template
+<img
+  className="screenshot"
+  alt="A screenshot of the Datadog dashboard template for Apollo Router"
+  src="../../../../../../images/apm-templates/datadog.jpg"
+/>
 
+## Install the dashboard template
 
 1. In your Datadog account, navigate to **Dashboards** > **New Dashboard** and create a new blank dashboard.
 2. Copy the JSON content from the [dashboard template](https://github.com/apollographql/apm-templates/blob/main/datadog/graphos-template.json).
@@ -37,7 +42,7 @@ Each section and metric includes a description of what it represents and why it 
 ## Keep the dashboard up to date
 
 Apollo plans to support keeping the dashboard in sync with upstream changes via tagged releases and Terraform modules.
-Until this feature is implemented, Apollo will treat the dashboard template as an immutable artifact unless router telemetry becomes incompatible with the template.
+Until versioning and distribution is implemented, Apollo will treat the dashboard template as an immutable artifact unless router telemetry becomes incompatible with the template.
 
 In that exceptional case, Apollo recommends the following process to update your dashboard:
 
