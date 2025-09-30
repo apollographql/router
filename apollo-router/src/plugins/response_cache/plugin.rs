@@ -947,6 +947,7 @@ impl CacheService {
                 .instrument(tracing::info_span!(
                     "response_cache.lookup",
                     kind = "root",
+                    subgraph.name = self.name.clone(),
                     "graphql.type" = self.entity_type.as_deref().unwrap_or_default(),
                     debug = self.debug,
                     private = is_known_private,
@@ -1126,6 +1127,7 @@ impl CacheService {
             .instrument(tracing::info_span!(
                 "response_cache.lookup",
                 kind = "entity",
+                subgraph.name = self.name.clone(),
                 debug = self.debug,
                 private = is_known_private,
                 contains_private_id = private_id.is_some()

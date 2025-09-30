@@ -52,8 +52,39 @@ The latency metrics are marked as experimental because we will change them if we
 
 ## Traces
 
-// TODO
+If you're looking at a trace when you have cache hits it looks like this:
+
+<img
+  className="screenshot"
+  alt="Response cache tracing"
+  src="../../../../images/response-cache/trace.png"
+  width="300"
+/>
+
+You'll have a `response_cache.lookup` span to know how much time was spent to fetch the data from the cache.
+
+When you insert data in the cache another span will be `response_cache.store` to know how much time was spent to insert the data in cache.
+
+For invalidation you can look for `invalidation_endpoint` span.
+
+List of available attributes on `response_cache.lookup`:
++ kind: either `root` or `entity` to know if we're fetching data for root fields or an entity
++ subgraph.name: the subgraph name
++ graphql.type: the type (or parent type for root fields) we're fetching
++ debug: boolean to know if the debug mode is enabled or not
++ private: boolean to know if it's a private data or not
++ contains_private_id: boolean to know if we found private id in context
++ cache.key: the primary cache key
++ cache.status: `hit`|`partial_hit`|`miss`
+
+
+List of available attributes on `response_cache.store`:
++ kind: either `root` or `entity` to know if we're fetching data for root fields or an entity
++ subgraph.name: the subgraph name
++ ttl: the ttl of this cache entry
++ batch.size: when it's an entity we often batch inserts for entities, it's the size of the batch
 
 ## Logs
 
 //TODO
+// Introduce the selectors
