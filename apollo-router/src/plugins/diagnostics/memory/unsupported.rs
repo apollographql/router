@@ -27,11 +27,7 @@ impl MemoryService {
         status: StatusCode,
         data: serde_json::Value,
     ) -> DiagnosticsResult<Response<Body>> {
-        ResponseBuilder::json_response(
-            status,
-            &data,
-            CacheControl::NoCache,
-        )
+        ResponseBuilder::json_response(status, &data, CacheControl::NoCache)
     }
 
     /// Helper for unsupported platform response
@@ -133,9 +129,7 @@ impl MemoryService {
     }
 
     /// Handle DELETE /diagnostics/memory/dumps - Clear all dumps (unsupported)
-    pub(crate) async fn handle_clear_all_dumps(
-        &self,
-    ) -> DiagnosticsResult<Response<Body>> {
+    pub(crate) async fn handle_clear_all_dumps(&self) -> DiagnosticsResult<Response<Body>> {
         self.unsupported_platform_response()
     }
 }

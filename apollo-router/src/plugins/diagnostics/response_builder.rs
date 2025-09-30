@@ -105,12 +105,8 @@ mod tests {
     fn test_json_response() {
         let data = json!({"status": "ok", "message": "test"});
 
-        let response = ResponseBuilder::json_response(
-            StatusCode::OK,
-            &data,
-            CacheControl::NoCache,
-        )
-        .unwrap();
+        let response =
+            ResponseBuilder::json_response(StatusCode::OK, &data, CacheControl::NoCache).unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(

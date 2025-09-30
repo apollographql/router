@@ -1,6 +1,7 @@
+use std::ffi::CStr;
+
 #[cfg(feature = "dhat-heap")]
 use parking_lot::Mutex;
-use std::ffi::CStr;
 
 #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 #[global_allocator]
@@ -64,8 +65,9 @@ static malloc_conf: Option<&'static libc::c_char> = Some(unsafe {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::ffi::CStr;
+
+    use super::*;
 
     #[test]
     fn test_malloc_conf_is_valid_c_string() {

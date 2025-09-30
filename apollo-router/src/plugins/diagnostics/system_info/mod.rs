@@ -624,7 +624,11 @@ impl ContainerCpuInfo {
                             match contents.split_once(' ') {
                                 Some((quota, period)) => (
                                     "cgroup2".to_string(),
-                                    Self::calculate_cpu_count_with_default(system_cpus, quota, period),
+                                    Self::calculate_cpu_count_with_default(
+                                        system_cpus,
+                                        quota,
+                                        period,
+                                    ),
                                 ),
                                 None => ("system".to_string(), system_cpus),
                             }
@@ -696,12 +700,14 @@ impl ContainerCpuInfo {
         #[cfg(target_os = "linux")]
         {
             // cgroup v1 shares
-            if let Ok(cpu_shares) = tokio::fs::read_to_string("/sys/fs/cgroup/cpu/cpu.shares").await {
+            if let Ok(cpu_shares) = tokio::fs::read_to_string("/sys/fs/cgroup/cpu/cpu.shares").await
+            {
                 let shares = cpu_shares.trim();
                 return Some(format!("CPU Shares (cgroup v1): {}", shares));
             }
             // cgroup v2 weight
-            else if let Ok(cpu_weight) = tokio::fs::read_to_string("/sys/fs/cgroup/cpu.weight").await
+            else if let Ok(cpu_weight) =
+                tokio::fs::read_to_string("/sys/fs/cgroup/cpu.weight").await
             {
                 let weight = cpu_weight.trim();
                 return Some(format!("CPU Weight (cgroup v2): {}", weight));
@@ -926,7 +932,6 @@ pub(crate) async fn collect() -> DiagnosticsResult<String> {
     let diagnostics = SystemDiagnostics::new().await;
     Ok(diagnostics.to_string())
 }
-
 
 /// CGroup version enumeration
 #[cfg(target_os = "linux")]

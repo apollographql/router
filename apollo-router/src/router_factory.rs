@@ -110,7 +110,7 @@ impl Endpoint {
     /// // - /diagnostics/
     /// // - /diagnostics/status
     /// ```
-    pub (crate) fn from_router(path: String, router: axum::Router) -> Self {
+    pub(crate) fn from_router(path: String, router: axum::Router) -> Self {
         Self {
             path,
             handler: EndpointHandler::Router(router),
@@ -120,9 +120,7 @@ impl Endpoint {
     pub(crate) fn into_router(self) -> axum::Router {
         match self.handler {
             // If we already have a router, just nest it at the path
-            EndpointHandler::Router(router) => {
-                axum::Router::new().nest(&self.path, router)
-            }
+            EndpointHandler::Router(router) => axum::Router::new().nest(&self.path, router),
             // Legacy service handling with path-based routing
             EndpointHandler::Service(handler) => {
                 let handler_clone = handler.clone();

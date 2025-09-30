@@ -95,7 +95,7 @@ pub struct PluginInit<T> {
     pub(crate) full_config: Option<Value>,
 
     /// The full router yaml before it was parsed and env variables expanded
-    pub(crate) original_config_yaml: Option<Arc<str>>,
+    pub(crate) original_yaml: Option<Arc<str>>,
 }
 
 impl<T> PluginInit<T>
@@ -157,7 +157,7 @@ where
             notify,
             license,
             full_config,
-            original_config_yaml,
+            original_yaml: original_config_yaml,
         }
     }
 
@@ -192,7 +192,7 @@ where
             notify,
             license,
             full_config,
-            original_config_yaml,
+            original_yaml: original_config_yaml,
         })
     }
 
@@ -223,7 +223,7 @@ where
             notify: notify.unwrap_or_else(Notify::for_tests),
             license: license.unwrap_or_default(),
             full_config,
-            original_config_yaml,
+            original_yaml: original_config_yaml,
         }
     }
 }
@@ -244,7 +244,7 @@ impl PluginInit<serde_json::Value> {
             .notify(self.notify.clone())
             .license(self.license)
             .and_full_config(self.full_config)
-            .and_original_config_yaml(self.original_config_yaml)
+            .and_original_config_yaml(self.original_yaml)
             .build()
     }
 }

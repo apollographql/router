@@ -412,7 +412,10 @@ impl MemoryService {
     }
 
     /// Handle GET /diagnostics/memory/dumps/{filename} - Download a specific heap dump file
-    pub(crate) async fn handle_download_dump(&self, filename: &str) -> DiagnosticsResult<Response<Body>> {
+    pub(crate) async fn handle_download_dump(
+        &self,
+        filename: &str,
+    ) -> DiagnosticsResult<Response<Body>> {
         // SECURITY: Critical security validation for file downloads
         if let Err(security_error) = SecurityValidator::validate_memory_dump_filename(filename) {
             return Err(security_error.into());
@@ -490,9 +493,7 @@ impl MemoryService {
     }
 
     /// Handle DELETE /diagnostics/memory/dumps - clear all heap dump files
-    pub(crate) async fn handle_clear_all_dumps(
-        &self,
-    ) -> DiagnosticsResult<Response<Body>> {
+    pub(crate) async fn handle_clear_all_dumps(&self) -> DiagnosticsResult<Response<Body>> {
         let memory_path = Path::new(&self.output_directory).join("memory");
 
         // Create memory directory if it doesn't exist

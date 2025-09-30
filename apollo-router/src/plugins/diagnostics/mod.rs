@@ -133,7 +133,7 @@ impl Plugin for DiagnosticsPlugin {
         Ok(Self {
             config: init.config,
             supergraph_schema: init.supergraph_sdl,
-            router_config: init.original_config_yaml.unwrap_or(Arc::from("")),
+            router_config: init.original_yaml.unwrap_or(Arc::from("")),
         })
     }
 

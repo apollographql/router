@@ -128,21 +128,25 @@ impl HtmlGenerator {
     /// Build data injection script with embedded data
     fn build_data_injection(&self, data: ReportData<'_>) -> DiagnosticsResult<String> {
         // Encode data as base64
-        let system_info = data.system_info
+        let system_info = data
+            .system_info
             .map(|s| base64::engine::general_purpose::STANDARD.encode(s))
             .unwrap_or_default();
 
-        let router_config = data.router_config
+        let router_config = data
+            .router_config
             .map(|s| base64::engine::general_purpose::STANDARD.encode(s))
             .unwrap_or_default();
 
-        let schema = data.supergraph_schema
+        let schema = data
+            .supergraph_schema
             .map(|s| base64::engine::general_purpose::STANDARD.encode(s))
             .unwrap_or_default();
 
         // Serialize memory dumps
-        let memory_dumps_json = serde_json::to_string(data.memory_dumps)
-            .map_err(|e| DiagnosticsError::Internal(format!("Failed to serialize memory dumps: {}", e)))?;
+        let memory_dumps_json = serde_json::to_string(data.memory_dumps).map_err(|e| {
+            DiagnosticsError::Internal(format!("Failed to serialize memory dumps: {}", e))
+        })?;
 
         // Build the injection script
         let injection = format!(
@@ -161,7 +165,6 @@ impl HtmlGenerator {
 
         Ok(injection)
     }
-
 }
 
 #[cfg(test)]
@@ -177,7 +180,11 @@ mod tests {
         assert!(generator.is_ok());
 
         let generator = generator.unwrap();
-        assert!(generator.template.contains("<!-- SCRIPT_INJECTION_POINT -->"));
+        assert!(
+            generator
+                .template
+                .contains("<!-- SCRIPT_INJECTION_POINT -->")
+        );
         assert!(generator.template.contains("<!-- DATA_INJECTION_POINT -->"));
     }
 
@@ -191,7 +198,6 @@ mod tests {
         let dumps = result.unwrap();
         assert!(dumps.is_empty());
     }
-
 
     #[tokio::test]
     async fn test_generate_report_basic() {

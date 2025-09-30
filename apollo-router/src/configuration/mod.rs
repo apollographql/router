@@ -149,7 +149,7 @@ pub struct Configuration {
     #[serde(skip)]
     pub(crate) validated_yaml: Option<Value>,
 
-    /// The raw config before parsings and env expansion.
+    /// The full router yaml before it was parsed and env variables expanded
     #[serde(skip)]
     pub(crate) original_yaml: Option<Arc<str>>,
 
