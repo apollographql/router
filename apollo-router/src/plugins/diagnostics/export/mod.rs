@@ -1,7 +1,7 @@
 //! Export functionality for diagnostics plugin
 //!
 //! This module handles the creation of diagnostic archives containing data
-//! from all diagnostic modules. It provides a export system
+//! from all diagnostic modules. It provides an export system
 //! that can be extended by additional diagnostic modules.
 //!
 //! ## Streaming Architecture
