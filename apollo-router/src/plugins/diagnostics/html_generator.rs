@@ -128,12 +128,10 @@ impl HtmlGenerator {
             include_str!("resources/main.js"),
         ];
 
-        let mut scripts = String::new();
-        for content in js_files.iter() {
-            scripts.push_str("\n    <script>\n");
-            scripts.push_str(content);
-            scripts.push_str("\n    </script>");
-        }
+        let scripts = js_files
+            .iter()
+            .map(|content| format!("\n    <script>\n{content}\n    </script>"))
+            .collect::<String>();
 
         Ok(scripts)
     }
