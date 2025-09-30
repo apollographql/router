@@ -101,7 +101,7 @@ items:
                           href: "./observability/router-telemetry-otel/enabling-telemetry/usage-guides/debugging-client-requests"
                         - label: "Client ID Enforcement"
                           href: "./observability/router-telemetry-otel/enabling-telemetry/usage-guides/client-id-enforcement"
-            - label: "Telemetry Pipelines"
+            - label: "Telemetry Exporters"
               children:
                 - label: "Metrics Exporters"
                   children:
