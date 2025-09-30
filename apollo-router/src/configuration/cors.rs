@@ -208,7 +208,7 @@ pub(crate) struct Cors {
 
     /// The origin(s) to allow requests from. The router matches request origins against policies
     /// in order, first by exact match, then by regex. See module documentation for default behavior.
-    pub(crate) policies: Option<Vec<Policy>>,
+    pub(crate) policies: Option<Arc<[Policy]>>,
 }
 
 impl Default for Cors {
@@ -250,7 +250,7 @@ impl Cors {
                 .map(|headers| headers.into_iter().map(Arc::from).collect()),
             max_age,
             methods: global_methods,
-            policies,
+            policies: policies.map(Arc::from),
         }
     }
 }
@@ -285,7 +285,7 @@ impl Cors {
     pub(crate) fn ensure_usable_cors_rules(&self) -> Result<(), &'static str> {
         // Check for wildcard origins in any Policy
         if let Some(policies) = &self.policies {
-            for policy in policies {
+            for policy in policies.iter() {
                 if policy.origins.iter().any(|x| &**x == "*") {
                     return Err(
                         "Invalid CORS configuration: use `allow_any_origin: true` to set `Access-Control-Allow-Origin: *`",
@@ -374,6 +374,7 @@ impl Cors {
                                 "Invalid CORS configuration: `Private-Network-Access-Name` header value must not be empty.",
                             );
                         }
+
                         // NOTE: Simply checking the number of bytes in the string will suffice
                         // (rather than chars) since all chars in the name are only a byte wide.
                         if name.len() > 248 {
@@ -382,9 +383,11 @@ impl Cors {
                                 no longer than 248 characters.",
                             );
                         }
+
+                        // The access name needs to make the EMCAscript ReGex: `/^[a-z0-9_-.]+$/.`
                         if name
                             .chars()
-                            .any(|c| !matches!(c, 'A'..='z' | '0'..='9' | ' ' | '-' | '.'))
+                            .any(|c| !matches!(c, 'A'..='Z'| 'a'..='z' | '0'..='9' | ' ' | '_' | '-' | '.'))
                         {
                             return Err(
                                 "Invalid CORS configuration: `Private-Network-Access-Name` header value can only \
@@ -392,6 +395,10 @@ impl Cors {
                             );
                         }
                     }
+
+                    // The access ID needs to follow pattern: XX:XX:XX:XX:XX:XX` (where "X" is a
+                    // hexdigit). This is 17 characters long, seperated by colons, with each
+                    // substring being only 2 characters long
                     if let Some(id) = &pna.access_id
                         && (id.len() != 17
                             || id
