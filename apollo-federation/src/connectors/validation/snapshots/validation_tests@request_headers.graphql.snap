@@ -30,14 +30,14 @@ input_file: apollo-federation/src/connectors/validation/test_data/request_header
     },
     Message {
         code: InvalidHeader,
-        message: "In `@connect(http.headers:)` on `Query.failOnInvalidRequestProperty`: `$request` doesn't have a field named `.x`",
+        message: "In `@connect(http.headers:)` on `Query.failOnInvalidRequestProperty`: `$request` doesn't have a field named `x`",
         locations: [
             36:60..36:61,
         ],
     },
     Message {
         code: InvalidUrl,
-        message: "In `GET` in `@connect(http:)` on `Query.failOnInvalidRequestProperty`: `$request` doesn't have a field named `.x`",
+        message: "In `GET` in `@connect(http:)` on `Query.failOnInvalidRequestProperty`: `$request` doesn't have a field named `x`",
         locations: [
             35:53..35:54,
         ],

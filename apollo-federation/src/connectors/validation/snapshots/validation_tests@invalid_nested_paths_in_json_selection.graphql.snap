@@ -6,28 +6,28 @@ input_file: apollo-federation/src/connectors/validation/test_data/invalid_nested
 [
     Message {
         code: InvalidBody,
-        message: "In `@connect(http: {body:})` on `Query.scalar`: `$args.scalar` doesn't have a field named `.blah`",
+        message: "In `@connect(http: {body:})` on `Query.scalar`: `$args.scalar` doesn't have a field named `blah`",
         locations: [
             12:34..12:38,
         ],
     },
     Message {
         code: InvalidBody,
-        message: "In `@connect(http: {body:})` on `Query.object`: `InputObject` doesn't have a field named `.fieldThatDoesntExist`",
+        message: "In `@connect(http: {body:})` on `Query.object`: `InputObject` doesn't have a field named `fieldThatDoesntExist`",
         locations: [
             20:33..20:53,
         ],
     },
     Message {
         code: InvalidBody,
-        message: "In `@connect(http: {body:})` on `Query.enum`: `Enum` doesn't have a field named `.cantHaveFields`",
+        message: "In `@connect(http: {body:})` on `Query.enum`: `Enum` doesn't have a field named `cantHaveFields`",
         locations: [
             28:30..28:44,
         ],
     },
     Message {
         code: InvalidBody,
-        message: "In `@connect(http: {body:})` on `Object.newField`: `$this` doesn't have a field named `.fieldThatDoesntExist`",
+        message: "In `@connect(http: {body:})` on `Object.newField`: `$this` doesn't have a field named `fieldThatDoesntExist`",
         locations: [
             40:27..40:47,
         ],

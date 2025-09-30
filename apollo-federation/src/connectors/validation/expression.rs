@@ -482,13 +482,16 @@ fn resolve_shape(
             for key in subpath {
                 let child = resolved.child(key.clone());
                 if child.is_none() || child.is_never() {
+                    let key_string = key.to_string();
+                    let key_without_dot = key_string.trim_start_matches('.');
+
                     let message = match key.value {
                         NamedShapePathKey::AnyIndex | NamedShapePathKey::Index(_) => {
                             format!("`{path}` is not an array or string")
                         }
 
                         NamedShapePathKey::AnyField | NamedShapePathKey::Field(_) => {
-                            format!("`{path}` doesn't have a field named `{key}`")
+                            format!("`{path}` doesn't have a field named `{key_without_dot}`")
                         }
 
                         NamedShapePathKey::Question | NamedShapePathKey::NotNone => {
@@ -975,7 +978,7 @@ mod tests {
             err.message
         );
         assert!(
-            err.message.contains("`.unknown`"),
+            err.message.contains("`unknown`"),
             "{} didn't reference field name",
             err.message
         );

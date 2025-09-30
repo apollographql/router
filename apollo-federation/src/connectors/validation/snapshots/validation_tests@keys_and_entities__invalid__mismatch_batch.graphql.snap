@@ -6,7 +6,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/keys_and_entit
 [
     Message {
         code: InvalidBody,
-        message: "In `@connect(http: {body:})` on `Product`: `$batch` doesn't have a field named `.id`",
+        message: "In `@connect(http: {body:})` on `Product`: `$batch` doesn't have a field named `id`",
         locations: [
             7:59..7:61,
         ],
