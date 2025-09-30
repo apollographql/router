@@ -1,3 +1,31 @@
+/**
+ * Custom Web Components for Apollo Router Diagnostics
+ *
+ * Defines reusable custom HTML elements using the Web Components API.
+ * All components use Shadow DOM for encapsulation and style isolation.
+ *
+ * ## Components
+ *
+ * - **LoadingMessage**: Spinner with loading text
+ * - **ErrorMessage**: Red alert box for error display
+ * - **InfoMessage**: Blue info box for notifications
+ * - **CallGraphContainer**: SVG container with pan/zoom support
+ * - **FlameGraphContainer**: Container for ECharts flame graph
+ * - **DumpItem**: List item for memory dump with download/delete actions
+ *
+ * ## Usage
+ *
+ * Components are registered with `customElements.define()` and can be used
+ * directly in HTML or created programmatically via `document.createElement()`.
+ *
+ * ## Shadow DOM
+ *
+ * All components use Shadow DOM (mode: 'open') to encapsulate styles and
+ * prevent CSS conflicts with the main page.
+ *
+ * @module custom-elements
+ */
+
 // Web Components using customElements.define() - MDN best practice
 
 class LoadingMessage extends HTMLElement {

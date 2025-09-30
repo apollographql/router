@@ -1,4 +1,35 @@
-// Flamegraph rendering and interaction functions
+/**
+ * Flame Graph Rendering Module for Apollo Router Diagnostics
+ *
+ * Renders interactive flame graphs using Apache ECharts for visualizing
+ * memory allocation patterns from heap dumps. Supports zooming, filtering,
+ * differential analysis, and image export.
+ *
+ * ## Features
+ *
+ * - **Interactive Visualization**: Click to zoom, hover for details
+ * - **Differential Mode**: Compare two heap dumps to show allocation changes
+ * - **Function Filtering**: Focus on specific functions and their call trees
+ * - **Image Export**: Save flame graphs as PNG for documentation
+ * - **Color Coding**: Visual distinction for positive/negative memory changes
+ *
+ * ## Data Format
+ *
+ * Expects flame data in collapsed stack format:
+ * ```javascript
+ * [
+ *   { name: "function_name", value: [level, startPos, size, parentId] },
+ *   ...
+ * ]
+ * ```
+ *
+ * ## Integration
+ *
+ * Called by main.js after backtrace-processor.js transforms heap dumps
+ * into flame-compatible format.
+ *
+ * @module flamegraph-renderer
+ */
 
 function renderFlameGraph(containerId, flameData) {
     const container = document.getElementById(containerId);
