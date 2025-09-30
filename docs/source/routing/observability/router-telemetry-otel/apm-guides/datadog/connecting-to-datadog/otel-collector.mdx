@@ -94,7 +94,7 @@ flowchart LR
 For detailed configuration options, see [configuration basics](https://opentelemetry.io/docs/collector/configuration/) and [Datadog's collector exporter documentation](https://docs.datadoghq.com/opentelemetry/setup/collector_exporter/).
 
 
-Create `otel-collector.yaml` with this minimal configuration. Set your Datadog API key as an environment variable: `export DD_API_KEY=your_datadog_api_key_here`:
+Create `otel-collector.yaml` with this minimal configuration. Before starting the collector, you'll need to set a `DD_API_KEY` environment variable to your Datadog API key:
 
 ```yaml title="otel-collector.yaml"
 receivers:
