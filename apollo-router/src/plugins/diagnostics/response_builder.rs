@@ -97,12 +97,13 @@ impl ResponseBuilder {
 
 #[cfg(test)]
 mod tests {
+    use http_body_util::BodyExt;
     use serde_json::json;
 
     use super::*;
 
-    #[test]
-    fn test_json_response() {
+    #[tokio::test]
+    async fn test_json_response_ok_status() {
         let data = json!({"status": "ok", "message": "test"});
 
         let response =
@@ -117,5 +118,110 @@ mod tests {
             response.headers().get(header::CACHE_CONTROL).unwrap(),
             "no-cache, no-store, must-revalidate"
         );
+        assert_eq!(response.headers().get("pragma").unwrap(), "no-cache");
+        assert_eq!(response.headers().get("expires").unwrap(), "0");
+    }
+
+    #[tokio::test]
+    async fn test_json_response_body_content() {
+        let data = json!({"key": "value", "number": 42});
+
+        let response =
+            ResponseBuilder::json_response(StatusCode::OK, &data, CacheControl::NoCache).unwrap();
+
+        let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let body_json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+        assert_eq!(body_json["key"], "value");
+        assert_eq!(body_json["number"], 42);
+    }
+
+    #[tokio::test]
+    async fn test_binary_response_with_filename() {
+        let data = b"binary data content".to_vec();
+
+        let response = ResponseBuilder::binary_response(
+            StatusCode::OK,
+            "application/octet-stream",
+            data.clone(),
+            Some("test.bin"),
+            CacheControl::NoCache,
+        )
+        .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/octet-stream"
+        );
+        assert_eq!(
+            response.headers().get(header::CONTENT_LENGTH).unwrap(),
+            &data.len().to_string()
+        );
+        assert_eq!(
+            response.headers().get(header::CONTENT_DISPOSITION).unwrap(),
+            "attachment; filename=\"test.bin\""
+        );
+    }
+
+    #[tokio::test]
+    async fn test_binary_response_without_filename() {
+        let data = b"some data".to_vec();
+
+        let response = ResponseBuilder::binary_response(
+            StatusCode::OK,
+            "application/octet-stream",
+            data.clone(),
+            None,
+            CacheControl::NoCache,
+        )
+        .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(
+            response.headers().get(header::CONTENT_DISPOSITION).is_none(),
+            "Content-Disposition header should not be present when filename is None"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_binary_response_body_content() {
+        let original_data = b"This is binary content with \x00 null bytes".to_vec();
+
+        let response = ResponseBuilder::binary_response(
+            StatusCode::OK,
+            "application/octet-stream",
+            original_data.clone(),
+            Some("test.bin"),
+            CacheControl::NoCache,
+        )
+        .unwrap();
+
+        let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+
+        assert_eq!(
+            body_bytes.as_ref(),
+            original_data.as_slice(),
+            "Response body should exactly match input data"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_binary_response_empty_data() {
+        let data = Vec::new();
+
+        let response = ResponseBuilder::binary_response(
+            StatusCode::OK,
+            "application/octet-stream",
+            data,
+            Some("empty.bin"),
+            CacheControl::NoCache,
+        )
+        .unwrap();
+
+        assert_eq!(response.headers().get(header::CONTENT_LENGTH).unwrap(), "0");
+
+        let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+        assert!(body_bytes.is_empty());
     }
 }
