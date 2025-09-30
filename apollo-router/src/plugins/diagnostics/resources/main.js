@@ -1,4 +1,31 @@
-// Main JavaScript code for Apollo Router Diagnostics
+/**
+ * Main Application Controller for Apollo Router Diagnostics Dashboard
+ *
+ * Coordinates the overall application flow, tab management, UI rendering, and
+ * integration between data loading, visualization components, and user interactions.
+ *
+ * ## Responsibilities
+ *
+ * - **Application Initialization**: Loads data and sets up the dashboard on page load
+ * - **Tab Management**: Controls visibility and state of diagnostic tabs
+ * - **UI Rendering**: Populates tabs with system info, config, schema, and memory data
+ * - **Chart Coordination**: Manages flame graph and call graph selector dropdowns
+ * - **Memory Profiling Controls**: Handles start/stop/dump buttons in dashboard mode
+ * - **XSS Prevention**: Uses secure DOM manipulation and HTML escaping throughout
+ *
+ * ## Global Variables
+ *
+ * - `EMBEDDED_DATA`: Injected by HTML template, contains embedded diagnostic data
+ * - `IS_DASHBOARD_MODE`: Boolean flag indicating dashboard vs embedded report mode
+ * - `window.LOADED_DATA`: Loaded diagnostic data accessible to all modules
+ *
+ * ## Entry Point
+ *
+ * The `initializeDashboard()` function is called on `DOMContentLoaded` to start
+ * the application.
+ *
+ * @module main
+ */
 
 // EMBEDDED_DATA is defined in the HTML template and will be available globally
 
