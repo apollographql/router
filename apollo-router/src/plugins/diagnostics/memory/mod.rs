@@ -65,7 +65,7 @@ pub(super) async fn load_memory_dumps(
     }
 
     // Sort dumps by name for consistent ordering
-    dumps.sort_by(|a, b| a.name.cmp(&b.name));
+    dumps.sort_by_key(|dump| &dump.name);
 
     Ok(dumps)
 }
