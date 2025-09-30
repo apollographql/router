@@ -1,4 +1,31 @@
 //! Memory profiling stub implementation for unsupported platforms
+//!
+//! This module provides a stub implementation of the memory profiling service
+//! for platforms that don't support jemalloc heap profiling. It ensures API
+//! compatibility across all platforms while gracefully returning "not supported"
+//! messages instead of failing at compile time.
+//!
+//! ## Purpose
+//!
+//! - **Graceful degradation**: Allow diagnostics plugin to work on all platforms
+//! - **API compatibility**: Same method signatures as the supported implementation
+//! - **Clear messaging**: Return helpful error messages explaining feature unavailability
+//!
+//! ## Platforms
+//!
+//! This stub is compiled on:
+//! - Windows (jemalloc not available)
+//! - Non-Unix systems
+//! - Unix systems without `global-allocator` feature flag
+//!
+//! ## Behavior
+//!
+//! All memory profiling operations return JSON responses with `status: "not_supported"`
+//! and appropriate error messages. Archive operations add empty placeholders.
+//!
+//! ## See Also
+//!
+//! - [`super::supported`] - Full implementation for Unix + global-allocator platforms
 
 use axum::body::Body;
 use http::Response;
