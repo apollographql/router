@@ -65,12 +65,14 @@ async fn test_dashboard_endpoint_returns_html() {
 
     assert_eq!(status, StatusCode::OK);
     assert!(body.contains("<!DOCTYPE html>") || body.contains("<html"));
-    assert!(headers
-        .get(http::header::CONTENT_TYPE)
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .contains("text/html"));
+    assert!(
+        headers
+            .get(http::header::CONTENT_TYPE)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("text/html")
+    );
 }
 
 // ============================================================================
@@ -133,8 +135,7 @@ async fn test_supergraph_schema_endpoint() {
 #[tokio::test]
 async fn test_memory_status_endpoint_returns_json() {
     let mut router = create_test_router();
-    let (status, body, headers) =
-        make_request(&mut router, Method::GET, "/memory/status").await;
+    let (status, body, headers) = make_request(&mut router, Method::GET, "/memory/status").await;
 
     // Should be OK on supported platforms, or NOT_IMPLEMENTED on unsupported
     assert!(status == StatusCode::OK || status == StatusCode::NOT_IMPLEMENTED);
@@ -239,12 +240,8 @@ async fn test_memory_clear_dumps_endpoint() {
 #[tokio::test]
 async fn test_memory_download_dump_not_found() {
     let mut router = create_test_router();
-    let (status, _, _) = make_request(
-        &mut router,
-        Method::GET,
-        "/memory/dumps/nonexistent.prof",
-    )
-    .await;
+    let (status, _, _) =
+        make_request(&mut router, Method::GET, "/memory/dumps/nonexistent.prof").await;
 
     // Should return 404 or NOT_IMPLEMENTED
     assert!(status == StatusCode::NOT_FOUND || status == StatusCode::NOT_IMPLEMENTED);
@@ -254,8 +251,12 @@ async fn test_memory_download_dump_not_found() {
 async fn test_memory_download_dump_invalid_filename() {
     let mut router = create_test_router();
     // Try path traversal attack
-    let (status, _, _) =
-        make_request(&mut router, Method::GET, "/memory/dumps/../../../etc/passwd").await;
+    let (status, _, _) = make_request(
+        &mut router,
+        Method::GET,
+        "/memory/dumps/../../../etc/passwd",
+    )
+    .await;
 
     // Should return 404 (security validation should reject)
     assert_eq!(status, StatusCode::NOT_FOUND);
@@ -265,12 +266,8 @@ async fn test_memory_download_dump_invalid_filename() {
 async fn test_memory_delete_dump_invalid_filename() {
     let mut router = create_test_router();
     // Try path traversal attack
-    let (status, _, _) = make_request(
-        &mut router,
-        Method::DELETE,
-        "/memory/dumps/../secret.txt",
-    )
-    .await;
+    let (status, _, _) =
+        make_request(&mut router, Method::DELETE, "/memory/dumps/../secret.txt").await;
 
     // Should return 404 (security validation should reject)
     assert_eq!(status, StatusCode::NOT_FOUND);

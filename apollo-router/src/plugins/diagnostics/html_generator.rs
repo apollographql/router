@@ -102,7 +102,7 @@ impl HtmlGenerator {
         Ok(html)
     }
 
-     /// Generate a complete HTML report with embedded data (for embedded mode)
+    /// Generate a complete HTML report with embedded data (for embedded mode)
     pub(crate) fn generate_embedded_html(&self, data: ReportData<'_>) -> DiagnosticsResult<String> {
         let mut html = self.template.clone();
 

@@ -179,7 +179,10 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
         assert!(
-            response.headers().get(header::CONTENT_DISPOSITION).is_none(),
+            response
+                .headers()
+                .get(header::CONTENT_DISPOSITION)
+                .is_none(),
             "Content-Disposition header should not be present when filename is None"
         );
     }

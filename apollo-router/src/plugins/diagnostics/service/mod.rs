@@ -48,8 +48,8 @@ use mime::TEXT_PLAIN_UTF_8;
 use super::constants;
 use super::export::Exporter;
 use super::html_generator::HtmlGenerator;
-use super::static_resources::StaticResourceHandler;
 use super::memory::MemoryService;
+use super::static_resources::StaticResourceHandler;
 
 #[cfg(test)]
 mod tests;
@@ -113,10 +113,7 @@ pub(super) fn create_router(
 // ============================================================================
 
 /// Helper to convert Result into Response with error handling
-fn result_to_response<T, E>(
-    result: Result<T, E>,
-    error_message: &str,
-) -> Response
+fn result_to_response<T, E>(result: Result<T, E>, error_message: &str) -> Response
 where
     T: IntoResponse,
     E: std::fmt::Display,
@@ -210,22 +207,34 @@ async fn handle_export(Extension(state): Extension<DiagnosticsState>) -> Respons
 
 /// GET /memory/status - Get memory profiling status
 async fn handle_memory_status(Extension(state): Extension<DiagnosticsState>) -> Response {
-    result_to_response(state.memory.handle_status().await, "Failed to get memory status")
+    result_to_response(
+        state.memory.handle_status().await,
+        "Failed to get memory status",
+    )
 }
 
 /// GET /memory/dumps - List all memory dumps
 async fn handle_memory_list_dumps(Extension(state): Extension<DiagnosticsState>) -> Response {
-    result_to_response(state.memory.handle_list_dumps().await, "Failed to list dumps")
+    result_to_response(
+        state.memory.handle_list_dumps().await,
+        "Failed to list dumps",
+    )
 }
 
 /// DELETE /memory/dumps - Clear all memory dumps
 async fn handle_memory_clear_dumps(Extension(state): Extension<DiagnosticsState>) -> Response {
-    result_to_response(state.memory.handle_clear_all_dumps().await, "Failed to clear dumps")
+    result_to_response(
+        state.memory.handle_clear_all_dumps().await,
+        "Failed to clear dumps",
+    )
 }
 
 /// POST /memory/start - Start memory profiling
 async fn handle_memory_start(Extension(state): Extension<DiagnosticsState>) -> Response {
-    result_to_response(state.memory.handle_start().await, "Failed to start profiling")
+    result_to_response(
+        state.memory.handle_start().await,
+        "Failed to start profiling",
+    )
 }
 
 /// POST /memory/stop - Stop memory profiling
@@ -247,7 +256,10 @@ async fn handle_memory_download_dump(
         .memory
         .handle_download_dump(&filename)
         .await
-        .map_or_else(|e| not_found_response(format!("Dump not found: {}", e)), |r| r.into_response())
+        .map_or_else(
+            |e| not_found_response(format!("Dump not found: {}", e)),
+            |r| r.into_response(),
+        )
 }
 
 /// DELETE /memory/dumps/:filename - Delete a specific memory dump
@@ -259,7 +271,10 @@ async fn handle_memory_delete_dump(
         .memory
         .handle_delete_dump(&filename)
         .await
-        .map_or_else(|e| not_found_response(format!("Dump not found: {}", e)), |r| r.into_response())
+        .map_or_else(
+            |e| not_found_response(format!("Dump not found: {}", e)),
+            |r| r.into_response(),
+        )
 }
 
 /// Fallback handler for unmatched routes (static resources: JS/CSS)

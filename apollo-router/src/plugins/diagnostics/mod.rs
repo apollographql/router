@@ -50,11 +50,11 @@ mod archive_utils;
 mod constants;
 mod export;
 mod html_generator;
-mod static_resources;
 mod memory;
 mod response_builder;
 mod security;
 mod service;
+mod static_resources;
 pub(crate) mod system_info;
 
 #[cfg(test)]
