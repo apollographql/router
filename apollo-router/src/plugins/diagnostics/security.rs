@@ -1,7 +1,25 @@
 //! Security validation utilities for diagnostics plugin
 //!
-//! This module provides security validation functions to prevent common
-//! attacks such as path traversal and file type validation.
+//! This module provides security validation functions to prevent common attacks
+//! when serving files through the diagnostics endpoints. Critical for preventing
+//! unauthorized file access and directory traversal attacks.
+//!
+//! ## Security Threats Mitigated
+//!
+//! - **Path Traversal**: Prevents `../../../etc/passwd` style attacks
+//! - **File Type Validation**: Ensures only allowed file extensions can be downloaded
+//! - **File Existence Validation**: Prevents information disclosure through error messages
+//!
+//! ## Usage
+//!
+//! All file download and deletion endpoints in [`super::service`] use these validators
+//! before performing file operations. Validators return [`SecurityError`] which is
+//! converted to appropriate HTTP error responses.
+//!
+//! ## Implementation Note
+//!
+//! Validators are fail-secure: any validation failure results in access denial
+//! rather than attempting to sanitize potentially malicious input.
 
 use displaydoc::Display;
 
