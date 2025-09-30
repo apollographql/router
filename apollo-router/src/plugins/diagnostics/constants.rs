@@ -1,7 +1,6 @@
 //! Constants for the diagnostics plugin
 //!
 //! This module centralizes constants used throughout the diagnostics plugin.
-//! Only includes constants that are actually used to avoid code bloat.
 
 use std::net::SocketAddr;
 use std::str::FromStr;
