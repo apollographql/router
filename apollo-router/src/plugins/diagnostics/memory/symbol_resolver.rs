@@ -1,7 +1,63 @@
-//! Enhanced heap profile processing with embedded symbols
+//! Symbol resolution for jemalloc heap profiles
 //!
-//! This module provides functionality to automatically resolve symbols from heap profiles
-//! and create enhanced profiles that work independently of the original binary.
+//! Transforms raw heap dumps from jemalloc (containing only hex addresses) into
+//! self-contained profiles with embedded function names. This makes profiles portable
+//! and analyzable without requiring access to the original router binary.
+//!
+//! ## Problem
+//!
+//! Raw jemalloc heap dumps contain memory addresses but no function names:
+//! ```text
+//! @ 0x55a1b2c3d4e5 0x55a1b2c3d678 0x55a1b2c3d890
+//!   t1: 1024: 8192 [0: 0]
+//! ```
+//!
+//! These addresses are meaningless without the binary they came from. Tools like
+//! `jeprof` require the original binary to resolve addresses to function names.
+//!
+//! ## Solution
+//!
+//! This module uses `addr2line` to resolve all addresses in the heap dump to function
+//! names, then appends a symbol table to the `.prof` file. The enhanced profile becomes
+//! self-contained and portable.
+//!
+//! ## Enhanced Profile Format
+//!
+//! The module appends a symbol section to the original heap dump:
+//! ```text
+//! [original heap data]
+//! --- symbol
+//! binary=/path/to/router
+//! 0x55a1b2c3d4e5 apollo_router::services::execution::execute
+//! 0x55a1b2c3d678 tokio::runtime::task::spawn
+//! 0x55a1b2c3d890 std::thread::spawn
+//! ---
+//! --- heap
+//! ...
+//! ```
+//!
+//! The JavaScript visualizer reads this symbol section to display function names
+//! instead of hex addresses in flame graphs and call graphs.
+//!
+//! ## Symbol Resolution Process
+//!
+//! 1. **Extract addresses**: Parse all hex addresses from the heap dump
+//! 2. **Find base address**: Locate the binary's load address from memory mappings
+//! 3. **Calculate relative addresses**: Convert absolute → relative for addr2line
+//! 4. **Resolve symbols**: Use addr2line's symbol table lookup
+//! 5. **Demangle**: Convert mangled names (e.g., `_ZN...`) to readable Rust names
+//! 6. **Append section**: Write symbol table to end of `.prof` file
+//!
+//! ## Graceful Degradation
+//!
+//! - If `addr2line` fails, falls back to hex addresses (e.g., `0x55a1b2c3d4e5`)
+//! - If binary has no symbols, uses hex addresses
+//! - Profiles remain valid even if symbol resolution completely fails
+//!
+//! ## Platform Support
+//!
+//! Works on any Unix system with debug symbols in the binary. Requires the
+//! `addr2line` crate which reads ELF symbol tables and DWARF debug info.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
