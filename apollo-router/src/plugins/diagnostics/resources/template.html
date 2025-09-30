@@ -5,74 +5,42 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Apollo Router Diagnostics</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@viz-js/viz@3.17.0/dist/viz-global.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
-    <script src="custom_elements.js"></script>
-    <script src="backtrace-processor.js"></script>
-    <script src="viz-js-integration.js"></script>
-    <script src="flamegraph-renderer.js"></script>
-    <script src="callgraph-svg-renderer.js"></script>
-    <script src="data-access.js"></script>
-    <script src="main.js"></script>
-
-    <script>
-        // Embedded data (replaced by the HTML generator)
-        const EMBEDDED_DATA = {
-            systemInfo: '{{SYSTEM_INFO_BASE64}}',
-            routerConfig: '{{ROUTER_CONFIG_BASE64}}',
-            schema: '{{SCHEMA_BASE64}}',
-            memoryDumps: {{MEMORY_DUMPS_JSON}}
-        };
-
-        // Dashboard mode flag (replaced by the HTML generator)
-        const IS_DASHBOARD_MODE = {{DASHBOARD_MODE}};
-
-        // Utility functions
-        function base64Decode(str) {
-            if (!str) return '';
-            try {
-                return atob(str);
-            } catch (e) {
-                console.error('Failed to decode base64:', e);
-                return '';
-            }
-        }
-    </script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js" integrity="sha384-BQKzmHvQLMCAnL3UtDBA1Al5tFjsCz1wrMlIUA1wkzo14DYkRWjywW+p9pCj0cwd" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@viz-js/viz@3.17.0/dist/viz-global.min.js" integrity="sha384-hhfCh87gn6AaMzlh2cgEwt+9VyM3DUYUrUg4H8eLNaLkjDrX78xSf3Nc84ZUmnLL" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js" integrity="sha384-yc/c2Lk1s2V2ir1rxvjo8YyVD9PlOlYTqpNr3Wm1WIuAA30GlDYNx6U5104OiavY" crossorigin="anonymous"></script>
+    <!-- SCRIPT_INJECTION_POINT -->
+    <!-- DATA_INJECTION_POINT -->
 </head>
 <body class="bg-gray-50 h-screen flex flex-col overflow-hidden">
     <!-- Top Bar -->
     <header class="bg-slate-800 text-white px-6 py-4 shadow-lg">
-        <div>
-            <h1 class="text-xl font-semibold">Apollo Router Diagnostics</h1>
-            <p class="text-slate-300 text-sm">Generated {{TIMESTAMP}}</p>
-        </div>
+        <h1 class="text-xl font-semibold">Apollo Router Diagnostics</h1>
     </header>
 
     <!-- Tabs Navigation -->
     <nav class="bg-white border-b border-gray-200 px-6">
         <div class="flex space-x-8">
-            <button class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-blue-500 text-blue-600" 
+            <button class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-blue-500 text-blue-600"
                     onclick="showTab('summary')" data-tab="summary" id="dashboard-tab">
                 Dashboard
             </button>
-            <button class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300" 
+            <button class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
                     onclick="showTab('system')" data-tab="system">
                 System
             </button>
-            <button class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300" 
+            <button class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
                     onclick="showTab('config')" data-tab="config">
                 Config
             </button>
-            <button class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300" 
+            <button class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
                     onclick="showTab('supergraph')" data-tab="supergraph">
                 Supergraph
             </button>
-            <button class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300" 
+            <button class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
                     onclick="showTab('flamegraph')" data-tab="flamegraph">
                 Flamegraph
             </button>
-            <button class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300" 
+            <button class="tab-button py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
                     onclick="showTab('callgraph')" data-tab="callgraph">
                 Callgraph
             </button>
@@ -99,21 +67,21 @@
                             </div>
                             <p class="text-sm text-gray-500 mt-2" id="profiling-status-message">Checking profiling status...</p>
                         </div>
-                        
+
                         <div class="flex space-x-3">
-                            <button id="start-profiling-btn" onclick="handleStartProfiling()" 
+                            <button id="start-profiling-btn" onclick="handleStartProfiling()"
                                     class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                     disabled>
                                 <span class="btn-text">Start</span>
                                 <div class="btn-spinner hidden inline-block w-4 h-4 ml-2 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                             </button>
-                            <button id="stop-profiling-btn" onclick="handleStopProfiling()" 
+                            <button id="stop-profiling-btn" onclick="handleStopProfiling()"
                                     class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                     disabled>
                                 <span class="btn-text">Stop</span>
                                 <div class="btn-spinner hidden inline-block w-4 h-4 ml-2 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                             </button>
-                            <button id="trigger-dump-btn" onclick="triggerDump()" 
+                            <button id="trigger-dump-btn" onclick="triggerDump()"
                                     class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                     disabled>
                                 <span class="btn-text">Create Dump</span>
@@ -161,7 +129,7 @@
                         <p class="text-sm text-gray-600 mb-4">
                             Download a complete diagnostics package containing all system information, configuration, schema, and memory dumps in a single tar file.
                         </p>
-                        <a href="/diagnostics/export" 
+                        <a href="/diagnostics/export"
                            class="w-full px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 inline-flex items-center justify-center text-decoration-none">
                             <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
@@ -221,21 +189,21 @@
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
                                 <label for="flamegraph-base-select" class="block text-sm font-medium text-gray-700 mb-2">Base Profile:</label>
-                                <select id="flamegraph-base-select" onchange="updateFlameGraph()" 
+                                <select id="flamegraph-base-select" onchange="updateFlameGraph()"
                                         class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                                     <option value="">None</option>
                                 </select>
                             </div>
                             <div>
                                 <label for="flamegraph-actual-select" class="block text-sm font-medium text-gray-700 mb-2">Actual Profile:</label>
-                                <select id="flamegraph-actual-select" onchange="updateFlameGraph()" 
+                                <select id="flamegraph-actual-select" onchange="updateFlameGraph()"
                                         class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                                     <option value="">Select a memory dump...</option>
                                 </select>
                             </div>
                         </div>
                     </div>
-                    
+
                     <!-- Chart Container -->
                     <div class="w-full bg-white border border-gray-200 rounded-lg flex-1 overflow-hidden">
                         <div id="flamegraph-fullscreen" class="w-full h-full overflow-auto">
@@ -260,21 +228,21 @@
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
                                 <label for="callgraph-base-select" class="block text-sm font-medium text-gray-700 mb-2">Base Profile:</label>
-                                <select id="callgraph-base-select" onchange="updateCallGraph()" 
+                                <select id="callgraph-base-select" onchange="updateCallGraph()"
                                         class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                                     <option value="">None</option>
                                 </select>
                             </div>
                             <div>
                                 <label for="callgraph-actual-select" class="block text-sm font-medium text-gray-700 mb-2">Actual Profile:</label>
-                                <select id="callgraph-actual-select" onchange="updateCallGraph()" 
+                                <select id="callgraph-actual-select" onchange="updateCallGraph()"
                                         class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                                     <option value="">Select a memory dump...</option>
                                 </select>
                             </div>
                         </div>
                     </div>
-                    
+
                     <!-- Chart Container -->
                     <div class="w-full bg-white border border-gray-200 rounded-lg flex-1 overflow-hidden">
                         <div id="callgraph-fullscreen" class="w-full h-full overflow-auto">

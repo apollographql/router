@@ -52,21 +52,25 @@ impl HtmlGenerator {
     pub(crate) fn generate_dashboard_html(&self) -> DiagnosticsResult<String> {
         let mut html = self.template.clone();
 
-        // Use separate script tags for dashboard mode (not embedded)
-        html = self.use_separate_script_tags(html)?;
+        // Inject script tags pointing to separate files
+        let script_injection = r#"
+    <script src="/diagnostics/custom_elements.js"></script>
+    <script src="/diagnostics/backtrace-processor.js"></script>
+    <script src="/diagnostics/viz-js-integration.js"></script>
+    <script src="/diagnostics/flamegraph-renderer.js"></script>
+    <script src="/diagnostics/callgraph-svg-renderer.js"></script>
+    <script src="/diagnostics/data-access.js"></script>
+    <script src="/diagnostics/main.js"></script>"#;
 
-        // Replace timestamp with current time
-        let timestamp = chrono::Utc::now()
-            .format("%Y-%m-%d %H:%M:%S UTC")
-            .to_string();
-        html = html.replace("{{TIMESTAMP}}", &timestamp);
+        // Inject dashboard mode configuration
+        let data_injection = r#"
+    <script>
+        const IS_DASHBOARD_MODE = true;
+        const EMBEDDED_DATA = null;
+    </script>"#;
 
-        // Set dashboard mode flag and no embedded data - will be loaded via API
-        html = html.replace("{{DASHBOARD_MODE}}", "true");
-        html = html.replace("{{SYSTEM_INFO_BASE64}}", "");
-        html = html.replace("{{ROUTER_CONFIG_BASE64}}", "");
-        html = html.replace("{{SCHEMA_BASE64}}", "");
-        html = html.replace("{{MEMORY_DUMPS_JSON}}", "[]");
+        html = html.replace("<!-- SCRIPT_INJECTION_POINT -->", script_injection);
+        html = html.replace("<!-- DATA_INJECTION_POINT -->", data_injection);
 
         Ok(html)
     }
@@ -75,111 +79,78 @@ impl HtmlGenerator {
     pub(crate) fn generate_report(&self, data: ReportData<'_>) -> DiagnosticsResult<String> {
         let mut html = self.template.clone();
 
-        // Embed JavaScript files inline for export mode
-        html = self.embed_javascript_files(html)?;
+        // Build embedded script injection
+        let script_injection = self.build_embedded_scripts()?;
 
-        // Replace timestamp with current time
-        let timestamp = chrono::Utc::now()
-            .format("%Y-%m-%d %H:%M:%S UTC")
-            .to_string();
-        html = html.replace("{{TIMESTAMP}}", &timestamp);
+        // Build data injection
+        let data_injection = self.build_data_injection(data)?;
 
-        // Set export mode flag (not dashboard mode)
-        html = html.replace("{{DASHBOARD_MODE}}", "false");
-
-        // Embed system info
-        if let Some(info) = data.system_info {
-            let encoded = base64::engine::general_purpose::STANDARD.encode(info);
-            html = html.replace("{{SYSTEM_INFO_BASE64}}", &encoded);
-        } else {
-            html = html.replace("{{SYSTEM_INFO_BASE64}}", "");
-        }
-
-        // Embed router config
-        if let Some(config) = data.router_config {
-            let encoded = base64::engine::general_purpose::STANDARD.encode(config);
-            html = html.replace("{{ROUTER_CONFIG_BASE64}}", &encoded);
-        } else {
-            html = html.replace("{{ROUTER_CONFIG_BASE64}}", "");
-        }
-
-        // Embed supergraph schema
-        if let Some(schema) = data.supergraph_schema {
-            let encoded = base64::engine::general_purpose::STANDARD.encode(schema);
-            html = html.replace("{{SCHEMA_BASE64}}", &encoded);
-        } else {
-            html = html.replace("{{SCHEMA_BASE64}}", "");
-        }
-
-        // Process memory dumps
-        let memory_dumps_json = serde_json::to_string(data.memory_dumps).map_err(|e| {
-            DiagnosticsError::Internal(format!("Failed to serialize memory dumps: {}", e))
-        })?;
-        html = html.replace("{{MEMORY_DUMPS_JSON}}", &memory_dumps_json);
+        // Perform injections
+        html = html.replace("<!-- SCRIPT_INJECTION_POINT -->", &script_injection);
+        html = html.replace("<!-- DATA_INJECTION_POINT -->", &data_injection);
 
         Ok(html)
     }
 
-    /// Embed JavaScript files inline, replacing script src links with embedded content
-    fn embed_javascript_files(&self, mut html: String) -> DiagnosticsResult<String> {
-        // List of JavaScript files to embed (in order they appear in template)
+    /// Build embedded script tags with inline JavaScript content
+    fn build_embedded_scripts(&self) -> DiagnosticsResult<String> {
         let js_files = [
-            (
-                "backtrace-processor.js",
-                include_str!("resources/backtrace-processor.js"),
-            ),
-            (
-                "viz-js-integration.js",
-                include_str!("resources/viz-js-integration.js"),
-            ),
-            (
-                "flamegraph-renderer.js",
-                include_str!("resources/flamegraph-renderer.js"),
-            ),
-            (
-                "callgraph-svg-renderer.js",
-                include_str!("resources/callgraph-svg-renderer.js"),
-            ),
-            ("data-access.js", include_str!("resources/data-access.js")),
-            (
-                "custom_elements.js",
-                include_str!("resources/custom_elements.js"),
-            ),
-            ("main.js", include_str!("resources/main.js")),
+            include_str!("resources/custom_elements.js"),
+            include_str!("resources/backtrace-processor.js"),
+            include_str!("resources/viz-js-integration.js"),
+            include_str!("resources/flamegraph-renderer.js"),
+            include_str!("resources/callgraph-svg-renderer.js"),
+            include_str!("resources/data-access.js"),
+            include_str!("resources/main.js"),
         ];
 
-        // Replace each script src with embedded content
-        for (filename, content) in js_files.iter() {
-            let script_tag = format!("<script src=\"{}\"></script>", filename);
-            let embedded_script = format!("<script>\n{}\n</script>", content);
-            html = html.replace(&script_tag, &embedded_script);
+        let mut scripts = String::new();
+        for content in js_files.iter() {
+            scripts.push_str("\n    <script>\n");
+            scripts.push_str(content);
+            scripts.push_str("\n    </script>");
         }
 
-        Ok(html)
+        Ok(scripts)
     }
 
-    /// Use separate script tags (for dashboard mode, not embedded)
-    fn use_separate_script_tags(&self, mut html: String) -> DiagnosticsResult<String> {
-        // List of JavaScript files that need base path prefixed
-        let js_files = [
-            "backtrace-processor.js",
-            "viz-js-integration.js",
-            "flamegraph-renderer.js",
-            "callgraph-svg-renderer.js",
-            "data-access.js",
-            "custom_elements.js",
-            "main.js",
-        ];
+    /// Build data injection script with embedded data
+    fn build_data_injection(&self, data: ReportData<'_>) -> DiagnosticsResult<String> {
+        // Encode data as base64
+        let system_info = data.system_info
+            .map(|s| base64::engine::general_purpose::STANDARD.encode(s))
+            .unwrap_or_default();
 
-        // Prefix each script src with the diagnostics base path
-        for filename in js_files.iter() {
-            let original_tag = format!("<script src=\"{}\"></script>", filename);
-            let prefixed_tag = format!("<script src=\"/diagnostics/{}\"></script>", filename);
-            html = html.replace(&original_tag, &prefixed_tag);
-        }
+        let router_config = data.router_config
+            .map(|s| base64::engine::general_purpose::STANDARD.encode(s))
+            .unwrap_or_default();
 
-        Ok(html)
+        let schema = data.supergraph_schema
+            .map(|s| base64::engine::general_purpose::STANDARD.encode(s))
+            .unwrap_or_default();
+
+        // Serialize memory dumps
+        let memory_dumps_json = serde_json::to_string(data.memory_dumps)
+            .map_err(|e| DiagnosticsError::Internal(format!("Failed to serialize memory dumps: {}", e)))?;
+
+        // Build the injection script
+        let injection = format!(
+            r#"
+    <script>
+        const IS_DASHBOARD_MODE = false;
+        const EMBEDDED_DATA = {{
+            systemInfo: '{}',
+            routerConfig: '{}',
+            schema: '{}',
+            memoryDumps: {}
+        }};
+    </script>"#,
+            system_info, router_config, schema, memory_dumps_json
+        );
+
+        Ok(injection)
     }
+
 }
 
 #[cfg(test)]
@@ -195,8 +166,8 @@ mod tests {
         assert!(generator.is_ok());
 
         let generator = generator.unwrap();
-        assert!(generator.template.contains("{{TIMESTAMP}}"));
-        assert!(generator.template.contains("{{MEMORY_DUMPS_JSON}}"));
+        assert!(generator.template.contains("<!-- SCRIPT_INJECTION_POINT -->"));
+        assert!(generator.template.contains("<!-- DATA_INJECTION_POINT -->"));
     }
 
     #[tokio::test]
@@ -227,18 +198,19 @@ mod tests {
         assert!(html.is_ok());
         let html_content = html.unwrap();
 
-        // Verify template placeholders were replaced
-        assert!(!html_content.contains("{{TIMESTAMP}}"));
-        assert!(!html_content.contains("{{SYSTEM_INFO_BASE64}}"));
-        assert!(!html_content.contains("{{ROUTER_CONFIG_BASE64}}"));
-        assert!(!html_content.contains("{{SCHEMA_BASE64}}"));
-        assert!(!html_content.contains("{{MEMORY_DUMPS_JSON}}"));
+        // Verify injection points were replaced
+        assert!(!html_content.contains("<!-- SCRIPT_INJECTION_POINT -->"));
+        assert!(!html_content.contains("<!-- DATA_INJECTION_POINT -->"));
 
         // Verify it contains base64 encoded data
         assert!(
             html_content
                 .contains(&base64::engine::general_purpose::STANDARD.encode("System info content"))
         );
+
+        // Verify embedded data structure
+        assert!(html_content.contains("const IS_DASHBOARD_MODE = false"));
+        assert!(html_content.contains("const EMBEDDED_DATA = {"));
     }
 
     #[tokio::test]
@@ -331,27 +303,19 @@ type Review @key(fields: "id") {
         assert!(html_content.contains("showTab"));
         assert!(html_content.contains("data-tab="));
 
-        // Verify no template placeholders remain unreplaced
+        // Verify injection points were replaced
         assert!(
-            !html_content.contains("{{TIMESTAMP}}"),
-            "TIMESTAMP placeholder should be replaced"
+            !html_content.contains("<!-- SCRIPT_INJECTION_POINT -->"),
+            "SCRIPT_INJECTION_POINT should be replaced"
         );
         assert!(
-            !html_content.contains("{{SYSTEM_INFO_BASE64}}"),
-            "SYSTEM_INFO_BASE64 placeholder should be replaced"
+            !html_content.contains("<!-- DATA_INJECTION_POINT -->"),
+            "DATA_INJECTION_POINT should be replaced"
         );
-        assert!(
-            !html_content.contains("{{ROUTER_CONFIG_BASE64}}"),
-            "ROUTER_CONFIG_BASE64 placeholder should be replaced"
-        );
-        assert!(
-            !html_content.contains("{{SCHEMA_BASE64}}"),
-            "SCHEMA_BASE64 placeholder should be replaced"
-        );
-        assert!(
-            !html_content.contains("{{MEMORY_DUMPS_JSON}}"),
-            "MEMORY_DUMPS_JSON placeholder should be replaced"
-        );
+
+        // Verify mode and data structure
+        assert!(html_content.contains("const IS_DASHBOARD_MODE = false"));
+        assert!(html_content.contains("const EMBEDDED_DATA = {"));
 
         // Verify memory dump processing worked with our mock file
         // Should contain JSON structure for memory dumps
