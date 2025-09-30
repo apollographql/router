@@ -251,7 +251,7 @@ impl RedisCacheStorage {
             .inspect_err(|err| record_redis_error(err, caller))?;
         let mut client_config = RedisConfig::from_url(url.as_str())
             .inspect_err(|err| record_redis_error(err, caller))?;
-        let is_cluster = url.scheme() == "redis-cluster" || url.scheme() == "rediss-cluster";
+        let is_cluster = client_config.server.is_clustered();
 
         if let Some(username) = config.username {
             client_config.username = Some(username);
