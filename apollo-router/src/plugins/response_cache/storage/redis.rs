@@ -288,7 +288,7 @@ impl CacheStorage for Storage {
             timeout: Some(self.insert_timeout()),
             ..Options::default()
         };
-        let pipeline = self.storage.client().pipeline().with_options(&options);
+        let pipeline = self.storage.pipeline().with_options(&options);
         for (cache_tag_key, elements) in cache_tags_to_pcks.into_iter() {
             self.send_to_maintenance_queue(cache_tag_key.clone());
 
@@ -335,7 +335,7 @@ impl CacheStorage for Storage {
         }
 
         // phase 3
-        let pipeline = self.storage.client().pipeline().with_options(&options);
+        let pipeline = self.storage.pipeline().with_options(&options);
         for document in batch_docs.into_iter() {
             let value = CacheValue {
                 data: document.data,

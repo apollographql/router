@@ -594,6 +594,11 @@ impl RedisCacheStorage {
         self.inner.next().pipeline()
     }
 
+    fn expiration(&self, ttl: Option<Duration>) -> Option<Expiration> {
+        let ttl = ttl.or(self.ttl)?;
+        Some(Expiration::EX(ttl.as_secs() as i64))
+    }
+
     pub(crate) fn make_key<K: KeyType>(&self, key: RedisKey<K>) -> String {
         match &self.namespace {
             Some(namespace) => format!("{namespace}:{key}"),
@@ -616,7 +621,7 @@ impl RedisCacheStorage {
         let key = self.make_key(key);
         match self.ttl {
             Some(ttl) if self.reset_ttl => {
-                let pipeline = self.client().pipeline().with_options(&options);
+                let pipeline = self.pipeline().with_options(&options);
                 let _: () = pipeline
                     .get(&key)
                     .await
@@ -631,7 +636,7 @@ impl RedisCacheStorage {
                 Ok(value)
             }
             _ => {
-                let client = self.inner.next().replicas().with_options(&options);
+                let client = self.client().replicas().with_options(&options);
                 client.get(key).await.inspect_err(|e| self.record_error(e))
             }
         }
@@ -656,10 +661,10 @@ impl RedisCacheStorage {
         //    - https://redis.io/docs/latest/commands/mget/
 
         tracing::trace!("getting multiple values from redis: {:?}", keys);
+        let client = self.client().replicas().with_options(&options);
 
         if keys.len() == 1 {
-            let key = self.make_key(keys.remove(0));
-            let client = self.inner.next().replicas().with_options(&options);
+            let key = self.make_key(keys.swap_remove(0));
             let res = client
                 .get(key)
                 .await
@@ -683,7 +688,7 @@ impl RedisCacheStorage {
             // then we query all the key groups at the same time
             let mut tasks = Vec::new();
             for (_shard, (indexes, keys)) in h {
-                let client = self.inner.next().replicas().with_options(&options);
+                let client = client.clone();
                 tasks.push(async move {
                     let result: Result<Vec<Option<RedisValue<V>>>, _> = client.mget(keys).await;
                     (indexes, result)
@@ -713,7 +718,6 @@ impl RedisCacheStorage {
                 .into_iter()
                 .map(|k| self.make_key(k))
                 .collect::<Vec<_>>();
-            let client = self.inner.next().replicas().with_options(&options);
             client
                 .mget(keys)
                 .await
@@ -730,18 +734,13 @@ impl RedisCacheStorage {
     ) {
         let key = self.make_key(key);
         tracing::trace!("inserting into redis: {:?}, {:?}", key, value);
-        let expiration = ttl
-            .as_ref()
-            .or(self.ttl.as_ref())
-            .map(|ttl| Expiration::EX(ttl.as_secs() as i64));
 
         // NOTE: we need a writer, so don't use replicas() here
-        let r = self
-            .inner
-            .set::<(), _, _>(key, value, expiration, None, false)
-            .await;
-        tracing::trace!("insert result {:?}", r);
-        if let Err(err) = r {
+        let expiration = self.expiration(ttl);
+        let result: Result<(), _> = self.client().set(key, value, expiration, None, false).await;
+        tracing::trace!("insert result {:?}", result);
+
+        if let Err(err) = result {
             self.record_error(&err);
         }
     }
@@ -752,17 +751,15 @@ impl RedisCacheStorage {
         ttl: Option<Duration>,
     ) {
         tracing::trace!("inserting into redis: {:#?}", data);
-        let expiration = ttl
-            .or(self.ttl)
-            .map(|ttl| Expiration::EX(ttl.as_secs() as i64));
+        let expiration = self.expiration(ttl);
 
         // NB: if we were using MSET here, we'd need to split the keys by hash slot. however, fred
         // seems to split the pipeline by hash slot in the background.
         let pipeline = self.pipeline();
         for (key, value) in data {
             let key = self.make_key(key.clone());
-            let _ = pipeline
-                .set::<(), _, _>(key, value.clone(), expiration.clone(), None, false)
+            let _: Result<(), _> = pipeline
+                .set(key, value.clone(), expiration.clone(), None, false)
                 .await;
         }
 
@@ -805,7 +802,7 @@ impl RedisCacheStorage {
 
         // then we query all the key groups at the same time
         let results: Vec<Result<u32, RedisError>> = join_all(h.into_values().map(|keys| async {
-            let client = self.inner.next().with_options(&options);
+            let client = self.client().with_options(&options);
             client.del(keys).await
         }))
         .await;
@@ -829,9 +826,9 @@ impl RedisCacheStorage {
         if self.is_cluster {
             // NOTE: scans might be better send to only the read replicas, but the read-only client
             // doesn't have a scan_cluster(), just a paginated version called scan_page()
-            Box::pin(self.inner.next().scan_cluster(pattern, count, None))
+            Box::pin(self.client().scan_cluster(pattern, count, None))
         } else {
-            Box::pin(self.inner.next().scan(pattern, count, None))
+            Box::pin(self.client().scan(pattern, count, None))
         }
     }
 }
