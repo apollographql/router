@@ -40,7 +40,11 @@ pub(super) async fn load_memory_dumps(
 
     if memory_directory.exists() {
         let mut entries = fs::read_dir(memory_directory).await.map_err(|e| {
-            super::DiagnosticsError::Internal(format!("Failed to read memory directory: {}", e))
+            super::DiagnosticsError::Internal(format!(
+                "Failed to read memory directory '{}': {}",
+                memory_directory.display(),
+                e
+            ))
         })?;
 
         while let Some(entry) = entries.next_entry().await.map_err(|e| {
@@ -80,14 +84,19 @@ async fn load_single_memory_dump(
 
     // Read the file content
     let content = fs::read(path).await.map_err(|e| {
-        super::DiagnosticsError::Internal(format!("Failed to read dump file {}: {}", file_name, e))
+        super::DiagnosticsError::Internal(format!(
+            "Failed to read dump file '{}': {}",
+            path.display(),
+            e
+        ))
     })?;
 
     // Get file metadata
     let metadata = fs::metadata(path).await.map_err(|e| {
         super::DiagnosticsError::Internal(format!(
-            "Failed to read dump metadata {}: {}",
-            file_name, e
+            "Failed to read dump metadata '{}': {}",
+            path.display(),
+            e
         ))
     })?;
 
