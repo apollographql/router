@@ -395,8 +395,10 @@ impl MemoryService {
                     }
 
                     // Sort by creation time (newest first)
-                    dumps.sort_by_key(|dump| {
-                        std::cmp::Reverse(dump.get("created").and_then(|v| v.as_u64()).unwrap_or(0))
+                    dumps.sort_by(|a, b| {
+                        let a_time = a.get("created").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let b_time = b.get("created").and_then(|v| v.as_u64()).unwrap_or(0);
+                        b_time.cmp(&a_time)
                     });
                 }
 
