@@ -381,13 +381,41 @@ fn resolve_shape(
                     return Ok(Shape::unknown([]));
                 }
 
-                let mut key_str = "$root".to_string();
+                // This path implicitly starts with the $root variable, and may
+                // have a prefix like $root.*.foo or even $root?.**.foo. Since
+                // we want the error message to focus on the foo identifier, we
+                // skip not only the $root base name but any non-key/index path
+                // elements, like ?, .*, and .**.
+                let mut key_str = String::new();
+                let mut skipping = true;
                 for key in subpath.iter() {
-                    key_str.push_str(key.to_string().as_str());
+                    if skipping
+                        && matches!(
+                            key.value,
+                            NamedShapePathKey::AnyIndex
+                                | NamedShapePathKey::AnyField
+                                | NamedShapePathKey::Question
+                                | NamedShapePathKey::NotNone
+                        )
+                    {
+                        continue;
+                    } else {
+                        key_str.push_str(key.to_string().as_str());
+                        // We only skip until we stop skipping, and then all key
+                        // variants become fair game.
+                        skipping = false;
+                    }
                 }
-                if !key_str.is_empty() {
-                    key_str = format!("`{key_str}` ");
+                if key_str.is_empty() {
+                    // If we ended up converting a path like $ to $root and then
+                    // losing $root due to the logic above, fall back to
+                    // printing the whole path for clarity/debuggability.
+                    key_str = shape.to_string();
+                } else if key_str.starts_with('.') {
+                    // Remove initial . from field keys
+                    key_str.remove(0);
                 }
+                key_str = format!("`{key_str}` ");
 
                 let locals_suffix = {
                     let local_vars = expression.expression.local_var_names();
@@ -905,7 +933,7 @@ mod tests {
         let expected_location =
             location_of_expression("something", selection, ConnectSpec::latest());
         assert!(
-            err.message.contains("`$root.something.blah`"),
+            err.message.contains("`something.blah`"),
             "{} didn't reference missing arg",
             err.message
         );

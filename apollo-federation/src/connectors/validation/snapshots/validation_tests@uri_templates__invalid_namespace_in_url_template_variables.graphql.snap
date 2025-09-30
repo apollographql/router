@@ -20,7 +20,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/uri_templates/
     },
     Message {
         code: InvalidUrl,
-        message: "In `GET` in `@connect(http:)` on `Query.nodollar`: `$root.config.bar` must start with one of $args, $config, $context, $request, $env",
+        message: "In `GET` in `@connect(http:)` on `Query.nodollar`: `config.bar` must start with one of $args, $config, $context, $request, $env",
         locations: [
             25:31..25:37,
         ],
