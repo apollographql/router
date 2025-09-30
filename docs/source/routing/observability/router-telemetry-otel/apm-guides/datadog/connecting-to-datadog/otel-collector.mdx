@@ -105,10 +105,13 @@ receivers:
 
 processors:
   batch:
-    # Datadog APM intake limit is 3.2MB
+    # Datadog APM Intake limit is 3.2MB.
     send_batch_max_size: 1000
     send_batch_size: 100
     timeout: 10s
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 1000
 
 connectors:
   # Required for APM trace metrics
