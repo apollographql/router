@@ -50,6 +50,7 @@ async fn basic_batch() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -128,6 +129,7 @@ async fn basic_batch_query_params() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -204,6 +206,7 @@ async fn batch_missing_items() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -297,6 +300,7 @@ async fn connect_on_type() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -397,6 +401,7 @@ async fn connect_on_interface_object() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -474,6 +479,7 @@ async fn batch_with_max_size_under_batch_size() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 
@@ -587,6 +593,7 @@ async fn batch_with_max_size_over_batch_size() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 

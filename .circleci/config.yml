@@ -5,13 +5,13 @@ version: 2.1
 # These "CircleCI Orbs" are reusable bits of configuration that can be shared
 # across projects.  See https://circleci.com/orbs/ for more information.
 orbs:
-  slack: circleci/slack@5.2.0
+  slack: circleci/slack@6.0.0
   secops: apollo/circleci-secops-orb@2.0.7
 
 executors:
   amd_linux_build: &amd_linux_build_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.16.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.18.0
     resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
@@ -19,34 +19,49 @@ executors:
       MISE_ENV: ci
   amd_linux_helm: &amd_linux_helm_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.16.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.18.0
     resource_class: small
     environment:
       MISE_ENV: ci
   amd_linux_test: &amd_linux_test_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.16.0
-      - image: cimg/redis:7.4.4
-      - image: cimg/postgres:17.5
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.18.0
+      - image: cimg/redis:7.4.5
+      - image: cimg/postgres:17.6
         environment:
           POSTGRES_USER: root
           POSTGRES_DB: root
       - image: openzipkin/zipkin:3.5.1
-      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.29.1
+      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.34.0
+      # redis cluster - 3 primaries, 3 replicas
+      - image: cimg/redis:7.4.5
+        command: [ "redis-server", "--protected-mode", "no", "--port", "7000", "--cluster-enabled", "yes" ]
+      - image: cimg/redis:7.4.5
+        command: [ "redis-server", "--protected-mode", "no", "--port", "7001", "--cluster-enabled", "yes" ]
+      - image: cimg/redis:7.4.5
+        command: [ "redis-server", "--protected-mode", "no", "--port", "7002", "--cluster-enabled", "yes" ]
+      - image: cimg/redis:7.4.5
+        command: [ "redis-server", "--protected-mode", "no", "--port", "7003", "--cluster-enabled", "yes" ]
+      - image: cimg/redis:7.4.5
+        command: [ "redis-server", "--protected-mode", "no", "--port", "7004", "--cluster-enabled", "yes" ]
+      - image: cimg/redis:7.4.5
+        command: [ "redis-server", "--protected-mode", "no", "--port", "7005", "--cluster-enabled", "yes" ]
+      - image: cimg/redis:7.4.5
+        command: [ "sh", "-c", "sleep 30; echo yes | redis-cli --cluster create --cluster-replicas 1 localhost:7000 localhost:7001 localhost:7002 localhost:7003 localhost:7004 localhost:7005" ]
     resource_class: 2xlarge
     environment:
       MISE_ENV: ci
       CARGO_BUILD_JOBS: 4
   arm_linux_build: &arm_linux_build_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.16.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.18.0
     resource_class: arm.xlarge
     environment:
       MISE_ENV: ci
       CARGO_BUILD_JOBS: 8
   arm_linux_test: &arm_linux_test_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.16.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.18.0
     resource_class: arm.xlarge
     environment:
       MISE_ENV: ci
@@ -72,14 +87,14 @@ executors:
   windows_build: &windows_build_executor
     machine:
       image: "windows-server-2019-vs2019:2024.02.21"
-    resource_class: windows.xlarge
+    resource_class: windows.2xlarge
     shell: bash.exe --login -eo pipefail
     environment:
       MISE_ENV: ci,windows
   windows_test: &windows_test_executor
     machine:
       image: "windows-server-2019-vs2019:2024.02.21"
-    resource_class: windows.xlarge
+    resource_class: windows.2xlarge
     shell: bash.exe --login -eo pipefail
     environment:
       MISE_ENV: ci,windows
@@ -365,7 +380,9 @@ commands:
           environment:
             # Use the settings from the "ci" profile in nextest configuration.
             NEXTEST_PROFILE: ci
-          command: cargo xtask test --workspace --locked --features ci,snapshot
+          command: |
+            cargo xtask test --workspace --locked --features ci,snapshot
+
       - run:
           name: Delete large files from cache
           command: |
@@ -697,13 +714,42 @@ jobs:
                   # See: https://docs.github.com/en/packages/learn-github-packages/connecting-a-repository-to-a-package#connecting-a-repository-to-a-container-image-using-the-command-line
 
                   BASE_VERSION=$(cargo metadata --format-version=1 --no-deps | jq --raw-output '.packages[0].version')
-                  ARTIFACT_URL="https://output.circle-artifacts.com/output/job/${CIRCLE_WORKFLOW_JOB_ID}/artifacts/0/artifacts/router-v${BASE_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+                  ARTIFACT_FILENAME="router-v${BASE_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+                  ARTIFACT_URL="https://output.circle-artifacts.com/output/job/${CIRCLE_WORKFLOW_JOB_ID}/artifacts/0/artifacts/${ARTIFACT_FILENAME}"
                   VERSION="v$(echo "${BASE_VERSION}" | tr "+" "-")"
                   ROUTER_TAG=ghcr.io/apollographql/nightly/router
 
+                  # Validate local artifact exists and calculate its checksum as a safety net
+                  if [ ! -f "artifacts/${ARTIFACT_FILENAME}" ]; then
+                    echo "Error: Local artifact not found: artifacts/${ARTIFACT_FILENAME}"
+                    exit 1
+                  fi
+                  LOCAL_ARTIFACT_SHA256SUM=$(sha256sum "artifacts/${ARTIFACT_FILENAME}" | cut -d' ' -f1)
+                  echo "Local artifact checksum: ${LOCAL_ARTIFACT_SHA256SUM}"
+
+                  # Download the artifact and calculate its checksum
+                  echo "Downloading artifact to calculate checksum..."
+                  curl -sSL -H "Circle-Token: ${CIRCLE_TOKEN}" -o "router-artifact.tar.gz" "${ARTIFACT_URL}"
+
+                  # Calculate checksum of the tarball (not the binary inside)
+                  ARTIFACT_URL_SHA256SUM=$(sha256sum "router-artifact.tar.gz" | cut -d' ' -f1)
+                  rm -f router-artifact.tar.gz
+
+                  # Compare local vs remote artifact checksums
+                  if [ "${LOCAL_ARTIFACT_SHA256SUM}" != "${ARTIFACT_URL_SHA256SUM}" ]; then
+                    echo "Error: Local and remote artifact checksums don't match!"
+                    echo "Local:      ${LOCAL_ARTIFACT_SHA256SUM}"
+                    echo "Remote: ${ARTIFACT_URL_SHA256SUM}"
+                    exit 1
+                  fi
+                  echo "Local and remote artifact checksums match: ${LOCAL_ARTIFACT_SHA256SUM}"
+
                   echo "REPO_URL: ${REPO_URL}"
                   echo "BASE_VERSION: ${BASE_VERSION}"
+                  echo "ARTIFACT_FILENAME: ${ARTIFACT_FILENAME}"
                   echo "ARTIFACT_URL: ${ARTIFACT_URL}"
+                  echo "ARTIFACT_URL_SHA256SUM: ${ARTIFACT_URL_SHA256SUM}"
+                  echo "LOCAL_ARTIFACT_SHA256SUM: ${LOCAL_ARTIFACT_SHA256SUM}"
                   echo "VERSION: ${VERSION}"
                   echo "ROUTER_TAG: ${ROUTER_TAG}"
 
@@ -716,10 +762,10 @@ jobs:
                   echo ${GITHUB_OCI_TOKEN} | docker login ghcr.io -u apollo-bot2 --password-stdin
                   # TODO: Can't figure out how to build multi-arch image from ARTIFACT_URL right now. Figure out later...
                   # Build and push debug image
-                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
+                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ARTIFACT_URL_SHA256SUM="${ARTIFACT_URL_SHA256SUM}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug dockerfiles/.
                   docker push ${ROUTER_TAG}:${VERSION}-debug
                   # Build and push release image
-                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ROUTER_RELEASE=${VERSION} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
+                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ARTIFACT_URL_SHA256SUM="${ARTIFACT_URL_SHA256SUM}" --build-arg ROUTER_RELEASE=${VERSION} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} dockerfiles/.
                   docker push ${ROUTER_TAG}:${VERSION}
                   # save containers for analysis
                   mkdir built-containers
@@ -804,7 +850,7 @@ jobs:
 
   publish_github_release:
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.16.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.18.0
     resource_class: small
     environment:
       <<: *common_job_environment
@@ -891,9 +937,9 @@ jobs:
                   docker manifest inspect ${ROUTER_TAG}:${VERSION}  > /dev/null && exit 1
                   docker manifest inspect ${ROUTER_TAG}:${VERSION}-debug  > /dev/null && exit 1
                   # Build and push debug image
-                  docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
+                  docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug dockerfiles/.
                   # Build and push release image
-                  docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
+                  docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} dockerfiles/.
             - run:
                 name: Helm build
                 command: |

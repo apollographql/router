@@ -305,7 +305,7 @@ where
                 0
             }
         });
-        let otel_name = format!("POST {}", schema_uri);
+        let otel_name = format!("POST {schema_uri}");
 
         let http_req_span = tracing::info_span!(HTTP_REQUEST_SPAN_NAME,
             "otel.kind" = "CLIENT",

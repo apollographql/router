@@ -1,15 +1,15 @@
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
-use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::helpers::json_type_name;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(TypeOfMethod, typeof_method, typeof_shape);
@@ -26,6 +26,7 @@ fn typeof_method(
     data: &JSON,
     _vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if method_args.is_some() {
         (
@@ -37,6 +38,7 @@ fn typeof_method(
                 ),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         )
     } else {
@@ -46,15 +48,14 @@ fn typeof_method(
 }
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn typeof_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
     _input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
     // TODO Compute this union type once and clone it here.
-    let locations = method_name.shape_location(source_id);
+    let locations = method_name.shape_location(context.source_id());
     Shape::one(
         [
             Shape::string_value("null", locations.clone()),

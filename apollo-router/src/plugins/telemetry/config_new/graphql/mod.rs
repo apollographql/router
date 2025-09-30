@@ -134,20 +134,20 @@ impl Instrumented for GraphQLInstruments {
         }
         self.custom.on_response_event(response, ctx);
 
-        if !self.custom.is_empty() || self.list_length.is_some() || self.field_execution.is_some() {
-            if let Some(executable_document) = ctx.executable_document() {
-                GraphQLInstrumentsVisitor {
-                    ctx,
-                    instruments: self,
-                }
-                .visit(
-                    &executable_document,
-                    response,
-                    &ctx.get_demand_control_context()
-                        .map(|c| c.variables)
-                        .unwrap_or_default(),
-                );
+        if (!self.custom.is_empty() || self.list_length.is_some() || self.field_execution.is_some())
+            && let Some(executable_document) = ctx.executable_document()
+        {
+            GraphQLInstrumentsVisitor {
+                ctx,
+                instruments: self,
             }
+            .visit(
+                &executable_document,
+                response,
+                &ctx.get_demand_control_context()
+                    .map(|c| c.variables)
+                    .unwrap_or_default(),
+            );
         }
     }
 

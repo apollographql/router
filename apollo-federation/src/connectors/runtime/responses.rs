@@ -1,6 +1,5 @@
-use std::cell::LazyCell;
-
 use apollo_compiler::collections::HashMap;
+use apollo_compiler::collections::IndexMap;
 use encoding_rs::Encoding;
 use encoding_rs::UTF_8;
 use http::HeaderMap;
@@ -96,22 +95,6 @@ pub fn handle_raw_response(
     context: impl ContextReader,
     client_headers: &HeaderMap<HeaderValue>,
 ) -> MappedResponse {
-    if parts.status.is_success() {
-        map_response(data, parts, key, connector, context, client_headers)
-    } else {
-        map_error(data, parts, key, connector, context, client_headers)
-    }
-}
-
-/// Returns a response with data transformed by the selection mapping.
-pub fn map_response(
-    data: &Value,
-    parts: &Parts,
-    key: ResponseKey,
-    connector: &Connector,
-    context: impl ContextReader,
-    client_headers: &HeaderMap<HeaderValue>,
-) -> MappedResponse {
     let inputs = key
         .inputs()
         .clone()
@@ -122,50 +105,74 @@ pub fn map_response(
         .request(&connector.response_headers, client_headers)
         .response(&connector.response_headers, Some(parts))
         .merge();
+    let warnings = Vec::new();
+    let (success, warnings) = is_success(connector, data, parts, &inputs, warnings);
+    if success {
+        map_response(data, key, inputs, warnings)
+    } else {
+        map_error(connector, data, parts, key, inputs, warnings)
+    }
+}
 
+// If the user has set a custom success condition selector, resolve that expression,
+// otherwise default to checking status code is 2XX
+fn is_success(
+    connector: &Connector,
+    data: &Value,
+    parts: &Parts,
+    inputs: &IndexMap<String, Value>,
+    mut warnings: Vec<Problem>,
+) -> (bool, Vec<Problem>) {
+    let Some(is_success_selection) = &connector.error_settings.connect_is_success else {
+        return (parts.status.is_success(), warnings);
+    };
+    let (res, apply_to_errors) = is_success_selection.apply_with_vars(data, inputs);
+    warnings.extend(aggregate_apply_to_errors(
+        apply_to_errors,
+        ProblemLocation::IsSuccess,
+    ));
+
+    (
+        res.as_ref().and_then(Value::as_bool).unwrap_or_default(),
+        warnings,
+    )
+}
+
+/// Returns a response with data transformed by the selection mapping.
+pub(super) fn map_response(
+    data: &Value,
+    key: ResponseKey,
+    inputs: IndexMap<String, Value>,
+    mut warnings: Vec<Problem>,
+) -> MappedResponse {
     let (res, apply_to_errors) = key.selection().apply_with_vars(data, &inputs);
-
-    let mapping_problems: Vec<Problem> =
-        aggregate_apply_to_errors(apply_to_errors, ProblemLocation::Selection).collect();
-
+    warnings.extend(aggregate_apply_to_errors(
+        apply_to_errors,
+        ProblemLocation::Selection,
+    ));
     MappedResponse::Data {
         key,
         data: res.unwrap_or_else(|| Value::Null),
-        problems: mapping_problems,
+        problems: warnings,
     }
 }
 
 /// Returns a `MappedResponse` with a GraphQL error.
-pub fn map_error(
+pub(super) fn map_error(
+    connector: &Connector,
     data: &Value,
     parts: &Parts,
     key: ResponseKey,
-    connector: &Connector,
-    context: impl ContextReader,
-    client_headers: &HeaderMap<HeaderValue>,
+    inputs: IndexMap<String, Value>,
+    mut warnings: Vec<Problem>,
 ) -> MappedResponse {
-    let mut problems = Vec::new();
-
-    let inputs = LazyCell::new(|| {
-        key.inputs()
-            .clone()
-            .merger(&connector.response_variable_keys)
-            .config(connector.config.as_ref())
-            .context(context)
-            .status(parts.status.as_u16())
-            .request(&connector.response_headers, client_headers)
-            .response(&connector.response_headers, Some(parts))
-            .merge()
-    });
-
-    // Do we have a error message mapping set for this connector?
+    // Do we have an error message mapping set for this connector?
     let message = if let Some(message_selection) = &connector.error_settings.message {
         let (res, apply_to_errors) = message_selection.apply_with_vars(data, &inputs);
-        problems.extend(aggregate_apply_to_errors(
+        warnings.extend(aggregate_apply_to_errors(
             apply_to_errors,
             ProblemLocation::ErrorsMessage,
         ));
-
         res.as_ref()
             .and_then(Value::as_str)
             .unwrap_or_default()
@@ -195,7 +202,7 @@ pub fn map_error(
     let mut extension_code = "CONNECTOR_FETCH".to_string();
     if let Some(extensions_selection) = &connector.error_settings.source_extensions {
         let (res, apply_to_errors) = extensions_selection.apply_with_vars(data, &inputs);
-        problems.extend(aggregate_apply_to_errors(
+        warnings.extend(aggregate_apply_to_errors(
             apply_to_errors,
             ProblemLocation::SourceErrorsExtensions,
         ));
@@ -219,7 +226,7 @@ pub fn map_error(
 
     if let Some(extensions_selection) = &connector.error_settings.connect_extensions {
         let (res, apply_to_errors) = extensions_selection.apply_with_vars(data, &inputs);
-        problems.extend(aggregate_apply_to_errors(
+        warnings.extend(aggregate_apply_to_errors(
             apply_to_errors,
             ProblemLocation::ConnectErrorsExtensions,
         ));
@@ -246,7 +253,7 @@ pub fn map_error(
     MappedResponse::Error {
         error,
         key,
-        problems,
+        problems: warnings,
     }
 }
 // --- MAPPED RESPONSE ---------------------------------------------------------
@@ -341,16 +348,23 @@ impl MappedResponse {
                         }
                     };
                 }
-                ResponseKey::BatchEntity { keys, inputs, .. } => {
+                ResponseKey::BatchEntity {
+                    selection,
+                    keys,
+                    inputs,
+                } => {
                     let Value::Array(values) = value else {
                         return Err(HandleResponseError::MergeError(
                             "Response for a batch request does not map to an array".into(),
                         ));
                     };
 
-                    let key_selection: Result<JSONSelection, _> = keys.try_into();
-                    let key_selection = key_selection
-                        .map_err(|e| HandleResponseError::MergeError(e.to_string()))?;
+                    let spec = selection.spec();
+                    let key_selection = JSONSelection::parse_with_spec(
+                        &keys.serialize().no_indent().to_string(),
+                        spec,
+                    )
+                    .map_err(|e| HandleResponseError::MergeError(e.to_string()))?;
 
                     // Convert representations into keys for use in the map
                     let key_values = inputs.batch.iter().map(|v| {

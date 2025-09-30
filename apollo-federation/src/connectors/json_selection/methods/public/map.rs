@@ -1,17 +1,17 @@
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
-use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::apply_to::ApplyToResultMethods;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(MapMethod, map_method, map_shape);
@@ -33,6 +33,7 @@ fn map_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     let Some(args) = method_args else {
         return (
@@ -41,6 +42,7 @@ fn map_method(
                 format!("Method ->{} requires one argument", method_name.as_ref()),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         );
     };
@@ -51,6 +53,7 @@ fn map_method(
                 format!("Method ->{} requires one argument", method_name.as_ref()),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         );
     };
@@ -61,7 +64,8 @@ fn map_method(
 
         for (i, element) in array.iter().enumerate() {
             let input_path = input_path.append(JSON::Number(i.into()));
-            let (applied_opt, arg_errors) = first_arg.apply_to_path(element, vars, &input_path);
+            let (applied_opt, arg_errors) =
+                first_arg.apply_to_path(element, vars, &input_path, spec);
             errors.extend(arg_errors);
             output.insert(i, applied_opt.unwrap_or(JSON::Null));
         }
@@ -71,7 +75,7 @@ fn map_method(
         // Return a singleton array wrapping the value of applying the
         // ->map method the non-array input data.
         first_arg
-            .apply_to_path(data, vars, input_path)
+            .apply_to_path(data, vars, input_path, spec)
             .and_then_collecting_errors(|value| {
                 (Some(JSON::Array(vec![value.clone()])), Vec::new())
             })
@@ -80,17 +84,16 @@ fn map_method(
 
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn map_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
     let Some(first_arg) = method_args.and_then(|args| args.args.first()) else {
         return Shape::error(
             format!("Method ->{} requires one argument", method_name.as_ref()),
-            method_name.shape_location(source_id),
+            method_name.shape_location(context.source_id()),
         );
     };
     match input_shape.case() {
@@ -98,29 +101,14 @@ fn map_shape(
             let new_prefix = prefix
                 .iter()
                 .map(|shape| {
-                    first_arg.compute_output_shape(
-                        shape.clone(),
-                        dollar_shape.clone(),
-                        named_var_shapes,
-                        source_id,
-                    )
+                    first_arg.compute_output_shape(context, shape.clone(), dollar_shape.clone())
                 })
                 .collect::<Vec<_>>();
-            let new_tail = first_arg.compute_output_shape(
-                tail.clone(),
-                dollar_shape,
-                named_var_shapes,
-                source_id,
-            );
+            let new_tail = first_arg.compute_output_shape(context, tail.clone(), dollar_shape);
             Shape::array(new_prefix, new_tail, input_shape.locations)
         }
         _ => Shape::list(
-            first_arg.compute_output_shape(
-                input_shape.any_item([]),
-                dollar_shape,
-                named_var_shapes,
-                source_id,
-            ),
+            first_arg.compute_output_shape(context, input_shape.any_item([]), dollar_shape),
             input_shape.locations,
         ),
     }
@@ -130,6 +118,8 @@ fn map_shape(
 mod tests {
     use serde_json_bytes::json;
 
+    use crate::connectors::ConnectSpec;
+    use crate::connectors::json_selection::ApplyToError;
     use crate::selection;
 
     #[test]
@@ -202,4 +192,33 @@ mod tests {
         //     assert_eq!(output_shape.pretty_print(), "List<String>");
         // }
     }*/
+
+    #[rstest::rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn map_should_handle_none_elements_gracefully(#[case] spec: ConnectSpec) {
+        // When individual elements in map return None, they become null in the result
+        assert_eq!(
+            selection!("$.a->map(@.missing)", spec).apply_to(&json!({
+                "a": [{}, {"missing": "value"}, {}],
+            })),
+            (
+                Some(json!([null, "value", null])),
+                vec![
+                    ApplyToError::from_json(&json!({
+                        "message": "Property .missing not found in object",
+                        "path": ["a", "->map", 0, "missing"],
+                        "range": [11, 18],
+                        "spec": spec.to_string(),
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "Property .missing not found in object",
+                        "path": ["a", "->map", 2, "missing"],
+                        "range": [11, 18],
+                        "spec": spec.to_string(),
+                    }))
+                ]
+            ),
+        );
+    }
 }

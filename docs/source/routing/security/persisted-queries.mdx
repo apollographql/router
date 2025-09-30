@@ -8,6 +8,7 @@ minVersion: Router v1.25.0
 <PlanRequired plans={["Free", "Developer", "Standard", "Enterprise"]}>
 
 Rate limits apply on the Free plan.
+Developer and Standard plans require Router v2.6.0 or later.
 
 </PlanRequired>
 
@@ -101,7 +102,7 @@ From version `1.50.0` to `1.54`, the `local_manifests` configuration option was 
 
 </Note>
 
-Adding `local_manifests` to your `persisted-queries` configuration lets you use local persisted query manifests instead of the hosted Uplink version. This is helpful when you're using an offline Enterprise license and can't use Uplink. With `local_manifests`, the router doesn't reload the manifest from the file system, so you need to restart the router to apply changes.
+Adding `local_manifests` to your `persisted-queries` configuration lets you use local persisted query manifests instead of the hosted Uplink version. This is helpful when you're using an [offline Enterprise license](/graphos/routing/license/#offline-license) and can't use Uplink. With `local_manifests`, the router doesn't reload the manifest from the file system, so you need to restart the router to apply changes.
 
 ```yaml title="router.yaml"
 persisted_queries:
@@ -206,4 +207,4 @@ This does not affect the behavior of the [`log_unknown` option](#log_unknown): u
 
 ## Limitations
 
-- **Unsupported with offline license**. An GraphOS Router using an [offline Enterprise license](/router/enterprise-features/#offline-enterprise-license) cannot use safelisting with persisted queries. The feature relies on Apollo Uplink to fetch persisted query manifests, so it doesn't work as designed when the router is disconnected from Uplink.
+- **Unsupported with offline license**. A GraphOS Router using an [offline license](/graphos/routing/license/#offline-license) cannot use safelisting with persisted queries. The feature relies on Apollo Uplink to fetch persisted query manifests, so it doesn't work as designed when the router is disconnected from Uplink.

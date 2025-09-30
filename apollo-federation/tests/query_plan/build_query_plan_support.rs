@@ -116,7 +116,7 @@ pub(crate) fn compose(
         .map(|(name, schema)| {
             (
                 *name,
-                format!("extend schema {DEFAULT_LINK_DIRECTIVE}\n\n{}", schema,),
+                format!("extend schema {DEFAULT_LINK_DIRECTIVE}\n\n{schema}",),
             )
         })
         .collect();

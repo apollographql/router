@@ -144,12 +144,13 @@ impl Merger {
                             )
                         })
                         .collect();
-                    self.error_reporter.report_mismatch_error::<_, ()>(
+                    self.error_reporter.report_mismatch_error::<_, _, ()>(
                         CompositionError::LinkImportNameMismatch {
                             message: format!("The \"@{}\" directive (from {}) is imported with mismatched name between subgraphs: it is imported as", directive.name, subgraph_core_directive.url),
                         },
                         &directive,
                         &definition_sources,
+                        |def| Some(format!("\"@{}\"", def.name)),
                         |def, _| Some(format!("\"@{}\"", def.name)),
                     );
                     return Ok(());
@@ -215,13 +216,16 @@ impl Merger {
             }
             self.link_spec_definition.apply_feature_to_schema(
                 &mut self.merged,
-                supergraph_core_directives[0].spec_in_supergraph, // TODO: Better to structure it how JS has it
+                supergraph_core_directives[0].spec_in_supergraph,
                 None,
                 supergraph_core_directives[0].spec_in_supergraph.purpose(),
                 Some(imports),
             )?;
 
-            let feature = self.merged.metadata().unwrap().for_identity(
+            let Some(links_metadata) = self.merged.metadata() else {
+                bail!("Missing links metadata in supergraph schema");
+            };
+            let feature = links_metadata.for_identity(
                 &supergraph_core_directives[0]
                     .spec_in_supergraph
                     .url()
@@ -237,19 +241,24 @@ impl Merger {
                 } else {
                     None
                 };
+                let Some(definition) = self
+                    .merged
+                    .schema()
+                    .directive_definitions
+                    .get(&supergraph_core_directive.name_in_supergraph)
+                else {
+                    bail!(
+                        "Could not find directive definition for @{} in supergraph schema",
+                        supergraph_core_directive.name_in_supergraph
+                    );
+                };
                 self.merged_federation_directive_names
                     .insert(supergraph_core_directive.name_in_supergraph.to_string());
                 self.merged_federation_directive_in_supergraph_by_directive_name
                     .insert(
                         supergraph_core_directive.name_in_supergraph.clone(),
                         MergedDirectiveInfo {
-                            definition: (**self
-                                .merged
-                                .schema()
-                                .directive_definitions
-                                .get(&supergraph_core_directive.name_in_supergraph)
-                                .unwrap())
-                            .clone(), // TODO: Switch this to ref
+                            definition: (**definition).clone(),
                             arguments_merger,
                             static_argument_transform: supergraph_core_directive
                                 .composition_spec

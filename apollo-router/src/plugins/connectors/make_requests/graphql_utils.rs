@@ -27,18 +27,18 @@ pub(super) fn field_arguments_map(
     }
 
     for argument_def in field.definition.arguments.iter() {
-        if let Some(value) = argument_def.default_value.as_ref() {
-            if !arguments.contains_key(argument_def.name.as_str()) {
-                arguments.insert(
-                    argument_def.name.as_str(),
-                    argument_value_to_json(value, variables).map_err(|err| {
-                        format!(
-                            "failed to convert default value on {}({}:) to json: {}",
-                            field.definition.name, argument_def.name, err
-                        )
-                    })?,
-                );
-            }
+        if let Some(value) = argument_def.default_value.as_ref()
+            && !arguments.contains_key(argument_def.name.as_str())
+        {
+            arguments.insert(
+                argument_def.name.as_str(),
+                argument_value_to_json(value, variables).map_err(|err| {
+                    format!(
+                        "failed to convert default value on {}({}:) to json: {}",
+                        field.definition.name, argument_def.name, err
+                    )
+                })?,
+            );
         }
     }
 
@@ -52,11 +52,10 @@ pub(super) fn argument_value_to_json(
     match value {
         Value::Null => Ok(JSONValue::Null),
         Value::Enum(e) => Ok(JSONValue::String(e.as_str().into())),
-        Value::Variable(name) => variables.get(name.as_str()).cloned().ok_or_else(|| {
-            BoxError::from(format!(
-                "variable {name} used in operation but not defined in variables"
-            ))
-        }),
+        Value::Variable(name) => Ok(variables
+            .get(name.as_str())
+            .cloned()
+            .unwrap_or(JSONValue::Null)),
         Value::String(s) => Ok(JSONValue::String(s.as_str().into())),
         Value::Float(f) => Ok(JSONValue::Number(
             Number::from_f64(

@@ -35,7 +35,7 @@ pub(crate) fn did_you_mean(suggestions: impl IntoIterator<Item = String>) -> Str
         suggestions
             .into_iter()
             .take(MAX_SUGGESTIONS)
-            .map(|s| format!("\"{}\"", s)),
+            .map(|s| format!("\"{s}\"")),
         human_readable::JoinStringsOptions {
             separator: ", ",
             first_separator: None,
@@ -43,5 +43,5 @@ pub(crate) fn did_you_mean(suggestions: impl IntoIterator<Item = String>) -> Str
             output_length_limit: None,
         },
     );
-    format!("{}{}?", MESSAGE, suggestion_str)
+    format!("{MESSAGE}{suggestion_str}?")
 }

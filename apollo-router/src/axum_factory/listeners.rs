@@ -19,8 +19,8 @@ use hyper_util::server::conn::auto::Builder;
 use multimap::MultiMap;
 #[cfg(unix)]
 use tokio::net::UnixListener;
-use tokio::sync::Notify;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use tokio_util::time::FutureExt;
 use tower_service::Service;
 
@@ -56,33 +56,31 @@ pub(super) fn ensure_endpoints_consistency(
     endpoints: &MultiMap<ListenAddr, Endpoint>,
 ) -> Result<(), ApolloRouterError> {
     // check the main endpoint
-    if let Some(supergraph_listen_endpoint) = endpoints.get_vec(&configuration.supergraph.listen) {
-        if supergraph_listen_endpoint
+    if let Some(supergraph_listen_endpoint) = endpoints.get_vec(&configuration.supergraph.listen)
+        && supergraph_listen_endpoint
             .iter()
             .any(|e| e.path == configuration.supergraph.path)
-        {
-            if let Some((ip, port)) = configuration.supergraph.listen.ip_and_port() {
-                return Err(ApolloRouterError::SameRouteUsedTwice(
-                    ip,
-                    port,
-                    configuration.supergraph.path.clone(),
-                ));
-            }
-        }
+        && let Some((ip, port)) = configuration.supergraph.listen.ip_and_port()
+    {
+        return Err(ApolloRouterError::SameRouteUsedTwice(
+            ip,
+            port,
+            configuration.supergraph.path.clone(),
+        ));
     }
 
     // check the extra endpoints
     let mut listen_addrs_and_paths = HashSet::new();
     for (listen, endpoints) in endpoints.iter_all() {
         for endpoint in endpoints {
-            if let Some((ip, port)) = listen.ip_and_port() {
-                if !listen_addrs_and_paths.insert((ip, port, endpoint.path.clone())) {
-                    return Err(ApolloRouterError::SameRouteUsedTwice(
-                        ip,
-                        port,
-                        endpoint.path.clone(),
-                    ));
-                }
+            if let Some((ip, port)) = listen.ip_and_port()
+                && !listen_addrs_and_paths.insert((ip, port, endpoint.path.clone()))
+            {
+                return Err(ApolloRouterError::SameRouteUsedTwice(
+                    ip,
+                    port,
+                    endpoint.path.clone(),
+                ));
             }
         }
     }
@@ -130,31 +128,28 @@ pub(super) fn ensure_listenaddrs_consistency(
         all_ports.insert(main_port, main_ip);
     }
 
-    if configuration.health_check.enabled {
-        if let Some((ip, port)) = configuration.health_check.listen.ip_and_port() {
-            if let Some(previous_ip) = all_ports.insert(port, ip) {
-                if ip != previous_ip {
-                    return Err(ApolloRouterError::DifferentListenAddrsOnSamePort(
-                        previous_ip,
-                        ip,
-                        port,
-                    ));
-                }
-            }
-        }
+    if configuration.health_check.enabled
+        && let Some((ip, port)) = configuration.health_check.listen.ip_and_port()
+        && let Some(previous_ip) = all_ports.insert(port, ip)
+        && ip != previous_ip
+    {
+        return Err(ApolloRouterError::DifferentListenAddrsOnSamePort(
+            previous_ip,
+            ip,
+            port,
+        ));
     }
 
     for addr in endpoints.keys() {
-        if let Some((ip, port)) = addr.ip_and_port() {
-            if let Some(previous_ip) = all_ports.insert(port, ip) {
-                if ip != previous_ip {
-                    return Err(ApolloRouterError::DifferentListenAddrsOnSamePort(
-                        previous_ip,
-                        ip,
-                        port,
-                    ));
-                }
-            }
+        if let Some((ip, port)) = addr.ip_and_port()
+            && let Some(previous_ip) = all_ports.insert(port, ip)
+            && ip != previous_ip
+        {
+            return Err(ApolloRouterError::DifferentListenAddrsOnSamePort(
+                previous_ip,
+                ip,
+                port,
+            ));
         }
     }
 
@@ -219,7 +214,7 @@ macro_rules! handle_connection {
             // the shutdown receiver was triggered first,
             // so we tell the connection to do a graceful shutdown
             // on the next request, then we wait for it to finish
-            _ = connection_shutdown.notified() => {
+            _ = connection_shutdown.cancelled() => {
                 connection_handle.shutdown();
                 connection.as_mut().graceful_shutdown();
                 // Only wait for the connection to close gracfully if we recieved a request.
@@ -332,7 +327,7 @@ pub(super) fn serve_router_on_listen_addr(
     let server = async move {
         tokio::pin!(shutdown_receiver);
 
-        let connection_shutdown = Arc::new(Notify::new());
+        let connection_shutdown = CancellationToken::new();
 
         loop {
             tokio::select! {
@@ -465,7 +460,7 @@ pub(super) fn serve_router_on_listen_addr(
         // the shutdown receiver was triggered so we break out of
         // the server loop, tell the currently active connections to stop
         // then return the TCP listen socket
-        connection_shutdown.notify_waiters();
+        connection_shutdown.cancel();
         listener
     };
     (server, shutdown_sender)
@@ -512,6 +507,7 @@ where
 mod tests {
     use std::net::SocketAddr;
     use std::str::FromStr;
+    use std::sync::Arc;
 
     use axum::BoxError;
     use tower::ServiceExt;

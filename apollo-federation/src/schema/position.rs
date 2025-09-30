@@ -8,6 +8,7 @@ use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast;
 use apollo_compiler::ast::Argument;
+use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
@@ -34,6 +35,9 @@ use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::database::links_metadata;
 use crate::link::spec_definition::SpecDefinition;
+use crate::merger::merge_argument::HasArguments;
+use crate::merger::merge_argument::HasDefaultValue;
+use crate::merger::merge_enum::EnumExampleAst;
 use crate::schema::FederationSchema;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::schema::referencer::EnumTypeReferencers;
@@ -152,6 +156,388 @@ macro_rules! infallible_conversions {
     }
 }
 
+/// Makes `description` field API available for use with generic types
+pub(crate) trait HasDescription {
+    fn description<'schema>(&self, schema: &'schema FederationSchema)
+    -> Option<&'schema Node<str>>;
+    fn set_description(
+        &self,
+        schema: &mut FederationSchema,
+        description: Option<Node<str>>,
+    ) -> Result<(), FederationError>;
+}
+
+macro_rules! impl_has_description_for {
+    ($struct_name:ident) => {
+        impl HasDescription for $struct_name {
+            fn description<'schema>(
+                &self,
+                schema: &'schema FederationSchema,
+            ) -> Option<&'schema Node<str>> {
+                self.try_get(&schema.schema)?.description.as_ref()
+            }
+
+            fn set_description(
+                &self,
+                schema: &mut FederationSchema,
+                description: Option<Node<str>>,
+            ) -> Result<(), FederationError> {
+                self.make_mut(&mut schema.schema)?.make_mut().description = description;
+                Ok(())
+            }
+        }
+    };
+}
+
+impl_has_description_for!(DirectiveDefinitionPosition);
+impl_has_description_for!(ScalarTypeDefinitionPosition);
+impl_has_description_for!(ObjectTypeDefinitionPosition);
+impl_has_description_for!(InterfaceTypeDefinitionPosition);
+impl_has_description_for!(UnionTypeDefinitionPosition);
+impl_has_description_for!(EnumTypeDefinitionPosition);
+impl_has_description_for!(InputObjectTypeDefinitionPosition);
+impl_has_description_for!(ObjectFieldDefinitionPosition);
+impl_has_description_for!(InterfaceFieldDefinitionPosition);
+impl_has_description_for!(EnumValueDefinitionPosition);
+impl_has_description_for!(InputObjectFieldDefinitionPosition);
+impl_has_description_for!(ObjectFieldArgumentDefinitionPosition);
+impl_has_description_for!(InterfaceFieldArgumentDefinitionPosition);
+impl_has_description_for!(DirectiveArgumentDefinitionPosition);
+
+// Irregular implementations of HasDescription
+impl HasDescription for SchemaDefinitionPosition {
+    fn description<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<str>> {
+        self.get(&schema.schema).description.as_ref()
+    }
+
+    fn set_description(
+        &self,
+        schema: &mut FederationSchema,
+        description: Option<Node<str>>,
+    ) -> Result<(), FederationError> {
+        self.make_mut(&mut schema.schema).make_mut().description = description;
+        Ok(())
+    }
+}
+
+impl HasDescription for ObjectOrInterfaceFieldDefinitionPosition {
+    fn description<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<str>> {
+        match self {
+            Self::Object(field) => field.description(schema),
+            Self::Interface(field) => field.description(schema),
+        }
+    }
+
+    fn set_description(
+        &self,
+        schema: &mut FederationSchema,
+        description: Option<Node<str>>,
+    ) -> Result<(), FederationError> {
+        match self {
+            Self::Object(field) => field.set_description(schema, description),
+            Self::Interface(field) => field.set_description(schema, description),
+        }
+    }
+}
+
+impl HasDescription for FieldDefinitionPosition {
+    fn description<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<str>> {
+        match self {
+            FieldDefinitionPosition::Object(field) => field.description(schema),
+            FieldDefinitionPosition::Interface(field) => field.description(schema),
+            FieldDefinitionPosition::Union(field) => field.description(schema),
+        }
+    }
+
+    fn set_description(
+        &self,
+        schema: &mut FederationSchema,
+        description: Option<Node<str>>,
+    ) -> Result<(), FederationError> {
+        match self {
+            FieldDefinitionPosition::Object(field) => field.set_description(schema, description),
+            FieldDefinitionPosition::Interface(field) => field.set_description(schema, description),
+            FieldDefinitionPosition::Union(field) => field.set_description(schema, description),
+        }
+    }
+}
+
+impl HasDescription for UnionTypenameFieldDefinitionPosition {
+    fn description<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<str>> {
+        self.get(&schema.schema)
+            .map_or(None, |field| field.description.as_ref())
+    }
+
+    fn set_description(
+        &self,
+        _schema: &mut FederationSchema,
+        _description: Option<Node<str>>,
+    ) -> Result<(), FederationError> {
+        bail!("Description is immutable for union typename fields")
+    }
+}
+
+impl HasDescription for DirectiveTargetPosition {
+    fn description<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<str>> {
+        match self {
+            Self::Schema(pos) => pos.description(schema),
+            Self::ScalarType(pos) => pos.description(schema),
+            Self::ObjectType(pos) => pos.description(schema),
+            Self::ObjectField(pos) => pos.description(schema),
+            Self::InterfaceType(pos) => pos.description(schema),
+            Self::InterfaceField(pos) => pos.description(schema),
+            Self::UnionType(pos) => pos.description(schema),
+            Self::EnumType(pos) => pos.description(schema),
+            Self::EnumValue(pos) => pos.description(schema),
+            Self::InputObjectType(pos) => pos.description(schema),
+            _ => None,
+        }
+    }
+
+    fn set_description(
+        &self,
+        schema: &mut FederationSchema,
+        description: Option<Node<str>>,
+    ) -> Result<(), FederationError> {
+        match self {
+            Self::Schema(pos) => pos.set_description(schema, description),
+            Self::ScalarType(pos) => pos.set_description(schema, description),
+            Self::ObjectType(pos) => pos.set_description(schema, description),
+            Self::ObjectField(pos) => pos.set_description(schema, description),
+            Self::InterfaceType(pos) => pos.set_description(schema, description),
+            Self::InterfaceField(pos) => pos.set_description(schema, description),
+            Self::UnionType(pos) => pos.set_description(schema, description),
+            Self::EnumType(pos) => pos.set_description(schema, description),
+            Self::EnumValue(pos) => pos.set_description(schema, description),
+            Self::InputObjectType(pos) => pos.set_description(schema, description),
+            _ => Err(FederationError::SingleFederationError(
+                SingleFederationError::Internal {
+                    message: String::from(
+                        "No valid conversion from DirectiveTargetPosition to desired type.",
+                    ),
+                },
+            )),
+        }
+    }
+}
+
+impl HasDescription for FieldArgumentDefinitionPosition {
+    fn description<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<str>> {
+        match self {
+            Self::Object(field) => field.description(schema),
+            Self::Interface(field) => field.description(schema),
+        }
+    }
+
+    fn set_description(
+        &self,
+        schema: &mut FederationSchema,
+        description: Option<Node<str>>,
+    ) -> Result<(), FederationError> {
+        match self {
+            Self::Object(field) => field.set_description(schema, description),
+            Self::Interface(field) => field.set_description(schema, description),
+        }
+    }
+}
+
+pub(crate) trait HasType {
+    fn get_type<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema ast::Type, FederationError>;
+
+    fn set_type(&self, schema: &mut FederationSchema, ty: ast::Type)
+    -> Result<(), FederationError>;
+
+    fn enum_example_ast(
+        &self,
+        schema: &FederationSchema,
+    ) -> Result<EnumExampleAst, FederationError>;
+}
+
+impl HasType for DirectiveArgumentDefinitionPosition {
+    fn get_type<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema ast::Type, FederationError> {
+        Ok(&self.get(&schema.schema)?.ty)
+    }
+
+    fn set_type(
+        &self,
+        schema: &mut FederationSchema,
+        ty: ast::Type,
+    ) -> Result<(), FederationError> {
+        *self.make_mut(&mut schema.schema)?.make_mut().ty.make_mut() = ty;
+        Ok(())
+    }
+
+    fn enum_example_ast(
+        &self,
+        schema: &FederationSchema,
+    ) -> Result<EnumExampleAst, FederationError> {
+        let node = self.get(schema.schema())?.clone();
+        Ok(EnumExampleAst::Input(node))
+    }
+}
+
+impl HasType for FieldArgumentDefinitionPosition {
+    fn get_type<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema ast::Type, FederationError> {
+        Ok(self.get(&schema.schema)?.ty.as_ref())
+    }
+
+    fn set_type(
+        &self,
+        schema: &mut FederationSchema,
+        ty: ast::Type,
+    ) -> Result<(), FederationError> {
+        *self.make_mut(&mut schema.schema)?.make_mut().ty.make_mut() = ty;
+        Ok(())
+    }
+
+    fn enum_example_ast(
+        &self,
+        schema: &FederationSchema,
+    ) -> Result<EnumExampleAst, FederationError> {
+        let node = self.get(schema.schema())?.clone();
+        Ok(EnumExampleAst::Input(node))
+    }
+}
+
+impl HasType for InputObjectFieldDefinitionPosition {
+    fn get_type<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema ast::Type, FederationError> {
+        Ok(&self.get(&schema.schema)?.ty)
+    }
+
+    fn set_type(
+        &self,
+        schema: &mut FederationSchema,
+        ty: ast::Type,
+    ) -> Result<(), FederationError> {
+        *self.make_mut(&mut schema.schema)?.make_mut().ty.make_mut() = ty;
+        Ok(())
+    }
+
+    fn enum_example_ast(
+        &self,
+        schema: &FederationSchema,
+    ) -> Result<EnumExampleAst, FederationError> {
+        Ok(EnumExampleAst::Input(
+            self.get(schema.schema())?.clone().node,
+        ))
+    }
+}
+
+impl HasType for ObjectFieldDefinitionPosition {
+    fn get_type<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema ast::Type, FederationError> {
+        Ok(&self.get(&schema.schema)?.ty)
+    }
+
+    fn set_type(
+        &self,
+        schema: &mut FederationSchema,
+        ty: ast::Type,
+    ) -> Result<(), FederationError> {
+        self.make_mut(&mut schema.schema)?.make_mut().ty = ty;
+        Ok(())
+    }
+
+    fn enum_example_ast(
+        &self,
+        schema: &FederationSchema,
+    ) -> Result<EnumExampleAst, FederationError> {
+        let node = self.get(schema.schema())?.clone().node;
+        Ok(EnumExampleAst::Field(node))
+    }
+}
+
+impl HasType for InterfaceFieldDefinitionPosition {
+    fn get_type<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema ast::Type, FederationError> {
+        Ok(&self.get(&schema.schema)?.ty)
+    }
+
+    fn set_type(
+        &self,
+        schema: &mut FederationSchema,
+        ty: ast::Type,
+    ) -> Result<(), FederationError> {
+        self.make_mut(&mut schema.schema)?.make_mut().ty = ty;
+        Ok(())
+    }
+
+    fn enum_example_ast(
+        &self,
+        schema: &FederationSchema,
+    ) -> Result<EnumExampleAst, FederationError> {
+        let node = self.get(schema.schema())?.clone().node;
+        Ok(EnumExampleAst::Field(node))
+    }
+}
+
+impl HasType for ObjectOrInterfaceFieldDefinitionPosition {
+    fn get_type<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema ast::Type, FederationError> {
+        match self {
+            Self::Object(field) => field.get_type(schema),
+            Self::Interface(field) => field.get_type(schema),
+        }
+    }
+
+    fn set_type(
+        &self,
+        schema: &mut FederationSchema,
+        ty: ast::Type,
+    ) -> Result<(), FederationError> {
+        match self {
+            Self::Object(field) => field.set_type(schema, ty),
+            Self::Interface(field) => field.set_type(schema, ty),
+        }
+    }
+
+    fn enum_example_ast(
+        &self,
+        schema: &FederationSchema,
+    ) -> Result<EnumExampleAst, FederationError> {
+        match self {
+            Self::Object(field) => field.enum_example_ast(schema),
+            Self::Interface(field) => field.enum_example_ast(schema),
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum TypeDefinitionPosition {
     Scalar(ScalarTypeDefinitionPosition),
@@ -187,6 +573,10 @@ impl TypeDefinitionPosition {
 
     pub(crate) fn is_introspection_type(&self) -> bool {
         self.type_name().starts_with("__")
+    }
+
+    pub(crate) fn is_object_type(&self) -> bool {
+        matches!(self, TypeDefinitionPosition::Object(_))
     }
 
     pub(crate) fn type_name(&self) -> &Name {
@@ -432,6 +822,52 @@ impl TypeDefinitionPosition {
             ),
         }
     }
+
+    pub(crate) fn remove(&self, schema: &mut FederationSchema) -> Result<bool, FederationError> {
+        let is_some = match self {
+            TypeDefinitionPosition::Scalar(scalar_pos) => scalar_pos.remove(schema)?.is_some(),
+            TypeDefinitionPosition::Enum(enum_pos) => enum_pos.remove(schema)?.is_some(),
+            TypeDefinitionPosition::Object(object_pos) => object_pos.remove(schema)?.is_some(),
+            TypeDefinitionPosition::Interface(interface_pos) => {
+                interface_pos.remove(schema)?.is_some()
+            }
+            TypeDefinitionPosition::Union(union_pos) => union_pos.remove(schema)?.is_some(),
+            TypeDefinitionPosition::InputObject(input_object_pos) => {
+                input_object_pos.remove(schema)?.is_some()
+            }
+        };
+        Ok(is_some)
+    }
+
+    #[allow(unused)]
+    pub(crate) fn remove_recursive(
+        &self,
+        schema: &mut FederationSchema,
+    ) -> Result<(), FederationError> {
+        match self {
+            TypeDefinitionPosition::Scalar(scalar_pos) => {
+                // Note: No `remove_recursive` for scalars
+                _ = scalar_pos.remove(schema)?;
+            }
+            TypeDefinitionPosition::Enum(enum_pos) => {
+                // Note: No `remove_recursive` for enums
+                _ = enum_pos.remove(schema)?;
+            }
+            TypeDefinitionPosition::Object(object_pos) => {
+                object_pos.remove_recursive(schema)?;
+            }
+            TypeDefinitionPosition::Interface(interface_pos) => {
+                interface_pos.remove_recursive(schema)?;
+            }
+            TypeDefinitionPosition::Union(union_pos) => {
+                union_pos.remove_recursive(schema)?;
+            }
+            TypeDefinitionPosition::InputObject(input_object_pos) => {
+                input_object_pos.remove_recursive(schema)?;
+            }
+        };
+        Ok(())
+    }
 }
 
 impl From<&ExtendedType> for TypeDefinitionPosition {
@@ -463,6 +899,37 @@ impl From<&ExtendedType> for TypeDefinitionPosition {
                     type_name: v.name.clone(),
                 })
             }
+        }
+    }
+}
+
+impl HasDescription for TypeDefinitionPosition {
+    fn description<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<str>> {
+        match self {
+            Self::Scalar(ty) => ty.description(schema),
+            Self::Object(ty) => ty.description(schema),
+            Self::Interface(ty) => ty.description(schema),
+            Self::Union(ty) => ty.description(schema),
+            Self::Enum(ty) => ty.description(schema),
+            Self::InputObject(ty) => ty.description(schema),
+        }
+    }
+
+    fn set_description(
+        &self,
+        schema: &mut FederationSchema,
+        description: Option<Node<str>>,
+    ) -> Result<(), FederationError> {
+        match self {
+            Self::Scalar(ty) => ty.set_description(schema, description),
+            Self::Object(ty) => ty.set_description(schema, description),
+            Self::Interface(ty) => ty.set_description(schema, description),
+            Self::Union(ty) => ty.set_description(schema, description),
+            Self::Enum(ty) => ty.set_description(schema, description),
+            Self::InputObject(ty) => ty.set_description(schema, description),
         }
     }
 }
@@ -771,6 +1238,43 @@ impl ObjectOrInterfaceTypeDefinitionPosition {
             )),
         }
     }
+
+    pub(crate) fn insert_directive(
+        &self,
+        schema: &mut FederationSchema,
+        directive: Component<Directive>,
+    ) -> Result<(), FederationError> {
+        match self {
+            Self::Object(type_) => type_.insert_directive(schema, directive),
+            Self::Interface(type_) => type_.insert_directive(schema, directive),
+        }
+    }
+
+    pub(crate) fn implemented_interfaces<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema apollo_compiler::collections::IndexSet<ComponentName>, PositionLookupError>
+    {
+        match self {
+            Self::Object(type_) => type_
+                .get(schema.schema())
+                .map(|obj| &obj.implements_interfaces),
+            Self::Interface(type_) => type_
+                .get(schema.schema())
+                .map(|itf| &itf.implements_interfaces),
+        }
+    }
+
+    pub(crate) fn insert_implements_interface(
+        &self,
+        schema: &mut FederationSchema,
+        interface_name: ComponentName,
+    ) -> Result<(), FederationError> {
+        match self {
+            Self::Object(type_) => type_.insert_implements_interface(schema, interface_name),
+            Self::Interface(type_) => type_.insert_implements_interface(schema, interface_name),
+        }
+    }
 }
 
 fallible_conversions!(ObjectOrInterfaceTypeDefinitionPosition::Object -> ObjectTypeDefinitionPosition);
@@ -982,6 +1486,21 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
         }
     }
 
+    pub(crate) fn has_applied_directive(
+        &self,
+        schema: &FederationSchema,
+        directive_name: &Name,
+    ) -> bool {
+        match self {
+            Self::Object(field) => !field
+                .get_applied_directives(schema, directive_name)
+                .is_empty(),
+            Self::Interface(field) => !field
+                .get_applied_directives(schema, directive_name)
+                .is_empty(),
+        }
+    }
+
     /// Remove a directive application from this field.
     pub(crate) fn remove_directive(
         &self,
@@ -1001,6 +1520,71 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
     pub(crate) fn coordinate(&self) -> String {
         format!("{}.{}", self.type_name(), self.field_name())
     }
+
+    pub(crate) fn insert(
+        &self,
+        schema: &mut FederationSchema,
+        field_def: Component<FieldDefinition>,
+    ) -> Result<(), FederationError> {
+        match self {
+            Self::Object(field) => field.insert(schema, field_def),
+            Self::Interface(field) => field.insert(schema, field_def),
+        }
+    }
+}
+
+impl HasArguments for ObjectOrInterfaceFieldDefinitionPosition {
+    type ArgumentPosition = FieldArgumentDefinitionPosition;
+
+    fn argument_position(&self, name: Name) -> Self::ArgumentPosition {
+        match self {
+            Self::Object(field) => field.argument_position(name).into(),
+            Self::Interface(field) => field.argument_position(name).into(),
+        }
+    }
+
+    fn get_argument<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        name: &Name,
+    ) -> Option<&'schema Node<InputValueDefinition>> {
+        match self {
+            Self::Object(field) => field.get_argument(schema, name),
+            Self::Interface(field) => field.get_argument(schema, name),
+        }
+    }
+
+    fn get_arguments<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema Vec<Node<InputValueDefinition>>, FederationError> {
+        match self {
+            Self::Object(field) => field.get_arguments(schema),
+            Self::Interface(field) => field.get_arguments(schema),
+        }
+    }
+
+    fn insert_argument(
+        &self,
+        schema: &mut FederationSchema,
+        arg: Node<InputValueDefinition>,
+    ) -> Result<(), FederationError> {
+        match self {
+            Self::Object(field) => field.insert_argument(schema, arg),
+            Self::Interface(field) => field.insert_argument(schema, arg),
+        }
+    }
+
+    fn remove_argument(
+        &self,
+        schema: &mut FederationSchema,
+        name: &Name,
+    ) -> Result<(), FederationError> {
+        match self {
+            Self::Object(field) => field.remove_argument(schema, name),
+            Self::Interface(field) => field.remove_argument(schema, name),
+        }
+    }
 }
 
 fallible_conversions!(FieldDefinitionPosition::{Object, Interface} -> ObjectOrInterfaceFieldDefinitionPosition);
@@ -1009,6 +1593,13 @@ fallible_conversions!(FieldDefinitionPosition::{Object, Interface} -> ObjectOrIn
 pub(crate) struct SchemaDefinitionPosition;
 
 impl SchemaDefinitionPosition {
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> impl Iterator<Item = &'schema Component<Directive>> {
+        self.get(&schema.schema).directives.iter()
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -1129,8 +1720,7 @@ impl SchemaDefinitionPosition {
         let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    "Schema definition's directive application \"@{}\" does not refer to an existing directive.",
-                    name,
+                    "Schema definition's directive application \"@{name}\" does not refer to an existing directive.",
                 ),
             }
         })?;
@@ -1287,14 +1877,14 @@ impl SchemaRootDefinitionPosition {
         match self.root_kind {
             SchemaRootDefinitionKind::Query => schema_definition.query.as_ref().ok_or_else(|| {
                 SingleFederationError::Internal {
-                    message: format!("Schema definition has no root {} type", self),
+                    message: format!("Schema definition has no root {self} type"),
                 }
                 .into()
             }),
             SchemaRootDefinitionKind::Mutation => {
                 schema_definition.mutation.as_ref().ok_or_else(|| {
                     SingleFederationError::Internal {
-                        message: format!("Schema definition has no root {} type", self),
+                        message: format!("Schema definition has no root {self} type"),
                     }
                     .into()
                 })
@@ -1302,7 +1892,7 @@ impl SchemaRootDefinitionPosition {
             SchemaRootDefinitionKind::Subscription => {
                 schema_definition.subscription.as_ref().ok_or_else(|| {
                     SingleFederationError::Internal {
-                        message: format!("Schema definition has no root {} type", self),
+                        message: format!("Schema definition has no root {self} type"),
                     }
                     .into()
                 })
@@ -1324,7 +1914,7 @@ impl SchemaRootDefinitionPosition {
     ) -> Result<(), FederationError> {
         if self.try_get(&schema.schema).is_some() {
             return Err(SingleFederationError::Internal {
-                message: format!("Root {} already exists on schema definition", self),
+                message: format!("Root {self} already exists on schema definition"),
             }
             .into());
         }
@@ -1599,7 +2189,7 @@ impl ScalarTypeDefinitionPosition {
                 .scalar_types
                 .shift_remove(&self.type_name)
                 .ok_or_else(|| SingleFederationError::Internal {
-                    message: format!("Schema missing referencers for type \"{}\"", self),
+                    message: format!("Schema missing referencers for type \"{self}\""),
                 })?,
         ))
     }
@@ -1666,9 +2256,7 @@ impl ScalarTypeDefinitionPosition {
         let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    "Scalar type \"{}\"'s directive application \"@{}\" does not refer to an existing directive.",
-                    self,
-                    name,
+                    "Scalar type \"{self}\"'s directive application \"@{name}\" does not refer to an existing directive.",
                 ),
             }
         })?;
@@ -1737,6 +2325,13 @@ impl ScalarTypeDefinitionPosition {
                 .any(|directive| &directive.name == directive_name);
         }
         false
+    }
+
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<impl Iterator<Item = &'schema Component<Directive>>, FederationError> {
+        Ok(self.get(&schema.schema)?.directives.iter())
     }
 
     pub(crate) fn get_applied_directives<'schema>(
@@ -1991,7 +2586,7 @@ impl ObjectTypeDefinitionPosition {
                 .object_types
                 .shift_remove(&self.type_name)
                 .ok_or_else(|| SingleFederationError::Internal {
-                    message: format!("Schema missing referencers for type \"{}\"", self),
+                    message: format!("Schema missing referencers for type \"{self}\""),
                 })?,
         ))
     }
@@ -2148,9 +2743,7 @@ impl ObjectTypeDefinitionPosition {
         let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    "Object type \"{}\"'s directive application \"@{}\" does not refer to an existing directive.",
-                    self,
-                    name,
+                    "Object type \"{self}\"'s directive application \"@{name}\" does not refer to an existing directive.",
                 ),
             }
         })?;
@@ -2173,9 +2766,7 @@ impl ObjectTypeDefinitionPosition {
         let interface_type_referencers = referencers.interface_types.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    "Object type \"{}\"'s implements \"{}\" does not refer to an existing interface.",
-                    self,
-                    name,
+                    "Object type \"{self}\"'s implements \"{name}\" does not refer to an existing interface.",
                 ),
             }
         })?;
@@ -2301,6 +2892,13 @@ impl ObjectTypeDefinitionPosition {
         false
     }
 
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<impl Iterator<Item = &'schema Component<Directive>>, FederationError> {
+        Ok(self.get(&schema.schema)?.directives.iter())
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -2354,11 +2952,60 @@ pub(crate) enum FieldArgumentDefinitionPosition {
     Object(ObjectFieldArgumentDefinitionPosition),
 }
 
+impl FieldArgumentDefinitionPosition {
+    pub(crate) fn get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Result<&'schema Node<InputValueDefinition>, PositionLookupError> {
+        match self {
+            Self::Interface(p) => p.get(schema),
+            Self::Object(p) => p.get(schema),
+        }
+    }
+
+    pub(crate) fn make_mut<'schema>(
+        &self,
+        schema: &'schema mut Schema,
+    ) -> Result<&'schema mut Node<InputValueDefinition>, PositionLookupError> {
+        match self {
+            Self::Interface(p) => p.make_mut(schema),
+            Self::Object(p) => p.make_mut(schema),
+        }
+    }
+}
+
 impl Debug for FieldArgumentDefinitionPosition {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Interface(p) => write!(f, "Interface({p})"),
             Self::Object(p) => write!(f, "Object({p})"),
+        }
+    }
+}
+
+impl HasDefaultValue for FieldArgumentDefinitionPosition {
+    fn is_input_field() -> bool {
+        false
+    }
+
+    fn get_default_value<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<ast::Value>> {
+        match self {
+            Self::Interface(pos) => pos.get_default_value(schema),
+            Self::Object(pos) => pos.get_default_value(schema),
+        }
+    }
+
+    fn set_default_value(
+        &self,
+        schema: &mut FederationSchema,
+        default: Option<Node<ast::Value>>,
+    ) -> Result<(), FederationError> {
+        match self {
+            Self::Interface(pos) => pos.set_default_value(schema, default),
+            Self::Object(pos) => pos.set_default_value(schema, default),
         }
     }
 }
@@ -2528,6 +3175,13 @@ impl ObjectFieldDefinitionPosition {
         self.insert_directive_name_references(&mut schema.referencers, &name)
     }
 
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<impl Iterator<Item = &'schema Node<Directive>>, FederationError> {
+        Ok(self.get(&schema.schema)?.directives.iter())
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -2626,9 +3280,7 @@ impl ObjectFieldDefinitionPosition {
         let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    "Object field \"{}\"'s directive application \"@{}\" does not refer to an existing directive.",
-                    self,
-                    name,
+                    "Object field \"{self}\"'s directive application \"@{name}\" does not refer to an existing directive.",
                 ),
             }
         })?;
@@ -2733,6 +3385,45 @@ impl Debug for ObjectFieldDefinitionPosition {
     }
 }
 
+impl HasArguments for ObjectFieldDefinitionPosition {
+    type ArgumentPosition = ObjectFieldArgumentDefinitionPosition;
+
+    fn argument_position(&self, name: Name) -> Self::ArgumentPosition {
+        self.argument(name)
+    }
+
+    fn get_argument<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        name: &Name,
+    ) -> Option<&'schema Node<InputValueDefinition>> {
+        self.argument_position(name.clone()).try_get(&schema.schema)
+    }
+
+    fn get_arguments<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema Vec<Node<InputValueDefinition>>, FederationError> {
+        Ok(&self.get(schema.schema())?.arguments)
+    }
+
+    fn insert_argument(
+        &self,
+        schema: &mut FederationSchema,
+        arg: Node<InputValueDefinition>,
+    ) -> Result<(), FederationError> {
+        self.argument_position(arg.name.clone()).insert(schema, arg)
+    }
+
+    fn remove_argument(
+        &self,
+        schema: &mut FederationSchema,
+        name: &Name,
+    ) -> Result<(), FederationError> {
+        self.argument_position(name.clone()).remove(schema)
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct ObjectFieldArgumentDefinitionPosition {
     pub(crate) type_name: Name,
@@ -2741,6 +3432,13 @@ pub(crate) struct ObjectFieldArgumentDefinitionPosition {
 }
 
 impl ObjectFieldArgumentDefinitionPosition {
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<impl Iterator<Item = &'schema Node<Directive>>, FederationError> {
+        Ok(self.get(&schema.schema)?.directives.iter())
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -2869,6 +3567,20 @@ impl ObjectFieldArgumentDefinitionPosition {
             .retain(|other_directive| other_directive.name != name);
     }
 
+    fn insert(
+        &self,
+        schema: &mut FederationSchema,
+        argument: Node<InputValueDefinition>,
+    ) -> Result<(), FederationError> {
+        let parent = self.parent().make_mut(&mut schema.schema)?;
+        if parent.argument_by_name(&self.argument_name).is_some() {
+            bail!(r#"Object field argument "{self}" already exists in schema"#);
+        }
+        self.insert_references(&argument, &mut schema.referencers)?;
+        parent.make_mut().arguments.push(argument);
+        Ok(())
+    }
+
     fn insert_references(
         &self,
         argument: &Node<InputValueDefinition>,
@@ -2907,9 +3619,7 @@ impl ObjectFieldArgumentDefinitionPosition {
         let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    "Object field argument \"{}\"'s directive application \"@{}\" does not refer to an existing directive.",
-                    self,
-                    name,
+                    "Object field argument \"{self}\"'s directive application \"@{name}\" does not refer to an existing directive.",
                 ),
             }
         })?;
@@ -3013,6 +3723,30 @@ impl Display for ObjectFieldArgumentDefinitionPosition {
 impl Debug for ObjectFieldArgumentDefinitionPosition {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "ObjectFieldArgument({self})")
+    }
+}
+
+impl HasDefaultValue for ObjectFieldArgumentDefinitionPosition {
+    fn is_input_field() -> bool {
+        false
+    }
+
+    fn get_default_value<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<ast::Value>> {
+        self.try_get(&schema.schema)
+            .and_then(|arg| arg.default_value.as_ref())
+    }
+
+    fn set_default_value(
+        &self,
+        schema: &mut FederationSchema,
+        default: Option<Node<ast::Value>>,
+    ) -> Result<(), FederationError> {
+        let arg = self.make_mut(&mut schema.schema)?.make_mut();
+        arg.default_value = default;
+        Ok(())
     }
 }
 
@@ -3286,7 +4020,7 @@ impl InterfaceTypeDefinitionPosition {
                 .interface_types
                 .shift_remove(&self.type_name)
                 .ok_or_else(|| SingleFederationError::Internal {
-                    message: format!("Schema missing referencers for type \"{}\"", self),
+                    message: format!("Schema missing referencers for type \"{self}\""),
                 })?,
         ))
     }
@@ -3413,9 +4147,7 @@ impl InterfaceTypeDefinitionPosition {
         let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    "Interface type \"{}\"'s directive application \"@{}\" does not refer to an existing directive.",
-                    self,
-                    name,
+                    "Interface type \"{self}\"'s directive application \"@{name}\" does not refer to an existing directive.",
                 ),
             }
         })?;
@@ -3438,9 +4170,7 @@ impl InterfaceTypeDefinitionPosition {
         let interface_type_referencers = referencers.interface_types.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    "Interface type \"{}\"'s implements \"{}\" does not refer to an existing interface.",
-                    self,
-                    name,
+                    "Interface type \"{self}\"'s implements \"{name}\" does not refer to an existing interface.",
                 ),
             }
         })?;
@@ -3534,6 +4264,13 @@ impl InterfaceTypeDefinitionPosition {
         false
     }
 
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<impl Iterator<Item = &'schema Component<Directive>>, FederationError> {
+        Ok(self.get(&schema.schema)?.directives.iter())
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -3621,7 +4358,7 @@ impl InterfaceFieldDefinitionPosition {
         self.get(schema).ok()
     }
 
-    fn make_mut<'schema>(
+    pub(crate) fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
     ) -> Result<&'schema mut Component<FieldDefinition>, PositionLookupError> {
@@ -3740,6 +4477,13 @@ impl InterfaceFieldDefinitionPosition {
         self.insert_directive_name_references(&mut schema.referencers, &name)
     }
 
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<impl Iterator<Item = &'schema Node<Directive>>, FederationError> {
+        Ok(self.get(&schema.schema)?.directives.iter())
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -3838,9 +4582,7 @@ impl InterfaceFieldDefinitionPosition {
         let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    "Interface field \"{}\"'s directive application \"@{}\" does not refer to an existing directive.",
-                    self,
-                    name,
+                    "Interface field \"{self}\"'s directive application \"@{name}\" does not refer to an existing directive.",
                 ),
             }
         })?;
@@ -3950,6 +4692,45 @@ impl Display for InterfaceFieldDefinitionPosition {
     }
 }
 
+impl HasArguments for InterfaceFieldDefinitionPosition {
+    type ArgumentPosition = InterfaceFieldArgumentDefinitionPosition;
+
+    fn argument_position(&self, name: Name) -> Self::ArgumentPosition {
+        self.argument(name)
+    }
+
+    fn get_argument<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        name: &Name,
+    ) -> Option<&'schema Node<InputValueDefinition>> {
+        self.argument_position(name.clone()).try_get(&schema.schema)
+    }
+
+    fn get_arguments<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema Vec<Node<InputValueDefinition>>, FederationError> {
+        Ok(&self.get(&schema.schema)?.arguments)
+    }
+
+    fn insert_argument(
+        &self,
+        schema: &mut FederationSchema,
+        arg: Node<InputValueDefinition>,
+    ) -> Result<(), FederationError> {
+        self.argument_position(arg.name.clone()).insert(schema, arg)
+    }
+
+    fn remove_argument(
+        &self,
+        schema: &mut FederationSchema,
+        name: &Name,
+    ) -> Result<(), FederationError> {
+        self.argument_position(name.clone()).remove(schema)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct InterfaceFieldArgumentDefinitionPosition {
     pub(crate) type_name: Name,
@@ -3958,6 +4739,13 @@ pub(crate) struct InterfaceFieldArgumentDefinitionPosition {
 }
 
 impl InterfaceFieldArgumentDefinitionPosition {
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<impl Iterator<Item = &'schema Node<Directive>>, FederationError> {
+        Ok(self.get(&schema.schema)?.directives.iter())
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -4089,6 +4877,20 @@ impl InterfaceFieldArgumentDefinitionPosition {
             .retain(|other_directive| other_directive.name != name);
     }
 
+    fn insert(
+        &self,
+        schema: &mut FederationSchema,
+        argument: Node<InputValueDefinition>,
+    ) -> Result<(), FederationError> {
+        let parent = self.parent().make_mut(&mut schema.schema)?;
+        if parent.argument_by_name(&argument.name).is_some() {
+            bail!(r#"Interface field argument "{self}" already exists in schema"#);
+        }
+        self.insert_references(&argument, &mut schema.referencers)?;
+        parent.make_mut().arguments.push(argument);
+        Ok(())
+    }
+
     fn insert_references(
         &self,
         argument: &Node<InputValueDefinition>,
@@ -4127,9 +4929,7 @@ impl InterfaceFieldArgumentDefinitionPosition {
         let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    "Interface field argument \"{}\"'s directive application \"@{}\" does not refer to an existing directive.",
-                    self,
-                    name,
+                    "Interface field argument \"{self}\"'s directive application \"@{name}\" does not refer to an existing directive.",
                 ),
             }
         })?;
@@ -4234,6 +5034,30 @@ impl Display for InterfaceFieldArgumentDefinitionPosition {
             "{}.{}({}:)",
             self.type_name, self.field_name, self.argument_name
         )
+    }
+}
+
+impl HasDefaultValue for InterfaceFieldArgumentDefinitionPosition {
+    fn is_input_field() -> bool {
+        false
+    }
+
+    fn get_default_value<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<ast::Value>> {
+        self.try_get(&schema.schema)
+            .and_then(|arg| arg.default_value.as_ref())
+    }
+
+    fn set_default_value(
+        &self,
+        schema: &mut FederationSchema,
+        default: Option<Node<ast::Value>>,
+    ) -> Result<(), FederationError> {
+        let arg = self.make_mut(&mut schema.schema)?.make_mut();
+        arg.default_value = default;
+        Ok(())
     }
 }
 
@@ -4399,7 +5223,7 @@ impl UnionTypeDefinitionPosition {
                 .union_types
                 .shift_remove(&self.type_name)
                 .ok_or_else(|| SingleFederationError::Internal {
-                    message: format!("Schema missing referencers for type \"{}\"", self),
+                    message: format!("Schema missing referencers for type \"{self}\""),
                 })?,
         ))
     }
@@ -4511,9 +5335,7 @@ impl UnionTypeDefinitionPosition {
         let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    "Union type \"{}\"'s directive application \"@{}\" does not refer to an existing directive.",
-                    self,
-                    name,
+                    "Union type \"{self}\"'s directive application \"@{name}\" does not refer to an existing directive.",
                 ),
             }
         })?;
@@ -4536,8 +5358,7 @@ impl UnionTypeDefinitionPosition {
         let object_type_referencers = referencers.object_types.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    "Union type \"{}\"'s member \"{}\" does not refer to an existing object.",
-                    self, name,
+                    "Union type \"{self}\"'s member \"{name}\" does not refer to an existing object.",
                 ),
             }
         })?;
@@ -4609,6 +5430,13 @@ impl UnionTypeDefinitionPosition {
                 .any(|directive| &directive.name == directive_name);
         }
         false
+    }
+
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<impl Iterator<Item = &'schema Component<Directive>>, FederationError> {
+        Ok(self.get(&schema.schema)?.directives.iter())
     }
 
     pub(crate) fn get_applied_directives<'schema>(
@@ -4703,8 +5531,7 @@ impl UnionTypenameFieldDefinitionPosition {
             scalar_type_referencers.union_fields.insert(self.clone());
         } else {
             return Err(FederationError::internal(format!(
-                "Schema missing referencers for type \"{}\"",
-                output_type_reference
+                "Schema missing referencers for type \"{output_type_reference}\""
             )));
         }
         Ok(())
@@ -4881,7 +5708,7 @@ impl EnumTypeDefinitionPosition {
                 .enum_types
                 .shift_remove(&self.type_name)
                 .ok_or_else(|| SingleFederationError::Internal {
-                    message: format!("Schema missing referencers for type \"{}\"", self),
+                    message: format!("Schema missing referencers for type \"{self}\""),
                 })?,
         ))
     }
@@ -4961,9 +5788,7 @@ impl EnumTypeDefinitionPosition {
         let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    "Enum type \"{}\"'s directive application \"@{}\" does not refer to an existing directive.",
-                    self,
-                    name,
+                    "Enum type \"{self}\"'s directive application \"@{name}\" does not refer to an existing directive.",
                 ),
             }
         })?;
@@ -5033,6 +5858,13 @@ impl EnumTypeDefinitionPosition {
         false
     }
 
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<impl Iterator<Item = &'schema Component<Directive>>, FederationError> {
+        Ok(self.get(&schema.schema)?.directives.iter())
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -5081,6 +5913,13 @@ pub(crate) struct EnumValueDefinitionPosition {
 }
 
 impl EnumValueDefinitionPosition {
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<impl Iterator<Item = &'schema Node<Directive>>, FederationError> {
+        Ok(self.get(&schema.schema)?.directives.iter())
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -5260,9 +6099,7 @@ impl EnumValueDefinitionPosition {
         let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    "Enum value \"{}\"'s directive application \"@{}\" does not refer to an existing directive.",
-                    self,
-                    name,
+                    "Enum value \"{self}\"'s directive application \"@{name}\" does not refer to an existing directive.",
                 ),
             }
         })?;
@@ -5464,7 +6301,7 @@ impl InputObjectTypeDefinitionPosition {
                 .input_object_types
                 .shift_remove(&self.type_name)
                 .ok_or_else(|| SingleFederationError::Internal {
-                    message: format!("Schema missing referencers for type \"{}\"", self),
+                    message: format!("Schema missing referencers for type \"{self}\""),
                 })?,
         ))
     }
@@ -5544,9 +6381,7 @@ impl InputObjectTypeDefinitionPosition {
         let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    "Input object type \"{}\"'s directive application \"@{}\" does not refer to an existing directive.",
-                    self,
-                    name,
+                    "Input object type \"{self}\"'s directive application \"@{name}\" does not refer to an existing directive.",
                 ),
             }
         })?;
@@ -5605,6 +6440,13 @@ impl InputObjectTypeDefinitionPosition {
         false
     }
 
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<impl Iterator<Item = &'schema Component<Directive>>, FederationError> {
+        Ok(self.get(&schema.schema)?.directives.iter())
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -5653,6 +6495,13 @@ pub(crate) struct InputObjectFieldDefinitionPosition {
 }
 
 impl InputObjectFieldDefinitionPosition {
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<impl Iterator<Item = &'schema Node<Directive>>, FederationError> {
+        Ok(self.get(&schema.schema)?.directives.iter())
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -5667,6 +6516,16 @@ impl InputObjectFieldDefinitionPosition {
         } else {
             Vec::new()
         }
+    }
+
+    pub(crate) fn has_applied_directive(
+        &self,
+        schema: &FederationSchema,
+        directive_name: &Name,
+    ) -> bool {
+        !self
+            .get_applied_directives(schema, directive_name)
+            .is_empty()
     }
 
     pub(crate) fn parent(&self) -> InputObjectTypeDefinitionPosition {
@@ -5858,9 +6717,7 @@ impl InputObjectFieldDefinitionPosition {
         let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    "Input object field \"{}\"'s directive application \"@{}\" does not refer to an existing directive.",
-                    self,
-                    name,
+                    "Input object field \"{self}\"'s directive application \"@{name}\" does not refer to an existing directive.",
                 ),
             }
         })?;
@@ -5949,6 +6806,30 @@ impl InputObjectFieldDefinitionPosition {
 impl Display for InputObjectFieldDefinitionPosition {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}.{}", self.type_name, self.field_name)
+    }
+}
+
+impl HasDefaultValue for InputObjectFieldDefinitionPosition {
+    fn is_input_field() -> bool {
+        true
+    }
+
+    fn get_default_value<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<ast::Value>> {
+        self.try_get(&schema.schema)
+            .and_then(|field| field.default_value.as_ref())
+    }
+
+    fn set_default_value(
+        &self,
+        schema: &mut FederationSchema,
+        default: Option<Node<ast::Value>>,
+    ) -> Result<(), FederationError> {
+        let field = self.make_mut(&mut schema.schema)?;
+        field.make_mut().default_value = default;
+        Ok(())
     }
 }
 
@@ -6104,7 +6985,7 @@ impl DirectiveDefinitionPosition {
                 .directives
                 .shift_remove(&self.directive_name)
                 .ok_or_else(|| SingleFederationError::Internal {
-                    message: format!("Schema missing referencers for directive \"{}\"", self),
+                    message: format!("Schema missing referencers for directive \"{self}\""),
                 })?,
         ))
     }
@@ -6132,11 +7013,71 @@ impl DirectiveDefinitionPosition {
         }
         Ok(())
     }
+
+    pub(crate) fn set_repeatable(
+        &self,
+        schema: &mut FederationSchema,
+        repeatable: bool,
+    ) -> Result<(), FederationError> {
+        self.make_mut(&mut schema.schema)?.make_mut().repeatable = repeatable;
+        Ok(())
+    }
+
+    pub(crate) fn add_locations(
+        &self,
+        schema: &mut FederationSchema,
+        locations: &Vec<DirectiveLocation>,
+    ) -> Result<(), FederationError> {
+        self.make_mut(&mut schema.schema)?
+            .make_mut()
+            .locations
+            .extend(locations);
+        Ok(())
+    }
 }
 
 impl Display for DirectiveDefinitionPosition {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "@{}", self.directive_name)
+    }
+}
+
+impl HasArguments for DirectiveDefinitionPosition {
+    type ArgumentPosition = DirectiveArgumentDefinitionPosition;
+
+    fn argument_position(&self, name: Name) -> Self::ArgumentPosition {
+        self.argument(name)
+    }
+
+    fn get_argument<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        name: &Name,
+    ) -> Option<&'schema Node<InputValueDefinition>> {
+        self.argument_position(name.clone()).try_get(&schema.schema)
+    }
+
+    fn get_arguments<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema Vec<Node<InputValueDefinition>>, FederationError> {
+        Ok(&self.get(&schema.schema)?.arguments)
+    }
+
+    fn insert_argument(
+        &self,
+        schema: &mut FederationSchema,
+        arg: Node<InputValueDefinition>,
+    ) -> Result<(), FederationError> {
+        self.argument_position(arg.name.clone()).insert(schema, arg)
+    }
+
+    fn remove_argument(
+        &self,
+        schema: &mut FederationSchema,
+        name: &Name,
+    ) -> Result<(), FederationError> {
+        self.argument_position(name.clone()).remove(schema)
     }
 }
 
@@ -6147,6 +7088,13 @@ pub(crate) struct DirectiveArgumentDefinitionPosition {
 }
 
 impl DirectiveArgumentDefinitionPosition {
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<impl Iterator<Item = &'schema Node<Directive>>, FederationError> {
+        Ok(self.get(&schema.schema)?.directives.iter())
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -6266,6 +7214,20 @@ impl DirectiveArgumentDefinitionPosition {
             .retain(|other_directive| other_directive.name != name);
     }
 
+    fn insert(
+        &self,
+        schema: &mut FederationSchema,
+        argument: Node<InputValueDefinition>,
+    ) -> Result<(), FederationError> {
+        let parent = self.parent().make_mut(&mut schema.schema)?;
+        if parent.argument_by_name(&argument.name).is_some() {
+            bail!(r#"Directive argument "{self}" already exists in schema"#);
+        }
+        self.insert_references(&argument, &mut schema.referencers)?;
+        parent.make_mut().arguments.push(argument);
+        Ok(())
+    }
+
     fn insert_references(
         &self,
         argument: &Node<InputValueDefinition>,
@@ -6304,9 +7266,7 @@ impl DirectiveArgumentDefinitionPosition {
         let directive_referencers = referencers.directives.get_mut(name).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!(
-                    "Directive argument \"{}\"'s directive application \"@{}\" does not refer to an existing directive.",
-                    self,
-                    name,
+                    "Directive argument \"{self}\"'s directive application \"@{name}\" does not refer to an existing directive.",
                 ),
             }
         })?;
@@ -6389,6 +7349,30 @@ impl Display for DirectiveArgumentDefinitionPosition {
     }
 }
 
+impl HasDefaultValue for DirectiveArgumentDefinitionPosition {
+    fn is_input_field() -> bool {
+        false
+    }
+
+    fn get_default_value<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<ast::Value>> {
+        self.try_get(&schema.schema)
+            .and_then(|arg| arg.default_value.as_ref())
+    }
+
+    fn set_default_value(
+        &self,
+        schema: &mut FederationSchema,
+        default: Option<Node<ast::Value>>,
+    ) -> Result<(), FederationError> {
+        let arg = self.make_mut(&mut schema.schema)?;
+        arg.make_mut().default_value = default;
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::Display)]
 pub(crate) enum DirectiveTargetPosition {
     Schema(SchemaDefinitionPosition),
@@ -6408,6 +7392,70 @@ pub(crate) enum DirectiveTargetPosition {
 }
 
 impl DirectiveTargetPosition {
+    pub(crate) fn get_all_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Vec<&'schema Node<Directive>> {
+        match self {
+            Self::Schema(pos) => pos
+                .get_all_applied_directives(schema)
+                .map(|component| &component.node)
+                .collect(),
+            Self::ScalarType(pos) => pos
+                .get_all_applied_directives(schema)
+                .map(|it| it.map(|component| &component.node).collect())
+                .unwrap_or_default(),
+            Self::ObjectType(pos) => pos
+                .get_all_applied_directives(schema)
+                .map(|it| it.map(|component| &component.node).collect())
+                .unwrap_or_default(),
+            Self::ObjectField(pos) => pos
+                .get_all_applied_directives(schema)
+                .map(|it| it.collect())
+                .unwrap_or_default(),
+            Self::ObjectFieldArgument(pos) => pos
+                .get_all_applied_directives(schema)
+                .map(|it| it.collect())
+                .unwrap_or_default(),
+            Self::InterfaceType(pos) => pos
+                .get_all_applied_directives(schema)
+                .map(|it| it.map(|component| &component.node).collect())
+                .unwrap_or_default(),
+            Self::InterfaceField(pos) => pos
+                .get_all_applied_directives(schema)
+                .map(|it| it.collect())
+                .unwrap_or_default(),
+            Self::InterfaceFieldArgument(pos) => pos
+                .get_all_applied_directives(schema)
+                .map(|it| it.collect())
+                .unwrap_or_default(),
+            Self::UnionType(pos) => pos
+                .get_all_applied_directives(schema)
+                .map(|it| it.map(|component| &component.node).collect())
+                .unwrap_or_default(),
+            Self::EnumType(pos) => pos
+                .get_all_applied_directives(schema)
+                .map(|it| it.map(|component| &component.node).collect())
+                .unwrap_or_default(),
+            Self::EnumValue(pos) => pos
+                .get_all_applied_directives(schema)
+                .map(|it| it.collect())
+                .unwrap_or_default(),
+            Self::InputObjectType(pos) => pos
+                .get_all_applied_directives(schema)
+                .map(|it| it.map(|component| &component.node).collect())
+                .unwrap_or_default(),
+            Self::InputObjectField(pos) => pos
+                .get_all_applied_directives(schema)
+                .map(|it| it.collect())
+                .unwrap_or_default(),
+            Self::DirectiveArgument(pos) => pos
+                .get_all_applied_directives(schema)
+                .map(|it| it.collect())
+                .unwrap_or_default(),
+        }
+    }
+
     pub(crate) fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -6499,6 +7547,44 @@ impl From<ObjectOrInterfaceFieldDefinitionPosition> for DirectiveTargetPosition 
 impl From<ObjectTypeDefinitionPosition> for DirectiveTargetPosition {
     fn from(pos: ObjectTypeDefinitionPosition) -> Self {
         DirectiveTargetPosition::ObjectType(pos)
+    }
+}
+
+impl From<SchemaDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: SchemaDefinitionPosition) -> Self {
+        DirectiveTargetPosition::Schema(pos)
+    }
+}
+
+impl From<TypeDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: TypeDefinitionPosition) -> Self {
+        match pos {
+            TypeDefinitionPosition::Scalar(scalar) => Self::ScalarType(scalar),
+            TypeDefinitionPosition::Object(object) => Self::ObjectType(object),
+            TypeDefinitionPosition::Interface(itf) => Self::InterfaceType(itf),
+            TypeDefinitionPosition::Union(union) => Self::UnionType(union),
+            TypeDefinitionPosition::Enum(enm) => Self::EnumType(enm),
+            TypeDefinitionPosition::InputObject(input_object) => {
+                Self::InputObjectType(input_object)
+            }
+        }
+    }
+}
+
+impl TryFrom<FieldDefinitionPosition> for DirectiveTargetPosition {
+    type Error = PositionConvertError<FieldDefinitionPosition>;
+
+    fn try_from(value: FieldDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            FieldDefinitionPosition::Object(obj_field) => Ok(Self::ObjectField(obj_field)),
+            FieldDefinitionPosition::Interface(itf_field) => Ok(Self::InterfaceField(itf_field)),
+            // The only field that can occur here is `__typename` on a Union, and meta fields
+            // cannot have directives
+            FieldDefinitionPosition::Union(_) => Err(PositionConvertError {
+                actual: value,
+                expected: "DirectiveTargetPosition",
+            }),
+        }
     }
 }
 

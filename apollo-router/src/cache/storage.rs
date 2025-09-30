@@ -191,17 +191,15 @@ where
                 let instant_redis = Instant::now();
                 if let Some(redis) = self.redis.as_ref() {
                     let inner_key = RedisKey(key.clone());
-                    let redis_value =
-                        redis
-                            .get::<K, V>(inner_key)
-                            .await
-                            .and_then(|mut v| match init_from_redis(&mut v.0) {
-                                Ok(()) => Some(v),
-                                Err(e) => {
-                                    tracing::error!("Invalid value from Redis cache: {e}");
-                                    None
-                                }
-                            });
+                    let redis_value = redis.get(inner_key).await.ok().and_then(|mut v| {
+                        match init_from_redis(&mut v.0) {
+                            Ok(()) => Some(v),
+                            Err(e) => {
+                                tracing::error!("Invalid value from Redis cache: {e}");
+                                None
+                            }
+                        }
+                    });
                     match redis_value {
                         Some(v) => {
                             self.insert_in_memory(key.clone(), v.0.clone()).await;

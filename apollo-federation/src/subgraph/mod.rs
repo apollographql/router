@@ -1,19 +1,24 @@
 use std::fmt::Display;
 use std::fmt::Formatter;
+use std::ops::Range;
 
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
+use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
+use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::Valid;
 use indexmap::map::Entry;
 
 use crate::ValidFederationSubgraph;
 use crate::error::FederationError;
+use crate::error::MultipleFederationErrors;
+use crate::error::SingleFederationError;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Link;
 use crate::link::LinkError;
@@ -326,31 +331,93 @@ impl From<ValidFederationSubgraph> for ValidSubgraph {
     }
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct SingleSubgraphError {
+    pub(crate) error: SingleFederationError,
+    pub(crate) locations: Vec<Range<LineColumn>>,
+}
+
 /// Currently, this is making up for the fact that we don't have an equivalent of `addSubgraphToErrors`.
 /// In JS, that manipulates the underlying `GraphQLError` message to prepend the subgraph name. In Rust,
 /// it's idiomatic to have strongly typed errors which defer conversion to strings via `thiserror`, so
 /// for now we wrap the underlying error until we figure out a longer-term replacement that accounts
 /// for missing error codes and the like.
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct SubgraphError {
     pub(crate) subgraph: String,
-    pub(crate) error: FederationError,
+    pub(crate) errors: Vec<SingleSubgraphError>,
 }
 
 impl SubgraphError {
-    pub fn new(subgraph: impl Into<String>, error: impl Into<FederationError>) -> Self {
+    // Legacy constructor without locations info.
+    pub(crate) fn new_without_locations(
+        subgraph: impl Into<String>,
+        error: impl Into<FederationError>,
+    ) -> Self {
         let subgraph = subgraph.into();
-        let error = error.into();
-        SubgraphError { subgraph, error }
+        let error: FederationError = error.into();
+        SubgraphError {
+            subgraph,
+            errors: error
+                .errors()
+                .into_iter()
+                .map(|e| SingleSubgraphError {
+                    error: e.clone(),
+                    locations: Vec::new(),
+                })
+                .collect(),
+        }
     }
 
-    pub fn error(&self) -> &FederationError {
-        &self.error
+    /// Construct from a FederationError.
+    ///
+    /// Note: FederationError may hold multiple errors. In that case, all individual errors in the
+    ///       FederationError will share the same locations.
+    #[allow(dead_code)]
+    pub(crate) fn from_federation_error(
+        subgraph: impl Into<String>,
+        error: impl Into<FederationError>,
+        locations: Vec<Range<LineColumn>>,
+    ) -> Self {
+        let error: FederationError = error.into();
+        let errors = error
+            .errors()
+            .into_iter()
+            .map(|e| SingleSubgraphError {
+                error: e.clone(),
+                locations: locations.clone(),
+            })
+            .collect();
+        SubgraphError {
+            subgraph: subgraph.into(),
+            errors,
+        }
     }
 
-    pub fn into_inner(self) -> FederationError {
-        self.error
+    /// Constructing from GraphQL errors.
+    pub(crate) fn from_diagnostic_list(
+        subgraph: impl Into<String>,
+        errors: DiagnosticList,
+    ) -> Self {
+        let subgraph = subgraph.into();
+        SubgraphError {
+            subgraph,
+            errors: errors
+                .iter()
+                .map(|d| SingleSubgraphError {
+                    error: SingleFederationError::InvalidGraphQL {
+                        message: d.to_string(),
+                    },
+                    locations: d.line_column_range().iter().cloned().collect(),
+                })
+                .collect(),
+        }
+    }
+
+    /// Convert SubgraphError to FederationError.
+    /// * WARNING: This is a lossy conversion, losing location information.
+    pub(crate) fn into_federation_error(self) -> FederationError {
+        MultipleFederationErrors::from_iter(self.errors.into_iter().map(|e| e.error)).into()
     }
 
     // Format subgraph errors in the same way as `Rover` does.
@@ -358,14 +425,16 @@ impl SubgraphError {
     // - Gather associated errors from the validation error.
     // - Split each error into its code and message.
     // - Add the subgraph name prefix to CompositionError message.
+    //
+    // This is mainly for internal testing. Consider using `to_composition_errors` method instead.
     pub fn format_errors(&self) -> Vec<(String, String)> {
-        self.error
-            .errors()
+        self.errors
             .iter()
             .map(|e| {
+                let error = &e.error;
                 (
-                    e.code_string(),
-                    format!("[{subgraph}] {e}", subgraph = self.subgraph),
+                    error.code_string(),
+                    format!("[{subgraph}] {error}", subgraph = self.subgraph),
                 )
             })
             .collect()
@@ -374,7 +443,11 @@ impl SubgraphError {
 
 impl Display for SubgraphError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{}] {}", self.subgraph, self.error)
+        let subgraph = &self.subgraph;
+        for (code, message) in self.format_errors() {
+            writeln!(f, "{code} [{subgraph}] {message}")?;
+        }
+        Ok(())
     }
 }
 
@@ -397,7 +470,7 @@ pub mod test_utils {
         let subgraph =
             Subgraph::parse(name, &format!("http://{name}"), schema_str).expect("valid schema");
         let subgraph = if matches!(build_option, BuildOption::AsFed2) {
-            subgraph.into_fed2_test_subgraph(true)?
+            subgraph.into_fed2_test_subgraph(true, false)?
         } else {
             subgraph
         };
@@ -414,7 +487,7 @@ pub mod test_utils {
         let subgraph =
             Subgraph::parse(name, &format!("http://{name}"), schema_str).expect("valid schema");
         let subgraph = if matches!(build_option, BuildOption::AsFed2) {
-            subgraph.into_fed2_test_subgraph(true)?
+            subgraph.into_fed2_test_subgraph(true, false)?
         } else {
             subgraph
         };
@@ -485,11 +558,11 @@ pub mod test_utils {
                 b.len(),
                 a.len(),
                 b.iter()
-                    .map(|(code, msg)| { format!("- {}: {}", code, msg) })
+                    .map(|(code, msg)| { format!("- {code}: {msg}") })
                     .collect::<Vec<_>>()
                     .join("\n"),
                 a.iter()
-                    .map(|(code, msg)| { format!("+ {}: {}", code, msg) })
+                    .map(|(code, msg)| { format!("+ {code}: {msg}") })
                     .collect::<Vec<_>>()
                     .join("\n"),
             ));
@@ -544,7 +617,7 @@ pub fn schema_diff_expanded_from_initial(schema_str: String) -> Result<String, F
     let initial_subgraph = typestate::Subgraph::new("S", "http://S", initial_schema.clone());
     let expanded_subgraph = initial_subgraph
         .expand_links()
-        .map_err(|e| e.into_inner())?;
+        .map_err(|e| e.into_federation_error())?;
 
     // Build string of missing directives and types from initial to expanded
     let mut diff = String::new();

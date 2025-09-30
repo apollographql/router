@@ -23,7 +23,7 @@ fn label_edge(edge: &QueryGraphEdge) -> String {
     if label.is_empty() {
         String::new()
     } else {
-        format!("label=\"{}\"", edge)
+        format!("label=\"{edge}\"")
     }
 }
 
@@ -67,7 +67,7 @@ fn to_dot_federated(graph: &QueryGraph) -> Result<String, std::fmt::Error> {
 
     fn label_cluster_node(node: &QueryGraphNode) -> String {
         let provide_id = match node.provide_id {
-            Some(id) => format!("#{}", id),
+            Some(id) => format!("#{id}"),
             None => String::new(),
         };
         format!(r#"label="{}{}@{}""#, node.type_, provide_id, node.source)
@@ -132,17 +132,17 @@ fn to_dot_federated(graph: &QueryGraph) -> Result<String, std::fmt::Error> {
 
     // Supergraph edges
     for i in stable_graph.edge_indices() {
-        if edge_across_clusters(&stable_graph, i) {
-            if let Some((n1, n2)) = stable_graph.edge_endpoints(i) {
-                let edge = &stable_graph[i];
-                writeln!(
-                    dot_str,
-                    "  {} -> {} [{}]",
-                    n1.index(),
-                    n2.index(),
-                    label_edge(edge)
-                )?;
-            }
+        if edge_across_clusters(&stable_graph, i)
+            && let Some((n1, n2)) = stable_graph.edge_endpoints(i)
+        {
+            let edge = &stable_graph[i];
+            writeln!(
+                dot_str,
+                "  {} -> {} [{}]",
+                n1.index(),
+                n2.index(),
+                label_edge(edge)
+            )?;
         }
     }
 

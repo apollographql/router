@@ -9,7 +9,6 @@ input_file: apollo-federation/src/connectors/validation/test_data/errors.graphql
         message: "In `@source(name: \"invalid_source_message_not_string\" errors.message:)`: object values aren't valid here",
         locations: [
             13:25..13:47,
-            13:25..13:47,
         ],
     },
     Message {
@@ -44,7 +43,6 @@ input_file: apollo-federation/src/connectors/validation/test_data/errors.graphql
         code: InvalidErrorsMessage,
         message: "In `@connect(errors.message:)` on `Query.invalid_sourceless_message_not_string`: object values aren't valid here",
         locations: [
-            86:27..86:49,
             86:27..86:49,
         ],
     },

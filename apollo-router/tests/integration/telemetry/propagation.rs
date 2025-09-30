@@ -27,12 +27,12 @@ async fn test_trace_id_via_header() -> Result<(), BoxError> {
     router.assert_started().await;
     make_call(&mut router, trace_id).await;
     router
-        .wait_for_log_message(&format!("trace_id: {}", trace_id))
+        .wait_for_log_message(&format!("trace_id: {trace_id}"))
         .await;
 
     make_call(&mut router, trace_id).await;
     router
-        .wait_for_log_message(&format!("\"id_from_header\": \"{}\"", trace_id))
+        .wait_for_log_message(&format!("\"id_from_header\": \"{trace_id}\""))
         .await;
 
     router.graceful_shutdown().await;

@@ -160,16 +160,18 @@ impl SchemaSource {
                 .boxed()
             }
             SchemaSource::OCI(oci_config) => {
+                tracing::debug!("using oci as schema source");
                 futures::stream::once(async move {
                     match fetch_oci(oci_config).await {
                         Ok(oci_result) => {
+                            tracing::debug!("fetched schema from oci registry");
                             Some(SchemaState {
                                 sdl: oci_result.schema,
                                 launch_id: None,
                             })
                         }
                         Err(err) => {
-                            tracing::error!("{}", err);
+                            tracing::error!("error fetching schema from oci registry {}", err);
                             None
                         }
                     }
@@ -181,12 +183,6 @@ impl SchemaSource {
         .chain(stream::iter(vec![NoMoreSchema]))
         .boxed()
     }
-}
-
-#[derive(thiserror::Error, Debug)]
-enum FetcherError {
-    #[error("failed to build http client")]
-    InitializationError(#[from] reqwest::Error),
 }
 
 // Encapsulates fetching the schema from the first viable url.

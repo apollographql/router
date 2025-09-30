@@ -1,13 +1,14 @@
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
 use shape::location::SourceId;
 
+use crate::connectors::ConnectSpec;
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::helpers::vec_push;
 use crate::connectors::json_selection::immutable::InputPath;
@@ -31,6 +32,7 @@ fn get_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     let Some(index_literal) = method_args.and_then(|MethodArgs { args, .. }| args.first()) else {
         return (
@@ -39,6 +41,7 @@ fn get_method(
                 format!("Method ->{} requires an argument", method_name.as_ref()),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         );
     };
@@ -51,6 +54,7 @@ fn get_method(
             vars,
             input_path,
             data,
+            spec,
         ),
         JSON::Array(input_value) => handle_array_method(
             method_name,
@@ -59,6 +63,7 @@ fn get_method(
             vars,
             input_path,
             data,
+            spec,
         ),
         JSON::Object(input_value) => handle_object_method(
             method_name,
@@ -67,6 +72,7 @@ fn get_method(
             vars,
             input_path,
             data,
+            spec,
         ),
         _ => (
             None,
@@ -77,6 +83,7 @@ fn get_method(
                 ),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         ),
     }
@@ -89,8 +96,9 @@ fn handle_string_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
     data: &JSON,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    let (index, index_apply_to_errors) = index_literal.apply_to_path(data, vars, input_path);
+    let (index, index_apply_to_errors) = index_literal.apply_to_path(data, vars, input_path, spec);
 
     match index {
         Some(JSON::Number(index_value)) => {
@@ -106,6 +114,7 @@ fn handle_string_method(
                             ),
                             input_path.to_vec(),
                             method_name.range(),
+                            spec,
                         ),
                     ),
                 );
@@ -123,6 +132,7 @@ fn handle_string_method(
                         ),
                         input_path.to_vec(),
                         method_name.range(),
+                        spec,
                     ),
                 )
             };
@@ -144,6 +154,7 @@ fn handle_string_method(
                     ),
                     input_path.to_vec(),
                     method_name.range(),
+                    spec,
                 ),
             ),
         ),
@@ -173,8 +184,9 @@ fn handle_array_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
     data: &JSON,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    let (index, index_apply_to_errors) = index_literal.apply_to_path(data, vars, input_path);
+    let (index, index_apply_to_errors) = index_literal.apply_to_path(data, vars, input_path, spec);
 
     match index {
         Some(JSON::Number(index_value)) => {
@@ -190,6 +202,7 @@ fn handle_array_method(
                             ),
                             input_path.to_vec(),
                             method_name.range(),
+                            spec,
                         ),
                     ),
                 );
@@ -207,6 +220,7 @@ fn handle_array_method(
                         ),
                         input_path.to_vec(),
                         method_name.range(),
+                        spec,
                     ),
                 )
             };
@@ -229,6 +243,7 @@ fn handle_array_method(
                     ),
                     input_path.to_vec(),
                     method_name.range(),
+                    spec,
                 ),
             ),
         ),
@@ -258,8 +273,9 @@ fn handle_object_method(
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
     data: &JSON,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    let (index, index_apply_to_errors) = index_literal.apply_to_path(data, vars, input_path);
+    let (index, index_apply_to_errors) = index_literal.apply_to_path(data, vars, input_path, spec);
 
     match index {
         Some(JSON::String(index_value)) => {
@@ -279,6 +295,7 @@ fn handle_object_method(
                             ),
                             input_path.to_vec(),
                             method_name.range(),
+                            spec,
                         ),
                     ),
                 )
@@ -295,6 +312,7 @@ fn handle_object_method(
                     ),
                     input_path.to_vec(),
                     method_name.range(),
+                    spec,
                 ),
             ),
         ),
@@ -304,12 +322,11 @@ fn handle_object_method(
 
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn get_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
     let arg_count = method_args.map(|args| args.args.len()).unwrap_or_default();
     if arg_count > 1 {
@@ -325,25 +342,21 @@ fn get_shape(
     let Some(index_literal) = method_args.and_then(|args| args.args.first()) else {
         return Shape::error(
             format!("Method ->{} requires one argument", method_name.as_ref()),
-            method_name.shape_location(source_id),
+            method_name.shape_location(context.source_id()),
         );
     };
 
-    let index_shape = index_literal.compute_output_shape(
-        input_shape.clone(),
-        dollar_shape,
-        named_var_shapes,
-        source_id,
-    );
+    let index_shape =
+        index_literal.compute_output_shape(context, input_shape.clone(), dollar_shape);
 
     if Shape::string([]).accepts(&input_shape) {
-        handle_string_shape(method_name, &input_shape, &index_shape, source_id)
+        handle_string_shape(method_name, &input_shape, &index_shape, context.source_id())
     } else if Shape::tuple([], []).accepts(&input_shape) {
-        handle_array_shape(method_name, &input_shape, &index_shape, source_id)
+        handle_array_shape(method_name, &input_shape, &index_shape, context.source_id())
     } else if Shape::empty_object([]).accepts(&input_shape) {
-        handle_object_shape(method_name, &input_shape, &index_shape, source_id)
+        handle_object_shape(method_name, &input_shape, &index_shape, context.source_id())
     } else if input_shape.accepts(&Shape::unknown([])) {
-        handle_unknown_shape(method_name, &index_shape, source_id)
+        handle_unknown_shape(method_name, &index_shape, context.source_id())
     } else {
         Shape::error(
             format!(
@@ -351,7 +364,7 @@ fn get_shape(
                 method_name.as_ref()
             )
             .as_str(),
-            method_name.shape_location(source_id),
+            method_name.shape_location(context.source_id()),
         )
     }
 }
@@ -450,7 +463,7 @@ fn handle_array_shape(
     } else if !tail.is_none() {
         // If we have a tail, we cannot know for sure if the item exists at the index or not
         // This is because a tail implies that there are 0 to many items of that type
-        return input_shape.any_item(method_name.shape_location(source_id));
+        input_shape.any_item(method_name.shape_location(source_id))
     } else {
         out_of_bounds_error()
     }
@@ -490,16 +503,16 @@ fn handle_object_shape(
     } else if !rest.is_none() {
         // If we have a rest, we cannot know for sure if the item exists at the index or not
         // This is because a rest implies that there are 0 to many items of that type
-        return input_shape.any_field(method_name.shape_location(source_id));
+        input_shape.any_field(method_name.shape_location(source_id))
     } else {
-        return Shape::error(
+        Shape::error(
             format!(
                 "Method ->{} property {index_value} not found in object",
                 method_name.as_ref()
             )
             .as_str(),
             method_name.shape_location(source_id),
-        );
+        )
     }
 }
 
@@ -531,6 +544,7 @@ mod tests {
 
     use super::*;
     use crate::assert_debug_snapshot;
+    use crate::connectors::json_selection::ApplyToError;
     use crate::selection;
 
     #[test]
@@ -752,6 +766,26 @@ mod tests {
             (Some(json!(11)), vec![]),
         );
     }
+
+    #[rstest::rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn get_should_return_none_when_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!("$.arr->get($.missing)", spec).apply_to(&json!({
+                "arr": [1, 2, 3],
+            })),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Property .missing not found in object",
+                    "path": ["missing"],
+                    "range": [13, 20],
+                    "spec": spec.to_string(),
+                }))]
+            ),
+        );
+    }
 }
 
 #[cfg(test)]
@@ -776,12 +810,11 @@ mod shape_tests {
     fn get_test_shape(args: Vec<WithRange<LitExpr>>, input: Shape) -> Shape {
         let location = get_location();
         get_shape(
+            &ShapeContext::new(location.source_id),
             &WithRange::new("get".to_string(), Some(location.span)),
             Some(&MethodArgs { args, range: None }),
             input,
             Shape::unknown([]),
-            &IndexMap::default(),
-            &location.source_id,
         )
     }
 
@@ -790,12 +823,11 @@ mod shape_tests {
         let location = get_location();
         assert_eq!(
             get_shape(
+                &ShapeContext::new(location.source_id),
                 &WithRange::new("get".to_string(), Some(location.span)),
                 None,
                 Shape::string([]),
                 Shape::none(),
-                &IndexMap::default(),
-                &location.source_id
             ),
             Shape::error(
                 "Method ->get requires one argument".to_string(),

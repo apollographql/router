@@ -1,295 +1,13 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
-use std::task::Poll;
 use std::time::Duration;
-use std::time::Instant;
 
-use bloomfilter::Bloom;
-use http::header;
-use opentelemetry::KeyValue;
-use opentelemetry::metrics::MeterProvider;
-use parking_lot::Mutex;
-use serde_json_bytes::Value;
-use tokio::sync::broadcast;
-use tokio_stream::StreamExt;
-use tokio_stream::wrappers::IntervalStream;
-use tower::BoxError;
-use tower::ServiceBuilder;
-use tower::ServiceExt;
-use tower_service::Service;
+use tokio::sync::mpsc::error::TrySendError;
 
-use super::plugin::REPRESENTATIONS;
-use super::plugin::Ttl;
-use super::plugin::hash_query;
-use super::plugin::hash_vary_headers;
-use crate::layers::ServiceBuilderExt;
-use crate::metrics::meter_provider;
-use crate::plugins::response_cache::postgres::PostgresCacheStorage;
-use crate::services::subgraph;
-use crate::spec::TYPENAME;
+use crate::plugins::response_cache::ErrorCode;
+use crate::plugins::response_cache::invalidation::InvalidationKind;
+use crate::plugins::response_cache::storage;
 
 pub(crate) const CACHE_INFO_SUBGRAPH_CONTEXT_KEY: &str =
     "apollo::router::response_cache::cache_info_subgraph";
-
-impl CacheMetricsService {
-    pub(crate) fn create(
-        name: String,
-        service: subgraph::BoxService,
-        ttl: Option<&Ttl>,
-        separate_per_type: bool,
-    ) -> subgraph::BoxService {
-        tower::util::BoxService::new(CacheMetricsService {
-            service: ServiceBuilder::new()
-                .buffered()
-                .service(service)
-                .boxed_clone(),
-            name: Arc::new(name),
-            counter: Some(Arc::new(Mutex::new(CacheCounter::new(
-                ttl.map(|t| t.0).unwrap_or_else(|| Duration::from_secs(60)),
-                separate_per_type,
-            )))),
-        })
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct CacheMetricsService {
-    service: subgraph::BoxCloneService,
-    name: Arc<String>,
-    counter: Option<Arc<Mutex<CacheCounter>>>,
-}
-
-impl Service<subgraph::Request> for CacheMetricsService {
-    type Response = subgraph::Response;
-    type Error = BoxError;
-    type Future = <subgraph::BoxService as Service<subgraph::Request>>::Future;
-
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, request: subgraph::Request) -> Self::Future {
-        let clone = self.clone();
-        let inner = std::mem::replace(self, clone);
-
-        Box::pin(inner.call_inner(request))
-    }
-}
-
-impl CacheMetricsService {
-    async fn call_inner(
-        mut self,
-        mut request: subgraph::Request,
-    ) -> Result<subgraph::Response, BoxError> {
-        let cache_attributes = Self::get_cache_attributes(&mut request);
-
-        let response = self.service.ready().await?.call(request).await?;
-
-        if let Some(cache_attributes) = cache_attributes {
-            if let Some(counter) = &self.counter {
-                Self::update_cache_metrics(&self.name, counter, &response, cache_attributes)
-            }
-        }
-
-        Ok(response)
-    }
-
-    fn get_cache_attributes(sub_request: &mut subgraph::Request) -> Option<CacheAttributes> {
-        let body = sub_request.subgraph_request.body_mut();
-        let hashed_query = hash_query(&sub_request.query_hash, body);
-        let representations = body
-            .variables
-            .get(REPRESENTATIONS)
-            .and_then(|value| value.as_array())?;
-
-        let keys = extract_cache_attributes(representations).ok()?;
-
-        Some(CacheAttributes {
-            headers: sub_request.subgraph_request.headers().clone(),
-            hashed_query: Arc::new(hashed_query),
-            representations: keys,
-        })
-    }
-
-    fn update_cache_metrics(
-        subgraph_name: &Arc<String>,
-        counter: &Mutex<CacheCounter>,
-        sub_response: &subgraph::Response,
-        cache_attributes: CacheAttributes,
-    ) {
-        let mut vary_headers = sub_response
-            .response
-            .headers()
-            .get_all(header::VARY)
-            .into_iter()
-            .filter_map(|val| {
-                val.to_str().ok().map(|v| {
-                    v.split(", ")
-                        .map(|s| s.to_string())
-                        .collect::<Vec<String>>()
-                })
-            })
-            .flatten()
-            .collect::<Vec<String>>();
-        vary_headers.sort();
-        let vary_headers = vary_headers.join(", ");
-
-        let hashed_headers = if vary_headers.is_empty() {
-            Arc::default()
-        } else {
-            Arc::new(hash_vary_headers(&cache_attributes.headers))
-        };
-
-        CacheCounter::record(
-            counter,
-            cache_attributes.hashed_query.clone(),
-            subgraph_name,
-            hashed_headers,
-            cache_attributes.representations,
-        );
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct CacheAttributes {
-    pub(crate) headers: http::HeaderMap,
-    pub(crate) hashed_query: Arc<String>,
-    // Typename + hashed_representation
-    pub(crate) representations: Vec<(Arc<String>, Value)>,
-}
-
-#[derive(Debug, Hash, Clone)]
-pub(crate) struct CacheKey {
-    pub(crate) representation: Value,
-    pub(crate) typename: Arc<String>,
-    pub(crate) query: Arc<String>,
-    pub(crate) subgraph_name: Arc<String>,
-    pub(crate) hashed_headers: Arc<String>,
-}
-
-// Get typename and hashed representation for each representations in the subgraph query
-pub(crate) fn extract_cache_attributes(
-    representations: &[Value],
-) -> Result<Vec<(Arc<String>, Value)>, BoxError> {
-    let mut res = Vec::new();
-    for representation in representations {
-        let opt_type = representation
-            .as_object()
-            .and_then(|o| o.get(TYPENAME))
-            .ok_or("missing __typename in representation")?;
-        let typename = opt_type.as_str().unwrap_or("");
-
-        res.push((Arc::new(typename.to_string()), representation.clone()));
-    }
-    Ok(res)
-}
-
-pub(crate) struct CacheCounter {
-    primary: Bloom<CacheKey>,
-    secondary: Bloom<CacheKey>,
-    created_at: Instant,
-    ttl: Duration,
-    per_type: bool,
-}
-
-impl CacheCounter {
-    pub(crate) fn new(ttl: Duration, per_type: bool) -> Self {
-        Self {
-            primary: Self::make_filter(),
-            secondary: Self::make_filter(),
-            created_at: Instant::now(),
-            ttl,
-            per_type,
-        }
-    }
-
-    fn make_filter() -> Bloom<CacheKey> {
-        // the filter is around 4kB in size (can be calculated with `Bloom::compute_bitmap_size`)
-        Bloom::new_for_fp_rate(10000, 0.2).expect("cannot fail")
-    }
-
-    pub(crate) fn record(
-        counter: &Mutex<CacheCounter>,
-        query: Arc<String>,
-        subgraph_name: &Arc<String>,
-        hashed_headers: Arc<String>,
-        representations: Vec<(Arc<String>, Value)>,
-    ) {
-        let separate_metrics_per_type;
-        {
-            let mut c = counter.lock();
-            if c.created_at.elapsed() >= c.ttl {
-                c.clear();
-            }
-            separate_metrics_per_type = c.per_type;
-        }
-
-        // typename -> (nb of cache hits, nb of entities)
-        let mut seen: HashMap<Arc<String>, (usize, usize)> = HashMap::new();
-        let mut key = CacheKey {
-            representation: Value::Null,
-            typename: Arc::new(String::new()),
-            query,
-            subgraph_name: subgraph_name.clone(),
-            hashed_headers,
-        };
-        for (typename, representation) in representations {
-            let cache_hit;
-            key.typename = typename.clone();
-            key.representation = representation;
-
-            {
-                let mut c = counter.lock();
-                cache_hit = c.check(&key);
-            }
-
-            let seen_entry = seen.entry(typename.clone()).or_default();
-            if cache_hit {
-                seen_entry.0 += 1;
-            }
-            seen_entry.1 += 1;
-        }
-
-        for (typename, (cache_hit, total_entities)) in seen.into_iter() {
-            if separate_metrics_per_type {
-                f64_histogram_with_unit!(
-                    "apollo.router.operations.response_cache.cache_hit",
-                    "Hit rate percentage of cached entities",
-                    "percent",
-                    (cache_hit as f64 / total_entities as f64) * 100f64,
-                    // Can't just `Arc::clone` these because they're `Arc<String>`,
-                    // while opentelemetry supports `Arc<str>`
-                    entity_type = typename.to_string(),
-                    subgraph = subgraph_name.to_string()
-                );
-            } else {
-                f64_histogram_with_unit!(
-                    "apollo.router.operations.response_cache.cache_hit",
-                    "Hit rate percentage of cached entities",
-                    "percent",
-                    (cache_hit as f64 / total_entities as f64) * 100f64,
-                    subgraph = subgraph_name.to_string()
-                );
-            }
-        }
-    }
-
-    fn check(&mut self, key: &CacheKey) -> bool {
-        self.primary.check_and_set(key) || self.secondary.check(key)
-    }
-
-    fn clear(&mut self) {
-        let secondary = std::mem::replace(&mut self.primary, Self::make_filter());
-        self.secondary = secondary;
-
-        self.created_at = Instant::now();
-    }
-}
 
 pub(crate) struct CacheMetricContextKey(String);
 
@@ -305,56 +23,119 @@ impl From<CacheMetricContextKey> for String {
     }
 }
 
-/// This task counts all rows in the given Postgres DB that is expired and will be removed when pg_cron will be triggered
-/// parameter subgraph_name is optional and is None when the database is the global one, and Some(...) when it's a database configured for a specific subgraph
-pub(super) async fn expired_data_task(
-    pg_cache: PostgresCacheStorage,
-    mut abort_signal: broadcast::Receiver<()>,
-    subgraph_name: Option<String>,
-) {
-    let mut interval = IntervalStream::new(tokio::time::interval(std::time::Duration::from_secs(
-        (pg_cache.cleanup_interval.num_seconds().max(60) / 2) as u64,
-    )));
-    let expired_data_count = Arc::new(AtomicU64::new(0));
-    let expired_data_count_clone = expired_data_count.clone();
-    let meter = meter_provider().meter("apollo/router");
-    let _gauge = meter
-        .u64_observable_gauge("apollo.router.response_cache.data.expired")
-        .with_description("Count of expired data entries still in database")
-        .with_unit("{entry}")
-        .with_callback(move |gauge| {
-            let attributes = match subgraph_name.clone() {
-                Some(subgraph_name) => {
-                    vec![KeyValue::new(
-                        "subgraph.name",
-                        opentelemetry::Value::String(subgraph_name.into()),
-                    )]
-                }
-                None => Vec::new(),
-            };
-            gauge.observe(
-                expired_data_count_clone.load(Ordering::Relaxed),
-                &attributes,
-            );
-        })
-        .init();
+pub(super) fn record_fetch_error(error: &storage::Error, subgraph_name: &str) {
+    u64_counter_with_unit!(
+        "apollo.router.operations.response_cache.fetch.error",
+        "Errors when fetching data from cache",
+        "{error}",
+        1,
+        "subgraph.name" = subgraph_name.to_string(),
+        "code" = error.code()
+    );
+    tracing::debug!(error = %error, "unable to fetch data from response cache");
+}
 
-    loop {
-        tokio::select! {
-            biased;
-            _ = abort_signal.recv() => {
-                break;
-            }
-            _ = interval.next() => {
-                let exp_data = match pg_cache.expired_data_count().await {
-                    Ok(exp_data) => exp_data,
-                    Err(err) => {
-                        ::tracing::error!(error = ?err, "cannot get expired data count");
-                        continue;
-                    }
-                };
-                expired_data_count.store(exp_data, Ordering::Relaxed);
-            }
-        }
+pub(super) fn record_fetch_duration(duration: Duration, subgraph_name: &str, batch_size: usize) {
+    f64_histogram_with_unit!(
+        "apollo.router.operations.response_cache.fetch",
+        "Time to fetch data from cache",
+        "s",
+        duration.as_secs_f64(),
+        "subgraph.name" = subgraph_name.to_string(),
+        "batch.size" = batch_size_str(batch_size)
+    );
+}
+
+pub(super) fn record_insert_error(error: &storage::Error, subgraph_name: &str) {
+    u64_counter_with_unit!(
+        "apollo.router.operations.response_cache.insert.error",
+        "Errors when inserting data in cache",
+        "{error}",
+        1,
+        "subgraph.name" = subgraph_name.to_string(),
+        "code" = error.code()
+    );
+    tracing::debug!(error = %error, "unable to insert data in response cache");
+}
+
+pub(super) fn record_insert_duration(duration: Duration, subgraph_name: &str, batch_size: usize) {
+    f64_histogram_with_unit!(
+        "apollo.router.operations.response_cache.insert",
+        "Time to insert new data in cache",
+        "s",
+        duration.as_secs_f64(),
+        "subgraph.name" = subgraph_name.to_string(),
+        "batch.size" = batch_size_str(batch_size)
+    );
+}
+
+pub(super) fn record_maintenance_success(entries: u64) {
+    u64_counter_with_unit!(
+        "apollo.router.operations.response_cache.maintenance.removed_cache_tag_entries",
+        "Counter for removed items",
+        "{entry}",
+        entries
+    );
+}
+
+pub(super) fn record_maintenance_error(error: &storage::Error) {
+    u64_counter_with_unit!(
+        "apollo.router.operations.response_cache.maintenance.error",
+        "Errors while removing expired entries from cache tag set",
+        "{error}",
+        1,
+        "code" = error.code()
+    );
+    tracing::debug!(error = %error, "unable to perform maintenance on cache tag set in response cache");
+}
+
+pub(super) fn record_maintenance_duration(duration: Duration) {
+    f64_histogram_with_unit!(
+        "apollo.router.operations.response_cache.maintenance",
+        "Time to remove expired entries from cache tag set",
+        "s",
+        duration.as_secs_f64()
+    );
+}
+
+pub(super) fn record_maintenance_queue_error<T>(error: &TrySendError<T>) {
+    let kind = match error {
+        TrySendError::Closed(_) => "channel closed",
+        TrySendError::Full(_) => "channel full",
+    };
+    u64_counter_with_unit!(
+        "apollo.router.operations.response_cache.maintenance.queue.error",
+        "Error while sending cache tag to maintenance queue",
+        "{error}",
+        1,
+        "error" = kind
+    );
+}
+
+pub(super) fn record_invalidation_duration(
+    duration: Duration,
+    invalidation_kind: InvalidationKind,
+) {
+    f64_histogram_with_unit!(
+        "apollo.router.operations.response_cache.invalidation",
+        "Time to invalidate data in cache",
+        "s",
+        duration.as_secs_f64(),
+        "kind" = invalidation_kind
+    );
+}
+
+/// Restrict `batch_size` cardinality so that it can be used as a metric attribute.
+fn batch_size_str(batch_size: usize) -> &'static str {
+    if batch_size == 0 {
+        "0"
+    } else if batch_size <= 10 {
+        "1-10"
+    } else if batch_size <= 20 {
+        "11-20"
+    } else if batch_size <= 50 {
+        "21-50"
+    } else {
+        "51+"
     }
 }

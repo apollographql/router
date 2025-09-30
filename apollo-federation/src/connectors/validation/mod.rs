@@ -238,6 +238,8 @@ pub enum Code {
     InvalidBody,
     /// The `errors.message` provided in `@connect` or `@source` was not valid.
     InvalidErrorsMessage,
+    /// The `isSuccess` mapping provided in `@connect` or `@source` was not valid.
+    InvalidIsSuccess,
     /// A circular reference was detected in a `@connect` directive's `selection` argument.
     CircularReference,
     /// A field included in a `@connect` directive's `selection` argument is not defined on the corresponding type.

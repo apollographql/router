@@ -523,7 +523,7 @@ impl std::fmt::Display for ParseErrors {
             if i > 0 {
                 f.write_str("\n")?;
             }
-            write!(f, "{}", error)?;
+            write!(f, "{error}")?;
         }
         let remaining = errors.count();
         if remaining > 0 {

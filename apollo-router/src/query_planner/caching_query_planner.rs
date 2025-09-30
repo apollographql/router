@@ -279,18 +279,16 @@ where
         // persisted queries are added first because they should get a lower priority in the LRU cache,
         // since a lot of them may be there to support old clients
         let mut all_cache_keys: Vec<WarmUpCachingQueryKey> = Vec::with_capacity(capacity);
-        if should_warm_with_pqs {
-            if let Some(queries) = persisted_queries_operations {
-                for query in queries {
-                    all_cache_keys.push(WarmUpCachingQueryKey {
-                        query,
-                        operation_name: None,
-                        hash: None,
-                        metadata: CacheKeyMetadata::default(),
-                        plan_options: PlanOptions::default(),
-                        config_mode_hash: self.config_mode_hash.clone(),
-                    });
-                }
+        if should_warm_with_pqs && let Some(queries) = persisted_queries_operations {
+            for query in queries {
+                all_cache_keys.push(WarmUpCachingQueryKey {
+                    query,
+                    operation_name: None,
+                    hash: None,
+                    metadata: CacheKeyMetadata::default(),
+                    plan_options: PlanOptions::default(),
+                    config_mode_hash: self.config_mode_hash.clone(),
+                });
             }
         }
 
@@ -344,16 +342,14 @@ where
                 // check if prewarming via seeing if the previous cache exists (aka a reloaded router); if reloading, try to reuse the
                 if let Some(ref previous_cache) = previous_cache {
                     // if the query hash did not change with the schema update, we can reuse the previously cached entry
-                    if let Some(hash) = hash {
-                        if hash == doc.hash {
-                            if let Some(entry) =
-                                { previous_cache.lock().await.get(&caching_key).cloned() }
-                            {
-                                self.cache.insert_in_memory(caching_key, entry).await;
-                                reused += 1;
-                                continue;
-                            }
-                        }
+                    if let Some(hash) = hash
+                        && hash == doc.hash
+                        && let Some(entry) =
+                            { previous_cache.lock().await.get(&caching_key).cloned() }
+                    {
+                        self.cache.insert_in_memory(caching_key, entry).await;
+                        reused += 1;
+                        continue;
                     }
                 }
             };
@@ -917,7 +913,7 @@ mod tests {
 
                 fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
                     self.map
-                        .insert(field.name().to_string(), format!("{:?}", value));
+                        .insert(field.name().to_string(), format!("{value:?}"));
                 }
             }
 
@@ -1255,7 +1251,7 @@ mod tests {
             Ok(_) => panic!(
                 "Expected the task to be aborted due to client drop, but it completed successfully"
             ),
-            Err(e) => assert!(e.is_cancelled(), "Task should be cancelled, got: {:?}", e),
+            Err(e) => assert!(e.is_cancelled(), "Task should be cancelled, got: {e:?}"),
         }
 
         // Give a small delay to ensure the span is recorded

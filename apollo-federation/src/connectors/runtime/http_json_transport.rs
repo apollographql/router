@@ -21,6 +21,7 @@ use crate::connectors::OriginatingDirective;
 use crate::connectors::ProblemLocation;
 use crate::connectors::runtime::debug::ConnectorContext;
 use crate::connectors::runtime::debug::ConnectorDebugHttpRequest;
+use crate::connectors::runtime::debug::DebugRequest;
 use crate::connectors::runtime::debug::SelectionData;
 use crate::connectors::runtime::mapping::Problem;
 use crate::connectors::runtime::mapping::aggregate_apply_to_errors;
@@ -30,7 +31,7 @@ use crate::connectors::runtime::mapping::aggregate_apply_to_errors_with_problem_
 #[derive(Debug)]
 pub struct HttpRequest {
     pub inner: http::Request<String>,
-    pub debug: (Option<Box<ConnectorDebugHttpRequest>>, Vec<Problem>),
+    pub debug: DebugRequest,
 }
 
 /// Response from an HTTP transport

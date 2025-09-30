@@ -1,0 +1,21 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/as_method_var_binding.graphql
+---
+[
+    Message {
+        code: InvalidSelection,
+        message: "In `@connect(selection:)` on `Query.invalidAsNameBinding`: unknown variable `$name`, must be one of $args, $config, $context, $env, $request, $response, $status, $this, $typo",
+        locations: [
+            86:41..86:46,
+        ],
+    },
+    Message {
+        code: InvalidSelection,
+        message: "In `@connect(selection:)` on `Query.invalidSubSelection`: unknown variable `$typo`, must be one of $args, $config, $context, $env, $request, $response, $status, $this, $name",
+        locations: [
+            95:13..95:18,
+        ],
+    },
+]

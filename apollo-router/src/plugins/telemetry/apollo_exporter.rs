@@ -30,7 +30,7 @@ use url::Url;
 use super::apollo::Report;
 use super::apollo::SingleReport;
 use super::config::ApolloMetricsReferenceMode;
-use crate::plugins::telemetry::tracing::BatchProcessorConfig;
+use crate::plugins::telemetry::apollo::ApolloUsageReportsBatchProcessorConfiguration;
 
 const BACKOFF_INCREMENT: Duration = Duration::from_millis(50);
 const ROUTER_REPORT_TYPE_METRICS: &str = "metrics";
@@ -86,7 +86,7 @@ impl Sender {
 /// Retrying when sending fails.
 /// Sending periodically (in the case of metrics).
 pub(crate) struct ApolloExporter {
-    batch_config: BatchProcessorConfig,
+    batch_config: ApolloUsageReportsBatchProcessorConfiguration,
     endpoint: Url,
     apollo_key: String,
     header: proto::reports::ReportHeader,
@@ -99,7 +99,7 @@ pub(crate) struct ApolloExporter {
 impl ApolloExporter {
     pub(crate) fn new(
         endpoint: &Url,
-        batch_config: &BatchProcessorConfig,
+        batch_config: &ApolloUsageReportsBatchProcessorConfiguration,
         apollo_key: &str,
         apollo_graph_ref: &str,
         schema_id: &str,
@@ -321,13 +321,13 @@ impl ApolloExporter {
                         );
                         if has_traces && !self.strip_traces.load(Ordering::SeqCst) {
                             // If we had traces then maybe disable sending traces from this exporter based on the response.
-                            if let Ok(response) = serde_json::Value::from_str(&data) {
-                                if let Some(Value::Bool(true)) = response.get("tracesIgnored") {
-                                    tracing::warn!(
-                                        "traces will not be sent to Apollo as this account is on a free plan"
-                                    );
-                                    self.strip_traces.store(true, Ordering::SeqCst);
-                                }
+                            if let Ok(response) = serde_json::Value::from_str(&data)
+                                && let Some(Value::Bool(true)) = response.get("tracesIgnored")
+                            {
+                                tracing::warn!(
+                                    "traces will not be sent to Apollo as this account is on a free plan"
+                                );
+                                self.strip_traces.store(true, Ordering::SeqCst);
                             }
                         }
                         return Ok(());

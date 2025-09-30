@@ -1,0 +1,140 @@
+---
+source: apollo-federation/src/connectors/json_selection/parser.rs
+expression: mul_with_dollars
+---
+JSONSelection {
+    inner: Path(
+        PathSelection {
+            path: WithRange {
+                node: Key(
+                    WithRange {
+                        node: Field(
+                            "a",
+                        ),
+                        range: Some(
+                            0..1,
+                        ),
+                    },
+                    WithRange {
+                        node: Method(
+                            WithRange {
+                                node: "mul",
+                                range: Some(
+                                    3..6,
+                                ),
+                            },
+                            Some(
+                                MethodArgs {
+                                    args: [
+                                        WithRange {
+                                            node: Path(
+                                                PathSelection {
+                                                    path: WithRange {
+                                                        node: Var(
+                                                            WithRange {
+                                                                node: $,
+                                                                range: Some(
+                                                                    7..8,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Key(
+                                                                    WithRange {
+                                                                        node: Field(
+                                                                            "b",
+                                                                        ),
+                                                                        range: Some(
+                                                                            9..10,
+                                                                        ),
+                                                                    },
+                                                                    WithRange {
+                                                                        node: Empty,
+                                                                        range: Some(
+                                                                            10..10,
+                                                                        ),
+                                                                    },
+                                                                ),
+                                                                range: Some(
+                                                                    8..10,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            7..10,
+                                                        ),
+                                                    },
+                                                },
+                                            ),
+                                            range: Some(
+                                                7..10,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Path(
+                                                PathSelection {
+                                                    path: WithRange {
+                                                        node: Var(
+                                                            WithRange {
+                                                                node: $,
+                                                                range: Some(
+                                                                    12..13,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Key(
+                                                                    WithRange {
+                                                                        node: Field(
+                                                                            "c",
+                                                                        ),
+                                                                        range: Some(
+                                                                            14..15,
+                                                                        ),
+                                                                    },
+                                                                    WithRange {
+                                                                        node: Empty,
+                                                                        range: Some(
+                                                                            15..15,
+                                                                        ),
+                                                                    },
+                                                                ),
+                                                                range: Some(
+                                                                    13..15,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            12..15,
+                                                        ),
+                                                    },
+                                                },
+                                            ),
+                                            range: Some(
+                                                12..15,
+                                            ),
+                                        },
+                                    ],
+                                    range: Some(
+                                        6..16,
+                                    ),
+                                },
+                            ),
+                            WithRange {
+                                node: Empty,
+                                range: Some(
+                                    16..16,
+                                ),
+                            },
+                        ),
+                        range: Some(
+                            1..16,
+                        ),
+                    },
+                ),
+                range: Some(
+                    0..16,
+                ),
+            },
+        },
+    ),
+    spec: V0_2,
+}

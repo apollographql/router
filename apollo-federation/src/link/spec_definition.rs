@@ -34,7 +34,6 @@ use crate::schema::type_and_directive_specification::DirectiveCompositionSpecifi
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
-#[allow(dead_code)]
 pub(crate) trait SpecDefinition {
     fn url(&self) -> &Url;
 
@@ -52,6 +51,23 @@ pub(crate) trait SpecDefinition {
 
     fn version(&self) -> &Version {
         &self.url().version
+    }
+
+    fn is_spec_directive_name(
+        &self,
+        schema: &FederationSchema,
+        name_in_schema: &Name,
+    ) -> Result<bool, FederationError> {
+        let Some(metadata) = schema.metadata() else {
+            return Err(SingleFederationError::Internal {
+                message: "Schema is not a core schema (add @link first)".to_owned(),
+            }
+            .into());
+        };
+        Ok(metadata
+            .source_link_of_directive(name_in_schema)
+            .map(|e| e.link.url.identity == *self.identity())
+            .unwrap_or(false))
     }
 
     fn is_spec_type_name(
@@ -106,8 +122,7 @@ pub(crate) trait SpecDefinition {
                 .ok_or_else(|| {
                     SingleFederationError::Internal {
                         message: format!(
-                            "Unexpectedly could not find spec directive \"@{}\" in schema",
-                            name
+                            "Unexpectedly could not find spec directive \"@{name}\" in schema"
                         ),
                     }
                     .into()
@@ -130,8 +145,7 @@ pub(crate) trait SpecDefinition {
                 .ok_or_else(|| {
                     SingleFederationError::Internal {
                         message: format!(
-                            "Unexpectedly could not find spec type \"{}\" in schema",
-                            name
+                            "Unexpectedly could not find spec type \"{name}\" in schema"
                         ),
                     }
                     .into()
@@ -218,7 +232,7 @@ impl<T: SpecDefinition> SpecDefinitions<T> {
         self.definitions.get(requested)
     }
 
-    pub(crate) fn versions(&self) -> Keys<Version, T> {
+    pub(crate) fn versions(&self) -> Keys<'_, Version, T> {
         self.definitions.keys()
     }
 
@@ -290,7 +304,6 @@ impl SpecRegistry {
     /// directive. An alternative would be to mark everything as `Sync` and store them on the
     /// individual feature specs, but we have omitted this for now due to a non-trivial (~10%)
     /// increase in heap usage that affects query planning.
-    #[allow(dead_code)]
     pub(crate) fn get_composition_spec(
         &self,
         source: &Link,

@@ -177,8 +177,7 @@ impl Display for FeatureGateViolation {
             } => {
                 write!(
                     f,
-                    "* {} @link(url: \"{}\")\n  To enable:\n\n{}",
-                    name, url, to_enable
+                    "* {name} @link(url: \"{url}\")\n  To enable:\n\n{to_enable}"
                 )
             }
         }

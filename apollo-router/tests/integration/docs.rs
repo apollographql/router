@@ -12,20 +12,20 @@ fn check_config_json() {
     let result = jsonpath_lib::select(&config, "$.sidebar.*.*").expect("values must be selectable");
     let re = Regex::new(r"^[a-z/-]+$").expect("regex must be valid");
     for value in result {
-        if let Value::String(path) = value {
-            if !path.starts_with("https://") {
+        if let Value::String(path) = value
+            && !path.starts_with("https://")
+        {
+            assert!(
+                re.is_match(path),
+                "{path} in config.json was not kebab case"
+            );
+            if path != "/" {
+                let path_in_docs = format!("../docs/source{path}.mdx");
+                let path_in_docs = Path::new(&path_in_docs);
                 assert!(
-                    re.is_match(path),
-                    "{path} in config.json was not kebab case"
+                    path_in_docs.exists(),
+                    "{path} in docs/source/config.json did not exist"
                 );
-                if path != "/" {
-                    let path_in_docs = format!("../docs/source{path}.mdx");
-                    let path_in_docs = Path::new(&path_in_docs);
-                    assert!(
-                        path_in_docs.exists(),
-                        "{path} in docs/source/config.json did not exist"
-                    );
-                }
             }
         }
     }

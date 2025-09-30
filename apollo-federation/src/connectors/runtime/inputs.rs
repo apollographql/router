@@ -46,7 +46,7 @@ impl RequestInputs {
     pub fn merger(
         self,
         variables_used: &IndexMap<Namespace, IndexSet<String>>,
-    ) -> MappingContextMerger {
+    ) -> MappingContextMerger<'_> {
         MappingContextMerger {
             inputs: self,
             variables_used,
