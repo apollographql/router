@@ -78,31 +78,33 @@ impl ArchiveUtils {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
+    use futures::StreamExt;
+
     use super::*;
 
-    #[test]
-    fn test_archive_header_builder_default() {
-        let content = b"test content";
-        let header = ArchiveHeaderBuilder::new("test.txt")
-            .build_for_content(content)
-            .unwrap();
-
-        assert_eq!(header.path().unwrap().to_str().unwrap(), "test.txt");
-        assert_eq!(header.size().unwrap(), content.len() as u64);
-        assert_eq!(header.mode().unwrap(), 0o644);
-        assert!(header.mtime().unwrap() > 0); // Should have a timestamp
-    }
-
     #[tokio::test]
-    async fn test_archive_utils_add_text_file() {
-        use std::io::Cursor;
-
+    async fn test_add_text_file() {
         let buffer = Vec::new();
         let cursor = Cursor::new(buffer);
         let mut tar = tokio_tar::Builder::new(cursor);
 
-        let result = ArchiveUtils::add_text_file(&mut tar, "test.txt", "Hello, World!").await;
+        ArchiveUtils::add_text_file(&mut tar, "test.txt", "Hello, World!")
+            .await
+            .unwrap();
 
-        assert!(result.is_ok());
+        // Get archive bytes before finishing
+        let archive_bytes = tar.get_ref().get_ref().clone();
+        tar.finish().await.unwrap();
+
+        // Parse the tar archive to verify the file was added correctly
+        let cursor = Cursor::new(&archive_bytes);
+        let mut archive = tokio_tar::Archive::new(cursor);
+        let mut entries = archive.entries().unwrap();
+
+        let entry = entries.next().await.unwrap().unwrap();
+        assert_eq!(entry.path().unwrap().to_str().unwrap(), "test.txt");
+        assert_eq!(entry.header().size().unwrap(), 13); // "Hello, World!" is 13 bytes
     }
 }
