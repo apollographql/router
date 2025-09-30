@@ -1,5 +1,31 @@
-// Data Access Layer for Apollo Router Diagnostics
-// Centralizes data access logic for both dashboard and embedded modes
+/**
+ * Data Access Layer for Apollo Router Diagnostics
+ *
+ * Provides a unified interface for loading diagnostic data in both dashboard
+ * and embedded modes. Handles switching between live API endpoints and embedded
+ * base64-encoded data.
+ *
+ * ## Architecture
+ *
+ * Two modes of operation:
+ * - **Dashboard Mode** (IS_DASHBOARD_MODE=true): Fetches data from REST API endpoints
+ * - **Embedded Mode** (IS_DASHBOARD_MODE=false): Decodes data from EMBEDDED_DATA object
+ *
+ * ## Data Sources
+ *
+ * Loads the following diagnostic data:
+ * - System information (OS, CPU, memory)
+ * - Router configuration (YAML)
+ * - Supergraph schema (GraphQL)
+ * - Memory heap dumps (.prof files)
+ *
+ * ## Security
+ *
+ * All data is fetched from same-origin endpoints or embedded at build time.
+ * No external data sources are accessed to prevent CORS and XSS issues.
+ *
+ * @module data-access
+ */
 
 // ===== Utility Functions =====
 
