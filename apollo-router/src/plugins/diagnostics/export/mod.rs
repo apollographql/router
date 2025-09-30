@@ -289,7 +289,7 @@ impl Exporter {
             Some(supergraph_schema),
             &memory_dumps,
         );
-        let html_content = generator.generate_report(report_data)?;
+        let html_content = generator.generate_embedded_html(report_data)?;
 
         // Add HTML report to archive using archive utilities
         ArchiveUtils::add_text_file(tar, "diagnostics_report.html", &html_content).await

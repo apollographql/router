@@ -1,3 +1,16 @@
+//! HTML report generator for diagnostics plugin
+//!
+//! Generates self-contained HTML reports with embedded diagnostic data and JavaScript
+//! visualizations. Supports two modes:
+//!
+//! - **Dashboard mode**: Live interactive dashboard with external script loading for API-based data
+//! - **Embedded mode**: Complete self-contained report with all data embedded as base64
+//!
+//! The generator uses a template-based approach with injection points for:
+//! - Tailwind CSS styles (embedded at compile time)
+//! - JavaScript visualization libraries (flamegraphs, call graphs, heap profiling)
+//! - Diagnostic data (system info, router config, supergraph schema, memory dumps)
+
 use base64::Engine;
 
 use crate::plugins::diagnostics::DiagnosticsError;
@@ -82,8 +95,8 @@ impl HtmlGenerator {
         Ok(html)
     }
 
-    /// Generate a complete HTML report with embedded data (for export mode)
-    pub(crate) fn generate_report(&self, data: ReportData<'_>) -> DiagnosticsResult<String> {
+     /// Generate a complete HTML report with embedded data (for embedded mode)
+    pub(crate) fn generate_embedded_html(&self, data: ReportData<'_>) -> DiagnosticsResult<String> {
         let mut html = self.template.clone();
 
         // Build embedded script injection
@@ -210,7 +223,7 @@ mod tests {
             Some("Schema content"),
             &[], // empty memory dumps
         );
-        let html = generator.generate_report(report_data);
+        let html = generator.generate_embedded_html(report_data);
 
         assert!(html.is_ok());
         let html_content = html.unwrap();
@@ -303,7 +316,7 @@ type Review @key(fields: "id") {
             Some(mock_schema),
             &mock_memory_dumps,
         );
-        let html_content = generator.generate_report(report_data).unwrap();
+        let html_content = generator.generate_embedded_html(report_data).unwrap();
 
         // Verify HTML structure (basic HTML validity)
         assert!(html_content.starts_with("<!DOCTYPE html>"));
