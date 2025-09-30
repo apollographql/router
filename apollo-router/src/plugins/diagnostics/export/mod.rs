@@ -138,7 +138,7 @@ impl Exporter {
         config: Config,
         supergraph_schema: Arc<String>,
         router_config: Arc<str>,
-    ) -> impl futures::Stream<Item = Result<Bytes, BoxError>> {
+    ) -> impl futures::Stream<Item = Result<Bytes, BoxError>> + Send + 'static  {
         // Use tokio::io::simplex for unidirectional pipe with backpressure
         // 2MB buffer prevents OOM while maintaining good throughput
         let (reader, writer) = tokio::io::simplex(2 * 1024 * 1024);
