@@ -46,3 +46,51 @@ pub(crate) mod routes {
         pub(crate) const STYLES: &str = "styles.css";
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_listen_addr_is_localhost() {
+        // SECURITY: Diagnostics must only bind to localhost to prevent network exposure
+        let addr = network::default_listen_addr();
+
+        assert!(
+            addr.ip().is_loopback(),
+            "Diagnostics endpoint MUST bind to localhost (127.0.0.1) for security, got: {}",
+            addr.ip()
+        );
+    }
+
+    #[test]
+    fn test_default_output_dir_is_absolute() {
+        assert!(
+            files::DEFAULT_OUTPUT_DIR_UNIX.starts_with('/'),
+            "Output directory must be an absolute path for consistency"
+        );
+    }
+
+    #[test]
+    fn test_all_resource_paths_are_unique() {
+        use std::collections::HashSet;
+
+        let all_resources = [
+            routes::js_resources::BACKTRACE_PROCESSOR,
+            routes::js_resources::VIZ_JS_INTEGRATION,
+            routes::js_resources::FLAMEGRAPH_RENDERER,
+            routes::js_resources::CALLGRAPH_SVG_RENDERER,
+            routes::js_resources::DATA_ACCESS,
+            routes::js_resources::MAIN,
+            routes::js_resources::CUSTOM_ELEMENTS,
+            routes::css_resources::STYLES,
+        ];
+
+        let unique: HashSet<_> = all_resources.iter().collect();
+        assert_eq!(
+            unique.len(),
+            all_resources.len(),
+            "All resource paths must be unique"
+        );
+    }
+}
