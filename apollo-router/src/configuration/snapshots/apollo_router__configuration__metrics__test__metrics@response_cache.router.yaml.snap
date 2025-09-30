@@ -11,6 +11,5 @@ expression: "& metrics.non_zero()"
           opt.enabled: true
           opt.subgraph.enabled: true
           opt.subgraph.invalidation.enabled: true
-          opt.subgraph.postgres.cleanup_interval: true
-          opt.subgraph.postgres.required_to_start: true
+          opt.subgraph.redis.required_to_start: true
           opt.subgraph.ttl: true
