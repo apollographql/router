@@ -54,7 +54,7 @@ telemetry:
     tracing:
       otlp:
         enabled: true
-        endpoint: http://localhost:4317
+        endpoint: 0.0.0.0:4317
         protocol: grpc
       common:
         sampler: 1.0  # Send all traces to collector for intelligent sampling
