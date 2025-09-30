@@ -4,6 +4,9 @@ use crate::plugins::diagnostics::DiagnosticsError;
 use crate::plugins::diagnostics::DiagnosticsResult;
 use crate::plugins::diagnostics::memory::MemoryDump;
 
+/// Embedded Tailwind CSS
+const TAILWIND_CSS: &str = include_str!("resources/styles.css");
+
 /// Parameters for generating diagnostic reports
 #[derive(Debug, Default)]
 pub(crate) struct ReportData<'a> {
@@ -69,6 +72,10 @@ impl HtmlGenerator {
         const EMBEDDED_DATA = null;
     </script>"#;
 
+        // Inject styles
+        let styles_injection = format!("<style>{}</style>", TAILWIND_CSS);
+        html = html.replace("<!-- STYLES_INJECTION_POINT -->", &styles_injection);
+
         html = html.replace("<!-- SCRIPT_INJECTION_POINT -->", script_injection);
         html = html.replace("<!-- DATA_INJECTION_POINT -->", data_injection);
 
@@ -84,6 +91,10 @@ impl HtmlGenerator {
 
         // Build data injection
         let data_injection = self.build_data_injection(data)?;
+
+        // Inject styles
+        let styles_injection = format!("<style>{}</style>", TAILWIND_CSS);
+        html = html.replace("<!-- STYLES_INJECTION_POINT -->", &styles_injection);
 
         // Perform injections
         html = html.replace("<!-- SCRIPT_INJECTION_POINT -->", &script_injection);
@@ -211,6 +222,16 @@ mod tests {
         // Verify embedded data structure
         assert!(html_content.contains("const IS_DASHBOARD_MODE = false"));
         assert!(html_content.contains("const EMBEDDED_DATA = {"));
+
+        // Verify Tailwind CSS is embedded
+        assert!(
+            html_content.contains("<style>") && html_content.contains("tailwindcss"),
+            "Tailwind CSS should be embedded in <style> tag"
+        );
+        assert!(
+            !html_content.contains("<!-- STYLES_INJECTION_POINT -->"),
+            "STYLES_INJECTION_POINT should be replaced"
+        );
     }
 
     #[tokio::test]
@@ -327,6 +348,20 @@ type Review @key(fields: "id") {
         assert!(
             html_content.len() > 10000,
             "HTML should be substantial with embedded JavaScript and data"
+        );
+
+        // Verify Tailwind CSS is embedded
+        assert!(
+            html_content.contains("<style>") && html_content.contains("tailwindcss"),
+            "Tailwind CSS should be embedded in <style> tag"
+        );
+        assert!(
+            !html_content.contains("<!-- STYLES_INJECTION_POINT -->"),
+            "STYLES_INJECTION_POINT should be replaced"
+        );
+        assert!(
+            !html_content.contains("cdn.tailwindcss.com"),
+            "Should not contain Tailwind CDN reference"
         );
     }
 }
