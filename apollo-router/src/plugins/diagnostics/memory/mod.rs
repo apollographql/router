@@ -26,27 +26,8 @@ pub(super) struct MemoryDump {
     pub name: String,
     pub data: String,
     pub size: u64,
-    pub timestamp: Option<String>,
-}
-
-impl MemoryDump {
-    /// Extract timestamp from heap dump filename (router_heap_dump_TIMESTAMP.prof)
-    pub(super) fn extract_timestamp_from_filename(filename: &str) -> Option<String> {
-        // Look for pattern: router_heap_dump_TIMESTAMP.prof
-        if let Some(start) = filename.find("router_heap_dump_") {
-            let timestamp_str = filename
-                .get(start + "router_heap_dump_".len()..)?
-                .split('.')
-                .next()?;
-
-            // Try to parse as Unix timestamp and convert to human readable
-            let timestamp = timestamp_str.parse::<i64>().ok()?;
-            chrono::DateTime::from_timestamp(timestamp, 0)
-                .map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
-        } else {
-            None
-        }
-    }
+    /// Unix timestamp (seconds since epoch)
+    pub timestamp: Option<u64>,
 }
 
 /// Load all memory dump files from a directory
@@ -113,8 +94,12 @@ async fn load_single_memory_dump(
     // Encode content as base64
     let encoded_content = base64::engine::general_purpose::STANDARD.encode(&content);
 
-    // Extract timestamp from filename if possible
-    let timestamp = MemoryDump::extract_timestamp_from_filename(file_name);
+    // Use the file's created timestamp (Unix timestamp in seconds)
+    let timestamp = metadata
+        .created()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs());
 
     Ok(MemoryDump {
         name: file_name.to_string(),

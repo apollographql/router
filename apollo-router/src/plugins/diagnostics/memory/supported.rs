@@ -378,17 +378,18 @@ impl MemoryService {
                             let metadata = fs::metadata(&path)
                                 .map_err(|e| format!("Failed to read file metadata: {}", e))?;
 
-                            // Extract timestamp from filename if possible
-                            let timestamp =
-                                super::MemoryDump::extract_timestamp_from_filename(file_name);
+                            // Use the file's created timestamp (Unix timestamp in seconds)
+                            let timestamp = metadata
+                                .created()
+                                .ok()
+                                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                .map(|d| d.as_secs());
 
                             dumps.push(serde_json::json!({
                                 "name": file_name,
                                 "size": metadata.len(),
                                 "timestamp": timestamp,
-                                "created": metadata.modified().ok()
-                                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                                    .map(|d| d.as_secs())
+                                "created": timestamp
                             }));
                         }
                     }

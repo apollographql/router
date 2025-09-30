@@ -100,13 +100,16 @@ async function populateChartSelectors() {
             const timeB = b.created || parseInt(b.name.match(/(\d+)/)?.[1]) || 0;
             return timeB - timeA; // Descending order (most recent first)
         });
-        
+
         sortedDumps.forEach((dump, index) => {
             const dumpName = dump.name || `dump-${index}`;
             const dumpSize = dump.size || 0;
-            const timestamp = dump.timestamp || 'Unknown time';
+            // Format Unix timestamp in user's local timezone
+            const timestamp = dump.timestamp
+                ? new Date(dump.timestamp * 1000).toLocaleString()
+                : 'Unknown time';
             const displayText = `${timestamp} (${formatFileSize(dumpSize)})`;
-            
+
             // Add to base selectors (optional)
             const baseOption1 = document.createElement('option');
             baseOption1.value = dumpName;
@@ -626,10 +629,14 @@ async function updateDumpsList(dumps) {
     sortedDumps.forEach((dump, index) => {
         console.log(`🏗️ Creating dump item ${index + 1}:`, dump.name);
         try {
+            // Format Unix timestamp in user's local timezone
+            const timestampDisplay = dump.timestamp
+                ? `Created: ${new Date(dump.timestamp * 1000).toLocaleString()}`
+                : '';
             const dumpElement = createDumpItem(
                 dump.name,
                 `Size: ${formatFileSize(dump.size)}`,
-                dump.timestamp ? `Created: ${dump.timestamp}` : ''
+                timestampDisplay
             );
             if (dumpElement) {
                 dumpsListElement.appendChild(dumpElement);

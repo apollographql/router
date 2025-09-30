@@ -210,16 +210,6 @@ mod tests {
         assert!(dumps.is_empty());
     }
 
-    #[test]
-    fn test_timestamp_extraction() {
-        let timestamp =
-            memory::MemoryDump::extract_timestamp_from_filename("router_heap_dump_1704067200.prof");
-        assert!(timestamp.is_some());
-
-        let timestamp =
-            memory::MemoryDump::extract_timestamp_from_filename("invalid_filename.prof");
-        assert!(timestamp.is_none());
-    }
 
     #[tokio::test]
     async fn test_generate_report_basic() {
@@ -303,7 +293,7 @@ type Review @key(fields: "id") {
                 name: "router_heap_dump_1234567890.prof".to_string(),
                 data: base64::engine::general_purpose::STANDARD.encode("heap profile: 1024:   8192 [  1024:   8192] @   0x1234 0x5678\n\nMAPPED_LIBRARIES:\n7f0000000000-7f0000001000 r-xp 00000000 08:01 123456 /usr/bin/router\n\n"),
                 size: 150,
-                timestamp: Some("2024-01-01 12:00:00".to_string()),
+                timestamp: Some(1704110400), // 2024-01-01 12:00:00 UTC
             }
         ];
 
