@@ -28,8 +28,7 @@ impl SystemDiagnostics {
     /// Collect all system diagnostic information
     async fn new() -> Self {
         // Create a single System instance for all system info collection
-        let mut system = System::new();
-        system.refresh_all();
+        let mut system = System::new_all();
 
         Self {
             basic_system: BasicSystemInfo::new().await,
