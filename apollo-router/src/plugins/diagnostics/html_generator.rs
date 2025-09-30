@@ -1,13 +1,20 @@
 //! HTML report generator for diagnostics plugin
 //!
-//! Generates self-contained HTML reports with embedded diagnostic data and JavaScript
-//! visualizations. Supports two modes:
+//! Generates HTML reports with embedded diagnostic data and JavaScript visualizations.
+//! Supports two modes with different resource loading strategies:
 //!
-//! - **Dashboard mode**: Live interactive dashboard with external script loading for API-based data
-//! - **Embedded mode**: Complete self-contained report with all data embedded as base64
+//! - **Dashboard mode**: Live interactive dashboard
+//!   - Links to external CSS via `<link>` tag
+//!   - Links to external JS files via `<script src="...">`
+//!   - Loads data dynamically from API endpoints
+//!
+//! - **Embedded mode**: Self-contained portable report
+//!   - Embeds CSS inline in `<style>` tag
+//!   - Embeds JS inline in `<script>` tags
+//!   - Embeds all data as base64 in JavaScript variables
 //!
 //! The generator uses a template-based approach with injection points for:
-//! - Tailwind CSS styles (embedded at compile time)
+//! - CSS styles (linked externally or embedded inline)
 //! - JavaScript visualization libraries (flamegraphs, call graphs, heap profiling)
 //! - Diagnostic data (system info, router config, supergraph schema, memory dumps)
 
@@ -85,9 +92,9 @@ impl HtmlGenerator {
         const EMBEDDED_DATA = null;
     </script>"#;
 
-        // Inject styles
-        let styles_injection = format!("<style>{}</style>", TAILWIND_CSS);
-        html = html.replace("<!-- STYLES_INJECTION_POINT -->", &styles_injection);
+        // Link to external CSS file for dashboard mode
+        let styles_injection = r#"<link rel="stylesheet" href="/diagnostics/styles.css">"#;
+        html = html.replace("<!-- STYLES_INJECTION_POINT -->", styles_injection);
 
         html = html.replace("<!-- SCRIPT_INJECTION_POINT -->", script_injection);
         html = html.replace("<!-- DATA_INJECTION_POINT -->", data_injection);
