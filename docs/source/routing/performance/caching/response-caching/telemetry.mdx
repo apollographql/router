@@ -35,16 +35,16 @@ releaseStage: preview
 
 
 ### Redis
-The latency metrics are marked as experimental because we will change them if we have an upstream change in one of our depdencies.
+The latency metrics are marked as experimental because Apollo might change them if there is an upstream change in one of our dependencies.
 
-**Connection and performance metrics:**
+#### Connection and performance metrics
   - `apollo.router.cache.redis.connections`: Number of active Redis connections
   - `apollo.router.cache.redis.command_queue_length`: Commands waiting to be sent to Redis
   - `apollo.router.cache.redis.commands_executed`: Total number of Redis commands executed
   - `apollo.router.cache.redis.redelivery_count`: Commands retried due to connection issues
   - `apollo.router.cache.redis.errors`: Redis errors by type (auth, timeout, io, etc.)
 
-**Experimental redis performance metrics:**
+#### Experimental redis performance metrics
   - `experimental.apollo.router.cache.redis.network_latency_avg`: Average network latency to Redis
   - `experimental.apollo.router.cache.redis.latency_avg`: Average Redis command execution time
   - `experimental.apollo.router.cache.redis.request_size_avg`: Average request payload size
@@ -68,21 +68,21 @@ When you insert data in the cache another span will be `response_cache.store` to
 For invalidation you can look for `invalidation_endpoint` span.
 
 List of available attributes on `response_cache.lookup`:
-+ kind: either `root` or `entity` to know if we're fetching data for root fields or an entity
-+ subgraph.name: the subgraph name
-+ graphql.type: the type (or parent type for root fields) we're fetching
-+ debug: boolean to know if the debug mode is enabled or not
-+ private: boolean to know if it's a private data or not
-+ contains_private_id: boolean to know if we found private id in context
-+ cache.key: the primary cache key
-+ cache.status: `hit`|`partial_hit`|`miss`
+- `kind`: `root` or `entity`. Indicates if the cache lookup is for a root field or an entity.
+- subgraph.name: the subgraph name
+- graphql.type: the type (or parent type for root fields) we're fetching
+- debug: boolean to know if the debug mode is enabled or not
+- private: boolean to know if it's a private data or not
+- contains_private_id: boolean to know if we found private id in context
+- cache.key: the primary cache key
+- cache.status: `hit`|`partial_hit`|`miss`
 
 
 List of available attributes on `response_cache.store`:
-+ kind: either `root` or `entity` to know if we're fetching data for root fields or an entity
-+ subgraph.name: the subgraph name
-+ ttl: the ttl of this cache entry
-+ batch.size: when it's an entity we often batch inserts for entities, it's the size of the batch
+- kind: either `root` or `entity` to know if we're fetching data for root fields or an entity
+- subgraph.name: the subgraph name
+- ttl: the ttl of this cache entry
+- batch.size: when it's an entity we often batch inserts for entities, it's the size of the batch
 
 ## Logs
 

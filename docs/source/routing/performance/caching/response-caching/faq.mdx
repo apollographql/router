@@ -5,6 +5,8 @@ minVersion: Router v2.8.0
 releaseStage: preview
 ---
 
+## FAQ
+
 + What's the minimal requirement at the subgraph level to benefit from response caching ?
 
 The Router currently cannot know which types or fields should be cached, so it requires the subgraph to set a `Cache-Control` header in its response to indicate that it should be stored.
@@ -15,16 +17,14 @@ To prevent transient errors from affecting the cache for a long duration, subgra
 
 + What if one of my subgraph is unavailable ?
 
-If some entities were obtained from the cache, but the subgraphs that provided them are unavailable, the router will return a response with the cached entities, and the other entities nullified (schema permitting), along with an error message for the nullified entities.
-
+If some entities were obtained from the cache, but the subgraphs that provided them are unavailable, the router returns a response with the cached entities, and the other entities nullified (schema permitting), along with an error message for the nullified entities.
 + How response caching is working with authorization ?
 
 When used alongside the router's [authorization directives](/router/configuration/authorization), cache entries are separated by authorization context. If a query contains fields that need a specific scope, the requests providing that scope have different cache entries from those not providing the scope. This means that data requiring authorization can still be safely cached and even shared across users, without needing invalidation when a user's roles change because their requests are automatically directed to a different part of the cache.
 
 + How does schema updates affect my cache ?
 
-On schema updates, the router ensures that queries unaffected (it's unaffected if the subgraph schema doesn't change) by the changes keep their cache entries. Queries with affected fields need to be cached again to ensure the router doesn't serve invalid data from before the update.
-
+On schema updates, the router ensures that queries keep their cache entries if the subgraph schema they depend on doesn't change. Queries with affected fields need to be cached again to ensure the router doesn't serve invalid data from before the update.
 
 + Why use caching in the router if your customer already uses CDN, client, subgraph caching?
 
@@ -33,7 +33,7 @@ Router level caching reduces traffic to subgraphs/services
 
 + Why was “Entity Caching” renamed to “Response Caching”?
 
-It wasn’t always describing the outcome and could create confusions.  Response caching more accurately explains the feature and gives us room to grow and evolve it.
+The name "Entity Caching" didn't always describe the outcome and could create confusion. "Response caching" more accurately explains the feature and gives Apollo room to grow and evolve it.
 
 + Can my customer use response caching in production with router versions < v2.8?
 
@@ -54,7 +54,7 @@ In the Redis-based entity cache preview that we shipped in 2024, active invalida
 
 + How does the new preview released in Router v2.8 impact existing response caching users?
 
-All changes will be backward compatible. Existing users of `preview_entity_caching` plugin will be automatically migrated over to the new plugin (`preview_response_caching`)
+All changes are backward-compatible. Existing users of the <code>preview_entity_caching</code> plugin are automatically migrated to the new <code>preview_response_caching</code> plugin.
 
 + Why weren’t cache tags added to the `@cacheControl` directive?
 
@@ -62,9 +62,9 @@ We considered this. The `@cacheControl` directive has been around for years and 
 
 + What happens to root field cache entries that have no tags associated with them?
 
-Like in today’s preview, they will eventually be removed based on TTL, you can invalidate it using either the builtin invalidation by subgraph or by entity but you won’t be able to invalidate root fields for example.
+As in the current preview, these entries are eventually removed based on their TTL. You can invalidate them by subgraph or by entity, but you can't invalidate root fields this way.
 
-+ Does `@cacheTag` directive with any subgraph implementation ?
++ `@cacheTag` directive compatibility ?
 
 Yes it's not a subgraph directive, it's only interpreted at the router level unlike `@cacheControl`.
 

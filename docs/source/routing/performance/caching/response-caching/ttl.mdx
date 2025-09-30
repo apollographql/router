@@ -8,10 +8,9 @@ releaseStage: preview
 ## Configure time to live (TTL)
 
 Besides configuring a global TTL for all the entries in Redis, the GraphOS Router also honors the [`Cache-Control` header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control) returned with the subgraph response. It generates a `Cache-Control` header for the client response by aggregating the TTL information from all response parts.
-A TTL has to be configured for all subgraphs using entity caching, either defined in the per subgraph configuration or inherited from the global configuration, in case the subgraph returns a `Cache-Control` header without a `max-age`.
+A TTL must be configured for all subgraphs using response caching. This can be defined in the per-subgraph configuration or inherited from the global configuration. This TTL is used if the subgraph returns a <code>Cache-Control</code> header without a <code>max-age</code>.
 
-
-If you're using Apollo server for your subgraph you can benefit from [`@cacheControl` directive](https://www.apollographql.com/docs/apollo-server/api/plugin/cache-control) available as a plugin called `ApolloServerPluginCacheControl`. This plugin will let you mark data in your subgraph schema to set custom TTL which will be translated into `Cache-Control` header.
+If you're using Apollo Server for your subgraph, you can use the [<code>@CacheControl</code> directive](https://www.apollographql.com/docs/apollo-server/api/plugin/cache-control), which is available via the <code>ApolloServerPluginCacheControl</code> plugin. This plugin lets you mark data in your subgraph schema to set a custom TTL, which is then translated into a <code>Cache-Control</code> header.
 
 Here is an example of schema using both `@cacheTag` and `@cacheControl` directives:
 

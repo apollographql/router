@@ -1,6 +1,7 @@
 ---
 title: Response caching customization for the GraphOS Router
 description: Response caching customization for GraphOS Router with GraphOS Enterprise.
+subtitle: Customize the Redis cache key for subgraph request
 minVersion: Router v2.8.0
 releaseStage: preview
 ---
@@ -10,7 +11,7 @@ releaseStage: preview
 
 If you need to store data for a particular request in different cache entries, you can configure the cache key through the `apollo::response_cache::key` context entry.
 
-This entry contains an object with the `all` field to affect all subgraph requests under one client request, and fields named after subgraph operation names to affect individual subgraph queries. The field's value can be any valid JSON value (object, string, etc).
+This entry contains an object with the <code>all</code> field to affect all subgraph requests under one client request, and fields named after subgraph operation names to affect individual subgraph queries. The field's value can be any valid JSON value, such as an object or a string.
 
 ```json
 {

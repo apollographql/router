@@ -8,7 +8,7 @@ releaseStage: preview
 
 ## Redis configuration
 
-We have several options related to Redis in router's configuration in order to make sure you can scale properly and have the best performances.
+The router's configuration provides several Redis options to ensure you can scale properly and achieve the best performance.
 For example if you need to have a different redis instance per subgraph you can configure a global redis instance (which will be used per default) and you can override and use a specific instance with their own configuration for specific subgraphs. You can also configuration default timeout and connection pool size.
 
 ```yaml title="router.yaml"
@@ -34,7 +34,7 @@ preview_response_cache:
 ```
 
 #### Timeout
-Connecting and sending commands to Redis are subject to a timeout, set by default to 500ms, that can be overriden.
+Connecting and sending commands to Redis are subject to a timeout, set by default to 500ms, that can be overridden.
 
 
 #### TTL
@@ -52,7 +52,7 @@ When active, the `required_to_start` option will prevent the router from startin
 
 #### Pool size
 
-The `pool_size` option defines the number of connections to Redis that the router will open. By default, the router will open a 5 connections to Redis. If there is a lot of traffic between router and Redis and/or there is some latency in those requests, it is recommended to increase the pool size to reduce that latency. For response caching you can potentially measure if you have to increase this number by looking at `apollo.router.operations.response_cache.insert` and `apollo.router.operations.response_cache.fetch` (or also check in [metrics](#metrics)) which measure the time it takes to insert and fetch data in cache, if it's long maybe it's because it takes time to acquire a connection from the pool.
+The <code>pool_size</code> option defines the number of Redis connections the router opens. By default, the router opens five connections. If you have high traffic between the router and Redis, or if you observe latency in those requests, increase the pool size to reduce that latency. You can measure whether you need to increase this number by monitoring the <code>apollo.router.operations.response_cache.insert</code> and <code>apollo.router.operations.response_cache.fetch</code> metrics (see [Metrics](#metrics)). If the time to insert and fetch data from the cache is long, it might be because of delays in acquiring a connection from the pool.
 
 ### Redis URL configuration
 
@@ -83,7 +83,7 @@ redis|rediss[-cluster] :// [[username:]password@] host [:port][?[node=host1:port
 
 or, if configured with multiple URLs:
 
-```
+```yaml
 [
   "redis|rediss[-cluster] :// [[username:]password@] host [:port]",
   "redis|rediss[-cluster] :// [[username:]password@] host1 [:port1]",
@@ -100,7 +100,7 @@ redis|rediss[-sentinel] :// [[username1:]password1@] host [:port][/database][?[n
 
 or, if configured with multiple URLs:
 
-```
+```yaml
 [
   "redis|rediss[-sentinel] :// [[username:]password@] host [:port][/database][?[&sentinelServiceName=myservice][&sentinelUsername=username2][&sentinelPassword=password2]]",
   "redis|rediss[-sentinel] :// [[username1:]password1@] host [:port][/database][?[&sentinelServiceName=myservice][&sentinelUsername=username2][&sentinelPassword=password2]]"
@@ -133,7 +133,7 @@ preview_response_cache:
 ```
 
 ### Metrics
-The latency metrics are marked as experimental because we will change them if we have an upstream change in one of our depdencies.
+The latency metrics are marked as experimental because Apollo might change them if there is an upstream change in one of our dependencies.
 
 **Connection and performance metrics:**
   - `apollo.router.cache.redis.connections`: Number of active Redis connections
@@ -148,7 +148,7 @@ The latency metrics are marked as experimental because we will change them if we
   - `experimental.apollo.router.cache.redis.request_size_avg`: Average request payload size
   - `experimental.apollo.router.cache.redis.response_size_avg`: Average response payload size
 
-## Typical deployement
+## Typical deployment
 
 ## What we tested
 // Version, replicas, load tests, ...

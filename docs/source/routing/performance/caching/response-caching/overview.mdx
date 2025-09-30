@@ -23,9 +23,9 @@ Response caching enables the router to respond to identical subgraph queries wit
 
 ### Goals
 
-Th main goal of response caching is to both reduce the load on your subgraphs and also improve overall latencies on your requests from clients. Using the router to cache data is better than using a CDN because it's a GraphQL aware cache. The router caches at the entity/query level which is GraphQL native and reusable across users and requests.
+The main goal of response caching is to reduce the load on your subgraphs and improve overall latencies for client requests. The router provides a GraphQL-aware cache, which offers advantages over a generic CDN. The router caches at the entity/query level, which is GraphQL-native and reusable across users and requests.
 
-### Benefits of entity caching
+### Benefits of response caching
 
 Compared to caching entire client responses, response caching supports finer control over:
 - the time to live (TTL) of cached data

@@ -1,16 +1,17 @@
 ---
 title: Response cache debugging for the GraphOS Router
 description: Response cache debugging for GraphOS Router with GraphOS Enterprise.
+subtitle: Debug response caching issues in the GraphOS Router
 minVersion: Router v2.8.0
 releaseStage: preview
 ---
 
 
-## Debugging
+## Debug response caching
 
 ### Debugger
 
-In order to make this feature easy to debug we developed a debugger for it and it's included in Apollo Sandbox if you run the router with this minimal configuration for example:
+To help you debug this feature, Apollo includes a debugger in Apollo Sandbox. To use it, run the router with the following minimal configuration:
 
 ```yaml title="router.yaml"
 homepage:
@@ -37,7 +38,7 @@ preview_response_cache:
         shared_key: ${env.INVALIDATION_SHARED_KEY} # Use environment variable INVALIDATION_SHARED_KEY
 ```
 
-+ You'll be able to go to your router instance at root URL and see the Apollo Sandbox:
+- Go to your router instance at its root URL to see Apollo Sandbox:
 
 <img
   className="screenshot"
@@ -46,7 +47,7 @@ preview_response_cache:
   width="300"
 />
 
-+ Make sure the cache debugger is also enabled in Sandbox, you'll have to click on the settings button (top left) and scroll down to the bottom to enable it:
+- In Sandbox, enable the cache debugger. Click the settings button in the top left and scroll to the bottom to enable it:
 
 <img
   className="screenshot"
@@ -55,7 +56,7 @@ preview_response_cache:
   width="300"
 />
 
-+ On the right panel when you have the response data you can open the dropdown at the top of this panel to select `Cache debugger`:
+- In the right panel, open the dropdown at the top of the response data panel and select **Cache debugger**:
 
 <img
   className="screenshot"
@@ -64,7 +65,7 @@ preview_response_cache:
   width="300"
 />
 
-+ You'll now have a list of cached or potential cached entries, in this screenshot we can see both entries coming from subgraph and from the cache. If you have data in `Created at` column that means the value has been put in cache, and if you have the source set to `products` for example that means for this specific call, even if it's now in cache it has been fetched from the `products` subgraph. If the `Created at` column is empty it means it hasn't been cached. The reason might be different (cf [troubleshoot](#Troubleshoot)) but in this case for subgraph `acccounts` it's because it contains private data that is uncacheable.
+- A list of cached or potentially cached entries appears. This list helps you understand the cache status of your data: - If the `Created at` column contains data, the value has been stored in the cache. - If the `source` column is `products`, the data for this call was fetched from the `products` subgraph, even if it is now cached. - If the `Created at` column is empty, the entry hasn't been cached. This might happen for several reasons (see [Troubleshoot](#Troubleshoot)). In this example, the `accounts` subgraph entry isn't cached because it contains private, uncacheable data.
 
 <img
   className="screenshot"
@@ -73,7 +74,7 @@ preview_response_cache:
   width="300"
 />
 
-+ If you click on one of these entries you can now have details about it. Like what was the value of `Cache-control` header returned by the subgraph, what response data is coming from this entry, the entity key and also the corresponding cache tags if you want to invalidate it.
+- If you click on one of these entries you can now have details about it. Like what was the value of `Cache-control` header returned by the subgraph, what response data is coming from this entry, the entity key and also the corresponding cache tags if you want to invalidate it.
 
 <img
   className="screenshot"
@@ -82,7 +83,7 @@ preview_response_cache:
   width="300"
 />
 
-+ You can also go in request pane to have details about the request originally sent to the subgraph to get the data. You'll be able to see the query and variables.
+- You can also go in request pane to have details about the request originally sent to the subgraph to get the data. You'll be able to see the query and variables.
 
 <img
   className="screenshot"
@@ -91,7 +92,7 @@ preview_response_cache:
   width="300"
 />
 
-+ Finally if you want to generate a curl command to invalidate this specific data you can click on the invalidate button and it will open a modal to see what you want to invalidate.
+- Finally if you want to generate a curl command to invalidate this specific data you can click on the invalidate button and it will open a modal to see what you want to invalidate.
 
 <img
   className="screenshot"
@@ -104,11 +105,11 @@ preview_response_cache:
 
 ### Common reasons for cache misses or passes
 
-+ Private data and no private_id set or available
-+ no cache-control header
-+ cache-control header set to no-store
-+ cache control maxage very low
-+ too much invalidations happening on data
+- Private data and no private_id set or available
+- no cache-control header
+- cache-control header set to no-store
+- cache control maxage very low
+- too much invalidations happening on data
 
 ### Slow latencies
 

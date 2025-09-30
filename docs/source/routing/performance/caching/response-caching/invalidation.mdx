@@ -1,6 +1,6 @@
 ---
 title: Response caching invalidation for the GraphOS Router
-description: Response caching invalidation for GraphOS Router with GraphOS Enterprise. Invalidate specific cache entries using http endpoint
+description: Response caching invalidation for GraphOS Router with GraphOS Enterprise. Invalidate specific cache entries using an HTTP endpoint.
 minVersion: Router v2.8.0
 releaseStage: preview
 ---
@@ -66,7 +66,7 @@ One invalidation request can invalidate multiple cached entries at once. It can 
 
 ### Configuration
 
-You can configure entity cache invalidation globally with `preview_response_cache.invalidation`. You can also override the global setting for a subgraph with `preview_response_cache.subgraph.subgraphs.SUBGRAPH_NAME.invalidation`. The example below shows both:
+You can configure entity cache invalidation globally with <code>preview_response_cache.invalidation</code>. You can also override the global setting for a subgraph with <code>preview_response_cache.subgraph.subgraphs.SUBGRAPH_NAME.invalidation</code>. The following example shows both:
 
 ```yaml title="router.yaml"
 preview_response_cache:
@@ -114,7 +114,7 @@ A string that will be used to authenticate invalidation requests.
 
 ### Invalidation
 
-Consider we have this subgraph schema which is part of our federated schema:
+Consider the following subgraph schema, which is part of a federated schema:
 
 ```graphql title=accounts.graphql
 extend schema
@@ -145,9 +145,7 @@ type Post @key(fields: "id") {
 
 #### By subgraph
 
-If you want to invalidate all cached data coming from subgraph `accounts`.
-
-Invalidation requests for subgraphs are defined as JSON objects with the following format:
+To invalidate all cached data from the <code>accounts</code> subgraph, send a request with the following format:
 
 ```json
 [{
@@ -173,7 +171,7 @@ Invalidation requests for entity type are defined as JSON objects with the follo
 #### By cache tag
 
 Given the previous schema if you want to invalidate all cached data related to a cache tag `profile` in subgraph `accounts`.
-For example imagine you have a profile page and you know you execute these 2 queries with root fields you can tag it with the cache tag `profile` and then make sure you invalidated all the data fetched for the profile page.
+For example, if you have a profile page that executes these two queries, you can tag them with the <code>profile</code> cache tag. You can then invalidate all data fetched for the profile page with a single request.
 
 Invalidation requests for cache tag are defined as JSON objects with the following format:
 
@@ -185,7 +183,7 @@ Invalidation requests for cache tag are defined as JSON objects with the followi
 }]
 ```
 
-You could also potentially add a dynamic cache tag (specificied like this `@cacheTag(format: "user-{$key.id}")`) containing the entity key on entity type `User` and decide to invalidate the cached data containing `User` data with id `42`:
+You can also add a dynamic cache tag containing the entity key to the <code>User</code> entity type, specified like this: <code>@cacheTag(format: "user-{$key.id}")</code>. This enables you to invalidate cached data for a specific <code>User</code>, such as one with an ID of <code>42</code>:
 
 ```json
 [{
@@ -207,12 +205,12 @@ Invalidate a root field with parameters using dynamic cache tag. To set a cache 
 
 <Note>
     There are existing limitations for `@cacheTag` directive in your schemas:
-    + You can only set a `@cacheTag` directive on either root fields query or an entity. If you try to add this directive on an Interface or another Type that doesn't already contain `@key` directive it won't work.
-    + When you set the `@cacheTag` directive on root fields it will allow for `{$args.XXX}` interpolation in the format, args is the map containing all the arguments on the corresponding root field. And for an entity it will be `{$key.XXX}`, containing a map of all entity keys for the corresponding type. Note that is you have `@key(fields: "id") @key(fields: "id name")` you'll only be able to have access to `{$key.id}` and not `name` because you can only use fields using in every `@key` directives.
-    + For more details please check our [FAQ](./faq.mdx)
+    - You can only set a `@cacheTag` directive on either root fields query or an entity. If you try to add this directive on an Interface or another Type that doesn't already contain `@key` directive it won't work.
+    - When you set the <code>@cacheTag</code> directive on a root field, the <code>format</code> string allows for <code>{$args.XXX}</code> interpolation. <code>args</code> is a map containing all arguments for that root field. For an entity, the format is <code>{$key.XXX}</code>, where <code>key</code> is a map of all entity keys for that type. Note: if you have multiple <code>@key</code> directives, such as <code>@key(fields: "id")</code> and <code>@key(fields: "id name")</code>, you can only access fields present in _every_ <code>@key</code> directive (in this case, only <code>{$key.id}</code>).
+    - For more details please check our [FAQ](./faq.mdx)
 </Note>
 
-If you want to set your cache tags programmatically because it doesn't depend neither on the arguments for root fields nor entity key for an entity you can create your own cache tags directly from your subgraph and set it in response extensions.
+If you need to set cache tags programmatically (for example, if the tag depends on neither root field arguments nor entity keys), create the cache tags in your subgraph and set them in the response extensions.
 
 Example of response payload if you want to set cache tags for different entities returned by subgraph:
 
