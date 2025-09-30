@@ -238,6 +238,10 @@ type Post @key(fields: "id") @cacheControl(maxAge: 60) {
 }
 ```
 
+<Note>
+    Don't forget to either re-compose or publish your schemas using `rover`
+</Note>
+
 You can see I tagged `User` with a static cache tag format `user` and a dynamic one involving variable interpolation and we use the entity key `id` to generate the cache tag. So for example if the `User` fetched has an `id` set to `42` it would generate `user-42` as a cache tag.
 
 Now we tagged our data we can invalidate it using a `curl` command to invalidate the user with id `42`:
