@@ -1185,19 +1185,19 @@ impl Merger {
 
 /// Simple builder for join__field directives (minimal version for compatibility)
 #[allow(dead_code)]
-struct JoinFieldBuilder {
+pub(crate) struct JoinFieldBuilder {
     arguments: Vec<Node<Argument>>,
 }
 
 #[allow(dead_code)]
 impl JoinFieldBuilder {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             arguments: Vec::new(),
         }
     }
 
-    fn arg<T: Into<Value>>(mut self, key: &Name, value: T) -> Self {
+    pub(crate) fn arg<T: Into<Value>>(mut self, key: &Name, value: T) -> Self {
         self.arguments.push(Node::new(Argument {
             name: key.clone(),
             value: Node::new(value.into()),
@@ -1205,7 +1205,7 @@ impl JoinFieldBuilder {
         self
     }
 
-    fn maybe_arg<T: Into<Value>>(self, key: &Name, value: Option<T>) -> Self {
+    pub(crate) fn maybe_arg<T: Into<Value>>(self, key: &Name, value: Option<T>) -> Self {
         if let Some(v) = value {
             self.arg(key, v)
         } else {
@@ -1213,7 +1213,7 @@ impl JoinFieldBuilder {
         }
     }
 
-    fn maybe_bool_arg(self, key: &Name, condition: bool) -> Self {
+    pub(crate) fn maybe_bool_arg(self, key: &Name, condition: bool) -> Self {
         if condition {
             self.arg(key, Value::Boolean(true))
         } else {
@@ -1221,7 +1221,7 @@ impl JoinFieldBuilder {
         }
     }
 
-    fn build(self) -> Directive {
+    pub(crate) fn build(self) -> Directive {
         Directive {
             name: name!("join__field"),
             arguments: self.arguments,
