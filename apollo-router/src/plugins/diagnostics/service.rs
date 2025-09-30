@@ -1,7 +1,36 @@
-//! Service implementation for diagnostics plugin with internal routing
+//! HTTP service implementation for diagnostics plugin
 //!
-//! **Platform Support**: This service is available on all platforms.
-//! Memory profiling features are available with graceful degradation on non-Linux platforms.
+//! Implements the Axum router and HTTP handlers for all diagnostic endpoints.
+//! The service provides a REST-like API with the following structure:
+//!
+//! ## Endpoints
+//!
+//! **Dashboard & Configuration:**
+//! - `GET /` - Interactive HTML dashboard
+//! - `GET /system_info.txt` - System diagnostic information
+//! - `GET /router_config.yaml` - Active router configuration
+//! - `GET /supergraph.graphql` - Supergraph schema
+//! - `GET /export` - Complete diagnostic archive (.tar.gz)
+//!
+//! **Memory Profiling:**
+//! - `GET /memory/status` - Current profiling state (active/inactive)
+//! - `POST /memory/start` - Begin heap profiling
+//! - `POST /memory/stop` - End heap profiling
+//! - `POST /memory/dump` - Create instant heap snapshot
+//! - `GET /memory/dumps` - List all heap dump files
+//! - `DELETE /memory/dumps` - Remove all heap dumps
+//! - `GET /memory/dumps/:filename` - Download specific dump
+//! - `DELETE /memory/dumps/:filename` - Delete specific dump
+//!
+//! **JavaScript Resources:**
+//! - Fallback handler serves embedded JS files for dashboard visualization
+//!
+//! All responses include appropriate cache-control headers to prevent stale diagnostics data.
+//!
+//! ## Platform Support
+//!
+//! Available on all platforms. Memory profiling endpoints return "not supported" responses
+//! on non-Linux platforms or when jemalloc is not enabled.
 
 use std::sync::Arc;
 
