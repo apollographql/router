@@ -16,6 +16,8 @@ use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
 use crate::merger::merge_field::PLACEHOLDER_TYPE_NAME;
 use crate::schema::FederationSchema;
+use crate::schema::position::HasDescription;
+use crate::schema::position::HasType;
 use crate::supergraph::CompositionHint;
 use crate::utils::human_readable::human_readable_subgraph_names;
 
@@ -68,7 +70,7 @@ impl Merger {
         &mut self,
         sources: &Sources<T>,
         dest: &T,
-    ) -> Result<(), FederationError>
+    ) -> Result<IndexSet<Name>, FederationError>
     where
         T: HasArguments + Display,
         <T as HasArguments>::ArgumentPosition: Display,
@@ -84,7 +86,7 @@ impl Merger {
             }
         }
 
-        for arg_name in arg_names {
+        for arg_name in &arg_names {
             // We add the argument unconditionally even if we're going to remove it later on.
             // This enables consistent mismatch/hint reporting.
             dest.insert_argument(
@@ -106,7 +108,7 @@ impl Merger {
                     continue;
                 };
                 let subgraph = &self.subgraphs[*idx];
-                let arg_opt = pos.get_argument(subgraph.schema(), &arg_name);
+                let arg_opt = pos.get_argument(subgraph.schema(), arg_name);
 
                 if let Some(arg) = arg_opt
                     && let Ok(Some(from_context)) = subgraph.from_context_directive_name()
@@ -132,7 +134,7 @@ impl Merger {
                         continue;
                     };
                     let subgraph = &self.subgraphs[*idx];
-                    if let Some(arg) = pos.get_argument(subgraph.schema(), &arg_name) {
+                    if let Some(arg) = pos.get_argument(subgraph.schema(), arg_name) {
                         if arg.is_required() && arg.default_value.is_none() {
                             self.error_reporter.add_error(CompositionError::ContextualArgumentNotContextualInAllSubgraphs {
                                 message: format!(
@@ -155,7 +157,7 @@ impl Merger {
                 }
                 // Note: we remove the element after the hint/error because we access it in
                 // the hint message generation.
-                dest.remove_argument(&mut self.merged, &arg_name)?;
+                dest.remove_argument(&mut self.merged, arg_name)?;
                 continue;
             }
 
@@ -169,7 +171,7 @@ impl Merger {
                     continue;
                 };
                 let subgraph = &self.subgraphs[*idx];
-                if let Some(arg) = pos.get_argument(subgraph.schema(), &arg_name) {
+                if let Some(arg) = pos.get_argument(subgraph.schema(), arg_name) {
                     present_in.push(*idx);
                     if arg.is_required() {
                         required_in.push(*idx);
@@ -224,10 +226,25 @@ impl Merger {
 
                 // Note that we remove the element after the hint/error because we
                 // access it in the hint message generation.
-                dest.remove_argument(&mut self.merged, &arg_name)?;
+                dest.remove_argument(&mut self.merged, arg_name)?;
             }
         }
 
+        Ok(arg_names)
+    }
+
+    pub(in crate::merger) fn merge_argument<T>(
+        &mut self,
+        sources: &Sources<T>,
+        dest: &T,
+    ) -> Result<(), FederationError>
+    where
+        T: Display + HasDefaultValue + HasDescription + HasType,
+    {
+        self.merge_description(sources, dest)?;
+        self.record_applied_directives_to_merge(sources, dest);
+        self.merge_type_reference(sources, dest, true)?;
+        self.merge_default_value(sources, dest)?;
         Ok(())
     }
 

@@ -7,13 +7,11 @@ use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::collections::HashSet;
 use itertools::Itertools;
 
-use crate::bail;
 use crate::error::FederationError;
 use crate::merger::hints::HintCode;
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
 use crate::merger::merge::map_sources;
-use crate::schema::position::DirectiveArgumentDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::subgraph::typestate::Subgraph;
@@ -180,17 +178,30 @@ impl Merger {
         {
             self.merge_custom_core_directive(name)?;
         } else {
-            let sources = self.get_sources_for_directive(name)?;
+            let sources = self
+                .subgraphs
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, subgraph)| {
+                    subgraph
+                        .schema()
+                        .get_directive_definition(name)
+                        .map(|def| (idx, Some(def)))
+                })
+                .collect();
             if Self::some_sources(&sources, |source, idx| {
                 let Some(source) = source else {
                     return false;
                 };
-                self.is_merged_directive_definition(&self.names[idx], source)
+                let Some(def) = source.try_get(self.subgraphs[idx].schema().schema()) else {
+                    return false;
+                };
+                self.is_merged_directive_definition(&self.names[idx], def)
             }) {
                 self.merge_executable_directive_definition(
                     name,
                     &sources,
-                    DirectiveDefinitionPosition {
+                    &DirectiveDefinitionPosition {
                         directive_name: name.clone(),
                     },
                 )?;
@@ -203,31 +214,33 @@ impl Merger {
         &mut self,
         name: &Name,
     ) -> Result<(), FederationError> {
-        let def = self
+        let Some(def) = self
             .compose_directive_manager
-            .get_latest_directive_definition(name)?;
-        let Some(def) = def else {
+            .get_latest_directive_definition(name)?
+        else {
             return Ok(());
         };
-        let Some(target) = self.merged.get_directive_definition(name) else {
-            bail!("Directive definition not found in supergraph");
+
+        let dest = DirectiveDefinitionPosition {
+            directive_name: name.clone(),
         };
-
         // This replaces the calls to target.set_description, target.set_repeatable, and target.add_locations in the JS implementation
-        target.insert(&mut self.merged, def.clone())?;
+        dest.insert(&mut self.merged, def.clone())?;
 
-        let mut sources: Sources<Node<DirectiveDefinition>> = Default::default();
-        sources.insert(0, Some(def.clone()));
-        self.add_arguments_shallow_placeholder(&sources, &target);
+        let sources = self
+            .subgraphs
+            .iter()
+            .enumerate()
+            .map(|(idx, subgraph)| (idx, subgraph.schema().get_directive_definition(name)))
+            .collect();
+        let arg_names = self.add_arguments_shallow(&sources, &dest)?;
 
-        for arg in &def.arguments {
-            let dest_arg = target.argument(arg.name.clone());
-            let sources = map_sources(&self.subgraph_sources(), |subgraph| {
-                subgraph
-                    .as_ref()
-                    .and_then(|s| dest_arg.get(s.schema().schema()).ok().cloned())
+        for arg_name in arg_names {
+            let sources = map_sources(&sources, |source| {
+                source.as_ref().map(|s| s.argument(arg_name.clone()))
             });
-            self.merge_directive_argument(&sources, &dest_arg)?;
+            let dest_arg = dest.argument(arg_name);
+            self.merge_argument(&sources, &dest_arg)?;
         }
         Ok(())
     }
@@ -235,8 +248,8 @@ impl Merger {
     fn merge_executable_directive_definition(
         &mut self,
         name: &Name,
-        sources: &Sources<Node<DirectiveDefinition>>,
-        dest: DirectiveDefinitionPosition,
+        sources: &Sources<DirectiveDefinitionPosition>,
+        dest: &DirectiveDefinitionPosition,
     ) -> Result<(), FederationError> {
         let mut repeatable: Option<bool> = None;
         let mut inconsistent_repeatable = false;
@@ -244,18 +257,20 @@ impl Merger {
         let mut inconsistent_locations = false;
 
         let supergraph_dest = dest.get(self.merged.schema())?.clone();
-        let position_sources = map_sources(sources, |_| Some(dest.clone()));
 
-        for (_, source) in sources {
-            let Some(source) = source else {
+        for (idx, source) in sources {
+            let Some(source) = source
+                .as_ref()
+                .and_then(|s| s.try_get(self.subgraphs[*idx].schema().schema()))
+            else {
                 // An executable directive could appear in any place of a query and thus get to any subgraph, so we cannot keep an
                 // executable directive unless it is in all subgraphs. We use an 'intersection' strategy.
                 dest.remove(&mut self.merged)?;
                 self.error_reporter.report_mismatch_hint::<DirectiveDefinitionPosition, DirectiveDefinitionPosition,()>(
                     HintCode::InconsistentExecutableDirectivePresence,
                     format!("Executable directive \"{name}\" will not be part of the supergraph as it does not appear in all subgraphs: "),
-                    &dest,
-                    &position_sources,
+                    dest,
+                    sources,
                     |_elt| Some("yes".to_string()),
                     |_elt, _idx| Some("yes".to_string()),
                     |_, subgraphs| format!("it is defined in {}", subgraphs.unwrap_or_default()),
@@ -285,13 +300,14 @@ impl Merger {
                 locations.retain(|loc| source_locations.contains(loc));
 
                 if locations.is_empty() {
-                    self.error_reporter.report_mismatch_hint::<Node<DirectiveDefinition>, Node<DirectiveDefinition>, ()>(
+                    self.error_reporter.report_mismatch_hint::<Node<DirectiveDefinition>, DirectiveDefinitionPosition, ()>(
                         HintCode::NoExecutableDirectiveLocationsIntersection,
                         format!("Executable directive \"{name}\" has no location that is common to all subgraphs: "),
                         &supergraph_dest,
                         sources,
                         |elt| Some(location_string(&extract_executable_locations(elt))),
-                        |elt, _idx| Some(location_string(&extract_executable_locations(elt))),
+                        |pos, idx| pos.try_get(self.subgraphs[idx].schema().schema())
+                            .map(|elt| location_string(&extract_executable_locations(elt))),
                         |_, _subgraphs| "it will not appear in the supergraph as there no intersection between ".to_string(),
                         |locs, subgraphs| format!("{locs} in {subgraphs}"),
                         false,
@@ -303,16 +319,17 @@ impl Merger {
         dest.set_repeatable(&mut self.merged, repeatable.unwrap_or_default())?; // repeatable will always be Some() here
         dest.add_locations(&mut self.merged, &locations)?;
 
-        self.merge_description(&position_sources, &dest)?;
+        self.merge_description(sources, dest)?;
 
         if inconsistent_repeatable {
-            self.error_reporter.report_mismatch_hint::<Node<DirectiveDefinition>, Node<DirectiveDefinition>, ()>(
+            self.error_reporter.report_mismatch_hint::<Node<DirectiveDefinition>, DirectiveDefinitionPosition, ()>(
                 HintCode::InconsistentExecutableDirectiveRepeatable,
                 format!("Executable directive \"{name}\" will not be marked repeatable in the supergraph as it is inconsistently marked repeatable in subgraphs: "),
                 &supergraph_dest,
                 sources,
                 |elt| if elt.repeatable { Some("yes".to_string()) } else { Some("no".to_string()) },
-                |elt, _idx| if elt.repeatable { Some("yes".to_string()) } else { Some("no".to_string()) },
+                |pos, idx| pos.try_get(self.subgraphs[idx].schema().schema())
+                    .map(|elt|  if elt.repeatable { "yes".to_string() } else { "no".to_string() }),
                 |_, subgraphs| format!("it is not repeatable in {}", subgraphs.unwrap_or_default()),
                 |_, subgraphs| format!(" but is repeatable in {}", subgraphs),
                 false,
@@ -320,7 +337,7 @@ impl Merger {
             );
         }
         if inconsistent_locations {
-            self.error_reporter.report_mismatch_hint::<Node<DirectiveDefinition>, Node<DirectiveDefinition>, ()>(
+            self.error_reporter.report_mismatch_hint::<Node<DirectiveDefinition>, DirectiveDefinitionPosition, ()>(
                 HintCode::InconsistentExecutableDirectiveLocations,
                 format!(
                     "Executable directive \"{name}\" has inconsistent locations across subgraphs: "
@@ -328,7 +345,7 @@ impl Merger {
                 &supergraph_dest,
                 sources,
                 |elt| Some(location_string(&extract_executable_locations(elt))),
-                |elt, _idx| Some(location_string(&extract_executable_locations(elt))),
+                |pos, idx| pos.try_get(self.subgraphs[idx].schema().schema()).map(|elt| location_string(&extract_executable_locations(elt))),
                 |_, _subgraphs| {
                     "it will not appear in the supergraph as there no intersection between "
                         .to_string()
@@ -340,19 +357,12 @@ impl Merger {
         }
 
         // Doing args last, mostly so we don't bother adding if the directive doesn't make it in.
-        self.add_arguments_shallow(&position_sources, &dest)?;
+        self.add_arguments_shallow(sources, dest)?;
         for arg in &supergraph_dest.arguments {
             let subgraph_args = map_sources(sources, |src| {
-                src.as_ref()
-                    .and_then(|src| src.arguments.iter().find(|a| a.name == arg.name).cloned())
+                src.as_ref().map(|src| src.argument(arg.name.clone()))
             });
-            self.merge_directive_argument(
-                &subgraph_args,
-                &DirectiveArgumentDefinitionPosition {
-                    directive_name: name.clone(),
-                    argument_name: arg.name.clone(),
-                },
-            )?;
+            self.merge_argument(&subgraph_args, &dest.argument(arg.name.clone()))?;
         }
         Ok(())
     }
@@ -372,34 +382,6 @@ impl Merger {
         }
         self.applied_directives_to_merge.clear();
         Ok(())
-    }
-
-    fn get_sources_for_directive(
-        &self,
-        name: &Name,
-    ) -> Result<Sources<Node<DirectiveDefinition>>, FederationError> {
-        let sources = self
-            .subgraphs
-            .iter()
-            .enumerate()
-            .filter_map(|(index, subgraph)| {
-                subgraph
-                    .schema()
-                    .schema()
-                    .directive_definitions
-                    .get(name)
-                    .map(|directive_def| (index, Some(directive_def.clone())))
-            })
-            .collect();
-        Ok(sources)
-    }
-
-    fn add_arguments_shallow_placeholder(
-        &self,
-        _sources: &Sources<Node<DirectiveDefinition>>,
-        _dest: &DirectiveDefinitionPosition,
-    ) {
-        todo!("Implement add_arguments_shallow_placeholder")
     }
 }
 
