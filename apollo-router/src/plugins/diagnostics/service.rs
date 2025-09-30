@@ -174,7 +174,7 @@ async fn handle_router_config(Extension(state): Extension<DiagnosticsState>) -> 
     (
         StatusCode::OK,
         [(http::header::CONTENT_TYPE, TEXT_YAML)],
-        state.router_config.as_ref(),
+        state.router_config.to_string(),
     )
         .into_response()
 }
@@ -184,7 +184,7 @@ async fn handle_supergraph_schema(Extension(state): Extension<DiagnosticsState>)
     (
         StatusCode::OK,
         [(http::header::CONTENT_TYPE, TEXT_PLAIN_UTF_8.as_ref())],
-        state.supergraph_schema.as_ref(),
+        state.supergraph_schema.to_string(),
     )
         .into_response()
 }
