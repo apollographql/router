@@ -1,4 +1,33 @@
 //! Memory profiling implementation for supported platforms (Unix + global-allocator)
+//!
+//! This module provides full jemalloc heap profiling integration for supported platforms.
+//! It enables runtime memory profiling capabilities through jemalloc's `malloc_stats_print`
+//! and profile dumping APIs.
+//!
+//! ## Features
+//!
+//! - **Start/Stop Profiling**: Control when heap allocations are tracked
+//! - **Heap Dumps**: Generate snapshots of heap state at any time
+//! - **Symbol Resolution**: Automatically resolve addresses to function names using `addr2line`
+//! - **Enhanced Profiles**: Embed symbols directly in heap dumps for standalone analysis
+//! - **Status Queries**: Check whether profiling is currently active
+//!
+//! ## Platform Requirements
+//!
+//! - **OS**: Unix-like systems (Linux, macOS, BSD)
+//! - **Allocator**: jemalloc (enabled via `global-allocator` feature flag)
+//! - **Tools**: `addr2line` for symbol resolution (optional, gracefully degrades)
+//!
+//! ## Implementation Details
+//!
+//! Uses `spawn_blocking` for all jemalloc FFI calls since they may block. Memory dumps
+//! are enhanced with embedded symbols via [`symbol_resolver`](super::symbol_resolver)
+//! to make profiles portable and easier to analyze.
+//!
+//! ## See Also
+//!
+//! - [`super::unsupported`] - Stub implementation for unsupported platforms
+//! - [`super::symbol_resolver`] - Symbol resolution for enhanced heap dumps
 
 use std::ffi::CString;
 use std::fs;
