@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use fred::clients::Client;
 use fred::clients::Pipeline;
+use fred::interfaces::ClusterInterface;
 use fred::interfaces::EventInterface;
 #[cfg(test)]
 use fred::mocks::Mocks;
@@ -35,6 +36,8 @@ use futures::Stream;
 use futures::future::join_all;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::task::AbortHandle;
+use tokio_stream::StreamExt;
+use tokio_stream::wrappers::IntervalStream;
 use tower::BoxError;
 use url::Url;
 
@@ -127,6 +130,7 @@ struct DropSafeRedisPool {
     pool: Arc<RedisPool>,
     caller: &'static str,
     heartbeat_abort_handle: AbortHandle,
+    cluster_sync_abort_handle: Option<AbortHandle>,
     // Metrics collector handles its own abort and gauges
     _metrics_collector: RedisMetricsCollector,
 }
@@ -151,6 +155,9 @@ impl Drop for DropSafeRedisPool {
             }
         });
         self.heartbeat_abort_handle.abort();
+        if let Some(handle) = &self.cluster_sync_abort_handle {
+            handle.abort();
+        }
         // Metrics collector will be dropped automatically and its Drop impl will abort the task
     }
 }
@@ -453,6 +460,11 @@ impl RedisCacheStorage {
         if required_to_start {
             pooled_client.wait_for_connect().await?;
             tracing::trace!("redis connections established");
+
+            if is_cluster && pooled_client.client_config().mocks.is_none() {
+                pooled_client.sync_cluster().await?;
+                tracing::trace!("cluster synced");
+            }
         }
 
         tokio::spawn(async move {
@@ -470,6 +482,22 @@ impl RedisCacheStorage {
                 .await
         });
 
+        let mut cluster_sync_abort_handle = None;
+        if is_cluster && pooled_client.client_config().mocks.is_none() {
+            let pool = pooled_client.clone();
+            let handle = tokio::spawn(async move {
+                let mut interval =
+                    IntervalStream::new(tokio::time::interval(Duration::from_secs(30)));
+                while interval.next().await.is_some() {
+                    if let Err(error) = pool.sync_cluster().await {
+                        tracing::warn!("Error while resyncing cluster state: {error:?}");
+                        record_redis_error(&error, caller);
+                    }
+                }
+            });
+            cluster_sync_abort_handle = Some(handle.abort_handle());
+        }
+
         let pooled_client_arc = Arc::new(pooled_client);
         let metrics_collector =
             RedisMetricsCollector::new(pooled_client_arc.clone(), caller, metrics_interval);
@@ -479,6 +507,7 @@ impl RedisCacheStorage {
                 pool: pooled_client_arc,
                 caller,
                 heartbeat_abort_handle: heartbeat_handle.abort_handle(),
+                cluster_sync_abort_handle,
                 _metrics_collector: metrics_collector,
             }),
             namespace: namespace.map(Arc::new),
@@ -839,7 +868,6 @@ impl RedisCacheStorage {
 impl RedisCacheStorage {
     pub(crate) async fn truncate_namespace(&self) -> Result<(), RedisError> {
         use fred::prelude::Key;
-        use futures::StreamExt;
 
         if self.namespace.is_none() {
             return Ok(());
