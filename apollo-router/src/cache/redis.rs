@@ -455,13 +455,18 @@ impl RedisCacheStorage {
             });
         }
 
+        #[cfg(not(test))]
+        let should_sync_cluster = is_cluster;
+        #[cfg(test)]
+        let should_sync_cluster = is_cluster && pooled_client.client_config().mocks.is_none();
+
         // NB: error is not recorded here as it will be observed by the task following `client.error_rx()`
         let client_handles = pooled_client.connect_pool();
         if required_to_start {
             pooled_client.wait_for_connect().await?;
             tracing::trace!("redis connections established");
 
-            if is_cluster && pooled_client.client_config().mocks.is_none() {
+            if should_sync_cluster {
                 pooled_client.sync_cluster().await?;
                 tracing::trace!("cluster synced");
             }
@@ -483,7 +488,7 @@ impl RedisCacheStorage {
         });
 
         let mut cluster_sync_abort_handle = None;
-        if is_cluster && pooled_client.client_config().mocks.is_none() {
+        if should_sync_cluster {
             let pool = pooled_client.clone();
             let handle = tokio::spawn(async move {
                 let mut interval =
