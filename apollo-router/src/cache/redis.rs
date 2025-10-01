@@ -17,6 +17,7 @@ use fred::prelude::Error as RedisError;
 use fred::prelude::ErrorKind as RedisErrorKind;
 use fred::prelude::HeartbeatInterface;
 use fred::prelude::KeysInterface;
+use fred::prelude::Options;
 use fred::prelude::Pool as RedisPool;
 use fred::prelude::TcpConfig;
 use fred::types::Builder;
@@ -281,12 +282,37 @@ impl RedisCacheStorage {
             is_cluster,
             caller,
             config.metrics_interval,
+            config.required_to_start,
         )
         .await
     }
 
     #[cfg(test)]
     pub(crate) async fn from_mocks(mocks: Arc<dyn Mocks>) -> Result<Self, BoxError> {
+        let config = RedisCache {
+            urls: vec![],
+            username: None,
+            password: None,
+            timeout: Duration::from_millis(2),
+            ttl: None,
+            namespace: None,
+            tls: None,
+            required_to_start: false,
+            reset_ttl: false,
+            pool_size: 1,
+            metrics_interval: Duration::from_millis(100),
+        };
+
+        Self::from_mocks_and_config(mocks, config, "test", false).await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn from_mocks_and_config(
+        mocks: Arc<dyn Mocks>,
+        config: RedisCache,
+        caller: &'static str,
+        is_cluster: bool,
+    ) -> Result<Self, BoxError> {
         let client_config = RedisConfig {
             mocks: Some(mocks),
             ..Default::default()
@@ -294,14 +320,15 @@ impl RedisCacheStorage {
 
         Self::create_client(
             client_config,
-            Duration::from_millis(2),
-            1,
-            None,
-            None,
-            false,
-            false,
-            "test",
-            Duration::from_millis(100),
+            config.timeout,
+            config.pool_size as usize,
+            config.namespace,
+            config.ttl,
+            config.reset_ttl,
+            is_cluster,
+            caller,
+            config.metrics_interval,
+            true,
         )
         .await
     }
@@ -317,6 +344,7 @@ impl RedisCacheStorage {
         is_cluster: bool,
         caller: &'static str,
         metrics_interval: Duration,
+        required_to_start: bool,
     ) -> Result<Self, BoxError> {
         let pooled_client = Builder::from_config(client_config)
             .with_connection_config(|config| {
@@ -407,7 +435,10 @@ impl RedisCacheStorage {
 
         // NB: error is not recorded here as it will be observed by the task following `client.error_rx()`
         let client_handles = pooled_client.connect_pool();
-        pooled_client.wait_for_connect().await?;
+        if required_to_start {
+            pooled_client.wait_for_connect().await?;
+            tracing::trace!("redis connections established");
+        }
 
         tokio::spawn(async move {
             // the handles will resolve when the clients finish terminating. per the `fred` docs:
@@ -428,7 +459,6 @@ impl RedisCacheStorage {
         let metrics_collector =
             RedisMetricsCollector::new(pooled_client_arc.clone(), caller, metrics_interval);
 
-        tracing::trace!("redis connection established");
         Ok(Self {
             inner: Arc::new(DropSafeRedisPool {
                 pool: pooled_client_arc,
@@ -544,11 +574,15 @@ impl RedisCacheStorage {
         self.ttl = ttl;
     }
 
-    fn pipeline(&self) -> Pipeline<Client> {
+    pub(crate) fn client(&self) -> Client {
+        self.inner.next().clone()
+    }
+
+    pub(crate) fn pipeline(&self) -> Pipeline<Client> {
         self.inner.next().pipeline()
     }
 
-    fn make_key<K: KeyType>(&self, key: RedisKey<K>) -> String {
+    pub(crate) fn make_key<K: KeyType>(&self, key: RedisKey<K>) -> String {
         match &self.namespace {
             Some(namespace) => format!("{namespace}:{key}"),
             None => key.to_string(),
@@ -559,10 +593,18 @@ impl RedisCacheStorage {
         &self,
         key: RedisKey<K>,
     ) -> Result<RedisValue<V>, RedisError> {
+        self.get_with_options(key, Options::default()).await
+    }
+
+    pub(crate) async fn get_with_options<K: KeyType, V: ValueType>(
+        &self,
+        key: RedisKey<K>,
+        options: Options,
+    ) -> Result<RedisValue<V>, RedisError> {
         let key = self.make_key(key);
         match self.ttl {
             Some(ttl) if self.reset_ttl => {
-                let pipeline = self.pipeline();
+                let pipeline = self.pipeline().with_options(&options);
                 let _: () = pipeline
                     .get(&key)
                     .await
@@ -576,17 +618,25 @@ impl RedisCacheStorage {
                     pipeline.all().await.inspect_err(|e| self.record_error(e))?;
                 Ok(value)
             }
-            _ => self
-                .inner
-                .get(key)
-                .await
-                .inspect_err(|e| self.record_error(e)),
+            _ => {
+                let client = self.inner.next().with_options(&options);
+                client.get(key).await.inspect_err(|e| self.record_error(e))
+            }
         }
     }
 
     pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
         &self,
+        keys: Vec<RedisKey<K>>,
+    ) -> Vec<Option<RedisValue<V>>> {
+        self.get_multiple_with_options(keys, Options::default())
+            .await
+    }
+
+    pub(crate) async fn get_multiple_with_options<K: KeyType, V: ValueType>(
+        &self,
         mut keys: Vec<RedisKey<K>>,
+        options: Options,
     ) -> Vec<Option<RedisValue<V>>> {
         // NB: MGET is different from GET in that it returns `Option`s rather than `Result`s.
         //  > For every key that does not hold a string value or does not exist, the special value
@@ -597,8 +647,8 @@ impl RedisCacheStorage {
 
         if keys.len() == 1 {
             let key = self.make_key(keys.remove(0));
-            let res = self
-                .inner
+            let client = self.inner.next().with_options(&options);
+            let res = client
                 .get(key)
                 .await
                 .inspect_err(|e| self.record_error(e))
@@ -621,7 +671,7 @@ impl RedisCacheStorage {
             // then we query all the key groups at the same time
             let mut tasks = Vec::new();
             for (_shard, (indexes, keys)) in h {
-                let client = self.inner.next();
+                let client = self.inner.next().with_options(&options);
                 tasks.push(async move {
                     let result: Result<Vec<Option<RedisValue<V>>>, _> = client.mget(keys).await;
                     (indexes, result)
@@ -651,7 +701,8 @@ impl RedisCacheStorage {
                 .into_iter()
                 .map(|k| self.make_key(k))
                 .collect::<Vec<_>>();
-            self.inner
+            let client = self.inner.next().with_options(&options);
+            client
                 .mget(keys)
                 .await
                 .inspect_err(|e| self.record_error(e))
@@ -714,10 +765,24 @@ impl RedisCacheStorage {
 
     /// Delete keys *without* adding the `namespace` prefix because `keys` is from
     /// `scan_with_namespaced_results` and already includes it.
-    pub(crate) async fn delete_from_scan_result(
+    pub(crate) async fn delete_from_scan_result<I>(&self, keys: I) -> Result<u32, RedisError>
+    where
+        I: Iterator<Item = fred::types::Key>,
+    {
+        self.delete_from_scan_result_with_options(keys, Options::default())
+            .await
+    }
+
+    /// Delete keys *without* adding the `namespace` prefix because `keys` is from
+    /// `scan_with_namespaced_results` and already includes it.
+    pub(crate) async fn delete_from_scan_result_with_options<I>(
         &self,
-        keys: Vec<fred::types::Key>,
-    ) -> Result<u32, RedisError> {
+        keys: I,
+        options: Options,
+    ) -> Result<u32, RedisError>
+    where
+        I: Iterator<Item = fred::types::Key>,
+    {
         let mut h: HashMap<u16, Vec<fred::types::Key>> = HashMap::new();
         for key in keys.into_iter() {
             let hash = ClusterRouting::hash_key(key.as_bytes());
@@ -726,8 +791,11 @@ impl RedisCacheStorage {
         }
 
         // then we query all the key groups at the same time
-        let results: Vec<Result<u32, RedisError>> =
-            join_all(h.into_values().map(|keys| self.inner.del(keys))).await;
+        let results: Vec<Result<u32, RedisError>> = join_all(h.into_values().map(|keys| async {
+            let client = self.inner.next().with_options(&options);
+            client.del(keys).await
+        }))
+        .await;
 
         let mut total = 0;
         for result in results {
@@ -750,6 +818,39 @@ impl RedisCacheStorage {
         } else {
             Box::pin(self.inner.next().scan(pattern, count, None))
         }
+    }
+}
+
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
+impl RedisCacheStorage {
+    pub(crate) async fn truncate_namespace(&self) -> Result<(), RedisError> {
+        use fred::prelude::Key;
+        use futures::StreamExt;
+
+        if self.namespace.is_none() {
+            return Ok(());
+        }
+
+        // find all members of this namespace via `SCAN`
+        let pattern = self.make_key(RedisKey("*"));
+        let client = self.client();
+        let mut stream: Pin<Box<dyn Stream<Item = Result<Key, RedisError>>>> = if self.is_cluster {
+            Box::pin(client.scan_cluster_buffered(pattern, None, None))
+        } else {
+            Box::pin(client.scan_buffered(pattern, None, None))
+        };
+
+        let mut keys = Vec::new();
+        while let Some(key) = stream.next().await {
+            keys.push(key?);
+        }
+
+        // remove all members of this namespace
+        self.delete_from_scan_result(keys.into_iter()).await?;
+        Ok(())
     }
 }
 
