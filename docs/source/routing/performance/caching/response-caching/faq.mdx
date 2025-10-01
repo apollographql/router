@@ -68,7 +68,63 @@ As in the current preview, these entries are eventually removed based on their T
 
 Yes it's not a subgraph directive, it's only interpreted at the router level unlike `@cacheControl`.
 
-//TODO
 + Limitations on `@cacheTag` directive
-+ `@cacheControl` directive
-+ Limitations on queries with multiple root fields
+Unlike `@cacheControl`, `@cacheTag` directive is interpreted at the router level to set cache tags in cache storage. This `@cacheTag` directive has several limitations:
+  - Only applies either on root fields query or resolvable entities (types marked with `@key` directive and `resolvable` field unset or `true`).
+  - Each entity field referenced in a `@cacheTag` format (applied on entity type) must be a member of every `@key` field set. In other words, when there are multiple `@key` fields on the type, the referenced field(s) must be limited to their intersection.
+    - Invalid example:
+    ```graphql
+    type Product
+      @key(fields: "upc") @key(fields: "name")
+      @cacheTag(format: "product-{$key.name}") {
+    # Raise an error at composition level
+      upc: String!
+      name: String!
+      price: Int
+    }
+    ```
+    - Valid example:
+    ```graphql
+    type Product
+      @key(fields: "upc") @key(fields: "upc isbn")
+      @cacheTag(format: "product-{$key.upc}") {
+      upc: String!
+      isbn: String!
+      name: String!
+      price: Int
+    }
+    ```
+  - `@cacheTag` format must always generate a valid string.
+    - Invalid example:
+    ```graphql
+    type Product
+      @key(fields: "upc country { name }")
+      @cacheTag(format: "product-upc-{$key.upc}-country-{$key.country}") { # Error, country is an object
+      upc: String!
+      name: String!
+      price: Int
+      country: Country!
+    }
+    ```
+    - Valid example:
+    ```graphql
+    type Product
+      @key(fields: "upc country { name }")
+      @cacheTag(format: "product-upc-{$key.upc}-country-{$key.country.name}") {
+      upc: String!
+      name: String!
+      price: Int
+      country: Country!
+    }
+
+    type Country {
+        name: String!
+    }
+    ```
+
++ How does `@cacheControl` work ?
+It's a directive interpreted at the subgraph level which means the router won't use it for response caching. At the subgraph level and especially in Apollo Server it will automatically generate the right `Cache-control` response header in order to set the correct cache directives given your schema. More docs [here](https://www.apollographql.com/docs/apollo-server/api/plugin/cache-control).
+
++ If my query involves 2 root fields (`query { topProducts{...} topAuthors{...} }`) how is it saved in the cache ?
+
+We won't create 2 separate cache entries for each root fields. It's a current limitation we have which means if call another query with one of these root fields and it was previously cached you won't have a cache hit it will create a different entry in the cache.

@@ -129,5 +129,23 @@ List of available attributes on `response_cache.store`:
 
 ## Logs
 
-//TODO
-// Introduce the selectors
+The router supports a [`response_cache` selector](/router/configuration/telemetry/instrumentation/selectors#subgraph) in telemetry for the subgraph service. The selector returns either the number of cache hits or misses by an entity for a subgraph request or the cache status (`hit`|`partial_hit`|`miss`) for a subgraph request.
+
+For example you can display a log containing all subgraph response data if it's not cached by using this selector:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    events:
+      subgraph:
+        response:
+          level: info
+          condition:
+            all:
+              - eq: # Only for subgraph posts
+                  - subgraph_name: true
+                  - static: posts
+              - eq: # If there's no cache hit in this subgraph response
+                  - response_cache: hit
+                  - 0
+```

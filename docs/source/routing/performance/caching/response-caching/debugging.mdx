@@ -103,15 +103,18 @@ preview_response_cache:
 
 ## Troubleshoot
 
-### Common reasons for cache misses or passes
+### Common reasons for cache misses
 
-- Private data and no private_id set or available
-- no cache-control header
-- cache-control header set to no-store
-- cache control maxage very low
-- too much invalidations happening on data
+- If your subgraph doesn't return a `Cache-control` header or returns it containing the directive `no-store` we won't cache it.
+
+- If your subgraph returns a `Cache-control` header containing the directive `private` it means it's private data and at the router level we have to know how to differentiate this private data between users. That's why we need to get a `private_id` to include in the primary cache key to not serve this data for other users but only for the current one. So if in your response cache configuration you didn't specify a context key where the router can get this `private_id` or if this context entry is empty it won't be able to cache it properly.
+
+- If you disabled response caching in router's configuration for a specific subgraph or for all subgraphs.
+
+- If your Redis is not available or timeout (cf [telemetry page](./telemetry) if you want to measure errors in metrics/traces/logs).
 
 ### Slow latencies
 
-+ Redis config ?
-+ Invalidation or TTL ?
+- Your Redis is slow or timeout is triggered you won't benefit from caching (cf [telemetry page](./telemetry) if you want to measure errors in metrics/traces/logs).
+- If your TTLs are too low you'll probably don't have a lot of cache hits and then the latencies won't improve a lot.
+- If you invalidate your data too often you won't benefit from caching

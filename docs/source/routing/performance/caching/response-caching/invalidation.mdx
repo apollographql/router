@@ -205,7 +205,7 @@ Invalidate a root field with parameters using dynamic cache tag. To set a cache 
 
 <Note>
     There are existing limitations for `@cacheTag` directive in your schemas:
-    - You can only set a `@cacheTag` directive on either root fields query or an entity. If you try to add this directive on an Interface or another Type that doesn't already contain `@key` directive it won't work.
+    - It only applies either on root fields query or resolvable entities (types marked with `@key` directive and `resolvable` field unset or `true`)
     - When you set the <code>@cacheTag</code> directive on a root field, the <code>format</code> string allows for <code>{$args.XXX}</code> interpolation. <code>args</code> is a map containing all arguments for that root field. For an entity, the format is <code>{$key.XXX}</code>, where <code>key</code> is a map of all entity keys for that type. Note: if you have multiple <code>@key</code> directives, such as <code>@key(fields: "id")</code> and <code>@key(fields: "id name")</code>, you can only access fields present in _every_ <code>@key</code> directive (in this case, only <code>{$key.id}</code>).
     - For more details please check our [FAQ](./faq.mdx)
 </Note>
