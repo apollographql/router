@@ -274,7 +274,7 @@ impl MeterProvider for AggregateMeterProvider {
         if let Some(inner) = inner.as_mut() {
             inner.versioned_meter(name, version, schema_url, attributes)
         } else {
-            // The meter was used after shutdown. Default to Noop the instrument cannot actually be used
+            // The meter was used after shutdown. Default to Noop since the instrument cannot actually be used
             NoopMeterProvider::default().versioned_meter(name, version, schema_url, attributes)
         }
     }
