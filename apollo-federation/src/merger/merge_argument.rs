@@ -16,6 +16,7 @@ use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
 use crate::merger::merge_field::PLACEHOLDER_TYPE_NAME;
 use crate::schema::FederationSchema;
+use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::HasDescription;
 use crate::schema::position::HasType;
 use crate::supergraph::CompositionHint;
@@ -239,10 +240,15 @@ impl Merger {
         dest: &T,
     ) -> Result<(), FederationError>
     where
-        T: Display + HasDefaultValue + HasDescription + HasType,
+        T: Clone
+            + Display
+            + HasDefaultValue
+            + HasDescription
+            + HasType
+            + Into<DirectiveTargetPosition>,
     {
         self.merge_description(sources, dest)?;
-        self.record_applied_directives_to_merge(sources, dest);
+        self.record_applied_directives_to_merge(sources, dest)?;
         self.merge_type_reference(sources, dest, true)?;
         self.merge_default_value(sources, dest)?;
         Ok(())

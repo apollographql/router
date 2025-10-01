@@ -259,7 +259,7 @@ impl Merger {
         // validate the external ones are consistent.
 
         self.merge_description(&without_external, dest)?;
-        self.record_applied_directives_to_merge(&without_external, dest);
+        self.record_applied_directives_to_merge(&without_external, dest)?;
         let arg_names = self.add_arguments_shallow(&without_external, dest)?;
 
         for arg_name in arg_names {
