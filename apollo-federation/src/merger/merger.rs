@@ -58,7 +58,6 @@ use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::HasDescription;
 use crate::schema::position::HasType;
-use crate::schema::position::InputObjectTypeDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
@@ -439,6 +438,12 @@ impl Merger {
         self.merge_schema_definition()?;
 
         // Merge non-union and non-enum types
+        for type_def in &object_types {
+            self.merge_type(type_def)?;
+        }
+        for type_def in &interface_types {
+            self.merge_type(type_def)?;
+        }
         for type_def in &scalar_types {
             self.merge_type(type_def)?;
         }
@@ -797,14 +802,30 @@ impl Merger {
     }
 
     fn should_merge_type(&self, name: &Name) -> bool {
-        !self
+        if self
+            .merged
+            .schema()
+            .types
+            .get(name)
+            .is_some_and(|ty| ty.is_built_in())
+        {
+            return false;
+        }
+        if self
             .link_spec_definition
             .is_spec_type_name(&self.merged, name)
             .unwrap_or(false)
-            && !self
-                .join_spec_definition
-                .is_spec_type_name(&self.merged, name)
-                .unwrap_or(false)
+        {
+            return false;
+        }
+        if self
+            .join_spec_definition
+            .is_spec_type_name(&self.merged, name)
+            .unwrap_or(false)
+        {
+            return false;
+        }
+        true
     }
 
     fn merge_implements(&mut self, type_def: &Name) -> Result<(), FederationError> {
@@ -825,18 +846,22 @@ impl Merger {
                 ExtendedType::Object(obj) => {
                     for implemented_itf in obj.implements_interfaces.iter() {
                         implemented.insert(implemented_itf.clone());
-                        let join_implements = self
-                            .join_spec_definition
-                            .implements_directive(graph_name.clone(), implemented_itf);
+                        let join_implements = self.join_spec_definition.implements_directive(
+                            &self.merged,
+                            graph_name.clone(),
+                            implemented_itf,
+                        )?;
                         dest.insert_directive(&mut self.merged, Component::new(join_implements))?;
                     }
                 }
                 ExtendedType::Interface(itf) => {
                     for implemented_itf in itf.implements_interfaces.iter() {
                         implemented.insert(implemented_itf.clone());
-                        let join_implements = self
-                            .join_spec_definition
-                            .implements_directive(graph_name.clone(), implemented_itf);
+                        let join_implements = self.join_spec_definition.implements_directive(
+                            &self.merged,
+                            graph_name.clone(),
+                            implemented_itf,
+                        )?;
                         dest.insert_directive(&mut self.merged, Component::new(join_implements))?;
                     }
                 }
@@ -887,7 +912,8 @@ impl Merger {
         _sources: &Sources<T>,
         _dest: &ObjectOrInterfaceFieldDefinitionPosition,
     ) -> Result<FieldMergeContext, FederationError> {
-        todo!("Implement validate_override")
+        // TODO(FED-555)
+        Ok(Default::default())
     }
 
     fn validate_subscription_field<T>(
@@ -1069,10 +1095,6 @@ impl Merger {
         Ok(!source_as_entity.is_empty())
     }
 
-    pub(crate) fn merge_input_object(&mut self, _io: InputObjectTypeDefinitionPosition) {
-        todo!("Implement merge_input_object")
-    }
-
     fn merge_schema_definition(&mut self) -> Result<(), FederationError> {
         let sources: Sources<SchemaDefinitionPosition> = self
             .subgraphs
@@ -1155,7 +1177,7 @@ impl Merger {
     }
 
     fn add_missing_interface_object_fields_to_implementations(&mut self) {
-        todo!("Implement adding missing interface object fields to implementations")
+        // TODO(FED-795)
     }
 
     fn post_merge_validations(&mut self) {
@@ -1696,11 +1718,13 @@ impl Merger {
 
         for (name, args_to_graphs_map) in joins_by_directive_name {
             for (args, graphs) in args_to_graphs_map {
-                dest.insert_directive(
-                    &mut self.merged,
-                    self.join_spec_definition
-                        .directive_directive(&name, graphs, args),
+                let join_directive = self.join_spec_definition.directive_directive(
+                    &self.merged,
+                    &name,
+                    graphs,
+                    args,
                 )?;
+                dest.insert_directive(&mut self.merged, join_directive)?;
             }
         }
 

@@ -15,7 +15,6 @@ use crate::merger::hints::HintCode;
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
 use crate::merger::merge_field::FieldMergeContext;
-use crate::merger::merge_field::PLACEHOLDER_TYPE_NAME;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::InputObjectFieldDefinitionPosition;
 use crate::schema::position::InputObjectTypeDefinitionPosition;
@@ -184,17 +183,19 @@ impl Merger {
         > = Default::default();
         let mut fields_to_add: HashMap<usize, HashSet<InputObjectFieldDefinitionPosition>> =
             Default::default();
+        let mut field_types: HashMap<InputObjectFieldDefinitionPosition, Node<Type>> =
+            Default::default();
         let mut extra_sources: Sources<InputObjectFieldDefinitionPosition> = Default::default();
 
         for (idx, source) in sources {
             if let Some(source) = source {
-                for field_name in source.fields.keys() {
-                    fields_to_add.entry(*idx).or_default().insert(
-                        InputObjectFieldDefinitionPosition {
-                            type_name: dest.type_name.clone(),
-                            field_name: field_name.clone(),
-                        },
-                    );
+                for field in source.fields.values() {
+                    let pos = InputObjectFieldDefinitionPosition {
+                        type_name: dest.type_name.clone(),
+                        field_name: field.name.clone(),
+                    };
+                    fields_to_add.entry(*idx).or_default().insert(pos.clone());
+                    field_types.insert(pos, field.ty.clone());
                 }
             }
 
@@ -218,14 +219,16 @@ impl Merger {
             for field in field_set {
                 // While the JS implementation checked `isMergedField` here, that would always
                 // return true for input fields, so we omit that check.
-                if !added.contains_key(&field) {
+                if !added.contains_key(&field)
+                    && let Some(ty) = field_types.get(&field)
+                {
                     field.insert(
                         &mut self.merged,
                         Component::new(InputValueDefinition {
                             description: None,
                             name: field.field_name.clone(),
                             default_value: None,
-                            ty: Node::new(Type::Named(PLACEHOLDER_TYPE_NAME)),
+                            ty: ty.clone(),
                             directives: Default::default(),
                         }),
                     )?;
