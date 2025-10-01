@@ -1,8 +1,12 @@
 //! Export functionality for diagnostics plugin
 //!
-//! This module handles the creation of diagnostic archives containing data
-//! from all diagnostic modules. It provides an export system
-//! that can be extended by additional diagnostic modules.
+//! This module handles the creation of diagnostic archives as `.tar.gz` files containing:
+//! - `manifest.txt` - Archive metadata and system information
+//! - `router.yaml` - Current router configuration
+//! - `supergraph.graphql` - Supergraph schema
+//! - `system_info.txt` - Detailed system information
+//! - `memory/` - Memory profiling data (heap dumps on Unix platforms with jemalloc)
+//! - `diagnostics_report.html` - Self-contained HTML report with all diagnostic data embedded
 //!
 //! ## Streaming Architecture
 //!
@@ -165,12 +169,12 @@ impl Exporter {
     ///
     /// This function accepts any `AsyncWrite` implementation (typically the write half
     /// of a `SimplexStream`) and writes a complete diagnostic archive containing:
-    /// - Main manifest with system information and file descriptions
-    /// - Router configuration as YAML
-    /// - Supergraph schema as GraphQL
-    /// - Router binary (or placeholder in test mode)
-    /// - Memory diagnostic files (platform-dependent)
-    /// - System information report
+    /// - `manifest.txt` - Archive metadata and system information
+    /// - `router.yaml` - Current router configuration
+    /// - `supergraph.graphql` - Supergraph schema
+    /// - `system_info.txt` - Detailed system information
+    /// - `memory/` - Memory profiling data (heap dumps on Unix platforms with jemalloc)
+    /// - `diagnostics_report.html` - Self-contained HTML report with all diagnostic data embedded
     ///
     /// All data is written directly to the writer with streaming I/O, ensuring
     /// memory usage remains bounded regardless of archive size.
@@ -198,7 +202,6 @@ impl Exporter {
         Self::add_memory_data_to_archive_async(&mut tar, &config.output_directory).await?;
         Self::add_html_report_to_archive_async(&mut tar, config, router_config, supergraph_schema)
             .await?;
-        // Router binary no longer needed - self-contained HTML report replaces analyze.sh
 
         // Finalize the archive and ensure all buffered data is flushed
         // The async tar builder and gzip encoder stream data incrementally
@@ -210,9 +213,6 @@ impl Exporter {
             .shutdown()
             .await
             .map_err(|e| DiagnosticsError::Internal(format!("Failed to finalize gzip: {}", e)))?;
-
-        // At this point, all archive data has been streamed to the client
-        // without accumulating large files in memory
         Ok(())
     }
 
