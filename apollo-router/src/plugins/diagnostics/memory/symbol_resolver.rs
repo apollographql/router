@@ -62,7 +62,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use log::debug;
 use regex::Regex;
 
 use crate::plugins::diagnostics::DiagnosticsError;
@@ -230,13 +229,13 @@ impl SymbolResolver {
                 };
 
                 if symbols_resolved > 0 {
-                    debug!(
-                        "✅ Symbol resolution successful for {}/{} addresses ({:.1}%)",
+                    tracing::debug!(
+                        "Symbol resolution successful for {}/{} addresses ({:.1}%)",
                         symbols_resolved, total_addresses, success_rate
                     );
                 } else {
-                    debug!(
-                        "❌ No symbols resolved! All {}/{} addresses failed ({:.1}% success rate)",
+                    tracing::debug!(
+                        "No symbols resolved, all {}/{} addresses failed ({:.1}% success rate)",
                         symbols_failed, total_addresses, success_rate
                     );
                 }
