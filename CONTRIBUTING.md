@@ -4,40 +4,13 @@
 
 ## Before you contribute
 
-> The Apollo Router Core is a project by [Apollo GraphQL] and is not currently ready for
-> external feature contributors, though some documentation contributions may be
-> accepted. We will try to publish a roadmap as soon as possible.
-
 A general rule of thumbs is that if a contribution requires more than an 1 hour of work, chances are it's worth commenting on an issue and / or discussing it with the maintainers first.
 
 That will allow us to figure out a way to solve the issue together, and possibly agree on what kind of PR would fix it best. Your time is valuable and we want to make sure you have the best contributors experience.
 
-## Setting up the project
+## Setting up the project for development
 
-The Apollo Router Core is written in [Rust]. In order to contribute, you'll need to have Rust installed. To install Rust,
-visit [https://www.rust-lang.org/tools/install].
-
-Rust has a build tool and package manager called [`cargo`] that you'll use to interact with the router's code.
-
-To build the CLI:
-
-```bash
-cargo build
-```
-
-To run the CLI:
-
-```bash
-cargo run -- <args>
-# e.g. 'cargo run -- --help' will run the router's help command
-```
-
-Refer to [the README file](README.md) or run `cargo run --help` for more information.
-
-[apollo graphql]: https://www.apollographql.com
-[rust]: https://www.rust-lang.org/
-[`cargo`]: https://doc.rust-lang.org/cargo/index.html
-[https://www.rust-lang.org/tools/install]: https://www.rust-lang.org/tools/install
+For detailed instructions on developing the router, see [`DEVELOPMENT.md`](./DEVELOPMENT.md).
 
 ## Project Structure
 
@@ -53,33 +26,13 @@ Refer to [the README file](README.md) or run `cargo run --help` for more informa
 
 ## Documentation
 
-Documentation for using and contributing to the Apollo Router Core is built using Gatsby
-and [Apollo's Docs Theme for Gatsby](https://github.com/apollographql/gatsby-theme-apollo/tree/master/packages/gatsby-theme-apollo-docs)
-.
+To contribute to these docs, you can add or edit the `.mdx` files in the `/docs/source` directory.  Generally speaking, you can preview those as Markdown, but to get a fully functioning preview link to the documentation you will need to open a pull-request with your changes. After opening the pull request, you will receive a comment on your PR with a link to a rendered preview of the documentation.
 
-To contribute to these docs, you can add or edit the markdown & MDX files in the `docs/source` directory.
+## Continuous Integration
 
-To build and run the documentation site locally, you'll also need a clone of
-the [apollographql/docs](https://github.com/apollographql/docs/) repository
-and run `npm run start:router` from there, after following
-[installation instructions](https://github.com/apollographql/docs/#developing-locally).
+This project uses CircleCI as its continuous integration pipeline.   At the current time, it is not possible for external contributors to trigger a CircleCI run due to the security implications of exposing environment variables to our build process.  If you open a pull request as an external contributor, after the PR is accepted and reviewed, a core team member will copy it to another PR before it merges.
 
-This will start up a development server with live reload enabled. You can see the docs by
-opening [localhost:8888](http://localhost:8888) in your browser.
-
-### Adding a new page to the documentation
-
-If you're interested in adding new pages, head over to [the creating pages section](https://github.com/apollographql/gatsby-theme-apollo/tree/master/packages/gatsby-theme-apollo-docs#creating-pages).
-
-### Documentation sidebar
-
-To see how the sidebar is built and how pages are grouped and named, see [this section](https://github.com/apollographql/gatsby-theme-apollo/tree/master/packages/gatsby-theme-apollo-docs#sidebarcategories) of the gatsby-theme-apollo-docs docs.
-
-## Pipelines
-
-This project uses Circle CI to run a continuous integration and delivery pipeline. Every code change will be run against a few steps to help keep the project running at its peak ability.
-
-- **CLA Check**: If you haven’t signed the Apollo CLA, a bot will comment on your PR asking you to do this
+- **CLA Check**: If you haven’t signed the Apollo CLA, a bot will comment on your PR asking you to do this.
 
 XTASKs:
 
