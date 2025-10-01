@@ -198,9 +198,7 @@ impl AggregateMeterProvider {
         let inner = guard
             .as_mut()
             .expect("cannot use meter provider after shutdown");
-        let instrument = Arc::new((create_fn)(inner));
-        inner.registered_instruments.push(instrument.clone().into());
-        instrument
+        inner.create_registered_instrument(create_fn)
     }
 
     #[cfg(test)]
@@ -259,6 +257,18 @@ impl Inner {
         }
 
         Meter::new(Arc::new(AggregateInstrumentProvider { meters }))
+    }
+
+    pub(crate) fn create_registered_instrument<T>(
+        &mut self,
+        create_fn: impl Fn(&mut Inner) -> T,
+    ) -> Arc<T>
+    where
+        Arc<T>: Into<InstrumentWrapper>,
+    {
+        let instrument = Arc::new((create_fn)(self));
+        self.registered_instruments.push(instrument.clone().into());
+        instrument
     }
 }
 
