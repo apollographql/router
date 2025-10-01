@@ -13,12 +13,20 @@ This guide walks through using Apollo's pre-configured template to create Datado
   src="../../../../../../images/apm-templates/datadog.jpg"
 />
 
+
 ## Install the dashboard template
 
 1. In your Datadog account, navigate to **Dashboards** > **New Dashboard** and create a new blank dashboard.
 2. Copy the JSON content from the [dashboard template](https://github.com/apollographql/apm-templates/blob/main/datadog/graphos-template.json).
 3. Paste the JSON content into your new blank dashboard and accept the prompt to overwrite it.
 4. Update the dashboard name and teams as desired.
+
+
+<Note>
+
+    To populate all dashboard widgets, apply our recommended [router instrumentation](/graphos/routing/observability/router-telemetry-otel/apm-guides/datadog/router-instrumentation) to your router instances.
+
+</Note>
 
 ## Use the dashboard template
 
