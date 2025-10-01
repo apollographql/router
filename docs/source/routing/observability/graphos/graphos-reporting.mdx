@@ -423,12 +423,10 @@ with additional attributes including the `service` and `code` found in [GraphQL 
 Additional diagnostic capabilities available in Studio now support viewing errors by `service` or `code`. The `service` dimension refers to the subgraph or connector where the error originated from.
 The `code` refers to the specific type of error that was raised by the router, federated subgraphs, or connectors.
 
-##### Cardinality limitations
+#### Cardinality limitations
 
-At scale, this feature is known to hit cardinality limitations in the OTel reporting agent. When this happens, some of the extended metrics attributes may no longer
-be visible in Studio. To reduce cardinality warnings in your logs, adjust the Apollo metrics OTLP batch processor configuration to send reports more frequently.
-
-Additionally, this feature may increase the Router's memory usage profile. Similarly, lowering the `scheduled_delay` can help to alleviate that as well. See the example below.
+At scale, some metrics are known to hit cardinality limitations in the OTel reporting agent. When this happens, some of the metrics' attributes may no longer
+be visible in Studio. To reduce cardinality warnings in your logs, adjust the Apollo metrics OTLP batch processor configuration to send reports more frequently. You can lower the `scheduled_delay` to reduce the cardinality stored in the router before the metric is flushed, as shown in the example:
 
 ```yaml title="router.yaml"
 telemetry:
