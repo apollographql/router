@@ -60,10 +60,9 @@ exporters:
   prometheus:
     endpoint: '0.0.0.0:9464'
 
-processors:
-  batch:
+connectors:
   spanmetrics:
-    metrics_exporter: prometheus
+    metrics_flush_interval: 15s
 
 service:
   pipelines:

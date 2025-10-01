@@ -224,12 +224,6 @@ serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
 strum = "0.27.0"
 strum_macros = "0.27.0"
-sqlx = { version = "0.8", features = [
-    "postgres",
-    "runtime-tokio",
-    "tls-rustls-ring-native-roots",
-    "chrono",
-] }
 sys-info = "0.9.1"
 sysinfo = { version = "0.37.0", features = [
     "system",
@@ -258,7 +252,7 @@ uuid = { version = "1.9.1", features = ["serde", "v4"] }
 yaml-rust = "0.4.5"
 wiremock = "0.6"
 wsl = "0.1.0"
-tokio-tungstenite = { version = "0.27.0", features = [
+tokio-tungstenite = { version = "0.28.0", features = [
     "rustls-tls-native-roots",
 ] }
 tokio-rustls = { version = "0.26.0", default-features = false }

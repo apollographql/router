@@ -1774,6 +1774,132 @@ expression: "&schema"
       "type": "object"
     },
     "Config7": {
+      "additionalProperties": false,
+      "description": "Redis cache configuration",
+      "properties": {
+        "fetch_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Timeout for Redis fetch commands (default: 150ms)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "insert_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Timeout for Redis insert commands (default: 500ms)\n\nInserts are processed asynchronously, so this will not affect response duration.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "invalidate_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Timeout for Redis invalidation commands (default: 1s)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "maintenance_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Timeout for Redis maintenance commands (default: 500ms)\n\nMaintenance tasks are processed asynchronously, so this will not affect response duration.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "metrics_interval": {
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Interval for collecting Redis metrics (default: 1s)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "namespace": {
+          "description": "namespace used to prefix Redis keys",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "password": {
+          "description": "Redis password if not provided in the URLs. This field takes precedence over the password in the URL",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pool_size": {
+          "default": 5,
+          "description": "The size of the Redis connection pool (default: 5)",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "required_to_start": {
+          "default": false,
+          "description": "Prevents the router from starting if it cannot connect to Redis",
+          "type": "boolean"
+        },
+        "tls": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TlsClient"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "TLS client configuration"
+        },
+        "ttl": {
+          "default": null,
+          "description": "TTL for entries",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "urls": {
+          "description": "List of URLs to the Redis cluster",
+          "items": {
+            "format": "uri",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "username": {
+          "description": "Redis username if not provided in the URLs. This field takes precedence over the username in the URL",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "urls"
+      ],
+      "type": "object"
+    },
+    "Config8": {
       "description": "Configuration for the progressive override plugin",
       "type": "object"
     },
@@ -6774,98 +6900,6 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "PostgresCacheConfig": {
-      "additionalProperties": false,
-      "description": "Postgres cache configuration",
-      "properties": {
-        "acquire_timeout": {
-          "default": {
-            "nanos": 50000000,
-            "secs": 0
-          },
-          "description": "PostgreSQL the maximum amount of time to spend waiting for a connection (default: 50ms)",
-          "type": "string"
-        },
-        "batch_size": {
-          "default": 100,
-          "description": "The size of batch when inserting cache entries in PG (default: 100)",
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "cleanup_interval": {
-          "default": {
-            "nanos": 0,
-            "secs": 3600
-          },
-          "description": "Specifies the interval between cache cleanup operations (e.g., \"2 hours\", \"30min\"). Default: 1 hour",
-          "type": "string"
-        },
-        "idle_timeout": {
-          "default": {
-            "nanos": 0,
-            "secs": 60
-          },
-          "description": "PostgreSQL maximum idle duration for individual connection (default: 1min)",
-          "type": "string"
-        },
-        "namespace": {
-          "default": null,
-          "description": "Useful when running tests in parallel to avoid conflicts",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "password": {
-          "description": "PostgreSQL password if not provided in the URLs. This field takes precedence over the password in the URL",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "pool_size": {
-          "default": 5,
-          "description": "The size of the PostgreSQL connection pool",
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "required_to_start": {
-          "default": false,
-          "description": "Prevents the router from starting if it cannot connect to PostgreSQL",
-          "type": "boolean"
-        },
-        "tls": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/TlsConfig"
-            }
-          ],
-          "default": {
-            "certificate_authorities": null,
-            "client_authentication": null
-          },
-          "description": "Postgres TLS client configuration"
-        },
-        "url": {
-          "description": "List of URL to Postgres",
-          "format": "uri",
-          "type": "string"
-        },
-        "username": {
-          "description": "PostgreSQL username if not provided in the URLs. This field takes precedence over the username in the URL",
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "url"
-      ],
-      "type": "object"
-    },
     "PrometheusMetricsConfig": {
       "additionalProperties": false,
       "description": "Prometheus configuration",
@@ -7095,8 +7129,11 @@ expression: "&schema"
           "type": "boolean"
         },
         "timeout": {
-          "default": null,
-          "description": "Redis request timeout (default: 2ms)",
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Redis request timeout (default: 500ms)",
           "type": [
             "string",
             "null"
@@ -7378,8 +7415,11 @@ expression: "&schema"
           "type": "boolean"
         },
         "timeout": {
-          "default": null,
-          "description": "Redis request timeout (default: 2ms)",
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Redis request timeout (default: 500ms)",
           "type": [
             "string",
             "null"
@@ -8730,18 +8770,6 @@ expression: "&schema"
           "default": null,
           "description": "Invalidation configuration"
         },
-        "postgres": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/PostgresCacheConfig"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "PostgreSQL configuration"
-        },
         "private_id": {
           "default": null,
           "description": "Context key used to separate cache sections per user",
@@ -8749,6 +8777,18 @@ expression: "&schema"
             "string",
             "null"
           ]
+        },
+        "redis": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Config7"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Redis configuration"
         },
         "ttl": {
           "anyOf": [
@@ -9897,8 +9937,8 @@ expression: "&schema"
           "default": {
             "enabled": true,
             "invalidation": null,
-            "postgres": null,
             "private_id": null,
+            "redis": null,
             "ttl": null
           },
           "description": "options applying to all subgraphs"
@@ -10794,50 +10834,6 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "TlsClientAuth2": {
-      "additionalProperties": false,
-      "description": "TLS client authentication",
-      "properties": {
-        "certificate": {
-          "description": "Sets the SSL client certificate as a PEM",
-          "type": "string"
-        },
-        "key": {
-          "description": "key in PEM format",
-          "type": "string"
-        }
-      },
-      "required": [
-        "certificate",
-        "key"
-      ],
-      "type": "object"
-    },
-    "TlsConfig": {
-      "additionalProperties": false,
-      "description": "Postgres TLS client configuration",
-      "properties": {
-        "certificate_authorities": {
-          "description": "list of certificate authorities in PEM format",
-          "type": "string"
-        },
-        "client_authentication": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/TlsClientAuth2"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "client certificate authentication"
-        }
-      },
-      "required": [
-        "certificate_authorities"
-      ],
-      "type": "object"
-    },
     "TlsSupergraph": {
       "additionalProperties": false,
       "description": "Configuration options pertaining to the supergraph server component.",
@@ -11606,7 +11602,7 @@ expression: "&schema"
       "$ref": "#/definitions/FileUploadsConfig"
     },
     "progressive_override": {
-      "$ref": "#/definitions/Config7"
+      "$ref": "#/definitions/Config8"
     },
     "rhai": {
       "$ref": "#/definitions/RhaiConfig"

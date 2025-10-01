@@ -8,6 +8,7 @@ mod connectors;
 mod coprocessor;
 mod docs;
 // In the CI environment we only install Redis on x86_64 Linux
+mod directives;
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 mod entity_cache;
 mod file_upload;
@@ -24,10 +25,7 @@ mod supergraph;
 mod traffic_shaping;
 mod typename;
 
-// In the CI environment we only install PostgreSQL on x86_64 Linux
-#[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
-mod postgres;
-// In the CI environment we only install PostgreSQL on x86_64 Linux
+// In the CI environment we only install Redis on x86_64 Linux
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 mod response_cache;
 // In the CI environment we only install Redis on x86_64 Linux

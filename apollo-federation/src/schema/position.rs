@@ -200,6 +200,9 @@ impl_has_description_for!(ObjectFieldDefinitionPosition);
 impl_has_description_for!(InterfaceFieldDefinitionPosition);
 impl_has_description_for!(EnumValueDefinitionPosition);
 impl_has_description_for!(InputObjectFieldDefinitionPosition);
+impl_has_description_for!(ObjectFieldArgumentDefinitionPosition);
+impl_has_description_for!(InterfaceFieldArgumentDefinitionPosition);
+impl_has_description_for!(DirectiveArgumentDefinitionPosition);
 
 // Irregular implementations of HasDescription
 impl HasDescription for SchemaDefinitionPosition {
@@ -333,6 +336,29 @@ impl HasDescription for DirectiveTargetPosition {
     }
 }
 
+impl HasDescription for FieldArgumentDefinitionPosition {
+    fn description<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<str>> {
+        match self {
+            Self::Object(field) => field.description(schema),
+            Self::Interface(field) => field.description(schema),
+        }
+    }
+
+    fn set_description(
+        &self,
+        schema: &mut FederationSchema,
+        description: Option<Node<str>>,
+    ) -> Result<(), FederationError> {
+        match self {
+            Self::Object(field) => field.set_description(schema, description),
+            Self::Interface(field) => field.set_description(schema, description),
+        }
+    }
+}
+
 pub(crate) trait HasType {
     fn get_type<'schema>(
         &self,
@@ -346,6 +372,32 @@ pub(crate) trait HasType {
         &self,
         schema: &FederationSchema,
     ) -> Result<EnumExampleAst, FederationError>;
+}
+
+impl HasType for DirectiveArgumentDefinitionPosition {
+    fn get_type<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema ast::Type, FederationError> {
+        Ok(&self.get(&schema.schema)?.ty)
+    }
+
+    fn set_type(
+        &self,
+        schema: &mut FederationSchema,
+        ty: ast::Type,
+    ) -> Result<(), FederationError> {
+        *self.make_mut(&mut schema.schema)?.make_mut().ty.make_mut() = ty;
+        Ok(())
+    }
+
+    fn enum_example_ast(
+        &self,
+        schema: &FederationSchema,
+    ) -> Result<EnumExampleAst, FederationError> {
+        let node = self.get(schema.schema())?.clone();
+        Ok(EnumExampleAst::Input(node))
+    }
 }
 
 impl HasType for FieldArgumentDefinitionPosition {
@@ -2931,6 +2983,33 @@ impl Debug for FieldArgumentDefinitionPosition {
     }
 }
 
+impl HasDefaultValue for FieldArgumentDefinitionPosition {
+    fn is_input_field() -> bool {
+        false
+    }
+
+    fn get_default_value<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<ast::Value>> {
+        match self {
+            Self::Interface(pos) => pos.get_default_value(schema),
+            Self::Object(pos) => pos.get_default_value(schema),
+        }
+    }
+
+    fn set_default_value(
+        &self,
+        schema: &mut FederationSchema,
+        default: Option<Node<ast::Value>>,
+    ) -> Result<(), FederationError> {
+        match self {
+            Self::Interface(pos) => pos.set_default_value(schema, default),
+            Self::Object(pos) => pos.set_default_value(schema, default),
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Hash, Serialize)]
 pub(crate) struct ObjectFieldDefinitionPosition {
     pub(crate) type_name: Name,
@@ -3644,6 +3723,30 @@ impl Display for ObjectFieldArgumentDefinitionPosition {
 impl Debug for ObjectFieldArgumentDefinitionPosition {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "ObjectFieldArgument({self})")
+    }
+}
+
+impl HasDefaultValue for ObjectFieldArgumentDefinitionPosition {
+    fn is_input_field() -> bool {
+        false
+    }
+
+    fn get_default_value<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<ast::Value>> {
+        self.try_get(&schema.schema)
+            .and_then(|arg| arg.default_value.as_ref())
+    }
+
+    fn set_default_value(
+        &self,
+        schema: &mut FederationSchema,
+        default: Option<Node<ast::Value>>,
+    ) -> Result<(), FederationError> {
+        let arg = self.make_mut(&mut schema.schema)?.make_mut();
+        arg.default_value = default;
+        Ok(())
     }
 }
 
@@ -4931,6 +5034,30 @@ impl Display for InterfaceFieldArgumentDefinitionPosition {
             "{}.{}({}:)",
             self.type_name, self.field_name, self.argument_name
         )
+    }
+}
+
+impl HasDefaultValue for InterfaceFieldArgumentDefinitionPosition {
+    fn is_input_field() -> bool {
+        false
+    }
+
+    fn get_default_value<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<ast::Value>> {
+        self.try_get(&schema.schema)
+            .and_then(|arg| arg.default_value.as_ref())
+    }
+
+    fn set_default_value(
+        &self,
+        schema: &mut FederationSchema,
+        default: Option<Node<ast::Value>>,
+    ) -> Result<(), FederationError> {
+        let arg = self.make_mut(&mut schema.schema)?.make_mut();
+        arg.default_value = default;
+        Ok(())
     }
 }
 
@@ -7222,6 +7349,30 @@ impl Display for DirectiveArgumentDefinitionPosition {
     }
 }
 
+impl HasDefaultValue for DirectiveArgumentDefinitionPosition {
+    fn is_input_field() -> bool {
+        false
+    }
+
+    fn get_default_value<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<ast::Value>> {
+        self.try_get(&schema.schema)
+            .and_then(|arg| arg.default_value.as_ref())
+    }
+
+    fn set_default_value(
+        &self,
+        schema: &mut FederationSchema,
+        default: Option<Node<ast::Value>>,
+    ) -> Result<(), FederationError> {
+        let arg = self.make_mut(&mut schema.schema)?;
+        arg.make_mut().default_value = default;
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::Display)]
 pub(crate) enum DirectiveTargetPosition {
     Schema(SchemaDefinitionPosition),
@@ -7241,6 +7392,25 @@ pub(crate) enum DirectiveTargetPosition {
 }
 
 impl DirectiveTargetPosition {
+    pub(crate) fn exists_in(&self, schema: &FederationSchema) -> bool {
+        match self {
+            Self::Schema(_) => true,
+            Self::ScalarType(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::ObjectType(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::ObjectField(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::ObjectFieldArgument(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::InterfaceType(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::InterfaceField(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::InterfaceFieldArgument(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::UnionType(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::EnumType(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::EnumValue(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::InputObjectType(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::InputObjectField(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::DirectiveArgument(pos) => pos.try_get(&schema.schema).is_some(),
+        }
+    }
+
     pub(crate) fn get_all_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -7377,6 +7547,31 @@ impl DirectiveTargetPosition {
             Self::InputObjectField(pos) => pos.insert_directive(schema, Node::new(directive)),
             Self::DirectiveArgument(pos) => pos.insert_directive(schema, Node::new(directive)),
         }
+    }
+}
+
+impl From<DirectiveArgumentDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: DirectiveArgumentDefinitionPosition) -> Self {
+        DirectiveTargetPosition::DirectiveArgument(pos)
+    }
+}
+
+impl From<FieldArgumentDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: FieldArgumentDefinitionPosition) -> Self {
+        match pos {
+            FieldArgumentDefinitionPosition::Object(pos) => {
+                DirectiveTargetPosition::ObjectFieldArgument(pos)
+            }
+            FieldArgumentDefinitionPosition::Interface(pos) => {
+                DirectiveTargetPosition::InterfaceFieldArgument(pos)
+            }
+        }
+    }
+}
+
+impl From<InputObjectFieldDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: InputObjectFieldDefinitionPosition) -> Self {
+        DirectiveTargetPosition::InputObjectField(pos)
     }
 }
 
