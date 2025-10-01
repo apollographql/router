@@ -36,12 +36,14 @@ pub(crate) struct Activation {
     /// The new tracer propagator. None means leave the existing one
     trace_propagator: Option<TextMapCompositePropagator>,
 
-    /// The new metrics providers. Absent means leave the existing one
+    /// The new metrics providers. Absent entry for a particular meter provider type
+    /// means leave the existing one as is
     meter_providers: HashMap<MeterProviderType, FilterMeterProvider>,
 
     /// The registry that backs prometheus
+    /// If this is None then Prometheus is not active
     /// This will be defaulted to the last applied registry via static unfortunately
-    /// We can further remove this if eventually we have a facility for plugins to maintain state across reloads.
+    /// We can remove this static if eventually we have a facility for plugins to maintain state across reloads.
     prometheus_registry: Option<Registry>,
 
     /// The new format layer
