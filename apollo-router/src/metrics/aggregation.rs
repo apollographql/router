@@ -179,7 +179,12 @@ impl AggregateMeterProvider {
 
     /// Shutdown MUST be called from a blocking thread.
     pub(crate) fn shutdown(&self) {
-        // Take inner as we will be shutting down
+        // Make sure that we don't deadlock by dropping the mutex guard before actual shutdown happens
+        // This means that if we have any misbehaving code that tries to access the meter provider during shutdown, e.g. for export metrics
+        // then we don't get stuck on the mutex.
+        // For instance the apollo exporters have in the past had metrics for exporting, as
+        // they shut down they try to increment a metric which causes a new meter to be created.
+        // However, if we have not released the guard then we deadlock.
         let mut guard = self.inner.lock();
         let old = guard.take();
         drop(guard);
