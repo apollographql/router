@@ -189,6 +189,16 @@ If you use the `selective` configuration, you must use the new context key names
 
 ### Client configuration
 
+<UnixDomainSocketConnection type="coprocessor" />
+
+For example, to use Unix Domain Sockets (UDS) to communicate with a coprocessor you can use this configuration:
+
+```yaml title="router.yaml"
+coprocessor:
+  url: unix:///tmp/coprocessor.sock
+```
+
+
 <HttpConnection type="coprocessor" />
 
 For example, to enable h2c (http2 cleartext) communication with a coprocessor you can use this configuration:
