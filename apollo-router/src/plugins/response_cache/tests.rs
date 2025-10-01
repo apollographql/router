@@ -7,7 +7,6 @@ use futures::StreamExt;
 use http::HeaderName;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
-use tokio::sync::broadcast;
 use tokio_stream::wrappers::IntervalStream;
 use tower::Service;
 use tower::ServiceExt;
@@ -20,16 +19,13 @@ use crate::graphql;
 use crate::metrics::FutureMetricsExt;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::MockSubgraphService;
-use crate::plugins::response_cache::cache_control::CacheControl;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
-use crate::plugins::response_cache::metrics;
 use crate::plugins::response_cache::plugin::CACHE_DEBUG_HEADER_NAME;
 use crate::plugins::response_cache::plugin::CacheKeysContext;
 use crate::plugins::response_cache::plugin::Subgraph;
 use crate::plugins::response_cache::storage::CacheStorage;
-use crate::plugins::response_cache::storage::Document;
-use crate::plugins::response_cache::storage::postgres::Config;
-use crate::plugins::response_cache::storage::postgres::Storage;
+use crate::plugins::response_cache::storage::redis::Config;
+use crate::plugins::response_cache::storage::redis::Storage;
 use crate::services::subgraph;
 use crate::services::supergraph;
 
@@ -164,14 +160,15 @@ async fn insert() {
         },
     });
 
-    let storage = Storage::new(&Config::test("test_insert_simple"))
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, "test_insert_simple"), drop_rx)
         .await
         .unwrap();
     let map = [
         (
             "user".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -181,7 +178,7 @@ async fn insert() {
         (
             "orga".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -192,7 +189,7 @@ async fn insert() {
     .into_iter()
     .collect();
     let response_cache =
-        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, false)
+        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
             .await
             .unwrap();
 
@@ -330,14 +327,15 @@ async fn insert_without_debug_header() {
         },
     });
 
-    let storage = Storage::new(&Config::test("insert_without_debug_header"))
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, "insert_without_debug_header"), drop_rx)
         .await
         .unwrap();
     let map = [
         (
             "user".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -347,7 +345,7 @@ async fn insert_without_debug_header() {
         (
             "orga".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -358,7 +356,7 @@ async fn insert_without_debug_header() {
     .into_iter()
     .collect();
     let response_cache =
-        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, false)
+        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
             .await
             .unwrap();
 
@@ -483,14 +481,15 @@ async fn insert_with_requires() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build())
     ].into_iter().collect());
 
-    let storage = Storage::new(&Config::test("test_insert_with_requires"))
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, "test_insert_with_requires"), drop_rx)
         .await
         .unwrap();
     let map: HashMap<String, Subgraph> = [
         (
             "products".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -500,7 +499,7 @@ async fn insert_with_requires() {
         (
             "inventory".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -515,7 +514,7 @@ async fn insert_with_requires() {
         map.clone(),
         valid_schema.clone(),
         true,
-        false,
+        drop_tx,
     )
     .await
     .unwrap();
@@ -646,14 +645,18 @@ async fn insert_with_nested_field_set() {
         }
     });
 
-    let storage = Storage::new(&Config::test("test_insert_with_nested_field_set"))
-        .await
-        .unwrap();
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(
+        &Config::test(false, "test_insert_with_nested_field_set"),
+        drop_rx,
+    )
+    .await
+    .unwrap();
     let map = [
         (
             "products".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -663,7 +666,7 @@ async fn insert_with_nested_field_set() {
         (
             "users".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -674,7 +677,7 @@ async fn insert_with_nested_field_set() {
     .into_iter()
     .collect();
     let response_cache =
-        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, false)
+        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
             .await
             .unwrap();
 
@@ -813,7 +816,8 @@ async fn no_cache_control() {
         },
     });
 
-    let storage = Storage::new(&Config::test("test_no_cache_control"))
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, "test_no_cache_control"), drop_rx)
         .await
         .unwrap();
     let response_cache = ResponseCache::for_test(
@@ -821,7 +825,7 @@ async fn no_cache_control() {
         HashMap::new(),
         valid_schema.clone(),
         false,
-        false,
+        drop_tx,
     )
     .await
     .unwrap();
@@ -939,7 +943,8 @@ async fn no_store_from_request() {
         },
     });
 
-    let storage = Storage::new(&Config::test("test_no_store_from_client"))
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, "test_no_store_from_client"), drop_rx)
         .await
         .unwrap();
     let response_cache = ResponseCache::for_test(
@@ -947,7 +952,7 @@ async fn no_store_from_request() {
         HashMap::new(),
         valid_schema.clone(),
         false,
-        false,
+        drop_tx,
     )
     .await
     .unwrap();
@@ -1002,21 +1007,19 @@ async fn no_store_from_request() {
     "#);
 
     // Just to make sure it doesn't invalidate anything, which means nothing has been stored
-    assert!(
-        storage
-            .invalidate(
-                vec![
-                    "user".to_string(),
-                    "organization".to_string(),
-                    "currentUser".to_string()
-                ],
-                vec!["orga".to_string(), "user".to_string()],
-                "test_bulk_invalidation"
-            )
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    let invalidations_by_subgraph = storage
+        .invalidate(
+            vec![
+                "user".to_string(),
+                "organization".to_string(),
+                "currentUser".to_string(),
+            ],
+            vec!["orga".to_string(), "user".to_string()],
+            "test_bulk_invalidation",
+        )
+        .await
+        .unwrap();
+    assert_eq!(invalidations_by_subgraph.into_values().sum::<u64>(), 0);
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone(), "headers": {
@@ -1069,21 +1072,19 @@ async fn no_store_from_request() {
     "#);
 
     // Just to make sure it doesn't invalidate anything, which means nothing has been stored
-    assert!(
-        storage
-            .invalidate(
-                vec![
-                    "user".to_string(),
-                    "organization".to_string(),
-                    "currentUser".to_string()
-                ],
-                vec!["orga".to_string(), "user".to_string()],
-                "test_bulk_invalidation"
-            )
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    let invalidations_by_subgraph = storage
+        .invalidate(
+            vec![
+                "user".to_string(),
+                "organization".to_string(),
+                "currentUser".to_string(),
+            ],
+            vec!["orga".to_string(), "user".to_string()],
+            "test_bulk_invalidate",
+        )
+        .await
+        .unwrap();
+    assert_eq!(invalidations_by_subgraph.into_values().sum::<u64>(), 0);
 }
 
 #[tokio::test]
@@ -1119,14 +1120,15 @@ async fn private_only() {
             },
         });
 
-        let storage = Storage::new(&Config::test("private_only"))
+        let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false,"private_only"), drop_rx)
             .await
             .unwrap();
         let map = [
             (
                 "user".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -1136,7 +1138,7 @@ async fn private_only() {
             (
                 "orga".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -1147,7 +1149,7 @@ async fn private_only() {
             .into_iter()
             .collect();
         let response_cache =
-            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, false)
+            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
                 .await
                 .unwrap();
 
@@ -1320,14 +1322,15 @@ async fn private_and_public() {
         },
     });
 
-    let storage = Storage::new(&Config::test("private_and_public"))
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, "private_and_public"), drop_rx)
         .await
         .unwrap();
     let map = [
         (
             "user".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -1337,7 +1340,7 @@ async fn private_and_public() {
         (
             "orga".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -1348,7 +1351,7 @@ async fn private_and_public() {
     .into_iter()
     .collect();
     let response_cache =
-        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, false)
+        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
             .await
             .unwrap();
 
@@ -1528,14 +1531,15 @@ async fn polymorphic_private_and_public() {
             },
         });
 
-        let storage = Storage::new(&Config::test("polymorphic_private_and_public"))
+        let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false,"polymorphic_private_and_public"), drop_rx)
             .await
             .unwrap();
         let map = [
             (
                 "user".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -1545,7 +1549,7 @@ async fn polymorphic_private_and_public() {
             (
                 "orga".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -1556,7 +1560,7 @@ async fn polymorphic_private_and_public() {
             .into_iter()
             .collect();
         let response_cache =
-            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, false)
+            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
                 .await
                 .unwrap();
 
@@ -1914,14 +1918,15 @@ async fn private_without_private_id() {
             },
         });
 
-        let storage = Storage::new(&Config::test("private_without_private_id"))
+        let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false,"private_without_private_id"), drop_rx)
             .await
             .unwrap();
         let map = [
             (
                 "user".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     enabled: true.into(),
                     ttl: None,
                     ..Default::default()
@@ -1930,7 +1935,7 @@ async fn private_without_private_id() {
             (
                 "orga".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     enabled: true.into(),
                     ttl: None,
                     ..Default::default()
@@ -1940,7 +1945,7 @@ async fn private_without_private_id() {
             .into_iter()
             .collect();
         let response_cache =
-            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, false)
+            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
                 .await
                 .unwrap();
 
@@ -2084,12 +2089,15 @@ async fn no_data() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
     ].into_iter().collect());
 
-    let storage = Storage::new(&Config::test("no_data")).await.unwrap();
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, "no_data"), drop_rx)
+        .await
+        .unwrap();
     let map = [
         (
             "user".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -2099,7 +2107,7 @@ async fn no_data() {
         (
             "orga".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -2109,8 +2117,9 @@ async fn no_data() {
     ]
     .into_iter()
     .collect();
+
     let response_cache =
-        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, false)
+        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
             .await
             .unwrap();
 
@@ -2320,14 +2329,11 @@ async fn missing_entities() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
     ].into_iter().collect());
 
-    let storage = Storage::new(&Config::test("missing_entities"))
-        .await
-        .unwrap();
     let map = [
         (
             "user".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -2337,7 +2343,7 @@ async fn missing_entities() {
         (
             "orga".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -2347,8 +2353,13 @@ async fn missing_entities() {
     ]
     .into_iter()
     .collect();
+
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, "missing_entities"), drop_rx)
+        .await
+        .unwrap();
     let response_cache =
-        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, false)
+        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
             .await
             .unwrap();
 
@@ -2376,12 +2387,16 @@ async fn missing_entities() {
     assert!(remove_debug_extensions_key(&mut response));
     insta::assert_json_snapshot!(response);
 
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, "missing_entities"), drop_rx)
+        .await
+        .unwrap();
     let response_cache = ResponseCache::for_test(
         storage.clone(),
         HashMap::new(),
         valid_schema.clone(),
         false,
-        false,
+        drop_tx,
     )
     .await
     .unwrap();
@@ -2482,14 +2497,15 @@ async fn invalidate_by_cache_tag() {
             },
         });
 
-        let storage = Storage::new(&Config::test("test_invalidate_by_cache_tag"))
+        let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false,"test_invalidate_by_cache_tag"), drop_rx)
             .await
             .unwrap();
         let map = [
             (
                 "user".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -2499,7 +2515,7 @@ async fn invalidate_by_cache_tag() {
             (
                 "orga".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -2510,7 +2526,7 @@ async fn invalidate_by_cache_tag() {
             .into_iter()
             .collect();
         let response_cache =
-            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, false)
+            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
                 .await
                 .unwrap();
 
@@ -2696,14 +2712,15 @@ async fn invalidate_by_type() {
             },
         });
 
-        let storage = Storage::new(&Config::test("test_invalidate_by_subgraph"))
+        let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false,"test_invalidate_by_subgraph"), drop_rx)
             .await
             .unwrap();
         let map = [
             (
                 "user".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -2713,7 +2730,7 @@ async fn invalidate_by_type() {
             (
                 "orga".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -2724,7 +2741,7 @@ async fn invalidate_by_type() {
             .into_iter()
             .collect();
         let response_cache =
-            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, false)
+            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
                 .await
                 .unwrap();
 
@@ -2874,68 +2891,6 @@ async fn invalidate_by_type() {
     }.with_metrics().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn interval_cleanup_config() {
-    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
-
-    let storage = Storage::new(&Config {
-        cleanup_interval: std::time::Duration::from_secs(60 * 7), // Every 7 minutes
-        ..Config::test("interval_cleanup_config_1")
-    })
-    .await
-    .unwrap();
-    let _response_cache = ResponseCache::for_test(
-        storage.clone(),
-        Default::default(),
-        valid_schema.clone(),
-        true,
-        true,
-    )
-    .await
-    .unwrap();
-
-    let cron = storage.get_cron().await.unwrap();
-    assert_eq!(cron.0, String::from("*/7 * * * *"));
-
-    let storage = Storage::new(&Config {
-        cleanup_interval: std::time::Duration::from_secs(60 * 60 * 7), // Every 7 hours
-        ..Config::test("interval_cleanup_config_2")
-    })
-    .await
-    .unwrap();
-    let _response_cache = ResponseCache::for_test(
-        storage.clone(),
-        Default::default(),
-        valid_schema.clone(),
-        true,
-        true,
-    )
-    .await
-    .unwrap();
-
-    let cron = storage.get_cron().await.unwrap();
-    assert_eq!(cron.0, String::from("0 */7 * * *"));
-
-    let storage = Storage::new(&Config {
-        cleanup_interval: std::time::Duration::from_secs(60 * 60 * 24 * 7), // Every 7 days
-        ..Config::test("interval_cleanup_config_2")
-    })
-    .await
-    .unwrap();
-    let _response_cache = ResponseCache::for_test(
-        storage.clone(),
-        Default::default(),
-        valid_schema.clone(),
-        true,
-        true,
-    )
-    .await
-    .unwrap();
-
-    let cron = storage.get_cron().await.unwrap();
-    assert_eq!(cron.0, String::from("0 0 */7 * *"));
-}
-
 #[tokio::test]
 async fn failure_mode() {
     async {
@@ -2974,7 +2929,7 @@ async fn failure_mode() {
             (
                 "user".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -2984,7 +2939,7 @@ async fn failure_mode() {
             (
                 "orga".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -3109,45 +3064,6 @@ async fn failure_mode() {
     .await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn expired_data_count() {
-    async {
-        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
-
-        let storage = Storage::new(&Config::test("expired_data_count"))
-            .await
-            .unwrap();
-        let _response_cache = ResponseCache::for_test(
-            storage.clone(),
-            Default::default(),
-            valid_schema.clone(),
-            true,
-            true,
-        )
-        .await
-        .unwrap();
-        let cache_key = uuid::Uuid::new_v4().to_string();
-        let document = Document {
-            key: cache_key,
-            data: Default::default(),
-            control: CacheControl::default(),
-            invalidation_keys: vec![],
-            expire: Duration::from_millis(2),
-        };
-        storage.insert(document, "test").await.unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        let (_drop_rx, drop_tx) = broadcast::channel(2);
-        tokio::spawn(
-            metrics::expired_data_task(storage.clone(), drop_tx, None)
-                .with_current_meter_provider(),
-        );
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        assert_gauge!("apollo.router.response_cache.data.expired", 1);
-    }
-    .with_metrics()
-    .await;
-}
-
 #[tokio::test]
 async fn failure_mode_reconnect() {
     async {
@@ -3186,7 +3102,7 @@ async fn failure_mode_reconnect() {
             (
                 "user".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -3196,7 +3112,7 @@ async fn failure_mode_reconnect() {
             (
                 "orga".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -3206,10 +3122,10 @@ async fn failure_mode_reconnect() {
         ]
             .into_iter()
             .collect();
-        let storage = Storage::new(&Config::test("failure_mode_reconnect"))
+        let (_drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false,"failure_mode_reconnect"), drop_rx)
             .await
             .unwrap();
-        storage.migrate().await.unwrap();
         storage.truncate_namespace().await.unwrap();
 
         let response_cache =

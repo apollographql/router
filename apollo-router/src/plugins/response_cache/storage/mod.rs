@@ -1,5 +1,6 @@
+mod config;
 mod error;
-pub(super) mod postgres;
+pub(super) mod redis;
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -136,13 +137,13 @@ pub(super) trait CacheStorage {
     }
 
     #[doc(hidden)]
-    async fn internal_invalidate_by_subgraph(&self, subgraph_name: String) -> StorageResult<u64>;
+    async fn internal_invalidate_by_subgraph(&self, subgraph_name: &str) -> StorageResult<u64>;
 
     /// Invalidate all data associated with `subgraph_names`. Command will be timed out after
     /// `self.invalidate_timeout()`.
     async fn invalidate_by_subgraph(
         &self,
-        subgraph_name: String,
+        subgraph_name: &str,
         invalidation_kind: InvalidationKind,
     ) -> StorageResult<u64> {
         let now = Instant::now();

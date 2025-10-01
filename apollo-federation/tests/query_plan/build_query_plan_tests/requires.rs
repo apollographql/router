@@ -1929,3 +1929,108 @@ fn allows_post_requires_input_with_typename_on_interface_object_type() {
     "###
     );
 }
+
+#[test]
+fn avoids_selecting_inapplicable_key_from_parent_node() {
+    // Previously, there was an issue where a subgraph jump inserted due to a @requires field would
+    // try (as an optimization) to collect its locally satisfiable key from the parent, but the
+    // parent may not have that locally satisfiable key. We now explicitly check for this, falling
+    // back to the current node if needed (which should be guaranteed to have it).
+    let planner = planner!(
+        A: r#"
+          type Query {
+            t: T
+          }
+
+          type T @key(fields: "id1") {
+            id1: ID!
+          }
+        "#,
+        B: r#"
+          type T @key(fields: "id2") @key(fields: "id1") {
+            id1: ID!
+            id2: ID!
+            x: Int @external
+            req: Int @requires(fields: "x")
+          }
+        "#,
+        C: r#"
+          type T @key(fields: "id2") {
+            id2: ID!
+            x: Int
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            t {
+              req
+            }
+          }
+        "#,
+
+        @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "A") {
+              {
+                t {
+                  __typename
+                  id1
+                }
+              }
+            },
+            Flatten(path: "t") {
+              Fetch(service: "B") {
+                {
+                  ... on T {
+                    __typename
+                    id1
+                  }
+                } =>
+                {
+                  ... on T {
+                    __typename
+                    id2
+                  }
+                }
+              },
+            },
+            Flatten(path: "t") {
+              Fetch(service: "C") {
+                {
+                  ... on T {
+                    __typename
+                    id2
+                  }
+                } =>
+                {
+                  ... on T {
+                    x
+                  }
+                }
+              },
+            },
+            Flatten(path: "t") {
+              Fetch(service: "B") {
+                {
+                  ... on T {
+                    __typename
+                    x
+                    id2
+                  }
+                } =>
+                {
+                  ... on T {
+                    req
+                  }
+                }
+              },
+            },
+          },
+        }
+      "###
+    );
+}
