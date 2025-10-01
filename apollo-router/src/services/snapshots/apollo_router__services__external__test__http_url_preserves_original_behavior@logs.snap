@@ -4,7 +4,7 @@ expression: yaml
 ---
 - fields: {}
   level: INFO
-  message: got request
+  message: got http request
   span:
     http.request.method: POST
     name: http_request

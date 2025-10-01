@@ -12,6 +12,8 @@ use http::Method;
 use http::StatusCode;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
+#[cfg(unix)]
+use hyperlocal;
 use opentelemetry::global::get_text_map_propagator;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -286,33 +288,65 @@ where
     {
         tracing::debug!("forwarding json: {}", serde_json::to_string(&self)?);
 
+        // Handle Unix socket URL conversion (similar to subgraph implementation)
+        #[cfg(unix)]
+        let (converted_uri, is_unix_socket, unix_path) =
+            if let Some(path) = uri.strip_prefix("unix://") {
+                tracing::debug!(
+                    "using Unix domain socket transport to coprocessor: {}",
+                    path
+                );
+                // Convert unix:// URL to hyperlocal format that UnixConnector can understand
+                let hyperlocal_uri: http::Uri = hyperlocal::Uri::new(path, "/").into();
+                (hyperlocal_uri, true, Some(path))
+            } else {
+                tracing::debug!("using HTTP transport to coprocessor: {}", uri);
+                (uri.parse()?, false, None)
+            };
+        #[cfg(not(unix))]
+        let (converted_uri, is_unix_socket, unix_path) = {
+            tracing::debug!("using HTTP transport to coprocessor: {}", uri);
+            (uri.parse()?, false, None::<&str>)
+        };
+
         let mut request = http::Request::builder()
-            .uri(uri)
+            .uri(converted_uri)
             .method(Method::POST)
             .header(ACCEPT, "application/json")
             .header(CONTENT_TYPE, "application/json")
             .body(router::body::from_bytes(serde_json::to_vec(&self)?))?;
 
         let schema_uri = request.uri();
-        let host = schema_uri.host().unwrap_or_default();
-        let port = schema_uri.port_u16().unwrap_or_else(|| {
-            let scheme = schema_uri.scheme_str();
-            if scheme == Some("https") {
-                443
-            } else if scheme == Some("http") {
-                80
-            } else {
-                0
-            }
-        });
-        let otel_name = format!("POST {schema_uri}");
+
+        // For tracing, use more meaningful attributes depending on transport type
+        let (span_host, span_port, span_transport, span_url) = if is_unix_socket {
+            // For Unix sockets, show the socket path as the server address
+            let socket_path = unix_path.unwrap_or("unknown");
+            (socket_path, 0u16, "unix", format!("unix://{}", socket_path))
+        } else {
+            let host = schema_uri.host().unwrap_or_default();
+            let port = schema_uri.port_u16().unwrap_or_else(|| {
+                let scheme = schema_uri.scheme_str();
+                if scheme == Some("https") {
+                    443
+                } else if scheme == Some("http") {
+                    80
+                } else {
+                    0
+                }
+            });
+            (host, port, "ip_tcp", uri.to_string())
+        };
+
+        let otel_name = format!("POST {}", span_url);
 
         let http_req_span = tracing::info_span!(HTTP_REQUEST_SPAN_NAME,
             "otel.kind" = "CLIENT",
             "http.request.method" = "POST",
-            "server.address" = %host,
-            "server.port" = %port,
-            "url.full" = %schema_uri,
+            "server.address" = %span_host,
+            "server.port" = %span_port,
+            "url.full" = %span_url,
+            "net.transport" = %span_transport,
             "otel.name" = %otel_name,
             "otel.original_name" = "http_request",
         );
@@ -438,6 +472,96 @@ mod test {
                 .build();
 
             // Make the call which should create the HTTP request span
+            let _ = externalizable
+                .call(service, "http://example.com/test")
+                .await;
+        }
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn it_will_create_unix_socket_request_span() {
+        async {
+            // Create a mock service that returns a simple response
+            let service = service_fn(|req: http::Request<RouterBody>| async move {
+                tracing::info!("got unix socket request");
+                // Verify the URI was converted to hyperlocal format
+                assert!(
+                    req.uri().host().is_some(),
+                    "Unix socket URI should have encoded host"
+                );
+                Ok::<_, BoxError>(
+                    Response::builder()
+                        .status(200)
+                        .body(router::body::from_bytes(vec![]))
+                        .unwrap(),
+                )
+            });
+
+            // Create an externalizable request
+            let externalizable = Externalizable::<String>::router_builder()
+                .stage(PipelineStep::RouterRequest)
+                .id("test-id".to_string())
+                .build();
+
+            // Make the call with a Unix socket URL which should create proper tracing
+            let _ = externalizable.call(service, "unix:///tmp/test.sock").await;
+        }
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await;
+    }
+
+    #[test]
+    fn test_unix_socket_url_detection() {
+        // Test Unix socket URL detection
+        let unix_url = "unix:///tmp/socket.sock";
+        assert!(unix_url.starts_with("unix://"));
+
+        let http_url = "http://localhost:8080";
+        assert!(!http_url.starts_with("unix://"));
+
+        let https_url = "https://example.com/api";
+        assert!(!https_url.starts_with("unix://"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_unix_socket_uri_conversion() {
+        use hyperlocal::Uri as UnixUri;
+
+        // Test that we can create hyperlocal URIs for valid paths
+        let socket_path = "/tmp/test.sock";
+        let hyperlocal_uri: http::Uri = UnixUri::new(socket_path, "/").into();
+
+        // Verify the conversion produces a valid URI
+        assert!(hyperlocal_uri.host().is_some());
+        assert_eq!(hyperlocal_uri.path(), "/");
+    }
+
+    #[tokio::test]
+    async fn test_http_url_preserves_original_behavior() {
+        async {
+            let service = service_fn(|req: http::Request<RouterBody>| async move {
+                tracing::info!("got http request");
+                // Verify HTTP URLs are processed normally
+                assert_eq!(req.uri().host(), Some("example.com"));
+                assert_eq!(req.uri().path(), "/test");
+                Ok::<_, BoxError>(
+                    Response::builder()
+                        .status(200)
+                        .body(router::body::from_bytes(vec![]))
+                        .unwrap(),
+                )
+            });
+
+            let externalizable = Externalizable::<String>::router_builder()
+                .stage(PipelineStep::RouterRequest)
+                .id("test-id".to_string())
+                .build();
+
+            // Verify HTTP URLs still work as before
             let _ = externalizable
                 .call(service, "http://example.com/test")
                 .await;

@@ -18,13 +18,10 @@ use http::HeaderName;
 use http::HeaderValue;
 use http::header;
 use http_body_util::BodyExt;
-use hyper_rustls::ConfigBuilderExt;
-use hyper_rustls::HttpsConnector;
-use hyper_util::client::legacy::connect::HttpConnector;
-use hyper_util::rt::TokioExecutor;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
+use tower::Layer;
 use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -45,7 +42,6 @@ use crate::plugin::PluginInit;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::router::selectors::RouterSelector;
 use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector;
-use crate::plugins::traffic_shaping::Http2Config;
 use crate::register_plugin;
 use crate::services;
 use crate::services::external::Control;
@@ -54,8 +50,6 @@ use crate::services::external::EXTERNALIZABLE_VERSION;
 use crate::services::external::Externalizable;
 use crate::services::external::PipelineStep;
 use crate::services::external::externalize_header_map;
-use crate::services::hickory_dns_connector::AsyncHyperResolver;
-use crate::services::hickory_dns_connector::new_async_http_connector;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::subgraph;
@@ -67,21 +61,55 @@ mod execution;
 mod supergraph;
 
 pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
-const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5));
 const COPROCESSOR_ERROR_EXTENSION: &str = "ERROR";
 const COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION: &str = "EXTERNAL_DESERIALIZATION_ERROR";
 
-type MapFn = fn(http::Response<hyper::body::Incoming>) -> http::Response<RouterBody>;
+// Adapter service to convert HttpClientService to coprocessor-compatible interface
+#[derive(Clone)]
+struct CoprocessorHttpClientAdapter {
+    inner: tower::timeout::Timeout<crate::services::http::HttpClientService>,
+}
 
-type HTTPClientService = tower::util::MapResponse<
-    tower::timeout::Timeout<
-        hyper_util::client::legacy::Client<
-            HttpsConnector<HttpConnector<AsyncHyperResolver>>,
-            RouterBody,
-        >,
-    >,
-    MapFn,
->;
+impl CoprocessorHttpClientAdapter {
+    fn new(
+        http_client_service: crate::services::http::HttpClientService,
+        timeout: Duration,
+    ) -> Self {
+        Self {
+            inner: TimeoutLayer::new(timeout).layer(http_client_service),
+        }
+    }
+}
+
+impl Service<http::Request<RouterBody>> for CoprocessorHttpClientAdapter {
+    type Response = http::Response<RouterBody>;
+    type Error = BoxError;
+    type Future = futures::future::BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: http::Request<RouterBody>) -> Self::Future {
+        let http_request = crate::services::http::HttpRequest {
+            http_request: req,
+            context: Context::new(),
+        };
+
+        let future = self.inner.call(http_request);
+
+        Box::pin(async move {
+            let response = future.await?;
+            Ok(response.http_response)
+        })
+    }
+}
+
+// Use HttpClientService for all coprocessor HTTP communication
+type HTTPClientService = CoprocessorHttpClientAdapter;
 
 #[async_trait::async_trait]
 impl Plugin for CoprocessorPlugin<HTTPClientService> {
@@ -89,27 +117,6 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         let client_config = init.config.client.clone().unwrap_or_default();
-        let mut http_connector =
-            new_async_http_connector(client_config.dns_resolution_strategy.unwrap_or_default())?;
-        http_connector.set_nodelay(true);
-        http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
-        http_connector.enforce_http(false);
-
-        let tls_config = rustls::ClientConfig::builder()
-            .with_native_roots()?
-            .with_no_client_auth();
-
-        let builder = hyper_rustls::HttpsConnectorBuilder::new()
-            .with_tls_config(tls_config)
-            .https_or_http()
-            .enable_http1();
-
-        let experimental_http2 = client_config.experimental_http2.unwrap_or_default();
-        let connector = if experimental_http2 != Http2Config::Disable {
-            builder.enable_http2().wrap_connector(http_connector)
-        } else {
-            builder.wrap_connector(http_connector)
-        };
 
         if matches!(
             init.config.router.request.context,
@@ -176,21 +183,18 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
             );
         }
 
-        let http_client = ServiceBuilder::new()
-            .map_response(
-                |http_response: http::Response<hyper::body::Incoming>| -> http::Response<RouterBody> {
-                    let (parts, body) = http_response.into_parts();
-                    http::Response::from_parts(parts, body.map_err(axum::Error::new).boxed_unsync())
-                } as MapFn,
-            )
-            .layer(TimeoutLayer::new(init.config.timeout))
-            .service(
-                hyper_util::client::legacy::Client::builder(TokioExecutor::new())
-                    .http2_only(experimental_http2 == Http2Config::Http2Only)
-                    .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
-                    .build(connector),
-            );
-        CoprocessorPlugin::new(http_client, init.config, init.supergraph_sdl)
+        // Use shared HttpClientService infrastructure instead of duplicated client creation
+        let tls_root_store =
+            crate::services::http::service::HttpClientService::native_roots_store();
+        let http_client_service =
+            crate::services::http::service::HttpClientService::from_config_for_coprocessor(
+                &tls_root_store,
+                client_config,
+            )?;
+
+        let client = CoprocessorHttpClientAdapter::new(http_client_service, init.config.timeout);
+
+        CoprocessorPlugin::new(client, init.config, init.supergraph_sdl)
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
@@ -403,7 +407,7 @@ pub(super) struct SubgraphResponseConf {
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "CoprocessorConfig")]
 struct Conf {
-    /// The url you'd like to offload processing to (can be overridden per-stage)
+    /// The url you'd like to offload processing to (can be overridden per-stage). Supports HTTP (http://127.0.0.1:8081/urlpath) and Unix Domain Socket (unix:///path/to/socket) URLs.
     url: String,
     client: Option<Client>,
     /// The timeout for external requests
