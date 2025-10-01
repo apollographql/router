@@ -174,18 +174,15 @@ You can omit the `resource.name` attribute entirely and let Datadog auto-generat
 
 If you choose to set `resource.name` explicitly, the goal is to find names that meaningfully group similar operations while keeping the total number of unique resource names manageable (typically hundreds).
 
-**Good examples (low cardinality):**
-- Operation type: `query`, `mutation`, `subscription` (using `operation_kind` selector)
-- HTTP method: `GET`, `POST` (using `request_method` selector)
-- Subgraph name: `users`, `products`, `reviews` (using `subgraph_name` selector)
-
-**Moderate cardinality (acceptable for many use cases):**
-- Named operations: `GetUser`, `CreateProduct`, `UpdateReview` (using `operation_name` or `subgraph_operation_name` selectors, assuming you have controlled, named operations)
-
-**Bad examples (high cardinality - avoid):**
-- Anonymous operations with field names: `query_user_posts_comments`
-- Including request IDs: `GetUser_req_12345`
-- Including parameters: `GetUser_userId_789`
+- **Good (low cardinality):**
+  - `query`, `mutation`, `subscription` (via `operation_kind`)
+  - `GET`, `POST` (via `request_method`)
+  - `users`, `products`, `reviews` (via `subgraph_name`)
+- **Moderate (acceptable for many use cases):**
+  - `GetUser`, `CreateProduct`, `UpdateReview` (via `operation_name`, assuming controlled, named operations)
+  - `GetUser_users-subgraph_2`, `CreateProduct_products-subgraph_1`, `UpdateReview_reviews-subgraph_3` (via `subgraph_operation_name`)
+- **Bad (high cardinality - avoid):**
+  - `query_user_posts_comments`, `GetUser_req_12345`, `GetUser_userId_789`
 
 **Key consideration:**
 For high-traffic APIs with many unique operation names, use `operation_kind` or `subgraph_name` instead of `operation_name` to avoid high cardinality.
