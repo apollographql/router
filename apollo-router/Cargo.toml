@@ -224,12 +224,6 @@ serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
 strum = "0.27.0"
 strum_macros = "0.27.0"
-sqlx = { version = "0.8", features = [
-    "postgres",
-    "runtime-tokio",
-    "tls-rustls-ring-native-roots",
-    "chrono",
-] }
 sys-info = "0.9.1"
 sysinfo = { version = "0.37.0", features = [
     "system",

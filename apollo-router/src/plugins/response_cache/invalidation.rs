@@ -18,7 +18,7 @@ use crate::plugins::response_cache::plugin::INTERNAL_CACHE_TAG_PREFIX;
 use crate::plugins::response_cache::plugin::RESPONSE_CACHE_VERSION;
 use crate::plugins::response_cache::storage;
 use crate::plugins::response_cache::storage::CacheStorage;
-use crate::plugins::response_cache::storage::postgres::Storage;
+use crate::plugins::response_cache::storage::redis::Storage;
 
 #[derive(Clone)]
 pub(crate) struct Invalidation {
@@ -95,7 +95,7 @@ impl Invalidation {
         let (count, subgraphs) = match request {
             InvalidationRequest::Subgraph { subgraph } => {
                 let count = storage
-                    .invalidate_by_subgraph(subgraph.clone(), request.kind())
+                    .invalidate_by_subgraph(subgraph, request.kind())
                     .await
                     .inspect_err(|err| {
                         u64_counter_with_unit!(

@@ -260,18 +260,23 @@ fn validate_shared_key(
 mod tests {
     use std::collections::HashMap;
 
+    use tokio::sync::broadcast;
     use tower::ServiceExt;
 
     use super::*;
     use crate::plugins::response_cache::plugin::StorageInterface;
-    use crate::plugins::response_cache::storage::postgres::Config;
-    use crate::plugins::response_cache::storage::postgres::Storage;
+    use crate::plugins::response_cache::storage::redis::Config;
+    use crate::plugins::response_cache::storage::redis::Storage;
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key() {
-        let storage = Storage::new(&Config::test("test_invalidation_service_bad_shared_key"))
-            .await
-            .unwrap();
+        let (_drop_tx, drop_rx) = broadcast::channel(2);
+        let storage = Storage::new(
+            &Config::test(false, "test_invalidation_service_bad_shared_key"),
+            drop_rx,
+        )
+        .await
+        .unwrap();
         let storage = Arc::new(StorageInterface::from(storage));
         let invalidation = Invalidation::new(storage.clone()).await.unwrap();
 
@@ -279,7 +284,7 @@ mod tests {
             all: Subgraph {
                 ttl: None,
                 enabled: Some(true),
-                postgres: None,
+                redis: None,
                 private_id: None,
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
@@ -316,9 +321,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key_subgraph() {
-        let storage = Storage::new(&Config::test(
-            "test_invalidation_service_bad_shared_key_subgraph",
-        ))
+        let (_drop_tx, drop_rx) = broadcast::channel(2);
+        let storage = Storage::new(
+            &Config::test(false, "test_invalidation_service_bad_shared_key_subgraph"),
+            drop_rx,
+        )
         .await
         .unwrap();
         let storage = Arc::new(StorageInterface::from(storage));
@@ -328,7 +335,7 @@ mod tests {
             all: Subgraph {
                 ttl: None,
                 enabled: Some(true),
-                postgres: None,
+                redis: None,
                 private_id: None,
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
@@ -340,7 +347,7 @@ mod tests {
                 Subgraph {
                     ttl: None,
                     enabled: Some(true),
-                    postgres: None,
+                    redis: None,
                     private_id: None,
                     invalidation: Some(SubgraphInvalidationConfig {
                         enabled: true,
@@ -374,9 +381,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key_subgraphs() {
-        let storage = Storage::new(&Config::test(
-            "test_invalidation_service_bad_shared_key_subgraphs",
-        ))
+        let (_drop_tx, drop_rx) = broadcast::channel(2);
+        let storage = Storage::new(
+            &Config::test(false, "test_invalidation_service_bad_shared_key_subgraphs"),
+            drop_rx,
+        )
         .await
         .unwrap();
         let storage = Arc::new(StorageInterface::from(storage));
@@ -386,7 +395,7 @@ mod tests {
             all: Subgraph {
                 ttl: None,
                 enabled: Some(true),
-                postgres: None,
+                redis: None,
                 private_id: None,
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
@@ -399,7 +408,7 @@ mod tests {
                     Subgraph {
                         ttl: None,
                         enabled: Some(true),
-                        postgres: None,
+                        redis: None,
                         private_id: None,
                         invalidation: Some(SubgraphInvalidationConfig {
                             enabled: true,
@@ -412,7 +421,7 @@ mod tests {
                     Subgraph {
                         ttl: None,
                         enabled: Some(true),
-                        postgres: None,
+                        redis: None,
                         private_id: None,
                         invalidation: Some(SubgraphInvalidationConfig {
                             enabled: true,
@@ -452,9 +461,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation_service_good_shared_key_subgraphs() {
-        let storage = Storage::new(&Config::test(
-            "test_invalidation_service_good_shared_key_subgraphs",
-        ))
+        let (_drop_tx, drop_rx) = broadcast::channel(2);
+        let storage = Storage::new(
+            &Config::test(false, "test_invalidation_service_good_shared_key_subgraphs"),
+            drop_rx,
+        )
         .await
         .unwrap();
         let storage = Arc::new(StorageInterface::from(storage));
@@ -464,7 +475,7 @@ mod tests {
             all: Subgraph {
                 ttl: None,
                 enabled: Some(true),
-                postgres: None,
+                redis: None,
                 private_id: None,
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
@@ -477,7 +488,7 @@ mod tests {
                     Subgraph {
                         ttl: None,
                         enabled: Some(true),
-                        postgres: None,
+                        redis: None,
                         private_id: None,
                         invalidation: Some(SubgraphInvalidationConfig {
                             enabled: true,
@@ -490,7 +501,7 @@ mod tests {
                     Subgraph {
                         ttl: None,
                         enabled: Some(true),
-                        postgres: None,
+                        redis: None,
                         private_id: None,
                         invalidation: Some(SubgraphInvalidationConfig {
                             enabled: true,
