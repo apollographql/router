@@ -43,13 +43,8 @@ impl MeterProvider {
             }
         }
     }
-    fn shutdown(&self) -> opentelemetry::metrics::Result<()> {
-        match self {
-            MeterProvider::Regular(provider) => provider.shutdown(),
-            MeterProvider::Global(_provider) => Ok(()),
-        }
-    }
 
+    #[cfg(test)]
     fn force_flush(&self) -> opentelemetry::metrics::Result<()> {
         match self {
             MeterProvider::Regular(provider) => provider.force_flush(),
@@ -128,12 +123,7 @@ impl FilterMeterProvider {
         FilterMeterProvider::builder().delegate(delegate).build()
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn shutdown(&self) -> opentelemetry::metrics::Result<()> {
-        self.delegate.shutdown()
-    }
-
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn force_flush(&self) -> opentelemetry::metrics::Result<()> {
         self.delegate.force_flush()
     }
