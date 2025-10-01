@@ -14,6 +14,10 @@ releaseStage: preview
 To help you debug this feature, Apollo includes a debugger in Apollo Sandbox. To use it, run the router with the following minimal configuration:
 
 ```yaml title="router.yaml"
+supergraph:
+  introspection: true
+  path: /
+  listen: 0.0.0.0:4000
 homepage:
   enabled: false
 sandbox: # Enabled sandbox

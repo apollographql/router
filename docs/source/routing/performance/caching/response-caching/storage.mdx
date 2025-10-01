@@ -21,14 +21,17 @@ preview_response_cache:
       # Configure Redis globally
       redis:
         urls: ["redis://..."]
-        timeout: 2s # Optional, by default: 500ms
+        fetch_timeout: 2s # Optional, by default: 500ms
+        insert_timeout: 2s # Optional, by default: 500ms
+        invalidate_timeout: 2s # Optional, by default: 1s
         ttl: 24h # Optional, by default no expiration. Default ttl for data saved in redis
     # Configure entity caching per subgraph, overrides options from the "all" section
     subgraphs:
       products:
-        urls: ["redis://..."] # Override global redis instance for this specific subgraph
-        pool_size: 15 # Optional. Default: 5
-        namespace: products_response_cache # Optional. Prefix all the cached entries in Redis with this prefix in Redis key
+        redis:
+          urls: ["redis://..."] # Override global redis instance for this specific subgraph
+          pool_size: 15 # Optional. Default: 5
+          namespace: products_response_cache # Optional. Prefix all the cached entries in Redis with this prefix in Redis key
       inventory:
         enabled: false # disable for a specific subgraph
 ```

@@ -169,10 +169,10 @@ subgraphs:
     assert_eq!(
         error.to_string(),
         String::from(
-            r#"configuration had errors: 
+            r#"configuration had errors:
 1. at line 4
 
-  
+
   supergraph:
     path: /
 ┌ subgraphs:
@@ -198,10 +198,10 @@ unknown:
     assert_eq!(
         error.to_string(),
         String::from(
-            r#"configuration had errors: 
+            r#"configuration had errors:
 1. at line 2
 
-  
+
 ┌ unknown:
 |   foo: true
 └-----> Additional properties are not allowed ('unknown' was unexpected)
@@ -457,11 +457,13 @@ fn validate_project_config_files() {
                     .mocked_env_var("JAEGER_HOST", "http://example.com")
                     .mocked_env_var("JAEGER_USERNAME", "username")
                     .mocked_env_var("JAEGER_PASSWORD", "pass")
+                    .mocked_env_var("REDIS_PASSWORD", "pass")
                     .mocked_env_var("ZIPKIN_HOST", "http://example.com")
                     .mocked_env_var("TEST_CONFIG_ENDPOINT", "http://example.com")
                     .mocked_env_var("TEST_CONFIG_COLLECTOR_ENDPOINT", "http://example.com")
                     .mocked_env_var("PARSER_MAX_RECURSION", "500")
                     .mocked_env_var("AWS_ROLE_ARN", "arn:aws:iam::12345678:role/SomeRole")
+                    .mocked_env_var("INVALIDATION_SHARED_KEY", "invalidation")
                     .build()
                     .unwrap();
 
