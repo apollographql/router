@@ -358,8 +358,7 @@ impl RedisCacheStorage {
                     if let Err(err) = client_config
                         .server
                         .set_cluster_discovery_policy(ClusterDiscoveryPolicy::ConfigEndpoint) {
-                        tracing::error!("Redis running in a cluster but unable to set cluster-discovery-policy: {err}")
-
+                        tracing::error!("Redis running in a cluster but unable to set cluster-discovery-policy: {err}");
                     }
                 }
             })
@@ -1020,6 +1019,10 @@ mod test {
     ///
     /// This test inserts data that is guaranteed to hash to different slots to verify that
     /// `RedisCacheStorage` is well-behaved when operating against a cluster.
+    #[cfg(all(
+        test,
+        any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+    ))]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_redis_storage_avoids_common_cross_slot_errors() -> Result<(), BoxError> {
         let config_json = json!({
@@ -1029,14 +1032,7 @@ mod test {
             "ttl": "60s"
         });
         let config = serde_json::from_value(config_json).unwrap();
-        let storage = super::RedisCacheStorage::new(config, "test_redis_cluster").await;
-
-        // only error for lack of storage when running in CI. otherwise, skip this test.
-        #[cfg(not(all(feature = "ci", all(target_arch = "x86_64", target_os = "linux"))))]
-        if storage.is_err() {
-            return Ok(());
-        }
-        let storage = storage?;
+        let storage = super::RedisCacheStorage::new(config, "test_redis_cluster").await?;
 
         // insert values which reflect different cluster slots
         let mut data = HashMap::default();

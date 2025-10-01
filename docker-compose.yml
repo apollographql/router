@@ -112,6 +112,14 @@ services:
         echo 'waiting 30s for cluster'
         sleep 30
 
+        redis-cli -h redis-cluster-7000 -p 7000 FLUSHALL &
+        redis-cli -h redis-cluster-7001 -p 7001 FLUSHALL &
+        redis-cli -h redis-cluster-7002 -p 7002 FLUSHALL &
+        redis-cli -h redis-cluster-7003 -p 7003 FLUSHALL & 
+        redis-cli -h redis-cluster-7004 -p 7004 FLUSHALL & 
+        redis-cli -h redis-cluster-7005 -p 7005 FLUSHALL &
+        wait
+
         redis-cli -h redis-cluster-7000 -p 7000 CLUSTER RESET HARD &
         redis-cli -h redis-cluster-7001 -p 7001 CLUSTER RESET HARD &
         redis-cli -h redis-cluster-7002 -p 7002 CLUSTER RESET HARD &
