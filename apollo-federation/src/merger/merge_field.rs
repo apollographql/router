@@ -49,8 +49,6 @@ use crate::schema::validators::from_context::parse_context;
 use crate::utils::human_readable::human_readable_subgraph_names;
 use crate::utils::human_readable::human_readable_types;
 
-pub(crate) const PLACEHOLDER_TYPE_NAME: Name = name!("PLACEHOLDER");
-
 #[derive(Debug, Clone)]
 struct SubgraphWithIndex {
     subgraph: String,
@@ -117,6 +115,8 @@ impl Merger {
         > = Default::default();
         let mut fields_to_add: HashMap<usize, HashSet<ObjectOrInterfaceFieldDefinitionPosition>> =
             Default::default();
+        let mut field_types: HashMap<ObjectOrInterfaceFieldDefinitionPosition, Type> =
+            Default::default();
         let mut extra_sources: Sources<ObjectOrInterfaceFieldDefinitionPosition> =
             Default::default();
 
@@ -135,6 +135,8 @@ impl Merger {
             }
 
             for field in obj_or_itf.fields(subgraph.schema().schema())? {
+                let field_node = field.get(subgraph.schema().schema())?;
+                field_types.insert(field.clone(), field_node.ty.clone());
                 fields_to_add.entry(idx).or_default().insert(field);
             }
 
@@ -161,14 +163,16 @@ impl Merger {
                 if !is_merged_field {
                     continue;
                 }
-                if !added.contains_key(&field) {
+                if !added.contains_key(&field)
+                    && let Some(ty) = field_types.get(&field)
+                {
                     field.insert(
                         &mut self.merged,
                         Component::new(FieldDefinition {
                             description: None,
                             name: field.field_name().clone(),
                             arguments: vec![],
-                            ty: Type::Named(PLACEHOLDER_TYPE_NAME),
+                            ty: ty.clone(),
                             directives: Default::default(),
                         }),
                     )?;
