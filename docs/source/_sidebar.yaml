@@ -53,7 +53,7 @@ items:
             href: "./security/demand-control"
       - label: "Observability"
         children:
-          - label: "GraphOS Native Metrics and Insights"
+          - label: "Studio Insights"
             children:
             - label: "Overview"
               href: "./observability/graphos"
