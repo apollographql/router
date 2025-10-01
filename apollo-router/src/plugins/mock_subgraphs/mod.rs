@@ -233,10 +233,57 @@ struct MockResolver<'a> {
 impl<'a> RootResolver<'a> {
     fn find_entities(&self, representation: &JsonMap) -> Option<&'a JsonMap> {
         self.entities.iter().find(|entity| {
-            representation
-                .iter()
-                .all(|(k, v)| entity.get(k).is_some_and(|value| value == v))
+            representation.iter().all(|(k, v)| {
+                entity
+                    .get(k)
+                    .is_some_and(|value| Self::is_a_match(value, v))
+            })
         })
+    }
+
+    /// Tests whether an entity and its representation are a match with support for complex
+    /// keys
+    ///
+    /// Supports:
+    ///  * simple scalars: @key(fields: "id"), where id is an ID
+    ///  * complex scalars: @key(fields: "productId userId"), where both are IDs
+    ///  * nested objects in complex keys: @key(fields: "id items { id name }"), where items is an
+    ///    array of a type that nested fields
+    fn is_a_match(entity_value: &JsonValue, representation_value: &JsonValue) -> bool {
+        match (entity_value, representation_value) {
+            // strings, numbers, bools, and null are directly comparable via straightforward
+            // equality
+            (JsonValue::String(a), JsonValue::String(b)) => a == b,
+            (JsonValue::Number(a), JsonValue::Number(b)) => a == b,
+            (JsonValue::Bool(a), JsonValue::Bool(b)) => a == b,
+            (JsonValue::Null, JsonValue::Null) => true,
+
+            // anything with nested fields needs to recurse down until we have something directly
+            // comparable
+            (JsonValue::Object(entity_obj), JsonValue::Object(repr_obj)) => {
+                repr_obj.iter().all(|(k, v)| {
+                    entity_obj
+                        .get(k)
+                        .is_some_and(|entity_field_value| Self::is_a_match(entity_field_value, v))
+                })
+            }
+
+            // arrays might be filled with values that have nested fields
+            (JsonValue::Array(a), JsonValue::Array(b)) => {
+                // early return arrays of different lengths
+                a.len() == b.len()
+                    // for all A values
+                    && a.iter().all(|av|{
+                    // and any B value, if there's a match, return true
+                    b.iter().any(|bv| {
+                        Self::is_a_match(av, bv)
+                    })
+                })
+            }
+
+            // no match found
+            _ => false,
+        }
     }
 }
 
@@ -373,5 +420,310 @@ impl<'de> serde::Deserialize<'de> for HeaderMap {
             );
         }
         Ok(Self(map))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json_bytes::json;
+
+    use super::*;
+
+    #[test]
+    fn test_is_a_match_primitives() {
+        assert!(RootResolver::is_a_match(&json!("hello"), &json!("hello")));
+        assert!(!RootResolver::is_a_match(&json!("hello"), &json!("world")));
+        assert!(RootResolver::is_a_match(&json!(42), &json!(42)));
+        assert!(!RootResolver::is_a_match(&json!(42), &json!(43)));
+        assert!(RootResolver::is_a_match(&json!(true), &json!(true)));
+        assert!(!RootResolver::is_a_match(&json!(true), &json!(false)));
+        assert!(RootResolver::is_a_match(&json!(null), &json!(null)));
+    }
+
+    #[test]
+    fn test_is_a_match_type_mismatches() {
+        assert!(!RootResolver::is_a_match(&json!("42"), &json!(42)));
+        assert!(!RootResolver::is_a_match(&json!(true), &json!(1)));
+        assert!(!RootResolver::is_a_match(&json!(null), &json!("")));
+    }
+
+    #[test]
+    fn test_is_a_match_simple_objects() {
+        assert!(RootResolver::is_a_match(
+            &json!({"id": "1", "name": "Test"}),
+            &json!({"id": "1", "name": "Test"})
+        ));
+
+        // entity has extra fields but should match because it has all of the target fields
+        // of the representation (what the router thinks identifies the entity)
+        assert!(RootResolver::is_a_match(
+            &json!({"id": "1", "name": "Test", "extra": "data"}),
+            &json!({"id": "1", "name": "Test"})
+        ));
+
+        // the representation has more fields than the entity, but since the representation
+        // is what the router thinks identifies the entity, this won't count as a match
+        assert!(!RootResolver::is_a_match(
+            &json!({"id": "1"}),
+            &json!({"id": "1", "name": "Test"})
+        ));
+    }
+
+    #[test]
+    fn test_is_a_match_nested_objects() {
+        assert!(RootResolver::is_a_match(
+            &json!({
+                "id": "1",
+                "address": {
+                    "street": "Main St",
+                    "city": "Boston"
+                }
+            }),
+            &json!({
+                "id": "1",
+                "address": {
+                    "street": "Main St",
+                    "city": "Boston"
+                }
+            })
+        ));
+
+        // entities with extra fields should match
+        assert!(RootResolver::is_a_match(
+            &json!({
+                "id": "1",
+                "address": {
+                    "street": "Main St",
+                    "city": "Boston",
+                    "zip": "02101"
+                }
+            }),
+            &json!({
+                "id": "1",
+                "address": {
+                    "street": "Main St",
+                    "city": "Boston"
+                }
+            })
+        ));
+
+        // representations with extra fields shouldn't match; it's what the router thinks
+        // identifies the entity
+        assert!(!RootResolver::is_a_match(
+            &json!({
+                "id": "1",
+                "address": {
+                    "street": "Main St",
+                    "city": "Boston",
+                    "zip": "02101"
+                }
+            }),
+            &json!({
+                "id": "1",
+                "address": {
+                    "street": "Main St",
+                    "city": "Boston",
+                    "state": "of mind"
+                }
+            })
+        ));
+    }
+
+    #[test]
+    fn test_is_a_match_arrays_with_scalars() {
+        assert!(RootResolver::is_a_match(
+            &json!(["a", "b", "c"]),
+            &json!(["a", "b", "c"])
+        ));
+        assert!(!RootResolver::is_a_match(
+            &json!(["a", "b", "c"]),
+            &json!(["a", "b", "d"])
+        ));
+        // different lengths
+        assert!(!RootResolver::is_a_match(
+            &json!(["a", "b", "c"]),
+            &json!(["a", "b"])
+        ));
+        // order doesn't matter for what identifies an entity
+        assert!(RootResolver::is_a_match(
+            &json!(["a", "b", "c"]),
+            &json!(["a", "c", "b"])
+        ));
+    }
+
+    #[test]
+    fn test_is_a_match_arrays_with_objects() {
+        assert!(RootResolver::is_a_match(
+            &json!([
+                {"id": "1", "name": "Item1"},
+                {"id": "2", "name": "Item2"}
+            ]),
+            &json!([
+                {"id": "1", "name": "Item1"},
+                {"id": "2", "name": "Item2"}
+            ])
+        ));
+        // extra fields on an entity should match; the representation must match as the
+        // identifier
+        assert!(RootResolver::is_a_match(
+            &json!([
+                {"id": "1", "name": "Item1", "price": 10},
+                {"id": "2", "name": "Item2", "price": 20}
+            ]),
+            &json!([
+                {"id": "1", "name": "Item1"},
+                {"id": "2", "name": "Item2"}
+            ])
+        ));
+        assert!(!RootResolver::is_a_match(
+            &json!([
+                {"id": "1", "name": "Item1"},
+                {"id": "2", "name": "Wrong"}
+            ]),
+            &json!([
+                {"id": "1", "name": "Item1"},
+                {"id": "2", "name": "Item2"}
+            ])
+        ));
+    }
+
+    #[test]
+    fn test_is_a_match_complex_nested_structures() {
+        // complex key scenario: nested objects within arrays should match, even when the
+        // entity has more keys than the representation
+        assert!(RootResolver::is_a_match(
+            &json!({
+                "id": "1",
+                "items": [
+                    {
+                        "id": "i1",
+                        "name": "Item",
+                        "metadata": {
+                            "category": "books",
+                            "inStock": true
+                        }
+                    }
+                ]
+            }),
+            &json!({
+                "id": "1",
+                "items": [
+                    {
+                        "id": "i1",
+                        "name": "Item",
+                        "metadata": {
+                            "category": "books"
+                        }
+                    }
+                ]
+            })
+        ));
+    }
+
+    #[test]
+    fn test_find_entities_simple_match() {
+        let entities = vec![
+            json!({"__typename": "Product", "id": "1", "name": "Widget"})
+                .as_object()
+                .unwrap()
+                .clone(),
+            json!({"__typename": "Product", "id": "2", "name": "Gadget"})
+                .as_object()
+                .unwrap()
+                .clone(),
+        ];
+
+        let resolver = RootResolver {
+            root_mocks: &JsonMap::new(),
+            entities: &entities,
+        };
+
+        // find first entity
+        let repr_value = json!({"__typename": "Product", "id": "1"});
+        let repr = repr_value.as_object().unwrap();
+        let result = resolver.find_entities(repr);
+        assert_eq!(result.unwrap().get("name").unwrap(), "Widget");
+
+        // find second entity
+        let repr_value = json!({"__typename": "Product", "id": "2"});
+        let repr = repr_value.as_object().unwrap();
+        let result = resolver.find_entities(repr);
+        assert_eq!(result.unwrap().get("name").unwrap(), "Gadget");
+
+        // no match for a product that doesn't exist
+        let repr_value = json!({"__typename": "Product", "id": "3"});
+        let repr = repr_value.as_object().unwrap();
+        let result = resolver.find_entities(repr);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_find_entities_with_extra_fields_in_storage() {
+        // entity has more fields than representation, but they're non-identifying
+        let entities = vec![
+            json!({
+                "__typename": "Status",
+                "id": "1",
+                "items": [{"id": "i1", "name": "Item"}],
+                "statusDetails": "available",
+                "internalData": "secret"
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
+        ];
+
+        let resolver = RootResolver {
+            root_mocks: &JsonMap::new(),
+            entities: &entities,
+        };
+
+        // representation has only the identifying, key fields
+        let repr_value = json!({
+            "__typename": "Status",
+            "id": "1",
+            "items": [{"id": "i1", "name": "Item"}]
+        });
+        let repr = repr_value.as_object().unwrap();
+        let result = resolver.find_entities(repr);
+        assert_eq!(result.unwrap().get("statusDetails").unwrap(), "available");
+    }
+
+    #[test]
+    fn test_find_entities_complex_key_with_arrays() {
+        // entity with extra fields in its `items` array--non-identifying fields
+        let entities = vec![
+            json!({
+                "__typename": "Stock",
+                "id": "1",
+                "items": [
+                    {"id": "i1", "name": "Item1", "price": 10.99},
+                    {"id": "i2", "name": "Item2", "price": 20.99}
+                ],
+                "stockDetails": "in stock"
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
+        ];
+
+        let resolver = RootResolver {
+            root_mocks: &JsonMap::new(),
+            entities: &entities,
+        };
+
+        // representation without extra fields in array items
+        let repr_value = json!({
+            "__typename": "Stock",
+            "id": "1",
+            "items": [
+                {"id": "i1", "name": "Item1"},
+                {"id": "i2", "name": "Item2"}
+            ]
+        });
+        let repr = repr_value.as_object().unwrap();
+        let result = resolver.find_entities(repr);
+
+        assert_eq!(result.unwrap().get("stockDetails").unwrap(), "in stock");
     }
 }
