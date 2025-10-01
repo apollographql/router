@@ -7,32 +7,24 @@ context:
 ---
 
 This guide walks through configuring the Apollo Router to send telemetry data to Datadog via the OpenTelemetry Collector.
+
 For an overview of all available connection methods, see [Connecting to Datadog](/graphos/routing/observability/router-telemetry-otel/apm-guides/datadog/connecting-to-datadog).
-
-For general metrics and tracing configuration, refer to [Router Metrics Configuration](/router/configuration/telemetry/exporters/metrics/overview) and [Router Tracing Configuration](/router/configuration/telemetry/exporters/tracing/overview).
-
-For router instrumentation with Datadog-specific attributes, see the [Router Instrumentation guide](/graphos/routing/observability/router-telemetry-otel/apm-guides/datadog/router-instrumentation).
-
 
 ## Prerequisites
 
 - [Apollo Router](/graphos/routing/self-hosted) deployed
-- [OpenTelemetry collector](https://opentelemetry.io/docs/collector/installation/) installed 
+- [OpenTelemetry collector](https://opentelemetry.io/docs/collector/installation/) installed
 - [Datadog account](https://docs.datadoghq.com/account_management/api-app-keys/) with an API key
 - [OpenTelemetry integration installed in Datadog](https://app.datadoghq.com/integrations?search=otel&integrationId=otel)
 
-<Note>
 
-If you're using the [Apollo Runtime container](https://github.com/apollographql/apollo-runtime), see the [Datadog example configuration](https://github.com/apollographql/apollo-runtime/tree/main/examples/datadog/otel-collector) for ready-to-use configuration that implements this guide.
+## Basic configuration
 
-</Note>
+Copy these configurations to get started. Before starting the collector, you'll need to set a `DD_API_KEY` environment variable to your Datadog API key.
 
-## Configure the router
+### Router configuration
 
-Configure your router to send telemetry to the OpenTelemetry Collector using OTLP.
-
-
-Add telemetry exporters to your existing `router.yaml`. This configuration follows [Datadog's unified service tagging](https://docs.datadoghq.com/getting_started/tagging/unified_service_tagging/) approach:
+Add telemetry exporters to your `router.yaml`:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -62,38 +54,9 @@ telemetry:
           deployment.environment: "dev"
 ```
 
-## Configure the OpenTelemetry collector
+### OpenTelemetry Collector configuration
 
-The collector uses a pipeline architecture with four key components:
-- **Receivers**: Collect telemetry from sources (in this case, the router via OTLP)
-- **Processors**: Transform and modify data (batching, sampling, filtering)
-- **Connectors**: Generate new telemetry from existing data (the Datadog connector creates trace metrics)
-- **Exporters**: Send data to backends (Datadog in this configuration)
-
-```mermaid
-flowchart LR
-    Router[Apollo Router] -->|OTLP| OTLP[OTLP Receiver]
-
-    subgraph Collector[OpenTelemetry Collector]
-        %% Traces Pipeline
-        OTLP -->|Traces| BatchT[Batch Processor]
-        BatchT --> Connector[Datadog Connector]
-        Connector --> DatadogExp[Datadog Exporter]
-
-        %% Metrics Pipeline
-        OTLP -->|Metrics| BatchM[Batch Processor]
-        Connector -->|Trace Metrics| BatchM
-        BatchM --> DatadogExp
-    end
-
-    DatadogExp --> Datadog[Datadog APM]
-
-```
-
-For detailed configuration options, see [configuration basics](https://opentelemetry.io/docs/collector/configuration/) and [Datadog's collector exporter documentation](https://docs.datadoghq.com/opentelemetry/setup/collector_exporter/).
-
-
-Create `otel-collector.yaml` with this minimal configuration. Before starting the collector, you'll need to set a `DD_API_KEY` environment variable to your Datadog API key:
+Create `otel-collector.yaml`:
 
 ```yaml title="otel-collector.yaml"
 receivers:
@@ -145,17 +108,64 @@ With both the router and OpenTelemetry collector running, verify that telemetry 
    - **Service**: Go to [APM > Services](https://app.datadoghq.com/apm/services) and look for the `apollo-router` service
    - **Metrics**: Go to [Metrics > Explorer](https://app.datadoghq.com/metric/explorer) and search for `http.server.request.duration` filtered by `service:apollo-router`
 
-## Enhance your configuration
+If you don't see data in Datadog, see the [Troubleshooting](#troubleshooting) section below.
 
-After you verify the basic setup, you can enhance your configuration with additional features.
+## Understanding the configuration
 
-### Router enhancements
+### Router configuration
 
-Add [router instrumentation](/graphos/routing/observability/router-telemetry-otel/apm-guides/datadog/router-instrumentation) for Datadog-optimized span attributes, error tracking, and better APM organization.
+The router sends telemetry to the collector using OTLP (OpenTelemetry Protocol). Key settings:
 
-### Collector enhancements
+**Metrics configuration:**
+- `endpoint: 0.0.0.0:4317` - Collector's OTLP gRPC endpoint
+- `temporality: delta` - Required for Datadog (sends the change between measurements rather than cumulative totals)
 
-Enhance the collector pipeline with advanced processing capabilities. This configuration is designed for non-containerized environments - see [Datadog's OpenTelemetry integrations](https://docs.datadoghq.com/opentelemetry/integrations/) for Kubernetes and container examples:
+**Tracing configuration:**
+- `endpoint: 0.0.0.0:4317` - Same collector endpoint
+- `sampler: 1.0` - Sends 100% of traces to the collector for intelligent sampling
+
+**Service identification:**
+- `service.name` and `deployment.environment` - Follow [Datadog's unified service tagging](https://docs.datadoghq.com/getting_started/tagging/unified_service_tagging/) for consistent identification across your infrastructure
+
+For more details, see [Router Metrics Configuration](/router/configuration/telemetry/exporters/metrics/overview) and [Router Tracing Configuration](/router/configuration/telemetry/exporters/tracing/overview).
+
+### Collector architecture
+
+The collector uses a pipeline architecture with four key components:
+- **Receivers**: Collect telemetry from sources (in this case, the router via OTLP)
+- **Processors**: Transform and modify data (batching, sampling, filtering)
+- **Connectors**: Generate new telemetry from existing data (the Datadog connector creates trace metrics)
+- **Exporters**: Send data to backends (Datadog in this configuration)
+
+```mermaid
+flowchart LR
+    Router[Apollo Router] -->|OTLP| OTLP[OTLP Receiver]
+
+    subgraph Collector[OpenTelemetry Collector]
+        %% Traces Pipeline
+        OTLP -->|Traces| BatchT[Batch Processor]
+        BatchT --> Connector[Datadog Connector]
+        Connector --> DatadogExp[Datadog Exporter]
+
+        %% Metrics Pipeline
+        OTLP -->|Metrics| BatchM[Batch Processor]
+        Connector -->|Trace Metrics| BatchM
+        BatchM --> DatadogExp
+    end
+
+    DatadogExp --> Datadog[Datadog APM]
+
+```
+
+For detailed configuration options, see [configuration basics](https://opentelemetry.io/docs/collector/configuration/) and [Datadog's collector exporter documentation](https://docs.datadoghq.com/opentelemetry/setup/collector_exporter/).
+
+## Enhanced configuration
+
+After you verify the basic setup, you can enhance your configuration with tail sampling, host metrics collection, and collector health monitoring.
+
+### Complete enhanced collector configuration
+
+This configuration is designed for non-containerized environments - see [Datadog's OpenTelemetry integrations](https://docs.datadoghq.com/opentelemetry/integrations/) for Kubernetes and container examples:
 
 ```yaml title="otel-collector.yaml"
 receivers:
@@ -255,19 +265,13 @@ service:
       exporters: [datadog/exporter]
 ```
 
-#### Host metrics collection
+## Understanding the enhanced configuration
 
-Add host metrics to monitor your infrastructure alongside router telemetry. See [Datadog's host metrics guide](https://docs.datadoghq.com/opentelemetry/integrations/host_metrics/?tab=host) for detailed configuration including CPU, memory, disk, network, and filesystem metrics.
+The enhanced configuration adds three key capabilities:
 
-For additional examples across different environments (Kubernetes, Docker, host metrics, etc.), see the [Datadog exporter example configurations](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/exporter/datadogexporter/examples).
+### Intelligent sampling
 
-#### Container and orchestration metrics
-
-Extend monitoring to containerized environments with Docker and Kubernetes metrics. See [Datadog's Docker metrics guide](https://docs.datadoghq.com/opentelemetry/integrations/docker_metrics/?tab=host) for container resource usage, networking, and orchestration data alongside your router telemetry.
-
-#### Intelligent sampling
-
-Add tail sampling to keep all errors and slow requests while sampling normal traffic:
+Tail sampling keeps all errors and slow requests while sampling normal traffic:
 
 ```mermaid
 flowchart TD
@@ -336,9 +340,15 @@ service:
 
 </ExpansionPanel>
 
-#### Collector health metrics
+### Host metrics collection
 
-Monitor the health and performance of the OpenTelemetry Collector itself. See [Datadog's collector health metrics guide](https://docs.datadoghq.com/opentelemetry/integrations/collector_health_metrics/) for configuration to track collector throughput, dropped data, and resource usage. For detailed information about collector internal telemetry, see the [OpenTelemetry internal telemetry documentation](https://opentelemetry.io/docs/collector/internal-telemetry/).
+The `hostmetrics` receiver collects system metrics (CPU, memory, disk, network, filesystem) alongside router telemetry. See [Datadog's host metrics guide](https://docs.datadoghq.com/opentelemetry/integrations/host_metrics/?tab=host) for detailed configuration.
+
+For additional examples across different environments (Kubernetes, Docker, etc.), see the [Datadog exporter example configurations](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/exporter/datadogexporter/examples).
+
+### Collector health metrics
+
+The `prometheus/internal` receiver monitors the collector's own health and performance. See [Datadog's collector health metrics guide](https://docs.datadoghq.com/opentelemetry/integrations/collector_health_metrics/) for tracking collector throughput, dropped data, and resource usage. For detailed information, see the [OpenTelemetry internal telemetry documentation](https://opentelemetry.io/docs/collector/internal-telemetry/).
 
 ## Troubleshooting
 
@@ -351,27 +361,29 @@ Monitor the health and performance of the OpenTelemetry Collector itself. See [D
 
 For comprehensive troubleshooting guidance, see the [OpenTelemetry Collector troubleshooting documentation](https://opentelemetry.io/docs/collector/troubleshooting/).
 
-## Learn more
+## Next steps
 
-### OpenTelemetry collector resources
+### **[Configure router instrumentation](/graphos/routing/observability/router-telemetry-otel/apm-guides/datadog/router-instrumentation)**
+- Add Datadog-specific span attributes, operation names, resource names, and error tracking to optimize APM views and dashboards
+### [Configure Datadog dashboards](/graphos/routing/observability/apm-guides/datadog/observing-and-monitoring/dashboard-template)
+- Add our out of the box dashboard template to your Datadog account for router monitoring
+
+
+#### Learn more
+
+##### OpenTelemetry collector resources
 
 <ExpansionPanel title="Additional collector documentation and resources">
 
-- [Quick start guide](https://opentelemetry.io/docs/collector/quick-start/) - Get started with the collector
-- [Configuration basics](https://opentelemetry.io/docs/collector/configuration/) - Deep dive into collector configuration
-- [Deployment patterns](https://opentelemetry.io/docs/collector/deployment/agent/) - Agent vs Gateway deployment models
-- [Transforming telemetry](https://opentelemetry.io/docs/collector/transforming-telemetry/) - Processing and enriching data
-- [Architecture overview](https://opentelemetry.io/docs/collector/architecture/) - Understanding collector internals
-- [Component registry](https://opentelemetry.io/ecosystem/registry/?language=collector) - Available receivers, processors, and exporters
-- [Collector health checks](https://opentelemetry.io/docs/collector/management/#health-check) - HTTP health check endpoints
-- [zPages diagnostic pages](https://opentelemetry.io/docs/collector/management/#zpages) - Internal debugging and metrics pages
-- [Collector internal telemetry](https://opentelemetry.io/docs/collector/internal-telemetry/) - Self-monitoring configuration
+    - [Quick start guide](https://opentelemetry.io/docs/collector/quick-start/) - Get started with the collector
+    - [Configuration basics](https://opentelemetry.io/docs/collector/configuration/) - Deep dive into collector configuration
+    - [Deployment patterns](https://opentelemetry.io/docs/collector/deployment/agent/) - Agent vs Gateway deployment models
+    - [Transforming telemetry](https://opentelemetry.io/docs/collector/transforming-telemetry/) - Processing and enriching data
+    - [advanced sampling strategies](https://opentelemetry.io/docs/concepts/sampling/) - Expand your tail sampling
+    - [Architecture overview](https://opentelemetry.io/docs/collector/architecture/) - Understanding collector internals
+    - [Component registry](https://opentelemetry.io/ecosystem/registry/?language=collector) - Available receivers, processors, and exporters
+    - [Collector health checks](https://opentelemetry.io/docs/collector/management/#health-check) - HTTP health check endpoints
+    - [zPages diagnostic pages](https://opentelemetry.io/docs/collector/management/#zpages) - Internal debugging and metrics pages
+    - [Collector internal telemetry](https://opentelemetry.io/docs/collector/internal-telemetry/) - Self-monitoring configuration
 
 </ExpansionPanel>
-
-### Next steps
-
-- [Configure router instrumentation](/graphos/routing/observability/router-telemetry-otel/apm-guides/datadog/router-instrumentation) for Datadog-optimized telemetry
-- [Configure Datadog dashboards](/graphos/routing/observability/apm-guides/datadog/observing-and-monitoring/dashboard-template) for router monitoring
-- Learn about [advanced sampling strategies](https://opentelemetry.io/docs/concepts/sampling/)
-- Explore [collector processors](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/processor) for data transformation
