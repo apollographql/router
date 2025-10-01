@@ -1201,11 +1201,17 @@ impl Merger {
                         // more likely to be what user expects.
                         let mut new_field = itf_field.as_ref().clone();
                         new_field.directives.retain(|d| {
-                            !self
-                                .join_spec_definition
+                            self.join_spec_definition
                                 .is_spec_directive_name(&self.merged, &d.name)
-                                .is_ok_and(|b| b)
+                                .is_ok_and(|from_join_spec| !from_join_spec)
                         });
+                        for arg in new_field.arguments.iter_mut() {
+                            arg.make_mut().directives.retain(|d| {
+                                self.join_spec_definition
+                                    .is_spec_directive_name(&self.merged, &d.name)
+                                    .is_ok_and(|from_join_spec| !from_join_spec)
+                            });
+                        }
                         // We add a special @join__field for those added field with no `graph` target. This
                         // clarify to the later extraction process that this particular field doesn't come
                         // from any particular subgraph.
