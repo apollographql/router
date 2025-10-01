@@ -1101,11 +1101,11 @@ fn default_timeout() -> Duration {
     Duration::from_millis(500)
 }
 
-fn default_required_to_start() -> bool {
+pub(crate) fn default_required_to_start() -> bool {
     false
 }
 
-fn default_pool_size() -> u32 {
+pub(crate) fn default_pool_size() -> u32 {
     1
 }
 

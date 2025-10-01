@@ -6,7 +6,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/url_properties
 [
     Message {
         code: InvalidUrlProperty,
-        message: "In `@source(name: \"v3\")`, the `queryParams` argument is invalid: `*.bad` must start with one of $config, $context, $request, $env",
+        message: "In `@source(name: \"v3\")`, the `queryParams` argument is invalid: `bad` must start with one of $config, $context, $request, $env",
         locations: [
             19:59..19:62,
         ],
@@ -27,7 +27,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/url_properties
     },
     Message {
         code: InvalidUrlProperty,
-        message: "In `@connect` on `Query.resources`, the `queryParams` argument is invalid: `*.bad` must start with one of $args, $config, $context, $request, $env",
+        message: "In `@connect` on `Query.resources`, the `queryParams` argument is invalid: `bad` must start with one of $args, $config, $context, $request, $env",
         locations: [
             47:39..47:42,
         ],
