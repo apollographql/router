@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fmt::Display;
 
 use apollo_compiler::Name;
@@ -9,7 +8,6 @@ use apollo_compiler::ast::Value;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
 
-use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::error::Locations;
@@ -77,25 +75,18 @@ impl Merger {
         T: HasArguments + Display,
         <T as HasArguments>::ArgumentPosition: Display,
     {
-        let mut arg_names: IndexSet<Name> = IndexSet::new();
-        let mut arg_types: HashMap<Name, Node<Type>> = HashMap::new();
+        let mut arg_types: IndexMap<Name, Node<Type>> = Default::default();
         for (idx, source) in sources.iter() {
             let Some(pos) = source else {
                 continue;
             };
             let schema = self.subgraphs[*idx].schema();
             for arg in pos.get_arguments(schema)? {
-                arg_names.insert(arg.name.clone());
                 arg_types.insert(arg.name.clone(), arg.ty.clone());
             }
         }
 
-        for arg_name in &arg_names {
-            let Some(arg_type) = arg_types.get(arg_name) else {
-                bail!(
-                    "Argument \"{arg_name}\" should have a type since it is used in at least one subgraph"
-                );
-            };
+        for (arg_name, arg_type) in &arg_types {
             // We add the argument unconditionally even if we're going to remove it later on.
             // This enables consistent mismatch/hint reporting.
             dest.insert_argument(
@@ -239,7 +230,7 @@ impl Merger {
             }
         }
 
-        Ok(arg_names)
+        Ok(arg_types.into_keys().collect())
     }
 
     pub(in crate::merger) fn merge_argument<T>(
