@@ -62,8 +62,8 @@ impl<'a> Builder<'a> {
     }
 
     fn setup_public_metrics(&mut self) -> Result<(), BoxError> {
-        if self.metrics_config_changed::<metrics::prometheus::Config>()
-            || self.metrics_config_changed::<otlp::Config>()
+        if self.is_metrics_config_changed::<metrics::prometheus::Config>()
+            || self.is_metrics_config_changed::<otlp::Config>()
         {
             ::tracing::debug!("configuring metrics");
             let mut builder = MetricsBuilder::new(self.config);
@@ -96,10 +96,10 @@ impl<'a> Builder<'a> {
     }
 
     fn setup_public_tracing(&mut self) -> Result<(), BoxError> {
-        if self.tracing_config_changed::<otlp::Config>()
-            || self.tracing_config_changed::<datadog::Config>()
-            || self.tracing_config_changed::<zipkin::Config>()
-            || self.tracing_config_changed::<apollo::Config>()
+        if self.is_tracing_config_changed::<otlp::Config>()
+            || self.is_tracing_config_changed::<datadog::Config>()
+            || self.is_tracing_config_changed::<zipkin::Config>()
+            || self.is_tracing_config_changed::<apollo::Config>()
         {
             ::tracing::debug!("configuring tracing");
             let mut builder = TracingBuilder::new(self.config);
@@ -127,7 +127,7 @@ impl<'a> Builder<'a> {
 
     /// Detects if metrics config has changed. This can be used for any implementation of `MetricsConfigurator`
     /// because they know how to get the config from the overall telemetry config.
-    fn metrics_config_changed<T: MetricsConfigurator + PartialEq>(&self) -> bool {
+    fn is_metrics_config_changed<T: MetricsConfigurator + PartialEq>(&self) -> bool {
         if let Some(previous_config) = self.previous_config {
             T::config(previous_config) != T::config(self.config)
                 || previous_config.exporters.metrics.common != self.config.exporters.metrics.common
@@ -138,7 +138,7 @@ impl<'a> Builder<'a> {
 
     /// Detects if tracing config has changed. This can be used for any implementation of `TracingConfigurator`
     /// because they know how to get the config from the overall telemetry config.
-    fn tracing_config_changed<T: TracingConfigurator + PartialEq>(&self) -> bool {
+    fn is_tracing_config_changed<T: TracingConfigurator + PartialEq>(&self) -> bool {
         if let Some(previous_config) = self.previous_config {
             T::config(previous_config) != T::config(self.config)
                 || previous_config.exporters.tracing.common != self.config.exporters.tracing.common
