@@ -151,11 +151,12 @@ impl MetricsConfigurator for Config {
             .with_registry(registry.clone())
             .build()?;
 
-        let view_aggregation = |_i: &Instrument| {
+        let buckets = metrics_config.buckets.clone();
+        let view_aggregation = move |_i: &Instrument| {
             Some(
                 Stream::new() // change to StreamBuilder when we upgrade to v0.30.0
                     .aggregation(Aggregation::ExplicitBucketHistogram {
-                        boundaries: metrics_config.buckets.clone(),
+                        boundaries: buckets.clone(),
                         record_min_max: true,
                     }),
             )
