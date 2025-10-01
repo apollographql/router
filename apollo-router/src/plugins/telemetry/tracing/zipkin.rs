@@ -13,6 +13,7 @@ use crate::plugins::telemetry::config::GenericWith;
 use crate::plugins::telemetry::config::TracingCommon;
 use crate::plugins::telemetry::config_new::spans::Spans;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
+use crate::plugins::telemetry::error_handler::NamedSpanExporter;
 use crate::plugins::telemetry::otel::named_runtime_channel::NamedTokioRuntime;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
@@ -64,8 +65,10 @@ impl TracingConfigurator for Config {
             .with_trace_config(common)
             .init_exporter()?;
 
+        let named_exporter = NamedSpanExporter::new(exporter, "zipkin");
+
         Ok(builder.with_span_processor(
-            BatchSpanProcessor::builder(exporter, NamedTokioRuntime::new("zipkin-tracing"))
+            BatchSpanProcessor::builder(named_exporter, NamedTokioRuntime::new("zipkin-tracing"))
                 .with_batch_config(self.batch_processor.clone().into())
                 .build()
                 .filtered(),

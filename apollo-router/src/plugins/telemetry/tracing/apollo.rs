@@ -9,6 +9,7 @@ use crate::plugins::telemetry::apollo::router_id;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::config_new::spans::Spans;
+use crate::plugins::telemetry::error_handler::NamedSpanExporter;
 use crate::plugins::telemetry::otel::named_runtime_channel::NamedTokioRuntime;
 use crate::plugins::telemetry::span_factory::SpanMode;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
@@ -50,8 +51,9 @@ impl TracingConfigurator for Config {
             .use_legacy_request_span(matches!(spans_config.mode, SpanMode::Deprecated))
             .metrics_reference_mode(self.metrics_reference_mode)
             .build()?;
+        let named_exporter = NamedSpanExporter::new(exporter, "apollo");
         Ok(builder.with_span_processor(
-            BatchSpanProcessor::builder(exporter, NamedTokioRuntime::new("apollo-tracing"))
+            BatchSpanProcessor::builder(named_exporter, NamedTokioRuntime::new("apollo-tracing"))
                 .with_batch_config(self.tracing.batch_processor.clone().into())
                 .build(),
         ))

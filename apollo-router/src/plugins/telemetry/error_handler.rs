@@ -1,9 +1,22 @@
+use std::fmt::Debug;
 use std::time::Duration;
 use std::time::Instant;
 
+use async_trait::async_trait;
 use dashmap::DashMap;
+use futures::future::BoxFuture;
 use once_cell::sync::OnceCell;
 use opentelemetry::metrics::MetricsError;
+use opentelemetry_sdk::export::trace::ExportResult;
+use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::export::trace::SpanExporter;
+use opentelemetry_sdk::metrics::Aggregation;
+use opentelemetry_sdk::metrics::InstrumentKind;
+use opentelemetry_sdk::metrics::data::ResourceMetrics;
+use opentelemetry_sdk::metrics::data::Temporality;
+use opentelemetry_sdk::metrics::exporter::PushMetricsExporter;
+use opentelemetry_sdk::metrics::reader::AggregationSelector;
+use opentelemetry_sdk::metrics::reader::TemporalitySelector;
 
 #[derive(Eq, PartialEq, Hash)]
 enum ErrorType {
@@ -98,6 +111,117 @@ fn handle_error_with_map<T: Into<opentelemetry::global::Error>>(
                 ::tracing::error!(parent: None, "OpenTelemetry error occurred: {:?}", other)
             }
         }
+    }
+}
+
+/// Wrapper that modifies trace export errors to include exporter name
+pub(crate) struct NamedSpanExporter<E> {
+    name: &'static str,
+    inner: E,
+}
+
+impl<E> NamedSpanExporter<E> {
+    pub(crate) fn new(inner: E, name: &'static str) -> Self {
+        Self { name, inner }
+    }
+}
+
+impl<E: SpanExporter> Debug for NamedSpanExporter<E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NamedSpanExporter")
+            .field("name", &self.name)
+            .finish()
+    }
+}
+
+impl<E: SpanExporter> SpanExporter for NamedSpanExporter<E> {
+    fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
+        let name = self.name;
+        let fut = self.inner.export(batch);
+        Box::pin(async move {
+            fut.await.map_err(|err| {
+                let modified = format!("[{} traces] {}", name, err);
+                opentelemetry::trace::TraceError::from(modified)
+            })
+        })
+    }
+
+    fn shutdown(&mut self) {
+        self.inner.shutdown()
+    }
+
+    fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
+        self.inner.set_resource(resource)
+    }
+}
+
+/// Wrapper that modifies metrics export errors to include exporter name
+pub(crate) struct NamedMetricsExporter<E> {
+    name: &'static str,
+    inner: E,
+}
+
+impl<E> NamedMetricsExporter<E> {
+    pub(crate) fn new(inner: E, name: &'static str) -> Self {
+        Self { name, inner }
+    }
+}
+
+impl<E: PushMetricsExporter> Debug for NamedMetricsExporter<E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NamedMetricsExporter")
+            .field("name", &self.name)
+            .finish()
+    }
+}
+
+impl<E: AggregationSelector> AggregationSelector for NamedMetricsExporter<E> {
+    fn aggregation(&self, kind: InstrumentKind) -> Aggregation {
+        self.inner.aggregation(kind)
+    }
+}
+
+impl<E: TemporalitySelector> TemporalitySelector for NamedMetricsExporter<E> {
+    fn temporality(&self, kind: InstrumentKind) -> Temporality {
+        self.inner.temporality(kind)
+    }
+}
+
+fn prefix_metrics_error(name: &'static str, err: MetricsError) -> MetricsError {
+    match err {
+        MetricsError::Other(msg) => MetricsError::Other(format!("[{} metrics] {}", name, msg)),
+        MetricsError::Config(msg) => MetricsError::Config(format!("[{} metrics] {}", name, msg)),
+        MetricsError::ExportErr(inner) => {
+            MetricsError::Other(format!("[{} metrics] {}", name, inner))
+        }
+        // Don't modify instrument configuration errors - not related to export
+        MetricsError::InvalidInstrumentConfiguration(msg) => {
+            MetricsError::InvalidInstrumentConfiguration(msg)
+        }
+        _ => MetricsError::Other(format!("[{} metrics] {}", name, err)),
+    }
+}
+
+#[async_trait]
+impl<E: PushMetricsExporter> PushMetricsExporter for NamedMetricsExporter<E> {
+    async fn export(&self, metrics: &mut ResourceMetrics) -> opentelemetry::metrics::Result<()> {
+        self.inner
+            .export(metrics)
+            .await
+            .map_err(|err| prefix_metrics_error(self.name, err))
+    }
+
+    async fn force_flush(&self) -> opentelemetry::metrics::Result<()> {
+        self.inner
+            .force_flush()
+            .await
+            .map_err(|err| prefix_metrics_error(self.name, err))
+    }
+
+    fn shutdown(&self) -> opentelemetry::metrics::Result<()> {
+        self.inner
+            .shutdown()
+            .map_err(|err| prefix_metrics_error(self.name, err))
     }
 }
 

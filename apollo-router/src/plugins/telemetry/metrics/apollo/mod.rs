@@ -24,6 +24,7 @@ use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::MetricsCommon;
+use crate::plugins::telemetry::error_handler::NamedMetricsExporter;
 use crate::plugins::telemetry::metrics::CustomAggregationSelector;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
@@ -198,12 +199,15 @@ impl Config {
                     .build(),
             ),
         )?;
-        let default_reader = PeriodicReader::builder(exporter, runtime::Tokio)
+        let named_exporter = NamedMetricsExporter::new(exporter, "apollo");
+        let named_realtime_exporter = NamedMetricsExporter::new(realtime_exporter, "apollo");
+
+        let default_reader = PeriodicReader::builder(named_exporter, runtime::Tokio)
             .with_interval(Duration::from_secs(60))
             .with_timeout(batch_config.max_export_timeout)
             .build();
 
-        let realtime_reader = PeriodicReader::builder(realtime_exporter, runtime::Tokio)
+        let realtime_reader = PeriodicReader::builder(named_realtime_exporter, runtime::Tokio)
             .with_interval(batch_config.scheduled_delay)
             .with_timeout(batch_config.max_export_timeout)
             .build();

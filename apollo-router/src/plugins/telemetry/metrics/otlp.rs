@@ -5,6 +5,7 @@ use opentelemetry_sdk::runtime;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::MetricsCommon;
+use crate::plugins::telemetry::error_handler::NamedMetricsExporter;
 use crate::plugins::telemetry::metrics::CustomAggregationSelector;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
@@ -33,8 +34,10 @@ impl MetricsConfigurator for super::super::otlp::Config {
             ),
         )?;
 
+        let named_exporter = NamedMetricsExporter::new(exporter, "otlp");
+
         builder.public_meter_provider_builder = builder.public_meter_provider_builder.with_reader(
-            PeriodicReader::builder(exporter, runtime::Tokio)
+            PeriodicReader::builder(named_exporter, runtime::Tokio)
                 .with_interval(self.batch_processor.scheduled_delay)
                 .with_timeout(self.batch_processor.max_export_timeout)
                 .build(),
