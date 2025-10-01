@@ -16,7 +16,6 @@ use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::Component;
-use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use countmap::CountMap;
@@ -1084,7 +1083,7 @@ impl Merger {
         let dest = SchemaDefinitionPosition {};
 
         self.merge_description(&sources, &dest)?;
-        self.record_applied_directives_to_merge(&sources, &dest);
+        self.record_applied_directives_to_merge(&sources, &dest)?;
         self.add_join_directive_directives(&sources, &dest)?;
         Ok(())
     }
@@ -1710,18 +1709,6 @@ impl Merger {
 
     fn should_use_join_directive_for_url(&self, url: &Url) -> bool {
         self.join_directive_identities.contains(&url.identity)
-    }
-
-    pub(in crate::merger) fn record_applied_directives_to_merge<T>(
-        &mut self,
-        _sources: &Sources<T>,
-        _dest: &T,
-    ) {
-        todo!("Implement record_applied_directives_to_merge")
-    }
-
-    fn is_inaccessible_directive_in_supergraph(&self, _value: &EnumValueDefinition) -> bool {
-        todo!("Implement is_inaccessible_directive_in_supergraph")
     }
 
     /// Like Iterator::any, but for Sources<T> maps - checks if any source satisfies the predicate

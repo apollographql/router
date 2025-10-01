@@ -7392,6 +7392,25 @@ pub(crate) enum DirectiveTargetPosition {
 }
 
 impl DirectiveTargetPosition {
+    pub(crate) fn exists_in(&self, schema: &FederationSchema) -> bool {
+        match self {
+            Self::Schema(_) => true,
+            Self::ScalarType(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::ObjectType(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::ObjectField(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::ObjectFieldArgument(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::InterfaceType(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::InterfaceField(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::InterfaceFieldArgument(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::UnionType(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::EnumType(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::EnumValue(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::InputObjectType(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::InputObjectField(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::DirectiveArgument(pos) => pos.try_get(&schema.schema).is_some(),
+        }
+    }
+
     pub(crate) fn get_all_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -7528,6 +7547,31 @@ impl DirectiveTargetPosition {
             Self::InputObjectField(pos) => pos.insert_directive(schema, Node::new(directive)),
             Self::DirectiveArgument(pos) => pos.insert_directive(schema, Node::new(directive)),
         }
+    }
+}
+
+impl From<DirectiveArgumentDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: DirectiveArgumentDefinitionPosition) -> Self {
+        DirectiveTargetPosition::DirectiveArgument(pos)
+    }
+}
+
+impl From<FieldArgumentDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: FieldArgumentDefinitionPosition) -> Self {
+        match pos {
+            FieldArgumentDefinitionPosition::Object(pos) => {
+                DirectiveTargetPosition::ObjectFieldArgument(pos)
+            }
+            FieldArgumentDefinitionPosition::Interface(pos) => {
+                DirectiveTargetPosition::InterfaceFieldArgument(pos)
+            }
+        }
+    }
+}
+
+impl From<InputObjectFieldDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: InputObjectFieldDefinitionPosition) -> Self {
+        DirectiveTargetPosition::InputObjectField(pos)
     }
 }
 
