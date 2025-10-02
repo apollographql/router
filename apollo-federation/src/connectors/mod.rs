@@ -26,7 +26,7 @@ use std::hash::Hasher;
 use apollo_compiler::Name;
 
 pub mod expand;
-mod header;
+pub mod header;
 mod id;
 mod json_selection;
 mod models;
