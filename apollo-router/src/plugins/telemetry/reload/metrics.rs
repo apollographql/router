@@ -1,3 +1,25 @@
+//! Metrics provider construction
+//!
+//! This module provides tools for building OpenTelemetry meter providers from router configuration.
+//!
+//! ## Purpose
+//!
+//! The [`MetricsBuilder`] constructs meter providers for different telemetry backends:
+//! - **Public metrics** - Prometheus and OTLP exporters for general observability
+//! - **Apollo metrics** - Special meter providers for Apollo Studio reporting
+//!
+//! ## Configurator Pattern
+//!
+//! The [`MetricsConfigurator`] trait allows different metric exporters to contribute to the
+//! builder in a uniform way. Each exporter (Prometheus, OTLP, Apollo) implements this trait
+//! to extract its configuration and add appropriate readers and views to the builder.
+//!
+//! ## Provider Types
+//!
+//! Multiple meter providers are created to serve different purposes:
+//! - `Public` - For standard metrics exposed via Prometheus or sent to OTLP collectors
+//! - `Apollo`/`ApolloRealtime` - For metrics sent to Apollo Studio with specific filtering
+
 use ahash::HashMap;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::MeterProviderBuilder;
@@ -13,12 +35,17 @@ use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::config::MetricsCommon;
 
+/// Trait for metric exporters to contribute to meter provider construction
 pub(crate) trait MetricsConfigurator {
     fn config(conf: &Conf) -> &Self;
     fn is_enabled(&self) -> bool;
     fn configure<'a>(&self, builder: &mut MetricsBuilder<'a>) -> Result<(), BoxError>;
 }
 
+/// Builder for constructing OpenTelemetry meter providers.
+///
+/// Accumulates configuration from multiple exporters and builds the final meter providers
+/// with appropriate readers, views, and resource attributes.
 pub(crate) struct MetricsBuilder<'a> {
     meter_provider_builders:
         HashMap<MeterProviderType, opentelemetry_sdk::metrics::MeterProviderBuilder>,
@@ -121,6 +148,10 @@ impl<'a> MetricsBuilder<'a> {
         self
     }
 
+    /// Gets or creates a meter provider builder for a specific type.
+    ///
+    /// Note: Only Public and OtelDefault providers include resource attributes.
+    /// Apollo providers omit resources as they're not sent to Apollo Studio.
     fn meter_provider(
         &mut self,
         meter_provider_type: MeterProviderType,
@@ -128,13 +159,14 @@ impl<'a> MetricsBuilder<'a> {
         self.meter_provider_builders
             .entry(meter_provider_type)
             .or_insert_with(|| match meter_provider_type {
-                //Only public and default should have the resource attached as we don't send resource into fo apollo
+                // Public and default providers include resource attributes (service name, etc.)
                 MeterProviderType::Public => {
                     SdkMeterProvider::builder().with_resource(self.resource.clone())
                 }
                 MeterProviderType::OtelDefault => {
                     SdkMeterProvider::builder().with_resource(self.resource.clone())
                 }
+                // Apollo providers omit resource attributes - not sent to Apollo Studio
                 MeterProviderType::Apollo => SdkMeterProvider::builder(),
                 MeterProviderType::ApolloRealtime => SdkMeterProvider::builder(),
             })

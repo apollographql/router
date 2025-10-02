@@ -1,3 +1,25 @@
+//! Trace provider construction
+//!
+//! This module provides tools for building OpenTelemetry tracer providers from router configuration.
+//!
+//! ## Purpose
+//!
+//! The [`TracingBuilder`] constructs a tracer provider that handles distributed tracing across
+//! multiple backends (OTLP, Datadog, Zipkin, Apollo). It also configures trace propagation to
+//! ensure trace context is properly propagated across service boundaries.
+//!
+//! ## Configurator Pattern
+//!
+//! The [`TracingConfigurator`] trait allows different trace exporters to contribute span processors
+//! to the builder. Each exporter (OTLP, Datadog, Zipkin, Apollo) implements this trait to add its
+//! specific span processing logic.
+//!
+//! ## Propagation
+//!
+//! The [`create_propagator`] function builds a composite propagator supporting multiple trace
+//! context formats (W3C Trace Context, Jaeger, Zipkin, Datadog, AWS X-Ray). This allows the router
+//! to interoperate with services using different tracing systems.
+
 use opentelemetry::propagation::TextMapCompositePropagator;
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry_sdk::trace::SpanProcessor;
@@ -11,6 +33,7 @@ use crate::plugins::telemetry::config::Tracing;
 use crate::plugins::telemetry::config::TracingCommon;
 use crate::plugins::telemetry::config_new::spans::Spans;
 
+/// Builder for constructing OpenTelemetry tracer providers with multiple exporters
 pub(crate) struct TracingBuilder<'a> {
     common: &'a TracingCommon,
     spans: &'a Spans,
@@ -89,6 +112,7 @@ pub(crate) fn create_propagator(
     TextMapCompositePropagator::new(propagators)
 }
 
+/// Trait for trace exporters to contribute to tracer provider construction
 pub(crate) trait TracingConfigurator {
     fn config(conf: &Conf) -> &Self;
     fn is_enabled(&self) -> bool;

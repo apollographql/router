@@ -16,19 +16,34 @@ use crate::plugins::telemetry::reload::otel::LayeredTracer;
 use crate::plugins::telemetry::reload::otel::OPENTELEMETRY_TRACER_HANDLE;
 use crate::plugins::telemetry::reload::otel::reload_fmt;
 
-/// Activation is used to collect all the information that is needed when telemetry activate() is called.
-/// It contains:
-/// * meter providers
-/// * trace provider
-/// * trace propagation
-/// * tracking of the most recent prometheus registry
-/// * log format
+//! Telemetry activation state container
+//!
+//! This module provides the [`Activation`] type which acts as a container for all telemetry
+//! components that will be activated when the router is ready to commit configuration changes.
+//!
+//! ## Purpose
+//!
+//! The [`Activation`] struct collects new telemetry components during the preparation phase:
+//! - Meter providers (for metrics)
+//! - Tracer provider (for distributed tracing)
+//! - Trace propagation configuration
+//! - Prometheus registry (if enabled)
+//! - Logging format layer
+//!
+//! ## Safe Resource Management
+//!
+//! OpenTelemetry providers perform blocking I/O during shutdown, which can deadlock if executed
+//! on async runtime threads. This module ensures safety by:
+//!
+//! 1. **During commit**: Old providers being replaced are moved to blocking tasks for safe shutdown
+//! 2. **During drop**: Any uncommitted providers are moved to blocking tasks for cleanup
+//!
+//! This prevents blocking the async runtime while ensuring all resources are properly cleaned up.
+
+/// State container for telemetry components to be activated.
 ///
-/// This module correctly handles dropping of otel structures that may block in their own `Drop` implementation.
-/// Meter and tracing providers must be dropped in a spawn blocking, therefore if activation is dropped
-/// any such structs must be moved onto a blocking task.
-/// Similarly, when `commit` is called we need to make sure that the providers that are being replaced
-/// are also shut down in a safe way.
+/// Collects new telemetry providers and configuration during the preparation phase,
+/// then atomically applies them during the activation phase via [`Activation::commit()`].
 pub(crate) struct Activation {
     /// The new tracer provider. None means leave the existing one
     new_trace_provider: Option<opentelemetry_sdk::trace::TracerProvider>,
@@ -148,6 +163,19 @@ impl Activation {
 }
 
 impl Activation {
+    /// Commits the prepared telemetry state to global OpenTelemetry providers (Phase 2 of reload lifecycle).
+    ///
+    /// This method atomically updates all global telemetry state:
+    /// 1. Swaps in new tracer provider and updates the hot-reload handle
+    /// 2. Updates trace context propagation configuration
+    /// 3. Swaps in new meter providers for metrics collection
+    /// 4. Updates logging format layer
+    /// 5. Stores Prometheus registry for future endpoint creation
+    ///
+    /// Old providers are safely shut down in blocking tasks to avoid deadlocking the async runtime.
+    ///
+    /// This method cannot not fail - by the time we reach activation, all plugins have been
+    /// successfully initialized and we are committed to applying the new configuration.
     pub(crate) fn commit(mut self) {
         self.reload_tracing();
         self.reload_trace_propagation();
@@ -162,12 +190,14 @@ impl Activation {
         if let Some(hot_tracer) = OPENTELEMETRY_TRACER_HANDLE.get()
             && let Some(tracer_provider) = self.new_trace_provider.take()
         {
+            // Build a new tracer from the provider and hot-swap it into the tracing subscriber
             let tracer = tracer_provider
                 .tracer_builder(GLOBAL_TRACER_NAME)
                 .with_version(env!("CARGO_PKG_VERSION"))
                 .build();
             hot_tracer.reload(tracer);
 
+            // Install the new provider globally and safely drop the old one in a blocking task
             let last_provider = opentelemetry::global::set_tracer_provider(tracer_provider);
             block_in_place(move || {
                 drop(last_provider);
@@ -176,10 +206,14 @@ impl Activation {
     }
 
     /// Reloads metrics providers, installing new ones and storing the old ones for safe shutdown on drop.
+    ///
+    /// This performs an atomic swap: new providers are installed and old providers are stored back
+    /// in `self.new_meter_providers`. The old providers will be safely dropped when this `Activation`
+    /// is dropped (using blocking tasks to avoid runtime deadlocks).
     pub(crate) fn reload_metrics(&mut self) {
         let global_meter_provider = meter_provider_internal();
-        // Note that we are essentially swapping the new meter providers with the old.
-        // The meter providers will be dealt with in Drop.
+        // Swap new meter providers with old ones. Old providers stored here will be
+        // safely dropped in the Drop implementation using blocking tasks.
         for (meter_provider_type, meter_provider) in std::mem::take(&mut self.new_meter_providers) {
             self.new_meter_providers.insert(
                 meter_provider_type,
@@ -201,17 +235,25 @@ impl Activation {
     }
 }
 
-/// When dropping activation we have to be careful to drop inside spawn tasks
-/// Otel structures will perform blocking IO, so if drop happens in an async thread then it can cause issues.
-/// The solution to this is to move the structs into a blocking task so that they can shut down safely.
+/// Safely drops OpenTelemetry providers using blocking tasks (Phase 3 of reload lifecycle).
+///
+/// OpenTelemetry providers perform blocking I/O during shutdown (flushing buffers, closing connections).
+/// If dropped on an async runtime thread, this can deadlock the runtime. This Drop implementation ensures
+/// all providers are moved to blocking tasks for safe cleanup.
+///
+/// This runs in two scenarios:
+/// 1. **After commit**: Drops the old providers that were replaced
+/// 2. **If preparation fails**: Drops the new providers that were never activated
 impl Drop for Activation {
     fn drop(&mut self) {
+        // Drop all meter providers in blocking tasks to avoid runtime deadlocks
         for (_, meter_provider) in std::mem::take(&mut self.new_meter_providers) {
             block_in_place(move || {
                 drop(meter_provider);
             });
         }
 
+        // Drop tracer provider in blocking task if present
         if let Some(tracer_provider) = self.new_trace_provider.take() {
             block_in_place(move || {
                 drop(tracer_provider);

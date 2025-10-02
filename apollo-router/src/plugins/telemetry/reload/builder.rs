@@ -22,11 +22,32 @@ use crate::plugins::telemetry::reload::tracing::create_propagator;
 use crate::plugins::telemetry::tracing::datadog;
 use crate::plugins::telemetry::tracing::zipkin;
 
-/// Builder is responsible for:
-/// 1. Deciding when to to reload telemetry
-/// 2. Collating information from config
-///
-/// It will internally collect all the information using
+//! Telemetry configuration change detection and provider construction
+//!
+//! This module provides the [`Builder`] which orchestrates the preparation phase of telemetry reloading.
+//!
+//! ## Purpose
+//!
+//! The builder is responsible for:
+//! 1. **Change detection** - Comparing previous and current configurations to determine what needs reloading
+//! 2. **Provider construction** - Building new OpenTelemetry providers only when necessary
+//! 3. **State collection** - Gathering all prepared components into an [`Activation`] for the activation phase
+//!
+//! ## Change Detection
+//!
+//! The builder uses trait-based configuration access ([`MetricsConfigurator`], [`TracingConfigurator`])
+//! to detect changes in specific exporter configurations. This allows it to:
+//! - Reload only the components that have changed
+//! - Preserve existing providers when configuration is unchanged
+//! - Handle both common settings (service name, resource attributes) and exporter-specific settings
+//!
+//! ## Construction Safety
+//!
+//! External exporters may perform blocking I/O during construction, so the entire build process
+//! runs in [`block_in_place`] to avoid blocking the async runtime.
+
+/// Orchestrates telemetry reload preparation by detecting configuration changes
+/// and constructing new providers as needed.
 pub(super) struct Builder<'a> {
     previous_config: &'a Option<Conf>,
     config: &'a Conf,
@@ -76,8 +97,9 @@ impl<'a> Builder<'a> {
                 .with_prometheus_registry(prometheus_registry);
             self.activation.add_meter_providers(meter_providers);
         }
-        // If we didn't change telemetry then we will get the old prom registry. Otherwise the new registry will take effect
-        // The only time this will be None is if prometheus is not configured
+        // Always create Prometheus endpoint if we have a registry (either new or existing).
+        // The activation holds either the newly created registry or the previous one if unchanged.
+        // This will be None only if Prometheus has never been configured.
         if let Some(prometheus_registry) = self.activation.prometheus_registry() {
             let listen = self.config.exporters.metrics.prometheus.listen.clone();
             let path = self.config.exporters.metrics.prometheus.path.clone();
@@ -115,8 +137,9 @@ impl<'a> Builder<'a> {
 
     fn setup_apollo_metrics(&mut self) -> Result<(), BoxError> {
         ::tracing::debug!("configuring Apollo metrics");
-        // There is no change detection for apollo metrics because we
-        // have a custom sender and this MUST be populated on every reload
+        // Apollo metrics are always rebuilt (no change detection) because the sender
+        // needs to be populated on every reload. The sender cannot be stored globally
+        // and must be returned from the prepare phase.
         let mut builder = MetricsBuilder::new(self.config);
         builder.configure(&self.config.apollo)?;
         let (_, meter_providers, sender) = builder.build();
@@ -125,8 +148,12 @@ impl<'a> Builder<'a> {
         Ok(())
     }
 
-    /// Detects if metrics config has changed. This can be used for any implementation of `MetricsConfigurator`
-    /// because they know how to get the config from the overall telemetry config.
+    /// Detects if metrics config has changed for a specific exporter.
+    ///
+    /// Returns `true` if:
+    /// - This is the first run (no previous config)
+    /// - The exporter-specific config has changed
+    /// - Common metrics settings (service name, resource attributes, etc.) have changed
     fn is_metrics_config_changed<T: MetricsConfigurator + PartialEq>(&self) -> bool {
         if let Some(previous_config) = self.previous_config {
             T::config(previous_config) != T::config(self.config)
@@ -136,8 +163,12 @@ impl<'a> Builder<'a> {
         }
     }
 
-    /// Detects if tracing config has changed. This can be used for any implementation of `TracingConfigurator`
-    /// because they know how to get the config from the overall telemetry config.
+    /// Detects if tracing config has changed for a specific exporter.
+    ///
+    /// Returns `true` if:
+    /// - This is the first run (no previous config)
+    /// - The exporter-specific config has changed
+    /// - Common tracing settings (service name, sampler, span limits, etc.) have changed
     fn is_tracing_config_changed<T: TracingConfigurator + PartialEq>(&self) -> bool {
         if let Some(previous_config) = self.previous_config {
             T::config(previous_config) != T::config(self.config)

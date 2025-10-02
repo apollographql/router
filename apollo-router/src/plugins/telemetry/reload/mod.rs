@@ -1,19 +1,39 @@
 //! Reload support for telemetry
 //!
-//! Telemetry reloading is difficult because it modifies global state. Plugins may error as they are
-//! initialized so it is not possible to modify the global state there without risking that a
-//! later plugin may cause the new pipeline to fail.
+//! Telemetry reloading is complex because it modifies global OpenTelemetry state that must remain
+//! consistent across the entire application. The challenge is that plugins may fail during initialization,
+//! so we cannot safely modify global state at that time without risking leaving the system in an
+//! inconsistent state if a later plugin fails.
 //!
-//! Instead, once all plugins are intialised activate on `PluginPrivate` is called which commits the
-//! telemtry changes. `activate ` is not failable, so we are good to commit to global state.
+//! ## Lifecycle Overview
 //!
-//! This module is divided into submodules:
-//! * otel - deals with global state + legacy metrics layer (to be removed in 3.0)
-//! * activation - state to be applied when activate is called. Will set meter and tracing providers.
-//! * builder - from config determines what has changed and pulls together information needed to serve
-//!   telemetry if activate is reached.
-//! * metrics - support for building meter providers from config
-//! * tracing - support for building trace providers from config
+//! The reload process follows a three-phase lifecycle:
+//!
+//! ### 1. Preparation Phase (`prepare`)
+//! - Called during plugin initialization with the current and previous configurations
+//! - The [`Builder`] detects what has changed by comparing configurations
+//! - For each changed component (metrics, tracing, etc.), new providers are constructed
+//! - An [`Activation`] object is created containing all the prepared state
+//! - This phase is fallible - errors will prevent the reload
+//!
+//! ### 2. Activation Phase (`activate`)
+//! - Called via `PluginPrivate::activate()` after all plugins are successfully initialized
+//! - The [`Activation::commit()`] method atomically updates global state
+//! - Old providers are safely shut down using blocking tasks
+//! - This phase is infallible - by this point we're committed to the new configuration
+//!
+//! ### 3. Cleanup Phase (Drop)
+//! - When activation is dropped (or if preparation fails), OpenTelemetry resources are cleaned up
+//! - Meter and tracer providers perform blocking I/O in their Drop implementations
+//! - These are moved to blocking tasks to avoid blocking async runtime threads
+//!
+//! ## Module Structure
+//!
+//! * [`otel`] - Global state management and initialization of the tracing subscriber
+//! * [`activation`] - State container for the activation phase, handles safe provider replacement
+//! * [`builder`] - Configuration change detection and construction of new providers
+//! * [`metrics`] - Building meter providers from configuration
+//! * [`tracing`] - Building trace providers from configuration
 use multimap::MultiMap;
 use tower::BoxError;
 
@@ -30,6 +50,24 @@ pub(crate) mod metrics;
 pub(crate) mod otel;
 pub(crate) mod tracing;
 
+/// Prepares telemetry components for activation (Phase 1 of reload lifecycle).
+///
+/// This is the entry point for the preparation phase. It:
+/// 1. Detects configuration changes by comparing `previous_config` with `config`
+/// 2. Constructs new providers only for components that have changed
+/// 3. Returns an `Activation` object containing the prepared state
+///
+/// # Returns
+///
+/// A tuple containing:
+/// - [`Activation`] - Prepared telemetry state to be activated later
+/// - Prometheus endpoints (if Prometheus is enabled)
+/// - Apollo metrics sender (if Apollo is configured)
+///
+/// # Errors
+///
+/// Returns an error if any provider construction fails. This prevents
+/// the reload from proceeding to the activation phase.
 pub(crate) fn prepare(
     previous_config: &Option<Conf>,
     config: &Conf,
