@@ -29,7 +29,7 @@ use opentelemetry::propagation::TextMapCompositePropagator;
 use opentelemetry::trace::TracerProvider;
 use parking_lot::Mutex;
 use prometheus::Registry;
-use tokio::task::block_in_place;
+use tokio::task::spawn_blocking;
 use tracing_subscriber::Layer;
 
 use crate::metrics::aggregation::MeterProviderType;
@@ -199,7 +199,7 @@ impl Activation {
 
             // Install the new provider globally and safely drop the old one in a blocking task
             let last_provider = opentelemetry::global::set_tracer_provider(tracer_provider);
-            block_in_place(move || {
+            spawn_blocking(move || {
                 drop(last_provider);
             });
         }
@@ -248,12 +248,12 @@ impl Drop for Activation {
     fn drop(&mut self) {
         // Drop all meter providers in blocking tasks to avoid runtime deadlocks
         for meter_provider in std::mem::take(&mut self.new_meter_providers).into_values() {
-            block_in_place(move || drop(meter_provider));
+            spawn_blocking(move || drop(meter_provider));
         }
 
         // Drop tracer provider in blocking task if present
         if let Some(tracer_provider) = self.new_trace_provider.take() {
-            block_in_place(move || drop(tracer_provider));
+            spawn_blocking(move || drop(tracer_provider));
         }
     }
 }
