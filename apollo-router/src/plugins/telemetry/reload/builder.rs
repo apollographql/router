@@ -1,27 +1,3 @@
-use multimap::MultiMap;
-use tokio::task::block_in_place;
-use tower::BoxError;
-use tower::ServiceExt;
-
-use crate::Endpoint;
-use crate::ListenAddr;
-use crate::metrics::aggregation::MeterProviderType;
-use crate::plugins::telemetry::apollo;
-use crate::plugins::telemetry::apollo_exporter::Sender;
-use crate::plugins::telemetry::config::Conf;
-use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
-use crate::plugins::telemetry::metrics;
-use crate::plugins::telemetry::metrics::prometheus::PrometheusService;
-use crate::plugins::telemetry::otlp;
-use crate::plugins::telemetry::reload::activation::Activation;
-use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
-use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
-use crate::plugins::telemetry::reload::tracing::TracingBuilder;
-use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
-use crate::plugins::telemetry::reload::tracing::create_propagator;
-use crate::plugins::telemetry::tracing::datadog;
-use crate::plugins::telemetry::tracing::zipkin;
-
 //! Telemetry configuration change detection and provider construction
 //!
 //! This module provides the [`Builder`] which orchestrates the preparation phase of telemetry reloading.
@@ -45,6 +21,30 @@ use crate::plugins::telemetry::tracing::zipkin;
 //!
 //! External exporters may perform blocking I/O during construction, so the entire build process
 //! runs in [`block_in_place`] to avoid blocking the async runtime.
+
+use multimap::MultiMap;
+use tokio::task::block_in_place;
+use tower::BoxError;
+use tower::ServiceExt;
+
+use crate::Endpoint;
+use crate::ListenAddr;
+use crate::metrics::aggregation::MeterProviderType;
+use crate::plugins::telemetry::apollo;
+use crate::plugins::telemetry::apollo_exporter::Sender;
+use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
+use crate::plugins::telemetry::metrics;
+use crate::plugins::telemetry::metrics::prometheus::PrometheusService;
+use crate::plugins::telemetry::otlp;
+use crate::plugins::telemetry::reload::activation::Activation;
+use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
+use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
+use crate::plugins::telemetry::reload::tracing::TracingBuilder;
+use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
+use crate::plugins::telemetry::reload::tracing::create_propagator;
+use crate::plugins::telemetry::tracing::datadog;
+use crate::plugins::telemetry::tracing::zipkin;
 
 /// Orchestrates telemetry reload preparation by detecting configuration changes
 /// and constructing new providers as needed.
@@ -155,12 +155,11 @@ impl<'a> Builder<'a> {
     /// - The exporter-specific config has changed
     /// - Common metrics settings (service name, resource attributes, etc.) have changed
     fn is_metrics_config_changed<T: MetricsConfigurator + PartialEq>(&self) -> bool {
-        if let Some(previous_config) = self.previous_config {
-            T::config(previous_config) != T::config(self.config)
-                || previous_config.exporters.metrics.common != self.config.exporters.metrics.common
-        } else {
-            true
-        }
+        let Some(previous_config) = self.previous_config else {
+            return true;
+        };
+        T::config(previous_config) != T::config(self.config)
+            || previous_config.exporters.metrics.common != self.config.exporters.metrics.common
     }
 
     /// Detects if tracing config has changed for a specific exporter.
@@ -170,12 +169,11 @@ impl<'a> Builder<'a> {
     /// - The exporter-specific config has changed
     /// - Common tracing settings (service name, sampler, span limits, etc.) have changed
     fn is_tracing_config_changed<T: TracingConfigurator + PartialEq>(&self) -> bool {
-        if let Some(previous_config) = self.previous_config {
-            T::config(previous_config) != T::config(self.config)
-                || previous_config.exporters.tracing.common != self.config.exporters.tracing.common
-        } else {
-            true
-        }
+        let Some(previous_config) = self.previous_config else {
+            return true;
+        };
+        T::config(previous_config) != T::config(self.config)
+            || previous_config.exporters.tracing.common != self.config.exporters.tracing.common
     }
 
     fn setup_propagation(&mut self) {

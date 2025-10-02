@@ -1,21 +1,3 @@
-use std::collections::HashMap;
-use std::sync::LazyLock;
-
-use opentelemetry::propagation::TextMapCompositePropagator;
-use opentelemetry::trace::TracerProvider;
-use parking_lot::Mutex;
-use prometheus::Registry;
-use tokio::task::block_in_place;
-use tracing_subscriber::Layer;
-
-use crate::metrics::aggregation::MeterProviderType;
-use crate::metrics::filter::FilterMeterProvider;
-use crate::metrics::meter_provider_internal;
-use crate::plugins::telemetry::GLOBAL_TRACER_NAME;
-use crate::plugins::telemetry::reload::otel::LayeredTracer;
-use crate::plugins::telemetry::reload::otel::OPENTELEMETRY_TRACER_HANDLE;
-use crate::plugins::telemetry::reload::otel::reload_fmt;
-
 //! Telemetry activation state container
 //!
 //! This module provides the [`Activation`] type which acts as a container for all telemetry
@@ -39,6 +21,24 @@ use crate::plugins::telemetry::reload::otel::reload_fmt;
 //! 2. **During drop**: Any uncommitted providers are moved to blocking tasks for cleanup
 //!
 //! This prevents blocking the async runtime while ensuring all resources are properly cleaned up.
+
+use std::collections::HashMap;
+use std::sync::LazyLock;
+
+use opentelemetry::propagation::TextMapCompositePropagator;
+use opentelemetry::trace::TracerProvider;
+use parking_lot::Mutex;
+use prometheus::Registry;
+use tokio::task::block_in_place;
+use tracing_subscriber::Layer;
+
+use crate::metrics::aggregation::MeterProviderType;
+use crate::metrics::filter::FilterMeterProvider;
+use crate::metrics::meter_provider_internal;
+use crate::plugins::telemetry::GLOBAL_TRACER_NAME;
+use crate::plugins::telemetry::reload::otel::LayeredTracer;
+use crate::plugins::telemetry::reload::otel::OPENTELEMETRY_TRACER_HANDLE;
+use crate::plugins::telemetry::reload::otel::reload_fmt;
 
 /// State container for telemetry components to be activated.
 ///
@@ -85,16 +85,16 @@ pub(crate) struct TestInstrumentation {
 static REGISTRY: LazyLock<Mutex<Option<Registry>>> = LazyLock::new(Default::default);
 
 impl Activation {
-    pub(crate) fn new() -> Activation {
-        Activation {
-            new_trace_provider: Default::default(),
-            new_trace_propagator: Default::default(),
-            new_meter_providers: Default::default(),
+    pub(crate) fn new() -> Self {
+        Self {
+            new_trace_provider: None,
+            new_trace_propagator: None,
+            new_meter_providers: HashMap::default(),
             // We can remove this is we allow state to be maintained across plugin reloads
             prometheus_registry: REGISTRY.lock().clone(),
-            new_logging_fmt_layer: Default::default(),
+            new_logging_fmt_layer: None,
             #[cfg(test)]
-            test_instrumentation: Default::default(),
+            test_instrumentation: TestInstrumentation::default(),
         }
     }
 
@@ -247,17 +247,13 @@ impl Activation {
 impl Drop for Activation {
     fn drop(&mut self) {
         // Drop all meter providers in blocking tasks to avoid runtime deadlocks
-        for (_, meter_provider) in std::mem::take(&mut self.new_meter_providers) {
-            block_in_place(move || {
-                drop(meter_provider);
-            });
+        for meter_provider in std::mem::take(&mut self.new_meter_providers).into_values() {
+            block_in_place(move || drop(meter_provider));
         }
 
         // Drop tracer provider in blocking task if present
         if let Some(tracer_provider) = self.new_trace_provider.take() {
-            block_in_place(move || {
-                drop(tracer_provider);
-            });
+            block_in_place(move || drop(tracer_provider));
         }
     }
 }

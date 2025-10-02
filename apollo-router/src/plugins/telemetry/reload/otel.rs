@@ -180,11 +180,9 @@ where
     fn is_sampled(&self) -> bool {
         // if this extension is set, that means the parent span was accepted, and so the
         // entire trace is accepted
-        let extensions = self.extensions();
-        extensions
+        self.extensions()
             .get::<SampledSpan>()
-            .map(|s| matches!(s, SampledSpan::Sampled(_, _)))
-            .unwrap_or_default()
+            .is_some_and(|s| matches!(s, SampledSpan::Sampled(_, _)))
     }
 
     fn get_trace_id(&self) -> Option<TraceId> {
