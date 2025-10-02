@@ -41,11 +41,11 @@ impl TracingConfigurator for Config {
         &conf.exporters.tracing.zipkin
     }
 
-    fn enabled(&self) -> bool {
+    fn is_enabled(&self) -> bool {
         self.enabled
     }
 
-    fn apply(&self, builder: &mut TracingBuilder) -> Result<(), BoxError> {
+    fn configure(&self, builder: &mut TracingBuilder) -> Result<(), BoxError> {
         tracing::info!("configuring Zipkin tracing: {}", self.batch_processor);
         let common: opentelemetry_sdk::trace::Config = builder.tracing_common().into();
         let endpoint = &self.endpoint.to_full_uri(&DEFAULT_ENDPOINT);

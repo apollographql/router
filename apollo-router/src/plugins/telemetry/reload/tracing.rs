@@ -28,8 +28,8 @@ impl<'a> TracingBuilder<'a> {
     }
 
     pub(crate) fn configure<T: TracingConfigurator>(&mut self, config: &T) -> Result<(), BoxError> {
-        if config.enabled() {
-            return config.apply(self);
+        if config.is_enabled() {
+            return config.configure(self);
         }
         Ok(())
     }
@@ -91,6 +91,6 @@ pub(crate) fn create_propagator(
 
 pub(crate) trait TracingConfigurator {
     fn config(conf: &Conf) -> &Self;
-    fn enabled(&self) -> bool;
-    fn apply(&self, builder: &mut TracingBuilder) -> Result<(), BoxError>;
+    fn is_enabled(&self) -> bool;
+    fn configure(&self, builder: &mut TracingBuilder) -> Result<(), BoxError>;
 }

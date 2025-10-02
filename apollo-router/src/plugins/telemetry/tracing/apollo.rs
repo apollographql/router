@@ -18,11 +18,11 @@ impl TracingConfigurator for Config {
         &conf.apollo
     }
 
-    fn enabled(&self) -> bool {
+    fn is_enabled(&self) -> bool {
         self.apollo_key.is_some() && self.apollo_graph_ref.is_some()
     }
 
-    fn apply(&self, builder: &mut TracingBuilder) -> Result<(), BoxError> {
+    fn configure(&self, builder: &mut TracingBuilder) -> Result<(), BoxError> {
         tracing::debug!("configuring Apollo tracing");
         let exporter = apollo_telemetry::Exporter::builder()
             .endpoint(&self.endpoint)

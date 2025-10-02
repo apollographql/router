@@ -121,11 +121,11 @@ impl TracingConfigurator for Config {
         &conf.exporters.tracing.datadog
     }
 
-    fn enabled(&self) -> bool {
+    fn is_enabled(&self) -> bool {
         self.enabled
     }
 
-    fn apply(&self, builder: &mut TracingBuilder) -> Result<(), BoxError> {
+    fn configure(&self, builder: &mut TracingBuilder) -> Result<(), BoxError> {
         tracing::info!("Configuring Datadog tracing: {}", self.batch_processor);
         let common: opentelemetry_sdk::trace::Config = builder.tracing_common().into();
 

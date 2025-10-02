@@ -27,7 +27,7 @@ use crate::plugins::telemetry::reload::otel::reload_fmt;
 /// This module correctly handles dropping of otel structures that may block in their own `Drop` implementation.
 /// Meter and tracing providers must be dropped in a spawn blocking, therefore if activation is dropped
 /// any such structs must be moved onto a blocking task.
-/// Similarly, when apply is called we need to make sure that the providers that are being replaced
+/// Similarly, when `commit` is called we need to make sure that the providers that are being replaced
 /// are also shut down in a safe way.
 pub(crate) struct Activation {
     /// The new tracer provider. None means leave the existing one

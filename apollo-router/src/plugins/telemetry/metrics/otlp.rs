@@ -15,11 +15,11 @@ impl MetricsConfigurator for super::super::otlp::Config {
         &conf.exporters.metrics.otlp
     }
 
-    fn enabled(&self) -> bool {
+    fn is_enabled(&self) -> bool {
         self.enabled
     }
 
-    fn apply(&self, builder: &mut MetricsBuilder) -> Result<(), BoxError> {
+    fn configure(&self, builder: &mut MetricsBuilder) -> Result<(), BoxError> {
         let exporter_builder: MetricsExporterBuilder = self.exporter(TelemetryDataKind::Metrics)?;
         let exporter = exporter_builder.build_metrics_exporter(
             (&self.temporality).into(),

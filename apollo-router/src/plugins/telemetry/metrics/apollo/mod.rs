@@ -47,11 +47,11 @@ impl MetricsConfigurator for Config {
         &conf.apollo
     }
 
-    fn enabled(&self) -> bool {
+    fn is_enabled(&self) -> bool {
         self.apollo_key.is_some() && self.apollo_graph_ref.is_some()
     }
 
-    fn apply(&self, builder: &mut MetricsBuilder) -> Result<(), BoxError> {
+    fn configure(&self, builder: &mut MetricsBuilder) -> Result<(), BoxError> {
         tracing::debug!("configuring Apollo metrics");
         static ENABLED: AtomicBool = AtomicBool::new(false);
         if let Config {

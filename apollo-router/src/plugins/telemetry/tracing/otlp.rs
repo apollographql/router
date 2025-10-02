@@ -17,11 +17,11 @@ impl TracingConfigurator for super::super::otlp::Config {
         &conf.exporters.tracing.otlp
     }
 
-    fn enabled(&self) -> bool {
+    fn is_enabled(&self) -> bool {
         self.enabled
     }
 
-    fn apply(&self, builder: &mut TracingBuilder) -> Result<(), BoxError> {
+    fn configure(&self, builder: &mut TracingBuilder) -> Result<(), BoxError> {
         let exporter: SpanExporterBuilder = self.exporter(TelemetryDataKind::Traces)?;
         let batch_span_processor = BatchSpanProcessor::builder(
             exporter.build_span_exporter()?,

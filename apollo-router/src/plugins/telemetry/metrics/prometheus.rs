@@ -70,11 +70,11 @@ impl MetricsConfigurator for Config {
         &conf.exporters.metrics.prometheus
     }
 
-    fn enabled(&self) -> bool {
+    fn is_enabled(&self) -> bool {
         self.enabled
     }
 
-    fn apply(&self, builder: &mut MetricsBuilder) -> Result<(), BoxError> {
+    fn configure(&self, builder: &mut MetricsBuilder) -> Result<(), BoxError> {
         let registry = Registry::new();
 
         let exporter = opentelemetry_prometheus::exporter()

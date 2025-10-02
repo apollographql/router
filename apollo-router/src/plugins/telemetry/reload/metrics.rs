@@ -15,8 +15,8 @@ use crate::plugins::telemetry::config::MetricsCommon;
 
 pub(crate) trait MetricsConfigurator {
     fn config(conf: &Conf) -> &Self;
-    fn enabled(&self) -> bool;
-    fn apply<'a>(&self, builder: &mut MetricsBuilder<'a>) -> Result<(), BoxError>;
+    fn is_enabled(&self) -> bool;
+    fn configure<'a>(&self, builder: &mut MetricsBuilder<'a>) -> Result<(), BoxError>;
 }
 
 pub(crate) struct MetricsBuilder<'a> {
@@ -60,8 +60,8 @@ impl<'a> MetricsBuilder<'a> {
         )
     }
     pub(crate) fn configure<T: MetricsConfigurator>(&mut self, config: &T) -> Result<(), BoxError> {
-        if config.enabled() {
-            return config.apply(self);
+        if config.is_enabled() {
+            return config.configure(self);
         }
         Ok(())
     }
@@ -140,7 +140,7 @@ impl<'a> MetricsBuilder<'a> {
             })
     }
 
-    pub(crate) fn apply_views(
+    pub(crate) fn configure_views(
         &mut self,
         meter_provider_type: MeterProviderType,
     ) -> Result<(), BoxError> {

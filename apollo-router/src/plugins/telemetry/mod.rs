@@ -1645,19 +1645,19 @@ impl Telemetry {
 
     fn plugin_metrics(config: &Arc<Conf>) {
         let mut attributes = Vec::new();
-        if MetricsConfigurator::enabled(&config.exporters.metrics.otlp) {
+        if MetricsConfigurator::is_enabled(&config.exporters.metrics.otlp) {
             attributes.push(KeyValue::new("telemetry.metrics.otlp", true));
         }
         if config.exporters.metrics.prometheus.enabled {
             attributes.push(KeyValue::new("telemetry.metrics.prometheus", true));
         }
-        if TracingConfigurator::enabled(&config.exporters.tracing.otlp) {
+        if TracingConfigurator::is_enabled(&config.exporters.tracing.otlp) {
             attributes.push(KeyValue::new("telemetry.tracing.otlp", true));
         }
-        if config.exporters.tracing.datadog.enabled() {
+        if config.exporters.tracing.datadog.is_enabled() {
             attributes.push(KeyValue::new("telemetry.tracing.datadog", true));
         }
-        if config.exporters.tracing.zipkin.enabled() {
+        if config.exporters.tracing.zipkin.is_enabled() {
             attributes.push(KeyValue::new("telemetry.tracing.zipkin", true));
         }
 
