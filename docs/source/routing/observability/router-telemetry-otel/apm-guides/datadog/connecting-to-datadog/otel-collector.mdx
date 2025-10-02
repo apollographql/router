@@ -20,7 +20,7 @@ For an overview of all available connection methods, see [Connecting to Datadog]
 
 ## Basic configuration
 
-Copy these configurations to get started. Before starting the collector, you'll need to set a `DD_API_KEY` environment variable to your Datadog API key.
+Copy these configurations to get started. Before starting the collector, set the `DD_API_KEY` environment variable to your Datadog API key.
 
 ### Router configuration
 
@@ -98,17 +98,17 @@ service:
       exporters: [datadog/exporter]
 ```
 
-## Verify the connection
+## Verify your connection
 
 With both the router and OpenTelemetry collector running, verify that telemetry data is flowing to Datadog:
 
-1. **Send test queries** to your router to generate telemetry data
+1. Send test queries to your router to generate telemetry data.
 
-2. **View your data in Datadog**:
+2. View your data in Datadog:
    - **Service**: Go to [APM > Services](https://app.datadoghq.com/apm/services) and look for the `apollo-router` service
    - **Metrics**: Go to [Metrics > Explorer](https://app.datadoghq.com/metric/explorer) and search for `http.server.request.duration` filtered by `service:apollo-router`
 
-If you don't see data in Datadog, see the [Troubleshooting](#troubleshooting) section below.
+If you don't see data in Datadog, see the following [Troubleshooting](#troubleshooting) section.
 
 ## Understanding the configuration
 

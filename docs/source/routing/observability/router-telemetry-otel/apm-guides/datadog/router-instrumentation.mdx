@@ -76,15 +76,15 @@ telemetry:
 
 <Caution>
 
-**High Cardinality Warning**: The `operation_name` and `subgraph_operation_name` attributes can create high cardinality if your GraphQL operations have many unique names. This affects APM views and trace metrics because Datadog creates metrics for each unique `resource.name` value.
+High Cardinality Warning: The `operation_name` and `subgraph_operation_name` attributes can create high cardinality if your GraphQL operations have many unique names. This affects APM views and trace metrics because Datadog creates metrics for each unique `resource.name` value.
 
-For high-traffic APIs, consider using `operation_kind` (query/mutation/subscription) or `subgraph_name` instead, or remove `resource.name` entirely and let Datadog auto-generate it. See [Resource naming best practices](#resource-naming) below.
+For high-traffic APIs, consider using `operation_kind` (query/mutation/subscription) or `subgraph_name` instead, or remove `resource.name` entirely and let Datadog auto-generate it. See the following [Resource naming best practices](#resource-naming).
 
 </Caution>
 
 ## Understanding the configuration
 
-The sections below explain what each part of the configuration does.
+The following sections explain what each part of the configuration does.
 
 ### Operation and resource names
 
