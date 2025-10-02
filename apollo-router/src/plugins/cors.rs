@@ -328,7 +328,7 @@ impl<S> CorsService<S> {
             && let Some(Some(pna)) = policy.map(|policy| policy.private_network_access.as_ref())
         {
             const ACCESS_CONTROL_PRIVATE_NETWORK: HeaderName =
-                HeaderName::from_static("access_control_private_network");
+                HeaderName::from_static("access-control-private-network");
 
             const ACCESS_CONTROL_PRIVATE_NETWORK_VALUE: http::HeaderValue =
                 HeaderValue::from_static("true");
@@ -340,7 +340,7 @@ impl<S> CorsService<S> {
 
             if let Some(name) = &pna.access_name {
                 const PRIVATE_NETWORK_ACCESS_NAME: HeaderName =
-                    HeaderName::from_static("private_network_access_name");
+                    HeaderName::from_static("private-network-access-name");
 
                 response.headers_mut().insert(
                     PRIVATE_NETWORK_ACCESS_NAME,
@@ -351,7 +351,7 @@ impl<S> CorsService<S> {
 
             if let Some(id) = &pna.access_id {
                 const PRIVATE_NETWORK_ACCESS_ID: HeaderName =
-                    HeaderName::from_static("private_network_access_id");
+                    HeaderName::from_static("private-network-access-id");
 
                 response.headers_mut().insert(
                     PRIVATE_NETWORK_ACCESS_ID,
@@ -447,19 +447,17 @@ mod tests {
     impl Service<Request<()>> for DummyService {
         type Response = Response<&'static str>;
         type Error = ();
-        type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+        type Future = std::future::Ready<Result<Self::Response, Self::Error>>;
 
         fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
             Poll::Ready(Ok(()))
         }
 
         fn call(&mut self, _req: Request<()>) -> Self::Future {
-            Box::pin(async {
-                Ok(Response::builder()
-                    .status(StatusCode::OK)
-                    .body("ok")
-                    .unwrap())
-            })
+            std::future::ready(Ok(Response::builder()
+                .status(StatusCode::OK)
+                .body("ok")
+                .unwrap()))
         }
     }
 

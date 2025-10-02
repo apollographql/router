@@ -171,6 +171,18 @@ impl Policy {
     }
 }
 
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl PrivateNetworkAccessPolicy {
+    #[builder]
+    pub(crate) fn new(access_name: Option<String>, access_id: Option<String>) -> Self {
+        Self {
+            access_id: access_id.map(Arc::from),
+            access_name: access_name.map(Arc::from),
+        }
+    }
+}
+
 /// Cross origin request configuration.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -385,10 +397,9 @@ impl Cors {
                         }
 
                         // The access name needs to make the EMCAscript ReGex: `/^[a-z0-9_-.]+$/.`
-                        if name
-                            .chars()
-                            .any(|c| !matches!(c, 'A'..='Z'| 'a'..='z' | '0'..='9' | ' ' | '_' | '-' | '.'))
-                        {
+                        if name.chars().any(
+                            |c| !matches!(c, 'A'..='Z'| 'a'..='z' | '0'..='9' | '_' | '-' | '.'),
+                        ) {
                             return Err(
                                 "Invalid CORS configuration: `Private-Network-Access-Name` header value can only \
                                 contain the characters a-z0-9_-.",
@@ -1180,5 +1191,149 @@ policies:
         assert!(result.is_err());
         // Should fail on the first wildcard check (global allow_headers)
         assert!(result.unwrap_err().contains("Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Headers: *`"));
+    }
+
+    #[test]
+    fn test_empty_pna_access_name_cors_configuration() {
+        let cors = Cors::builder()
+            .policies(vec![
+                Policy::builder()
+                    .private_network_access(
+                        PrivateNetworkAccessPolicy::builder()
+                            .access_name(String::from(""))
+                            .build(),
+                    )
+                    .build(),
+            ])
+            .build();
+        let layer = cors.into_layer();
+        assert!(layer.is_err());
+
+        assert_eq!(
+            layer.unwrap_err(),
+            String::from(
+                "Invalid CORS configuration: `Private-Network-Access-Name` header value must not be empty."
+            )
+        );
+    }
+
+    #[test]
+    fn test_bad_pna_access_name_cors_configuration() {
+        let cors = Cors::builder()
+            .policies(vec![
+                Policy::builder()
+                    .private_network_access(
+                        PrivateNetworkAccessPolicy::builder()
+                            .access_name(String::from("Bad name"))
+                            .build(),
+                    )
+                    .build(),
+            ])
+            .build();
+        let layer = cors.into_layer();
+        assert!(layer.is_err());
+
+        assert_eq!(
+            layer.unwrap_err(),
+            String::from(
+                "Invalid CORS configuration: `Private-Network-Access-Name` header value can only contain the characters a-z0-9_-."
+            )
+        );
+    }
+
+    #[test]
+    fn test_long_pna_access_name_cors_configuration() {
+        let cors = Cors::builder()
+            .policies(vec![
+                Policy::builder()
+                    .private_network_access(
+                        PrivateNetworkAccessPolicy::builder()
+                            .access_name("long_name".repeat(28))
+                            .build(),
+                    )
+                    .build(),
+            ])
+            .build();
+        let layer = cors.into_layer();
+        assert!(layer.is_err());
+
+        assert_eq!(
+            layer.unwrap_err(),
+            String::from(
+                "Invalid CORS configuration: `Private-Network-Access-Name` header value must be no longer than 248 characters."
+            )
+        );
+    }
+
+    #[test]
+    fn test_short_pna_access_id_cors_configuration() {
+        let cors = Cors::builder()
+            .policies(vec![
+                Policy::builder()
+                    .private_network_access(
+                        PrivateNetworkAccessPolicy::builder()
+                            .access_id(String::from("01:23:45:56:78"))
+                            .build(),
+                    )
+                    .build(),
+            ])
+            .build();
+        let layer = cors.into_layer();
+        assert!(layer.is_err());
+
+        assert_eq!(
+            layer.unwrap_err(),
+            String::from(
+                "Invalid CORS configuration: `Private-Network-Access-ID` header value must be a 48-bit value presented as 6 hexadecimal bytes separated by colons"
+            )
+        );
+    }
+
+    #[test]
+    fn test_bad_pna_access_id_cors_configuration() {
+        let cors = Cors::builder()
+            .policies(vec![
+                Policy::builder()
+                    .private_network_access(
+                        PrivateNetworkAccessPolicy::builder()
+                            .access_id(String::from("0:1:2:3:4:5:5:6:7"))
+                            .build(),
+                    )
+                    .build(),
+            ])
+            .build();
+        let layer = cors.into_layer();
+        assert!(layer.is_err());
+
+        assert_eq!(
+            layer.unwrap_err(),
+            String::from(
+                "Invalid CORS configuration: `Private-Network-Access-ID` header value must be a 48-bit value presented as 6 hexadecimal bytes separated by colons"
+            )
+        );
+    }
+
+    #[test]
+    fn test_non_hex_pna_access_id_cors_configuration() {
+        let cors = Cors::builder()
+            .policies(vec![
+                Policy::builder()
+                    .private_network_access(
+                        PrivateNetworkAccessPolicy::builder()
+                            .access_id(String::from("O1:23:45:56:78:9A"))
+                            .build(),
+                    )
+                    .build(),
+            ])
+            .build();
+        let layer = cors.into_layer();
+        assert!(layer.is_err());
+
+        assert_eq!(
+            layer.unwrap_err(),
+            String::from(
+                "Invalid CORS configuration: `Private-Network-Access-ID` header value must be a 48-bit value presented as 6 hexadecimal bytes separated by colons"
+            )
+        );
     }
 }
