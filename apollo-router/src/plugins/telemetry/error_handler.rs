@@ -233,6 +233,12 @@ mod tests {
     use std::time::Duration;
 
     use dashmap::DashMap;
+    use futures::future::BoxFuture;
+    use opentelemetry::metrics::MetricsError;
+    use opentelemetry_sdk::export::trace::SpanData;
+    use opentelemetry_sdk::export::trace::SpanExporter;
+    use opentelemetry_sdk::metrics::data::ResourceMetrics;
+    use opentelemetry_sdk::metrics::exporter::PushMetricsExporter;
     use parking_lot::Mutex;
     use tracing_core::Event;
     use tracing_core::Field;
@@ -336,5 +342,123 @@ mod tests {
         }
         .with_metrics()
         .await;
+    }
+
+    // Mock span exporter to test failures
+    #[derive(Debug)]
+    struct FailingSpanExporter;
+
+    impl SpanExporter for FailingSpanExporter {
+        fn export(
+            &mut self,
+            _batch: Vec<SpanData>,
+        ) -> BoxFuture<'static, opentelemetry_sdk::export::trace::ExportResult> {
+            Box::pin(async { Err(opentelemetry::trace::TraceError::from("connection failed")) })
+        }
+
+        fn shutdown(&mut self) {}
+
+        fn set_resource(&mut self, _resource: &opentelemetry_sdk::Resource) {}
+    }
+
+    #[tokio::test]
+    async fn test_named_span_exporter_adds_prefix() {
+        let inner = FailingSpanExporter;
+        let mut named = super::NamedSpanExporter::new(inner, "test-exporter");
+
+        let result = named.export(vec![]).await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        let err_msg = err.to_string();
+        assert!(err_msg.contains("[test-exporter traces]"));
+        assert!(err_msg.contains("connection failed"));
+    }
+
+    // Mock metrics exporter to test failures
+    #[derive(Debug)]
+    struct FailingMetricsExporter {
+        error_type: &'static str,
+    }
+
+    #[async_trait::async_trait]
+    impl PushMetricsExporter for FailingMetricsExporter {
+        async fn export(
+            &self,
+            _metrics: &mut ResourceMetrics,
+        ) -> opentelemetry::metrics::Result<()> {
+            match self.error_type {
+                "other" => Err(MetricsError::Other("export failed".to_string())),
+                "config" => Err(MetricsError::Config("invalid config".to_string())),
+                _ => Ok(()),
+            }
+        }
+
+        async fn force_flush(&self) -> opentelemetry::metrics::Result<()> {
+            Ok(())
+        }
+
+        fn shutdown(&self) -> opentelemetry::metrics::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl opentelemetry_sdk::metrics::reader::AggregationSelector for FailingMetricsExporter {
+        fn aggregation(
+            &self,
+            _kind: opentelemetry_sdk::metrics::InstrumentKind,
+        ) -> opentelemetry_sdk::metrics::Aggregation {
+            opentelemetry_sdk::metrics::Aggregation::Default
+        }
+    }
+
+    impl opentelemetry_sdk::metrics::reader::TemporalitySelector for FailingMetricsExporter {
+        fn temporality(
+            &self,
+            _kind: opentelemetry_sdk::metrics::InstrumentKind,
+        ) -> opentelemetry_sdk::metrics::data::Temporality {
+            opentelemetry_sdk::metrics::data::Temporality::Cumulative
+        }
+    }
+
+    fn empty_resource_metrics() -> ResourceMetrics {
+        use opentelemetry_sdk::Resource;
+        ResourceMetrics {
+            resource: Resource::empty(),
+            scope_metrics: vec![],
+        }
+    }
+
+    #[tokio::test]
+    async fn test_named_metrics_exporter_adds_prefix() {
+        let inner = FailingMetricsExporter {
+            error_type: "other",
+        };
+        let named = super::NamedMetricsExporter::new(inner, "test-exporter");
+
+        let result = named.export(&mut empty_resource_metrics()).await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        match err {
+            MetricsError::Other(msg) => {
+                assert!(msg.contains("[test-exporter metrics]"));
+                assert!(msg.contains("export failed"));
+            }
+            _ => panic!("Expected MetricsError::Other, got: {:?}", err),
+        }
+    }
+
+    #[test]
+    fn test_prefix_metrics_error() {
+        let err = MetricsError::Config("bad config".to_string());
+        let prefixed = super::prefix_metrics_error("test-exporter", err);
+
+        match prefixed {
+            MetricsError::Config(msg) => {
+                assert_eq!(msg, "[test-exporter metrics] bad config");
+            }
+            _ => panic!("Expected Config variant"),
+        }
     }
 }
