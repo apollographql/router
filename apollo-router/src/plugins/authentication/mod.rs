@@ -173,6 +173,15 @@ enum Source {
     },
 }
 
+impl Source {
+    fn as_textual_representation(&self) -> String {
+        match self {
+            Source::Header { name, .. } => format!("header:{}", name),
+            Source::Cookie { name } => format!("cookie:{}", name),
+        }
+    }
+}
+
 /// Authentication
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -236,7 +245,9 @@ impl PluginPrivate for AuthenticationPlugin {
                 tracing::info_span!(
                     AUTHENTICATION_SPAN_NAME,
                     "authentication service" = stringify!(router::Request),
-                    "otel.kind" = "INTERNAL"
+                    "otel.kind" = "INTERNAL",
+                    "authentication.jwt.failed" = tracing::field::Empty,
+                    "authentication.jwt.source" = tracing::field::Empty
                 )
             }
         }
@@ -459,9 +470,17 @@ fn authenticate(
     ) -> ControlFlow<router::Response, router::Request> {
         // This is a metric and will not appear in the logs
         let failed = true;
-        increment_jwt_counter_metric(failed);
+        increment_jwt_counter_metric(failed, source);
 
-        tracing::info!(message = %error, "jwt authentication failure");
+        // Record span attributes for JWT failure
+        let span = tracing::Span::current();
+        span.record("authentication.jwt.failed", true);
+        if let Some(src) = source {
+            span.record("authentication.jwt.source", src.as_textual_representation());
+            tracing::info!(message = %error, jwtsource = %src.as_textual_representation(), "jwt authentication failure");
+        } else {
+            tracing::info!(message = %error, "jwt authentication failure");
+        }
 
         let _ = request.context.insert_json_value(
             JWT_CONTEXT_KEY,
@@ -488,13 +507,27 @@ fn authenticate(
     }
 
     /// This is the documented metric
-    fn increment_jwt_counter_metric(failed: bool) {
-        u64_counter!(
-            "apollo.router.operations.authentication.jwt",
-            "Number of requests with JWT authentication",
-            1,
-            authentication.jwt.failed = failed
-        );
+    ///
+    /// Emits a counter with the following attributes:
+    /// - `authentication.jwt.failed`: boolean indicating if authentication failed
+    /// - `authentication.jwt.source`: source of the JWT (e.g., "header:authorization", "cookie:authz") when available
+    fn increment_jwt_counter_metric(failed: bool, source: Option<&Source>) {
+        if let Some(src) = source {
+            u64_counter!(
+                "apollo.router.operations.authentication.jwt",
+                "Number of requests with JWT authentication",
+                1,
+                authentication.jwt.failed = failed,
+                authentication.jwt.source = src.as_textual_representation()
+            );
+        } else {
+            u64_counter!(
+                "apollo.router.operations.authentication.jwt",
+                "Number of requests with JWT authentication",
+                1,
+                authentication.jwt.failed = failed
+            );
+        }
     }
 
     let mut jwt = None;
@@ -685,7 +718,14 @@ fn authenticate(
         );
         // Use the fixed name too:
         let failed = false;
-        increment_jwt_counter_metric(failed);
+        increment_jwt_counter_metric(failed, source_of_extracted_jwt);
+
+        // Record span attributes for JWT success
+        let span = tracing::Span::current();
+        span.record("authentication.jwt.failed", false);
+        if let Some(src) = source_of_extracted_jwt {
+            span.record("authentication.jwt.source", src.as_textual_representation());
+        }
 
         let _ = request.context.insert_json_value(
             JWT_CONTEXT_KEY,

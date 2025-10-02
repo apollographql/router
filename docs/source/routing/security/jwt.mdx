@@ -799,9 +799,12 @@ If you _do_ need to pass entire JWTs to subgraphs, you can do so via the GraphOS
 
 ## Observability
 
-If your router enables [tracing](/router/configuration/telemetry/exporters/tracing/overview), the JWT authentication plugin has its own tracing span: `authentication_plugin`
+If your router enables [tracing](/router/configuration/telemetry/exporters/tracing/overview), the JWT authentication plugin has its own tracing span: `authentication_plugin`. This span includes the following attributes when JWT processing occurs:
 
-If your router [exports metrics](/graphos/routing/observability/telemetry/metrics-exporters/overview), the JWT authentication plugin exports the `apollo.router.operations.authentication.jwt` metric. You can use the metric's `authentication.jwt.failed` attribute to count failed authentications. If the `authentication.jwt.failed` attribute is absent or `false`, the authentication succeeded.
+- `authentication.jwt.failed`: boolean indicating whether JWT authentication failed
+- `authentication.jwt.source`: the source of the JWT (e.g., `header:authorization`, `cookie:authz`)
+
+If your router [exports metrics](/graphos/routing/observability/telemetry/metrics-exporters/overview), the JWT authentication plugin exports the `apollo.router.operations.authentication.jwt` metric. You can use the metric's `authentication.jwt.failed` attribute to count failed authentications. If the `authentication.jwt.failed` attribute is absent or `false`, the authentication succeeded. The metric also includes the `authentication.jwt.source` attribute when a JWT source is identified.
 
 ## Additional resources
 

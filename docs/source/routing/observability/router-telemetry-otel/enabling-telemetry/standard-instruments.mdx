@@ -89,6 +89,12 @@ The `apollo.router.cache.redis.errors` metric also includes an `error_type` attr
 - `sentinel` - Redis Sentinel errors
 - `backpressure` - Backpressure/overload errors
 
+### Authentication
+
+- `apollo.router.operations.authentication.jwt` - Number of requests with JWT authentication.
+  - `authentication.jwt.failed`: boolean indicating if authentication failed
+  - `authentication.jwt.source`: source of the JWT (e.g., `header:authorization`, `cookie:authz`) when available
+
 ### Coprocessor
 
 - `apollo.router.operations.coprocessor` - Total operations with coprocessors enabled.
