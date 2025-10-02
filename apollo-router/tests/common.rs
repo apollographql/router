@@ -869,7 +869,7 @@ impl IntegrationTest {
                 yaml,
                 &self._subgraph_overrides,
                 &self._apollo_otlp_server.uri().to_string(),
-                Some(self.bind_address()),
+                None,
                 &self.redis_namespace,
                 Some(&self.port_replacements),
             ),

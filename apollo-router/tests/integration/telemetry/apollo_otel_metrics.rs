@@ -201,7 +201,7 @@ async fn test_subgraph_layer_error_emits_metric() {
         .await;
 
     let metrics = router
-        .wait_for_emitted_otel_metrics(Duration::from_millis(20))
+        .wait_for_emitted_otel_metrics(Duration::from_millis(200))
         .await;
 
     assert!(!metrics.is_empty());

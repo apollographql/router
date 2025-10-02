@@ -38,7 +38,7 @@ use crate::error::FetchError;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
-use crate::plugins::telemetry::reload::prepare_context;
+use crate::plugins::telemetry::reload::otel::prepare_context;
 use crate::plugins::traffic_shaping::Http2Config;
 use crate::services::hickory_dns_connector::AsyncHyperResolver;
 use crate::services::hickory_dns_connector::new_async_http_connector;
