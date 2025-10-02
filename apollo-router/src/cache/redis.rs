@@ -375,6 +375,8 @@ impl RedisCacheStorage {
                     max_timeout: Some(DEFAULT_INTERNAL_REDIS_TIMEOUT),
                     interval: Duration::from_secs(3),
                 };
+                // TODO: figure out why this is necessary and either document or remove it
+                config.replica.lazy_connections = false;
             })
             .with_performance_config(|config| {
                 config.default_command_timeout = timeout;
