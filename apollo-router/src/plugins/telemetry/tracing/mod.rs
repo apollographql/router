@@ -8,17 +8,13 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::trace::BatchConfig;
 use opentelemetry_sdk::trace::BatchConfigBuilder;
-use opentelemetry_sdk::trace::Builder;
 use opentelemetry_sdk::trace::Span;
 use opentelemetry_sdk::trace::SpanProcessor;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tower::BoxError;
 
-use super::config_new::spans::Spans;
 use super::formatters::APOLLO_CONNECTOR_PREFIX;
 use super::formatters::APOLLO_PRIVATE_PREFIX;
-use crate::plugins::telemetry::config::TracingCommon;
 use crate::plugins::telemetry::tracing::datadog::DatadogSpanProcessor;
 
 pub(crate) mod apollo;
@@ -29,16 +25,6 @@ pub(crate) mod datadog_exporter;
 pub(crate) mod otlp;
 pub(crate) mod reload;
 pub(crate) mod zipkin;
-
-pub(crate) trait TracingConfigurator {
-    fn enabled(&self) -> bool;
-    fn apply(
-        &self,
-        builder: Builder,
-        common: &TracingCommon,
-        spans: &Spans,
-    ) -> Result<Builder, BoxError>;
-}
 
 #[derive(Debug)]
 struct ApolloFilterSpanProcessor<T: SpanProcessor> {
@@ -110,7 +96,7 @@ where
 }
 
 /// Batch processor configuration
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq)]
 #[serde(default)]
 pub(crate) struct BatchProcessorConfig {
     #[serde(deserialize_with = "humantime_serde::deserialize")]
