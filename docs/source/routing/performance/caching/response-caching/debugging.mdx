@@ -48,7 +48,6 @@ preview_response_cache:
   className="screenshot"
   alt="Sandbox in GraphOS Studio"
   src="../../../../images/response-cache/sandbox.png"
-  width="300"
 />
 
 - In Sandbox, enable the cache debugger. Click the settings button in the top left and scroll to the bottom to enable it:
@@ -57,7 +56,6 @@ preview_response_cache:
   className="screenshot"
   alt="Sandbox debugger configuration in GraphOS Studio"
   src="../../../../images/response-cache/debugger-config.png"
-  width="300"
 />
 
 - In the right panel, open the dropdown at the top of the response data panel and select **Cache debugger**:
@@ -66,7 +64,6 @@ preview_response_cache:
   className="screenshot"
   alt="Sandbox in GraphOS Studio"
   src="../../../../images/response-cache/sandbox-dropdown.png"
-  width="300"
 />
 
 - A list of cached or potentially cached entries appears. This list helps you understand the cache status of your data: - If the `Created at` column contains data, the value has been stored in the cache. - If the `source` column is `products`, the data for this call was fetched from the `products` subgraph, even if it is now cached. - If the `Created at` column is empty, the entry hasn't been cached. This might happen for several reasons (see [Troubleshoot](#Troubleshoot)). In this example, the `accounts` subgraph entry isn't cached because it contains private, uncacheable data.
@@ -75,7 +72,6 @@ preview_response_cache:
   className="screenshot"
   alt="Response cache debugger in GraphOS Studio"
   src="../../../../images/response-cache/debugger.png"
-  width="300"
 />
 
 - If you click on one of these entries you can now have details about it. Like what was the value of `Cache-control` header returned by the subgraph, what response data is coming from this entry, the entity key and also the corresponding cache tags if you want to invalidate it.
@@ -84,7 +80,6 @@ preview_response_cache:
   className="screenshot"
   alt="Response cache debugger details in GraphOS Studio"
   src="../../../../images/response-cache/debugger-cache-details.png"
-  width="300"
 />
 
 - You can also go in request pane to have details about the request originally sent to the subgraph to get the data. You'll be able to see the query and variables.
@@ -93,7 +88,6 @@ preview_response_cache:
   className="screenshot"
   alt="Response cache debugger details in GraphOS Studio"
   src="../../../../images/response-cache/debugger-cache-details-req.png"
-  width="300"
 />
 
 - Finally if you want to generate a curl command to invalidate this specific data you can click on the invalidate button and it will open a modal to see what you want to invalidate.
@@ -102,7 +96,6 @@ preview_response_cache:
   className="screenshot"
   alt="Response cache debugger invalidation in GraphOS Studio"
   src="../../../../images/response-cache/debugger-invalidate.png"
-  width="300"
 />
 
 ## Troubleshoot

@@ -7,68 +7,68 @@ releaseStage: preview
 
 ## FAQ
 
-+ What's the minimal requirement at the subgraph level to benefit from response caching ?
+### What's the minimal requirement at the subgraph level to benefit from response caching ?
 
 The Router currently cannot know which types or fields should be cached, so it requires the subgraph to set a `Cache-Control` header in its response to indicate that it should be stored.
 
-+ Does it cache errors from response ?
+### Does it cache errors from response ?
 
 To prevent transient errors from affecting the cache for a long duration, subgraph responses with errors are not cached.
 
-+ What if one of my subgraph is unavailable ?
+### What if one of my subgraph is unavailable ?
 
 If some entities were obtained from the cache, but the subgraphs that provided them are unavailable, the router returns a response with the cached entities, and the other entities nullified (schema permitting), along with an error message for the nullified entities.
-+ How response caching is working with authorization ?
+### How response caching is working with authorization ?
 
 When used alongside the router's [authorization directives](/router/configuration/authorization), cache entries are separated by authorization context. If a query contains fields that need a specific scope, the requests providing that scope have different cache entries from those not providing the scope. This means that data requiring authorization can still be safely cached and even shared across users, without needing invalidation when a user's roles change because their requests are automatically directed to a different part of the cache.
 
-+ How does schema updates affect my cache ?
+### How does schema updates affect my cache ?
 
 On schema updates, the router ensures that queries keep their cache entries if the subgraph schema they depend on doesn't change. Queries with affected fields need to be cached again to ensure the router doesn't serve invalid data from before the update.
 
-+ Why use caching in the router if your customer already uses CDN, client, subgraph caching?
+### Why use caching in the router if your customer already uses CDN, client, subgraph caching?
 
 The router caches at the entity/query level which is GraphQL native and reusable across users and requests
 Router level caching reduces traffic to subgraphs/services
 
-+ Why was “Entity Caching” renamed to “Response Caching”?
+### Why was “Entity Caching” renamed to “Response Caching”?
 
 The name "Entity Caching" didn't always describe the outcome and could create confusion. "Response caching" more accurately explains the feature and gives Apollo room to grow and evolve it.
 
-+ Can my customer use response caching in production with router versions < v2.8?
+### Can my customer use response caching in production with router versions < v2.8?
 
 For TTL-based caching, yes.
 For API-based invalidation, please use v2.8+
 
-+ Router v2.8 introduces Cache Tags. Does this work with CDN caches which use surrogate cache key or cache tag?
+### Router v2.8 introduces Cache Tags. Does this work with CDN caches which use surrogate cache key or cache tag?
 
 Yes, it works in a similar and compatible way with those existing systems.
 
-+ Why the focus on invalidation when TTL works for many customers?
+### Why the focus on invalidation when TTL works for many customers?
 
 Discovery shows that a majority of our customers need API-based invalidation, and customers with event-driven architectures can't achieve optimal performance with TTL-only approaches.
 
-+ What are the issues with performance in the existing preview of caching (2024)?
+### What are the issues with performance in the existing preview of caching (2024)?
 
 In the Redis-based entity cache preview that we shipped in 2024, active invalidation fundamentally cannot scale because it uses a linear scan that consumes resources proportional to the total size of the database, not just the amount of invalidated entries. An entirely different approach is needed. This is the main reason that iteration of the feature never left preview in over a year.
 
-+ How does the new preview released in Router v2.8 impact existing response caching users?
+### How does the new preview released in Router v2.8 impact existing response caching users?
 
 All changes are backward-compatible. Existing users of the <code>preview_entity_caching</code> plugin are automatically migrated to the new <code>preview_response_caching</code> plugin.
 
-+ Why weren’t cache tags added to the `@cacheControl` directive?
+### Why weren’t cache tags added to the `@cacheControl` directive?
 
 We considered this. The `@cacheControl` directive has been around for years and is a subgraph-only directive, meaning it’s not part of the supergraph schema. We would need to manage legacy usage. Additionally, another reason to follow this approach is that it mirrors HTTP specifications. Typically, a cache-control header is used to set the TTL and specify whether data should be cached, while a surrogate-key header lists the surrogate keys.
 
-+ What happens to root field cache entries that have no tags associated with them?
+### What happens to root field cache entries that have no tags associated with them?
 
 As in the current preview, these entries are eventually removed based on their TTL. You can invalidate them by subgraph or by entity, but you can't invalidate root fields this way.
 
-+ `@cacheTag` directive compatibility ?
+### `@cacheTag` directive compatibility ?
 
 Yes it's not a subgraph directive, it's only interpreted at the router level unlike `@cacheControl`.
 
-+ Limitations on `@cacheTag` directive
+### Limitations on `@cacheTag` directive
 Unlike `@cacheControl`, `@cacheTag` directive is interpreted at the router level to set cache tags in cache storage. This `@cacheTag` directive has several limitations:
   - Only applies either on root fields query or resolvable entities (types marked with `@key` directive and `resolvable` field unset or `true`).
   - Each entity field referenced in a `@cacheTag` format (applied on entity type) must be a member of every `@key` field set. In other words, when there are multiple `@key` fields on the type, the referenced field(s) must be limited to their intersection.
@@ -122,9 +122,9 @@ Unlike `@cacheControl`, `@cacheTag` directive is interpreted at the router level
     }
     ```
 
-+ How does `@cacheControl` work ?
+### How does `@cacheControl` work ?
 It's a directive interpreted at the subgraph level which means the router won't use it for response caching. At the subgraph level and especially in Apollo Server it will automatically generate the right `Cache-control` response header in order to set the correct cache directives given your schema. More docs [here](https://www.apollographql.com/docs/apollo-server/api/plugin/cache-control).
 
-+ If my query involves 2 root fields (`query { topProducts{...} topAuthors{...} }`) how is it saved in the cache ?
+### If my query involves 2 root fields (`query { topProducts{...} topAuthors{...} }`) how is it saved in the cache ?
 
 We won't create 2 separate cache entries for each root fields. It's a current limitation we have which means if call another query with one of these root fields and it was previously cached you won't have a cache hit it will create a different entry in the cache.
