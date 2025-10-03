@@ -170,7 +170,7 @@ mod test {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn it_emits_metrics_when_tps_enforced() {
         async {
             // GIVEN

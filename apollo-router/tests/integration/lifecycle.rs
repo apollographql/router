@@ -149,7 +149,6 @@ async fn test_force_config_reload_via_chaos() -> Result<(), BoxError> {
         .await;
     router.start().await;
     router.assert_started().await;
-    tokio::time::sleep(Duration::from_secs(2)).await;
     router.assert_reloaded().await;
     router.graceful_shutdown().await;
     Ok(())
@@ -166,7 +165,6 @@ async fn test_force_schema_reload_via_chaos() -> Result<(), BoxError> {
         .await;
     router.start().await;
     router.assert_started().await;
-    tokio::time::sleep(Duration::from_secs(2)).await;
     router.assert_reloaded().await;
     router.graceful_shutdown().await;
     Ok(())
