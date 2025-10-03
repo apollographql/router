@@ -25,13 +25,11 @@ impl TracingConfigurator for super::super::otlp::Config {
     fn configure(&self, builder: &mut TracingBuilder) -> Result<(), BoxError> {
         let exporter: SpanExporterBuilder = self.exporter(TelemetryDataKind::Traces)?;
         let named_exporter = NamedSpanExporter::new(exporter.build_span_exporter()?, "otlp");
-        let batch_span_processor = BatchSpanProcessor::builder(
-            named_exporter,
-            NamedTokioRuntime::new("otlp-tracing"),
-        )
-        .with_batch_config(self.batch_processor.clone().into())
-        .build()
-        .filtered();
+        let batch_span_processor =
+            BatchSpanProcessor::builder(named_exporter, NamedTokioRuntime::new("otlp-tracing"))
+                .with_batch_config(self.batch_processor.clone().into())
+                .build()
+                .filtered();
 
         if builder
             .tracing_common()
