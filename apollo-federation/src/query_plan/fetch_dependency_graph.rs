@@ -4800,14 +4800,56 @@ fn create_post_requires_node(
             parent.parent_node_id,
             parent_path,
         )?;
+
+        // The `post_requires_node_id` node needs a key. This can come from `fetch_node_id` (and
+        // code in `GraphPath::can_satisfy_conditions()` guarantees such a locally satisfiable key
+        // exists in `fetch_node_id`), but it can also potentially come from
+        // `parent.parent_node_id`, and previous code had (wrongfully) always assumed it could.
+        //
+        // To keep this previous optimization, we now explicitly check whether the known locally
+        // satisfiable key can be rebased in `parent.parent_node_id`, and we fall back to
+        // `fetch_node_id` if it doesn't.
+        let Some(key_condition) = dependency_graph
+            .federated_query_graph
+            .locally_satisfiable_key(query_graph_edge_id)?
+        else {
+            bail!(
+                "Due to @requires, validation should have required a key to be present for {}",
+                query_graph_edge_id.index()
+            );
+        };
+        let parent_fetch_node = dependency_graph.node_weight(parent.parent_node_id)?;
+        let type_at_path_for_parent = dependency_graph.type_at_path(
+            &parent_fetch_node.selection_set.selection_set.type_position,
+            &parent_fetch_node.selection_set.selection_set.schema,
+            &path_for_parent.path_in_node,
+        )?;
+        let (require_node_path, pre_require_node_id) = if !key_condition.can_rebase_on(
+            &type_at_path_for_parent,
+            &parent_fetch_node.selection_set.selection_set.schema,
+        )? {
+            // It's possible we didn't add `fetch_node_id` as a parent previously, so we do so here
+            // similarly to how `handle_conditions_tree()` specifies it.
+            dependency_graph.add_parent(
+                post_requires_node_id,
+                ParentRelation {
+                    parent_node_id: fetch_node_id,
+                    path_in_parent: Some(Arc::new(Default::default())),
+                },
+            );
+            (fetch_node_path, fetch_node_id)
+        } else {
+            (&path_for_parent, parent.parent_node_id)
+        };
+
         add_post_require_inputs(
             dependency_graph,
-            &path_for_parent,
+            require_node_path,
             &entity_type_schema,
             entity_type_position.clone(),
             query_graph_edge_id,
             context,
-            parent.parent_node_id,
+            pre_require_node_id,
             post_requires_node_id,
         )?;
         created_nodes.insert(post_requires_node_id);

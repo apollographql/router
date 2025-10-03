@@ -24,6 +24,10 @@ impl From<CacheMetricContextKey> for String {
 }
 
 pub(super) fn record_fetch_error(error: &storage::Error, subgraph_name: &str) {
+    if error.is_row_not_found() {
+        return;
+    }
+
     u64_counter_with_unit!(
         "apollo.router.operations.response_cache.fetch.error",
         "Errors when fetching data from cache",

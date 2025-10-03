@@ -14,8 +14,8 @@ use crate::error::Locations;
 use crate::merger::hints::HintCode;
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
-use crate::merger::merge_field::PLACEHOLDER_TYPE_NAME;
 use crate::schema::FederationSchema;
+use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::HasDescription;
 use crate::schema::position::HasType;
 use crate::supergraph::CompositionHint;
@@ -75,18 +75,18 @@ impl Merger {
         T: HasArguments + Display,
         <T as HasArguments>::ArgumentPosition: Display,
     {
-        let mut arg_names: IndexSet<Name> = IndexSet::new();
+        let mut arg_types: IndexMap<Name, Node<Type>> = Default::default();
         for (idx, source) in sources.iter() {
             let Some(pos) = source else {
                 continue;
             };
             let schema = self.subgraphs[*idx].schema();
             for arg in pos.get_arguments(schema)? {
-                arg_names.insert(arg.name.clone());
+                arg_types.insert(arg.name.clone(), arg.ty.clone());
             }
         }
 
-        for arg_name in &arg_names {
+        for (arg_name, arg_type) in &arg_types {
             // We add the argument unconditionally even if we're going to remove it later on.
             // This enables consistent mismatch/hint reporting.
             dest.insert_argument(
@@ -95,7 +95,7 @@ impl Merger {
                     description: None,
                     name: arg_name.clone(),
                     default_value: None,
-                    ty: Node::new(Type::Named(PLACEHOLDER_TYPE_NAME)),
+                    ty: arg_type.clone(),
                     directives: Default::default(),
                 }),
             )?;
@@ -230,7 +230,7 @@ impl Merger {
             }
         }
 
-        Ok(arg_names)
+        Ok(arg_types.into_keys().collect())
     }
 
     pub(in crate::merger) fn merge_argument<T>(
@@ -239,10 +239,15 @@ impl Merger {
         dest: &T,
     ) -> Result<(), FederationError>
     where
-        T: Display + HasDefaultValue + HasDescription + HasType,
+        T: Clone
+            + Display
+            + HasDefaultValue
+            + HasDescription
+            + HasType
+            + Into<DirectiveTargetPosition>,
     {
         self.merge_description(sources, dest)?;
-        self.record_applied_directives_to_merge(sources, dest);
+        self.record_applied_directives_to_merge(sources, dest)?;
         self.merge_type_reference(sources, dest, true)?;
         self.merge_default_value(sources, dest)?;
         Ok(())

@@ -49,8 +49,6 @@ use crate::schema::validators::from_context::parse_context;
 use crate::utils::human_readable::human_readable_subgraph_names;
 use crate::utils::human_readable::human_readable_types;
 
-pub(crate) const PLACEHOLDER_TYPE_NAME: Name = name!("PLACEHOLDER");
-
 #[derive(Debug, Clone)]
 struct SubgraphWithIndex {
     subgraph: String,
@@ -117,6 +115,8 @@ impl Merger {
         > = Default::default();
         let mut fields_to_add: HashMap<usize, HashSet<ObjectOrInterfaceFieldDefinitionPosition>> =
             Default::default();
+        let mut field_types: HashMap<ObjectOrInterfaceFieldDefinitionPosition, Type> =
+            Default::default();
         let mut extra_sources: Sources<ObjectOrInterfaceFieldDefinitionPosition> =
             Default::default();
 
@@ -135,6 +135,8 @@ impl Merger {
             }
 
             for field in obj_or_itf.fields(subgraph.schema().schema())? {
+                let field_node = field.get(subgraph.schema().schema())?;
+                field_types.insert(field.clone(), field_node.ty.clone());
                 fields_to_add.entry(idx).or_default().insert(field);
             }
 
@@ -161,14 +163,16 @@ impl Merger {
                 if !is_merged_field {
                     continue;
                 }
-                if !added.contains_key(&field) {
+                if !added.contains_key(&field)
+                    && let Some(ty) = field_types.get(&field)
+                {
                     field.insert(
                         &mut self.merged,
                         Component::new(FieldDefinition {
                             description: None,
                             name: field.field_name().clone(),
                             arguments: vec![],
-                            ty: Type::Named(PLACEHOLDER_TYPE_NAME),
+                            ty: ty.clone(),
                             directives: Default::default(),
                         }),
                     )?;
@@ -259,7 +263,7 @@ impl Merger {
         // validate the external ones are consistent.
 
         self.merge_description(&without_external, dest)?;
-        self.record_applied_directives_to_merge(&without_external, dest);
+        self.record_applied_directives_to_merge(&without_external, dest)?;
         let arg_names = self.add_arguments_shallow(&without_external, dest)?;
 
         for arg_name in arg_names {
@@ -1185,19 +1189,19 @@ impl Merger {
 
 /// Simple builder for join__field directives (minimal version for compatibility)
 #[allow(dead_code)]
-struct JoinFieldBuilder {
+pub(crate) struct JoinFieldBuilder {
     arguments: Vec<Node<Argument>>,
 }
 
 #[allow(dead_code)]
 impl JoinFieldBuilder {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             arguments: Vec::new(),
         }
     }
 
-    fn arg<T: Into<Value>>(mut self, key: &Name, value: T) -> Self {
+    pub(crate) fn arg<T: Into<Value>>(mut self, key: &Name, value: T) -> Self {
         self.arguments.push(Node::new(Argument {
             name: key.clone(),
             value: Node::new(value.into()),
@@ -1205,7 +1209,7 @@ impl JoinFieldBuilder {
         self
     }
 
-    fn maybe_arg<T: Into<Value>>(self, key: &Name, value: Option<T>) -> Self {
+    pub(crate) fn maybe_arg<T: Into<Value>>(self, key: &Name, value: Option<T>) -> Self {
         if let Some(v) = value {
             self.arg(key, v)
         } else {
@@ -1213,7 +1217,7 @@ impl JoinFieldBuilder {
         }
     }
 
-    fn maybe_bool_arg(self, key: &Name, condition: bool) -> Self {
+    pub(crate) fn maybe_bool_arg(self, key: &Name, condition: bool) -> Self {
         if condition {
             self.arg(key, Value::Boolean(true))
         } else {
@@ -1221,7 +1225,7 @@ impl JoinFieldBuilder {
         }
     }
 
-    fn build(self) -> Directive {
+    pub(crate) fn build(self) -> Directive {
         Directive {
             name: name!("join__field"),
             arguments: self.arguments,
