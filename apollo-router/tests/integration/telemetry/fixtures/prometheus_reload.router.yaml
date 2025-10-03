@@ -1,0 +1,52 @@
+limits:
+  http_max_request_bytes: 200
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: required
+      router:
+        http.server.request.duration:
+          attributes:
+            server.port: false
+            server.address: false
+            http.response.status_code:
+              alias: status
+            error:
+              error: reason
+  exporters:
+    metrics:
+      prometheus:
+        listen: 127.0.0.1:4000
+        enabled: true
+        path: /metrics
+      common:
+        views:
+          - name: apollo_router_http_request_duration_seconds
+            aggregation:
+              histogram:
+                buckets:
+                  - 0.1
+                  - 0.5
+                  - 1
+                  - 2
+                  - 3
+                  - 4
+                  - 5
+                  - 1000
+headers:
+  all:
+    request:
+      - insert:
+          name: "x-custom-header"
+          value: "test_custom"
+override_subgraph_url:
+  products: http://localhost:4005
+include_subgraph_errors:
+  all: true
+supergraph:
+  introspection: true
+apq:
+  router:
+    cache:
+      in_memory:
+        limit: 1000

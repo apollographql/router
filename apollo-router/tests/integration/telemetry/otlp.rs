@@ -141,6 +141,65 @@ async fn test_resources() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_otlp_tracing_reload() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        panic!("Error: test skipped because GraphOS is not enabled");
+    }
+    let mock_server = mock_otlp_server(0..).await;
+    let config_initial = include_str!("fixtures/otlp_tracing.router.yaml")
+        .replace("<otel-collector-endpoint>", &mock_server.uri());
+
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp {
+            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+        })
+        .config(&config_initial)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Verify initial resource env=local1
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .resource("env", "local1")
+        .build()
+        .validate_otlp_trace(&mut router, &mock_server, Query::default())
+        .await?;
+
+    // This config will NOT reload tracing as the config did not change
+    router.update_config(&config_initial).await;
+    router.assert_reloaded().await;
+    router.assert_log_not_contained("OpenTelemetry trace error occurred");
+
+    // Execute query and verify resource is still local1
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .resource("env", "local1")
+        .build()
+        .validate_otlp_trace(&mut router, &mock_server, Query::default())
+        .await?;
+
+    // This config will force a reload as it changes the resource env value
+    let config_reload = include_str!("fixtures/otlp_tracing_reload.router.yaml")
+        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    router.update_config(&config_reload).await;
+    router.assert_reloaded().await;
+
+    // Execute query and verify resource changed to local2
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .resource("env", "local2")
+        .build()
+        .validate_otlp_trace(&mut router, &mock_server, Query::default())
+        .await?;
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_otlp_request_with_datadog_propagator() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         panic!("Error: test skipped because GraphOS is not enabled");

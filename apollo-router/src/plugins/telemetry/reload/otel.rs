@@ -1,6 +1,32 @@
+//! OpenTelemetry global state management
+//!
+//! This module manages the global OpenTelemetry state and tracing subscriber initialization.
+//! It provides the foundation for hot-reloading telemetry configuration without restarting the router.
+//!
+//! ## Global State
+//!
+//! OpenTelemetry requires global state for tracer providers and propagators. This module maintains:
+//! - **Tracer handle** ([`OPENTELEMETRY_TRACER_HANDLE`]) - Allows hot-swapping the active tracer
+//! - **Format layer handle** ([`FMT_LAYER_HANDLE`]) - Allows hot-swapping the logging format
+//!
+//! These handles are set once during initialization and then used to reload components when
+//! configuration changes.
+//!
+//! ## Initialization
+//!
+//! The [`init_telemetry`] function sets up the tracing subscriber stack with:
+//! - Dynamic attribute layer for request-scoped attributes
+//! - OpenTelemetry layer for distributed tracing
+//! - Format layer for structured logging (JSON or text based on TTY)
+//! - Environment filter for log level control
+//!
+//! ## Reloading
+//!
+//! The reload handles enable the activation phase to update telemetry without recreating the
+//! entire subscriber stack, which would require restarting the application.
+
 use std::io::IsTerminal;
 
-use anyhow::Result;
 use anyhow::anyhow;
 use once_cell::sync::OnceCell;
 use opentelemetry::Context;
@@ -13,17 +39,17 @@ use opentelemetry::trace::TracerProvider;
 use opentelemetry_sdk::trace::Tracer;
 use tower::BoxError;
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
-use tracing_subscriber::layer::Layer;
 use tracing_subscriber::layer::Layered;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::SpanRef;
 use tracing_subscriber::reload::Handle;
 use tracing_subscriber::util::SubscriberInitExt;
 
-use super::dynamic_attribute::DynAttributeLayer;
-use super::fmt_layer::FmtLayer;
-use super::formatters::json::Json;
+use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
+use crate::plugins::telemetry::fmt_layer::FmtLayer;
+use crate::plugins::telemetry::formatters::json::Json;
 use crate::plugins::telemetry::formatters::text::Text;
 use crate::plugins::telemetry::otel;
 use crate::plugins::telemetry::otel::OpenTelemetryLayer;
@@ -32,21 +58,26 @@ use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 use crate::tracer::TraceId;
 
 pub(crate) type LayeredRegistry = Layered<DynAttributeLayer, Registry>;
-
-pub(super) type LayeredTracer =
+pub(in crate::plugins::telemetry) type LayeredTracer =
     Layered<OpenTelemetryLayer<LayeredRegistry, ReloadTracer<Tracer>>, LayeredRegistry>;
 
-// These handles allow hot tracing of layers. They have complex type definitions because tracing has
-// generic types in the layer definition.
-pub(super) static OPENTELEMETRY_TRACER_HANDLE: OnceCell<
+/// Global handle for hot-reloading the OpenTelemetry tracer
+///
+/// This handle allows the activation phase to swap in a new tracer without rebuilding
+/// the entire tracing subscriber stack.
+pub(in crate::plugins::telemetry) static OPENTELEMETRY_TRACER_HANDLE: OnceCell<
     ReloadTracer<opentelemetry_sdk::trace::Tracer>,
 > = OnceCell::new();
 
+/// Global handle for hot-reloading the logging format layer
+///
+/// This handle allows the activation phase to change logging format (e.g., JSON vs text)
+/// without rebuilding the entire tracing subscriber stack.
 static FMT_LAYER_HANDLE: OnceCell<
     Handle<Box<dyn Layer<LayeredTracer> + Send + Sync>, LayeredTracer>,
 > = OnceCell::new();
 
-pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
+pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
     let hot_tracer = ReloadTracer::new(
         opentelemetry_sdk::trace::TracerProvider::default()
             .tracer_builder("noop")
@@ -89,7 +120,9 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn reload_fmt(layer: Box<dyn Layer<LayeredTracer> + Send + Sync>) {
+pub(in crate::plugins::telemetry) fn reload_fmt(
+    layer: Box<dyn Layer<LayeredTracer> + Send + Sync>,
+) {
     if let Some(handle) = FMT_LAYER_HANDLE.get() {
         handle.reload(layer).expect("fmt layer reload must succeed");
     }
@@ -147,11 +180,9 @@ where
     fn is_sampled(&self) -> bool {
         // if this extension is set, that means the parent span was accepted, and so the
         // entire trace is accepted
-        let extensions = self.extensions();
-        extensions
+        self.extensions()
             .get::<SampledSpan>()
-            .map(|s| matches!(s, SampledSpan::Sampled(_, _)))
-            .unwrap_or_default()
+            .is_some_and(|s| matches!(s, SampledSpan::Sampled(_, _)))
     }
 
     fn get_trace_id(&self) -> Option<TraceId> {
@@ -169,6 +200,7 @@ const LEGACY_METRIC_PREFIX_COUNTER: &str = "counter.";
 const LEGACY_METRIC_PREFIX_HISTOGRAM: &str = "histogram.";
 const LEGACY_METRIC_PREFIX_VALUE: &str = "value.";
 
+/// REMOVE in 3.0
 /// Detects use of the 1.x `tracing`-based metrics events, which are no longer supported in 2.x.
 struct WarnLegacyMetricsLayer;
 

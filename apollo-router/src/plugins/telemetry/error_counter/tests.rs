@@ -682,7 +682,7 @@ async fn test_count_operation_errors_with_duplicate_errors_and_extended_config_e
     .await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_subgraph_error_counting() {
     async {
         let operation_name = "operationName";
@@ -798,7 +798,7 @@ async fn test_subgraph_error_counting() {
     .await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_execution_error_counting() {
     async {
         let operation_name = "operationName";
@@ -909,7 +909,7 @@ async fn test_execution_error_counting() {
     .await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_supergraph_error_counting() {
     async {
         let query = "query operationName { __typename }";
@@ -1031,7 +1031,7 @@ async fn test_supergraph_error_counting() {
     .await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_router_error_counting() {
     async {
         let operation_name = "operationName";
@@ -1141,7 +1141,7 @@ async fn test_router_error_counting() {
     .await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_operation_errors_emitted_when_config_is_enabled() {
     async {
         let query = "query operationName { __typename }";

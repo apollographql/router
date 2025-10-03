@@ -31,7 +31,7 @@ use crate::configuration::schema::Mode;
 use crate::configuration::validate_yaml_configuration;
 use crate::metrics::meter_provider_internal;
 use crate::plugin::plugins;
-use crate::plugins::telemetry::reload::init_telemetry;
+use crate::plugins::telemetry::reload::otel::init_telemetry;
 use crate::registry::OciConfig;
 use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
