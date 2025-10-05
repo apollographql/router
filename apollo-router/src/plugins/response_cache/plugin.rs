@@ -5,7 +5,6 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
-use std::time::Instant;
 
 use apollo_compiler::Schema;
 use apollo_compiler::ast::NamedType;
@@ -27,8 +26,6 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use tokio::sync::RwLock;
 use tokio::sync::broadcast;
-use tokio::sync::broadcast::Receiver;
-use tokio::sync::broadcast::Sender;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::IntervalStream;
 use tower::BoxError;
@@ -45,10 +42,7 @@ use super::invalidation_endpoint::InvalidationEndpointConfig;
 use super::invalidation_endpoint::InvalidationService;
 use super::invalidation_endpoint::SubgraphInvalidationConfig;
 use super::metrics::CacheMetricContextKey;
-use super::postgres::BatchDocument;
-use super::postgres::CacheEntry;
-use super::postgres::PostgresCacheConfig;
-use super::postgres::PostgresCacheStorage;
+use super::metrics::record_fetch_error;
 use crate::Context;
 use crate::Endpoint;
 use crate::ListenAddr;
@@ -65,12 +59,15 @@ use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::mock_subgraphs::execution::input_coercion::coerce_argument_values;
-use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::response_cache::cache_key::PrimaryCacheKeyEntity;
 use crate::plugins::response_cache::cache_key::PrimaryCacheKeyRoot;
 use crate::plugins::response_cache::cache_key::hash_additional_data;
 use crate::plugins::response_cache::cache_key::hash_query;
-use crate::plugins::response_cache::metrics;
+use crate::plugins::response_cache::storage;
+use crate::plugins::response_cache::storage::CacheEntry;
+use crate::plugins::response_cache::storage::CacheStorage;
+use crate::plugins::response_cache::storage::Document;
+use crate::plugins::response_cache::storage::redis::Storage;
 use crate::plugins::telemetry::LruSizeInstrument;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::span_ext::SpanMarkError;
@@ -99,11 +96,11 @@ const DEFAULT_LRU_PRIVATE_QUERIES_SIZE: NonZeroUsize = NonZeroUsize::new(2048).u
 const LRU_PRIVATE_QUERIES_INSTRUMENT_NAME: &str =
     "apollo.router.response_cache.private_queries.lru.size";
 
-register_private_plugin!("apollo", "experimental_response_cache", ResponseCache);
+register_private_plugin!("apollo", "preview_response_cache", ResponseCache);
 
 #[derive(Clone)]
 pub(crate) struct ResponseCache {
-    pub(super) storage: Arc<Storage>,
+    pub(super) storage: Arc<StorageInterface>,
     endpoint_config: Option<Arc<InvalidationEndpointConfig>>,
     subgraphs: Arc<SubgraphConfiguration<Subgraph>>,
     entity_type: Option<String>,
@@ -114,9 +111,9 @@ pub(crate) struct ResponseCache {
     supergraph_schema: Arc<Valid<Schema>>,
     /// map containing the enum GRAPH
     subgraph_enums: Arc<HashMap<String, String>>,
-    /// To close all related tasks
-    drop_tx: Sender<()>,
     lru_size_instrument: LruSizeInstrument,
+    /// Sender to tell spawned tasks to abort when this struct is dropped
+    drop_tx: broadcast::Sender<()>,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -125,72 +122,43 @@ struct PrivateQueryKey {
     has_private_id: bool,
 }
 
-impl Drop for ResponseCache {
-    fn drop(&mut self) {
-        let _ = self.drop_tx.send(());
+#[derive(Clone, Default)]
+pub(crate) struct StorageInterface {
+    all: Option<Arc<OnceLock<Storage>>>,
+    subgraphs: HashMap<String, Arc<OnceLock<Storage>>>,
+}
+
+impl StorageInterface {
+    pub(crate) fn get(&self, subgraph: &str) -> Option<&Storage> {
+        let storage = self.subgraphs.get(subgraph).or(self.all.as_ref())?;
+        storage.get()
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct Storage {
-    pub(crate) all: Option<Arc<OnceLock<PostgresCacheStorage>>>,
-    pub(crate) subgraphs: HashMap<String, Arc<OnceLock<PostgresCacheStorage>>>,
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
+impl StorageInterface {
+    /// Replace the `all` storage layer in this struct.
+    ///
+    /// This supports tests which initialize the `StorageInterface` without a backing database
+    /// and then add one later, simulating a delayed storage connection.
+    pub(crate) fn replace_storage(&self, storage: Storage) -> Option<()> {
+        self.all.as_ref()?.set(storage).ok()
+    }
 }
 
-impl Storage {
-    pub(crate) fn get(&self, subgraph: &str) -> Option<&PostgresCacheStorage> {
-        match self.subgraphs.get(subgraph) {
-            Some(subgraph) => subgraph.get(),
-            None => self.all.as_ref().and_then(|s| s.get()),
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
+impl From<Storage> for StorageInterface {
+    fn from(storage: Storage) -> Self {
+        Self {
+            all: Some(Arc::new(storage.into())),
+            subgraphs: HashMap::new(),
         }
-    }
-
-    pub(crate) async fn migrate(&self) -> anyhow::Result<()> {
-        if let Some(all) = self.all.as_ref().and_then(|all| all.get()) {
-            all.migrate().await?;
-        }
-        futures::future::try_join_all(
-            self.subgraphs
-                .values()
-                .filter_map(|s| Some(s.get()?.migrate())),
-        )
-        .await?;
-
-        Ok(())
-    }
-
-    /// Spawn tokio task to refresh metrics about expired data count
-    fn expired_data_count_tasks(&self, drop_signal: Receiver<()>) {
-        if let Some(all) = self.all.as_ref().and_then(|all| all.get()) {
-            tokio::task::spawn(metrics::expired_data_task(
-                all.clone(),
-                drop_signal.resubscribe(),
-                None,
-            ));
-        }
-        for (subgraph_name, subgraph_cache_storage) in &self.subgraphs {
-            if let Some(subgraph_cache_storage) = subgraph_cache_storage.get() {
-                tokio::task::spawn(metrics::expired_data_task(
-                    subgraph_cache_storage.clone(),
-                    drop_signal.resubscribe(),
-                    subgraph_name.clone().into(),
-                ));
-            }
-        }
-    }
-
-    pub(crate) async fn update_cron(&self) -> anyhow::Result<()> {
-        if let Some(all) = self.all.as_ref().and_then(|all| all.get()) {
-            all.update_cron().await?;
-        }
-        futures::future::try_join_all(
-            self.subgraphs
-                .values()
-                .filter_map(|s| Some(s.get()?.update_cron())),
-        )
-        .await?;
-
-        Ok(())
     }
 }
 
@@ -225,8 +193,8 @@ const fn default_lru_private_queries_size() -> NonZeroUsize {
 #[derive(Clone, Debug, JsonSchema, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 pub(crate) struct Subgraph {
-    /// PostgreSQL configuration
-    pub(crate) postgres: Option<PostgresCacheConfig>,
+    /// Redis configuration
+    pub(crate) redis: Option<storage::redis::Config>,
 
     /// expiration for all keys for this subgraph, unless overridden by the `Cache-Control` header in subgraph responses
     pub(crate) ttl: Option<Ttl>,
@@ -244,7 +212,7 @@ pub(crate) struct Subgraph {
 impl Default for Subgraph {
     fn default() -> Self {
         Self {
-            postgres: None,
+            redis: None,
             enabled: Some(true),
             ttl: Default::default(),
             private_id: Default::default(),
@@ -289,71 +257,6 @@ impl PluginPrivate for ResponseCache {
             .as_ref()
             .map(|q| q.name.to_string());
 
-        let mut all = None;
-        let (drop_tx, drop_rx) = broadcast::channel(2);
-        let mut task_aborts = Vec::new();
-        if let Some(postgres) = &init.config.subgraph.all.postgres {
-            let postgres_config = postgres.clone();
-            let required_to_start = postgres_config.required_to_start;
-            all = match PostgresCacheStorage::new(&postgres_config).await {
-                Ok(storage) => Some(Arc::new(OnceLock::from(storage))),
-                Err(e) => {
-                    tracing::error!(
-                        cache = "response",
-                        error = %e,
-                        "could not open connection to Postgres for caching",
-                    );
-                    if required_to_start {
-                        return Err(e.into());
-                    } else {
-                        let pg_cache_storage = Arc::new(OnceLock::new());
-                        task_aborts.push(
-                            tokio::spawn(check_pg_connection(
-                                postgres_config,
-                                pg_cache_storage.clone(),
-                                drop_rx,
-                                None,
-                            ))
-                            .abort_handle(),
-                        );
-                        Some(pg_cache_storage)
-                    }
-                }
-            };
-        }
-        let mut subgraph_storages = HashMap::new();
-        for (subgraph, config) in &init.config.subgraph.subgraphs {
-            if let Some(postgres) = &config.postgres {
-                let required_to_start = postgres.required_to_start;
-                let storage = match PostgresCacheStorage::new(postgres).await {
-                    Ok(storage) => Arc::new(OnceLock::from(storage)),
-                    Err(e) => {
-                        tracing::error!(
-                            cache = "response",
-                            error = %e,
-                            "could not open connection to Postgres for caching",
-                        );
-                        if required_to_start {
-                            return Err(e.into());
-                        } else {
-                            let pg_cache_storage = Arc::new(OnceLock::new());
-                            task_aborts.push(
-                                tokio::spawn(check_pg_connection(
-                                    postgres.clone(),
-                                    pg_cache_storage.clone(),
-                                    drop_tx.subscribe(),
-                                    subgraph.clone().into(),
-                                ))
-                                .abort_handle(),
-                            );
-                            pg_cache_storage
-                        }
-                    }
-                };
-                subgraph_storages.insert(subgraph.clone(), storage);
-            }
-        }
-
         if init.config.subgraph.all.ttl.is_none()
             && init
                 .config
@@ -383,17 +286,30 @@ impl PluginPrivate for ResponseCache {
             );
         }
 
-        let storage = Arc::new(Storage {
-            all,
-            subgraphs: subgraph_storages,
-        });
-        storage.migrate().await?;
-        storage.update_cron().await?;
+        let mut storage_interface = StorageInterface::default();
 
-        let invalidation = Invalidation::new(storage.clone()).await?;
+        let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+        if let Some(config) = init.config.subgraph.all.redis.clone() {
+            let storage = Arc::new(OnceLock::new());
+            storage_interface.all = Some(storage.clone());
+            connect_or_spawn_reconnection_task(config, storage, drop_rx).await?;
+        }
+
+        for (subgraph, subgraph_config) in &init.config.subgraph.subgraphs {
+            if let Some(config) = subgraph_config.redis.clone() {
+                let storage = Arc::new(OnceLock::new());
+                storage_interface
+                    .subgraphs
+                    .insert(subgraph.clone(), storage.clone());
+                connect_or_spawn_reconnection_task(config, storage, drop_tx.subscribe()).await?;
+            }
+        }
+
+        let storage_interface = Arc::new(storage_interface);
+        let invalidation = Invalidation::new(storage_interface.clone()).await?;
 
         Ok(Self {
-            storage,
+            storage: storage_interface,
             entity_type,
             enabled: init.config.enabled,
             debug: init.config.debug,
@@ -405,15 +321,12 @@ impl PluginPrivate for ResponseCache {
             invalidation,
             subgraph_enums: Arc::new(get_subgraph_enums(&init.supergraph_schema)),
             supergraph_schema: init.supergraph_schema,
-            drop_tx,
             lru_size_instrument: LruSizeInstrument::new(LRU_PRIVATE_QUERIES_INSTRUMENT_NAME),
+            drop_tx,
         })
     }
 
-    fn activate(&self) {
-        self.storage
-            .expired_data_count_tasks(self.drop_tx.subscribe());
-    }
+    fn activate(&self) {}
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         let debug = self.debug;
@@ -553,11 +466,11 @@ impl ResponseCache {
         any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
     ))]
     pub(crate) async fn for_test(
-        storage: PostgresCacheStorage,
+        storage: Storage,
         subgraphs: HashMap<String, Subgraph>,
         supergraph_schema: Arc<Valid<Schema>>,
         truncate_namespace: bool,
-        update_cron: bool,
+        drop_tx: broadcast::Sender<()>,
     ) -> Result<Self, BoxError>
     where
         Self: Sized,
@@ -565,20 +478,15 @@ impl ResponseCache {
         use std::net::IpAddr;
         use std::net::Ipv4Addr;
         use std::net::SocketAddr;
-        storage.migrate().await?;
-        if update_cron {
-            storage.update_cron().await?;
-        }
         if truncate_namespace {
             storage.truncate_namespace().await?;
         }
 
-        let storage = Arc::new(Storage {
+        let storage = Arc::new(StorageInterface {
             all: Some(Arc::new(storage.into())),
             subgraphs: HashMap::new(),
         });
         let invalidation = Invalidation::new(storage.clone()).await?;
-        let (drop_tx, _drop_rx) = broadcast::channel(2);
         Ok(Self {
             storage,
             entity_type: None,
@@ -605,8 +513,8 @@ impl ResponseCache {
             invalidation,
             subgraph_enums: Arc::new(get_subgraph_enums(&supergraph_schema)),
             supergraph_schema,
-            drop_tx,
             lru_size_instrument: LruSizeInstrument::new(LRU_PRIVATE_QUERIES_INSTRUMENT_NAME),
+            drop_tx,
         })
     }
     #[cfg(all(
@@ -625,7 +533,7 @@ impl ResponseCache {
         use std::net::Ipv4Addr;
         use std::net::SocketAddr;
 
-        let storage = Arc::new(Storage {
+        let storage = Arc::new(StorageInterface {
             all: Some(Default::default()),
             subgraphs: HashMap::new(),
         });
@@ -658,8 +566,8 @@ impl ResponseCache {
             invalidation,
             subgraph_enums: Arc::new(get_subgraph_enums(&supergraph_schema)),
             supergraph_schema,
-            drop_tx,
             lru_size_instrument: LruSizeInstrument::new(LRU_PRIVATE_QUERIES_INSTRUMENT_NAME),
+            drop_tx,
         })
     }
 
@@ -689,6 +597,12 @@ impl ResponseCache {
     }
 }
 
+impl Drop for ResponseCache {
+    fn drop(&mut self) {
+        let _ = self.drop_tx.send(());
+    }
+}
+
 /// Get the map of subgraph enum variant mapped with subgraph name
 fn get_subgraph_enums(supergraph_schema: &Valid<Schema>) -> HashMap<String, String> {
     let mut subgraph_enums = HashMap::new();
@@ -715,7 +629,7 @@ struct CacheService {
     service: subgraph::BoxCloneService,
     name: String,
     entity_type: Option<String>,
-    storage: Arc<Storage>,
+    storage: Arc<StorageInterface>,
     subgraph_ttl: Duration,
     private_queries: Arc<RwLock<LruCache<PrivateQueryKey, ()>>>,
     private_id: Option<String>,
@@ -750,18 +664,14 @@ impl CacheService {
         mut self,
         request: subgraph::Request,
     ) -> Result<subgraph::Response, BoxError> {
-        let storage = match self.storage.get(&self.name) {
-            Some(storage) => storage.clone(),
-            None => {
-                u64_counter_with_unit!(
-                    "apollo.router.operations.response_cache.fetch.error",
-                    "Errors when fetching data from cache",
-                    "{error}",
-                    1,
-                    "subgraph.name" = self.name.clone(),
-                    "code" = "NO_STORAGE"
-                );
-
+        let storage = match self
+            .storage
+            .get(&self.name)
+            .ok_or(storage::Error::NoStorage)
+        {
+            Ok(storage) => storage.clone(),
+            Err(err) => {
+                record_fetch_error(&err, &self.name);
                 return self
                     .service
                     .map_response(move |response: subgraph::Response| {
@@ -1120,7 +1030,7 @@ impl CacheService {
                         let debug_cache_keys_ctx = cache_result.0.iter().filter_map(|ir| {
                             ir.cache_entry.as_ref().map(|cache_entry| CacheKeyContext {
                                 hashed_private_id: private_id.clone(),
-                                key: cache_entry.cache_key.clone(),
+                                key: cache_entry.key.clone(),
                                 invalidation_keys: ir.invalidation_keys.clone().into_iter()
                                 .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
                                 .collect(),
@@ -1247,7 +1157,7 @@ impl CacheService {
 async fn cache_lookup_root(
     name: String,
     entity_type_opt: Option<&str>,
-    cache: PostgresCacheStorage,
+    cache: Storage,
     is_known_private: bool,
     private_id: Option<&str>,
     debug: bool,
@@ -1274,18 +1184,7 @@ async fn cache_lookup_root(
 
     Span::current().record("cache.key", key.clone());
 
-    let now = Instant::now();
-    let cache_result = cache.get(&key).await;
-    f64_histogram_with_unit!(
-        "apollo.router.operations.response_cache.fetch",
-        "Time to fetch data from cache",
-        "s",
-        now.elapsed().as_secs_f64(),
-        "subgraph.name" = request.subgraph_name.clone(),
-        "kind" = "single"
-    );
-
-    match cache_result {
+    match cache.fetch(&key, &request.subgraph_name).await {
         Ok(value) => {
             if value.control.can_use() {
                 let control = value.control.clone();
@@ -1311,7 +1210,7 @@ async fn cache_lookup_root(
                         CONTEXT_DEBUG_CACHE_KEYS,
                         |mut val| {
                             val.push(CacheKeyContext {
-                                key: value.cache_key.clone(),
+                                key: value.key.clone(),
                                 hashed_private_id: private_id.map(ToString::to_string),
                                 invalidation_keys: invalidation_keys
                                     .clone()
@@ -1356,17 +1255,8 @@ async fn cache_lookup_root(
         }
         Err(err) => {
             let span = Span::current();
-            if !matches!(err, sqlx::Error::RowNotFound) {
+            if !err.is_row_not_found() {
                 span.mark_as_error(format!("cannot get cache entry: {err}"));
-
-                u64_counter_with_unit!(
-                    "apollo.router.operations.response_cache.fetch.error",
-                    "Errors when fetching data from cache",
-                    "{error}",
-                    1,
-                    "subgraph.name" = name,
-                    "code" = err.code()
-                );
             }
 
             span.set_span_dyn_attribute(
@@ -1502,7 +1392,7 @@ async fn cache_lookup_entities(
     name: String,
     supergraph_schema: Arc<Valid<Schema>>,
     subgraph_enums: &HashMap<String, String>,
-    cache: PostgresCacheStorage,
+    cache: Storage,
     is_known_private: bool,
     private_id: Option<&str>,
     mut request: subgraph::Request,
@@ -1518,12 +1408,11 @@ async fn cache_lookup_entities(
     )?;
     let keys_len = cache_metadata.len();
 
-    let now = Instant::now();
     let cache_keys = cache_metadata
         .iter()
         .map(|k| k.cache_key.as_str())
         .collect::<Vec<&str>>();
-    let cache_result = cache.get_multiple(&cache_keys).await;
+    let cache_result = cache.fetch_multiple(&cache_keys, &name).await;
     Span::current().set_span_dyn_attribute(
         "cache.keys".into(),
         opentelemetry::Value::Array(Array::String(
@@ -1532,14 +1421,6 @@ async fn cache_lookup_entities(
                 .map(|ck| StringValue::from(ck.to_string()))
                 .collect(),
         )),
-    );
-    f64_histogram_with_unit!(
-        "apollo.router.operations.response_cache.fetch",
-        "Time to fetch data from cache",
-        "s",
-        now.elapsed().as_secs_f64(),
-        "subgraph.name" = request.subgraph_name.clone(),
-        "kind" = "batch"
     );
 
     let cache_result: Vec<Option<CacheEntry>> = match cache_result {
@@ -1551,18 +1432,9 @@ async fn cache_lookup_entities(
             })
             .collect(),
         Err(err) => {
-            let span = Span::current();
-            if !matches!(err, sqlx::Error::RowNotFound) {
+            if !err.is_row_not_found() {
+                let span = Span::current();
                 span.mark_as_error(format!("cannot get cache entry: {err}"));
-
-                u64_counter_with_unit!(
-                    "apollo.router.operations.response_cache.fetch.error",
-                    "Errors when fetching data from cache",
-                    "{error}",
-                    1,
-                    "subgraph.name" = name.clone(),
-                    "code" = err.code()
-                );
             }
 
             std::iter::repeat_n(None, keys_len).collect()
@@ -1674,7 +1546,7 @@ fn update_cache_control(context: &Context, cache_control: &CacheControl) {
 }
 
 async fn cache_store_root_from_response(
-    cache: PostgresCacheStorage,
+    cache: Storage,
     default_subgraph_ttl: Duration,
     response: &subgraph::Response,
     cache_control: CacheControl,
@@ -1703,43 +1575,24 @@ async fn cache_store_root_from_response(
                         .map(|s| s.to_owned()),
                 );
             }
-            let data = data.clone();
+
+            let document = Document {
+                key: cache_key,
+                data: data.clone(),
+                control: cache_control,
+                invalidation_keys,
+                expire: ttl,
+            };
 
             let subgraph_name = response.subgraph_name.clone();
             let span = tracing::info_span!("response_cache.store", "kind" = "root", "subgraph.name" = subgraph_name.clone(), "ttl" = ?ttl);
-            // Write to cache in a non-awaited task so it’s on in the request’s critical path
+
+            // Write to cache in a non-awaited task so that it's not on the request’s critical path
             tokio::spawn(async move {
-                let now = Instant::now();
-                if let Err(err) = cache
-                    .insert(
-                        &cache_key,
-                        ttl,
-                        invalidation_keys,
-                        data,
-                        cache_control,
-                        &subgraph_name,
-                    )
+                let _ = cache
+                    .insert(document, &subgraph_name)
                     .instrument(span)
-                    .await
-                {
-                    u64_counter_with_unit!(
-                        "apollo.router.operations.response_cache.insert.error",
-                        "Errors when inserting data in cache",
-                        "{error}",
-                        1,
-                        "subgraph.name" = subgraph_name.clone(),
-                        "code" = err.code()
-                    );
-                    tracing::debug!(error = %err, "cannot insert data in cache");
-                }
-                f64_histogram_with_unit!(
-                    "apollo.router.operations.response_cache.insert",
-                    "Time to insert new data in cache",
-                    "s",
-                    now.elapsed().as_secs_f64(),
-                    "subgraph.name" = subgraph_name,
-                    "kind" = "single"
-                );
+                    .await;
             });
         }
     }
@@ -1749,7 +1602,7 @@ async fn cache_store_root_from_response(
 
 #[allow(clippy::too_many_arguments)]
 async fn cache_store_entities_from_response(
-    cache: PostgresCacheStorage,
+    cache: Storage,
     default_subgraph_ttl: Duration,
     response: &mut subgraph::Response,
     cache_control: CacheControl,
@@ -2298,7 +2151,7 @@ fn filter_representations(
 async fn insert_entities_in_result(
     entities: &mut Vec<Value>,
     errors: &[Error],
-    cache: PostgresCacheStorage,
+    cache: Storage,
     default_subgraph_ttl: Duration,
     cache_control: CacheControl,
     result: &mut Vec<IntermediateResult>,
@@ -2404,10 +2257,10 @@ async fn insert_entities_in_result(
                         invalidation_keys
                             .extend(keys.iter().filter_map(|v| v.as_str()).map(|s| s.to_owned()));
                     }
-                    to_insert.push(BatchDocument {
-                        control: serde_json::to_string(&cache_control)?,
-                        data: serde_json::to_string(&value)?,
-                        cache_key: key,
+                    to_insert.push(Document {
+                        control: cache_control.clone(),
+                        data: value.clone(),
+                        key,
                         invalidation_keys,
                         expire: ttl,
                     });
@@ -2429,45 +2282,14 @@ async fn insert_entities_in_result(
     if !to_insert.is_empty() {
         let batch_size = to_insert.len();
         let span = tracing::info_span!("response_cache.store", "kind" = "entity", "subgraph.name" = subgraph_name, "ttl" = ?ttl, "batch.size" = %batch_size);
-
-        let batch_size_str = if batch_size <= 10 {
-            "1-10"
-        } else if batch_size <= 20 {
-            "11-20"
-        } else if batch_size <= 50 {
-            "21-50"
-        } else {
-            "50+"
-        };
-
         let subgraph_name = subgraph_name.to_string();
-        // Write to cache in a non-awaited task so it’s on in the request’s critical path
+
+        // Write to cache in a non-awaited task so that it's not on the request’s critical path
         tokio::spawn(async move {
-            let now = Instant::now();
-            if let Err(err) = cache
+            let _ = cache
                 .insert_in_batch(to_insert, &subgraph_name)
                 .instrument(span)
-                .await
-            {
-                u64_counter_with_unit!(
-                    "apollo.router.operations.response_cache.insert.error",
-                    "Errors when inserting data in cache",
-                    "{error}",
-                    1,
-                    "subgraph.name" = subgraph_name.clone(),
-                    "code" = err.code()
-                );
-                tracing::debug!(error = %err, "cannot insert data in cache");
-            }
-            f64_histogram_with_unit!(
-                "apollo.router.operations.response_cache.insert",
-                "Time to insert new data in cache",
-                "s",
-                now.elapsed().as_secs_f64(),
-                "subgraph.name" = subgraph_name,
-                "kind" = "batch",
-                "batch.size" = batch_size_str
-            );
+                .await;
         });
     }
 
@@ -2504,45 +2326,6 @@ fn assemble_response_from_errors(
         }
     }
     (new_entities, new_errors)
-}
-
-async fn check_pg_connection(
-    postgres_config: PostgresCacheConfig,
-    pg_storage: Arc<OnceLock<PostgresCacheStorage>>,
-    mut abort_signal: Receiver<()>,
-    subgraph_name: Option<String>,
-) {
-    let mut interval =
-        IntervalStream::new(tokio::time::interval(std::time::Duration::from_secs(30)));
-    let abort_signal_cloned = abort_signal.resubscribe();
-    loop {
-        tokio::select! {
-            biased;
-            _ = abort_signal.recv() => {
-                break;
-            }
-            _ = interval.next() => {
-                u64_counter_with_unit!(
-                    "apollo.router.response_cache.reconnection",
-                    "Number of reconnections to the cache storage",
-                    "{retry}",
-                    1,
-                    "subgraph.name" = subgraph_name.clone().unwrap_or_default()
-                );
-                if let Ok(storage) = PostgresCacheStorage::new(&postgres_config).await {
-                    if let Err(err) = storage.migrate().await {
-                        tracing::error!(error = %err, "cannot migrate storage");
-                    }
-                    if let Err(err) = storage.update_cron().await {
-                        tracing::error!(error = %err, "cannot update cron storage");
-                    }
-                    let _ = pg_storage.set(storage.clone());
-                    tokio::task::spawn(metrics::expired_data_task(storage, abort_signal_cloned, None));
-                    break;
-                }
-            }
-        }
-    }
 }
 
 pub(crate) type CacheKeysContext = Vec<CacheKeyContext>;
@@ -2606,36 +2389,88 @@ impl Ord for CacheKeySource {
     }
 }
 
+async fn connect_or_spawn_reconnection_task(
+    config: storage::redis::Config,
+    storage: Arc<OnceLock<Storage>>,
+    abort_signal: broadcast::Receiver<()>,
+) -> Result<(), BoxError> {
+    match attempt_connection(&config, storage.clone(), abort_signal.resubscribe()).await {
+        Ok(()) => Ok(()),
+        Err(err) if config.required_to_start => Err(err),
+        Err(_) => {
+            tokio::spawn(reattempt_connection(config.clone(), storage, abort_signal));
+            Ok(())
+        }
+    }
+}
+
+async fn attempt_connection(
+    config: &storage::redis::Config,
+    cache_storage: Arc<OnceLock<Storage>>,
+    abort_signal: broadcast::Receiver<()>,
+) -> Result<(), BoxError> {
+    let storage = Storage::new(config, abort_signal)
+        .await
+        .inspect_err(|err| {
+            tracing::error!(
+                cache = "response",
+                error = %err,
+                "could not open connection to Redis for response caching",
+            )
+        })?;
+    let _ = cache_storage.set(storage);
+
+    Ok(())
+}
+
+async fn reattempt_connection(
+    config: storage::redis::Config,
+    cache_storage: Arc<OnceLock<Storage>>,
+    mut abort_signal: broadcast::Receiver<()>,
+) {
+    let mut interval = IntervalStream::new(tokio::time::interval(Duration::from_secs(30)));
+    loop {
+        tokio::select! {
+            biased;
+            _ = abort_signal.recv() => {
+                break;
+            }
+            _ = interval.next() => {
+                if attempt_connection(&config, cache_storage.clone(), abort_signal.resubscribe()).await.is_ok() {
+                    break;
+                }
+            }
+        }
+    }
+}
+
 #[cfg(all(
     test,
     any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
 ))]
 mod tests {
-    use super::*;
-    use crate::plugins::response_cache::postgres::default_batch_size;
-    use crate::plugins::response_cache::postgres::default_cleanup_interval;
-    use crate::plugins::response_cache::postgres::default_pool_size;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use apollo_compiler::Schema;
+    use tokio::sync::broadcast;
+
+    use super::Subgraph;
+    use super::Ttl;
+    use crate::configuration::subgraph::SubgraphConfiguration;
+    use crate::plugins::response_cache::plugin::ResponseCache;
+    use crate::plugins::response_cache::storage::redis::Config;
+    use crate::plugins::response_cache::storage::redis::Storage;
 
     const SCHEMA: &str = include_str!("../../testdata/orga_supergraph_cache_key.graphql");
 
     #[tokio::test]
     async fn test_subgraph_enabled() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-            tls: Default::default(),
-            cleanup_interval: default_cleanup_interval(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from("test_subgraph_enabled")),
-        })
-        .await
-        .unwrap();
+        let (drop_tx, drop_rx) = broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false, "test_subgraph_enabled"), drop_rx)
+            .await
+            .unwrap();
         let map = serde_json::json!({
             "user": {
                 "private_id": "sub"
@@ -2651,11 +2486,11 @@ mod tests {
         });
 
         let mut response_cache = ResponseCache::for_test(
-            pg_cache.clone(),
+            storage.clone(),
             serde_json::from_value(map).unwrap(),
             valid_schema.clone(),
             true,
-            false,
+            drop_tx,
         )
         .await
         .unwrap();
@@ -2677,21 +2512,10 @@ mod tests {
     #[tokio::test]
     async fn test_subgraph_ttl() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-            tls: Default::default(),
-            cleanup_interval: default_cleanup_interval(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from("test_subgraph_ttl")),
-        })
-        .await
-        .unwrap();
+        let (drop_tx, drop_rx) = broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false, "test_subgraph_ttl"), drop_rx)
+            .await
+            .unwrap();
         let map = serde_json::json!({
             "user": {
                 "private_id": "sub",
@@ -2709,11 +2533,11 @@ mod tests {
         });
 
         let mut response_cache = ResponseCache::for_test(
-            pg_cache.clone(),
+            storage.clone(),
             serde_json::from_value(map).unwrap(),
             valid_schema.clone(),
             true,
-            false,
+            drop_tx,
         )
         .await
         .unwrap();

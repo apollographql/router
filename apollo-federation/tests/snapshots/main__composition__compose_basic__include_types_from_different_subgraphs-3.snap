@@ -1,0 +1,16 @@
+---
+source: apollo-federation/tests/composition/compose_basic.rs
+expression: "print_sdl(subgraph_b_extracted.schema.schema())"
+snapshot_kind: text
+---
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"])
+{
+  query: Query
+}
+
+type User {
+  name: String
+  email: String!
+}

@@ -9,6 +9,7 @@ use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
+use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::FieldDefinition;
 
@@ -34,11 +35,14 @@ use crate::link::federation_spec_definition::FEDERATION_USED_OVERRIDEN_ARGUMENT_
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
 use crate::merger::merge::map_sources;
+use crate::merger::merge_argument::HasArguments;
+use crate::schema::blueprint::FEDERATION_OPERATION_FIELDS;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::validators::from_context::parse_context;
@@ -85,6 +89,104 @@ impl SubgraphField {
 }
 
 impl Merger {
+    /// Adds a shallow copy of each field in an Object or Interface type to the supergraph schema.
+    /// The primary purpose is to record the names of all fields which should be merged later. In
+    /// the original source code, this simply copies the names over. However, we need to create an
+    /// instance of `FieldDefinition`. For most data in the definition, we can use `None` or an
+    /// empty vector, but we have to provide a return type for the field. Here, we use a constant
+    /// placeholder type name which will be overwritten later when the fields are deep merged.
+    pub(crate) fn add_fields_shallow<T>(
+        &mut self,
+        ty: T,
+    ) -> Result<
+        HashMap<
+            ObjectOrInterfaceFieldDefinitionPosition,
+            Sources<ObjectOrInterfaceFieldDefinitionPosition>,
+        >,
+        FederationError,
+    >
+    where
+        T: Into<ObjectOrInterfaceTypeDefinitionPosition>,
+    {
+        let obj_or_itf: ObjectOrInterfaceTypeDefinitionPosition = ty.into();
+        let mut added: HashMap<
+            ObjectOrInterfaceFieldDefinitionPosition,
+            Sources<ObjectOrInterfaceFieldDefinitionPosition>,
+        > = Default::default();
+        let mut fields_to_add: HashMap<usize, HashSet<ObjectOrInterfaceFieldDefinitionPosition>> =
+            Default::default();
+        let mut field_types: HashMap<ObjectOrInterfaceFieldDefinitionPosition, Type> =
+            Default::default();
+        let mut extra_sources: Sources<ObjectOrInterfaceFieldDefinitionPosition> =
+            Default::default();
+
+        for (idx, subgraph) in self.subgraphs.iter().enumerate() {
+            for itf in obj_or_itf.implemented_interfaces(subgraph.schema())? {
+                if subgraph
+                    .schema()
+                    .get_type(itf.name.clone())
+                    .as_ref()
+                    .is_ok_and(|ty| subgraph.is_interface_object_type(ty))
+                {
+                    // This marks the subgraph as having a relevant @interfaceObject,
+                    // even though we do not actively add that type's fields.
+                    extra_sources.insert(idx, None);
+                }
+            }
+
+            for field in obj_or_itf.fields(subgraph.schema().schema())? {
+                let field_node = field.get(subgraph.schema().schema())?;
+                field_types.insert(field.clone(), field_node.ty.clone());
+                fields_to_add.entry(idx).or_default().insert(field);
+            }
+
+            if subgraph
+                .schema()
+                .try_get_type(obj_or_itf.type_name().clone())
+                .is_some()
+            {
+                // Our needsJoinField logic adds @join__field if any subgraphs define
+                // the parent type containing the field but not the field itself. In
+                // those cases, for each field we add, we need to add undefined entries
+                // for each subgraph that defines the parent object/interface/input
+                // type. We do this by populating extraSources with undefined entries
+                // here, then create each new Sources map from that starting set (see
+                // `new Map(extraSources)` below).
+                extra_sources.insert(idx, None);
+            }
+        }
+
+        for (idx, field_set) in fields_to_add {
+            for field in field_set {
+                let is_merged_field = !self.subgraphs[idx].schema().is_root_type(field.type_name())
+                    && !FEDERATION_OPERATION_FIELDS.contains(field.field_name());
+                if !is_merged_field {
+                    continue;
+                }
+                if !added.contains_key(&field)
+                    && let Some(ty) = field_types.get(&field)
+                {
+                    field.insert(
+                        &mut self.merged,
+                        Component::new(FieldDefinition {
+                            description: None,
+                            name: field.field_name().clone(),
+                            arguments: vec![],
+                            ty: ty.clone(),
+                            directives: Default::default(),
+                        }),
+                    )?;
+                }
+                added
+                    .entry(field.clone())
+                    .or_insert_with(|| extra_sources.clone())
+                    .insert(idx, Some(field));
+            }
+        }
+
+        Ok(added)
+    }
+
     #[allow(dead_code)]
     pub(crate) fn merge_field(
         &mut self,
@@ -161,25 +263,17 @@ impl Merger {
         // validate the external ones are consistent.
 
         self.merge_description(&without_external, dest)?;
-        self.record_applied_directives_to_merge(&without_external, dest);
-        self.add_arguments_shallow(&without_external, dest);
-        let dest_field = dest.get(self.merged.schema())?;
-        let dest_arguments = dest_field.arguments.clone();
-        for dest_arg in dest_arguments.iter() {
+        self.record_applied_directives_to_merge(&without_external, dest)?;
+        let arg_names = self.add_arguments_shallow(&without_external, dest)?;
+
+        for arg_name in arg_names {
             let subgraph_args = map_sources(&without_external, |field| {
-                field.as_ref().and_then(|f| {
-                    let field_def = match f.get(self.merged.schema()) {
-                        Ok(def) => def,
-                        Err(_) => return None,
-                    };
-                    field_def
-                        .arguments
-                        .iter()
-                        .find(|arg| arg.name == dest_arg.name)
-                        .cloned()
-                })
+                field
+                    .as_ref()
+                    .map(|f| f.argument_position(arg_name.clone()))
             });
-            self.merge_argument(&subgraph_args, dest_arg)?;
+            let dest_arg = dest.argument_position(arg_name);
+            self.merge_argument(&subgraph_args, &dest_arg)?;
         }
 
         // Note that due to @interfaceObject, it's possible that `withoutExternal` is "empty" (has no
@@ -258,7 +352,7 @@ impl Merger {
         let subgraph = &self.subgraphs[source_idx];
         for itf in dest_field.parent().implemented_interfaces(&self.merged)? {
             let itf_as_obj = ObjectTypeDefinitionPosition {
-                type_name: itf.clone(),
+                type_name: itf.name.clone(),
             };
             if subgraph
                 .is_interface_object_type(&TypeDefinitionPosition::Object(itf_as_obj.clone()))
@@ -399,8 +493,6 @@ impl Merger {
                 if dest_arg.ty != source_arg.ty && !arg_is_subtype {
                     invalid_args_types.insert(name.clone());
                 }
-                // TODO: Use valueEquals instead of != for proper GraphQL value comparison
-                // See: https://github.com/apollographql/federation/blob/4653320016ed4202a229d9ab5933ad3f13e5b6c0/composition-js/src/merging/merge.ts#L1877
                 if dest_arg.default_value != source_arg.default_value {
                     invalid_args_defaults.insert(name.clone());
                 }
@@ -409,19 +501,21 @@ impl Merger {
 
         // Phase 2: Reporting - report errors in groups, matching JS version order
         if has_invalid_types {
-            self.error_reporter.report_mismatch_error::<FieldDefinitionPosition, ()>(
+            self.error_reporter.report_mismatch_error::<FieldDefinition, FieldDefinitionPosition, ()>(
                 CompositionError::ExternalTypeMismatch {
                     message: format!(
                         "Type of field \"{dest}\" is incompatible across subgraphs (where marked @external): it has ",
                     ),
                 },
-                dest,
+                dest_field,
                 sources,
-                |source, _| Some(format!("type \"{source}\"")),
+                |d| Some(format!("type \"{}\"", d.ty)),
+                |s, idx| s.try_get(self.subgraphs[idx].schema().schema()).map(|f| format!("type \"{}\"", f.ty)),
             );
         }
 
         for arg_name in &invalid_args_presence {
+            // TODO: We need a more complete port of this on `ErrorReporter`
             self.report_mismatch_error_with_specifics(
                 CompositionError::ExternalArgumentMissing {
                     message: format!(
@@ -439,7 +533,7 @@ impl Merger {
                 field_name: dest.field_name().clone(),
                 argument_name: arg_name.clone(),
             };
-            self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ()>(
+            self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ObjectFieldArgumentDefinitionPosition, ()>(
                 CompositionError::ExternalArgumentTypeMismatch {
                     message: format!(
                         "Type of argument \"{argument_pos}\" is incompatible across subgraphs (where \"{dest}\" is marked @external): it has ",
@@ -447,7 +541,8 @@ impl Merger {
                 },
                 &argument_pos,
                 &self.argument_sources(sources, arg_name)?,
-                |source, _| Some(format!("type \"{source}\"")),
+                |d| d.try_get(self.merged.schema()).map(|a| format!("type \"{}\"", a.ty)),
+                |s, idx| s.try_get(self.subgraphs[idx].schema().schema()).map(|a| format!("type \"{}\"", a.ty)),
             );
         }
 
@@ -457,7 +552,7 @@ impl Merger {
                 field_name: dest.field_name().clone(),
                 argument_name: arg_name.clone(),
             };
-            self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ()>(
+            self.error_reporter.report_mismatch_error::<ObjectFieldArgumentDefinitionPosition, ObjectFieldArgumentDefinitionPosition, ()>(
                 CompositionError::ExternalArgumentDefaultMismatch {
                     message: format!(
                         "Argument \"{argument_pos}\" has incompatible defaults across subgraphs (where \"{dest}\" is marked @external): it has ",
@@ -465,7 +560,10 @@ impl Merger {
                 },
                 &argument_pos,
                 &self.argument_sources(sources, arg_name)?,
-                |source, _| Some(format!("default value {source:?}")), // TODO: Need proper value formatting
+                |d| d.try_get(self.merged.schema())
+                        .and_then(|f| Some(format!("default value {}", f.default_value.as_ref()?))), 
+                |s, idx| s.try_get(self.subgraphs[idx].schema().schema())
+                        .and_then(|f| Some(format!("default value {}", f.default_value.as_ref()?))),
             );
         }
 
@@ -1091,19 +1189,19 @@ impl Merger {
 
 /// Simple builder for join__field directives (minimal version for compatibility)
 #[allow(dead_code)]
-struct JoinFieldBuilder {
+pub(crate) struct JoinFieldBuilder {
     arguments: Vec<Node<Argument>>,
 }
 
 #[allow(dead_code)]
 impl JoinFieldBuilder {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             arguments: Vec::new(),
         }
     }
 
-    fn arg<T: Into<Value>>(mut self, key: &Name, value: T) -> Self {
+    pub(crate) fn arg<T: Into<Value>>(mut self, key: &Name, value: T) -> Self {
         self.arguments.push(Node::new(Argument {
             name: key.clone(),
             value: Node::new(value.into()),
@@ -1111,7 +1209,7 @@ impl JoinFieldBuilder {
         self
     }
 
-    fn maybe_arg<T: Into<Value>>(self, key: &Name, value: Option<T>) -> Self {
+    pub(crate) fn maybe_arg<T: Into<Value>>(self, key: &Name, value: Option<T>) -> Self {
         if let Some(v) = value {
             self.arg(key, v)
         } else {
@@ -1119,7 +1217,7 @@ impl JoinFieldBuilder {
         }
     }
 
-    fn maybe_bool_arg(self, key: &Name, condition: bool) -> Self {
+    pub(crate) fn maybe_bool_arg(self, key: &Name, condition: bool) -> Self {
         if condition {
             self.arg(key, Value::Boolean(true))
         } else {
@@ -1127,7 +1225,7 @@ impl JoinFieldBuilder {
         }
     }
 
-    fn build(self) -> Directive {
+    pub(crate) fn build(self) -> Directive {
         Directive {
             name: name!("join__field"),
             arguments: self.arguments,

@@ -200,9 +200,10 @@ struct RouterShaping {
 
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
+#[schemars(rename = "TrafficShapingConfig")]
 // FIXME: This struct is pub(crate) because we need its configuration in the query planner service.
 // Remove this once the configuration yml changes.
-/// Configuration for the experimental traffic shaping plugin
+/// Configuration for the traffic shaping plugin
 pub(crate) struct Config {
     /// Applied at the router level
     router: Option<RouterShaping>,
@@ -719,6 +720,7 @@ mod test {
                 None,
                 Some(vec![(APOLLO_TRAFFIC_SHAPING.to_string(), plugin)]),
                 Default::default(),
+                None,
             )
             .await
             .expect("create plugins should work"),

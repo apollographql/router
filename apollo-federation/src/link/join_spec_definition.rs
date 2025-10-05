@@ -616,12 +616,13 @@ impl JoinSpecDefinition {
 
     pub(crate) fn type_directive(
         &self,
+        schema: &FederationSchema,
         graph: Name,
         key_fields: Option<Node<Value>>,
         extension: Option<bool>,
         resolvable: Option<bool>,
         is_interface_object: Option<bool>,
-    ) -> Directive {
+    ) -> Result<Directive, FederationError> {
         let mut args = vec![Node::new(Argument {
             name: JOIN_GRAPH_ARGUMENT_NAME,
             value: Node::new(Value::Enum(graph)),
@@ -657,10 +658,16 @@ impl JoinSpecDefinition {
             }));
         }
 
-        Directive {
-            name: JOIN_TYPE_DIRECTIVE_NAME_IN_SPEC,
+        let Some(name) =
+            self.directive_name_in_schema(schema, &JOIN_TYPE_DIRECTIVE_NAME_IN_SPEC)?
+        else {
+            bail!("Unexpectedly could not find @join__type directive in schema")
+        };
+
+        Ok(Directive {
+            name,
             arguments: args,
-        }
+        })
     }
 
     /// @join__field
@@ -845,12 +852,20 @@ impl JoinSpecDefinition {
         ))
     }
 
-    /// Creates an instance of the `@join__implements` directive. Since we do not allow renaming of
-    /// join spec directives, this is infallible and always applies the directive with the standard
-    /// name.
-    pub(crate) fn implements_directive(&self, graph: Name, interface: &str) -> Directive {
-        Directive {
-            name: JOIN_IMPLEMENTS_DIRECTIVE_NAME_IN_SPEC,
+    /// Creates an instance of the `@join__implements` directive.
+    pub(crate) fn implements_directive(
+        &self,
+        schema: &FederationSchema,
+        graph: Name,
+        interface: &str,
+    ) -> Result<Directive, FederationError> {
+        let Some(name) =
+            self.directive_name_in_schema(schema, &JOIN_IMPLEMENTS_DIRECTIVE_NAME_IN_SPEC)?
+        else {
+            bail!("Unexpectedly could not find @join__implements directive in schema");
+        };
+        Ok(Directive {
+            name,
             arguments: vec![
                 Node::new(Argument {
                     name: JOIN_GRAPH_ARGUMENT_NAME,
@@ -861,7 +876,7 @@ impl JoinSpecDefinition {
                     value: Node::new(Value::String(interface.to_owned())),
                 }),
             ],
-        }
+        })
     }
 
     /// @join__unionMember
@@ -992,12 +1007,18 @@ impl JoinSpecDefinition {
     /// name.
     pub(crate) fn directive_directive(
         &self,
+        schema: &FederationSchema,
         name: &Name,
         graphs: impl IntoIterator<Item = Name>,
         args: impl IntoIterator<Item = Node<Argument>>,
-    ) -> Directive {
-        Directive {
-            name: JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC,
+    ) -> Result<Directive, FederationError> {
+        let Some(directive_name) =
+            self.directive_name_in_schema(schema, &JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC)?
+        else {
+            bail!("Unexpectedly could not find @join__directive directive in schema");
+        };
+        Ok(Directive {
+            name: directive_name,
             arguments: vec![
                 Node::new(Argument {
                     name: JOIN_NAME_ARGUMENT_NAME,
@@ -1021,7 +1042,7 @@ impl JoinSpecDefinition {
                     )),
                 }),
             ],
-        }
+        })
     }
 
     /// @join__owner

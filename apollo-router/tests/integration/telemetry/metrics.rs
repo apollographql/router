@@ -352,3 +352,50 @@ async fn test_gauges_on_reload() {
         )
         .await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_prom_reset_on_reload() {
+    let mut router = IntegrationTest::builder()
+        .config(include_str!("fixtures/prometheus.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    router.execute_default_query().await;
+    router.execute_default_query().await;
+
+    router
+        .assert_metrics_contains(
+            r#"http_server_request_duration_seconds_count{http_request_method="POST",status="200",otel_scope_name="apollo/router"} 2"#,
+            None,
+        )
+        .await;
+
+    // This config will NOT reload prometheus as the config did not change
+    router
+        .update_config(include_str!("fixtures/prometheus.router.yaml"))
+        .await;
+    router.assert_reloaded().await;
+    router
+        .assert_metrics_contains(
+            r#"http_server_request_duration_seconds_count{http_request_method="POST",status="200",otel_scope_name="apollo/router"} 2"#,
+            None,
+        )
+        .await;
+
+    // This config will force a reload as it changes the prometheus buckets
+    router
+        .update_config(include_str!("fixtures/prometheus_reload.router.yaml"))
+        .await;
+    router.assert_reloaded().await;
+    router.execute_default_query().await;
+    router
+        .assert_metrics_contains(
+            r#"http_server_request_duration_seconds_count{http_request_method="POST",status="200",otel_scope_name="apollo/router"} 1"#,
+            None,
+        )
+        .await;
+    router.graceful_shutdown().await;
+}

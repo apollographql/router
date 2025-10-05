@@ -170,6 +170,7 @@ where
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[schemars(rename = "StandardEventConfig{T}")]
 #[serde(untagged)]
 pub(crate) enum StandardEventConfig<T> {
     Level(EventLevelConfig),
@@ -217,6 +218,8 @@ impl<T: Clone> StandardEvent<T> {
     }
 }
 
+/// Log level configuration for events. Use "off" to not log the event, or a level name to log the
+/// event at that level and above.
 #[derive(Deserialize, JsonSchema, Clone, Debug, Default, PartialEq, Copy)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum EventLevelConfig {

@@ -1,0 +1,28 @@
+---
+source: apollo-federation/tests/composition/compose_interface_object.rs
+expression: print_sdl(api_schema.schema())
+---
+type A implements I {
+  id: ID!
+  x: Int
+  w: Int
+  y: Int
+}
+
+type B implements I {
+  id: ID!
+  x: Int
+  z: Int
+  y: Int
+}
+
+interface I {
+  id: ID!
+  x: Int
+  y: Int
+}
+
+type Query {
+  iFromA: I
+  iFromB: I
+}
