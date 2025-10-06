@@ -424,7 +424,6 @@ pub(crate) mod tests {
             enum_usages: Default::default(),
             fields_with_from_context: Default::default(),
             fields_with_override: Default::default(),
-            subgraph_enum_values: Vec::new(),
             inaccessible_directive_name_in_supergraph: None,
             link_spec_definition,
             join_spec_definition,

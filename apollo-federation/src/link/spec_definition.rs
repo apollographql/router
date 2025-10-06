@@ -247,6 +247,16 @@ impl<T: SpecDefinition> SpecDefinitions<T> {
         self.definitions.iter()
     }
 
+    pub(crate) fn get_maximum_allowed_version(
+        &'static self,
+        federation_version: &Version,
+    ) -> Option<&'static T> {
+        self.definitions
+            .values()
+            .rev()
+            .find(|spec| federation_version.satisfies(spec.minimum_federation_version()))
+    }
+
     pub(crate) fn get_minimum_required_version(
         &'static self,
         federation_version: &Version,

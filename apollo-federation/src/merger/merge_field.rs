@@ -12,6 +12,8 @@ use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::FieldDefinition;
+use tracing::instrument;
+use tracing::trace;
 
 use crate::bail;
 use crate::error::CompositionError;
@@ -109,6 +111,8 @@ impl Merger {
         T: Into<ObjectOrInterfaceTypeDefinitionPosition>,
     {
         let obj_or_itf: ObjectOrInterfaceTypeDefinitionPosition = ty.into();
+        trace!("Adding fields shallow for type {}", obj_or_itf);
+
         let mut added: HashMap<
             ObjectOrInterfaceFieldDefinitionPosition,
             Sources<ObjectOrInterfaceFieldDefinitionPosition>,
@@ -120,8 +124,12 @@ impl Merger {
         let mut extra_sources: Sources<ObjectOrInterfaceFieldDefinitionPosition> =
             Default::default();
 
+        trace!("Gathering fields to add for type {}", obj_or_itf);
         for (idx, subgraph) in self.subgraphs.iter().enumerate() {
-            for itf in obj_or_itf.implemented_interfaces(subgraph.schema())? {
+            let Ok(interfaces) = obj_or_itf.implemented_interfaces(subgraph.schema()) else {
+                continue;
+            };
+            for itf in interfaces {
                 if subgraph
                     .schema()
                     .get_type(itf.name.clone())
@@ -156,10 +164,11 @@ impl Merger {
             }
         }
 
+        trace!("Adding fields to supergraph schema for type {}", obj_or_itf);
         for (idx, field_set) in fields_to_add {
             for field in field_set {
                 let is_merged_field = !self.subgraphs[idx].schema().is_root_type(field.type_name())
-                    && !FEDERATION_OPERATION_FIELDS.contains(field.field_name());
+                    || !FEDERATION_OPERATION_FIELDS.contains(field.field_name());
                 if !is_merged_field {
                     continue;
                 }
@@ -187,7 +196,7 @@ impl Merger {
         Ok(added)
     }
 
-    #[allow(dead_code)]
+    #[instrument(skip(self, sources, merge_context))]
     pub(crate) fn merge_field(
         &mut self,
         sources: &Sources<ObjectOrInterfaceFieldDefinitionPosition>,
@@ -335,6 +344,7 @@ impl Merger {
         if self.has_external(&field_sources) {
             self.validate_external_fields(&field_sources, &dest.clone().into(), all_types_equal)?;
         }
+        trace!("Adding join field");
         self.add_join_field(sources, dest, all_types_equal, merge_context)?;
         self.add_join_directive_directives(sources, dest)?;
         Ok(())
@@ -849,7 +859,6 @@ impl Merger {
     /// Adds a join__field directive to a field definition with appropriate arguments.
     /// This constructs the directive with graph, external, requires, provides, type,
     /// override, overrideLabel, usedOverridden, and contextArguments as needed.
-    #[allow(dead_code)]
     pub(crate) fn add_join_field<T>(
         &mut self,
         sources: &Sources<T>,
@@ -871,10 +880,17 @@ impl Merger {
         };
 
         // Skip if no join__field directive is required for this field.
+        trace!("Checking if join__field is needed for field {dest}");
         match self.needs_join_field(sources, &parent_name, all_types_equal, merge_context) {
-            Ok(needs) if !needs => return Ok(()), // No join__field needed, exit early
-            Err(_) => return Ok(()),              // Skip on error - invalid parent name
-            Ok(_) => {}                           // needs join field, continue
+            Ok(needs) if !needs => {
+                trace!("Field {dest} does not need join__field");
+                return Ok(());
+            } // No join__field needed, exit early
+            Err(_) => {
+                trace!("Error implies parent of {dest} does not exist, skipping join__field");
+                return Ok(());
+            } // Skip on error - invalid parent name
+            Ok(_) => {} // needs join field, continue
         }
 
         // Filter source fields by override usage and override label presence.
@@ -889,15 +905,24 @@ impl Merger {
                 Some(source) => Some((idx, source, used_overridden, override_label)),
             }
         });
+        trace!(
+            "Found {} sources with override",
+            sources_with_override.clone().count()
+        );
 
         // Iterate through valid source fields.
         for (idx, source, used_overridden, override_label) in sources_with_override {
             // Resolve the graph enum value for this subgraph index.
-            let Some(graph_name) = self.subgraph_enum_values.get(idx) else {
+            let Some(graph_name) = self.subgraph_names_to_join_spec_name.get(&self.names[idx])
+            else {
+                trace!(
+                    "Skipping join__field for subgraph index {} as it has no graph enum value",
+                    idx
+                );
                 continue;
             };
 
-            let graph_value = Value::Enum(graph_name.to_name());
+            let graph_value = Value::Enum(graph_name.clone());
 
             let source = source.clone().into();
             let field_def = match &source {
@@ -934,7 +959,10 @@ impl Merger {
                         })?;
                     JoinableField::Input(def)
                 }
-                _ => continue,
+                _ => {
+                    trace!("Skipping join__field for non-field position: {:?}", source);
+                    continue;
+                }
             };
 
             let type_string = field_def.ty().to_string();
@@ -978,7 +1006,9 @@ impl Merger {
             }
 
             // Attach the constructed directive to the destination field definition.
-            dest.insert_directive(&mut self.merged, builder.build())?;
+            let directive = builder.build();
+            trace!("Adding join__field directive: {:?}", directive);
+            dest.insert_directive(&mut self.merged, directive)?;
         }
 
         Ok(())

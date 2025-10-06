@@ -9,6 +9,7 @@ use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
+use tracing::instrument;
 
 use super::FederationSchema;
 use super::TypeDefinitionPosition;
@@ -895,6 +896,7 @@ impl SchemaUpgrader {
 
 // PORT_NOTE: In JS, this returns upgraded subgraphs along with a set of messages about what changed.
 // However, those messages were never used, so we have omitted them here.
+#[instrument(skip(subgraphs))]
 pub fn upgrade_subgraphs_if_necessary(
     subgraphs: Vec<Subgraph<Expanded>>,
 ) -> Result<Vec<Subgraph<Upgraded>>, Vec<CompositionError>> {
