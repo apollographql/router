@@ -14,7 +14,7 @@ You will need:
 - A [Railway account](https://railway.com/)
 - A [GitHub account](https://github.com/)
 
-## Option 1: Quick deployment with template (Recommended)
+## Steps
 
 The fastest way to deploy the Apollo Router on Railway is using the official template:
 
@@ -39,52 +39,3 @@ The fastest way to deploy the Apollo Router on Railway is using the official tem
 1. You can clone the repo into your own GitHub account by navigating to **Settings** > **Source** > **Upstream Repo** and clicking **Eject**.
 
 ![Railway eject button to clone repo](../../../images/managed-hosting/railway-eject-button.png)
-
-## Option 2: Custom deployment
-
-If you need more control over your deployment, you can set up a custom deployment using the [Apollo Runtime container](/graphos/routing/self-hosted/containerization/docker).
-
-After following the steps in the [Docker](/graphos/routing/self-hosted/containerization/docker) guide, you can deploy your router to Railway using the following steps:
-
-1. Fork the [router-template](https://github.com/apollographql/router-template) repository.
-
-1. (Optional) Create a `router.yaml` configuration file for custom settings:
-    
-    ```yaml title="router.yaml"
-    # The Apollo Runtime container comes with sensible defaults
-    # Only create this file if you need custom configuration
-    supergraph:
-      listen: 0.0.0.0:4000
-    health_check:
-      listen: 0.0.0.0:8088
-    cors:
-      # Development setting - replace for production
-      allow_any_origin: true
-    ```
-
-1. Create a `Dockerfile`:
-
-    ```dockerfile
-    # Use the official Apollo Runtime container image as the base
-    FROM ghcr.io/apollographql/apollo-runtime:0.0.14_router2.5.0_mcp-server0.7.0
-
-    # Optionally copy custom router configuration
-    # COPY router.yaml /config/router_config.yaml
-    ```
-
-1. Connect your repository:
-   - In your Railway dashboard, click **New Project**
-   - Select **Deploy from GitHub repo**
-   - Connect and authorize your GitHub repository
-
-1. Railway automatically configures the service:
-   - Railway detects your Dockerfile and configures the service
-   - The build and deployment process starts automatically
-
-1. Set environment variables:
-   - In your project dashboard, go to the **Variables** tab
-   - Add `APOLLO_KEY` and set it to your Graph API key
-   - Add `APOLLO_GRAPH_REF` and set it to your graph reference
-   - Railway automatically provides the `PORT` variable
-
-1. Railway automatically redeploys your service when environment variables are added.

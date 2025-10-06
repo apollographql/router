@@ -14,7 +14,7 @@ You will need:
 - A [Render account](https://render.com/)
 - A [GitHub account](https://github.com/)
 
-## Option 1: Quick deployment with template (Recommended)
+## Steps
 
 The fastest way to deploy the Apollo Router on Render is using the official template:
 
@@ -35,48 +35,3 @@ The fastest way to deploy the Apollo Router on Render is using the official temp
 1. Click **Create Web Service** to start the deployment.
 
 1. After the deployment finishes, visit your service URL to confirm the router is running.
-
-## Option 2: Custom deployment
-
-If you need more control over your deployment, you can set up a custom deployment using the [Apollo Runtime container](/graphos/routing/self-hosted/containerization/docker).
-
-After following the steps in the [Docker](/graphos/routing/self-hosted/containerization/docker) guide, you can deploy your router to Render using the following steps:
-
-1. Create a `render.yaml` file for Render-specific configuration:
-
-    ```yaml title="render.yaml"
-    services:
-      - type: web
-        name: apollo-router
-        runtime: docker
-        plan: free  # or starter/standard based on your needs
-        envVars:
-          - key: APOLLO_GRAPH_REF
-            sync: false  # Set this manually in Render dashboard
-          - key: APOLLO_KEY
-            sync: false  # Set this manually in Render dashboard
-          - key: PORT
-            value: "4000"
-            sync: true
-        region: oregon  # or your preferred region
-        dockerContext: .
-        dockerfilePath: ./Dockerfile
-        rootDir: ./
-    version: "1"
-    ```
-
-1. Connect your repository:
-   - In your Render dashboard, click **New** > **Web Service**
-   - Connect your GitHub repository containing the router configuration
-
-1. Configure the service:
-   - **Runtime**: Docker
-   - **Build Command**: Leave empty (Docker handles the build)
-   - **Start Command**: Leave empty (defined in Dockerfile)
-
-1. Set environment variables:
-   - Add `APOLLO_KEY` and set it to your graph API key
-   - Add `APOLLO_GRAPH_REF` and set it to your graph reference
-   - Add `PORT` and set it to `4000`
-
-1. Click **Create Web Service**.
