@@ -344,7 +344,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     tracing::error!("Not connected to GraphOS. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS (using APOLLO_KEY and APOLLO_GRAPH_REF) that provides a license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.", report);
                 }
 
-                return Err(ApolloRouterError::LicenseViolation);
+                //return Err(ApolloRouterError::LicenseViolation);
             }
             _ => {
                 tracing::debug!("A valid Apollo license was not detected. However, no restricted features are in use.");
@@ -355,7 +355,8 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         let effective_license = if !report.uses_restricted_features() {
             LicenseState::Licensed
         } else {
-            license
+            //license
+            LicenseState::Licensed
         };
 
         let router_service_factory = state_machine
