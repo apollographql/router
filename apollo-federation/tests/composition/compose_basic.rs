@@ -45,20 +45,12 @@ fn generates_a_valid_supergraph() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
     let supergraph = result.expect("Expected composition to succeed");
-
-    // Test supergraph SDL structure
-    insta::with_settings!({sort_maps => true}, {
-        assert_snapshot!(supergraph.schema().schema());
-    });
-    // TODO: Sort out non-determinism in SDL
-
-    // Test API schema structure
     let api_schema = supergraph
         .to_api_schema(Default::default())
         .expect("Expected API schema generation to succeed");
-    insta::with_settings!({sort_maps => true}, {
-        assert_snapshot!(api_schema.schema());
-    });
+
+    assert_snapshot!(supergraph.schema().schema());
+    assert_snapshot!(api_schema.schema());
 }
 
 #[test]

@@ -12,6 +12,8 @@ use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::FieldDefinition;
+use indexmap::IndexMap;
+use indexmap::IndexSet;
 use tracing::instrument;
 use tracing::trace;
 
@@ -101,7 +103,7 @@ impl Merger {
         &mut self,
         ty: T,
     ) -> Result<
-        HashMap<
+        IndexMap<
             ObjectOrInterfaceFieldDefinitionPosition,
             Sources<ObjectOrInterfaceFieldDefinitionPosition>,
         >,
@@ -113,11 +115,11 @@ impl Merger {
         let obj_or_itf: ObjectOrInterfaceTypeDefinitionPosition = ty.into();
         trace!("Adding fields shallow for type {}", obj_or_itf);
 
-        let mut added: HashMap<
+        let mut added: IndexMap<
             ObjectOrInterfaceFieldDefinitionPosition,
             Sources<ObjectOrInterfaceFieldDefinitionPosition>,
         > = Default::default();
-        let mut fields_to_add: HashMap<usize, HashSet<ObjectOrInterfaceFieldDefinitionPosition>> =
+        let mut fields_to_add: IndexMap<usize, IndexSet<ObjectOrInterfaceFieldDefinitionPosition>> =
             Default::default();
         let mut field_types: HashMap<ObjectOrInterfaceFieldDefinitionPosition, Type> =
             Default::default();
@@ -1007,7 +1009,6 @@ impl Merger {
 
             // Attach the constructed directive to the destination field definition.
             let directive = builder.build();
-            trace!("Adding join__field directive: {:?}", directive);
             dest.insert_directive(&mut self.merged, directive)?;
         }
 
