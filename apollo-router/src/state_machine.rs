@@ -111,7 +111,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
 
     async fn no_more_license(self) -> Self {
         match self {
-            Startup { license: None, .. } => Errored(NoLicense),
+            //Startup { license: None, .. } => Errored(NoLicense),
             _ => self,
         }
     }
