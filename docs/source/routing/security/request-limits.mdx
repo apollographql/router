@@ -291,6 +291,34 @@ If router receives more headers than the buffer size, it responds to the client 
 
 Limit the maximum buffer size for the HTTP1 connection. Default is ~400kib.
 
+### Additional HTTP Header Configuration
+
+You can configure additional HTTP header limits using the `limits` section, which provides comprehensive control over both HTTP/1.1 and HTTP/2 connections:
+
+```yaml title="router.yaml"
+limits:
+  # Maximum size of individual header field (name + value) in bytes
+  # Applies to both HTTP/1.1 and HTTP/2
+  http_max_header_size: "32kb"
+  
+  # Maximum total size of all headers combined
+  # Primarily affects HTTP/2 connections
+  http_max_header_list_size: "64kb"
+```
+
+These limits work alongside the existing `http1_max_request_headers` and `http1_max_request_buf_size` settings to provide comprehensive HTTP request protection:
+
+- Set per-header size limits with `http_max_header_size` (similar to Node.js `--max-http-header-size`)
+- Control header count limits with `http1_max_request_headers` for HTTP/1.1
+- Set total header payload limits with `http_max_header_list_size` for HTTP/2
+- Configure HTTP/1 buffer size with `http1_max_request_buf_size`
+
+If router receives requests exceeding these limits, it responds with `431 Request Header Fields Too Large`.
+
+#### Server-level Header Limits
+
+The Apollo Router enforces header limits at the HTTP server level using the `limits.*` configuration settings. These limits are protocol-specific and enforced early in the request processing pipeline for optimal performance.
+
 ## Parser-based limits
 
 ### `parser_max_tokens`

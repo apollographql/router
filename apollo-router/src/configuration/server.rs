@@ -10,6 +10,7 @@ fn default_header_read_timeout() -> Duration {
     DEFAULT_HEADER_READ_TIMEOUT
 }
 
+
 /// Configuration for HTTP
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
@@ -37,6 +38,7 @@ impl Default for ServerHttpConfig {
         }
     }
 }
+
 
 #[buildstructor::buildstructor]
 impl Server {
@@ -114,5 +116,21 @@ mod tests {
         let config: Server = serde_json::from_value(json_config).unwrap();
 
         assert_eq!(config.http.header_read_timeout, Duration::from_secs(60));
+    }
+
+
+
+    #[test]
+    fn test_deny_unknown_fields() {
+        let json_config = json!({
+            "http": {
+                "header_read_timeout": "10s",
+                "invalid_field": "should_fail"
+            }
+        });
+
+        let result: Result<Server, _> = serde_json::from_value(json_config);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("unknown field"));
     }
 }

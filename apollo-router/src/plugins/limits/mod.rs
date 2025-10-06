@@ -116,6 +116,18 @@ pub(crate) struct Config {
     #[schemars(with = "Option<String>", default)]
     pub(crate) http1_max_request_buf_size: Option<ByteSize>,
 
+    /// Maximum size of a single header field (name + value) in bytes.
+    /// Applies to both HTTP/1.1 and HTTP/2.
+    /// If not specified, uses the underlying HTTP implementation's default.
+    #[schemars(with = "Option<String>")]
+    pub(crate) http_max_header_size: Option<ByteSize>,
+
+    /// Maximum total size of all headers combined in bytes.
+    /// Applies primarily to HTTP/2 connections.
+    /// If not specified, uses the underlying HTTP implementation's default.
+    #[schemars(with = "Option<String>")]
+    pub(crate) http_max_header_list_size: Option<ByteSize>,
+
     /// Limit the depth of nested list fields in introspection queries
     /// to protect avoid generating huge responses. Returns a GraphQL
     /// error with `{ message: "Maximum introspection depth exceeded" }`
@@ -136,9 +148,11 @@ impl Default for Config {
             http_max_request_bytes: 2_000_000,
             http1_max_request_headers: None,
             http1_max_request_buf_size: None,
+            http_max_header_size: None,
+            http_max_header_list_size: None,
             parser_max_tokens: 15_000,
 
-            // This is `apollo-parser`’s default, which protects against stack overflow
+            // This is `apollo-parser`'s default, which protects against stack overflow
             // but is still very high for "reasonable" queries.
             // https://github.com/apollographql/apollo-rs/blob/apollo-parser%400.7.3/crates/apollo-parser/src/parser/mod.rs#L93-L104
             parser_max_recursion: 500,
