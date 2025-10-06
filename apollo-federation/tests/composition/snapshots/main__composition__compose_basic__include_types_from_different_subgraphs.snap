@@ -1,0 +1,17 @@
+---
+source: apollo-federation/tests/composition/compose_basic.rs
+expression: api_schema.schema()
+---
+type Query {
+  products: [Product!]
+}
+
+type Product {
+  sku: String!
+  name: String!
+}
+
+type User {
+  name: String
+  email: String!
+}
