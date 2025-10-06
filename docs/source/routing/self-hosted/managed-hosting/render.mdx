@@ -1,0 +1,37 @@
+---
+title: Deploying GraphOS Router on Render
+subtitle: Deploy router with Render's managed hosting
+description: Deploy Apollo GraphOS Router or Apollo Router Core to Render using their managed hosting platform.
+---
+
+In this guide, you will deploy the GraphOS Router using the [Render](https://render.com/) template.
+
+## Prerequisites
+
+You will need:
+
+- [A GraphQL API set up in GraphOS](/graphos/get-started/guides/graphql#step-1-set-up-your-graphql-api). You will need your graph credentials: `APOLLO_KEY` and `APOLLO_GRAPH_REF`.
+- A [Render account](https://render.com/)
+- A [GitHub account](https://github.com/)
+
+## Steps
+
+The fastest way to deploy the Apollo Router on Render is using the official template:
+
+1. Deploy using the template:
+    <a href="https://render.com/deploy?repo=github.com/apollographql/router-template">
+      <img src="https://render.com/images/deploy-to-render-button.svg" alt="Deploy to Render" width="200px"/>
+    </a>
+
+1. Configure your service:
+   - **Service Name**: Enter a name for your router service
+   - **Branch**: Select `main` or your preferred branch
+
+1. Set environment variables:
+   - `APOLLO_KEY`: Your Graph API key from GraphOS Studio
+   - `APOLLO_GRAPH_REF`: Your graph reference, e.g. `my-graph@production`
+   - `PORT`: Set to `4000`
+
+1. Click **Create Web Service** to start the deployment.
+
+1. After the deployment finishes, visit your service URL to confirm the router is running.
