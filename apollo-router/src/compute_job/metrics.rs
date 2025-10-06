@@ -4,6 +4,7 @@ use std::time::Instant;
 use tracing::Span;
 
 use crate::compute_job::ComputeJobType;
+use crate::metrics::UpDownCounterGuard;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
@@ -70,31 +71,20 @@ impl Drop for JobWatcher {
 }
 
 pub(super) struct ActiveComputeMetric {
-    compute_job_type: ComputeJobType,
+    _guard: UpDownCounterGuard<i64>,
 }
 
 impl ActiveComputeMetric {
     // create metric (auto-increments and decrements)
     pub(super) fn register(compute_job_type: ComputeJobType) -> Self {
-        let s = Self { compute_job_type };
-        s.incr(1);
-        s
-    }
-
-    fn incr(&self, value: i64) {
-        i64_up_down_counter_with_unit!(
+        let guard = i64_up_down_counter_with_unit!(
             "apollo.router.compute_jobs.active_jobs",
             "Number of computation jobs in progress",
             "{job}",
-            value,
-            job.type = self.compute_job_type
+            1,
+            job.type = compute_job_type
         );
-    }
-}
-
-impl Drop for ActiveComputeMetric {
-    fn drop(&mut self) {
-        self.incr(-1);
+        Self { _guard: guard }
     }
 }
 
