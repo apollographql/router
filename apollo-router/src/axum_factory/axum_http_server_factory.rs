@@ -24,7 +24,7 @@ use http::header::CONTENT_ENCODING;
 use itertools::Itertools;
 use multimap::MultiMap;
 use once_cell::sync::Lazy;
-use opentelemetry::metrics::MeterProvider as _;
+#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 use opentelemetry::metrics::ObservableGauge;
 use regex::Regex;
 use serde_json::json;
@@ -33,6 +33,7 @@ use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
 use tower::ServiceExt;
+#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 use tower::layer::layer_fn;
 use tower_http::trace::TraceLayer;
 use tracing::Instrument;
@@ -55,7 +56,6 @@ use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
-use crate::metrics::meter_provider;
 use crate::plugins::telemetry::SpanMode;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
@@ -65,21 +65,9 @@ use crate::uplink::license_enforcement::APOLLO_ROUTER_LICENSE_EXPIRED;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 use crate::uplink::license_enforcement::LicenseState;
 
-static ACTIVE_SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
 static BARE_WILDCARD_PATH_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^/\{\*[^/]+\}$").expect("this regex to check wildcard paths is valid")
 });
-
-fn session_count_instrument() -> ObservableGauge<u64> {
-    let meter = meter_provider().meter("apollo/router");
-    meter
-        .u64_observable_gauge("apollo.router.session.count.active")
-        .with_description("Amount of in-flight sessions")
-        .with_callback(|gauge| {
-            gauge.observe(ACTIVE_SESSION_COUNT.load(Ordering::Relaxed), &[]);
-        })
-        .init()
-}
 
 #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 fn jemalloc_metrics_instruments() -> (tokio::task::JoinHandle<()>, Vec<ObservableGauge<u64>>) {
@@ -96,21 +84,6 @@ fn jemalloc_metrics_instruments() -> (tokio::task::JoinHandle<()>, Vec<Observabl
             jemalloc::create_retained_gauge(),
         ],
     )
-}
-
-struct ActiveSessionCountGuard;
-
-impl ActiveSessionCountGuard {
-    fn start() -> Self {
-        ACTIVE_SESSION_COUNT.fetch_add(1, Ordering::Acquire);
-        Self
-    }
-}
-
-impl Drop for ActiveSessionCountGuard {
-    fn drop(&mut self) {
-        ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Acquire);
-    }
 }
 
 /// A basic http server using Axum.
@@ -498,17 +471,16 @@ where
         early_cancel: configuration.supergraph.early_cancel,
         experimental_log_on_broken_pipe: configuration.supergraph.experimental_log_on_broken_pipe,
     }));
-    let session_count_instrument = session_count_instrument();
     #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
-    let (_epoch_advance_loop, jemalloc_instrument) = jemalloc_metrics_instruments();
-    // Tie the lifetime of the various instruments to the lifetime of the router
-    // by referencing them in a no-op layer.
-    router = router.layer(layer_fn(move |service| {
-        let _session_count_instrument = &session_count_instrument;
-        #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
-        let _jemalloc_instrument = &jemalloc_instrument;
-        service
-    }));
+    {
+        let (_epoch_advance_loop, jemalloc_instrument) = jemalloc_metrics_instruments();
+        // Tie the lifetime of the jemalloc instruments to the lifetime of the router
+        // by referencing them in a no-op layer.
+        router = router.layer(layer_fn(move |service| {
+            let _jemalloc_instrument = &jemalloc_instrument;
+            service
+        }));
+    }
 
     router
 }
@@ -518,7 +490,12 @@ async fn handle_graphql<RF: RouterFactory>(
     Extension(service_factory): Extension<RF>,
     http_request: Request<axum::body::Body>,
 ) -> impl IntoResponse {
-    let _guard = ActiveSessionCountGuard::start();
+    let _guard = i64_up_down_counter_with_unit!(
+        "apollo.router.session.count.active",
+        "Amount of in-flight sessions",
+        "{session}",
+        1
+    );
 
     let HandlerOptions {
         early_cancel,
