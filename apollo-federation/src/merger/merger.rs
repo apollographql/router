@@ -18,7 +18,6 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
-use countmap::CountMap;
 use indexmap::IndexSet;
 use itertools::Itertools;
 use strum::IntoEnumIterator as _;
@@ -1625,21 +1624,18 @@ impl Merger {
     where
         T: HasDescription + Display,
     {
-        let mut descriptions: CountMap<String, usize> = CountMap::new();
-
-        for (idx, source) in sources {
-            // Skip if source has no description
-            let Some(source_desc) = source
-                .as_ref()
-                .and_then(|s| s.description(self.subgraphs[*idx].schema()))
-            else {
-                continue;
-            };
-
-            descriptions.insert_or_increment(source_desc.trim().to_string());
-        }
+        let mut descriptions = sources
+            .iter()
+            .map(|(idx, source)| {
+                source
+                    .as_ref()
+                    .and_then(|s| s.description(self.subgraphs[*idx].schema()))
+                    .map(|d| d.trim().to_string())
+                    .unwrap_or_default()
+            })
+            .counts();
         // we don't want to raise a hint if a description is ""
-        descriptions.remove(&String::new());
+        descriptions.remove("");
 
         if !descriptions.is_empty() {
             if let Some((description, _)) = iter_into_single_item(descriptions.iter()) {

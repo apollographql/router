@@ -4,7 +4,6 @@ use test_log::test;
 use super::ServiceDefinition;
 use super::compose_as_fed2_subgraphs;
 use super::extract_subgraphs_from_supergraph_result;
-use super::print_sdl;
 
 #[test]
 fn generates_a_valid_supergraph() {
@@ -54,7 +53,6 @@ fn generates_a_valid_supergraph() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn preserves_descriptions() {
     let subgraph1 = ServiceDefinition {
         name: "Subgraph1",
@@ -102,7 +100,7 @@ fn preserves_descriptions() {
     let api_schema = supergraph
         .to_api_schema(Default::default())
         .expect("Expected API schema generation to succeed");
-    assert_snapshot!(print_sdl(api_schema.schema()));
+    assert_snapshot!(api_schema.schema());
 }
 
 #[test]

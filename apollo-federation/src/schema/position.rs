@@ -7058,12 +7058,15 @@ impl DirectiveDefinitionPosition {
     pub(crate) fn add_locations(
         &self,
         schema: &mut FederationSchema,
-        locations: &Vec<DirectiveLocation>,
+        locations: Vec<DirectiveLocation>,
     ) -> Result<(), FederationError> {
-        self.make_mut(&mut schema.schema)?
-            .make_mut()
-            .locations
-            .extend(locations);
+        let existing = self.make_mut(&mut schema.schema)?.make_mut();
+
+        for location in locations {
+            if !existing.locations.contains(&location) {
+                existing.locations.push(location);
+            }
+        }
         Ok(())
     }
 }
@@ -7585,6 +7588,12 @@ impl DirectiveTargetPosition {
 impl From<DirectiveArgumentDefinitionPosition> for DirectiveTargetPosition {
     fn from(pos: DirectiveArgumentDefinitionPosition) -> Self {
         DirectiveTargetPosition::DirectiveArgument(pos)
+    }
+}
+
+impl From<EnumValueDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: EnumValueDefinitionPosition) -> Self {
+        DirectiveTargetPosition::EnumValue(pos)
     }
 }
 
