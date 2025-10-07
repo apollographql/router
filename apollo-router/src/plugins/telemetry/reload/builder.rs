@@ -103,6 +103,7 @@ impl<'a> Builder<'a> {
         if let Some(prometheus_registry) = self.activation.prometheus_registry() {
             let listen = self.config.exporters.metrics.prometheus.listen.clone();
             let path = self.config.exporters.metrics.prometheus.path.clone();
+            tracing::info!("Prometheus endpoint exposed at {}{}", &listen, &path);
             self.endpoints.insert(
                 listen,
                 Endpoint::from_router_service(
