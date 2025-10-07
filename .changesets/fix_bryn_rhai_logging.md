@@ -1,6 +1,6 @@
 ### (fix) Rhai short circuit responses will not log if a body is present ([PR #8364](https://github.com/apollographql/router/pull/8364))
 
-Rhai scripts that short circuited the pipeline by throwing would now only log an error if a response is not present. 
+Rhai scripts that short circuited the pipeline by throwing would now only log an error if a response body is not present. 
 
 For example the following will NOT log:
 ```
