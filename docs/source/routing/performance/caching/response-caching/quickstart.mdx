@@ -1,7 +1,7 @@
 ---
-title: Response caching for the GraphOS Router
-subtitle: Configure Redis-backed caching for subgraph responses
-description: Response caching for GraphOS Router with GraphOS Enterprise. Cache and reuse individual entities and root fields across queries.
+title: Response Caching Quickstart
+subtitle: Get started with Redis-backed response caching
+description: Set up response caching in GraphOS Router with Redis. Enable entity-level caching and monitor cache performance.
 minVersion: Router v2.8.0
 releaseStage: preview
 ---
@@ -25,7 +25,7 @@ Follow this guide to enable and add a minimal configuration for response caching
 To use response caching in the GraphOS Router, you must set up:
 
 - A Redis instance or cluster that your router instances can communicate with
-- A [GraphOS Enterprise plan](https://www.apollographql.com/pricing/) that [connects your router to GraphOS](/router/configuration/overview/#environment-variables).
+- A router that [connects to GraphOS](/router/configuration/overview/#environment-variables)
 
 ### Configure router for response caching
 
@@ -53,15 +53,21 @@ preview_response_cache:
       invalidation:
         enabled: true
         shared_key: ${env.INVALIDATION_SHARED_KEY} # Use environment variable INVALIDATION_SHARED_KEY
+    # Configure overrides for specific subgraphs
+    subgraphs:
+      inventory:
+        enabled: false # Disable caching for inventory subgraph
+      products:
+        redis:
+          urls: ["redis://products-cache:6379"] # Use different Redis for products
 ```
 
 
 ### Identify what data to cache
 
-Links to telemetry page with metrics and dashboard screenshots and studio insights
-In order to know what could highly benefit from caching you can enable metrics and add more granularity to this metrics to exactly know what you want to cache. It's granular because the more you add granularity to more it will generate high cardinality for this metric and will have a cost on your APM.
+To identify which subgraphs would benefit most from caching, you can enable metrics and increase their granularity. Keep in mind that more granularity leads to higher metric cardinality, which may increase costs in your APM.
 
-Here is how to configure this metric:
+Configure this metric as follows:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -78,7 +84,7 @@ telemetry:
             # You can add more custom attributes using subgraph selectors
 ```
 
-Now you'll be able to use `apollo.router.operations.response.cache` metric and you should have a dashboard looking like this for example:
+You can now use the `apollo.router.operations.response.cache` metric to create a dashboard like this example:
 
 <img
   className="screenshot"
@@ -86,11 +92,11 @@ Now you'll be able to use `apollo.router.operations.response.cache` metric and y
   src="../../../../images/response-cache/cache_hit_miss_dashboard.png"
 />
 
-On the left you have the number of cache hits per subgraph and types. No cache hits because you didn't return any `Cache-control` header from your subgraphs. On the right you can see the number of cache misses and so the potential cache hits you could have. If we look at this example it might be worth it to cache type `User` from subgraph `posts` as you have a lot of cache misses.
+The left chart shows cache hits per subgraph and type. No cache hits appear because your subgraphs don't return any `Cache-Control` headers. The right chart shows cache misses and potential cache hits. In this example, caching the `User` type from the `posts` subgraph would be beneficial given the high number of cache misses.
 
 
 ### Schema integration
-Consider we have 2 subgraphs: users and posts.
+Consider an example with two subgraphs: users and posts.
 
 ```graphql title="users.graphql"
 extend schema
@@ -140,10 +146,10 @@ type Post @key(fields: "id") {
 }
 ```
 
-As I saw earlier with metrics I could highly benefit from caching by caching type `User` on subgraph `posts` I'm going to do it by using the `@cacheControl` directive.
+Based on the metrics, caching the `User` type on the `posts` subgraph would provide significant benefits. Enable this using the `@cacheControl` directive.
 
 <Note>
-    This example using `@cacheControl` only works if you're using Apollo Server as subgraph. If you're using something else then you'll have to update your codebase to return the right `Cache-control` header and it will work properly.
+    This example using `@cacheControl` only works if you're using Apollo Server as a subgraph. If you're using another server implementation, update your codebase to return the correct `Cache-Control` header.
 </Note>
 
 Here is the new version of the schema for subgraph `posts`:
@@ -181,8 +187,8 @@ type Post @key(fields: "id") @cacheControl(maxAge: 60) {
 }
 ```
 
-I set the cache control with TTL of 60 seconds so both the `Post` and `User` types will be in cached for 60 seconds.
-Now I enabled this you can see the difference on the previous dashboard, you now have cache hits and less cache misses.
+The cache control is set with a TTL of 60 seconds, so both the `Post` and `User` types are cached for 60 seconds.
+With caching enabled, you can see the difference in the dashboard: more cache hits and fewer cache misses.
 
 <img
   className="screenshot"
@@ -190,7 +196,7 @@ Now I enabled this you can see the difference on the previous dashboard, you now
   src="../../../../images/response-cache/cache_hit_dashboard.png"
 />
 
-And the response time will be faster as you can see on the right in the following screenshot:
+Response times are also faster, as shown in the right panel of this screenshot:
 
 <img
   className="screenshot"
@@ -200,9 +206,9 @@ And the response time will be faster as you can see on the right in the followin
 
 ### Invalidation
 
-Now you have cached data based on TTL maybe you would like to be able to increase these TTLs and automatically invalidate the data you want when you know there's a change on a specific data. By default we have several ways to invalidate data and to go further you can read the docs about [invalidation](./invalidation) but for this quickstart we will use cache tags which are like surrogate cache keys for REST APIs. You can tag some data on your schema to tag it and be able to only invalidate this data.
+With cached data based on TTL, you might want to increase these TTLs and automatically invalidate specific data when you know it has changed. Response caching provides several ways to invalidate data. For more details, see [Cache Expiration](./cache-expiration). For this quickstart, we'll use cache tags, which work like surrogate cache keys for REST APIs. You can tag data in your schema to enable targeted invalidation.
 
-To achieve this we will use `@cacheTag` directive introduced in federation v2.12. It takes a `format` as argument to create your cache tag. For type `User` and for root fields `posts` we will create different cache tags:
+Use the `@cacheTag` directive introduced in Federation v2.12. It takes a `format` argument to create your cache tag. For the `User` type and the `posts` root field, create different cache tags:
 
 
 ```graphql title="posts.graphql"
@@ -239,12 +245,12 @@ type Post @key(fields: "id") @cacheControl(maxAge: 60) {
 ```
 
 <Note>
-    Don't forget to either re-compose or publish your schemas using `rover`
+    Re-compose or publish your schemas using `rover` after making these changes.
 </Note>
 
-You can see I tagged `User` with a static cache tag format `user` and a dynamic one involving variable interpolation and we use the entity key `id` to generate the cache tag. So for example if the `User` fetched has an `id` set to `42` it would generate `user-42` as a cache tag.
+The `User` type is tagged with a static cache tag format `user` and a dynamic one with variable interpolation using the entity key `id` to generate the cache tag. For example, if the fetched `User` has an `id` of `42`, it generates `user-42` as a cache tag.
 
-Now we tagged our data we can invalidate it using a `curl` command to invalidate the user with id `42`:
+With tagged data, you can invalidate it using a `curl` command to invalidate the user with id `42`:
 
 ```
 curl --request POST \
@@ -254,9 +260,9 @@ curl --request POST \
 	--data '[{"kind":"cache_tag","subgraphs":["posts"],"cache_tag":"user-42"}]'
 ```
 
-`INVALIDATION_SHARED_KEY` is an environment variable key you set containing a token used to call this endpoint, it has been used in router's configuration at the beginining of this page.
+`INVALIDATION_SHARED_KEY` is an environment variable containing a token for authenticating requests to this endpoint. This was configured in the router setup at the beginning of this page.
 
-This call will return the number of invalidated entries, for example if we only invalidated 1 entry with this request we would receive:
+The call returns the number of invalidated entries. For example, if only 1 entry was invalidated:
 
 ```json
 {
@@ -264,4 +270,4 @@ This call will return the number of invalidated entries, for example if we only 
 }
 ```
 
-If you want to play with response caching and see what has been cached or not in a query I highly recommend you to use the cache debugger documented [here](./debugging)
+To explore response caching and see what data has been cached in a query, use the cache debugger documented [here](./observability#cache-debugger).

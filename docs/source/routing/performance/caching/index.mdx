@@ -4,7 +4,7 @@ subtitle: Accelerate query retrieval with in-memory and distributed caching
 description: Accelerate query retrieval for your federated graph with in-memory and distributed caching in Apollo Router.
 ---
 
-Apollo Router supports multiple caching strategies, including in-memory caching, distributed caching with Redis, and entity caching, that allow you to reduce redundant subgraph requests and improve query latency. 
+Apollo Router supports multiple caching strategies, including in-memory caching, distributed caching with Redis, and response caching, that allow you to reduce redundant subgraph requests and improve query latency. 
 
 ## In-memory caching
 
@@ -24,10 +24,10 @@ You can configure a Redis-backed distributed cache that enables multiple router 
 
 Learn more about [distributed caching](/graphos/routing/performance/caching/distributed).
 
-## Entity-based caching
+## Response caching
 
-Entity caching speeds up graph data retrieval by storing only the necessary data for entities, rather than entire client responses. It's helpful in scenarios where the same data is requested frequently, such as product information systems and user profile services.
+Response caching speeds up graph data retrieval by storing portions of GraphQL responses at the entity and operation level. Using Redis, the router caches subgraph responses and serves them from cache when the same entities are requested—even across different operations and clients. This reduces load on your subgraphs and backend services.
 
-Using Redis, the router stores subgraph responses and ensures that requests for the same entity from different clients are served from the cache, rather than fetching the data repeatedly from subgraphs. It can cache data at a fine-grained level and provides separate configurations for caching duration (TTL) and other caching behaviors per subgraph. 
+You can configure cache expiration with TTL or active invalidation via API, and customize caching behavior per subgraph or operation.
 
-[Learn more about entity-based caching](/graphos/routing/performance/caching/entity).
+[Learn more about response caching](/graphos/routing/performance/caching/response-caching).

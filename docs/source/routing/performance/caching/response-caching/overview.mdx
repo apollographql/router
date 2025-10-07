@@ -1,6 +1,7 @@
 ---
-title: Response caching for the GraphOS Router
-description: Response caching for GraphOS Router with GraphOS Enterprise. Cache and reuse individual entities and root fields across queries.
+title: Response Caching
+subtitle: Cache subgraph responses to improve query performance
+description: Learn how response caching in GraphOS Router enables entity-level caching to reduce subgraph load and improve query latency.
 minVersion: Router v2.8.0
 releaseStage: preview
 ---
@@ -25,15 +26,22 @@ Response caching enables the router to respond to identical subgraph queries wit
 
 The main goal of response caching is to reduce the load on your subgraphs and improve overall latencies for client requests. The router provides a GraphQL-aware cache, which offers advantages over a generic CDN. The router caches at the entity/query level, which is GraphQL-native and reusable across users and requests.
 
+### The GraphQL caching challenge
+
+GraphQL responses present unique caching challenges that traditional HTTP caching doesn't address well. A typical GraphQL response combines data from multiple sources with varying freshness requirements and visibility constraints:
+
+- **Mixed TTLs**: A single response might include product prices (change weekly), inventory (change constantly), and user reviews (change rarely). Traditional response caching forces you to use the shortest time to live (TTL)—the duration data remains valid in cache—for the entire response.
+- **Personalized and public data**: Responses often mix public data (product details) with private data (user's cart, viewing history). This makes full-response caching either impossible or requires separate cache entries per user.
+- **High duplication**: Different queries requesting similar entities result in duplicate cached data. For example, a product list query and a product detail query both cache the same product name and price.
+
+Response caching solves these challenges by caching at the entity and field level. Each piece of data can have its own TTL and visibility settings, enabling granular cache control that matches how your data actually behaves.
+
 ### Benefits of response caching
 
-Compared to caching entire client responses, response caching supports finer control over:
-- the time to live (TTL) of cached data
+Compared to caching entire client responses, response caching in the router supports finer control over:
+- the time to live (TTL) and programmatic invalidation of cached data
 - the amount of data being cached
-
-When caching an entire client response, the router must store it with a shorter TTL because application data can change often. Real-time data needs more frequent updates.
-
-A client-response cache might not be shareable between users, because the application data might contain personal and private information. A client-response cache might also duplicate a lot of data between client responses.
+- sharing cached data across users while maintaining privacy for personalized data
 
 For example, consider the `Products` and `Inventory` subgraphs from the [Entities guide](/federation/entities):
 
