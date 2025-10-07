@@ -106,7 +106,6 @@ fn preserves_descriptions() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn no_hint_raised_when_merging_empty_description() {
     let subgraph1 = ServiceDefinition {
         name: "Subgraph1",
@@ -153,7 +152,6 @@ fn no_hint_raised_when_merging_empty_description() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn include_types_from_different_subgraphs() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -184,7 +182,7 @@ fn include_types_from_different_subgraphs() {
     let api_schema = supergraph
         .to_api_schema(Default::default())
         .expect("Expected API schema generation to succeed");
-    assert_snapshot!(print_sdl(api_schema.schema()));
+    assert_snapshot!(api_schema.schema());
 
     // Validate extracted subgraphs contain proper federation directives
     let extracted_subgraphs = extract_subgraphs_from_supergraph_result(&supergraph)
@@ -193,16 +191,15 @@ fn include_types_from_different_subgraphs() {
     let subgraph_a_extracted = extracted_subgraphs
         .get("subgraphA")
         .expect("Expected subgraphA to be present in extracted subgraphs");
-    assert_snapshot!(print_sdl(subgraph_a_extracted.schema.schema()));
+    assert_snapshot!(subgraph_a_extracted.schema.schema());
 
     let subgraph_b_extracted = extracted_subgraphs
         .get("subgraphB")
         .expect("Expected subgraphB to be present in extracted subgraphs");
-    assert_snapshot!(print_sdl(subgraph_b_extracted.schema.schema()));
+    assert_snapshot!(subgraph_b_extracted.schema.schema());
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn doesnt_leave_federation_directives_in_the_final_schema() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -233,7 +230,7 @@ fn doesnt_leave_federation_directives_in_the_final_schema() {
     let api_schema = supergraph
         .to_api_schema(Default::default())
         .expect("Expected API schema generation to succeed");
-    assert_snapshot!(print_sdl(api_schema.schema()));
+    assert_snapshot!(api_schema.schema());
 
     // Validate that federation directives (@provides, @key, @external, @shareable)
     // are properly rebuilt in the extracted subgraphs
@@ -243,16 +240,15 @@ fn doesnt_leave_federation_directives_in_the_final_schema() {
     let subgraph_a_extracted = extracted_subgraphs
         .get("subgraphA")
         .expect("Expected subgraphA to be present in extracted subgraphs");
-    assert_snapshot!(print_sdl(subgraph_a_extracted.schema.schema()));
+    assert_snapshot!(subgraph_a_extracted.schema.schema());
 
     let subgraph_b_extracted = extracted_subgraphs
         .get("subgraphB")
         .expect("Expected subgraphB to be present in extracted subgraphs");
-    assert_snapshot!(print_sdl(subgraph_b_extracted.schema.schema()));
+    assert_snapshot!(subgraph_b_extracted.schema.schema());
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn merges_default_arguments_when_they_are_arrays() {
     let subgraph_a = ServiceDefinition {
         name: "subgraph-a",
