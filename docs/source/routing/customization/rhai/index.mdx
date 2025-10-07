@@ -551,7 +551,7 @@ When a Rhai callback function throws an error, the router automatically logs the
 
 #### Errors without custom body
 
-When a callback throws a simple error (a string), the router logs the full error details at ERROR level:
+When a callback throws a simple error (a string), the router logs the full error details at <code>ERROR</code> level:
 
 ```rhai
 fn supergraph_service(service) {
@@ -562,13 +562,13 @@ fn supergraph_service(service) {
 ```
 
 The log output includes:
-- HTTP status code (defaults to 500)
+- HTTP status code (defaults to <code>500</code>)
 - Error message
 - Line number and position where the error occurred
 
 #### Errors with custom body
 
-When a callback throws an error with a custom GraphQL response body, the router does **not** log the error details:
+When a callback throws an error with a custom GraphQL response body, the router does _not_ log the error details:
 
 ```rhai
 fn supergraph_service(service) {
