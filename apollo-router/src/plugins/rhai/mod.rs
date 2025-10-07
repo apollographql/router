@@ -530,7 +530,7 @@ macro_rules! gen_map_deferred_response {
                         execute(&$rhai_service, &$callback, (shared_response.clone(),));
                     if let Err(error) = result {
                         let error_details = process_error(error);
-                                                if error_details.body.is_none() {
+                        if error_details.body.is_none() {
                             tracing::error!("map_request callback failed: {error_details:#?}");
                         }
                         let mut guard = shared_response.lock();
