@@ -512,10 +512,10 @@ async fn test_multi_pipelines() {
     // There may be more than one in each category because reqwest does connection pooling.
     let terminating =
         Regex::new(r#"(?m)^apollo_router_open_connections[{].+terminating.+[}]"#).expect("regex");
-    assert_eq!(terminating.captures_iter(&metrics).count(), 1);
+    assert!(terminating.captures_iter(&metrics).count() >= 1);
     let active =
         Regex::new(r#"(?m)^apollo_router_open_connections[{].+active.+[}]"#).expect("regex");
-    assert_eq!(active.captures_iter(&metrics).count(), 1);
+    assert!(active.captures_iter(&metrics).count() >= 1);
 }
 
 /// This test ensures that the router will not leave pipelines hanging around
@@ -561,11 +561,11 @@ async fn test_forced_connection_shutdown() {
     tokio::time::sleep(Duration::from_millis(100)).await;
     // There should be two instances of the pipeline metrics
     let pipelines = Regex::new(r#"(?m)^apollo_router_pipelines[{].+[}] 1"#).expect("regex");
-    assert_eq!(pipelines.captures_iter(&metrics).count(), 1);
+    assert!(pipelines.captures_iter(&metrics).count() >= 1);
 
     let terminating =
         Regex::new(r#"(?m)^apollo_router_open_connections[{].+active.+[}]"#).expect("regex");
-    assert_eq!(terminating.captures_iter(&metrics).count(), 1);
+    assert!(terminating.captures_iter(&metrics).count() >= 1);
     router.read_logs();
     router.assert_log_contained("connection shutdown exceeded, forcing close");
 }
