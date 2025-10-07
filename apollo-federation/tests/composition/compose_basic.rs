@@ -4,7 +4,6 @@ use test_log::test;
 use super::ServiceDefinition;
 use super::compose_as_fed2_subgraphs;
 use super::extract_subgraphs_from_supergraph_result;
-use super::print_sdl; // TODO: Remove after rebasing onto merge commit of pull/8380
 
 #[test]
 fn generates_a_valid_supergraph() {
