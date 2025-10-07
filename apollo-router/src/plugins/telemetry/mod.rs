@@ -296,6 +296,12 @@ impl EnabledFeatures {
     }
 }
 
+// Struct to hold request attributes for the http client in context
+#[derive(Clone, Debug)]
+pub(crate) struct HttpClientAttributes {
+    pub(crate) attributes: Vec<KeyValue>,
+}
+
 #[async_trait::async_trait]
 impl PluginPrivate for Telemetry {
     type Config = config::Conf;
@@ -1091,6 +1097,45 @@ impl PluginPrivate for Telemetry {
                     }
                 },
             )
+            .service(service)
+            .boxed()
+    }
+
+    fn http_client_service(
+        &self,
+        _subgraph_name: &str,
+        service: crate::services::http::BoxService,
+    ) -> crate::services::http::BoxService {
+        let req_fn_config = self.config.clone();
+        let res_fn_config = self.config.clone();
+
+        ServiceBuilder::new()
+            .map_request(move |request: crate::services::http::HttpRequest| {
+                // Get and store attributes so that they can be applied later after the span is created
+                let client_attributes = HttpClientAttributes {
+                    attributes: req_fn_config
+                        .instrumentation
+                        .spans
+                        .http_client
+                        .attributes
+                        .on_request(&request),
+                };
+                request.context.extensions().with_lock(|lock| {
+                    lock.insert(client_attributes);
+                });
+
+                request
+            })
+            .map_response(move |response: crate::services::http::HttpResponse| {
+                let attributes = res_fn_config
+                    .instrumentation
+                    .spans
+                    .http_client
+                    .attributes
+                    .on_response(&response);
+                ::tracing::Span::current().set_span_dyn_attributes(attributes);
+                response
+            })
             .service(service)
             .boxed()
     }
