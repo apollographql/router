@@ -1,4 +1,5 @@
 use insta::assert_snapshot;
+use test_log::test;
 
 use super::ServiceDefinition;
 use super::compose_as_fed2_subgraphs;
@@ -6,7 +7,6 @@ use super::extract_subgraphs_from_supergraph_result;
 use super::print_sdl;
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn generates_a_valid_supergraph() {
     let subgraph1 = ServiceDefinition {
         name: "Subgraph1",
@@ -45,15 +45,12 @@ fn generates_a_valid_supergraph() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
     let supergraph = result.expect("Expected composition to succeed");
-
-    // Test supergraph SDL structure
-    assert_snapshot!(print_sdl(supergraph.schema().schema()));
-
-    // Test API schema structure
     let api_schema = supergraph
         .to_api_schema(Default::default())
         .expect("Expected API schema generation to succeed");
-    assert_snapshot!(print_sdl(api_schema.schema()));
+
+    assert_snapshot!(supergraph.schema().schema());
+    assert_snapshot!(api_schema.schema());
 }
 
 #[test]

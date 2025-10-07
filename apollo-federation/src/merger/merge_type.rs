@@ -1,5 +1,6 @@
 use apollo_compiler::Name;
 use apollo_compiler::schema::Component;
+use tracing::instrument;
 
 use crate::bail;
 use crate::error::CompositionError;
@@ -14,6 +15,7 @@ use crate::schema::SchemaElement;
 use crate::schema::position::TypeDefinitionPosition;
 
 impl Merger {
+    #[instrument(skip(self))]
     pub(in crate::merger) fn merge_type(&mut self, type_def: &Name) -> Result<(), FederationError> {
         let Ok(dest) = self.merged.get_type(type_def.clone()) else {
             bail!(

@@ -5,6 +5,7 @@ use std::vec;
 use apollo_compiler::Schema;
 use apollo_compiler::validation::Valid;
 use itertools::Itertools;
+use tracing::instrument;
 
 pub use crate::composition::satisfiability::validate_satisfiability;
 use crate::error::CompositionError;
@@ -20,6 +21,7 @@ pub use crate::supergraph::Merged;
 pub use crate::supergraph::Satisfiable;
 pub use crate::supergraph::Supergraph;
 
+#[instrument(skip(subgraphs))]
 pub fn compose(
     subgraphs: Vec<Subgraph<Initial>>,
 ) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
@@ -48,6 +50,7 @@ pub fn compose(
 
 /// Apollo Federation allow subgraphs to specify partial schemas (i.e. "import" directives through
 /// `@link`). This function will update subgraph schemas with all missing federation definitions.
+#[instrument(skip(subgraphs))]
 pub fn expand_subgraphs(
     subgraphs: Vec<Subgraph<Initial>>,
 ) -> Result<Vec<Subgraph<Expanded>>, Vec<CompositionError>> {
@@ -66,6 +69,7 @@ pub fn expand_subgraphs(
 
 /// Validate subgraph schemas to ensure they satisfy Apollo Federation requirements (e.g. whether
 /// `@key` specifies valid `FieldSet`s etc).
+#[instrument(skip(subgraphs))]
 pub fn validate_subgraphs(
     subgraphs: Vec<Subgraph<Upgraded>>,
 ) -> Result<Vec<Subgraph<Validated>>, Vec<CompositionError>> {
@@ -83,6 +87,7 @@ pub fn validate_subgraphs(
 }
 
 /// Perform validations that require information about all available subgraphs.
+#[instrument(skip(subgraphs))]
 pub fn pre_merge_validations(
     subgraphs: &[Subgraph<Validated>],
 ) -> Result<(), Vec<CompositionError>> {
@@ -91,6 +96,7 @@ pub fn pre_merge_validations(
     Ok(())
 }
 
+#[instrument(skip(subgraphs))]
 pub fn merge_subgraphs(
     subgraphs: Vec<Subgraph<Validated>>,
 ) -> Result<Supergraph<Merged>, Vec<CompositionError>> {
@@ -116,6 +122,7 @@ pub fn merge_subgraphs(
     }
 }
 
+#[instrument(skip(_supergraph))]
 pub fn post_merge_validations(
     _supergraph: &Supergraph<Merged>,
 ) -> Result<(), Vec<CompositionError>> {

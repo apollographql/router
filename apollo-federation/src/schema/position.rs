@@ -1749,6 +1749,38 @@ impl SchemaDefinitionPosition {
             None => false,
         })
     }
+
+    pub(crate) fn get_root_type<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        kind: SchemaRootDefinitionKind,
+    ) -> Option<&'schema ComponentName> {
+        let schema_definition = self.get(schema.schema());
+        match kind {
+            SchemaRootDefinitionKind::Query => schema_definition.query.as_ref(),
+            SchemaRootDefinitionKind::Mutation => schema_definition.mutation.as_ref(),
+            SchemaRootDefinitionKind::Subscription => schema_definition.subscription.as_ref(),
+        }
+    }
+
+    pub(crate) fn set_root_type(
+        &self,
+        schema: &mut FederationSchema,
+        kind: SchemaRootDefinitionKind,
+        type_name: ComponentName,
+    ) -> Result<(), FederationError> {
+        let schema_definition = self.make_mut(&mut schema.schema);
+        match kind {
+            SchemaRootDefinitionKind::Query => schema_definition.make_mut().query = Some(type_name),
+            SchemaRootDefinitionKind::Mutation => {
+                schema_definition.make_mut().mutation = Some(type_name)
+            }
+            SchemaRootDefinitionKind::Subscription => {
+                schema_definition.make_mut().subscription = Some(type_name)
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
