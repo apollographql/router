@@ -1,0 +1,14 @@
+[package]
+name = "router-with-plugin"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "router"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+apollo-router = { path = "../../apollo-router" }
+custom-plugin = { path = "../" }
+tokio = { version = "1", features = ["full"] }

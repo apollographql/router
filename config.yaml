@@ -1,0 +1,69 @@
+sandbox:
+  enabled: true
+homepage:
+  enabled: false
+
+subscription:
+  enabled: true
+  mode:
+    passthrough:
+      # docker setup, for local setup comment out the following section
+      all:        
+        path: /
+          
+
+supergraph:
+  listen: 0.0.0.0:4000
+  introspection: true    
+  path: /
+
+override_subgraph_url:
+  book: http://book-subgraph:4001/
+  review: http://review-subgraph:4002/
+#  instruments: http://instruments-subgraph:4003/
+  
+
+headers:
+  all:
+    request:
+      - propagate:
+          matching: ".*" 
+
+
+telemetry:
+  instrumentation:
+    spans:
+      mode: spec_compliant
+      default_attribute_requirement_level: required
+      supergraph:
+        attributes:
+          my_attr:
+            static: "STATIC_VALUE"
+          client_id:
+            request_header: "jwt_client_id"
+          username:
+            request_header: "jwt_username"      
+  exporters:
+    tracing:
+      common:        
+        sampler: always_on
+        service_name: "no-metrics-test-trace"
+      otlp: ## default otlp config. should not coexist with datadog exporter
+        enabled: false
+        endpoint: http://datadog-agent:4317 # the port should check automatic. there was a recent
+        # fix that fixed the bug that was prevemtimng this
+        protocol: grpc # grpc is the default
+    metrics:
+      common: 
+        service_name: "no-metrics-test-metric"
+        service_namespace: "no-metrics-test-namespace" # OTEL namespace
+      prometheus:
+        enabled: false
+        listen: 0.0.0.0:6900
+        path: /
+      otlp: ## default otlp config. should not coexist with datadog exporter
+          enabled: false
+
+plugins:
+  rust.custom_plugin:
+    name: ""

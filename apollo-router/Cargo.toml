@@ -8,7 +8,7 @@ description = "A configurable, high-performance routing runtime for Apollo Feder
 license = "Elastic-2.0"
 
 # renovate-automation: rustc version
-rust-version = "1.85.0"
+rust-version = "1.90.0"
 edition = "2024"
 build = "build/main.rs"
 default-run = "router"
