@@ -1,5 +1,6 @@
 use apollo_compiler::coord;
 use insta::assert_snapshot;
+use test_log::test;
 
 use super::ServiceDefinition;
 use super::assert_composition_errors;
@@ -173,7 +174,6 @@ fn enum_types_errors_if_enum_used_only_as_input_has_no_consistent_values() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn enum_types_errors_when_merging_inconsistent_enum_used_as_both_input_and_output() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
