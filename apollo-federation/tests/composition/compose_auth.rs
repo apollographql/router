@@ -458,7 +458,6 @@ fn requires_scopes_comprehensive_locations() {
 // =============================================================================
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn policy_comprehensive_locations() {
     let on_object = ServiceDefinition {
         name: "on-object",
