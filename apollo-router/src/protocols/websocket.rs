@@ -383,7 +383,7 @@ where
             }
             Ok(Message::Frame(frame)) => serde_json::from_slice(frame.payload()),
             Err(err) => {
-                tracing::error!("cannot consume more message on websocket stream: {err:?}");
+                tracing::trace!("cannot consume more message on websocket stream: {err:?}");
 
                 Ok(ServerMessage::Error {
                     id: id.to_string(),
