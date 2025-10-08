@@ -1064,6 +1064,10 @@ pub(crate) static FEDERATION_VERSIONS: LazyLock<SpecDefinitions<FederationSpecDe
     LazyLock::new(|| {
         let mut definitions = SpecDefinitions::new(Identity::federation_identity());
         definitions.add(FederationSpecDefinition::new(Version {
+            major: 1,
+            minor: 0,
+        }));
+        definitions.add(FederationSpecDefinition::new(Version {
             major: 2,
             minor: 0,
         }));
