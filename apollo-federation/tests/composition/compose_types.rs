@@ -1,3 +1,4 @@
+use apollo_compiler::coord;
 use insta::assert_snapshot;
 
 use super::ServiceDefinition;
@@ -9,7 +10,6 @@ use super::compose_as_fed2_subgraphs;
 // =============================================================================
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn enum_types_merges_inconsistent_enum_only_used_as_output() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -40,26 +40,18 @@ fn enum_types_merges_inconsistent_enum_only_used_as_output() {
         .expect("Expected API schema generation to succeed");
 
     // Should merge to include both V1 and V2 values (JS test only checks the enum type, not full schema)
-    let enum_e = api_schema
-        .schema()
-        .types
-        .get("E")
+    let enum_e = coord!(E)
+        .lookup(api_schema.schema())
         .expect("Enum E should exist");
-    if let apollo_compiler::schema::ExtendedType::Enum(enum_type) = enum_e {
-        let enum_string = enum_type.to_string();
-        assert_snapshot!(enum_string, @r###"
+    assert_snapshot!(enum_e, @r#"
         enum E {
           V1
           V2
         }
-        "###);
-    } else {
-        panic!("E should be an enum type");
-    }
+        "#);
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn enum_types_merges_enum_but_skips_inconsistent_values_only_used_as_input() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -91,25 +83,17 @@ fn enum_types_merges_enum_but_skips_inconsistent_values_only_used_as_input() {
         .expect("Expected API schema generation to succeed");
 
     // Should only include V1 (common value), V2 is skipped for input-only enum
-    let enum_e = api_schema
-        .schema()
-        .types
-        .get("E")
+    let enum_e = coord!(E)
+        .lookup(api_schema.schema())
         .expect("Enum E should exist");
-    if let apollo_compiler::schema::ExtendedType::Enum(enum_type) = enum_e {
-        let enum_string = enum_type.to_string();
-        assert_snapshot!(enum_string, @r###"
+    assert_snapshot!(enum_e, @r###"
         enum E {
           V1
         }
         "###);
-    } else {
-        panic!("E should be an enum type");
-    }
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn enum_types_does_not_error_if_skipped_inconsistent_value_has_directive() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -143,26 +127,18 @@ fn enum_types_does_not_error_if_skipped_inconsistent_value_has_directive() {
         .expect("Expected API schema generation to succeed");
 
     // Should include V1 and V3 (common values), V2 is skipped but no error for @deprecated on V2
-    let enum_e = api_schema
-        .schema()
-        .types
-        .get("E")
+    let enum_e = coord!(E)
+        .lookup(api_schema.schema())
         .expect("Enum E should exist");
-    if let apollo_compiler::schema::ExtendedType::Enum(enum_type) = enum_e {
-        let enum_string = enum_type.to_string();
-        assert_snapshot!(enum_string, @r###"
+    assert_snapshot!(enum_e, @r#"
         enum E {
           V1
           V3
         }
-        "###);
-    } else {
-        panic!("E should be an enum type");
-    }
+        "#);
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn enum_types_errors_if_enum_used_only_as_input_has_no_consistent_values() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
