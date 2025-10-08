@@ -177,7 +177,12 @@ impl ComposeDirectiveManager {
             .collect();
 
         for subgraph in subgraphs {
-            for application in subgraph.schema().compose_directive_applications()? {
+            let Ok(compose_directive_applications) =
+                subgraph.schema().compose_directive_applications()
+            else {
+                continue;
+            };
+            for application in compose_directive_applications {
                 match application {
                     Ok(compose_directive) => {
                         // The parser will ensure this is not null, since `name` is defined as `String!`,
