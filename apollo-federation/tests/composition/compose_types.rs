@@ -215,7 +215,6 @@ fn enum_types_errors_when_merging_inconsistent_enum_used_as_both_input_and_outpu
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn enum_types_ignores_inaccessible_fields_when_merging_enums_used_as_both_input_and_output() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -247,7 +246,6 @@ fn enum_types_ignores_inaccessible_fields_when_merging_enums_used_as_both_input_
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn enum_types_succeeds_merging_consistent_enum_used_as_both_input_and_output() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -280,22 +278,15 @@ fn enum_types_succeeds_merging_consistent_enum_used_as_both_input_and_output() {
         .expect("Expected API schema generation to succeed");
 
     // Should include both V1 and V2 (fully consistent)
-    let enum_e = api_schema
-        .schema()
-        .types
-        .get("E")
+    let enum_e = coord!(E)
+        .lookup(api_schema.schema())
         .expect("Enum E should exist");
-    if let apollo_compiler::schema::ExtendedType::Enum(enum_type) = enum_e {
-        let enum_string = enum_type.to_string();
-        assert_snapshot!(enum_string, @r###"
+    assert_snapshot!(enum_e, @r#"
         enum E {
           V1
           V2
         }
-        "###);
-    } else {
-        panic!("E should be an enum type");
-    }
+        "#);
 }
 
 // =============================================================================
