@@ -227,7 +227,6 @@ fn inaccessible_succeeds_if_imported_under_same_non_default_name() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn inaccessible_ignores_inaccessible_element_when_validating_composition() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -261,7 +260,6 @@ fn inaccessible_ignores_inaccessible_element_when_validating_composition() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn inaccessible_errors_if_subgraph_misuses_inaccessible() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -293,25 +291,21 @@ fn inaccessible_errors_if_subgraph_misuses_inaccessible() {
         &result,
         &[(
             "REFERENCED_INACCESSIBLE",
-            r#"Type "A" is @inaccessible but is referenced by "Query.q2", which is in the API schema."#,
+            r#"The following errors occurred:
+  - Type `A` is @inaccessible but is referenced by `Query.q2`, which is in the API schema."#,
         )],
     );
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn inaccessible_uses_security_core_purpose_in_supergraph() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
         type_defs: r#"
-        type Query {
-          me: User @inaccessible
-        }
-
-        type User @key(fields: "id") {
-          id: ID!
-          name: String!
-        }
+          type Query {
+            someField: String!
+            privateField: String! @inaccessible
+          }
         "#,
     };
 
@@ -332,8 +326,8 @@ fn inaccessible_uses_security_core_purpose_in_supergraph() {
         })
         .expect("Link to inaccessible spec should be present in supergraph schema");
     let inaccessible_purpose = inaccessible_link
-        .specified_argument_by_name("purpose")
-        .expect("Link to inaccessible spec should have a purpose argument");
+        .specified_argument_by_name("for")
+        .expect("Link to inaccessible spec should have a \"for\" argument indicating purpose");
 
     assert!(
         matches!(inaccessible_purpose.as_ref(), apollo_compiler::ast::Value::Enum(enum_name) if enum_name == "SECURITY"),
