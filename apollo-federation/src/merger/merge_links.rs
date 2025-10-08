@@ -53,10 +53,6 @@ impl Merger {
             };
 
             for (directive, referencers) in &subgraph.schema().referencers().directives {
-                trace!(
-                    "Evaluating usage of @{directive} in subgraph {}",
-                    subgraph.name
-                );
                 let Some((source, import)) = features.directives_by_imported_name.get(directive)
                 else {
                     trace!("Directive @{directive} has no @link, skipping");
@@ -67,7 +63,10 @@ impl Merger {
                 }
                 let Some(composition_spec) = SPEC_REGISTRY.get_composition_spec(source, import)
                 else {
-                    trace!("Directive @{directive} has no registered composition spec, skipping");
+                    trace!(
+                        "Directive @{directive} from {} has no registered composition spec, skipping",
+                        source.url
+                    );
                     continue;
                 };
                 let Some(definition) = subgraph
@@ -136,10 +135,6 @@ impl Merger {
                 else {
                     continue;
                 };
-                trace!(
-                    "Evaluating directive @{} from {} for subgraph {}",
-                    directive.name, subgraph_core_directive.url, subgraph.name
-                );
 
                 if name_in_supergraph.is_none() {
                     name_in_supergraph = Some(&directive.name);
@@ -234,6 +229,7 @@ impl Merger {
                     });
                 }
             }
+
             self.link_spec_definition.apply_feature_to_schema(
                 &mut self.merged,
                 supergraph_core_directives[0].spec_in_supergraph,
