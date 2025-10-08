@@ -149,6 +149,7 @@ fn inaccessible_errors_if_imported_under_mismatched_names() {
           @link(url: "https://specs.apollo.dev/federation/v2.0", import: [{name: "@inaccessible", as: "@private"}])
 
         type Query {
+          q: Int
           q1: Int @private
         }
         "#,
@@ -179,23 +180,21 @@ fn inaccessible_errors_if_imported_under_mismatched_names() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn inaccessible_succeeds_if_imported_under_same_non_default_name() {
-    let subgraph_a = ServiceDefinition {
-        name: "subgraphA",
-        type_defs: r#"
+    let subgraph_a = Subgraph::parse("subgraphA", "",
+        r#"
         extend schema
           @link(url: "https://specs.apollo.dev/federation/v2.0", import: [{name: "@inaccessible", as: "@private"}])
 
         type Query {
+          q: Int
           q1: Int @private
         }
         "#,
-    };
+    ).unwrap();
 
-    let subgraph_b = ServiceDefinition {
-        name: "subgraphB",
-        type_defs: r#"
+    let subgraph_b = Subgraph::parse("subgraphB", "",
+        r#"
         extend schema
           @link(url: "https://specs.apollo.dev/federation/v2.0", import: [{name: "@inaccessible", as: "@private"}])
 
@@ -203,9 +202,9 @@ fn inaccessible_succeeds_if_imported_under_same_non_default_name() {
           q2: Int @private
         }
         "#,
-    };
+    ).unwrap();
 
-    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    let result = compose(vec![subgraph_a, subgraph_b]);
     let supergraph =
         result.expect("Expected composition to succeed with consistent @inaccessible import names");
 

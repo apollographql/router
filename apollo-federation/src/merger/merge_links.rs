@@ -19,7 +19,6 @@ use crate::merger::merge::MergedDirectiveInfo;
 use crate::merger::merge::Merger;
 use crate::schema::type_and_directive_specification::DirectiveCompositionSpecification;
 
-#[allow(dead_code)]
 pub(crate) struct CoreDirectiveInSubgraphs {
     url: Url,
     name: Name,
@@ -27,7 +26,16 @@ pub(crate) struct CoreDirectiveInSubgraphs {
     composition_spec: DirectiveCompositionSpecification,
 }
 
-#[allow(dead_code)]
+impl std::fmt::Debug for CoreDirectiveInSubgraphs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CoreDirectiveInSubgraphs")
+            .field("url", &self.url)
+            .field("name", &self.name)
+            .field("definitions_per_subgraph", &self.definitions_per_subgraph)
+            .finish()
+    }
+}
+
 struct CoreDirectiveInSupergraph {
     spec_in_supergraph: &'static dyn SpecDefinition,
     name_in_feature: Name,
@@ -138,7 +146,7 @@ impl Merger {
 
                 if name_in_supergraph.is_none() {
                     name_in_supergraph = Some(&directive.name);
-                } else if name_in_supergraph.is_some_and(|n| *n != subgraph_core_directive.name) {
+                } else if name_in_supergraph.is_some_and(|n| *n != directive.name) {
                     let definition_sources: IndexMap<_, _> = self
                         .subgraphs
                         .iter()
