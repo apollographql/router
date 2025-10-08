@@ -1,5 +1,4 @@
 use apollo_compiler::coord;
-use apollo_compiler::schema::ExtendedType;
 use insta::assert_snapshot;
 use test_log::test;
 
@@ -305,7 +304,6 @@ fn authenticated_validation_error_on_invalid_application() {
 // =============================================================================
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn requires_scopes_comprehensive_locations() {
     let on_object = ServiceDefinition {
         name: "on-object",
@@ -426,112 +424,32 @@ fn requires_scopes_comprehensive_locations() {
     //  "ScopedScalar", "ScopedEnum", "Query.scopedRootField",
     //  "ObjectWithScopedField.field", "EntityWithScopedField.field"]
 
-    // ScopedObject
-    let scoped_object = schema
-        .types
-        .get("ScopedObject")
-        .expect("ScopedObject exists");
-    if let ExtendedType::Object(object) = scoped_object {
-        assert!(object.directives.iter().any(|d| d.name == "requiresScopes"));
-    } else {
-        panic!("ScopedObject is not an object");
+    for coord in [
+        coord!(ScopedObject),
+        coord!(ScopedInterface),
+        coord!(ScopedInterfaceObject),
+        coord!(ScopedScalar),
+        coord!(ScopedEnum),
+    ] {
+        let target = coord.lookup(schema).expect("Target exists");
+        let has_scopes = target
+            .directives()
+            .iter()
+            .any(|d| d.name == "requiresScopes");
+        assert!(has_scopes, "No requiresScopes directive found in {target}");
     }
-
-    // ScopedInterface
-    let scoped_interface = schema
-        .types
-        .get("ScopedInterface")
-        .expect("ScopedInterface exists");
-    if let ExtendedType::Interface(interface) = scoped_interface {
+    for coord in [
+        coord!(Query.scopedRootField),
+        coord!(ObjectWithScopedField.field),
+        coord!(EntityWithScopedField.field),
+    ] {
+        let target = coord.lookup_field(schema).expect("Target exists");
+        let has_scopes = target.directives.iter().any(|d| d.name == "requiresScopes");
         assert!(
-            interface
-                .directives
-                .iter()
-                .any(|d| d.name == "requiresScopes")
+            has_scopes,
+            "No requiresScopes directive found in {}",
+            target.node
         );
-    } else {
-        panic!("ScopedInterface is not an interface");
-    }
-
-    // ScopedInterfaceObject
-    let scoped_interface_object = schema
-        .types
-        .get("ScopedInterfaceObject")
-        .expect("ScopedInterfaceObject exists");
-    if let ExtendedType::Object(object) = scoped_interface_object {
-        assert!(object.directives.iter().any(|d| d.name == "requiresScopes"));
-    } else {
-        panic!("ScopedInterfaceObject is not an object");
-    }
-
-    // ScopedScalar
-    let scoped_scalar = schema
-        .types
-        .get("ScopedScalar")
-        .expect("ScopedScalar exists");
-    if let ExtendedType::Scalar(scalar) = scoped_scalar {
-        assert!(scalar.directives.iter().any(|d| d.name == "requiresScopes"));
-    } else {
-        panic!("ScopedScalar is not a scalar");
-    }
-
-    // ScopedEnum
-    let scoped_enum = schema.types.get("ScopedEnum").expect("ScopedEnum exists");
-    if let ExtendedType::Enum(enum_type) = scoped_enum {
-        assert!(
-            enum_type
-                .directives
-                .iter()
-                .any(|d| d.name == "requiresScopes")
-        );
-    } else {
-        panic!("ScopedEnum is not an enum");
-    }
-
-    // Query.scopedRootField
-    if let Some(query_type_name) = &schema.schema_definition.query
-        && let Some(ExtendedType::Object(query_obj)) = schema.types.get(query_type_name.as_str())
-    {
-        if let Some(scoped_root_field) = query_obj.fields.get("scopedRootField") {
-            assert!(
-                scoped_root_field
-                    .directives
-                    .iter()
-                    .any(|d| d.name == "requiresScopes")
-            );
-        } else {
-            panic!("scopedRootField not found on Query");
-        }
-    }
-
-    // ObjectWithScopedField.field
-    let object_with_field = schema
-        .types
-        .get("ObjectWithScopedField")
-        .expect("ObjectWithScopedField exists");
-    if let ExtendedType::Object(object) = object_with_field {
-        if let Some(field) = object.fields.get("field") {
-            assert!(field.directives.iter().any(|d| d.name == "requiresScopes"));
-        } else {
-            panic!("field not found on ObjectWithScopedField");
-        }
-    } else {
-        panic!("ObjectWithScopedField is not an object");
-    }
-
-    // EntityWithScopedField.field
-    let entity_with_field = schema
-        .types
-        .get("EntityWithScopedField")
-        .expect("EntityWithScopedField exists");
-    if let ExtendedType::Object(object) = entity_with_field {
-        if let Some(field) = object.fields.get("field") {
-            assert!(field.directives.iter().any(|d| d.name == "requiresScopes"));
-        } else {
-            panic!("field not found on EntityWithScopedField");
-        }
-    } else {
-        panic!("EntityWithScopedField is not an object");
     }
 }
 
@@ -661,101 +579,24 @@ fn policy_comprehensive_locations() {
     //  "ScopedScalar", "ScopedEnum", "Query.scopedRootField",
     //  "ObjectWithScopedField.field", "EntityWithScopedField.field"]
 
-    // ScopedObject
-    let scoped_object = schema
-        .types
-        .get("ScopedObject")
-        .expect("ScopedObject exists");
-    if let ExtendedType::Object(object) = scoped_object {
-        assert!(object.directives.iter().any(|d| d.name == "policy"));
-    } else {
-        panic!("ScopedObject is not an object");
+    for coord in [
+        coord!(ScopedObject),
+        coord!(ScopedInterface),
+        coord!(ScopedInterfaceObject),
+        coord!(ScopedScalar),
+        coord!(ScopedEnum),
+    ] {
+        let target = coord.lookup(schema).expect("Target exists");
+        let has_policy = target.directives().iter().any(|d| d.name == "policy");
+        assert!(has_policy, "No policy directive found in {target}");
     }
-
-    // ScopedInterface
-    let scoped_interface = schema
-        .types
-        .get("ScopedInterface")
-        .expect("ScopedInterface exists");
-    if let ExtendedType::Interface(interface) = scoped_interface {
-        assert!(interface.directives.iter().any(|d| d.name == "policy"));
-    } else {
-        panic!("ScopedInterface is not an interface");
-    }
-
-    // ScopedInterfaceObject
-    let scoped_interface_object = schema
-        .types
-        .get("ScopedInterfaceObject")
-        .expect("ScopedInterfaceObject exists");
-    if let ExtendedType::Object(object) = scoped_interface_object {
-        assert!(object.directives.iter().any(|d| d.name == "policy"));
-    } else {
-        panic!("ScopedInterfaceObject is not an object");
-    }
-
-    // ScopedScalar
-    let scoped_scalar = schema
-        .types
-        .get("ScopedScalar")
-        .expect("ScopedScalar exists");
-    if let ExtendedType::Scalar(scalar) = scoped_scalar {
-        assert!(scalar.directives.iter().any(|d| d.name == "policy"));
-    } else {
-        panic!("ScopedScalar is not a scalar");
-    }
-
-    // ScopedEnum
-    let scoped_enum = schema.types.get("ScopedEnum").expect("ScopedEnum exists");
-    if let ExtendedType::Enum(enum_type) = scoped_enum {
-        assert!(enum_type.directives.iter().any(|d| d.name == "policy"));
-    } else {
-        panic!("ScopedEnum is not an enum");
-    }
-
-    // Query.scopedRootField
-    if let Some(query_type_name) = &schema.schema_definition.query
-        && let Some(ExtendedType::Object(query_obj)) = schema.types.get(query_type_name.as_str())
-    {
-        if let Some(scoped_root_field) = query_obj.fields.get("scopedRootField") {
-            assert!(
-                scoped_root_field
-                    .directives
-                    .iter()
-                    .any(|d| d.name == "policy")
-            );
-        } else {
-            panic!("scopedRootField not found on Query");
-        }
-    }
-
-    // ObjectWithScopedField.field
-    let object_with_field = schema
-        .types
-        .get("ObjectWithScopedField")
-        .expect("ObjectWithScopedField exists");
-    if let ExtendedType::Object(object) = object_with_field {
-        if let Some(field) = object.fields.get("field") {
-            assert!(field.directives.iter().any(|d| d.name == "policy"));
-        } else {
-            panic!("field not found on ObjectWithScopedField");
-        }
-    } else {
-        panic!("ObjectWithScopedField is not an object");
-    }
-
-    // EntityWithScopedField.field
-    let entity_with_field = schema
-        .types
-        .get("EntityWithScopedField")
-        .expect("EntityWithScopedField exists");
-    if let ExtendedType::Object(object) = entity_with_field {
-        if let Some(field) = object.fields.get("field") {
-            assert!(field.directives.iter().any(|d| d.name == "policy"));
-        } else {
-            panic!("field not found on EntityWithScopedField");
-        }
-    } else {
-        panic!("EntityWithScopedField is not an object");
+    for coord in [
+        coord!(Query.scopedRootField),
+        coord!(ObjectWithScopedField.field),
+        coord!(EntityWithScopedField.field),
+    ] {
+        let target = coord.lookup_field(schema).expect("Target exists");
+        let has_policy = target.directives.iter().any(|d| d.name == "policy");
+        assert!(has_policy, "No policy directive found in {}", target.node);
     }
 }
