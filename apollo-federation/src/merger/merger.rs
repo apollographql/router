@@ -1206,6 +1206,12 @@ impl Merger {
                     .collect();
                 applications.push(transformed_application);
             }
+        } else {
+            applications.extend(
+                pos.get_applied_directives(subgraph.schema(), &merge_info.definition.name)
+                    .into_iter()
+                    .map(|n| (**n).clone()),
+            );
         }
         applications
     }

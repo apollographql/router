@@ -1,5 +1,7 @@
+use apollo_compiler::coord;
 use apollo_compiler::schema::ExtendedType;
 use insta::assert_snapshot;
+use test_log::test;
 
 use super::ServiceDefinition;
 use super::assert_composition_errors;
@@ -15,7 +17,6 @@ fn print_directive_definition(directive: &apollo_compiler::schema::DirectiveDefi
 // =============================================================================
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn authenticated_comprehensive_locations() {
     let on_object = ServiceDefinition {
         name: "on-object",
@@ -136,115 +137,28 @@ fn authenticated_comprehensive_locations() {
     //  "AuthenticatedScalar", "AuthenticatedEnum", "Query.authenticatedRootField",
     //  "ObjectWithAuthenticatedField.field", "EntityWithAuthenticatedField.field"]
 
-    // AuthenticatedObject
-    let authenticated_object = schema
-        .types
-        .get("AuthenticatedObject")
-        .expect("AuthenticatedObject exists");
-    if let ExtendedType::Object(object) = authenticated_object {
-        assert!(object.directives.iter().any(|d| d.name == "authenticated"));
-    } else {
-        panic!("AuthenticatedObject is not an object");
+    for coord in [
+        coord!(AuthenticatedObject),
+        coord!(AuthenticatedInterface),
+        coord!(AuthenticatedInterfaceObject),
+        coord!(AuthenticatedScalar),
+        coord!(AuthenticatedEnum),
+    ] {
+        let target = coord.lookup(schema).expect("Target exists");
+        let has_auth = target
+            .directives()
+            .iter()
+            .any(|d| d.name == "authenticated");
+        assert!(has_auth, "No auth directive found in {target}");
     }
-
-    // AuthenticatedInterface
-    let authenticated_interface = schema
-        .types
-        .get("AuthenticatedInterface")
-        .expect("AuthenticatedInterface exists");
-    if let ExtendedType::Interface(interface) = authenticated_interface {
-        assert!(
-            interface
-                .directives
-                .iter()
-                .any(|d| d.name == "authenticated")
-        );
-    } else {
-        panic!("AuthenticatedInterface is not an interface");
-    }
-
-    // AuthenticatedInterfaceObject
-    let authenticated_interface_object = schema
-        .types
-        .get("AuthenticatedInterfaceObject")
-        .expect("AuthenticatedInterfaceObject exists");
-    if let ExtendedType::Object(object) = authenticated_interface_object {
-        assert!(object.directives.iter().any(|d| d.name == "authenticated"));
-    } else {
-        panic!("AuthenticatedInterfaceObject is not an object");
-    }
-
-    // AuthenticatedScalar
-    let authenticated_scalar = schema
-        .types
-        .get("AuthenticatedScalar")
-        .expect("AuthenticatedScalar exists");
-    if let ExtendedType::Scalar(scalar) = authenticated_scalar {
-        assert!(scalar.directives.iter().any(|d| d.name == "authenticated"));
-    } else {
-        panic!("AuthenticatedScalar is not a scalar");
-    }
-
-    // AuthenticatedEnum
-    let authenticated_enum = schema
-        .types
-        .get("AuthenticatedEnum")
-        .expect("AuthenticatedEnum exists");
-    if let ExtendedType::Enum(enum_type) = authenticated_enum {
-        assert!(
-            enum_type
-                .directives
-                .iter()
-                .any(|d| d.name == "authenticated")
-        );
-    } else {
-        panic!("AuthenticatedEnum is not an enum");
-    }
-
-    // Query.authenticatedRootField
-    if let Some(query_type_name) = &schema.schema_definition.query
-        && let Some(ExtendedType::Object(query_obj)) = schema.types.get(query_type_name.as_str())
-    {
-        if let Some(authenticated_root_field) = query_obj.fields.get("authenticatedRootField") {
-            assert!(
-                authenticated_root_field
-                    .directives
-                    .iter()
-                    .any(|d| d.name == "authenticated")
-            );
-        } else {
-            panic!("authenticatedRootField not found on Query");
-        }
-    }
-
-    // ObjectWithAuthenticatedField.field
-    let object_with_field = schema
-        .types
-        .get("ObjectWithAuthenticatedField")
-        .expect("ObjectWithAuthenticatedField exists");
-    if let ExtendedType::Object(object) = object_with_field {
-        if let Some(field) = object.fields.get("field") {
-            assert!(field.directives.iter().any(|d| d.name == "authenticated"));
-        } else {
-            panic!("field not found on ObjectWithAuthenticatedField");
-        }
-    } else {
-        panic!("ObjectWithAuthenticatedField is not an object");
-    }
-
-    // EntityWithAuthenticatedField.field
-    let entity_with_field = schema
-        .types
-        .get("EntityWithAuthenticatedField")
-        .expect("EntityWithAuthenticatedField exists");
-    if let ExtendedType::Object(object) = entity_with_field {
-        if let Some(field) = object.fields.get("field") {
-            assert!(field.directives.iter().any(|d| d.name == "authenticated"));
-        } else {
-            panic!("field not found on EntityWithAuthenticatedField");
-        }
-    } else {
-        panic!("EntityWithAuthenticatedField is not an object");
+    for coord in [
+        coord!(Query.authenticatedRootField),
+        coord!(ObjectWithAuthenticatedField.field),
+        coord!(EntityWithAuthenticatedField.field),
+    ] {
+        let target = coord.lookup_field(schema).expect("Target exists");
+        let has_auth = target.directives.iter().any(|d| d.name == "authenticated");
+        assert!(has_auth, "No auth directive found in {}", target.node);
     }
 }
 
