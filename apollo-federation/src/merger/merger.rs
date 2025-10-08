@@ -18,9 +18,10 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
-use countmap::CountMap;
 use indexmap::IndexSet;
 use itertools::Itertools;
+use strum::IntoEnumIterator as _;
+use tracing::trace;
 
 use crate::LinkSpecDefinition;
 use crate::bail;
@@ -33,7 +34,6 @@ use crate::link::Import;
 use crate::link::Link;
 use crate::link::federation_spec_definition::FEDERATION_OPERATION_TYPES;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
-use crate::link::join_spec_definition::EnumValue;
 use crate::link::join_spec_definition::JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
@@ -65,6 +65,7 @@ use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::SchemaDefinitionPosition;
+use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::schema::type_and_directive_specification::ArgumentMerger;
@@ -136,7 +137,6 @@ pub(crate) struct Merger {
     pub(in crate::merger) enum_usages: HashMap<String, EnumTypeUsage>,
     pub(in crate::merger) fields_with_from_context: DirectiveReferencers,
     pub(in crate::merger) fields_with_override: DirectiveReferencers,
-    pub(in crate::merger) subgraph_enum_values: Vec<EnumValue>,
     pub(in crate::merger) inaccessible_directive_name_in_supergraph: Option<Name>,
     pub(in crate::merger) schema_to_import_to_feature_url: HashMap<String, HashMap<String, Url>>,
     pub(in crate::merger) link_spec_definition: &'static LinkSpecDefinition,
@@ -157,7 +157,7 @@ impl Merger {
         let latest_federation_version_used =
             Self::get_latest_federation_version_used(&subgraphs, &mut error_reporter).clone();
         let Some(join_spec) =
-            JOIN_VERSIONS.get_minimum_required_version(&latest_federation_version_used)
+            JOIN_VERSIONS.get_maximum_allowed_version(&latest_federation_version_used)
         else {
             bail!(
                 "No join spec version found for federation version {}",
@@ -190,6 +190,12 @@ impl Merger {
         let merged = FederationSchema::new(Schema::new())?;
         let join_directive_identities = HashSet::from([Identity::connect_identity()]);
 
+        trace!(
+            "Preparing to merge supergraph with federation {latest_federation_version_used}, join {}, and link {}",
+            join_spec.version(),
+            link_spec_definition.version()
+        );
+
         let mut merger = Self {
             subgraphs,
             options,
@@ -208,7 +214,6 @@ impl Merger {
             join_directive_identities,
             inaccessible_directive_name_in_supergraph: None,
             join_spec_definition: join_spec,
-            subgraph_enum_values: Vec::new(),
             latest_federation_version_used,
             applied_directives_to_merge: Vec::new(),
         };
@@ -394,6 +399,7 @@ impl Merger {
     /// a supergraph will be returned along with any hints collected during the merge process.
     pub(crate) fn merge(mut self) -> Result<MergeResult, FederationError> {
         // Validate and record usages of @composeDirective
+        trace!("Validating @composeDirective applications");
         self.compose_directive_manager
             .validate(&self.subgraphs, &mut self.error_reporter)?;
         // TODO: JS doesn't include this, but we're bailing here to test error generation while the
@@ -409,9 +415,11 @@ impl Merger {
         }
 
         // Add core features to the merged schema
+        trace!("Adding core features to merged schema");
         self.add_core_features()?;
 
         // Create empty objects for all types and directive definitions
+        trace!("Adding shallow types and directives to merged schema");
         self.add_types_shallow()?;
         self.add_directives_shallow()?;
 
@@ -423,57 +431,63 @@ impl Merger {
         let input_object_types = self.get_merged_input_object_type_names();
 
         // Merge implements relationships for object and interface types
+        trace!("Merging implements relationships");
         for object_type in &object_types {
             self.merge_implements(object_type)?;
         }
-
         for interface_type in &interface_types {
             self.merge_implements(interface_type)?;
         }
 
         // Merge union types
+        trace!("Merging union types");
         for union_type in &union_types {
             self.merge_type(union_type)?;
         }
 
         // Merge schema definition (root types)
+        trace!("Merging schema definition");
         self.merge_schema_definition()?;
 
         // Merge non-union and non-enum types
+        trace!("Merging object types");
         for type_def in &object_types {
             self.merge_type(type_def)?;
         }
+        trace!("Merging interface types");
         for type_def in &interface_types {
             self.merge_type(type_def)?;
         }
+        trace!("Merging scalar types");
         for type_def in &scalar_types {
             self.merge_type(type_def)?;
         }
+        trace!("Merging input object types");
         for type_def in &input_object_types {
             self.merge_type(type_def)?;
         }
 
         // Merge directive definitions
+        trace!("Merging directive definitions");
         self.merge_directive_definitions()?;
 
         // Merge enum types last
+        trace!("Merging enum types");
         for enum_type in &enum_types {
             self.merge_type(enum_type)?;
         }
 
         // Validate that we have a query root type
+        trace!("Validating query root type");
         self.validate_query_root();
 
         // Merge all applied directives
+        trace!("Merging applied directives");
         self.merge_all_applied_directives()?;
 
         // Add missing interface object fields to implementations
+        trace!("Adding missing interface object fields to implementations");
         self.add_missing_interface_object_fields_to_implementations()?;
-
-        // Post-merge validations if no errors so far
-        if !self.error_reporter.has_errors() {
-            self.post_merge_validations();
-        }
 
         // Return result
         let (errors, hints) = self.error_reporter.into_errors_and_hints();
@@ -885,7 +899,9 @@ impl Merger {
         let is_subscription = self.merged.is_subscription_root_type(&obj.type_name);
 
         let added = self.add_fields_shallow(obj.clone())?;
+
         if added.is_empty() {
+            trace!("Object has no fields to merge, removing from schema");
             obj.remove(&mut self.merged)?;
         } else {
             for (field, subgraph_fields) in added {
@@ -1108,6 +1124,22 @@ impl Merger {
 
         self.merge_description(&sources, &dest)?;
         self.record_applied_directives_to_merge(&sources, &dest)?;
+
+        // Root types are already validated to be consistent across subgraphs. See
+        // [crate::schema::validators::::validate_consistent_root_fields].
+        for root_kind in SchemaRootDefinitionKind::iter() {
+            for (idx, source) in sources.iter() {
+                let Some(source) = source else {
+                    continue;
+                };
+                if let Some(root_type) =
+                    source.get_root_type(self.subgraphs[*idx].schema(), root_kind)
+                {
+                    dest.set_root_type(&mut self.merged, root_kind, root_type.clone())?;
+                    break;
+                }
+            }
+        }
         self.add_join_directive_directives(&sources, &dest)?;
         Ok(())
     }
@@ -1275,10 +1307,6 @@ impl Merger {
                 && field_pos.try_get(subgraph.schema().schema()).is_some()
                 && !subgraph.metadata().is_field_external(&field_pos.into())
         })
-    }
-
-    fn post_merge_validations(&mut self) {
-        todo!("Implement post-merge validations")
     }
 
     /// Core type merging logic for GraphQL Federation composition.
@@ -1596,21 +1624,18 @@ impl Merger {
     where
         T: HasDescription + Display,
     {
-        let mut descriptions: CountMap<String, usize> = CountMap::new();
-
-        for (idx, source) in sources {
-            // Skip if source has no description
-            let Some(source_desc) = source
-                .as_ref()
-                .and_then(|s| s.description(self.subgraphs[*idx].schema()))
-            else {
-                continue;
-            };
-
-            descriptions.insert_or_increment(source_desc.trim().to_string());
-        }
+        let mut descriptions = sources
+            .iter()
+            .map(|(idx, source)| {
+                source
+                    .as_ref()
+                    .and_then(|s| s.description(self.subgraphs[*idx].schema()))
+                    .map(|d| d.trim().to_string())
+                    .unwrap_or_default()
+            })
+            .counts();
         // we don't want to raise a hint if a description is ""
-        descriptions.remove(&String::new());
+        descriptions.remove("");
 
         if !descriptions.is_empty() {
             if let Some((description, _)) = iter_into_single_item(descriptions.iter()) {

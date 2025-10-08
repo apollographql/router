@@ -6,6 +6,7 @@ use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::ast::DirectiveLocation;
 use indexmap::IndexSet;
 use itertools::Itertools;
+use tracing::trace;
 
 use crate::error::FederationError;
 use crate::merger::hints::HintCode;
@@ -366,7 +367,7 @@ impl Merger {
             }
         }
         dest.set_repeatable(&mut self.merged, repeatable.unwrap_or_default())?; // repeatable will always be Some() here
-        dest.add_locations(&mut self.merged, &locations)?;
+        dest.add_locations(&mut self.merged, locations)?;
 
         self.merge_description(sources, dest)?;
 
@@ -406,12 +407,13 @@ impl Merger {
         }
 
         // Doing args last, mostly so we don't bother adding if the directive doesn't make it in.
-        self.add_arguments_shallow(sources, dest)?;
-        for arg in &supergraph_dest.arguments {
+        let arg_names = self.add_arguments_shallow(sources, dest)?;
+        for arg in arg_names {
             let subgraph_args = map_sources(sources, |src| {
-                src.as_ref().map(|src| src.argument(arg.name.clone()))
+                src.as_ref().map(|src| src.argument(arg.clone()))
             });
-            self.merge_argument(&subgraph_args, &dest.argument(arg.name.clone()))?;
+            trace!("Full merging of argument {arg} of directive @{name}");
+            self.merge_argument(&subgraph_args, &dest.argument(arg))?;
         }
         Ok(())
     }
