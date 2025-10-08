@@ -26,7 +26,7 @@ executors:
   amd_linux_test: &amd_linux_test_executor
     docker:
       - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.18.0
-      - image: cimg/redis:7.4.5
+      - image: cimg/redis:7.4.6
       - image: cimg/postgres:17.6
         environment:
           POSTGRES_USER: root
@@ -34,19 +34,19 @@ executors:
       - image: openzipkin/zipkin:3.5.1
       - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.34.0
       # redis cluster - 3 primaries, 3 replicas
-      - image: cimg/redis:7.4.5
+      - image: cimg/redis:7.4.6
         command: [ "redis-server", "--protected-mode", "no", "--port", "7000", "--cluster-enabled", "yes" ]
-      - image: cimg/redis:7.4.5
+      - image: cimg/redis:7.4.6
         command: [ "redis-server", "--protected-mode", "no", "--port", "7001", "--cluster-enabled", "yes" ]
-      - image: cimg/redis:7.4.5
+      - image: cimg/redis:7.4.6
         command: [ "redis-server", "--protected-mode", "no", "--port", "7002", "--cluster-enabled", "yes" ]
-      - image: cimg/redis:7.4.5
+      - image: cimg/redis:7.4.6
         command: [ "redis-server", "--protected-mode", "no", "--port", "7003", "--cluster-enabled", "yes" ]
-      - image: cimg/redis:7.4.5
+      - image: cimg/redis:7.4.6
         command: [ "redis-server", "--protected-mode", "no", "--port", "7004", "--cluster-enabled", "yes" ]
-      - image: cimg/redis:7.4.5
+      - image: cimg/redis:7.4.6
         command: [ "redis-server", "--protected-mode", "no", "--port", "7005", "--cluster-enabled", "yes" ]
-      - image: cimg/redis:7.4.5
+      - image: cimg/redis:7.4.6
         command: [ "sh", "-c", "sleep 30; echo yes | redis-cli --cluster create --cluster-replicas 1 localhost:7000 localhost:7001 localhost:7002 localhost:7003 localhost:7004 localhost:7005" ]
     resource_class: 2xlarge
     environment:
