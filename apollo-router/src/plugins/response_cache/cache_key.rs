@@ -172,13 +172,16 @@ where
     I: Iterator<Item = (&'a ByteString, &'a Value)>,
 {
     fields.sorted_by(|a, b| a.0.cmp(b.0)).for_each(|(k, v)| {
-        state.update(serde_json::to_string(k).unwrap().as_bytes());
+        state.update(k.as_str().as_bytes());
         state.update(":".as_bytes());
         match v {
-            serde_json_bytes::Value::Object(obj) => {
+            Value::Object(obj) => {
                 state.update("{".as_bytes());
                 hash(state, obj.iter());
                 state.update("}".as_bytes());
+            }
+            Value::String(s) => {
+                state.update(s.as_str().as_bytes());
             }
             _ => {
                 state.update(serde_json::to_string(v).unwrap().as_bytes());

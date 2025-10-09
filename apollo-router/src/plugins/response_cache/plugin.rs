@@ -2471,7 +2471,7 @@ mod tests {
         let storage = Storage::new(&Config::test(false, "test_subgraph_enabled"), drop_rx)
             .await
             .unwrap();
-        let map = serde_json::json!({
+        let map = serde_json_bytes::json!({
             "user": {
                 "private_id": "sub"
             },
@@ -2487,7 +2487,7 @@ mod tests {
 
         let mut response_cache = ResponseCache::for_test(
             storage.clone(),
-            serde_json::from_value(map).unwrap(),
+            serde_json_bytes::from_value(map).unwrap(),
             valid_schema.clone(),
             true,
             drop_tx,
@@ -2497,13 +2497,13 @@ mod tests {
 
         assert!(response_cache.subgraph_enabled("user"));
         assert!(!response_cache.subgraph_enabled("archive"));
-        let subgraph_config = serde_json::json!({
+        let subgraph_config = serde_json_bytes::json!({
             "all": {
                 "enabled": false
             },
             "subgraphs": response_cache.subgraphs.subgraphs.clone()
         });
-        response_cache.subgraphs = Arc::new(serde_json::from_value(subgraph_config).unwrap());
+        response_cache.subgraphs = Arc::new(serde_json_bytes::from_value(subgraph_config).unwrap());
         assert!(!response_cache.subgraph_enabled("archive"));
         assert!(response_cache.subgraph_enabled("user"));
         assert!(response_cache.subgraph_enabled("orga"));
@@ -2516,7 +2516,7 @@ mod tests {
         let storage = Storage::new(&Config::test(false, "test_subgraph_ttl"), drop_rx)
             .await
             .unwrap();
-        let map = serde_json::json!({
+        let map = serde_json_bytes::json!({
             "user": {
                 "private_id": "sub",
                 "ttl": "2s"
@@ -2534,7 +2534,7 @@ mod tests {
 
         let mut response_cache = ResponseCache::for_test(
             storage.clone(),
-            serde_json::from_value(map).unwrap(),
+            serde_json_bytes::from_value(map).unwrap(),
             valid_schema.clone(),
             true,
             drop_tx,
