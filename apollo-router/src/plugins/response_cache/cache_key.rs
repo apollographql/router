@@ -88,7 +88,7 @@ impl<'a> PrimaryCacheKeyEntity<'a> {
         } else {
             hash_representation(representation)
         };
-        let hashed_entity_key = hash_entity_key(entity_key);
+        let hashed_entity_key = hash_representation(entity_key);
 
         // - response cache version: current version of the hash
         // - subgraph name: caching is done per subgraph
@@ -156,13 +156,9 @@ pub(super) fn hash_additional_data(
 }
 
 // Order-insensitive structural hash of the representation value
-pub(super) fn hash_representation(
-    representation: &serde_json_bytes::Map<ByteString, Value>,
-) -> String {
+fn hash_representation(representation: &serde_json_bytes::Map<ByteString, Value>) -> String {
     let mut digest = blake3::Hasher::new();
-
     hash(&mut digest, representation.iter());
-
     digest.finalize().to_hex().to_string()
 }
 
@@ -188,15 +184,6 @@ where
             }
         }
     });
-}
-
-// Only hash the list of entity keys
-pub(super) fn hash_entity_key(
-    entity_keys: &serde_json_bytes::Map<ByteString, serde_json_bytes::Value>,
-) -> String {
-    tracing::trace!("entity keys: {entity_keys:?}");
-    // We have to hash the representation because it can contains PII
-    hash_representation(entity_keys)
 }
 
 #[cfg(test)]
