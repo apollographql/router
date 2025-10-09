@@ -63,6 +63,7 @@ use crate::plugins::response_cache::cache_key::PrimaryCacheKeyEntity;
 use crate::plugins::response_cache::cache_key::PrimaryCacheKeyRoot;
 use crate::plugins::response_cache::cache_key::hash_additional_data;
 use crate::plugins::response_cache::cache_key::hash_query;
+use crate::plugins::response_cache::mutation;
 use crate::plugins::response_cache::storage;
 use crate::plugins::response_cache::storage::CacheEntry;
 use crate::plugins::response_cache::storage::CacheStorage;
@@ -389,6 +390,7 @@ impl PluginPrivate for ResponseCache {
                         .buffered()
                         .service(service)
                         .boxed_clone(),
+                    invalidation: self.invalidation.clone(),
                     entity_type: self.entity_type.clone(),
                     name: name.to_string(),
                     storage: self.storage.clone(),
@@ -627,6 +629,7 @@ fn get_subgraph_enums(supergraph_schema: &Valid<Schema>) -> HashMap<String, Stri
 #[derive(Clone)]
 struct CacheService {
     service: subgraph::BoxCloneService,
+    invalidation: Invalidation,
     name: String,
     entity_type: Option<String>,
     storage: Arc<StorageInterface>,
@@ -695,6 +698,30 @@ impl CacheService {
                 .headers()
                 .get(CACHE_DEBUG_HEADER_NAME)
                 == Some(&HeaderValue::from_static("true")));
+
+        if request.operation_kind == OperationKind::Mutation {
+            let invalidations_to_execute = mutation::get_invalidations_from_mutation(
+                &request,
+                &self.subgraph_enums,
+                self.supergraph_schema.clone(),
+            )?;
+
+            let resp = self.service.call(request).await?;
+            if resp.response.body().errors.is_empty() {
+                tokio::spawn(async move {
+                    let res = mutation::automatic_invalidation(
+                        self.invalidation.clone(),
+                        invalidations_to_execute,
+                    )
+                    .await;
+                    if let Err(err) = res {
+                        tracing::error!(error = ?err, "cannot automatically invalidate data for your mutation");
+                    }
+                });
+            }
+
+            return Ok(resp);
+        }
         // Check if the request is part of a batch. If it is, completely bypass response caching since it
         // will break any request batches which this request is part of.
         // This check is what enables Batching and response caching to work together, so be very careful
