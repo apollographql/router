@@ -34,7 +34,7 @@ pub(crate) struct CorsLayer {
 impl CorsLayer {
     pub(crate) fn new(config: Cors) -> Result<Self, String> {
         // Ensure configuration is valid before creating CorsLayer
-        config.ensure_usable_cors_rules()?;
+        config.ensure_usable_cors_rules().map_err(|e| e.to_string())?;
 
         // Validate global headers
         if !config.allow_headers.is_empty() {
