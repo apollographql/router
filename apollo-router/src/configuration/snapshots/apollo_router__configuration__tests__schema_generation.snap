@@ -1,6 +1,7 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
+snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -236,11 +237,6 @@ expression: "&schema"
           ],
           "description": "Percentage of traces to send via the OTel protocol when sending to Apollo Studio."
         },
-        "preview_subgraph_metrics": {
-          "default": false,
-          "description": "Enable sending additional subgraph metrics to Apollo Studio via OTLP",
-          "type": "boolean"
-        },
         "send_headers": {
           "allOf": [
             {
@@ -265,6 +261,11 @@ expression: "&schema"
           ],
           "default": "enhanced",
           "description": "Set the signature normalization algorithm to use when sending Apollo usage reports."
+        },
+        "subgraph_metrics": {
+          "default": false,
+          "description": "Enable sending additional subgraph metrics to Apollo Studio via OTLP",
+          "type": "boolean"
         },
         "tracing": {
           "allOf": [
