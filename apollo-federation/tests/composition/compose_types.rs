@@ -386,7 +386,6 @@ fn input_types_merges_input_field_with_different_but_compatible_types() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn input_types_errors_when_merging_completely_inconsistent_input_types() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -421,7 +420,6 @@ fn input_types_errors_when_merging_completely_inconsistent_input_types() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn input_types_errors_if_mandatory_input_field_not_in_all_subgraphs() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -465,7 +463,6 @@ fn input_types_errors_if_mandatory_input_field_not_in_all_subgraphs() {
 // =============================================================================
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn union_types_merges_inconsistent_unions() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -504,15 +501,8 @@ fn union_types_merges_inconsistent_unions() {
         .expect("Expected API schema generation to succeed");
 
     // Should merge to include A, B, and C in union
-    let union_u = api_schema
-        .schema()
-        .types
-        .get("U")
+    let union_u = coord!(U)
+        .lookup(api_schema.schema())
         .expect("Union U should exist");
-    if let apollo_compiler::schema::ExtendedType::Union(union_type) = union_u {
-        let union_string = union_type.to_string();
-        assert_snapshot!(union_string, @"union U = A | B | C");
-    } else {
-        panic!("U should be a union type");
-    }
+    assert_snapshot!(union_u, @"union U = A | B | C");
 }

@@ -90,7 +90,8 @@ impl Merger {
 
                     self.error_reporter.add_error(CompositionError::RequiredInputFieldMissingInSomeSubgraph {
                         message: format!(
-                            "Input object field \"{}\" is required in some subgraphs but does not appear in all subgraphs: it is required in {} but does not appear in {}",
+                            "Input object field \"{}.{}\" is required in some subgraphs but does not appear in all subgraphs: it is required in {} but does not appear in {}",
+                            dest_field.type_name,
                             dest_field.field_name,
                             non_optional_subgraphs_str,
                             missing_subgraphs_str
