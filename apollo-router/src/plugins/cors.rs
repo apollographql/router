@@ -25,6 +25,13 @@ use tower::Service;
 use crate::configuration::cors::Cors;
 use crate::configuration::cors::Policy;
 
+const ACCESS_CONTROL_PRIVATE_NETWORK: HeaderName =
+    HeaderName::from_static("access-control-private-network");
+const ACCESS_CONTROL_PRIVATE_NETWORK_VALUE: http::HeaderValue = HeaderValue::from_static("true");
+const PRIVATE_NETWORK_ACCESS_NAME: HeaderName =
+    HeaderName::from_static("private-network-access-name");
+const PRIVATE_NETWORK_ACCESS_ID: HeaderName = HeaderName::from_static("private-network-access-id");
+
 /// Our custom CORS layer that supports per-origin configuration
 #[derive(Clone, Debug)]
 pub(crate) struct CorsLayer {
@@ -34,7 +41,9 @@ pub(crate) struct CorsLayer {
 impl CorsLayer {
     pub(crate) fn new(config: Cors) -> Result<Self, String> {
         // Ensure configuration is valid before creating CorsLayer
-        config.ensure_usable_cors_rules().map_err(|e| e.to_string())?;
+        config
+            .ensure_usable_cors_rules()
+            .map_err(|e| e.to_string())?;
 
         // Validate global headers
         if !config.allow_headers.is_empty() {
@@ -327,21 +336,12 @@ impl<S> CorsService<S> {
         if is_preflight
             && let Some(Some(pna)) = policy.map(|policy| policy.private_network_access.as_ref())
         {
-            const ACCESS_CONTROL_PRIVATE_NETWORK: HeaderName =
-                HeaderName::from_static("access-control-private-network");
-
-            const ACCESS_CONTROL_PRIVATE_NETWORK_VALUE: http::HeaderValue =
-                HeaderValue::from_static("true");
-
             response.headers_mut().insert(
                 ACCESS_CONTROL_PRIVATE_NETWORK,
                 ACCESS_CONTROL_PRIVATE_NETWORK_VALUE,
             );
 
             if let Some(name) = &pna.access_name {
-                const PRIVATE_NETWORK_ACCESS_NAME: HeaderName =
-                    HeaderName::from_static("private-network-access-name");
-
                 response.headers_mut().insert(
                     PRIVATE_NETWORK_ACCESS_NAME,
                     http::HeaderValue::from_str(name)
@@ -350,9 +350,6 @@ impl<S> CorsService<S> {
             }
 
             if let Some(id) = &pna.access_id {
-                const PRIVATE_NETWORK_ACCESS_ID: HeaderName =
-                    HeaderName::from_static("private-network-access-id");
-
                 response.headers_mut().insert(
                     PRIVATE_NETWORK_ACCESS_ID,
                     http::HeaderValue::from_str(id)
