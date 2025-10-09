@@ -198,3 +198,50 @@ pub(super) fn hash_entity_key(
     // We have to hash the representation because it can contains PII
     hash_representation(entity_keys)
 }
+
+#[cfg(test)]
+mod tests {
+    use insta::assert_snapshot;
+
+    #[test]
+    fn top_level_hash_is_order_insensitive() {
+        // hash should not vary based on the order that the keys are provided.
+        // NB: this doesn't check any nested arrays, that's done in serde_blake3
+        let data = serde_json_bytes::json!({"hello": "world", "order": "doesn't matter"});
+        let data_obj = data.as_object().unwrap();
+
+        let mut hasher = blake3::Hasher::new();
+        super::hash(&mut hasher, data_obj.iter());
+        let value1 = hasher.finalize();
+
+        let mut hasher = blake3::Hasher::new();
+        super::hash(&mut hasher, data_obj.iter().rev());
+        let value2 = hasher.finalize();
+
+        assert_eq!(value1, value2);
+        assert_snapshot!(value1);
+    }
+
+    #[test]
+    fn nested_hash_is_order_sensitive() {
+        // hash does vary based on the order that the vec values are provided.
+        // NB: I'm not sure if this is intentional, but adding a test for the existing behavior.
+        let data = serde_json_bytes::json!({"nested": ["does", "order", "matter"]});
+        let data_obj = data.as_object().unwrap();
+
+        let mut hasher = blake3::Hasher::new();
+        super::hash(&mut hasher, data_obj.iter());
+        let value1 = hasher.finalize();
+
+        let data = serde_json_bytes::json!({"nested": ["order", "does", "matter"]});
+        let data_obj = data.as_object().unwrap();
+
+        let mut hasher = blake3::Hasher::new();
+        super::hash(&mut hasher, data_obj.iter());
+        let value2 = hasher.finalize();
+
+        assert_ne!(value1, value2);
+        assert_snapshot!(value1);
+        assert_snapshot!(value2);
+    }
+}
