@@ -86,9 +86,9 @@ impl<'a> PrimaryCacheKeyEntity<'a> {
         let hashed_representation = if representation.is_empty() {
             String::new()
         } else {
-            hash_representation(representation)
+            sort_and_hash_object(representation)
         };
-        let hashed_entity_key = hash_representation(entity_key);
+        let hashed_entity_key = sort_and_hash_object(entity_key);
 
         // - response cache version: current version of the hash
         // - subgraph name: caching is done per subgraph
@@ -155,10 +155,10 @@ pub(super) fn hash_additional_data(
     hasher.finalize().to_hex().to_string()
 }
 
-// Order-insensitive structural hash of the representation value
-fn hash_representation(representation: &serde_json_bytes::Map<ByteString, Value>) -> String {
+// Order-insensitive structural hash of a map, ie a representation or entity key
+fn sort_and_hash_object(object: &Map<ByteString, Value>) -> String {
     let mut digest = blake3::Hasher::new();
-    hash(&mut digest, representation.iter());
+    hash(&mut digest, object.iter());
     digest.finalize().to_hex().to_string()
 }
 
@@ -214,18 +214,10 @@ mod tests {
         // hash does vary based on the order that the vec values are provided.
         // NB: I'm not sure if this is intentional, but adding a test for the existing behavior.
         let data = serde_json_bytes::json!({"nested": ["does", "order", "matter"]});
-        let data_obj = data.as_object().unwrap();
-
-        let mut hasher = blake3::Hasher::new();
-        super::hash(&mut hasher, data_obj.iter());
-        let value1 = hasher.finalize();
+        let value1 = super::sort_and_hash_object(data.as_object().unwrap());
 
         let data = serde_json_bytes::json!({"nested": ["order", "does", "matter"]});
-        let data_obj = data.as_object().unwrap();
-
-        let mut hasher = blake3::Hasher::new();
-        super::hash(&mut hasher, data_obj.iter());
-        let value2 = hasher.finalize();
+        let value2 = super::sort_and_hash_object(data.as_object().unwrap());
 
         assert_ne!(value1, value2);
         assert_snapshot!(value1);
