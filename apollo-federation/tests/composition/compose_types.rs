@@ -294,7 +294,6 @@ fn enum_types_succeeds_merging_consistent_enum_used_as_both_input_and_output() {
 // =============================================================================
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn input_types_only_merges_fields_common_to_all_subgraphs() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -330,29 +329,17 @@ fn input_types_only_merges_fields_common_to_all_subgraphs() {
         .expect("Expected API schema generation to succeed");
 
     // Should only include field 'x' (common to both subgraphs), field 'y' should be undefined
-    let input_a = api_schema
-        .schema()
-        .types
-        .get("A")
-        .expect("Input A should exist");
-    if let apollo_compiler::schema::ExtendedType::InputObject(input_type) = input_a {
-        // Validate field 'x' exists
-        assert!(
-            input_type.fields.get("x").is_some(),
-            "Expected field 'x' to exist on input A"
-        );
-        // Validate field 'y' does not exist (not common to both subgraphs)
-        assert!(
-            input_type.fields.get("y").is_none(),
-            "Expected field 'y' to be undefined on input A"
-        );
-    } else {
-        panic!("A should be an input type");
-    }
+    assert!(
+        coord!(A.x).lookup_input_field(api_schema.schema()).is_ok(),
+        "Expected A.x to exist"
+    );
+    assert!(
+        coord!(A.y).lookup_input_field(api_schema.schema()).is_err(),
+        "Expected A.y to be undefined"
+    );
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn input_types_merges_input_field_with_different_but_compatible_types() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -387,25 +374,15 @@ fn input_types_merges_input_field_with_different_but_compatible_types() {
         .expect("Expected API schema generation to succeed");
 
     // Should merge to non-nullable (Int!) for input compatibility
-    let input_a = api_schema
-        .schema()
-        .types
-        .get("A")
-        .expect("Input A should exist");
-    if let apollo_compiler::schema::ExtendedType::InputObject(input_type) = input_a {
-        if let Some(x_field) = input_type.fields.get("x") {
-            // Check that field type is Int! (non-nullable)
-            assert!(
-                x_field.ty.to_string() == "Int!",
-                "Expected field type to be Int!, got {}",
-                x_field.ty
-            );
-        } else {
-            panic!("Expected field 'x' to exist on input A");
-        }
-    } else {
-        panic!("A should be an input type");
-    }
+    let target = coord!(A.x)
+        .lookup_input_field(api_schema.schema())
+        .expect("Expected A.x to exist");
+    assert_eq!(
+        target.ty.to_string(),
+        "Int!",
+        "Expected A.x to be of type Int! but got {}",
+        target.ty
+    );
 }
 
 #[test]
