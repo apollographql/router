@@ -185,6 +185,7 @@ fn validate_args_selection(
                 .ok_or_else(|| CacheTagValidationError::CacheTagInvalidFormat {
                     message: format!("unknown field \"{name}\""),
                 })?;
+
         let type_name = field.inner_named_type();
         let type_def = schema.get_type(type_name.clone())?;
         if !sel.is_leaf() {
@@ -201,6 +202,7 @@ fn validate_args_selection(
                     let field_def = field_pos
                         .get(schema.schema())
                         .map_err(FederationError::from)?;
+
                     Ok::<_, CacheTagValidationError>((
                         field_pos.field_name().clone(),
                         &field_def.ty,
@@ -562,6 +564,25 @@ mod tests {
             }
         "#;
         build_and_validate(SCHEMA);
+    }
+
+    #[test]
+    fn test_invalid_format_string_nullable_args() {
+        const SCHEMA: &str = r#"
+            type Product @key(fields: "upc")
+                         @cacheTag(format: "product-{$key.upc}")
+            {
+                upc: String!
+                name: String
+            }
+
+            type Query {
+                topProducts(first: Int): [Product]
+                    @cacheTag(format: "topProducts")
+                    @cacheTag(format: "topProducts-{$args.first}")
+            }
+        "#;
+        assert!(!build_for_errors(SCHEMA).is_empty());
     }
 
     #[test]
