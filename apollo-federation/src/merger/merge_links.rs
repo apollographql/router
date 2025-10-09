@@ -19,7 +19,6 @@ use crate::merger::merge::MergedDirectiveInfo;
 use crate::merger::merge::Merger;
 use crate::schema::type_and_directive_specification::DirectiveCompositionSpecification;
 
-#[allow(dead_code)]
 pub(crate) struct CoreDirectiveInSubgraphs {
     url: Url,
     name: Name,
@@ -27,7 +26,16 @@ pub(crate) struct CoreDirectiveInSubgraphs {
     composition_spec: DirectiveCompositionSpecification,
 }
 
-#[allow(dead_code)]
+impl std::fmt::Debug for CoreDirectiveInSubgraphs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CoreDirectiveInSubgraphs")
+            .field("url", &self.url)
+            .field("name", &self.name)
+            .field("definitions_per_subgraph", &self.definitions_per_subgraph)
+            .finish()
+    }
+}
+
 struct CoreDirectiveInSupergraph {
     spec_in_supergraph: &'static dyn SpecDefinition,
     name_in_feature: Name,
@@ -53,10 +61,6 @@ impl Merger {
             };
 
             for (directive, referencers) in &subgraph.schema().referencers().directives {
-                trace!(
-                    "Evaluating usage of @{directive} in subgraph {}",
-                    subgraph.name
-                );
                 let Some((source, import)) = features.directives_by_imported_name.get(directive)
                 else {
                     trace!("Directive @{directive} has no @link, skipping");
@@ -67,7 +71,10 @@ impl Merger {
                 }
                 let Some(composition_spec) = SPEC_REGISTRY.get_composition_spec(source, import)
                 else {
-                    trace!("Directive @{directive} has no registered composition spec, skipping");
+                    trace!(
+                        "Directive @{directive} from {} has no registered composition spec, skipping",
+                        source.url
+                    );
                     continue;
                 };
                 let Some(definition) = subgraph
@@ -136,14 +143,10 @@ impl Merger {
                 else {
                     continue;
                 };
-                trace!(
-                    "Evaluating directive @{} from {} for subgraph {}",
-                    directive.name, subgraph_core_directive.url, subgraph.name
-                );
 
                 if name_in_supergraph.is_none() {
                     name_in_supergraph = Some(&directive.name);
-                } else if name_in_supergraph.is_some_and(|n| *n != subgraph_core_directive.name) {
+                } else if name_in_supergraph.is_some_and(|n| *n != directive.name) {
                     let definition_sources: IndexMap<_, _> = self
                         .subgraphs
                         .iter()
@@ -159,7 +162,7 @@ impl Merger {
                         .collect();
                     self.error_reporter.report_mismatch_error::<_, _, ()>(
                         CompositionError::LinkImportNameMismatch {
-                            message: format!("The \"@{}\" directive (from {}) is imported with mismatched name between subgraphs: it is imported as", directive.name, subgraph_core_directive.url),
+                            message: format!("The \"@{}\" directive (from {}) is imported with mismatched name between subgraphs: it is imported as ", directive.name, subgraph_core_directive.url),
                         },
                         &directive,
                         &definition_sources,
@@ -234,6 +237,7 @@ impl Merger {
                     });
                 }
             }
+
             self.link_spec_definition.apply_feature_to_schema(
                 &mut self.merged,
                 supergraph_core_directives[0].spec_in_supergraph,
