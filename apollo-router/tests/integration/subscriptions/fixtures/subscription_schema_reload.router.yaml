@@ -18,7 +18,7 @@ subscription:
       all:
         path: /ws
       subgraphs:
-        rng:
+        accounts:
           path: /ws
           protocol: graphql_transport_ws
 telemetry:

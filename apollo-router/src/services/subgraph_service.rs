@@ -483,13 +483,6 @@ async fn call_websocket(
     subgraph_cfg: &WebSocketConfiguration,
     subscription_hash: String,
 ) -> Result<SubgraphResponse, BoxError> {
-    let operation_name = request
-        .subgraph_request
-        .body()
-        .operation_name
-        .clone()
-        .unwrap_or_default();
-
     let subgraph_request_event = context
         .extensions()
         .with_lock(|lock| lock.get::<SubgraphEventRequest>().cloned());
@@ -635,7 +628,7 @@ async fn call_websocket(
         "http.url" = %uri,
         "net.transport" = "ip_tcp",
         "apollo.subgraph.name" = %service_name,
-        "graphql.operation.name" = %operation_name,
+        "graphql.operation.name" = body.operation_name.as_deref().unwrap_or(""),
     );
 
     let (ws_stream, resp) = match request.uri().scheme_str() {

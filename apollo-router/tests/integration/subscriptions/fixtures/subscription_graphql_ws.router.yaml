@@ -20,7 +20,7 @@ subscription:
       subgraphs:
         accounts:
           path: /ws
-          protocol: graphql_transport_ws
+          protocol: graphql_ws
 headers:
   all: # Header rules for all subgraphs
     request:
