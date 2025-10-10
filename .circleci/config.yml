@@ -32,7 +32,7 @@ executors:
           POSTGRES_USER: root
           POSTGRES_DB: root
       - image: openzipkin/zipkin:3.5.1
-      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.34.0
+      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.36.0
       # redis cluster - 3 primaries, 3 replicas
       - image: cimg/redis:7.4.5
         command: [ "redis-server", "--protected-mode", "no", "--port", "7000", "--cluster-enabled", "yes" ]
