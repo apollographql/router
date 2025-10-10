@@ -72,9 +72,9 @@ Offline license support is available on an as-needed basis to Enterprise organiz
 
 <Caution>
 
-An offline license is valid for the lesser of your enterprise contract term or **one year, plus a 28-day grace period**. You must rotate and replace the license file after every contract renewal. If the license expires and GraphOS features remain enabled, the Router **will stop processing requests** after the grace period!
-
-See also: [Grace period for expired plans](/graphos/routing/configuration/yaml) and [Turning off offline license for the GraphOS Router](/graphos/routing/configuration/yaml).
+An offline license is valid for the lesser of your **enterprise contract term, plus a 28-day grace period**, you must rotate and replace the license file after every contract renewal.  
+**Be alert** that if the license expires and GraphOS features remain enabled, the Router **will stop processing requests** after the grace period!  
+**Remind to check:** [Grace period for expired plans](/graphos/routing/configuration/yaml) and [Turning off offline license for the GraphOS Router](/graphos/routing/configuration/yaml).
 
 </Caution>
 
@@ -94,9 +94,8 @@ With an offline license, a router can either be fully disconnected from GraphOS 
 
 <Note>
 
-A router using an offline license requires [the use of local manifests](/graphos/routing/security/persisted-queries#local_manifests) when using [safelisting with persisted queries](/graphos/routing/security/persisted-queries), without local manifests, the Router cannot retrieve persisted query metadata from Uplink, and safelisting will not work as intended in disconnected environments. 
-
-Also, when operating offline, local manifests are the supported way to supply Persisted Query Lists and must be delivered through your own CI/CD or deployment process.
+A router using an offline license requires [the use of local manifests](/graphos/routing/security/persisted-queries#local_manifests) when using [safelisting with persisted queries](/graphos/routing/security/persisted-queries), without local manifests, the Router cannot retrieve persisted query metadata from Uplink, and safelisting will not work as intended in disconnected environments.  
+Also, when operating offline, local manifests are the supported way to supply Persisted Query Lists and must be delivered through your own **CI/CD or deployment process**.
 
 </Note>
 
@@ -128,9 +127,12 @@ Follow these steps to configure an GraphOS Router to use an offline license:
 1. Configure the router to use a local supergraph schema by setting one of the following:
 
     * [`--s/-supergraph`](/graphos/reference/router/configuration#-s----supergraph) CLI option, with an argument containing an absolute or relative path to supergraph schema file
+
     <Note>
-    Remember to always distribute updated supergraph schema files through your own CI/CD or deployment pipeline. Failing to propagate schema changes manually can lead to schema drift, unexpected errors, or outages.
+    Remember to always distribute updated supergraph schema files through your own **CI/CD or deployment pipeline**.  
+    Failing to propagate schema changes manually can lead to schema drift, unexpected errors, or outages.
     </Note>
+
     * [`APOLLO_SUPERGRAPH_PATH`](/graphos/reference/router/configuration#-s----supergraph) environment variable, containing an absolute or relative path to supergraph schema file
     * [`APOLLO_SUPERGRAPH_URLS`](/graphos/reference/router/configuration#-s----supergraph) environment variable, containing URLs to supergraph schemas
 
@@ -138,18 +140,20 @@ Follow these steps to configure an GraphOS Router to use an offline license:
 
     These metrics are necessary for several important GraphOS features (operations checks, field insights, operation traces, contracts). Sending them best-effort incurs no performance or uptime penalties. 
 
-### How to Properly Renew and Maintain an Offline License (License Rotation)
+### How to Properly Renew and Maintain an Offline License
 
-Because the Router does not auto-fetch updated licenses, you are fully responsible for keeping license files current across all deployments. Failure to rotate licenses before they expire will cause Router shutdown if GraphOS features remain active.
+Because the Router **does not auto-fetch updated licenses**, you need to remember for keeping license files current across all deployments.  
+
+Failure to rotate licenses before they expire will cause **Router shutdown** if GraphOS features remain active!
 
 **To maintain uninterrupted service (License rotation process):**
 
-1. Schedule a rover license fetch --graph-id … as part of every subscription renewal cycle.
-2. Securely distribute the newly generated license file to all Router instances.
-3. Replace the existing license file immediately after the contract is renewed.
-4. Ensure your CI/CD or configuration management system includes this rotation step as a standard operational procedure.
+1. Schedule a (`rover license fetch --graph-id…`) as part of every subscription renewal cycle.
+2. Securely distribute the newly generated license file to **all Router instances**.
+3. Replace the existing license file immediately **after the contract is renewed**.
+4. Ensure your CI/CD or configuration management system **includes this rotation step** as a standard operational procedure.
 
-### Stop Using an Offline License (Turn Off Offline Mode)
+### Stop Using an Offline License
 
 If you no longer want the Router to rely on an offline license, you can transition back to online validation through Uplink or disable GraphOS features entirely to avoid license enforcement. This is typically done when Routers regain reliable connectivity, when you want to eliminate manual license rotation, or when Apollo Support has confirmed that your account should no longer operate in offline-licensed mode.
 
@@ -157,9 +161,9 @@ If you no longer want the Router to rely on an offline license, you can transiti
 
 To resume online mode and allow the Router to obtain its license directly from Uplink:
 
-• Remove any --license flags and unset all APOLLO_ROUTER_LICENSE* environment variables.
-• Ensure that APOLLO_KEY and APOLLO_GRAPH_REF are set correctly so the Router can authenticate with Uplink and retrieve entitlements automatically.
-• Once online, license renewal is handled through GraphOS without the need to manually rotate files.
+* Remove any (`--license`) flags and unset all (`APOLLO_ROUTER_LICENSE*`) environment variables.
+* Ensure that (`APOLLO_KEY`) and (`APOLLO_GRAPH_REF`) are set correctly so the Router can authenticate with Uplink and retrieve entitlements automatically.
+* Once online, license renewal is handled through GraphOS without the need to manually rotate files.
 
 **Alternative:** operate without license enforcement by disabling GraphOS features
 If you prefer not to reconnect to Uplink and do not plan to renew the offline license, you must disable all GraphOS features that require entitlements before the grace period ends. Otherwise, once the license expires, the Router will stop processing requests.
