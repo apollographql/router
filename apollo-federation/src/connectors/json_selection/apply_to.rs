@@ -896,16 +896,23 @@ impl ApplyToInternal for WithRange<PathList> {
             }
 
             PathList::Question(tail) => {
-                // Explicitly represent the possibility of None (or null mapped
-                // to None) in the output shape.
+                let q_shape = input_shape.question(self.shape_location(context.source_id()));
                 (
-                    Shape::one(
-                        [
-                            input_shape,
-                            Shape::none().with_locations(self.shape_location(context.source_id())),
-                        ],
-                        self.shape_location(context.source_id()),
-                    ),
+                    if tail.is_empty() {
+                        // If there is no tail, we do not need to account for
+                        // the possibility that the whole path might evaluate to
+                        // None, as that possibility will be encoded in the
+                        // computed shape for this terminal/leaf ::Question.
+                        q_shape
+                    } else {
+                        // Using the ? operator with a non-empty tail suggests
+                        // the input shape could evaluate to None, so we always
+                        // include None as a possible shape here. If we don't
+                        // entertain this possibility, we might compute a
+                        // non-optional object shape with missing fields instead
+                        // of correctly computing One<{...}, None>.
+                        Shape::one([q_shape, Shape::none()], [])
+                    },
                     Some(tail),
                 )
             }
@@ -1179,42 +1186,19 @@ impl ApplyToInternal for WithRange<LitExpr> {
                     })
                     .collect();
 
-                if shapes.iter().any(|shape| match shape.case() {
-                    ShapeCase::Name(..) => true,
-                    ShapeCase::One(one)
-                        if one.iter().any(|s| matches!(s.case(), ShapeCase::Name(..))) =>
-                    {
-                        true
-                    }
-                    _ => false,
-                }) {
-                    return Shape::unknown(locations);
-                }
-
                 match op.as_ref() {
                     LitOp::NullishCoalescing => {
                         if let Some(last_shape) = shapes.pop() {
-                            if let Some(prefix) = match Shape::one(shapes.clone(), []).case() {
-                                ShapeCase::None => None,
-                                ShapeCase::Null => None,
-                                ShapeCase::One(shapes) => {
-                                    let filtered = shapes
-                                        .iter()
-                                        .filter(|shape| !shape.is_none() && !shape.is_null())
-                                        .cloned()
-                                        .collect::<Vec<_>>();
-                                    if filtered.is_empty() {
-                                        None
-                                    } else {
-                                        Some(Shape::one(filtered, locations.clone()))
-                                    }
-                                }
-                                _ => Some(Shape::one(shapes, locations.clone())),
-                            } {
-                                Shape::one([prefix, last_shape], locations)
-                            } else {
-                                last_shape
-                            }
+                            let mut new_shapes = shapes
+                                .iter()
+                                .map(|shape| {
+                                    shape
+                                        .question(locations.clone())
+                                        .not_none(locations.clone())
+                                })
+                                .collect::<Vec<_>>();
+                            new_shapes.push(last_shape);
+                            Shape::one(new_shapes, locations)
                         } else {
                             Shape::one(shapes, locations)
                         }
@@ -1223,26 +1207,12 @@ impl ApplyToInternal for WithRange<LitExpr> {
                     // Just like NullishCoalescing except null is not excluded.
                     LitOp::NoneCoalescing => {
                         if let Some(last_shape) = shapes.pop() {
-                            if let Some(prefix) = match Shape::one(shapes.clone(), []).case() {
-                                ShapeCase::None => None,
-                                ShapeCase::One(shapes) => {
-                                    let filtered = shapes
-                                        .iter()
-                                        .filter(|shape| !shape.is_none())
-                                        .cloned()
-                                        .collect::<Vec<_>>();
-                                    if filtered.is_empty() {
-                                        None
-                                    } else {
-                                        Some(Shape::one(filtered, locations.clone()))
-                                    }
-                                }
-                                _ => Some(Shape::one(shapes, locations.clone())),
-                            } {
-                                Shape::one([prefix, last_shape], locations)
-                            } else {
-                                last_shape
-                            }
+                            let mut new_shapes = shapes
+                                .iter()
+                                .map(|shape| shape.not_none(locations.clone()))
+                                .collect::<Vec<_>>();
+                            new_shapes.push(last_shape);
+                            Shape::one(new_shapes, locations)
                         } else {
                             Shape::one(shapes, locations)
                         }
@@ -3952,7 +3922,7 @@ mod tests {
         );
         assert_eq!(
             author_selection.shape().pretty_print(),
-            "{ author: One<{ age: $root.*.author.*.age, middleName: One<$root.*.author.*.middleName, None> }, None> }",
+            "{ author: One<{ age: $root.*.author?.*.age, middleName: $root.*.author?.*.middleName? }, None> }",
         );
     }
 
@@ -5071,7 +5041,22 @@ mod tests {
         );
         assert_eq!(
             complex_chain_no_fallback.shape().pretty_print(),
-            "One<{ __typename: \"Good\", message: $root.*.message }, { __typename: \"Bad\", error: $root.*.error }, None>",
+            // None should not be an option here, even though both message and
+            // error might not exist, because the ... spread operator spreads
+            // nothing in that case.
+            // "One<{ __typename: \"Good\", message: $root.*.message }, { __typename: \"Bad\", error: $root.*.error }, None>",
+            "One<{ __typename: \"Good\", message: $root.*.message }, { __typename: \"Bad\", error: $root.*.error }, {}>",
+        );
+        assert_eq!(
+            complex_chain_no_fallback.apply_to(&json!({})),
+            (Some(json!({})), vec![
+                ApplyToError::new(
+                    "Inlined path produced no value".to_string(),
+                    vec![],
+                    Some(17..165),
+                    spec,
+                ),
+            ]),
         );
     }
     **/
@@ -5132,6 +5117,426 @@ mod tests {
                 // not be a problem to pass Shape::none() as $root.
                 .compute_output_shape(&shape_context, Shape::none())
                 .pretty_print(),
+            "One<String, null>",
+        );
+    }
+
+    #[test]
+    fn question_operator_should_map_null_to_none() {
+        let spec = ConnectSpec::V0_3;
+
+        let nullish_string_selection = selection!("$(stringOrNull?)", spec);
+        assert_eq!(
+            nullish_string_selection.apply_to(&json!({"stringOrNull": "a string"})),
+            (Some(json!("a string")), vec![]),
+        );
+        assert_eq!(
+            nullish_string_selection.apply_to(&json!({"stringOrNull": null})),
+            (None, vec![]),
+        );
+        assert_eq!(
+            nullish_string_selection.apply_to(&json!({})),
+            (None, vec![]),
+        );
+
+        let shape_context = {
+            let mut named_shapes = IndexMap::default();
+
+            named_shapes.insert(
+                "$root".to_string(),
+                Shape::record(
+                    {
+                        let mut map = Shape::empty_map();
+                        map.insert(
+                            "stringOrNull".to_string(),
+                            Shape::one([Shape::string([]), Shape::null([])], []),
+                        );
+                        map
+                    },
+                    [],
+                ),
+            );
+
+            ShapeContext::new(SourceId::Other("JSONSelection".into()))
+                .with_spec(spec)
+                .with_named_shapes(named_shapes)
+        };
+
+        let root_shape = shape_context.named_shapes().get("$root").unwrap().clone();
+
+        assert_eq!(
+            root_shape.pretty_print(),
+            "{ stringOrNull: One<String, null> }",
+        );
+
+        assert_eq!(
+            nullish_string_selection
+                .compute_output_shape(
+                    &shape_context,
+                    shape_context.named_shapes().get("$root").unwrap().clone(),
+                )
+                .pretty_print(),
+            // Note that null has been replaced with None.
+            "One<String, None>",
+        );
+    }
+
+    #[test]
+    fn question_operator_should_add_none_to_named_shapes() {
+        let spec = ConnectSpec::V0_3;
+
+        let string_or_null_expr = selection!("$(stringOrNull?)", spec);
+
+        assert_eq!(
+            string_or_null_expr.shape().pretty_print(),
+            "$root.stringOrNull?",
+        );
+    }
+
+    #[test]
+    fn question_operator_with_nested_objects() {
+        let spec = ConnectSpec::V0_3;
+
+        let nested_selection = selection!("$(user?.profile?.name)", spec);
+        assert_eq!(
+            nested_selection.apply_to(&json!({"user": {"profile": {"name": "Alice"}}})),
+            (Some(json!("Alice")), vec![]),
+        );
+        assert_eq!(
+            nested_selection.apply_to(&json!({"user": null})),
+            (None, vec![]),
+        );
+        assert_eq!(
+            nested_selection.apply_to(&json!({"user": {"profile": null}})),
+            (None, vec![]),
+        );
+        assert_eq!(nested_selection.apply_to(&json!({})), (None, vec![]));
+    }
+
+    #[test]
+    fn question_operator_with_array_access() {
+        let spec = ConnectSpec::V0_3;
+
+        let array_selection = selection!("$(items?->first?.name)", spec);
+        assert_eq!(
+            array_selection.apply_to(&json!({"items": [{"name": "first"}]})),
+            (Some(json!("first")), vec![]),
+        );
+        assert_eq!(
+            array_selection.apply_to(&json!({"items": []})),
+            (None, vec![]),
+        );
+        assert_eq!(
+            array_selection.apply_to(&json!({"items": null})),
+            (None, vec![]),
+        );
+        assert_eq!(array_selection.apply_to(&json!({})), (None, vec![]));
+    }
+
+    #[test]
+    fn question_operator_with_union_shapes() {
+        let spec = ConnectSpec::V0_3;
+
+        let shape_context = {
+            let mut named_shapes = IndexMap::default();
+
+            named_shapes.insert(
+                "$root".to_string(),
+                Shape::record(
+                    {
+                        let mut map = Shape::empty_map();
+                        map.insert(
+                            "unionField".to_string(),
+                            Shape::one([Shape::string([]), Shape::int([]), Shape::null([])], []),
+                        );
+                        map
+                    },
+                    [],
+                ),
+            );
+
+            ShapeContext::new(SourceId::Other("JSONSelection".into()))
+                .with_spec(spec)
+                .with_named_shapes(named_shapes)
+        };
+
+        let union_selection = selection!("$(unionField?)", spec);
+
+        assert_eq!(
+            union_selection
+                .compute_output_shape(
+                    &shape_context,
+                    shape_context.named_shapes().get("$root").unwrap().clone(),
+                )
+                .pretty_print(),
+            "One<String, Int, None>",
+        );
+    }
+
+    #[test]
+    fn question_operator_with_error_shapes() {
+        let spec = ConnectSpec::V0_3;
+
+        let shape_context = {
+            let mut named_shapes = IndexMap::default();
+
+            named_shapes.insert(
+                "$root".to_string(),
+                Shape::record(
+                    {
+                        let mut map = Shape::empty_map();
+                        map.insert(
+                            "errorField".to_string(),
+                            Shape::error_with_partial(
+                                "Test error".to_string(),
+                                Shape::one([Shape::string([]), Shape::null([])], []),
+                                [],
+                            ),
+                        );
+                        map
+                    },
+                    [],
+                ),
+            );
+
+            ShapeContext::new(SourceId::Other("JSONSelection".into()))
+                .with_spec(spec)
+                .with_named_shapes(named_shapes)
+        };
+
+        let error_selection = selection!("$(errorField?)", spec);
+
+        let result_shape = error_selection.compute_output_shape(
+            &shape_context,
+            shape_context.named_shapes().get("$root").unwrap().clone(),
+        );
+
+        // The question mark should be applied recursively to the partial shape within the error
+        assert!(result_shape.pretty_print().contains("Error"));
+        assert!(result_shape.pretty_print().contains("None"));
+    }
+
+    #[test]
+    fn question_operator_with_all_shapes() {
+        let spec = ConnectSpec::V0_3;
+
+        let shape_context = {
+            let mut named_shapes = IndexMap::default();
+
+            named_shapes.insert(
+                "$root".to_string(),
+                Shape::record(
+                    {
+                        let mut map = Shape::empty_map();
+                        map.insert(
+                            "allField".to_string(),
+                            Shape::all(
+                                [
+                                    Shape::string([]),
+                                    Shape::one([Shape::string([]), Shape::null([])], []),
+                                ],
+                                [],
+                            ),
+                        );
+                        map
+                    },
+                    [],
+                ),
+            );
+
+            ShapeContext::new(SourceId::Other("JSONSelection".into()))
+                .with_spec(spec)
+                .with_named_shapes(named_shapes)
+        };
+
+        let all_selection = selection!("$(allField?)", spec);
+
+        assert_eq!(
+            all_selection
+                .compute_output_shape(
+                    &shape_context,
+                    shape_context.named_shapes().get("$root").unwrap().clone(),
+                )
+                .pretty_print(),
+            "One<String, None>",
+        );
+    }
+
+    #[test]
+    fn question_operator_preserves_non_null_shapes() {
+        let spec = ConnectSpec::V0_3;
+
+        let shape_context = {
+            let mut named_shapes = IndexMap::default();
+
+            named_shapes.insert(
+                "$root".to_string(),
+                Shape::record(
+                    {
+                        let mut map = Shape::empty_map();
+                        map.insert("nonNullString".to_string(), Shape::string([]));
+                        map
+                    },
+                    [],
+                ),
+            );
+
+            ShapeContext::new(SourceId::Other("JSONSelection".into()))
+                .with_spec(spec)
+                .with_named_shapes(named_shapes)
+        };
+
+        let non_null_selection = selection!("$(nonNullString?)", spec);
+
+        assert_eq!(
+            non_null_selection
+                .compute_output_shape(
+                    &shape_context,
+                    shape_context.named_shapes().get("$root").unwrap().clone(),
+                )
+                .pretty_print(),
+            "String",
+        );
+    }
+
+    #[test]
+    fn question_operator_with_multiple_operators_in_chain() {
+        let spec = ConnectSpec::V0_3;
+
+        // Test combining ? with other operators
+        let mixed_chain_selection = selection!("$(field? ?? 'default')", spec);
+        assert_eq!(
+            mixed_chain_selection.apply_to(&json!({"field": "value"})),
+            (Some(json!("value")), vec![]),
+        );
+        assert_eq!(
+            mixed_chain_selection.apply_to(&json!({"field": null})),
+            (Some(json!("default")), vec![]),
+        );
+        assert_eq!(
+            mixed_chain_selection.apply_to(&json!({})),
+            (Some(json!("default")), vec![]),
+        );
+    }
+
+    #[test]
+    fn question_operator_direct_null_input_shape() {
+        let spec = ConnectSpec::V0_3;
+
+        let shape_context = {
+            let mut named_shapes = IndexMap::default();
+
+            named_shapes.insert("$root".to_string(), Shape::null([]));
+
+            ShapeContext::new(SourceId::Other("JSONSelection".into()))
+                .with_spec(spec)
+                .with_named_shapes(named_shapes)
+        };
+
+        let null_selection = selection!("$root?", spec);
+
+        assert_eq!(
+            null_selection
+                .compute_output_shape(
+                    &shape_context,
+                    shape_context.named_shapes().get("$root").unwrap().clone(),
+                )
+                .pretty_print(),
+            "None",
+        );
+    }
+
+    #[test]
+    fn test_unknown_name() {
+        let spec = ConnectSpec::V0_3;
+        let sel = selection!("book.author? { name age? }", spec);
+        assert_eq!(
+            sel.shape().pretty_print(),
+            "One<{ age: $root.book.author?.*.age?, name: $root.book.author?.*.name }, None>",
+        );
+    }
+
+    #[test]
+    fn test_nullish_coalescing_shape() {
+        let spec = ConnectSpec::V0_3;
+        let sel = selection!("$(a ?? b ?? c)", spec);
+        assert_eq!(
+            sel.shape().pretty_print(),
+            "One<$root.a?!, $root.b?!, $root.c>",
+        );
+
+        let mut named_shapes = IndexMap::default();
+        named_shapes.insert(
+            "$root".to_string(),
+            Shape::record(
+                {
+                    let mut map = Shape::empty_map();
+                    map.insert(
+                        "a".to_string(),
+                        Shape::one([Shape::string([]), Shape::null([])], []),
+                    );
+                    map.insert("b".to_string(), Shape::string([]));
+                    map.insert("c".to_string(), Shape::int([]));
+                    map
+                },
+                [],
+            ),
+        );
+
+        let shape_context = ShapeContext::new(SourceId::Other("JSONSelection".into()))
+            .with_spec(spec)
+            .with_named_shapes(named_shapes);
+
+        assert_eq!(
+            sel.compute_output_shape(
+                &shape_context,
+                shape_context.named_shapes().get("$root").unwrap().clone(),
+            )
+            .pretty_print(),
+            "One<String, Int>",
+        );
+    }
+
+    #[test]
+    fn test_none_coalescing_shape() {
+        let spec = ConnectSpec::V0_3;
+        let sel = selection!("$(a ?! b ?! c)", spec);
+        assert_eq!(
+            sel.shape().pretty_print(),
+            "One<$root.a!, $root.b!, $root.c>",
+        );
+
+        let mut named_shapes = IndexMap::default();
+        named_shapes.insert(
+            "$root".to_string(),
+            Shape::record(
+                {
+                    let mut map = Shape::empty_map();
+                    map.insert(
+                        "a".to_string(),
+                        Shape::one([Shape::string([]), Shape::null([])], []),
+                    );
+                    map.insert(
+                        "b".to_string(),
+                        Shape::one([Shape::string([]), Shape::none()], []),
+                    );
+                    map.insert("c".to_string(), Shape::null([]));
+                    map
+                },
+                [],
+            ),
+        );
+
+        let shape_context = ShapeContext::new(SourceId::Other("JSONSelection".into()))
+            .with_spec(spec)
+            .with_named_shapes(named_shapes);
+
+        assert_eq!(
+            sel.compute_output_shape(
+                &shape_context,
+                shape_context.named_shapes().get("$root").unwrap().clone(),
+            )
+            .pretty_print(),
             "One<String, null>",
         );
     }

@@ -105,6 +105,15 @@ The subgraph service executes multiple times during query execution, with each e
 | `error`                     | No          | `reason`         | A string value containing error reason when it's a critical error              |
 | `cache`                     | No          | `hit` \| `miss`    | Returns the number of cache hit or miss for this subgraph request              |
 
+### HTTP Client
+
+The HTTP client service also executes multiple times, with each execution representing a HTTP request to a single subgraph or REST service. Importantly, this service executes after any Rhai scripts that modify the subgraph requests, so these selectors can be used to observe any headers added by the Rhai script.
+
+| Selector           | Defaultable | Values | Description                   |
+|--------------------|-------------|--------|-------------------------------|
+| `request_header`   | Yes         |        | The name of a request header  |
+| `response_header`  | Yes         |        | The name of a response header |
+
 ### Connector
 
 #### HTTP

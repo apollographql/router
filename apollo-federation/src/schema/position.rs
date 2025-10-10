@@ -1749,6 +1749,38 @@ impl SchemaDefinitionPosition {
             None => false,
         })
     }
+
+    pub(crate) fn get_root_type<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        kind: SchemaRootDefinitionKind,
+    ) -> Option<&'schema ComponentName> {
+        let schema_definition = self.get(schema.schema());
+        match kind {
+            SchemaRootDefinitionKind::Query => schema_definition.query.as_ref(),
+            SchemaRootDefinitionKind::Mutation => schema_definition.mutation.as_ref(),
+            SchemaRootDefinitionKind::Subscription => schema_definition.subscription.as_ref(),
+        }
+    }
+
+    pub(crate) fn set_root_type(
+        &self,
+        schema: &mut FederationSchema,
+        kind: SchemaRootDefinitionKind,
+        type_name: ComponentName,
+    ) -> Result<(), FederationError> {
+        let schema_definition = self.make_mut(&mut schema.schema);
+        match kind {
+            SchemaRootDefinitionKind::Query => schema_definition.make_mut().query = Some(type_name),
+            SchemaRootDefinitionKind::Mutation => {
+                schema_definition.make_mut().mutation = Some(type_name)
+            }
+            SchemaRootDefinitionKind::Subscription => {
+                schema_definition.make_mut().subscription = Some(type_name)
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
@@ -7026,12 +7058,15 @@ impl DirectiveDefinitionPosition {
     pub(crate) fn add_locations(
         &self,
         schema: &mut FederationSchema,
-        locations: &Vec<DirectiveLocation>,
+        locations: Vec<DirectiveLocation>,
     ) -> Result<(), FederationError> {
-        self.make_mut(&mut schema.schema)?
-            .make_mut()
-            .locations
-            .extend(locations);
+        let existing = self.make_mut(&mut schema.schema)?.make_mut();
+
+        for location in locations {
+            if !existing.locations.contains(&location) {
+                existing.locations.push(location);
+            }
+        }
         Ok(())
     }
 }
@@ -7392,6 +7427,25 @@ pub(crate) enum DirectiveTargetPosition {
 }
 
 impl DirectiveTargetPosition {
+    pub(crate) fn exists_in(&self, schema: &FederationSchema) -> bool {
+        match self {
+            Self::Schema(_) => true,
+            Self::ScalarType(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::ObjectType(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::ObjectField(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::ObjectFieldArgument(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::InterfaceType(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::InterfaceField(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::InterfaceFieldArgument(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::UnionType(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::EnumType(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::EnumValue(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::InputObjectType(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::InputObjectField(pos) => pos.try_get(&schema.schema).is_some(),
+            Self::DirectiveArgument(pos) => pos.try_get(&schema.schema).is_some(),
+        }
+    }
+
     pub(crate) fn get_all_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -7528,6 +7582,37 @@ impl DirectiveTargetPosition {
             Self::InputObjectField(pos) => pos.insert_directive(schema, Node::new(directive)),
             Self::DirectiveArgument(pos) => pos.insert_directive(schema, Node::new(directive)),
         }
+    }
+}
+
+impl From<DirectiveArgumentDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: DirectiveArgumentDefinitionPosition) -> Self {
+        DirectiveTargetPosition::DirectiveArgument(pos)
+    }
+}
+
+impl From<EnumValueDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: EnumValueDefinitionPosition) -> Self {
+        DirectiveTargetPosition::EnumValue(pos)
+    }
+}
+
+impl From<FieldArgumentDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: FieldArgumentDefinitionPosition) -> Self {
+        match pos {
+            FieldArgumentDefinitionPosition::Object(pos) => {
+                DirectiveTargetPosition::ObjectFieldArgument(pos)
+            }
+            FieldArgumentDefinitionPosition::Interface(pos) => {
+                DirectiveTargetPosition::InterfaceFieldArgument(pos)
+            }
+        }
+    }
+}
+
+impl From<InputObjectFieldDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: InputObjectFieldDefinitionPosition) -> Self {
+        DirectiveTargetPosition::InputObjectField(pos)
     }
 }
 

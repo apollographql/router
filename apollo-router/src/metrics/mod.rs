@@ -169,11 +169,11 @@ pub(crate) mod test_utils {
 
             meter_provider.set(
                 MeterProviderType::Public,
-                Some(FilterMeterProvider::all(
+                FilterMeterProvider::all(
                     MeterProviderBuilder::default()
                         .with_reader(reader.clone())
                         .build(),
-                )),
+                ),
             );
 
             (meter_provider, reader)
@@ -1480,7 +1480,6 @@ mod test {
     use opentelemetry::metrics::MeterProvider;
 
     use crate::metrics::FutureMetricsExt;
-    use crate::metrics::aggregation::MeterProviderType;
     use crate::metrics::meter_provider;
     use crate::metrics::meter_provider_internal;
 
@@ -1730,7 +1729,7 @@ mod test {
         assert_eq!(meter_provider_internal().registered_instruments(), 1);
 
         // Force invalidation of instruments
-        meter_provider_internal().set(MeterProviderType::PublicPrometheus, None);
+        meter_provider_internal().invalidate();
         assert_eq!(meter_provider_internal().registered_instruments(), 0);
 
         // Slow path

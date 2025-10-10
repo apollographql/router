@@ -26,6 +26,7 @@ pub(crate) mod cost;
 pub(crate) mod events;
 pub(crate) mod extendable;
 pub(crate) mod graphql;
+pub(crate) mod http_client;
 pub(crate) mod http_common;
 pub(crate) mod http_server;
 pub(crate) mod instruments;

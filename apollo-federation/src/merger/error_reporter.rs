@@ -89,9 +89,9 @@ impl ErrorReporter {
                 let distribution_str = join_strings(
                     distribution.iter(),
                     JoinStringsOptions {
-                        first_separator: Some(" and "),
-                        separator: ", ",
-                        last_separator: Some(" but "),
+                        first_separator: Some(" but "),
+                        separator: " and ",
+                        last_separator: Some(" and "),
                         output_length_limit: None,
                     },
                 );

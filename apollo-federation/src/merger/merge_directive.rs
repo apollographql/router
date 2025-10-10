@@ -4,8 +4,9 @@ use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::ast::DirectiveLocation;
-use apollo_compiler::collections::HashSet;
+use indexmap::IndexSet;
 use itertools::Itertools;
+use tracing::trace;
 
 use crate::error::FederationError;
 use crate::merger::hints::HintCode;
@@ -13,26 +14,75 @@ use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
 use crate::merger::merge::map_sources;
 use crate::schema::position::DirectiveDefinitionPosition;
+use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::referencer::DirectiveReferencers;
-use crate::subgraph::typestate::Subgraph;
-use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
 use crate::supergraph::EXECUTABLE_DIRECTIVE_LOCATIONS;
 
 #[derive(Clone)]
 pub(crate) struct AppliedDirectiveToMergeEntry {
-    pub names: HashSet<Name>,
-    pub sources: Sources<Subgraph<Validated>>,
+    pub names: IndexSet<Name>,
+    pub sources: Sources<DirectiveTargetPosition>,
+    pub dest: DirectiveTargetPosition,
 }
 
 pub(crate) type AppliedDirectivesToMerge = Vec<AppliedDirectiveToMergeEntry>;
 
 #[allow(dead_code)]
 impl Merger {
-    fn merge_applied_directive(
+    pub(in crate::merger) fn record_applied_directives_to_merge<T>(
+        &mut self,
+        sources: &Sources<T>,
+        dest: &T,
+    ) -> Result<(), FederationError>
+    where
+        T: Clone + Into<DirectiveTargetPosition>,
+    {
+        let inaccessible_name = self.inaccessible_directive_name_in_supergraph.clone();
+        let mut directive_sources: Sources<DirectiveTargetPosition> = Sources::default();
+        let mut names = IndexSet::new();
+
+        // This loop corresponds to `gatherAppliedDirectivesToMerge` in the JS implementation.
+        for (idx, source) in sources {
+            let Some(source) = source else {
+                continue;
+            };
+            let source: DirectiveTargetPosition = source.clone().into();
+            let subgraph = &self.subgraphs[*idx];
+            for directive in source.get_all_applied_directives(subgraph.schema()) {
+                if self.is_merged_directive(&subgraph.name, directive) {
+                    names.insert(directive.name.clone());
+                }
+            }
+            directive_sources.insert(*idx, Some(source));
+        }
+
+        let dest = dest.clone().into();
+        if let Some(inaccessible) = inaccessible_name.as_ref()
+            && names.contains(inaccessible)
+        {
+            self.merge_applied_directive(inaccessible, &directive_sources, &dest)?;
+            names.shift_remove(inaccessible);
+        }
+
+        if names.is_empty() {
+            trace!("No applied directives to merge at {dest}");
+        } else {
+            self.applied_directives_to_merge
+                .push(AppliedDirectiveToMergeEntry {
+                    names,
+                    sources: directive_sources,
+                    dest,
+                });
+        }
+        Ok(())
+    }
+
+    fn merge_applied_directive<T>(
         &mut self,
         name: &Name,
-        sources: Sources<Subgraph<Validated>>,
+        sources: &Sources<T>,
+        dest: &DirectiveTargetPosition,
     ) -> Result<(), FederationError> {
         let Some(directive_in_supergraph) = self
             .merged_federation_directive_in_supergraph_by_directive_name
@@ -43,15 +93,20 @@ impl Merger {
         };
 
         // Accumulate all positions of the directive in the source schemas
-        let all_schema_referencers = sources
-            .values()
-            .filter_map(|subgraph| subgraph.as_ref())
-            .fold(DirectiveReferencers::default(), |mut acc, subgraph| {
-                if let Ok(drs) = subgraph.schema().referencers().get_directive(name) {
-                    acc.extend(drs);
-                }
-                acc
-            });
+        let all_schema_referencers =
+            sources
+                .iter()
+                .fold(DirectiveReferencers::default(), |mut acc, (idx, source)| {
+                    if source.is_some()
+                        && let Ok(drs) = self.subgraphs[*idx]
+                            .schema()
+                            .referencers()
+                            .get_directive(name)
+                    {
+                        acc.extend(drs);
+                    }
+                    acc
+                });
 
         for pos in all_schema_referencers.iter() {
             // In JS, there are several methods for checking if directive applications are the same, and the static
@@ -61,12 +116,12 @@ impl Merger {
             let mut directive_sources: Sources<Directive> = Default::default();
             let directive_counts = sources
                 .iter()
-                .flat_map(|(idx, subgraph)| {
-                    if let Some(subgraph) = subgraph {
+                .flat_map(|(idx, source)| {
+                    if source.is_some() {
                         let directives = Self::directive_applications_with_transformed_arguments(
                             &pos,
                             directive_in_supergraph,
-                            subgraph,
+                            &self.subgraphs[*idx],
                         );
                         directive_sources.insert(*idx, directives.first().cloned());
                         directives
@@ -77,12 +132,19 @@ impl Merger {
                 .counts();
 
             if directive_in_supergraph.definition.repeatable {
+                trace!(
+                    "Directive @{name} is repeatable, merging all {} applications at {pos}",
+                    directive_counts.len()
+                );
                 for directive in directive_counts.keys() {
-                    pos.insert_directive(&mut self.merged, (*directive).clone())?;
+                    dest.insert_directive(&mut self.merged, (*directive).clone())?;
                 }
             } else if directive_counts.len() == 1 {
+                trace!(
+                    "Directive @{name} is non-repeatable but only applied once, merging application at {pos}"
+                );
                 let only_application = directive_counts.iter().next().unwrap().0.clone();
-                pos.insert_directive(&mut self.merged, only_application)?;
+                dest.insert_directive(&mut self.merged, only_application)?;
             } else if let Some(merger) = &directive_in_supergraph.arguments_merger {
                 // When we have multiple unique applications of the directive, and there is a
                 // supplied argument merger, then we merge each of the arguments into a combined
@@ -106,7 +168,10 @@ impl Merger {
                         merged_directive.arguments.push(Node::new(merged_arg));
                     }
                 }
-                pos.insert_directive(&mut self.merged, merged_directive)?;
+                trace!(
+                    "Directive @{name} is non-repeatable but has an argument merger, merging applications at {pos}"
+                );
+                dest.insert_directive(&mut self.merged, merged_directive)?;
                 self.error_reporter.add_hint(CompositionHint {
                     code: HintCode::MergedNonRepeatableDirectiveArguments.code().to_string(),
                     message: format!(
@@ -120,10 +185,13 @@ impl Merger {
                 .max_by_key(|(_, count)| *count)
                 .map(|(directive, _)| directive)
             {
+                trace!(
+                    "Directive @{name} is non-repeatable and has no argument merger, picking most used application at {pos}"
+                );
                 // When there is no argument merger, we use the application appearing in the most
                 // subgraphs. Adding it to the destination here allows the error reporter to
                 // determine which one we selected when it's looking through the sources.
-                pos.insert_directive(&mut self.merged, most_used_directive.clone())?;
+                dest.insert_directive(&mut self.merged, most_used_directive.clone())?;
                 fn print_arguments(elt: &Directive) -> Option<String> {
                     if elt.arguments.is_empty() {
                         Some("no arguments".to_string())
@@ -148,6 +216,10 @@ impl Merger {
                     |application, subgraphs| format!("{application} in {subgraphs}"),
                     false,
                     false,
+                );
+            } else {
+                trace!(
+                    "Directive @{name} is non-repeatable but has no applications to merge at {pos} (this should not happen)"
                 );
             }
         }
@@ -317,7 +389,7 @@ impl Merger {
             }
         }
         dest.set_repeatable(&mut self.merged, repeatable.unwrap_or_default())?; // repeatable will always be Some() here
-        dest.add_locations(&mut self.merged, &locations)?;
+        dest.add_locations(&mut self.merged, locations)?;
 
         self.merge_description(sources, dest)?;
 
@@ -357,30 +429,34 @@ impl Merger {
         }
 
         // Doing args last, mostly so we don't bother adding if the directive doesn't make it in.
-        self.add_arguments_shallow(sources, dest)?;
-        for arg in &supergraph_dest.arguments {
+        let arg_names = self.add_arguments_shallow(sources, dest)?;
+        for arg in arg_names {
             let subgraph_args = map_sources(sources, |src| {
-                src.as_ref().map(|src| src.argument(arg.name.clone()))
+                src.as_ref().map(|src| src.argument(arg.clone()))
             });
-            self.merge_argument(&subgraph_args, &dest.argument(arg.name.clone()))?;
+            self.merge_argument(&subgraph_args, &dest.argument(arg))?;
         }
         Ok(())
     }
 
     pub(crate) fn merge_all_applied_directives(&mut self) -> Result<(), FederationError> {
-        let len = self.applied_directives_to_merge.len();
-        for i in 0..len {
-            let names: Vec<_> = self.applied_directives_to_merge[i]
-                .names
-                .iter()
-                .cloned()
-                .collect();
+        for AppliedDirectiveToMergeEntry {
+            names,
+            sources,
+            dest,
+        } in self.applied_directives_to_merge.drain(..).collect_vec()
+        {
+            // There are some cases where we recorded directives to be merged on a `dest` that ended
+            // up being removed from the ouptut. This is typically because we needed to known if that
+            // `dest` was @inaccessible before deciding if it should be kept or not. If it no
+            // longer exists in the schema, then we skip this destination.
+            if !dest.exists_in(&self.merged) {
+                continue;
+            }
             for name in names {
-                let sources = self.applied_directives_to_merge[i].sources.clone();
-                self.merge_applied_directive(&name, sources)?;
+                self.merge_applied_directive(&name, &sources, &dest)?;
             }
         }
-        self.applied_directives_to_merge.clear();
         Ok(())
     }
 }

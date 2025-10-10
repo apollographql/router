@@ -26,6 +26,7 @@ use crate::error::SingleFederationError;
 use crate::link::Import;
 use crate::link::Link;
 use crate::link::Purpose;
+use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
@@ -247,6 +248,16 @@ impl<T: SpecDefinition> SpecDefinitions<T> {
         self.definitions.iter()
     }
 
+    pub(crate) fn get_maximum_allowed_version(
+        &'static self,
+        federation_version: &Version,
+    ) -> Option<&'static T> {
+        self.definitions
+            .values()
+            .rev()
+            .find(|spec| federation_version.satisfies(spec.minimum_federation_version()))
+    }
+
     pub(crate) fn get_minimum_required_version(
         &'static self,
         federation_version: &Version,
@@ -325,6 +336,7 @@ pub(crate) static SPEC_REGISTRY: LazyLock<SpecRegistry> = LazyLock::new(|| {
     registry.extend(&CONNECT_VERSIONS);
     registry.extend(&CONTEXT_VERSIONS);
     registry.extend(&COST_VERSIONS);
+    registry.extend(&FEDERATION_VERSIONS);
     registry.extend(&INACCESSIBLE_VERSIONS);
     registry.extend(&POLICY_VERSIONS);
     registry.extend(&REQUIRES_SCOPES_VERSIONS);

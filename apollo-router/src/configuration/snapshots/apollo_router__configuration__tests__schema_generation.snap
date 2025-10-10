@@ -1,6 +1,7 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
+snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -1157,6 +1158,133 @@ expression: "&schema"
         }
       ]
     },
+    "ConditionHttpClientSelector": {
+      "description": "Specify a condition for when an [instrument][] should be mutated or an [event][] should be triggered.\n\n[instrument]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/instruments\n[event]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/events",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A condition to check a selection against a value.",
+          "properties": {
+            "eq": {
+              "items": {
+                "$ref": "#/definitions/HttpClientSelectorOrValue"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "eq"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The first selection must be greater than the second selection.",
+          "properties": {
+            "gt": {
+              "items": {
+                "$ref": "#/definitions/HttpClientSelectorOrValue"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "gt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The first selection must be less than the second selection.",
+          "properties": {
+            "lt": {
+              "items": {
+                "$ref": "#/definitions/HttpClientSelectorOrValue"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "lt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A condition to check a selection against a selector.",
+          "properties": {
+            "exists": {
+              "$ref": "#/definitions/HttpClientSelector"
+            }
+          },
+          "required": [
+            "exists"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "All sub-conditions must be true.",
+          "properties": {
+            "all": {
+              "items": {
+                "$ref": "#/definitions/ConditionHttpClientSelector"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "all"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "At least one sub-conditions must be true.",
+          "properties": {
+            "any": {
+              "items": {
+                "$ref": "#/definitions/ConditionHttpClientSelector"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "any"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The sub-condition must not be true",
+          "properties": {
+            "not": {
+              "$ref": "#/definitions/ConditionHttpClientSelector"
+            }
+          },
+          "required": [
+            "not"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "true",
+          "description": "Static true condition",
+          "type": "string"
+        },
+        {
+          "const": "false",
+          "description": "Static false condition",
+          "type": "string"
+        }
+      ]
+    },
     "ConditionRouterSelector": {
       "description": "Specify a condition for when an [instrument][] should be mutated or an [event][] should be triggered.\n\n[instrument]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/instruments\n[event]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/events",
       "oneOf": [
@@ -1547,6 +1675,21 @@ expression: "&schema"
           "properties": {
             "condition": {
               "$ref": "#/definitions/ConditionConnectorSelector"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    },
+    "ConditionalHttpClientSelector": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/HttpClientSelector"
+        },
+        {
+          "properties": {
+            "condition": {
+              "$ref": "#/definitions/ConditionHttpClientSelector"
             }
           },
           "type": "object"
@@ -3751,6 +3894,12 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "ExtendedHttpClientAttributesWithConditionalHttpClientSelector": {
+      "additionalProperties": {
+        "$ref": "#/definitions/ConditionalHttpClientSelector"
+      },
+      "type": "object"
+    },
     "ExtendedRouterAttributesWithConditionalRouterSelector": {
       "additionalProperties": {
         "$ref": "#/definitions/ConditionalRouterSelector"
@@ -5279,6 +5428,86 @@ expression: "&schema"
           "type": "string"
         }
       ]
+    },
+    "HttpClientSelector": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "description": "A header from the HTTP request",
+          "properties": {
+            "default": {
+              "description": "Optional default value.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "request_header": {
+              "description": "The name of the request header.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_header"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A header from the HTTP response",
+          "properties": {
+            "default": {
+              "description": "Optional default value.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "response_header": {
+              "description": "The name of the response header.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "response_header"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "HttpClientSelectorOrValue": {
+      "anyOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AttributeValue"
+            }
+          ],
+          "description": "A constant value."
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/definitions/HttpClientSelector"
+            }
+          ],
+          "description": "Selector to extract a value from the pipeline."
+        }
+      ]
+    },
+    "HttpClientSpans": {
+      "additionalProperties": false,
+      "properties": {
+        "attributes": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ExtendedHttpClientAttributesWithConditionalHttpClientSelector"
+            }
+          ],
+          "description": "Custom attributes that are attached to the HTTP client span."
+        }
+      },
+      "type": "object"
     },
     "HttpExporter": {
       "additionalProperties": false,
@@ -8279,6 +8508,14 @@ expression: "&schema"
           ],
           "description": "The attributes to include by default in spans based on their level as specified in the otel semantic conventions and Apollo documentation."
         },
+        "http_client": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/HttpClientSpans"
+            }
+          ],
+          "description": "Attributes to include on the HTTP client span.\nHTTP client spans contain information about HTTP requests made to subgraphs, including any changes made by Rhai scripts."
+        },
         "mode": {
           "allOf": [
             {
@@ -11165,11 +11402,18 @@ expression: "&schema"
       "type": "object"
     },
     "WebSocketProtocol": {
-      "enum": [
-        "graphql_ws",
-        "graphql_transport_ws"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "const": "graphql_ws",
+          "description": "The modern graphql-ws protocol. The subprotocol name is \"graphql-transport-ws\".\n\nSpec URL: https://github.com/enisdenjo/graphql-ws/blob/0c0eb499c3a0278c6d9cc799064f22c5d24d2f60/PROTOCOL.md",
+          "type": "string"
+        },
+        {
+          "const": "graphql_transport_ws",
+          "description": "The legacy subscriptions-transport-ws protocol. Confusingly, the subprotocol name is\n\"graphql-ws\".\n\nhttps://github.com/apollographql/subscriptions-transport-ws/blob/36f3f6f780acc1a458b768db13fd39c65e5e6518/PROTOCOL.md",
+          "type": "string"
+        }
+      ]
     },
     "ZipkinConfig": {
       "additionalProperties": false,

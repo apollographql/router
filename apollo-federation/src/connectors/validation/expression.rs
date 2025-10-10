@@ -373,7 +373,7 @@ fn resolve_shape(
             }
             Ok(Shape::all(inners, []))
         }
-        ShapeCase::Name(name, key) => {
+        ShapeCase::Name(name, subpath) => {
             let mut resolved = if name.value == "$root" {
                 // For response mapping, $root (aka the response body) is allowed so we will exit out early here
                 // However, $root is not allowed for requests so we will error below
@@ -381,10 +381,41 @@ fn resolve_shape(
                     return Ok(Shape::unknown([]));
                 }
 
-                let mut key_str = key.iter().map(|key| key.to_string()).join(".");
-                if !key_str.is_empty() {
-                    key_str = format!("`{key_str}` ");
+                // This path implicitly starts with the $root variable, and may
+                // have a prefix like $root.*.foo or even $root?.**.foo. Since
+                // we want the error message to focus on the foo identifier, we
+                // skip not only the $root base name but any non-key/index path
+                // elements, like ?, .*, and .**.
+                let mut key_str = String::new();
+                let mut skipping = true;
+                for key in subpath.iter() {
+                    if skipping
+                        && matches!(
+                            key.value,
+                            NamedShapePathKey::AnyIndex
+                                | NamedShapePathKey::AnyField
+                                | NamedShapePathKey::Question
+                                | NamedShapePathKey::NotNone
+                        )
+                    {
+                        continue;
+                    } else {
+                        key_str.push_str(key.to_string().as_str());
+                        // We only skip until we stop skipping, and then all key
+                        // variants become fair game.
+                        skipping = false;
+                    }
                 }
+                if key_str.is_empty() {
+                    // If we ended up converting a path like $ to $root and then
+                    // losing $root due to the logic above, fall back to
+                    // printing the whole path for clarity/debuggability.
+                    key_str = shape.to_string();
+                } else if key_str.starts_with('.') {
+                    // Remove initial . from field keys
+                    key_str.remove(0);
+                }
+                key_str = format!("`{key_str}` ");
 
                 let locals_suffix = {
                     let local_vars = expression.expression.local_var_names();
@@ -405,7 +436,8 @@ fn resolve_shape(
                         namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", "),
                     ),
                     locations: transform_locations(
-                        key.first()
+                        subpath
+                            .first()
                             .map(|key| &key.locations)
                             .unwrap_or(&shape.locations),
                         context,
@@ -447,16 +479,23 @@ fn resolve_shape(
             };
             resolved.locations.extend(shape.locations.iter().cloned());
             let mut path = name.value.clone();
-            for key in key {
+            for key in subpath {
                 let child = resolved.child(key.clone());
-                if child.is_none() {
+                if child.is_none() || child.is_never() {
+                    let key_string = key.to_string();
+                    let key_without_dot = key_string.trim_start_matches('.');
+
                     let message = match key.value {
                         NamedShapePathKey::AnyIndex | NamedShapePathKey::Index(_) => {
                             format!("`{path}` is not an array or string")
                         }
 
                         NamedShapePathKey::AnyField | NamedShapePathKey::Field(_) => {
-                            format!("`{path}` doesn't have a field named `{key}`")
+                            format!("`{path}` doesn't have a field named `{key_without_dot}`")
+                        }
+
+                        NamedShapePathKey::Question | NamedShapePathKey::NotNone => {
+                            format!("`{path}{key}` evaluated to nothing")
                         }
                     };
                     return Err(Message {
@@ -466,7 +505,7 @@ fn resolve_shape(
                     });
                 }
                 resolved = child;
-                path = format!("{path}.{key}");
+                path = format!("{path}{key}");
             }
             resolve_shape(&resolved, context, expression)
         }

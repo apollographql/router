@@ -39,18 +39,12 @@ Make sure to replace `<your-graph-ref>` and `<your-graph-api-key>` with your gra
 
 ## Enabling MCP
 
-<ExperimentalFeature>
-
-This feature is [experimental](/graphos/resources/feature-launch-stages#experimental). For more information about MCP support,  review the [MCP documentation](https://www.apollographql.com/docs/apollo-mcp-server).
-
-</ExperimentalFeature>
-
-To serve MCP requests, enable the [MCP server](https://www.apollographql.com/docs/apollo-mcp-server) using the `MCP_ENABLE` environment variable. You'll also need to export container port `5000` for HTTP Streamable connections to the MCP server, using the `-p 5000:5000` flag.
+To serve MCP requests, enable the [Apollo MCP Server](/apollo-mcp-server) using the `MCP_ENABLE` environment variable. You'll also need to export container port `5000` for Streamable HTTP connections to the MCP server, using the `-p 5050:5000` flag.
 
 ```bash title="Docker" {3, 6}
 docker run \
   -p 4000:4000 \
-  -p 5000:5000 \
+  -p 5050:5000 \
   --env APOLLO_GRAPH_REF="<your-graph-ref>" \
   --env APOLLO_KEY="<your-graph-api-key>" \
   --env MCP_ENABLE=1 \

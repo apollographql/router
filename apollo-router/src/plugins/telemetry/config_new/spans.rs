@@ -2,6 +2,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::connector::spans::ConnectorSpans;
+use super::http_client::spans::HttpClientSpans;
 use super::router::spans::RouterSpans;
 use super::subgraph::spans::SubgraphSpans;
 use super::supergraph::spans::SupergraphSpans;
@@ -35,6 +36,10 @@ pub(crate) struct Spans {
     /// Attributes to include on the connector span.
     /// Connector spans contain information about the connector request and response and therefore contain connector specific attributes.
     pub(crate) connector: ConnectorSpans,
+
+    /// Attributes to include on the HTTP client span.
+    /// HTTP client spans contain information about HTTP requests made to subgraphs, including any changes made by Rhai scripts.
+    pub(crate) http_client: HttpClientSpans,
 }
 
 impl Spans {
@@ -49,6 +54,10 @@ impl Spans {
             TelemetryDataKind::Traces,
         );
         self.subgraph.defaults_for_levels(
+            self.default_attribute_requirement_level,
+            TelemetryDataKind::Traces,
+        );
+        self.http_client.defaults_for_levels(
             self.default_attribute_requirement_level,
             TelemetryDataKind::Traces,
         );
@@ -69,6 +78,11 @@ impl Spans {
             custom
                 .validate()
                 .map_err(|err| format!("error for subgraph span attribute {name:?}: {err}"))?;
+        }
+        for (name, custom) in &self.http_client.attributes.custom {
+            custom
+                .validate()
+                .map_err(|err| format!("error for http_client span attribute {name:?}: {err}"))?;
         }
 
         Ok(())
