@@ -302,7 +302,7 @@ tikv-jemalloc-ctl = { version = "0.6.0", features = ["stats", "profiling"], opti
 [dev-dependencies]
 axum = { version = "0.8.1", features = ["http2", "ws"] }
 axum-server = "0.7.1"
-ctor = "0.5.0"
+ctor = "0.6.0"
 ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
 encoding_rs.workspace = true
 fred = { version = "10.1.0", features = [
