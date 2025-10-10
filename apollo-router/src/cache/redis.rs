@@ -872,20 +872,10 @@ impl RedisCacheStorage {
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
     use std::time::SystemTime;
 
-    use fred::types::cluster::ClusterRouting;
-    use itertools::Itertools;
-    use rand::Rng;
-    use rand::RngCore;
-    use rand::distr::Alphanumeric;
-    use serde_json::json;
-    use tower::BoxError;
     use url::Url;
 
-    use crate::cache::redis::RedisKey;
-    use crate::cache::redis::RedisValue;
     use crate::cache::storage::ValueType;
 
     #[test]
@@ -1016,120 +1006,136 @@ mod test {
         }
     }
 
-    /// Tests that `insert_multiple` and `get_multiple` are successful when run against clustered Redis.
+    /// Module that collects tests which apply to a real cluster.
     ///
-    /// Clustered Redis works by hashing each key to one of 16384 hash slots, and assigning each hash
-    /// slot to a node. Operations which interact with multiple keys (`MGET`, `MSET`) *cannot* be
-    /// used on keys which map to different hash slots, even if those hash slots are on the same node.
-    ///
-    /// This test inserts data that is guaranteed to hash to different slots to verify that
-    /// `RedisCacheStorage` is well-behaved when operating against a cluster.
+    /// This allows us to put the insanely long #[cfg] line in one place and fixes linting issues
+    /// for unused imports.
     #[cfg(all(
         test,
         any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
     ))]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_redis_storage_avoids_common_cross_slot_errors() -> Result<(), BoxError> {
-        let config_json = json!({
-            "urls": ["redis-cluster://localhost:7000"],
-            "namespace": "test_redis_storage_avoids_common_cross_slot_errors",
-            "required_to_start": true,
-            "ttl": "60s"
-        });
-        let config = serde_json::from_value(config_json).unwrap();
-        let storage = super::RedisCacheStorage::new(config, "test_redis_cluster").await?;
+    mod test_against_cluster {
+        use std::collections::HashMap;
 
-        // insert values which reflect different cluster slots
-        let mut data = HashMap::default();
-        let expected_value = rand::rng().next_u32() as usize;
-        let unique_cluster_slot_count = |data: &HashMap<RedisKey<String>, _>| {
-            data.keys()
-                .map(|key| ClusterRouting::hash_key(key.0.as_bytes()))
-                .unique()
-                .count()
-        };
+        use fred::types::cluster::ClusterRouting;
+        use itertools::Itertools;
+        use rand::Rng;
+        use rand::RngCore;
+        use rand::distr::Alphanumeric;
+        use serde_json::json;
+        use tower::BoxError;
 
-        while unique_cluster_slot_count(&data) < 50 {
-            // NB: include {} around key so that this key is what determines the cluster hash slot - adding
-            // the namespace will otherwise change the slot
-            let key = rand::rng()
-                .sample_iter(&Alphanumeric)
-                .take(10)
-                .map(char::from)
-                .collect::<String>();
-            data.insert(RedisKey(format!("{{{}}}", key)), RedisValue(expected_value));
-        }
+        use crate::cache::redis::RedisCacheStorage;
+        use crate::cache::redis::RedisKey;
+        use crate::cache::redis::RedisValue;
 
-        // insert values
-        let keys: Vec<_> = data.keys().cloned().collect();
-        let data: Vec<_> = data.into_iter().collect();
-        storage.insert_multiple(&data, None).await;
+        /// Tests that `insert_multiple` and `get_multiple` are successful when run against clustered Redis.
+        ///
+        /// Clustered Redis works by hashing each key to one of 16384 hash slots, and assigning each hash
+        /// slot to a node. Operations which interact with multiple keys (`MGET`, `MSET`) *cannot* be
+        /// used on keys which map to different hash slots, even if those hash slots are on the same node.
+        ///
+        /// This test inserts data that is guaranteed to hash to different slots to verify that
+        /// `RedisCacheStorage` is well-behaved when operating against a cluster.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_redis_storage_avoids_common_cross_slot_errors() -> Result<(), BoxError> {
+            let config_json = json!({
+                "urls": ["redis-cluster://localhost:7000"],
+                "namespace": "test_redis_storage_avoids_common_cross_slot_errors",
+                "required_to_start": true,
+                "ttl": "60s"
+            });
+            let config = serde_json::from_value(config_json).unwrap();
+            let storage = RedisCacheStorage::new(config, "test_redis_cluster").await?;
 
-        // make a `get` call for each key and ensure that it has the expected value. this tests both
-        // the `get` and `insert_multiple` functions
-        for key in &keys {
-            let value: RedisValue<usize> = storage.get(key.clone()).await?;
-            assert_eq!(value.0, expected_value);
-        }
+            // insert values which reflect different cluster slots
+            let mut data = HashMap::default();
+            let expected_value = rand::rng().next_u32() as usize;
+            let unique_cluster_slot_count = |data: &HashMap<RedisKey<String>, _>| {
+                data.keys()
+                    .map(|key| ClusterRouting::hash_key(key.0.as_bytes()))
+                    .unique()
+                    .count()
+            };
 
-        // test the `mget` functionality
-        let values = storage.get_multiple(keys).await;
-        for value in values {
-            let value: RedisValue<usize> = value.ok_or("missing value")?;
-            assert_eq!(value.0, expected_value);
-        }
+            while unique_cluster_slot_count(&data) < 50 {
+                // NB: include {} around key so that this key is what determines the cluster hash slot - adding
+                // the namespace will otherwise change the slot
+                let key = rand::rng()
+                    .sample_iter(&Alphanumeric)
+                    .take(10)
+                    .map(char::from)
+                    .collect::<String>();
+                data.insert(RedisKey(format!("{{{}}}", key)), RedisValue(expected_value));
+            }
 
-        Ok(())
-    }
+            // insert values
+            let keys: Vec<_> = data.keys().cloned().collect();
+            let data: Vec<_> = data.into_iter().collect();
+            storage.insert_multiple(&data, None).await;
 
-    /// Test that `get_multiple` returns items in the correct order.
-    #[cfg(all(
-        test,
-        any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
-    ))]
-    #[tokio::test]
-    async fn test_get_multiple_is_ordered() -> Result<(), BoxError> {
-        let config_json = json!({
-            "urls": ["redis://localhost:6379"],
-            "namespace": "test_get_multiple_is_ordered",
-            "required_to_start": true,
-            "ttl": "60s"
-        });
-        let config = serde_json::from_value(config_json).unwrap();
-        let storage = super::RedisCacheStorage::new(config, "test_get_multiple_is_ordered").await?;
+            // make a `get` call for each key and ensure that it has the expected value. this tests both
+            // the `get` and `insert_multiple` functions
+            for key in &keys {
+                let value: RedisValue<usize> = storage.get(key.clone()).await?;
+                assert_eq!(value.0, expected_value);
+            }
 
-        let data = [("a", "1"), ("b", "2"), ("c", "3")]
-            .map(|(k, v)| (RedisKey(k.to_string()), RedisValue(v.to_string())));
-        storage.insert_multiple(&data, None).await;
-
-        // check different orders of fetches to make everything is ordered correctly, including
-        // when some values are none
-        let test_cases = vec![
-            (vec!["a", "b", "c"], vec![Some("1"), Some("2"), Some("3")]),
-            (vec!["c", "b", "a"], vec![Some("3"), Some("2"), Some("1")]),
-            (vec!["d", "b", "c"], vec![None, Some("2"), Some("3")]),
-            (
-                vec!["d", "3", "s", "b", "s", "1", "c", "Y"],
-                vec![None, None, None, Some("2"), None, None, Some("3"), None],
-            ),
-        ];
-
-        for (keys, expected_values) in test_cases {
-            let keys: Vec<RedisKey<_>> = keys
-                .into_iter()
-                .map(|key| RedisKey(key.to_string()))
-                .collect();
-            let expected_values: Vec<Option<String>> = expected_values
-                .into_iter()
-                .map(|value| value.map(ToString::to_string))
-                .collect();
-
+            // test the `mget` functionality
             let values = storage.get_multiple(keys).await;
-            let parsed_values: Vec<Option<String>> =
-                values.into_iter().map(|v| v.map(|v| v.0)).collect();
-            assert_eq!(parsed_values, expected_values);
+            for value in values {
+                let value: RedisValue<usize> = value.ok_or("missing value")?;
+                assert_eq!(value.0, expected_value);
+            }
+
+            Ok(())
         }
 
-        Ok(())
+        /// Test that `get_multiple` returns items in the correct order.
+        #[tokio::test]
+        async fn test_get_multiple_is_ordered() -> Result<(), BoxError> {
+            let config_json = json!({
+                "urls": ["redis://localhost:6379"],
+                "namespace": "test_get_multiple_is_ordered",
+                "required_to_start": true,
+                "ttl": "60s"
+            });
+            let config = serde_json::from_value(config_json).unwrap();
+            let storage = RedisCacheStorage::new(config, "test_get_multiple_is_ordered").await?;
+
+            let data = [("a", "1"), ("b", "2"), ("c", "3")]
+                .map(|(k, v)| (RedisKey(k.to_string()), RedisValue(v.to_string())));
+            storage.insert_multiple(&data, None).await;
+
+            // check different orders of fetches to make everything is ordered correctly, including
+            // when some values are none
+            let test_cases = vec![
+                (vec!["a", "b", "c"], vec![Some("1"), Some("2"), Some("3")]),
+                (vec!["c", "b", "a"], vec![Some("3"), Some("2"), Some("1")]),
+                (vec!["d", "b", "c"], vec![None, Some("2"), Some("3")]),
+                (
+                    vec!["d", "3", "s", "b", "s", "1", "c", "Y"],
+                    vec![None, None, None, Some("2"), None, None, Some("3"), None],
+                ),
+            ];
+
+            for (keys, expected_values) in test_cases {
+                let keys: Vec<RedisKey<_>> = keys
+                    .into_iter()
+                    .map(|key| RedisKey(key.to_string()))
+                    .collect();
+                let expected_values: Vec<Option<String>> = expected_values
+                    .into_iter()
+                    .map(|value| value.map(ToString::to_string))
+                    .collect();
+
+                let values = storage.get_multiple(keys).await;
+                let parsed_values: Vec<Option<String>> =
+                    values.into_iter().map(|v| v.map(|v| v.0)).collect();
+                assert_eq!(parsed_values, expected_values);
+            }
+
+            Ok(())
+        }
     }
 }
