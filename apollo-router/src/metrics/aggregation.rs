@@ -4,6 +4,7 @@ use std::ops::DerefMut;
 use std::sync::Arc;
 
 use derive_more::From;
+use opentelemetry::InstrumentationScope;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Gauge;
@@ -49,9 +50,7 @@ impl Default for AggregateMeterProvider {
 
         meter_provider.set(
             MeterProviderType::OtelDefault,
-            Some(FilterMeterProvider::public(
-                SdkMeterProvider::default(),
-            )),
+            Some(FilterMeterProvider::public(SdkMeterProvider::default())),
         );
 
         meter_provider
@@ -178,17 +177,14 @@ impl AggregateMeterProvider {
 
 impl Inner {
     pub(crate) fn meter(&mut self, name: &'static str) -> Meter {
-        self.versioned_meter(
-            name,
-            None::<Cow<'static, str>>,
-            None::<Cow<'static, str>>,
-        )
+        self.versioned_meter(name, None::<Cow<'static, str>>, None::<Cow<'static, str>>, None)
     }
     pub(crate) fn versioned_meter(
         &mut self,
         name: &'static str,
         version: Option<impl Into<Cow<'static, str>>>,
         schema_url: Option<impl Into<Cow<'static, str>>>,
+        attributes: Option<Vec<KeyValue>>,
     ) -> Meter {
         let version = version.map(|v| v.into());
         let schema_url = schema_url.map(|v| v.into());
@@ -203,7 +199,17 @@ impl Inner {
                         schema_url: schema_url.clone(),
                     })
                     .or_insert_with(|| {
-                        provider.meter(name)
+                        let mut builder = InstrumentationScope::builder(name);
+                        if let Some(ref v) = version {
+                            builder = builder.with_version(v.clone());
+                        }
+                        if let Some(ref s) = schema_url {
+                            builder = builder.with_schema_url(s.clone());
+                        }
+                        if let Some(ref attrs) = attributes {
+                            builder = builder.with_attributes(attrs.clone());
+                        }
+                        provider.meter_with_scope(builder.build())
                     })
                     .clone(),
             );
@@ -214,14 +220,11 @@ impl Inner {
 }
 
 impl MeterProvider for AggregateMeterProvider {
-    fn meter(
-        &self,
-        name: &'static str,
-    ) -> Meter {
+    fn meter(&self, name: &'static str) -> Meter {
         let mut inner = self.inner.lock();
         inner.meter(name)
     }
-    
+
     fn meter_with_scope(&self, scope: opentelemetry::InstrumentationScope) -> Meter {
         let provider = SdkMeterProvider::default();
         provider.meter_with_scope(scope)
@@ -297,7 +300,7 @@ macro_rules! aggregate_instrument_fn {
         fn $name(
             &self,
             builder: opentelemetry::metrics::InstrumentBuilder<'_, $wrapper<$ty>>,
-        ) -> $wrapper<$ty>{
+        ) -> $wrapper<$ty> {
             let delegates = self
                 .meters
                 .iter()
@@ -322,7 +325,7 @@ macro_rules! aggregate_histogram_fn {
         fn $name(
             &self,
             builder: opentelemetry::metrics::HistogramBuilder<'_, $wrapper<$ty>>,
-        ) -> $wrapper<$ty>{
+        ) -> $wrapper<$ty> {
             let delegates = self
                 .meters
                 .iter()
@@ -345,7 +348,6 @@ macro_rules! aggregate_histogram_fn {
 impl InstrumentProvider for AggregateInstrumentProvider {
     aggregate_instrument_fn!(u64_counter, u64, Counter, AggregateCounter);
     aggregate_instrument_fn!(f64_counter, f64, Counter, AggregateCounter);
-
 
     aggregate_histogram_fn!(u64_histogram, u64, Histogram, AggregateHistogram);
     aggregate_histogram_fn!(f64_histogram, f64, Histogram, AggregateHistogram);
@@ -377,22 +379,9 @@ impl InstrumentProvider for AggregateInstrumentProvider {
         ObservableUpDownCounter
     );
 
-    aggregate_observable_instrument_fn!(
-        f64_observable_gauge,
-        f64,
-        ObservableGauge
-    );
-    aggregate_observable_instrument_fn!(
-        i64_observable_gauge,
-        i64,
-        ObservableGauge
-    );
-    aggregate_observable_instrument_fn!(
-        u64_observable_gauge,
-        u64,
-        ObservableGauge
-    );
-
+    aggregate_observable_instrument_fn!(f64_observable_gauge, f64, ObservableGauge);
+    aggregate_observable_instrument_fn!(i64_observable_gauge, i64, ObservableGauge);
+    aggregate_observable_instrument_fn!(u64_observable_gauge, u64, ObservableGauge);
 }
 
 #[cfg(test)]
@@ -402,20 +391,20 @@ mod test {
     use std::sync::atomic::AtomicI64;
     use std::time::Duration;
 
+    use crate::metrics::aggregation::AggregateMeterProvider;
+    use crate::metrics::aggregation::MeterProviderType;
+    use crate::metrics::filter::FilterMeterProvider;
     use async_trait::async_trait;
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::error::OTelSdkResult;
     use opentelemetry_sdk::metrics::ManualReader;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
     use opentelemetry_sdk::metrics::PeriodicReader;
+    use opentelemetry_sdk::metrics::Temporality;
     use opentelemetry_sdk::metrics::data::Gauge;
     use opentelemetry_sdk::metrics::data::ResourceMetrics;
     use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
     use opentelemetry_sdk::metrics::reader::MetricReader;
-    use opentelemetry_sdk::metrics::Temporality;
-    use crate::metrics::aggregation::AggregateMeterProvider;
-    use crate::metrics::aggregation::MeterProviderType;
-    use crate::metrics::filter::FilterMeterProvider;
 
     #[derive(Clone, Debug)]
     struct SharedReader(Arc<ManualReader>);
@@ -573,7 +562,7 @@ mod test {
         let meter_provider = AggregateMeterProvider::default();
         meter_provider.set(
             MeterProviderType::OtelDefault,
-            Some(FilterMeterProvider::public(delegate))
+            Some(FilterMeterProvider::public(delegate)),
         );
 
         let counter = meter_provider
@@ -703,12 +692,10 @@ mod test {
         meter_provider: &AggregateMeterProvider,
         shutdown: &Arc<AtomicBool>,
     ) -> PeriodicReader<TestExporter> {
-        PeriodicReader::builder(
-            TestExporter {
-                meter_provider: meter_provider.clone(),
-                shutdown: shutdown.clone(),
-            },
-        )
+        PeriodicReader::builder(TestExporter {
+            meter_provider: meter_provider.clone(),
+            shutdown: shutdown.clone(),
+        })
         .with_interval(Duration::from_millis(10))
         .with_timeout(Duration::from_millis(10))
         .build()

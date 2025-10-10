@@ -6,14 +6,15 @@ use opentelemetry::KeyValue;
 use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Gauge;
 use opentelemetry::metrics::Histogram;
-use opentelemetry::metrics::UpDownCounter;
-use opentelemetry::metrics::ObservableCounter;
-use opentelemetry::metrics::ObservableGauge;
-use opentelemetry::metrics::ObservableUpDownCounter;
 use opentelemetry::metrics::InstrumentProvider;
 use opentelemetry::metrics::Meter;
 use opentelemetry::metrics::MeterProvider as OtelMeterProvider;
+use opentelemetry::metrics::ObservableCounter;
+use opentelemetry::metrics::ObservableGauge;
+use opentelemetry::metrics::ObservableUpDownCounter;
+use opentelemetry::metrics::UpDownCounter;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry::InstrumentationScope;
 use regex::Regex;
 
 #[derive(Clone)]
@@ -25,12 +26,24 @@ impl MeterProvider {
     fn versioned_meter(
         &self,
         name: &'static str,
-        _version: Option<impl Into<Cow<'static, str>>>,
-        _schema_url: Option<impl Into<Cow<'static, str>>>,
-        _attributes: Option<Vec<KeyValue>>,
+        version: Option<impl Into<Cow<'static, str>>>,
+        schema_url: Option<impl Into<Cow<'static, str>>>,
+        attributes: Option<Vec<KeyValue>>,
     ) -> Meter {
         match &self {
-            MeterProvider::Regular(provider) => provider.meter(name),
+            MeterProvider::Regular(provider) => {
+                let mut builder = InstrumentationScope::builder(name);
+                if let Some(v) = version {
+                    builder = builder.with_version(v.into());
+                }
+                if let Some(s) = schema_url {
+                    builder = builder.with_schema_url(s.into());
+                }
+                if let Some(ref attrs) = attributes {
+                    builder = builder.with_attributes(attrs.clone());
+                }
+                provider.meter_with_scope(builder.build())
+            }
         }
     }
     fn shutdown(&self) -> opentelemetry_sdk::error::OTelSdkResult {
@@ -141,18 +154,18 @@ macro_rules! filter_instrument_fn {
                 (_, _) => {
                     let mut instrument_builder = self.delegate.$name(builder.name);
                     if let Some(ref description) = builder.description {
-                        instrument_builder = instrument_builder.with_description(description.clone());
+                        instrument_builder =
+                            instrument_builder.with_description(description.clone());
                     }
                     if let Some(ref unit) = builder.unit {
                         instrument_builder = instrument_builder.with_unit(unit.clone());
                     }
                     instrument_builder.build()
-                },
+                }
             }
         }
     };
 }
-
 
 macro_rules! filter_histogram_fn {
     ($name:ident, $ty:ty, $wrapper:ident) => {
@@ -168,13 +181,14 @@ macro_rules! filter_histogram_fn {
                 (_, _) => {
                     let mut instrument_builder = self.delegate.$name(builder.name);
                     if let Some(ref description) = builder.description {
-                        instrument_builder = instrument_builder.with_description(description.clone());
+                        instrument_builder =
+                            instrument_builder.with_description(description.clone());
                     }
                     if let Some(ref unit) = builder.unit {
                         instrument_builder = instrument_builder.with_unit(unit.clone());
                     }
                     instrument_builder.build()
-                },
+                }
             }
         }
     };
@@ -197,20 +211,20 @@ macro_rules! filter_observable_instrument_fn {
                         instrument_builder = instrument_builder.with_callback(callback);
                     }
                     if let Some(ref description) = builder.description {
-                        instrument_builder = instrument_builder.with_description(description.clone());
+                        instrument_builder =
+                            instrument_builder.with_description(description.clone());
                     }
                     if let Some(ref unit) = builder.unit {
                         instrument_builder = instrument_builder.with_unit(unit.clone());
                     }
                     instrument_builder.build()
-                },
+                }
             }
         }
     };
 }
 
 impl InstrumentProvider for FilteredInstrumentProvider {
-
     filter_instrument_fn!(u64_counter, u64, Counter);
     filter_instrument_fn!(f64_counter, f64, Counter);
 
@@ -233,15 +247,10 @@ impl InstrumentProvider for FilteredInstrumentProvider {
     filter_observable_instrument_fn!(f64_observable_gauge, f64, ObservableGauge);
     filter_observable_instrument_fn!(i64_observable_gauge, i64, ObservableGauge);
     filter_observable_instrument_fn!(u64_observable_gauge, u64, ObservableGauge);
-
-
 }
 
 impl opentelemetry::metrics::MeterProvider for FilterMeterProvider {
-    fn meter(
-        &self,
-        name: &'static str,
-    ) -> Meter {
+    fn meter(&self, name: &'static str) -> Meter {
         Meter::new(Arc::new(FilteredInstrumentProvider {
             noop: opentelemetry::global::meter_provider().meter(""),
             delegate: self
@@ -251,10 +260,7 @@ impl opentelemetry::metrics::MeterProvider for FilterMeterProvider {
             allow: self.allow.clone(),
         }))
     }
-    fn meter_with_scope(
-        &self,
-        scope: opentelemetry::InstrumentationScope,
-    ) -> Meter {
+    fn meter_with_scope(&self, scope: opentelemetry::InstrumentationScope) -> Meter {
         let provider = SdkMeterProvider::default();
         provider.meter_with_scope(scope)
     }
@@ -262,9 +268,9 @@ impl opentelemetry::metrics::MeterProvider for FilterMeterProvider {
 
 #[cfg(test)]
 mod test {
+    use opentelemetry_sdk::metrics::InMemoryMetricExporter;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
     use opentelemetry_sdk::metrics::PeriodicReader;
-    use opentelemetry_sdk::metrics::InMemoryMetricExporter;
 
     use crate::metrics::filter::FilterMeterProvider;
 
@@ -336,7 +342,11 @@ mod test {
                 .any(|m| m.name() == "apollo.router.operations.test")
         );
 
-        assert!(metrics.iter().any(|m| m.name() == "apollo.router.operations"));
+        assert!(
+            metrics
+                .iter()
+                .any(|m| m.name() == "apollo.router.operations")
+        );
 
         assert!(
             metrics
@@ -400,9 +410,13 @@ mod test {
             .flat_map(|m| m.scope_metrics().into_iter())
             .flat_map(|m| m.metrics().into_iter())
             .collect();
-        assert!(metrics.iter().any(|m| m.name() == "apollo.router.operations"
-            && m.description() == "desc"
-            && m.unit() == "ms"));
+        assert!(
+            metrics
+                .iter()
+                .any(|m| m.name() == "apollo.router.operations"
+                    && m.description() == "desc"
+                    && m.unit() == "ms")
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -423,9 +437,9 @@ mod test {
 
         test_public_metrics(
             exporter.clone(),
-                MeterProviderBuilder::default()
-                    .with_reader(PeriodicReader::builder(exporter.clone()).build())
-                    .build(),
+            MeterProviderBuilder::default()
+                .with_reader(PeriodicReader::builder(exporter.clone()).build())
+                .build(),
         )
         .await;
     }
@@ -434,7 +448,10 @@ mod test {
         meter_provider: T,
     ) {
         let meter_provider = FilterMeterProvider::public(meter_provider);
-        let filtered = meter_provider.delegate.versioned_meter("filtered", "".into(), "".into(), None);
+        let filtered =
+            meter_provider
+                .delegate
+                .versioned_meter("filtered", "".into(), "".into(), None);
         filtered
             .u64_counter("apollo.router.config")
             .build()
