@@ -1,0 +1,4 @@
+{
+    "query": "query Feed {\n  postInterface1(id: \"\") {\n    __typename\n    feed {\n      ...relatedPostFragment\n      ... on Recommendation {\n        postInterface1 {\n          ...relatedPostFragment\n        }\n      }\n    }\n  }\n}\n\nfragment crosspostFragment on PostInterface2 {\n  crosspost {\n    postInterface1 {\n      ... on PostInterface2 {\n        __typename\n        gallery {\n          __typename\n          items {\n            __typename\n            id\n            name\n          }\n        }\n      }\n    }\n  }\n}\n\nfragment relatedPostFragment on PostInterface1 {\n  __typename\n  ... on PostInterface2 {\n    ...crosspostFragment\n  }\n}"
+  }
+  

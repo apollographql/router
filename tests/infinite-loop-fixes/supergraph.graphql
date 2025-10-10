@@ -1,0 +1,203 @@
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+type ConcretePost1 implements PostInterface1 & PostInterface2 & FeedInterface1
+  @join__implements(graph: A, interface: "PostInterface1")
+  @join__implements(graph: A, interface: "PostInterface2")
+  @join__implements(graph: A, interface: "FeedInterface1")
+  @join__implements(graph: B, interface: "PostInterface1")
+  @join__implements(graph: B, interface: "PostInterface2")
+  @join__implements(graph: B, interface: "FeedInterface1")
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+{
+  id: ID!
+  name: String
+  score: Int
+  crosspost: Crosspost
+  feed: [FeedInterface1] @join__field(graph: A)
+  gallery: Gallery @join__field(graph: B)
+}
+
+type ConcretePost2 implements PostInterface1 & FeedInterface1
+  @join__implements(graph: A, interface: "PostInterface1")
+  @join__implements(graph: A, interface: "FeedInterface1")
+  @join__implements(graph: B, interface: "PostInterface1")
+  @join__implements(graph: B, interface: "FeedInterface1")
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+{
+  id: ID!
+  name: String
+  score: Int
+  crosspost: Crosspost
+  feed: [FeedInterface1] @join__field(graph: A)
+}
+
+type ConcretePost3 implements PostInterface1 & PostInterface2 & FeedInterface1
+  @join__implements(graph: A, interface: "PostInterface1")
+  @join__implements(graph: A, interface: "PostInterface2")
+  @join__implements(graph: A, interface: "FeedInterface1")
+  @join__implements(graph: B, interface: "PostInterface1")
+  @join__implements(graph: B, interface: "PostInterface2")
+  @join__implements(graph: B, interface: "FeedInterface1")
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+{
+  id: ID!
+  name: String
+  score: Int
+  crosspost: Crosspost
+  feed: [FeedInterface1] @join__field(graph: A)
+  gallery: Gallery @join__field(graph: B)
+}
+
+type ConcretePost4 implements PostInterface1 & FeedInterface1
+  @join__implements(graph: A, interface: "PostInterface1")
+  @join__implements(graph: A, interface: "FeedInterface1")
+  @join__implements(graph: B, interface: "PostInterface1")
+  @join__implements(graph: B, interface: "FeedInterface1")
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+{
+  id: ID!
+  name: String
+  score: Int
+  crosspost: Crosspost
+  feed: [FeedInterface1] @join__field(graph: A)
+}
+
+type ConcretePost5 implements PostInterface1 & FeedInterface1
+  @join__implements(graph: A, interface: "PostInterface1")
+  @join__implements(graph: A, interface: "FeedInterface1")
+  @join__implements(graph: B, interface: "PostInterface1")
+  @join__implements(graph: B, interface: "FeedInterface1")
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+{
+  id: ID!
+  name: String
+  crosspost: Crosspost
+  feed: [FeedInterface1] @join__field(graph: A)
+}
+
+type ConcretePost6 implements PostInterface1 & PostInterface2 & FeedInterface1
+  @join__implements(graph: A, interface: "PostInterface1")
+  @join__implements(graph: A, interface: "PostInterface2")
+  @join__implements(graph: A, interface: "FeedInterface1")
+  @join__implements(graph: B, interface: "PostInterface1")
+  @join__implements(graph: B, interface: "PostInterface2")
+  @join__implements(graph: B, interface: "FeedInterface1")
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+{
+  id: ID!
+  name: String
+  score: Int
+  crosspost: Crosspost
+  feed: [FeedInterface1] @join__field(graph: A)
+  gallery: Gallery @join__field(graph: B)
+}
+
+type Crosspost
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  id: ID!
+  postInterface1: PostInterface1
+}
+
+interface FeedInterface1
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  id: ID!
+}
+
+type Gallery
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  items: [GalleryItem]
+}
+
+type GalleryItem
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  id: ID
+  name: String
+  url: String
+}
+
+scalar join__FieldSet
+
+enum join__Graph {
+  A @join__graph(name: "a", url: "http://localhost:8070/query")
+  B @join__graph(name: "b", url: "http://localhost:8071/query")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+interface PostInterface1
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  id: ID!
+  name: String
+  crosspost: Crosspost
+  feed: [FeedInterface1] @join__field(graph: A)
+}
+
+interface PostInterface2
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  id: ID!
+  score: Int
+  crosspost: Crosspost
+  gallery: Gallery @join__field(graph: B)
+}
+
+type Query
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  postInterface1(id: ID!): PostInterface1 @join__field(graph: B)
+}
+
+type Recommendation implements FeedInterface1
+  @join__implements(graph: A, interface: "FeedInterface1")
+  @join__implements(graph: B, interface: "FeedInterface1")
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  id: ID!
+  postInterface1: PostInterface1
+}

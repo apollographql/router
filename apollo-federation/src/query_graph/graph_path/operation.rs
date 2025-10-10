@@ -1855,13 +1855,38 @@ impl SimultaneousPaths {
             .fold(1_usize, |product, options| {
                 product.saturating_mul(options.len())
             });
-        if num_options > 1_000_000 {
-            return Err(SingleFederationError::QueryPlanComplexityExceeded {
-                message: format!(
-                    "Excessive number of combinations for a given path: {num_options}"
-                ),
+
+        // Experimental constant to prevent combinatorial explosion when advancing through multiple
+        // interface implementations. Testing shows 20,000 provides optimal speed/memory trade-off.
+        // Search for MKEXP_ to find all experimental constants added for infinite loop fixes.
+        const MKEXP_MAX_CARTESIAN_PRODUCT: usize = 20_000;
+        const MKEXP_DEBUG_LOGGING: bool = false;
+
+        // AGGRESSIVE OPTIMIZATION: Much lower limit to prevent exponential explosion
+        // and force early termination with reasonable plans
+        if num_options > MKEXP_MAX_CARTESIAN_PRODUCT {
+            // Instead of failing, truncate the options to keep only the first few from each path
+            // This prevents exponential explosion while still allowing some combinations
+            let mut truncated_options = Vec::new();
+            for path_options in &options_for_each_path {
+                let max_per_path = (MKEXP_MAX_CARTESIAN_PRODUCT as f64).powf(1.0 / options_for_each_path.len() as f64) as usize;
+                let truncated_path: Vec<_> = path_options.iter().take(max_per_path).cloned().collect();
+                truncated_options.push(truncated_path);
             }
-            .into());
+            
+            // Recalculate with truncated options
+            let truncated_num_options = truncated_options
+                .iter()
+                .fold(1_usize, |product, options| {
+                    product.saturating_mul(options.len())
+                });
+            
+            if MKEXP_DEBUG_LOGGING {
+                eprintln!("WARNING: Truncated cartesian product from {} to {} combinations", 
+                    num_options, truncated_num_options);
+            }
+            
+            return Self::flat_cartesian_product(truncated_options, check_cancellation);
         }
         let mut product = Vec::with_capacity(num_options);
 

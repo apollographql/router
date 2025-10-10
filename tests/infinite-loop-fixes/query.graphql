@@ -1,0 +1,38 @@
+query Feed {
+  postInterface1(id: "") {
+    __typename
+    feed {
+      ...relatedPostFragment
+      ... on Recommendation {
+        postInterface1 {
+          ...relatedPostFragment
+        }
+      }
+    }
+  }
+}
+
+fragment crosspostFragment on PostInterface2 {
+  crosspost {
+    postInterface1 {
+      ... on PostInterface2 {
+        __typename
+        gallery {
+          __typename
+          items {
+            __typename
+            id
+            name
+          }
+        }
+      }
+    }
+  }
+}
+
+fragment relatedPostFragment on PostInterface1 {
+  __typename
+  ... on PostInterface2 {
+    ...crosspostFragment
+  }
+}

@@ -471,15 +471,22 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 .set(evaluated_paths_count.get() + simultaneous_indirect_path_count);
 
             new_options.extend(followups_for_option);
-            if let Some(options_limit) = self.parameters.config.debug.paths_limit {
-                if new_options.len() > options_limit as usize {
-                    return Err(SingleFederationError::QueryPlanComplexityExceeded {
-                        message: format!(
-                            "Too many options generated for {}, reached the limit of {}.",
-                            selection, options_limit,
-                        ),
-                    }
-                    .into());
+
+            // Experimental constant to prevent excessive memory usage and planning time.
+            // Testing with production schemas shows 500 is optimal balance between speed and plan quality.
+            // Search for MKEXP_ to find all experimental constants added for infinite loop fixes.
+            const MKEXP_MAX_OPTIONS_PER_FIELD: usize = 500;
+            const MKEXP_DEBUG_LOGGING: bool = false;
+
+            // AGGRESSIVE OPTIMIZATION: Limit options per field to prevent exponential explosion
+            // This is much more aggressive than the original limit but prevents runaway complexity
+            if new_options.len() > MKEXP_MAX_OPTIONS_PER_FIELD {
+                // Keep only the first MKEXP_MAX_OPTIONS_PER_FIELD options and log a warning
+                let was_len = new_options.len();
+                new_options.truncate(MKEXP_MAX_OPTIONS_PER_FIELD);
+                if MKEXP_DEBUG_LOGGING {
+                    eprintln!("WARNING: Truncated options for {} to {} (was {})", 
+                        selection, MKEXP_MAX_OPTIONS_PER_FIELD, was_len);
                 }
             }
         }

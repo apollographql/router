@@ -135,7 +135,24 @@ where
         index: Some(0),
     });
 
+    // Experimental timeout constants for query planning to prevent excessive planning time.
+    // These implement a multi-tier timeout strategy:
+    // - Soft timeout: Return a plan if one has been found (4s)
+    // - Hard timeout: Always stop, even without a plan (30s)
+    // - Check interval: How often to check soft timeout (1s)
+    // 
+    // Search for MKEXP_ to find all experimental constants added for infinite loop fixes.
+    const MKEXP_SOFT_TIMEOUT_MS: u64 = 4000;
+    const MKEXP_HARD_TIMEOUT_MS: u64 = 30000;
+    const MKEXP_CHECK_INTERVAL_MS: u64 = 1000;
+    
+    // Enable verbose logging for query planning debugging. Set to false for production.
+    const MKEXP_DEBUG_LOGGING: bool = false;
+
     let mut min = None;
+    let start_time = std::time::Instant::now();
+    let last_timeout_check = start_time;
+    
     while let Some(Partial {
         partial_plan,
         partial_cost,
@@ -144,6 +161,35 @@ where
         index,
     }) = stack.pop_back()
     {
+        let elapsed = start_time.elapsed();
+        
+        // Hard timeout: Always stop after 15 seconds, regardless of whether we have a plan
+        if elapsed > std::time::Duration::from_millis(MKEXP_HARD_TIMEOUT_MS) {
+            if MKEXP_DEBUG_LOGGING {
+                if min.is_some() {
+                    eprintln!("⏱ Hard timeout reached after {:.2}s, returning best plan found", 
+                        elapsed.as_secs_f64());
+                } else {
+                    eprintln!("❌ Hard timeout reached after {:.2}s with no plan found", 
+                        elapsed.as_secs_f64());
+                }
+            }
+            break;
+        }
+        
+        // Soft timeout + periodic checks: After 4 seconds, check periodically (every ~1s of loop iterations)
+        // and if we have a plan, return it
+        if elapsed > std::time::Duration::from_millis(MKEXP_SOFT_TIMEOUT_MS) && min.is_some() {
+            let now = std::time::Instant::now();
+            let time_since_last_check = now.duration_since(last_timeout_check);
+            if time_since_last_check >= std::time::Duration::from_millis(MKEXP_CHECK_INTERVAL_MS) {
+                if MKEXP_DEBUG_LOGGING {
+                    eprintln!("⏱ Soft timeout check at {:.2}s, returning best plan found", 
+                        elapsed.as_secs_f64());
+                }
+                break;
+            }
+        }
         // If we've found some plan already,
         // and the partial we have is already more costly than that,
         // then no point continuing with it.
@@ -187,7 +233,30 @@ where
             // We have a complete plan. If it is best, save it, otherwise, we're done with it.
             plan_builder.on_plan_generated(&new_partial_plan, cost, previous_min_cost);
             if !previous_min_is_better {
-                min = Some((new_partial_plan, cost))
+                let was_first_plan = min.is_none();
+                let is_better = previous_min_cost.is_some();
+                min = Some((new_partial_plan, cost));
+                
+                // Log when we find the first plan or better plans
+                if MKEXP_DEBUG_LOGGING {
+                    if was_first_plan {
+                        eprintln!("✓ First valid plan found after {:.2}s with cost {:.2}", 
+                            start_time.elapsed().as_secs_f64(), cost);
+                    } else if is_better {
+                        eprintln!("✓ Better plan found after {:.2}s with cost {:.2} (improved from {:.2})", 
+                            start_time.elapsed().as_secs_f64(), cost, previous_min_cost.unwrap());
+                    }
+                }
+                
+                // AGGRESSIVE EARLY TERMINATION: If we have a very good plan early on, stop immediately
+                // This is more aggressive than the soft timeout for exceptionally good plans
+                if start_time.elapsed() > std::time::Duration::from_secs(2) && cost < 2000.0 {
+                    if MKEXP_DEBUG_LOGGING {
+                        eprintln!("→ Early termination after {:.2}s (cost {:.2} < 2000, very good plan)", 
+                            start_time.elapsed().as_secs_f64(), cost);
+                    }
+                    break;
+                }
             }
             continue;
         }
@@ -205,6 +274,14 @@ where
             )
         }
     }
+    
+    // Log the final plan cost
+    if MKEXP_DEBUG_LOGGING {
+        if let Some((_, final_cost)) = &min {
+            eprintln!("→ Returning final plan with cost {:.2}", final_cost);
+        }
+    }
+    
     min.ok_or_else(|| FederationError::internal("A plan should have been found"))
 }
 

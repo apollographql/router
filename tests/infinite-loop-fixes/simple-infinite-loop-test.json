@@ -1,0 +1,4 @@
+{
+  "query": "query SimpleInfiniteLoopTest {\n  postInterface1(id: \"1\") {\n    __typename\n    feed {\n      __typename\n      ... on Recommendation {\n        postInterface1 {\n          __typename\n          ... on PostInterface2 {\n            crosspost {\n              postInterface1 {\n                __typename\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}"
+}
+

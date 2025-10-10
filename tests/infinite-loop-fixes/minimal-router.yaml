@@ -1,0 +1,15 @@
+supergraph:
+  introspection: true
+  # Very high query planning limits for extremely complex queries
+  # WARNING: These high limits may cause high memory usage
+  query_planning:
+    experimental_plans_limit: 1000000
+    experimental_paths_limit: 1000000
+
+# Increase server timeouts
+server:
+  http:
+    header_read_timeout: 300s
+
+plugins:
+  experimental.expose_query_plan: true
