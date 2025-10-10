@@ -355,11 +355,10 @@ impl RedisCacheStorage {
             .with_config(|client_config| {
                 // TODO: comment
                 if is_cluster {
-                    if let Err(err) = client_config
+                    let _ = client_config
                         .server
-                        .set_cluster_discovery_policy(ClusterDiscoveryPolicy::ConfigEndpoint) {
-                        tracing::error!("Redis running in a cluster but unable to set cluster-discovery-policy: {err}");
-                    }
+                        .set_cluster_discovery_policy(ClusterDiscoveryPolicy::ConfigEndpoint)
+                        .inspect_err(|err| tracing::error!("Redis running in a cluster but unable to set cluster-discovery-policy: {err}"));
                 }
             })
             .with_connection_config(|config| {
