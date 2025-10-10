@@ -259,7 +259,6 @@ struct BuiltinInstruments {
     connector_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     apollo_connector_instruments: Arc<HashMap<String, StaticInstrument>>,
     cache_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
-    _pipeline_instruments: Arc<HashMap<String, StaticInstrument>>,
 }
 
 fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments {
@@ -272,7 +271,6 @@ fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments 
         connector_custom_instruments: Arc::new(config.new_builtin_connector_instruments()),
         apollo_connector_instruments: Arc::new(config.new_builtin_apollo_connector_instruments()),
         cache_custom_instruments: Arc::new(config.new_builtin_cache_instruments()),
-        _pipeline_instruments: Arc::new(config.new_pipeline_instruments()),
     }
 }
 

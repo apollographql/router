@@ -1047,12 +1047,6 @@ impl InstrumentsConfig {
             }),
         }
     }
-
-    pub(crate) fn new_pipeline_instruments(&self) -> HashMap<String, StaticInstrument> {
-        // Pipeline and connection metrics are now tracked using updown counters
-        // and no longer require static gauge instruments
-        HashMap::new()
-    }
 }
 
 #[derive(Debug)]
