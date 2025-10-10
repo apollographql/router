@@ -287,6 +287,7 @@ impl RedisCacheStorage {
             caller,
             config.metrics_interval,
             config.required_to_start,
+            config.lazy_replica_connections,
         )
         .await
     }
@@ -305,6 +306,7 @@ impl RedisCacheStorage {
             reset_ttl: false,
             pool_size: 1,
             metrics_interval: Duration::from_millis(100),
+            lazy_replica_connections: false,
         };
 
         Self::from_mocks_and_config(mocks, config, "test", false).await
@@ -333,6 +335,7 @@ impl RedisCacheStorage {
             caller,
             config.metrics_interval,
             true,
+            config.lazy_replica_connections,
         )
         .await
     }
@@ -349,6 +352,7 @@ impl RedisCacheStorage {
         caller: &'static str,
         metrics_interval: Duration,
         required_to_start: bool,
+        lazy_replica_connections: bool,
     ) -> Result<Self, BoxError> {
         let pooled_client = Builder::from_config(client_config)
             // TODO: comment
@@ -375,7 +379,7 @@ impl RedisCacheStorage {
                     interval: Duration::from_secs(3),
                 };
                 // TODO: figure out why this is necessary and either document or remove it
-                config.replica.lazy_connections = false;
+                config.replica.lazy_connections = lazy_replica_connections;
             })
             .with_performance_config(|config| {
                 config.default_command_timeout = timeout;
