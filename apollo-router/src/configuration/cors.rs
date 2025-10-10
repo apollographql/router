@@ -1191,7 +1191,10 @@ policies:
         let result = cors.ensure_usable_cors_rules();
         assert!(result.is_err());
         // Should fail on the first wildcard check (global allow_headers)
-        assert_eq!(result.unwrap_err(), CorsConfigError::AllowCredentialsWithAllowHeaders);
+        assert_eq!(
+            result.unwrap_err(),
+            CorsConfigError::AllowCredentialsWithAllowHeaders
+        );
     }
 
     #[test]
