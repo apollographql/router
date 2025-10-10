@@ -133,6 +133,7 @@ where
 
         // Intercept OPTIONS requests and return preflight response directly
         if is_preflight {
+            println!("Preflight request!");
             let mut response = Response::builder()
                 .status(http::StatusCode::OK)
                 .body(ResBody::default())
@@ -439,6 +440,7 @@ mod tests {
     use super::*;
     use crate::configuration::cors::Cors;
     use crate::configuration::cors::Policy;
+    use crate::configuration::cors::PrivateNetworkAccessPolicy;
 
     struct DummyService;
     impl Service<Request<()>> for DummyService {
@@ -1211,5 +1213,101 @@ mod tests {
         let headers = resp.headers();
         let vary_header = headers.get(VARY).unwrap().to_str().unwrap();
         assert_eq!(vary_header, "origin, access-control-request-headers");
+    }
+
+    #[test]
+    fn pna_without_other_headers() {
+        let cors = Cors::builder()
+            .policies(vec![
+                Policy::builder()
+                    .private_network_access(PrivateNetworkAccessPolicy::builder().build())
+                    .origin("https://studio.apollographql.com")
+                    .build(),
+            ])
+            .build();
+        println!("{cors:?}");
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+
+        let req = Request::builder()
+            .method("OPTIONS")
+            .uri("/")
+            .header(ORIGIN, "https://studio.apollographql.com")
+            .body(())
+            .unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let finder = |header| resp.headers().iter().find(|h| h.0 == header);
+        assert!(finder(ACCESS_CONTROL_PRIVATE_NETWORK).is_some());
+        assert!(finder(PRIVATE_NETWORK_ACCESS_NAME).is_none());
+        assert!(finder(PRIVATE_NETWORK_ACCESS_ID).is_none());
+    }
+
+    #[test]
+    fn pna_with_access_name() {
+        let cors = Cors::builder()
+            .policies(vec![
+                Policy::builder()
+                    .private_network_access(
+                        PrivateNetworkAccessPolicy::builder()
+                            .access_name("ferris-server")
+                            .build(),
+                    )
+                    .origin("https://studio.apollographql.com")
+                    .build(),
+            ])
+            .allow_any_origin(true)
+            .build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+
+        let req = Request::builder()
+            .method("OPTIONS")
+            .uri("/")
+            .header(ORIGIN, "https://studio.apollographql.com")
+            .body(())
+            .unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        let finder = |header| resp.headers().iter().find(|h| h.0 == header);
+        assert!(finder(ACCESS_CONTROL_PRIVATE_NETWORK).is_some());
+        assert!(
+            finder(PRIVATE_NETWORK_ACCESS_NAME).is_some_and(|(_, name)| name == "ferris-server")
+        );
+        assert!(finder(PRIVATE_NETWORK_ACCESS_ID).is_none());
+    }
+
+    #[test]
+    fn pna_with_access_name_and_id() {
+        let cors = Cors::builder()
+            .policies(vec![
+                Policy::builder()
+                    .private_network_access(
+                        PrivateNetworkAccessPolicy::builder()
+                            .access_name("ferris-server")
+                            .access_id("01:23:45:67:89:0A")
+                            .build(),
+                    )
+                    .origin("https://studio.apollographql.com")
+                    .build(),
+            ])
+            .build();
+        let layer = CorsLayer::new(cors).unwrap();
+        let mut service = layer.layer(DummyService);
+
+        let req = Request::builder()
+            .method("OPTIONS")
+            .uri("/")
+            .header(ORIGIN, "https://studio.apollographql.com")
+            .body(())
+            .unwrap();
+        let resp = futures::executor::block_on(service.call(req)).unwrap();
+        resp.headers()
+            .iter()
+            .for_each(|header| println!("{header:?}"));
+        let finder = |header| resp.headers().iter().find(|h| h.0 == header);
+        assert!(finder(ACCESS_CONTROL_PRIVATE_NETWORK).is_some());
+        assert!(
+            finder(PRIVATE_NETWORK_ACCESS_NAME).is_some_and(|(_, name)| name == "ferris-server")
+        );
+        assert!(finder(PRIVATE_NETWORK_ACCESS_ID).is_some_and(|(_, id)| id == "01:23:45:67:89:0A"));
     }
 }

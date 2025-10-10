@@ -85,9 +85,9 @@ pub(crate) struct Policy {
     pub(crate) expose_headers: Arc<[Arc<str>]>,
 
     /// Regex patterns to match origins against.
-    #[serde(with = "serde_regex")]
+    #[serde(with = "arc_regex")]
     #[schemars(with = "Vec<String>")]
-    pub(crate) match_origins: Vec<Regex>,
+    pub(crate) match_origins: Arc<[Regex]>,
 
     /// The `Access-Control-Max-Age` header value in time units
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
@@ -126,7 +126,7 @@ impl Default for Policy {
             allow_credentials: None,
             allow_headers: Arc::new([]),
             expose_headers: Arc::new([]),
-            match_origins: Vec::new(),
+            match_origins: Arc::new([]),
             max_age: None,
             methods: None,
             origins: default_origins(),
@@ -162,7 +162,7 @@ impl Policy {
             allow_credentials,
             allow_headers: allow_headers.into_iter().map(Arc::from).collect(),
             expose_headers: expose_headers.into_iter().map(Arc::from).collect(),
-            match_origins,
+            match_origins: match_origins.into(),
             max_age,
             methods: methods.map(|methods| methods.into_iter().map(Arc::from).collect()),
             origins: origins.into_iter().map(Arc::from).collect(),
@@ -433,6 +433,27 @@ impl Cors {
             }
         }
         Ok(())
+    }
+}
+
+mod arc_regex {
+    use std::sync::Arc;
+
+    use regex::Regex;
+    use serde::Deserializer;
+    use serde::Serializer;
+
+    pub(super) fn serialize<S: Serializer>(
+        values: &Arc<[Regex]>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serde_regex::serialize(&values.to_vec(), serializer)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Arc<[Regex]>, D::Error> {
+        serde_regex::deserialize::<Vec<Regex>, D>(deserializer).map(Arc::from)
     }
 }
 
