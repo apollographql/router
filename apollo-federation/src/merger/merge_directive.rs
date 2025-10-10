@@ -64,12 +64,17 @@ impl Merger {
             self.merge_applied_directive(inaccessible, &directive_sources, &dest)?;
             names.shift_remove(inaccessible);
         }
-        self.applied_directives_to_merge
-            .push(AppliedDirectiveToMergeEntry {
-                names,
-                sources: directive_sources,
-                dest,
-            });
+
+        if names.is_empty() {
+            trace!("No applied directives to merge at {dest}");
+        } else {
+            self.applied_directives_to_merge
+                .push(AppliedDirectiveToMergeEntry {
+                    names,
+                    sources: directive_sources,
+                    dest,
+                });
+        }
         Ok(())
     }
 
@@ -127,10 +132,17 @@ impl Merger {
                 .counts();
 
             if directive_in_supergraph.definition.repeatable {
+                trace!(
+                    "Directive @{name} is repeatable, merging all {} applications at {pos}",
+                    directive_counts.len()
+                );
                 for directive in directive_counts.keys() {
                     dest.insert_directive(&mut self.merged, (*directive).clone())?;
                 }
             } else if directive_counts.len() == 1 {
+                trace!(
+                    "Directive @{name} is non-repeatable but only applied once, merging application at {pos}"
+                );
                 let only_application = directive_counts.iter().next().unwrap().0.clone();
                 dest.insert_directive(&mut self.merged, only_application)?;
             } else if let Some(merger) = &directive_in_supergraph.arguments_merger {
@@ -156,6 +168,9 @@ impl Merger {
                         merged_directive.arguments.push(Node::new(merged_arg));
                     }
                 }
+                trace!(
+                    "Directive @{name} is non-repeatable but has an argument merger, merging applications at {pos}"
+                );
                 dest.insert_directive(&mut self.merged, merged_directive)?;
                 self.error_reporter.add_hint(CompositionHint {
                     code: HintCode::MergedNonRepeatableDirectiveArguments.code().to_string(),
@@ -170,6 +185,9 @@ impl Merger {
                 .max_by_key(|(_, count)| *count)
                 .map(|(directive, _)| directive)
             {
+                trace!(
+                    "Directive @{name} is non-repeatable and has no argument merger, picking most used application at {pos}"
+                );
                 // When there is no argument merger, we use the application appearing in the most
                 // subgraphs. Adding it to the destination here allows the error reporter to
                 // determine which one we selected when it's looking through the sources.
@@ -198,6 +216,10 @@ impl Merger {
                     |application, subgraphs| format!("{application} in {subgraphs}"),
                     false,
                     false,
+                );
+            } else {
+                trace!(
+                    "Directive @{name} is non-repeatable but has no applications to merge at {pos} (this should not happen)"
                 );
             }
         }
@@ -412,7 +434,6 @@ impl Merger {
             let subgraph_args = map_sources(sources, |src| {
                 src.as_ref().map(|src| src.argument(arg.clone()))
             });
-            trace!("Full merging of argument {arg} of directive @{name}");
             self.merge_argument(&subgraph_args, &dest.argument(arg))?;
         }
         Ok(())

@@ -619,10 +619,6 @@ fn directive_argument_merger(
             let strategy = arg.composition_strategy.as_ref().unwrap();
             let arg_name = &arg.base_spec.name;
             let arg_type = (arg.base_spec.get_type)(schema, link)?;
-            assert!(
-                !arg_type.is_list(),
-                "Should have gotten error getting type for @{directive_name}({arg_name}:), but got {arg_type}"
-            );
             strategy.is_type_supported(schema, &arg_type).map_err(|support_msg| {
                 let strategy_name = strategy.name();
                 SingleFederationError::DirectiveDefinitionInvalid {
