@@ -11,7 +11,7 @@ orbs:
 executors:
   amd_linux_build: &amd_linux_build_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.18.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.19.0
     resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
@@ -19,13 +19,13 @@ executors:
       MISE_ENV: ci
   amd_linux_helm: &amd_linux_helm_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.18.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.19.0
     resource_class: small
     environment:
       MISE_ENV: ci
   amd_linux_test: &amd_linux_test_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.18.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.19.0
       - image: cimg/redis:7.4.6
       - image: cimg/postgres:17.6
         environment:
@@ -54,14 +54,14 @@ executors:
       CARGO_BUILD_JOBS: 4
   arm_linux_build: &arm_linux_build_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.18.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.19.0
     resource_class: arm.xlarge
     environment:
       MISE_ENV: ci
       CARGO_BUILD_JOBS: 8
   arm_linux_test: &arm_linux_test_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.18.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.19.0
     resource_class: arm.xlarge
     environment:
       MISE_ENV: ci
@@ -850,7 +850,7 @@ jobs:
 
   publish_github_release:
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.18.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.19.0
     resource_class: small
     environment:
       <<: *common_job_environment
