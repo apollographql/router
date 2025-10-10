@@ -1356,22 +1356,17 @@ mod test {
 
         // Test external registry with unlicensed state
         let schema_state = SchemaState {
-            sdl: "type Query { hello: String }".to_string(),
+            sdl: include_str!("testdata/oss.graphql").to_string(),
             launch_id: None,
             is_external_registry: true,
         };
 
-        let schema = Schema::parse_arc(
-            Arc::new(schema_state.clone()),
-            &crate::configuration::Configuration::builder()
-                .build()
-                .unwrap(),
-        )
-        .unwrap();
+        let config =
+            crate::configuration::Configuration::from_str(include_str!("testdata/oss.router.yaml"))
+                .unwrap();
+        let schema = Schema::parse_arc(Arc::new(schema_state.clone()), &config).unwrap();
         let report = LicenseEnforcementReport::build(
-            &crate::configuration::Configuration::builder()
-                .build()
-                .unwrap(),
+            &config,
             &schema,
             &LicenseState::Unlicensed,
             &schema_state,
@@ -1392,7 +1387,7 @@ mod test {
 
         // Test external registry with licensed state that includes the feature
         let schema_state = SchemaState {
-            sdl: "type Query { hello: String }".to_string(),
+            sdl: include_str!("testdata/oss.graphql").to_string(),
             launch_id: None,
             is_external_registry: true,
         };
@@ -1407,21 +1402,12 @@ mod test {
             limits: Some(limits),
         };
 
-        let schema = Schema::parse_arc(
-            Arc::new(schema_state.clone()),
-            &crate::configuration::Configuration::builder()
-                .build()
-                .unwrap(),
-        )
-        .unwrap();
-        let report = LicenseEnforcementReport::build(
-            &crate::configuration::Configuration::builder()
-                .build()
-                .unwrap(),
-            &schema,
-            &license_state,
-            &schema_state,
-        );
+        let config =
+            crate::configuration::Configuration::from_str(include_str!("testdata/oss.router.yaml"))
+                .unwrap();
+        let schema = Schema::parse_arc(Arc::new(schema_state.clone()), &config).unwrap();
+        let report =
+            LicenseEnforcementReport::build(&config, &schema, &license_state, &schema_state);
 
         // Should not detect external registry violation with proper license
         assert!(!report.uses_restricted_features());
@@ -1437,22 +1423,17 @@ mod test {
 
         // Test Apollo registry with unlicensed state (should be allowed)
         let schema_state = SchemaState {
-            sdl: "type Query { hello: String }".to_string(),
+            sdl: include_str!("testdata/oss.graphql").to_string(),
             launch_id: None,
             is_external_registry: false, // Apollo registry is not external
         };
 
-        let schema = Schema::parse_arc(
-            Arc::new(schema_state.clone()),
-            &crate::configuration::Configuration::builder()
-                .build()
-                .unwrap(),
-        )
-        .unwrap();
+        let config =
+            crate::configuration::Configuration::from_str(include_str!("testdata/oss.router.yaml"))
+                .unwrap();
+        let schema = Schema::parse_arc(Arc::new(schema_state.clone()), &config).unwrap();
         let report = LicenseEnforcementReport::build(
-            &crate::configuration::Configuration::builder()
-                .build()
-                .unwrap(),
+            &config,
             &schema,
             &LicenseState::Unlicensed,
             &schema_state,
