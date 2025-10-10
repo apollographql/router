@@ -237,11 +237,6 @@ snapshot_kind: text
           ],
           "description": "Percentage of traces to send via the OTel protocol when sending to Apollo Studio."
         },
-        "preview_subgraph_metrics": {
-          "default": false,
-          "description": "Enable sending additional subgraph metrics to Apollo Studio via OTLP",
-          "type": "boolean"
-        },
         "send_headers": {
           "allOf": [
             {
@@ -266,6 +261,11 @@ snapshot_kind: text
           ],
           "default": "enhanced",
           "description": "Set the signature normalization algorithm to use when sending Apollo usage reports."
+        },
+        "subgraph_metrics": {
+          "default": false,
+          "description": "Enable sending additional subgraph metrics to Apollo Studio via OTLP",
+          "type": "boolean"
         },
         "tracing": {
           "allOf": [
