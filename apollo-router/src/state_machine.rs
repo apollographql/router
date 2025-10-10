@@ -334,7 +334,8 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 .map_err(|e| ServiceCreationError(e.to_string().into()))?,
         );
         // Check the license
-        let report = LicenseEnforcementReport::build(&configuration, &schema, &license);
+        let report =
+            LicenseEnforcementReport::build(&configuration, &schema, &license, &schema_state);
 
         let license_limits = match &*license {
             LicenseState::Licensed { limits } => {
@@ -715,6 +716,7 @@ mod tests {
         SchemaState {
             sdl: include_str!("testdata/supergraph.graphql").to_owned(),
             launch_id: None,
+            is_external_registry: false,
         }
     }
 
@@ -833,7 +835,7 @@ mod tests {
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
                     UpdateLicense(Arc::new(LicenseState::Licensed {
-                        limits: Some(LicenseLimits::default())
+                        limits: Some(LicenseLimits::default()),
                     })),
                     Shutdown
                 ])
@@ -869,7 +871,7 @@ mod tests {
                         limits: Some(LicenseLimits {
                             tps: None,
                             allowed_features: (HashSet::from_iter(allowed_features))
-                        })
+                        }),
                     })),
                     Shutdown
                 ])
@@ -1645,7 +1647,8 @@ mod tests {
                     UpdateConfiguration(Arc::new(Configuration::builder().build().unwrap())),
                     UpdateSchema(SchemaState {
                         sdl: minimal_schema.to_owned(),
-                        launch_id: None
+                        launch_id: None,
+                        is_external_registry: false,
                     }),
                     UpdateLicense(Default::default()),
                     UpdateSchema(example_schema()),
@@ -1671,12 +1674,14 @@ mod tests {
                     UpdateConfiguration(Arc::new(Configuration::builder().build().unwrap())),
                     UpdateSchema(SchemaState {
                         sdl: minimal_schema.to_owned(),
-                        launch_id: None
+                        launch_id: None,
+                        is_external_registry: false,
                     }),
                     UpdateLicense(Default::default()),
                     UpdateSchema(SchemaState {
                         sdl: minimal_schema.to_owned(),
-                        launch_id: None
+                        launch_id: None,
+                        is_external_registry: false,
                     }),
                     Shutdown
                 ])
@@ -1700,7 +1705,8 @@ mod tests {
                     UpdateConfiguration(Arc::new(Configuration::builder().build().unwrap())),
                     UpdateSchema(SchemaState {
                         sdl: minimal_schema.to_owned(),
-                        launch_id: None
+                        launch_id: None,
+                        is_external_registry: false,
                     }),
                     UpdateLicense(Default::default()),
                     UpdateLicense(Arc::new(LicenseState::Licensed {
@@ -1828,7 +1834,8 @@ mod tests {
                     UpdateLicense(Default::default()),
                     UpdateSchema(SchemaState {
                         sdl: minimal_schema.to_owned(),
-                        launch_id: None
+                        launch_id: None,
+                        is_external_registry: false,
                     }),
                     Shutdown
                 ])
@@ -1889,7 +1896,8 @@ mod tests {
                     )),
                     UpdateSchema(SchemaState {
                         sdl: minimal_schema.to_owned(),
-                        launch_id: None
+                        launch_id: None,
+                        is_external_registry: false,
                     }),
                     Shutdown
                 ]),

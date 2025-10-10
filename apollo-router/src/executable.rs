@@ -40,6 +40,18 @@ use crate::router::ShutdownSource;
 use crate::uplink::Endpoints;
 use crate::uplink::UplinkConfig;
 
+const APOLLO_REGISTRY_HOST: &str = "apollographql.com";
+
+/// Determines if a graph artifact reference points to an external registry (not Apollo's registry)
+fn is_external_registry(graph_artifact_reference: &Option<String>) -> bool {
+    graph_artifact_reference
+        .as_ref()
+        .and_then(|ref_str| url::Url::parse(ref_str).ok())
+        .and_then(|url| url.host_str().map(|host| host.to_lowercase()))
+        .map(|host| !host.ends_with(APOLLO_REGISTRY_HOST))
+        .unwrap_or(false)
+}
+
 #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 #[global_allocator]
 static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
@@ -650,7 +662,15 @@ impl Executable {
                     };
                     match opt.graph_artifact_reference {
                         None => SchemaSource::Registry(opt.uplink_config()?),
-                        Some(_) => SchemaSource::OCI(opt.oci_config()?),
+                        Some(_) => {
+                            let oci_config = opt.oci_config()?;
+                            let is_external_registry =
+                                is_external_registry(&opt.graph_artifact_reference);
+                            SchemaSource::OCI {
+                                config: oci_config,
+                                is_external_registry,
+                            }
+                        }
                     }
                 }
             }
@@ -659,7 +679,15 @@ impl Executable {
                 tracing::info!("{apollo_telemetry_msg}");
                 match opt.graph_artifact_reference {
                     None => SchemaSource::Registry(opt.uplink_config()?),
-                    Some(_) => SchemaSource::OCI(opt.oci_config()?),
+                    Some(_) => {
+                        let oci_config = opt.oci_config()?;
+                        let is_external_registry =
+                            is_external_registry(&opt.graph_artifact_reference);
+                        SchemaSource::OCI {
+                            config: oci_config,
+                            is_external_registry,
+                        }
+                    }
                 }
             }
             _ => {

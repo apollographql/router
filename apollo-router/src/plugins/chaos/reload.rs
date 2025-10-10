@@ -166,6 +166,7 @@ mod tests {
         SchemaState {
             sdl: "type Query { hello: String }".to_string(),
             launch_id: Some("test-launch".to_string()),
+            is_external_registry: false,
         }
     }
 

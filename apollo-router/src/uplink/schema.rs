@@ -6,6 +6,7 @@ use std::str::FromStr;
 pub(crate) struct SchemaState {
     pub(crate) sdl: String,
     pub(crate) launch_id: Option<String>,
+    pub(crate) is_external_registry: bool,
 }
 
 impl FromStr for SchemaState {
@@ -15,6 +16,17 @@ impl FromStr for SchemaState {
         Ok(Self {
             sdl: s.to_string(),
             launch_id: None,
+            is_external_registry: false,
         })
+    }
+}
+
+impl From<String> for SchemaState {
+    fn from(s: String) -> Self {
+        Self {
+            sdl: s,
+            launch_id: None,
+            is_external_registry: false,
+        }
     }
 }

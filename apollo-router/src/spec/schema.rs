@@ -75,6 +75,7 @@ impl Schema {
                 Arc::new(SchemaState {
                     sdl: raw_sdl,
                     launch_id: preserved_launch_id,
+                    is_external_registry: false,
                 }),
                 Some(ValidFederationSchema::new(*api).map_err(SchemaError::Connector)?),
                 Some(apply_config(config, connectors)),

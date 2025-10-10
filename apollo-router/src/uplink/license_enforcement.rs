@@ -43,6 +43,7 @@ pub(crate) const LICENSE_EXPIRED_SHORT_MESSAGE: &str =
 
 pub(crate) const APOLLO_ROUTER_LICENSE_EXPIRED: &str = "APOLLO_ROUTER_LICENSE_EXPIRED";
 
+
 static JWKS: OnceCell<JwkSet> = OnceCell::new();
 
 #[derive(Error, Display, Debug)]
@@ -107,17 +108,23 @@ where
 pub(crate) struct LicenseEnforcementReport {
     restricted_config_in_use: Vec<ConfigurationRestriction>,
     restricted_schema_in_use: Vec<SchemaViolation>,
+    restricted_schema_startup_in_use: Vec<SchemaStartupRestriction>,
 }
+
+
 
 impl LicenseEnforcementReport {
     pub(crate) fn uses_restricted_features(&self) -> bool {
-        !self.restricted_config_in_use.is_empty() || !self.restricted_schema_in_use.is_empty()
+        !self.restricted_config_in_use.is_empty() 
+            || !self.restricted_schema_in_use.is_empty()
+            || !self.restricted_schema_startup_in_use.is_empty()
     }
 
     pub(crate) fn build(
         configuration: &Configuration,
         schema: &Schema,
         license: &LicenseState,
+        schema_state: &crate::uplink::schema::SchemaState,
     ) -> LicenseEnforcementReport {
         LicenseEnforcementReport {
             restricted_config_in_use: Self::validate_configuration(
@@ -128,6 +135,7 @@ impl LicenseEnforcementReport {
                 schema,
                 &Self::schema_restrictions(license),
             ),
+            restricted_schema_startup_in_use: Self::validate_schema_startup(schema_state, license),
         }
     }
 
@@ -143,6 +151,13 @@ impl LicenseEnforcementReport {
                 }
                 SchemaViolation::DirectiveArgument { name, .. } => {
                     restricted_features_in_use.push(name.clone());
+                }
+            }
+        }
+        for restricted_schema_startup_in_use in self.restricted_schema_startup_in_use.clone() {
+            match restricted_schema_startup_in_use {
+                SchemaStartupRestriction::ExternalRegistry { explanation } => {
+                    restricted_features_in_use.push(explanation);
                 }
             }
         }
@@ -299,6 +314,26 @@ impl LicenseEnforcementReport {
         schema_violations
     }
 
+    fn validate_schema_startup(
+        schema_state: &crate::uplink::schema::SchemaState,
+        license: &LicenseState,
+    ) -> Vec<SchemaStartupRestriction> {
+        let mut schema_startup_violations = Vec::new();
+        let allowed_features = license.get_allowed_features();
+        
+        // Check external registry usage if not allowed by license
+        if !allowed_features.contains(&AllowedFeature::GraphArtifactExternalRegistry)
+            && schema_state.is_external_registry
+        {
+            schema_startup_violations.push(SchemaStartupRestriction::ExternalRegistry {
+                explanation: "External registries are only available with an enterprise license"
+                    .to_string(),
+            });
+        }
+        
+        schema_startup_violations
+    }
+
     fn configuration_restrictions(license: &LicenseState) -> Vec<ConfigurationRestriction> {
         let mut configuration_restrictions = vec![];
 
@@ -420,6 +455,8 @@ impl LicenseEnforcementReport {
         configuration_restrictions
     }
 
+
+
     fn schema_restrictions(license: &LicenseState) -> Vec<SchemaRestriction> {
         let mut schema_restrictions = vec![];
         let allowed_features = license.get_allowed_features();
@@ -479,7 +516,20 @@ impl Display for LicenseEnforcementReport {
                 .map(|v| v.to_string())
                 .join("\n\n");
 
-            write!(f, "Schema features:\n{restricted_schema}")?
+            write!(f, "Schema features:\n{restricted_schema}")?;
+        }
+
+        if !self.restricted_schema_startup_in_use.is_empty() {
+            let restricted_schema_startup = self
+                .restricted_schema_startup_in_use
+                .iter()
+                .map(|v| v.to_string())
+                .join("\n\n");
+
+            if !self.restricted_config_in_use.is_empty() || !self.restricted_schema_in_use.is_empty() {
+                writeln!(f)?;
+            }
+            write!(f, "Schema startup restrictions:\n{restricted_schema_startup}")?;
         }
 
         Ok(())
@@ -532,6 +582,8 @@ pub enum AllowedFeature {
     Experimental,
     /// Extended reference reporting
     ExtendedReferenceReporting,
+    /// Graph artifact from external registry
+    GraphArtifactExternalRegistry,
     /// Persisted queries safelisting
     PersistedQueries,
     /// Request limits - depth and breadth
@@ -562,6 +614,7 @@ impl From<&str> for AllowedFeature {
             "request_limits" => Self::RequestLimits,
             "subscriptions" => Self::Subscriptions,
             "traffic_shaping" => Self::TrafficShaping,
+            "graph_artifact_external_registry" => Self::GraphArtifactExternalRegistry,
             other => Self::Other(other.into()),
         }
     }
@@ -751,6 +804,7 @@ pub(crate) struct ConfigurationRestriction {
     value: Option<Value>,
 }
 
+
 // An individual check for the supergraph schema
 // #[derive(Builder, Clone, Debug, Serialize, Deserialize)]
 // pub(crate) struct SchemaRestriction {
@@ -822,6 +876,24 @@ impl Display for SchemaViolation {
     }
 }
 
+/// An individual check for schema startup restrictions (e.g., external registry usage)
+#[derive(Debug, Clone)]
+pub(crate) enum SchemaStartupRestriction {
+    ExternalRegistry {
+        explanation: String,
+    },
+}
+
+impl Display for SchemaStartupRestriction {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        match self {
+            SchemaStartupRestriction::ExternalRegistry { explanation } => {
+                write!(f, "* External registry usage\n  {explanation}")
+            }
+        }
+    }
+}
+
 impl License {
     pub(crate) fn jwks() -> &'static JwkSet {
         JWKS.get_or_init(|| {
@@ -874,8 +946,13 @@ mod test {
         let config = Configuration::from_str(router_yaml).expect("router config must be valid");
         let schema =
             Schema::parse(supergraph_schema, &config).expect("supergraph schema must be valid");
+        let schema_state = crate::uplink::schema::SchemaState {
+            sdl: supergraph_schema.to_string(),
+            launch_id: None,
+            is_external_registry: false,
+        };
 
-        LicenseEnforcementReport::build(&config, &schema, &license)
+        LicenseEnforcementReport::build(&config, &schema, &license, &schema_state)
     }
 
     #[test]
@@ -891,6 +968,8 @@ mod test {
             "should not have found restricted features"
         );
     }
+
+
 
     #[test]
     fn test_restricted_features_via_config_unlicensed() {
@@ -1092,7 +1171,7 @@ mod test {
                 warn_at: UNIX_EPOCH + Duration::from_secs(1676808000),
                 halt_at: UNIX_EPOCH + Duration::from_secs(1678017600),
                 tps: Default::default(),
-                allowed_features: Default::default()
+                allowed_features: Default::default(),
             }),
         );
     }
@@ -1109,7 +1188,7 @@ mod test {
                 warn_at: UNIX_EPOCH + Duration::from_secs(1676808000),
                 halt_at: UNIX_EPOCH + Duration::from_secs(1678017600),
                 tps: Default::default(),
-                allowed_features: Default::default()
+                allowed_features: Default::default(),
             }),
         );
     }
@@ -1272,4 +1351,92 @@ mod test {
             "shouldn't have found restricted connect feature"
         );
     }
+
+    #[test]
+    fn test_check_startup_schema_license_violations_external_registry_unlicensed() {
+        use std::sync::Arc;
+        use crate::uplink::schema::SchemaState;
+        use crate::spec::Schema;
+        
+        // Test external registry with unlicensed state
+        let schema_state = SchemaState {
+            sdl: "type Query { hello: String }".to_string(),
+            launch_id: None,
+            is_external_registry: true,
+        };
+        
+        let schema = Schema::parse_arc(Arc::new(schema_state.clone()), &crate::configuration::Configuration::builder().build().unwrap()).unwrap();
+        let report = LicenseEnforcementReport::build(
+            &crate::configuration::Configuration::builder().build().unwrap(),
+            &schema,
+            &LicenseState::Unlicensed,
+            &schema_state,
+        );
+        
+        // Should detect external registry violation
+        assert!(report.uses_restricted_features());
+        assert!(!report.restricted_schema_startup_in_use.is_empty());
+    }
+
+    #[test]
+    fn test_check_startup_schema_license_violations_external_registry_licensed() {
+        use std::collections::HashSet;
+        use std::sync::Arc;
+        use crate::uplink::schema::SchemaState;
+        use crate::spec::Schema;
+        
+        // Test external registry with licensed state that includes the feature
+        let schema_state = SchemaState {
+            sdl: "type Query { hello: String }".to_string(),
+            launch_id: None,
+            is_external_registry: true,
+        };
+        
+        let limits = LicenseLimits {
+            tps: None,
+            allowed_features: HashSet::from_iter(vec![AllowedFeature::GraphArtifactExternalRegistry]),
+        };
+        let license_state = LicenseState::Licensed { limits: Some(limits) };
+        
+        let schema = Schema::parse_arc(Arc::new(schema_state.clone()), &crate::configuration::Configuration::builder().build().unwrap()).unwrap();
+        let report = LicenseEnforcementReport::build(
+            &crate::configuration::Configuration::builder().build().unwrap(),
+            &schema,
+            &license_state,
+            &schema_state,
+        );
+        
+        // Should not detect external registry violation with proper license
+        assert!(!report.uses_restricted_features());
+        assert!(report.restricted_schema_startup_in_use.is_empty());
+    }
+
+    #[test]
+    fn test_check_startup_schema_license_violations_apollo_registry_unlicensed() {
+        use std::sync::Arc;
+        use crate::uplink::schema::SchemaState;
+        use crate::spec::Schema;
+        
+        // Test Apollo registry with unlicensed state (should be allowed)
+        let schema_state = SchemaState {
+            sdl: "type Query { hello: String }".to_string(),
+            launch_id: None,
+            is_external_registry: false, // Apollo registry is not external
+        };
+        
+        let schema = Schema::parse_arc(Arc::new(schema_state.clone()), &crate::configuration::Configuration::builder().build().unwrap()).unwrap();
+        let report = LicenseEnforcementReport::build(
+            &crate::configuration::Configuration::builder().build().unwrap(),
+            &schema,
+            &LicenseState::Unlicensed,
+            &schema_state,
+        );
+        
+        // Should not detect external registry violation for Apollo registry
+        assert!(!report.uses_restricted_features());
+        assert!(report.restricted_schema_startup_in_use.is_empty());
+    }
+
+
+
 }

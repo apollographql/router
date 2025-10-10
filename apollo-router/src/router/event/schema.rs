@@ -55,7 +55,10 @@ pub enum SchemaSource {
     },
 
     #[display("Registry")]
-    OCI(OciConfig),
+    OCI {
+        config: OciConfig,
+        is_external_registry: bool,
+    },
 }
 
 impl From<&'_ str> for SchemaSource {
@@ -74,6 +77,7 @@ impl SchemaSource {
                 let update_schema = UpdateSchema(SchemaState {
                     sdl: schema,
                     launch_id: None,
+                    is_external_registry: false,
                 });
                 stream::once(future::ready(update_schema)).boxed()
             }
@@ -82,6 +86,7 @@ impl SchemaSource {
                     UpdateSchema(SchemaState {
                         sdl,
                         launch_id: None,
+                        is_external_registry: false,
                     })
                 })
                 .boxed(),
@@ -110,6 +115,7 @@ impl SchemaSource {
                                                     let update_schema = UpdateSchema(SchemaState {
                                                         sdl: schema,
                                                         launch_id: None,
+                                                        is_external_registry: false,
                                                     });
                                                     Some(update_schema)
                                                 }
@@ -125,6 +131,7 @@ impl SchemaSource {
                                 let update_schema = UpdateSchema(SchemaState {
                                     sdl: schema,
                                     launch_id: None,
+                                    is_external_registry: false,
                                 });
                                 stream::once(future::ready(update_schema)).boxed()
                             }
@@ -159,7 +166,7 @@ impl SchemaSource {
                 .filter_map(|s| async move { s.map(Event::UpdateSchema) })
                 .boxed()
             }
-            SchemaSource::OCI(oci_config) => {
+            SchemaSource::OCI { config: oci_config, is_external_registry } => {
                 tracing::debug!("using oci as schema source");
                 futures::stream::once(async move {
                     match fetch_oci(oci_config).await {
@@ -168,6 +175,7 @@ impl SchemaSource {
                             Some(SchemaState {
                                 sdl: oci_result.schema,
                                 launch_id: None,
+                                is_external_registry,
                             })
                         }
                         Err(err) => {
@@ -207,6 +215,7 @@ async fn fetch_supergraph_from_first_viable_url(urls: &[Url]) -> Option<SchemaSt
                     return Some(SchemaState {
                         sdl: schema,
                         launch_id: None,
+                        is_external_registry: false,
                     });
                 }
                 Err(err) => {

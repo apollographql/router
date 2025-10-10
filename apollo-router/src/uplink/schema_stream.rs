@@ -70,6 +70,7 @@ impl From<supergraph_sdl_query::ResponseData> for UplinkResponse<SchemaState> {
                 response: SchemaState {
                     sdl: result.supergraph_sdl,
                     launch_id: Some(result.id.clone()),
+                    is_external_registry: false,
                 },
                 id: result.id,
                 // this will truncate the number of seconds to under u64::MAX, which should be

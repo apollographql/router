@@ -409,6 +409,7 @@ mod tests {
             .send_event(UpdateSchema(SchemaState {
                 sdl: schema.to_string(),
                 launch_id: None,
+                is_external_registry: false,
             }))
             .await
             .unwrap();
@@ -455,6 +456,7 @@ mod tests {
             .send_event(UpdateSchema(SchemaState {
                 sdl: include_str!("../testdata/supergraph_missing_name.graphql").to_string(),
                 launch_id: None,
+                is_external_registry: false,
             }))
             .await
             .unwrap();
@@ -498,6 +500,7 @@ mod tests {
             .send_event(UpdateSchema(SchemaState {
                 sdl: include_str!("../testdata/supergraph.graphql").to_string(),
                 launch_id: None,
+                is_external_registry: false,
             }))
             .await
             .unwrap();
@@ -525,6 +528,7 @@ mod tests {
             .send_event(UpdateSchema(SchemaState {
                 sdl: include_str!("../testdata/supergraph_missing_name.graphql").to_string(),
                 launch_id: None,
+                is_external_registry: false,
             }))
             .await
             .unwrap();
