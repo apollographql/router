@@ -2429,7 +2429,3 @@ async fn test_supergraph_and_health_check_same_port_different_listener() {
         error.to_string()
     );
 }
-
-// The apollo.router.open_connections metric is now tracked using updown counters
-// The metric is automatically incremented when a ConnectionHandle is created
-// and decremented when it's dropped. This is handled by the RAII guard pattern.
