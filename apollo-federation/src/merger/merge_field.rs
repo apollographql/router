@@ -419,8 +419,8 @@ impl Merger {
 
                 let error = CompositionError::MergedDirectiveApplicationOnExternal {
                     message: format!(
-                        "Cannot apply merged directive @{} to external field \"{}\" (in subgraph \"{}\")",
-                        directive.name, field_pos, self.names[source_idx]
+                        "[{}] Cannot apply merged directive @{} to external field \"{field_pos}\"",
+                        self.names[source_idx], directive.name,
                     ),
                 };
 

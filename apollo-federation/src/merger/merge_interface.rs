@@ -1,4 +1,5 @@
 use indexmap::IndexSet;
+use tracing::trace;
 
 use crate::error::CompositionError;
 use crate::error::FederationError;
@@ -18,6 +19,7 @@ impl Merger {
         sources: &Sources<Subgraph<Validated>>,
         dest: &InterfaceTypeDefinitionPosition,
     ) -> Result<bool, FederationError> {
+        trace!("Validating interface keys");
         // Remark: it might be ok to filter @inaccessible types in `supergraphImplementations`, but this requires
         // some more thinking (and I'm not even sure it makes a practical difference given the rules for validity
         // of @inaccessible) and it will be backward compatible to filter them later, while the reverse wouldn't
@@ -36,11 +38,13 @@ impl Merger {
             }
 
             let source_metadata = self.subgraphs[*idx].metadata();
-            let key_directive_name = source_metadata
+            let Ok(key_directive_name) = source_metadata
                 .federation_spec_definition()
-                .key_directive_definition(&self.merged)?
-                .name
-                .clone();
+                .key_directive_definition(&self.merged)
+                .map(|def| def.name.clone())
+            else {
+                continue;
+            };
             let interface_pos: TypeDefinitionPosition = dest.clone().into();
             let keys = interface_pos.get_applied_directives(subgraph.schema(), &key_directive_name);
             has_key = has_key || !keys.is_empty();
@@ -78,6 +82,7 @@ impl Merger {
         sources: &Sources<Subgraph<Validated>>,
         dest: &InterfaceTypeDefinitionPosition,
     ) -> Result<(), FederationError> {
+        trace!("Validating interface objects");
         let supergraph_implementations = self.merged.possible_runtime_types(dest.clone().into())?;
 
         // Validates that if a source defines the interface as an @interfaceObject, then it doesn't define any
@@ -135,6 +140,7 @@ impl Merger {
                 )?;
             }
             let merge_context = self.validate_override(&subgraph_fields, &dest_field)?;
+            trace!("Merging interface field {}", dest_field.field_name());
             self.merge_field(&subgraph_fields, &dest_field, &merge_context)?;
         }
         Ok(())
