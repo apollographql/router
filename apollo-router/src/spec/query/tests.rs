@@ -1189,8 +1189,6 @@ fn reformat_response_array_of_id_duplicate() {
 }
 
 #[test]
-// If this test fails, this means you got greedy about allocations,
-// beware of aliases!
 fn reformat_response_expected_types() {
     FormatTest::builder()
         .schema(
