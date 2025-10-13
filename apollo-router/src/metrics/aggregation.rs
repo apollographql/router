@@ -177,7 +177,12 @@ impl AggregateMeterProvider {
 
 impl Inner {
     pub(crate) fn meter(&mut self, name: &'static str) -> Meter {
-        self.versioned_meter(name, None::<Cow<'static, str>>, None::<Cow<'static, str>>, None)
+        self.versioned_meter(
+            name,
+            None::<Cow<'static, str>>,
+            None::<Cow<'static, str>>,
+            None,
+        )
     }
     pub(crate) fn versioned_meter(
         &mut self,
@@ -610,7 +615,8 @@ mod test {
 
         fn shutdown_with_timeout(&self, _timeout: Duration) -> OTelSdkResult {
             self.count();
-            self.shutdown_with_timeout(_timeout);
+            self.shutdown
+                .store(true, std::sync::atomic::Ordering::SeqCst);
             Ok(())
         }
     }
