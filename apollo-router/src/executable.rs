@@ -663,15 +663,10 @@ impl Executable {
                     };
                     match opt.graph_artifact_reference {
                         None => SchemaSource::Registry(opt.uplink_config()?),
-                        Some(_) => {
-                            let oci_config = opt.oci_config()?;
-                            let is_external_registry =
-                                is_external_host(&opt.graph_artifact_reference);
-                            SchemaSource::OCI {
-                                config: oci_config,
-                                is_external_registry,
-                            }
-                        }
+                        Some(_) => SchemaSource::OCI {
+                            config: opt.oci_config()?,
+                            is_external_registry: is_external_host(&opt.graph_artifact_reference),
+                        },
                     }
                 }
             }
@@ -680,14 +675,10 @@ impl Executable {
                 tracing::info!("{apollo_telemetry_msg}");
                 match opt.graph_artifact_reference {
                     None => SchemaSource::Registry(opt.uplink_config()?),
-                    Some(_) => {
-                        let oci_config = opt.oci_config()?;
-                        let is_external_registry = is_external_host(&opt.graph_artifact_reference);
-                        SchemaSource::OCI {
-                            config: oci_config,
-                            is_external_registry,
-                        }
-                    }
+                    Some(_) => SchemaSource::OCI {
+                        config: opt.oci_config()?,
+                        is_external_registry: is_external_host(&opt.graph_artifact_reference),
+                    },
                 }
             }
             _ => {
