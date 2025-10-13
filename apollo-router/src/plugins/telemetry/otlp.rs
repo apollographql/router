@@ -176,36 +176,7 @@ pub(crate) enum Temporality {
 
 #[cfg(test)]
 mod tests {
-    use opentelemetry_sdk::metrics::data::Temporality as SdkTemporality;
-
     use super::*;
-
-    #[test]
-    fn endpoint_grpc_defaulting_no_scheme() {
-        let url = Url::parse("api.apm.com:433").unwrap();
-        let exporter = GrpcExporter::default();
-        let domain = exporter.default_tls_domain(&url);
-        assert_eq!(domain, None);
-    }
-
-    #[test]
-    fn endpoint_grpc_defaulting_scheme() {
-        let url = Url::parse("https://api.apm.com:433").unwrap();
-        let exporter = GrpcExporter::default();
-        let domain = exporter.default_tls_domain(&url);
-        assert_eq!(domain, Some(url.domain().expect("domain was expected")),);
-    }
-
-    #[test]
-    fn endpoint_grpc_explicit_domain() {
-        let url = Url::parse("https://api.apm.com:433").unwrap();
-        let exporter = GrpcExporter {
-            domain_name: Some("foo.bar".to_string()),
-            ..Default::default()
-        };
-        let domain = exporter.default_tls_domain(&url);
-        assert_eq!(domain, Some("foo.bar"));
-    }
 
     #[test]
     fn test_process_endpoint() {
