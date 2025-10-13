@@ -12,12 +12,29 @@ use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
+    /// The endpoint to send data to
+    #[serde(default)]
+    pub(crate) endpoint: Option<String>,
+
+    /// The protocol to use when sending data
+    #[serde(default)]
+    pub(crate) protocol: Protocol,
+
+    /// HTTP configuration settings
+    #[serde(default)]
+    pub(crate) http: HttpExporter,
+
     /// Enable otlp
     pub(crate) enabled: bool,
 
     /// Batch processor settings
     #[serde(default)]
     pub(crate) batch_processor: BatchProcessorConfig,
+
+    /// Temporality for export (default: `Cumulative`).
+    /// Note that when exporting to Datadog agent use `Delta`.
+    #[serde(default)]
+    pub(crate) temporality: Temporality,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -120,8 +137,7 @@ pub(super) fn process_endpoint(
         .transpose()
 }
 
-impl Config {
-}
+impl Config {}
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
@@ -153,8 +169,7 @@ fn header_map(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::sch
     HashMap::<String, Value>::json_schema(generator)
 }
 
-impl GrpcExporter {
-}
+impl GrpcExporter {}
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
