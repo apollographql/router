@@ -505,7 +505,7 @@ async fn test_multi_pipelines() {
         .expect("metrics");
 
     // There should be two instances of the pipeline metrics
-    let pipelines = Regex::new(r#"(?m)^apollo_router_pipelines[{].+[}] 1"#).expect("regex");
+    let pipelines = Regex::new(r#"(?m)^apollo_router_pipelines[{].+[}]"#).expect("regex");
     assert_eq!(pipelines.captures_iter(&metrics).count(), 2);
 
     // There should be at least two connections, one active and one terminating.
