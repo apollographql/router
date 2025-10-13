@@ -323,7 +323,7 @@ impl LicenseEnforcementReport {
             && schema_state.is_external_registry
         {
             schema_startup_violations.push(SchemaStartupRestriction::ExternalRegistry {
-                explanation: "External registries are only available with an enterprise license"
+                explanation: "External registries are only available with an Enterprise license"
                     .to_string(),
             });
         }
