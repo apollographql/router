@@ -22,8 +22,10 @@
 //! External exporters may perform blocking I/O during construction, so the entire build process
 //! runs in [`block_in_place`] to avoid blocking the async runtime.
 
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+
 use multimap::MultiMap;
-use rand::Rng;
 use tokio::task::block_in_place;
 use tower::BoxError;
 use tower::ServiceExt;
@@ -46,6 +48,9 @@ use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
 use crate::plugins::telemetry::reload::tracing::create_propagator;
 use crate::plugins::telemetry::tracing::datadog;
 use crate::plugins::telemetry::tracing::zipkin;
+
+/// Static counter for tracking Prometheus reload calls.
+static PROMETHEUS_CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 /// Orchestrates telemetry reload preparation by detecting configuration changes
 /// and constructing new providers as needed.
@@ -86,7 +91,7 @@ impl<'a> Builder<'a> {
     fn setup_public_metrics(&mut self) -> Result<(), BoxError> {
         if self.is_metrics_config_changed::<metrics::prometheus::Config>()
             || self.is_metrics_config_changed::<otlp::Config>()
-            || self.prometheus_random_change()
+            || self.prometheus_force_change()
         {
             ::tracing::debug!("configuring metrics");
             let mut builder = MetricsBuilder::new(self.config);
@@ -192,7 +197,7 @@ impl<'a> Builder<'a> {
         self.activation.with_logging(create_fmt_layer(self.config));
     }
 
-    /// Randomly returns true with 10% probability when Prometheus is enabled.
+    /// Returns true every 20 calls when Prometheus is enabled.
     ///
     /// This helps prevent accumulation of stale metrics in the Prometheus registry.
     /// Once a series enters the Prometheus registry it is never dropped, so metrics
@@ -202,11 +207,12 @@ impl<'a> Builder<'a> {
     /// The true solution for this is to drop Prometheus support as this has been dropped in upstream OTEL.
     /// Note that this doesn't actually hurt Prometheus metrics as these are OK to be recreated at any time,
     /// but things like connections won't be visible across reloads.
-    fn prometheus_random_change(&self) -> bool {
+    fn prometheus_force_change(&self) -> bool {
         if !metrics::prometheus::Config::config(self.config).enabled {
             return false;
         }
-        rand::rng().random_range(0.0..1.0) < 0.1
+        let count = PROMETHEUS_CALL_COUNT.fetch_add(1, Ordering::Relaxed);
+        count.is_multiple_of(20)
     }
 }
 
