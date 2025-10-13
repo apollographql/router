@@ -1,11 +1,16 @@
 //! Shared configuration for Otlp tracing and metrics.
 use std::collections::HashMap;
 
+use http::Uri;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
+use tonic::transport::Certificate;
+use tonic::transport::ClientTlsConfig;
+use tonic::transport::Identity;
 use tower::BoxError;
+use url::Url;
 
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
@@ -19,6 +24,10 @@ pub(crate) struct Config {
     /// The protocol to use when sending data
     #[serde(default)]
     pub(crate) protocol: Protocol,
+
+        /// gRPC configuration settings
+    #[serde(default)]
+    pub(crate) grpc: GrpcExporter,
 
     /// HTTP configuration settings
     #[serde(default)]
@@ -169,7 +178,45 @@ fn header_map(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::sch
     HashMap::<String, Value>::json_schema(generator)
 }
 
-impl GrpcExporter {}
+
+impl GrpcExporter {
+    pub(crate) fn to_tls_config(&self, endpoint: &Uri) -> Result<ClientTlsConfig, BoxError> {
+        let endpoint = endpoint
+            .to_string()
+            .parse::<Url>()
+            .map_err(|e| BoxError::from(format!("invalid GRPC endpoint {endpoint}, {e}")))?;
+        let domain_name = self.default_tls_domain(&endpoint);
+
+        if let (Some(ca), Some(key), Some(cert), Some(domain_name)) =
+            (&self.ca, &self.key, &self.cert, domain_name)
+        {
+            Ok(ClientTlsConfig::new()
+                .with_native_roots()
+                .domain_name(domain_name)
+                .ca_certificate(Certificate::from_pem(ca.clone()))
+                .identity(Identity::from_pem(cert.clone(), key.clone())))
+        } else {
+            // This was a breaking change in tonic where we now have to specify native roots.
+            Ok(ClientTlsConfig::new().with_native_roots())
+        }
+    }
+
+    fn default_tls_domain<'a>(&'a self, endpoint: &'a Url) -> Option<&'a str> {
+        match (&self.domain_name, endpoint) {
+            // If the URL contains the https scheme then default the tls config to use the domain from the URL. We know it's TLS.
+            // If the URL contains no scheme and the port is 443 emit a warning suggesting that they may have forgotten to configure TLS domain.
+            (Some(domain), _) => Some(domain.as_str()),
+            (None, endpoint) if endpoint.scheme() == "https" => endpoint.host_str(),
+            (None, endpoint) if endpoint.port() == Some(443) && endpoint.scheme() != "http" => {
+                tracing::warn!(
+                    "telemetry otlp exporter has been configured with port 443 but TLS domain has not been set. This is likely a configuration error"
+                );
+                None
+            }
+            _ => None,
+        }
+    }
+}
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]

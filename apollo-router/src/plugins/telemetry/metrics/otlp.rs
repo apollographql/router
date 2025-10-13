@@ -1,8 +1,11 @@
+use http::Uri;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_otlp::WithHttpConfig;
+use opentelemetry_otlp::WithTonicConfig;
 use opentelemetry_sdk::metrics::Instrument;
 use opentelemetry_sdk::metrics::PeriodicReader;
 use opentelemetry_sdk::metrics::StreamBuilder;
+use tonic::metadata::MetadataMap;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::MetricsCommon;
@@ -25,16 +28,40 @@ impl MetricsConfigurator for super::super::otlp::Config {
         if !self.enabled {
             return Ok(builder);
         }
+        let kind = TelemetryDataKind::Metrics;
         let exporter = match self.protocol {
-            // if they are using an TonicExporter, customers will need to configure metadata, timeout and endpoint/tls_config
-            // using env variables: OTEL_EXPORTER_OTLP_METRICS_HEADERS (metadata), OTEL_EXPORTER_OTLP_METRICS_TIMEOUT, OTEL_EXPORTER_OTLP_METRICS_ENDPOINT
+            Protocol::Grpc => {
+                let endpoint_opt = process_endpoint(&self.endpoint, &kind, &self.protocol)?;
+                // Figure out if we need to set tls config for our exporter
+                let tls_config_opt = if let Some(endpoint) = &endpoint_opt {
+                    if !endpoint.is_empty() {
+                        let tls_url = Uri::try_from(endpoint)?;
+                        Some(self.grpc.clone().to_tls_config(&tls_url)?)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
 
-            Protocol::Grpc => opentelemetry_otlp::MetricExporter::builder()
-                .with_tonic()
-                .build()?,
+                let mut exporter_builder = opentelemetry_otlp::MetricExporter::builder()
+                    .with_tonic()
+                    .with_protocol(opentelemetry_otlp::Protocol::Grpc)
+                    .with_timeout(self.batch_processor.max_export_timeout)
+                    .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()));
+                
+                if let Some(endpoint) = endpoint_opt {
+                    exporter_builder = exporter_builder.with_endpoint(endpoint);
+                }
+                if let Some(tls_config) = tls_config_opt {
+                    exporter_builder = exporter_builder.with_tls_config(tls_config);
+                }
+                    
+                exporter_builder.build()?
+            }
             Protocol::Http => {
                 let endpoint_opt =
-                    process_endpoint(&self.endpoint, &TelemetryDataKind::Metrics, &self.protocol)?;
+                    process_endpoint(&self.endpoint, &kind, &self.protocol)?;
                 let headers = self.http.headers.clone();
                 let mut exporter = opentelemetry_otlp::HttpExporterBuilder::default()
                     .with_protocol(opentelemetry_otlp::Protocol::Grpc)
