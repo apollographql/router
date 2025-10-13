@@ -592,7 +592,7 @@ async fn test_subgraph_request_emits_histogram() {
                 experimental_otlp_metrics_protocol: http
                 batch_processor:
                   scheduled_delay: 10ms
-                preview_subgraph_metrics: true
+                subgraph_metrics: true
             include_subgraph_errors:
               all: true
         "#,
@@ -652,7 +652,7 @@ async fn test_failed_subgraph_request_emits_histogram() {
                 experimental_otlp_metrics_protocol: http
                 batch_processor:
                   scheduled_delay: 10ms
-                preview_subgraph_metrics: true
+                subgraph_metrics: true
             include_subgraph_errors:
               all: true
         "#,
@@ -714,7 +714,7 @@ async fn test_connector_request_emits_histogram() {
                 experimental_otlp_metrics_protocol: http
                 batch_processor:
                   scheduled_delay: 10ms
-                preview_subgraph_metrics: true
+                subgraph_metrics: true
             include_subgraph_errors:
               all: true
         "#,
@@ -790,7 +790,7 @@ async fn test_failed_connector_request_emits_histogram() {
                 experimental_otlp_metrics_protocol: http
                 batch_processor:
                   scheduled_delay: 10ms
-                preview_subgraph_metrics: true
+                subgraph_metrics: true
             traffic_shaping:
                 connector:
                     sources:
