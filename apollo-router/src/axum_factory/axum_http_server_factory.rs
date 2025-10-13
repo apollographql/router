@@ -24,8 +24,6 @@ use http::header::CONTENT_ENCODING;
 use itertools::Itertools;
 use multimap::MultiMap;
 use once_cell::sync::Lazy;
-#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
-use opentelemetry::metrics::ObservableGauge;
 use regex::Regex;
 use serde_json::json;
 #[cfg(unix)]
@@ -33,8 +31,6 @@ use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
 use tower::ServiceExt;
-#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
-use tower::layer::layer_fn;
 use tower_http::trace::TraceLayer;
 use tracing::Instrument;
 use tracing::instrument::WithSubscriber;
@@ -70,7 +66,10 @@ static BARE_WILDCARD_PATH_REGEX: Lazy<Regex> = Lazy::new(|| {
 });
 
 #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
-fn jemalloc_metrics_instruments() -> (tokio::task::JoinHandle<()>, Vec<ObservableGauge<u64>>) {
+fn jemalloc_metrics_instruments() -> (
+    tokio::task::JoinHandle<()>,
+    Vec<opentelemetry::metrics::ObservableGauge<u64>>,
+) {
     use crate::axum_factory::metrics::jemalloc;
 
     (
@@ -473,6 +472,7 @@ where
     }));
     #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     {
+        use tower::layer::layer_fn;
         let (_epoch_advance_loop, jemalloc_instrument) = jemalloc_metrics_instruments();
         // Tie the lifetime of the jemalloc instruments to the lifetime of the router
         // by referencing them in a no-op layer.
