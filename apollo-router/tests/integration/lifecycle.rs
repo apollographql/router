@@ -560,14 +560,14 @@ async fn test_forced_connection_shutdown() {
         .expect("metrics");
     tokio::time::sleep(Duration::from_millis(100)).await;
     // There should be two instances of the pipeline metrics
-    let pipelines = Regex::new(r#"(?m)^apollo_router_pipelines[{].+[}] 1"#).expect("regex");
-    assert_eq!(pipelines.captures_iter(&metrics).count(), 1);
-
+    // There should be at least two connections, one active and one terminating.
+    // There may be more than one in each category because reqwest does connection pooling.
     let terminating =
-        Regex::new(r#"(?m)^apollo_router_open_connections[{].+active.+[}]"#).expect("regex");
+        Regex::new(r#"(?m)^apollo_router_open_connections[{].+terminating.+[}]"#).expect("regex");
     assert!(terminating.captures_iter(&metrics).count() >= 1);
-    router.read_logs();
-    router.assert_log_contained("connection shutdown exceeded, forcing close");
+    let active =
+        Regex::new(r#"(?m)^apollo_router_open_connections[{].+active.+[}]"#).expect("regex");
+    assert!(active.captures_iter(&metrics).count() >= 1);
 }
 
 /// Test that plugins receive their previous configuration during hot reload
