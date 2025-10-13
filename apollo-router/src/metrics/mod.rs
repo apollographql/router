@@ -1927,7 +1927,7 @@ mod test {
     #[should_panic]
     async fn test_type_up_down_counter() {
         async {
-            f64_up_down_counter!("test", "test description", 1.0, "attr" = "val");
+            let _ = f64_up_down_counter!("test", "test description", 1.0, "attr" = "val");
             assert_histogram_sum!("test", 1, "attr" = "val");
         }
         .with_metrics()
