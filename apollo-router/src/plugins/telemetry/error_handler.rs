@@ -8,7 +8,6 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use dashmap::DashMap;
     use parking_lot::Mutex;
     use tracing_core::Event;
     use tracing_core::Field;
@@ -23,7 +22,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_error_throttling() {
-        let error_map = DashMap::new();
         // Set up a fake subscriber so we can check log events. If this is useful then maybe it can be factored out into something reusable
         #[derive(Default)]
         struct TestVisitor {
@@ -83,7 +81,6 @@ mod tests {
     #[tokio::test]
     async fn test_cardinality_overflow() {
         async {
-            let error_map = DashMap::new();
             let msg = "Warning: Maximum data points for metric stream exceeded. Entry added to overflow. Subsequent overflows to same metric until next collect will not be logged.";
             ::tracing::warn!("{}", msg);
 
