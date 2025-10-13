@@ -382,10 +382,10 @@ impl Telemetry {
                     BatchSpanProcessor::builder(
                         SpanExporterBuilder::from(
                             opentelemetry_otlp::SpanExporter::builder()
-                                .with_endpoint(endpoint)
-                                .with_protocol(Protocol::HttpBinary)
                         )
                         .with_http()
+                        .with_endpoint(endpoint)
+                        .with_protocol(protocol)
                         .build()
                         .expect("otlp pipeline failed"),
                     )
