@@ -108,7 +108,7 @@ async fn verify_callback_events(
 ) -> Result<(), BoxError> {
     use pretty_assertions::assert_eq;
 
-    let callbacks = callback_state.received_callbacks.lock().unwrap().clone();
+    let callbacks = callback_state.received_callbacks.lock().clone();
 
     // Should have received: expected_user_events.len() "next" callbacks + 1 "complete" callback
     let next_callbacks: Vec<_> = callbacks.iter().filter(|c| c.action == "next").collect();
@@ -216,7 +216,7 @@ async fn test_subscription_callback_error_scenarios() -> Result<(), BoxError> {
 
     // Test 4: Add subscription ID and test success scenarios
     {
-        let mut ids = callback_state.subscription_ids.lock().unwrap();
+        let mut ids = callback_state.subscription_ids.lock();
         ids.push("test-id".to_string());
     }
 
