@@ -1007,7 +1007,7 @@ mod tests {
         for url in external_urls {
             assert!(
                 is_external_host(&Some(url.to_string())),
-                "External registry URL '{}' should be considered external",
+                "External registry URL '{}' should be external",
                 url
             );
         }
