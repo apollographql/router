@@ -1,0 +1,37 @@
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: required
+      router:
+        http.server.request.duration:
+          attributes:
+            server.port: false
+            server.address: false
+            http.response.status_code:
+              alias: status
+  exporters:
+    metrics:
+      prometheus:
+        listen: 127.0.0.1:4000
+        enabled: true
+        path: /metrics
+      common:
+        views:
+          # Test rename of http.server.request.duration to custom.http.duration
+          - name: http.server.request.duration
+            rename: custom.http.duration
+          # Test rename combined with histogram aggregation
+          - name: apollo.router.operations
+            rename: custom.operations.count
+            aggregation:
+              histogram:
+                buckets:
+                  - 1
+                  - 10
+                  - 100
+override_subgraph_url:
+  products: http://localhost:4005
+include_subgraph_errors:
+  all: true
+supergraph:
+  introspection: true

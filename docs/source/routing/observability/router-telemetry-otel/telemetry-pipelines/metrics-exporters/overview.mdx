@@ -119,7 +119,60 @@ telemetry:
 
 ### `views`
 
-You can override default attributes and default buckets for specific metrics thanks to this configuration.
+You can customize metrics behavior using OpenTelemetry views, including renaming metrics, overriding attributes, changing default buckets, or dropping metrics entirely.
+
+#### Renaming metrics
+
+You can rename metrics to match your organization's naming conventions or to align with existing monitoring infrastructure. This is particularly useful for customizing OTLP semantic convention metrics.
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    metrics:
+      common:
+        service_name: apollo-router
+        views:
+          - name: http.server.request.duration # Instrument name to rename
+            rename: apollo.router.http.request.duration # New metric name
+
+```
+
+<Note>
+
+**Important naming considerations:**
+
+- **OTLP exporters** use the renamed metric name exactly as specified
+- **Prometheus exporters** automatically transform metric names:
+  - Dots (`.`) are converted to underscores (`_`)
+  - Unit suffixes are added (e.g., `_seconds`, `_bytes`)
+  - Example: `apollo.router.http.duration` becomes `apollo_router_http_duration_seconds`
+- **Apollo Studio metrics** are not affected by renaming—they continue to use original metric names
+
+</Note>
+
+You can combine `rename` with other view properties:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    metrics:
+      common:
+        views:
+          - name: apollo.router.operations
+            rename: custom.graphql.operations
+            description: "Custom GraphQL operation metrics"
+            aggregation:
+              histogram:
+                buckets: [0.1, 0.5, 1.0, 5.0, 10.0]
+            allowed_attribute_keys:
+              - graphql.operation.name
+              - graphql.operation.type
+
+```
+
+#### Customizing metric attributes and buckets
+
+You can override default attributes and buckets for specific metrics:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -144,7 +197,9 @@ telemetry:
 
 ```
 
-You can drop specific metrics if you don't want these metrics to be sent to your APM.
+#### Dropping metrics
+
+You can drop specific metrics if you don't want them sent to your APM:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -165,7 +220,7 @@ telemetry:
 | `service_name`      | `unknown_service:router` | The OpenTelemetry service name.                               |
 | `service_namespace` |                          | The OpenTelemetry namespace.                                  |
 | `resource`          |                          | The OpenTelemetry resource to attach to metrics.              |
-| `views`             |                          | Override default buckets or configuration for metrics (including dropping the metric itself) |
+| `views`             |                          | Customize metrics using OpenTelemetry views: rename metrics, override default buckets or attributes, or drop metrics entirely. |
 
 
 ## Related topics

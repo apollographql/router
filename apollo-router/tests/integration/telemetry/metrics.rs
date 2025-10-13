@@ -399,3 +399,192 @@ async fn test_prom_reset_on_reload() {
         .await;
     router.graceful_shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_prometheus_metric_rename() {
+    let mut router = IntegrationTest::builder()
+        .config(include_str!("fixtures/prometheus_metric_rename.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Execute queries to generate metrics
+    router.execute_default_query().await;
+    router.execute_default_query().await;
+
+    // Get Prometheus metrics
+    let metrics = router
+        .get_metrics_response()
+        .await
+        .expect("failed to fetch metrics")
+        .text()
+        .await
+        .unwrap();
+
+    // Verify the renamed metric exists with Prometheus transformations
+    // custom.http.duration → custom_http_duration_seconds (dots to underscores, unit suffix added)
+    check_metrics_contains(&metrics, r#"custom_http_duration_seconds_count"#);
+    check_metrics_contains(&metrics, r#"custom_http_duration_seconds_sum"#);
+    check_metrics_contains(&metrics, r#"custom_http_duration_seconds_bucket"#);
+
+    // Verify the original metric name does NOT exist
+    assert!(
+        !metrics.contains(r#"http_server_request_duration_seconds"#),
+        "Original metric name should not exist after rename"
+    );
+
+    // Verify renamed operations metric
+    check_metrics_contains(&metrics, r#"custom_operations_count"#);
+
+    // Verify metric is actually recording data
+    check_metrics_contains(
+        &metrics,
+        r#"custom_http_duration_seconds_count{http_request_method="POST",status="200",otel_scope_name="apollo/router"} 2"#,
+    );
+
+    router.graceful_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_metric_rename_on_reload() {
+    // This test verifies that changing the rename field in a view triggers a proper reload
+    // and that the new renamed metric appears correctly
+    let mut router = IntegrationTest::builder()
+        .config(include_str!("fixtures/prometheus_metric_rename.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    router.execute_default_query().await;
+    router.execute_default_query().await;
+
+    // Verify initial renamed metric exists
+    router
+        .assert_metrics_contains(
+            r#"custom_http_duration_seconds_count{http_request_method="POST",status="200",otel_scope_name="apollo/router"} 2"#,
+            None,
+        )
+        .await;
+
+    // Reload with different rename
+    router
+        .update_config(include_str!("fixtures/prometheus_rename_reload.router.yaml"))
+        .await;
+    router.assert_reloaded().await;
+
+    // Execute another query after reload
+    router.execute_default_query().await;
+
+    let metrics = router
+        .get_metrics_response()
+        .await
+        .expect("failed to fetch metrics")
+        .text()
+        .await
+        .unwrap();
+
+    // After reload, the new renamed metric should exist
+    check_metrics_contains(&metrics, r#"reloaded_http_duration_seconds_count"#);
+
+    // Verify metric is recording data with new name
+    check_metrics_contains(
+        &metrics,
+        r#"reloaded_http_duration_seconds_count{http_request_method="POST",status="200",otel_scope_name="apollo/router"} 1"#,
+    );
+
+    // Old renamed metric should not exist (metrics reset on reload)
+    assert!(
+        !metrics.contains(r#"custom_http_duration_seconds"#),
+        "Old renamed metric should not exist after reload with different rename"
+    );
+
+    router.graceful_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_apollo_studio_metrics_not_affected_by_rename() {
+    if !graph_os_enabled() {
+        eprintln!("test skipped - requires Apollo GraphOS");
+        return;
+    }
+
+    // This test verifies that Apollo Studio metrics (using Apollo/ApolloRealtime meter providers)
+    // are NOT affected by rename views. Views only apply to the Public meter provider which
+    // feeds Prometheus and OTLP exporters.
+    //
+    // Architecture:
+    // - Public MeterProvider -> Prometheus & OTLP (views APPLIED)
+    // - Apollo MeterProvider -> Apollo Studio backend (views NOT APPLIED)
+    // - ApolloRealtime MeterProvider -> Apollo Realtime backend (views NOT APPLIED)
+    //
+    // IMPORTANT DISTINCTION:
+    // - Metrics visible at the /metrics endpoint (Prometheus) come from the Public provider
+    // - This includes metrics with names like "apollo_router_*" and otel_scope_name="apollo/router"
+    // - These are NOT Apollo Studio metrics - they're Public provider metrics with apollo_ prefix
+    // - Apollo Studio metrics are sent directly to Apollo's backend (not visible at /metrics)
+    // - The isolation test verifies that Public metrics CAN be renamed (they should be)
+    // - Apollo Studio metrics are isolated because setup_apollo_metrics() never calls configure_views()
+    //
+    // NOTE: We cannot directly test Apollo Studio metrics in integration tests because they
+    // are sent to Apollo Studio's backend. However, we can verify that:
+    // 1. Public provider metrics (Prometheus) ARE renamed, including apollo.router.* metrics
+    // 2. The code architecture ensures Apollo provider is isolated (see builder.rs)
+    // 3. Views are only applied via configure_views(MeterProviderType::Public)
+    // 4. Apollo Studio continues to send telemetry reports (confirming Apollo provider works)
+
+    let mut router = IntegrationTest::builder()
+        .config(include_str!("fixtures/prometheus_apollo_isolation.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    router.execute_default_query().await;
+    router.execute_default_query().await;
+
+    // Get Prometheus metrics (these are from the Public meter provider)
+    let metrics = router
+        .get_metrics_response()
+        .await
+        .expect("failed to fetch metrics")
+        .text()
+        .await
+        .unwrap();
+
+    // Verify that Public meter provider metrics ARE renamed in Prometheus
+    // The configuration renames apollo.router.operations -> renamed.apollo.operations
+    check_metrics_contains(&metrics, r#"renamed_apollo_operations_total"#);
+
+    // Verify the configuration renames apollo.router.cache.hit.time -> renamed.cache.hit.time
+    check_metrics_contains(&metrics, r#"renamed_cache_hit_time_count"#);
+
+    // Verify original metric names do NOT appear (they were renamed)
+    // Note: We check for the _total suffix which Prometheus adds to counters
+    assert!(
+        !metrics.contains(r#"apollo_router_operations_total"#),
+        "Original Public metric name should be renamed in Prometheus"
+    );
+
+    // The architectural guarantee:
+    // - Apollo Studio metrics are sent via a completely separate meter provider
+    // - builder.rs:setup_apollo_metrics() does NOT call configure_views()
+    // - Therefore Apollo Studio receives metrics with original names
+    // - We verify this by checking that telemetry studio reports exist and are being sent
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_telemetry_studio_reports_total{report_type="metrics",otel_scope_name="apollo/router"}"#,
+            Some(Duration::from_secs(10)),
+        )
+        .await;
+
+    // The existence of telemetry_studio_reports confirms Apollo metrics are being sent
+    // to Apollo Studio. These metrics use the original names (not renamed) because
+    // the Apollo meter provider never has views applied to it.
+
+    router.graceful_shutdown().await;
+}
