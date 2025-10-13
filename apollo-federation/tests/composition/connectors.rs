@@ -3,6 +3,8 @@ use super::compose_as_fed2_subgraphs;
 
 #[cfg(test)]
 mod tests {
+    use apollo_federation::error::ErrorCode;
+
     use super::*;
 
     #[ignore = "until merge implementation completed"]
@@ -446,10 +448,10 @@ mod tests {
         assert_eq!(errors.len(), 1, "Should have exactly one error");
         
         let error = &errors[0];
-        assert!(error.message.contains(r#"Directive "@source" argument "http""#));
-        assert!(error.message.contains("is required, but it was not provided"));
-        assert!(error.message.contains("[with-connectors]"));
-        assert_eq!(error.code, "INVALID_GRAPHQL");
+        assert!(error.to_string().contains(r#"Directive "@source" argument "http""#));
+        assert!(error.to_string().contains("is required, but it was not provided"));
+        assert!(error.to_string().contains("[with-connectors]"));
+        assert_eq!(error.code(), ErrorCode::InvalidGraphQL);
     }
 
     #[ignore = "until merge implementation completed"]
@@ -488,10 +490,10 @@ mod tests {
         assert_eq!(errors.len(), 1, "Should have exactly one error");
         
         let error = &errors[0];
-        assert!(error.message.contains(r#"Directive "@connect" argument "http""#));
-        assert!(error.message.contains("is required, but it was not provided"));
-        assert!(error.message.contains("[with-connectors]"));
-        assert_eq!(error.code, "INVALID_GRAPHQL");
+        assert!(error.to_string().contains(r#"Directive "@connect" argument "http""#));
+        assert!(error.to_string().contains("is required, but it was not provided"));
+        assert!(error.to_string().contains("[with-connectors]"));
+        assert_eq!(error.code(), ErrorCode::InvalidGraphQL);
     }
     
 }
