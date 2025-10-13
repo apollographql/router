@@ -97,7 +97,6 @@ impl SupergraphStage {
                 let sdl = sdl.clone();
 
                 async move {
-                    let mut succeeded = true;
                     let result = process_supergraph_request_stage(
                         http_client,
                         coprocessor_url,
@@ -108,17 +107,9 @@ impl SupergraphStage {
                     )
                     .await
                     .map_err(|error| {
-                        succeeded = false;
                         tracing::error!("coprocessor: supergraph request stage error: {error}");
                         error
                     });
-                    u64_counter!(
-                        "apollo.router.operations.coprocessor",
-                        "Total operations with co-processors enabled",
-                        1,
-                        "coprocessor.stage" = PipelineStep::SupergraphRequest,
-                        "coprocessor.succeeded" = succeeded
-                    );
                     result
                 }
             })
@@ -135,8 +126,6 @@ impl SupergraphStage {
 
                 async move {
                     let response: supergraph::Response = fut.await?;
-
-                    let mut succeeded = true;
                     let result = process_supergraph_response_stage(
                         http_client,
                         coprocessor_url,
@@ -147,17 +136,9 @@ impl SupergraphStage {
                     )
                     .await
                     .map_err(|error| {
-                        succeeded = false;
                         tracing::error!("coprocessor: supergraph response stage error: {error}");
                         error
                     });
-                    u64_counter!(
-                        "apollo.router.operations.coprocessor",
-                        "Total operations with co-processors enabled",
-                        1,
-                        "coprocessor.stage" = PipelineStep::SupergraphResponse,
-                        "coprocessor.succeeded" = succeeded
-                    );
                     result
                 }
             })
@@ -232,11 +213,14 @@ where
         .and_sdl(sdl_to_send)
         .build();
 
-    tracing::debug!(?payload, "externalized output");
+    tracing::debug!(?payload, "externalized output");    
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::SupergraphRequest, duration);
+    let succeeded = matches!(co_processor_result, Ok(_));
+    record_coprocessor_metrics(
+        PipelineStep::SupergraphRequest, 
+        start.elapsed(),
+        succeeded);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
@@ -377,15 +361,17 @@ where
         .build();
 
     // Second, call our co-processor and get a reply.
-    tracing::debug!(?payload, "externalized output");
+    tracing::debug!(?payload, "externalized output");    
     let start = Instant::now();
     let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::SupergraphResponse, duration);
+    let succeeded = matches!(co_processor_result, Ok(_));
+    record_coprocessor_metrics(
+        PipelineStep::SupergraphResponse, 
+        start.elapsed(),
+        succeeded);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
-
     validate_coprocessor_output(&co_processor_output, PipelineStep::SupergraphResponse)?;
 
     // Check if the incoming GraphQL response was valid according to GraphQL spec

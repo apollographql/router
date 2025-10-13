@@ -93,7 +93,6 @@ impl ExecutionStage {
                 let sdl = sdl.clone();
 
                 async move {
-                    let mut succeeded = true;
                     let result = process_execution_request_stage(
                         http_client,
                         coprocessor_url,
@@ -104,18 +103,9 @@ impl ExecutionStage {
                     )
                     .await
                     .map_err(|error| {
-                        succeeded = false;
                         tracing::error!("coprocessor: execution request stage error: {error}");
                         error
                     });
-
-                    u64_counter!(
-                        "apollo.router.operations.coprocessor",
-                        "Total operations with co-processors enabled",
-                        1,
-                        "coprocessor.stage" = PipelineStep::ExecutionRequest,
-                        "coprocessor.succeeded" = succeeded
-                    );
                     result
                 }
             })
@@ -133,7 +123,6 @@ impl ExecutionStage {
                 async move {
                     let response: execution::Response = fut.await?;
 
-                    let mut succeeded = true;
                     let result = process_execution_response_stage(
                         http_client,
                         coprocessor_url,
@@ -144,18 +133,9 @@ impl ExecutionStage {
                     )
                     .await
                     .map_err(|error| {
-                        succeeded = false;
                         tracing::error!("coprocessor: execution response stage error: {error}");
                         error
                     });
-
-                    u64_counter!(
-                        "apollo.router.operations.coprocessor",
-                        "Total operations with co-processors enabled",
-                        1,
-                        "coprocessor.stage" = PipelineStep::ExecutionResponse,
-                        "coprocessor.succeeded" = succeeded
-                    );
                     result
                 }
             })
@@ -231,11 +211,14 @@ where
         .and_query_plan(query_plan)
         .build();
 
-    tracing::debug!(?payload, "externalized output");
+    tracing::debug!(?payload, "externalized output");    
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::ExecutionRequest, duration);
+    let succeeded = matches!(co_processor_result, Ok(_));
+    record_coprocessor_metrics(
+        PipelineStep::ExecutionRequest, 
+        start.elapsed(),
+        succeeded);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
@@ -373,11 +356,14 @@ where
         .build();
 
     // Second, call our co-processor and get a reply.
-    tracing::debug!(?payload, "externalized output");
+    tracing::debug!(?payload, "externalized output");    
     let start = Instant::now();
     let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::ExecutionResponse, duration);
+    let succeeded = matches!(co_processor_result, Ok(_));
+    record_coprocessor_metrics(
+        PipelineStep::ExecutionResponse,
+        start.elapsed(),
+        succeeded);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;

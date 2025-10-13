@@ -487,12 +487,21 @@ fn default_response_validation() -> bool {
     true
 }
 
-fn record_coprocessor_duration(stage: PipelineStep, duration: Duration) {
+fn record_coprocessor_metrics(
+    stage: PipelineStep, duration: Duration, succeeded: bool) {
     f64_histogram!(
         "apollo.router.operations.coprocessor.duration",
         "Time spent waiting for the coprocessor to answer, in seconds",
         duration.as_secs_f64(),
         coprocessor.stage = stage.to_string()
+    );
+
+    u64_counter!(
+        "apollo.router.operations.coprocessor",
+        "Total run operations with co-processors enabled",
+        1,
+        "coprocessor.stage" = format!("{:?}", stage),
+        "coprocessor.succeeded" = succeeded
     );
 }
 
@@ -538,7 +547,6 @@ impl RouterStage {
                 let sdl = sdl.clone();
 
                 async move {
-                    let mut succeeded = true;
                     let result = process_router_request_stage(
                         http_client,
                         coprocessor_url,
@@ -549,17 +557,9 @@ impl RouterStage {
                     )
                     .await
                     .map_err(|error| {
-                        succeeded = false;
                         tracing::error!("coprocessor: router request stage error: {error}");
                         error
                     });
-                    u64_counter!(
-                        "apollo.router.operations.coprocessor",
-                        "Total operations with co-processors enabled",
-                        1,
-                        "coprocessor.stage" = PipelineStep::RouterRequest,
-                        "coprocessor.succeeded" = succeeded
-                    );
                     result
                 }
             })
@@ -575,8 +575,6 @@ impl RouterStage {
 
                 async move {
                     let response: router::Response = fut.await?;
-
-                    let mut succeeded = true;
                     let result = process_router_response_stage(
                         http_client,
                         coprocessor_url,
@@ -587,17 +585,9 @@ impl RouterStage {
                     )
                     .await
                     .map_err(|error| {
-                        succeeded = false;
                         tracing::error!("coprocessor: router response stage error: {error}");
                         error
                     });
-                    u64_counter!(
-                        "apollo.router.operations.coprocessor",
-                        "Total operations with co-processors enabled",
-                        1,
-                        "coprocessor.stage" = PipelineStep::RouterResponse,
-                        "coprocessor.succeeded" = succeeded
-                    );
                     result
                 }
             })
@@ -675,7 +665,6 @@ impl SubgraphStage {
                 let request_config = request_config.clone();
 
                 async move {
-                    let mut succeeded = true;
                     let result = process_subgraph_request_stage(
                         http_client,
                         coprocessor_url,
@@ -686,17 +675,9 @@ impl SubgraphStage {
                     )
                     .await
                     .map_err(|error| {
-                        succeeded = false;
                         tracing::error!("coprocessor: subgraph request stage error: {error}");
                         error
                     });
-                    u64_counter!(
-                        "apollo.router.operations.coprocessor",
-                        "Total operations with co-processors enabled",
-                        1,
-                        "coprocessor.stage" = PipelineStep::SubgraphRequest,
-                        "coprocessor.succeeded" = succeeded
-                    );
                     result
                 }
             })
@@ -713,8 +694,6 @@ impl SubgraphStage {
 
                 async move {
                     let response: subgraph::Response = fut.await?;
-
-                    let mut succeeded = true;
                     let result = process_subgraph_response_stage(
                         http_client,
                         coprocessor_url,
@@ -725,17 +704,9 @@ impl SubgraphStage {
                     )
                     .await
                     .map_err(|error| {
-                        succeeded = false;
                         tracing::error!("coprocessor: subgraph response stage error: {error}");
                         error
                     });
-                    u64_counter!(
-                        "apollo.router.operations.coprocessor",
-                        "Total operations with co-processors enabled",
-                        1,
-                        "coprocessor.stage" = PipelineStep::SubgraphResponse,
-                        "coprocessor.succeeded" = succeeded
-                    );
                     result
                 }
             })
@@ -821,11 +792,14 @@ where
         .method(parts.method.to_string())
         .build();
 
-    tracing::debug!(?payload, "externalized output");
+    tracing::debug!(?payload, "externalized output");    
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::RouterRequest, duration);
+    let succeeded = matches!(co_processor_result, Ok(_));
+    record_coprocessor_metrics(
+        PipelineStep::RouterRequest, 
+        start.elapsed(),
+        succeeded);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let mut co_processor_output = co_processor_result?;
@@ -986,12 +960,14 @@ where
         .and_sdl(sdl_to_send.clone())
         .build();
 
-    // Second, call our co-processor and get a reply.
-    tracing::debug!(?payload, "externalized output");
+    tracing::debug!(?payload, "externalized output");    
     let start = Instant::now();
     let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::RouterResponse, duration);
+    let succeeded = matches!(co_processor_result, Ok(_));
+    record_coprocessor_metrics(
+        PipelineStep::RouterResponse, 
+        start.elapsed(),
+        succeeded);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
@@ -1175,12 +1151,15 @@ where
         .and_subgraph_request_id(subgraph_request_id)
         .build();
 
-    tracing::debug!(?payload, "externalized output");
+    tracing::debug!(?payload, "externalized output");    
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::SubgraphRequest, duration);
-
+    let succeeded = matches!(co_processor_result, Ok(_));
+    record_coprocessor_metrics(
+        PipelineStep::SubgraphRequest, 
+        start.elapsed(),
+        succeeded);
+    
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
     validate_coprocessor_output(&co_processor_output, PipelineStep::SubgraphRequest)?;
@@ -1325,11 +1304,14 @@ where
         .and_subgraph_request_id(subgraph_request_id)
         .build();
 
-    tracing::debug!(?payload, "externalized output");
+    tracing::debug!(?payload, "externalized output");    
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::SubgraphResponse, duration);
+    let succeeded = matches!(co_processor_result, Ok(_));
+    record_coprocessor_metrics(
+        PipelineStep::SubgraphResponse, 
+        start.elapsed(),
+        succeeded);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
