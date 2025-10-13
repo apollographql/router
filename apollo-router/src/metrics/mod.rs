@@ -1112,6 +1112,9 @@ macro_rules! metric {
                     $guard::new(instrument.clone(), $value, attrs)
                 }
                 else {
+                    // This is only for testing.
+                    // The reason it is not cfg test is that we have a legitimate test for callsite caching though
+                    // cache_callsite is always true for not test
                     let meter_provider = crate::metrics::meter_provider();
                     let meter = opentelemetry::metrics::MeterProvider::meter(&meter_provider, "apollo/router");
                     let instrument = create_instrument_fn(meter);
