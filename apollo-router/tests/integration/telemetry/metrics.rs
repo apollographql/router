@@ -403,7 +403,9 @@ async fn test_prom_reset_on_reload() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_prometheus_metric_rename() {
     let mut router = IntegrationTest::builder()
-        .config(include_str!("fixtures/prometheus_metric_rename.router.yaml"))
+        .config(include_str!(
+            "fixtures/prometheus_metric_rename.router.yaml"
+        ))
         .build()
         .await;
 
@@ -452,7 +454,9 @@ async fn test_metric_rename_on_reload() {
     // This test verifies that changing the rename field in a view triggers a proper reload
     // and that the new renamed metric appears correctly
     let mut router = IntegrationTest::builder()
-        .config(include_str!("fixtures/prometheus_metric_rename.router.yaml"))
+        .config(include_str!(
+            "fixtures/prometheus_metric_rename.router.yaml"
+        ))
         .build()
         .await;
 
@@ -472,7 +476,9 @@ async fn test_metric_rename_on_reload() {
 
     // Reload with different rename
     router
-        .update_config(include_str!("fixtures/prometheus_rename_reload.router.yaml"))
+        .update_config(include_str!(
+            "fixtures/prometheus_rename_reload.router.yaml"
+        ))
         .await;
     router.assert_reloaded().await;
 
@@ -537,7 +543,9 @@ async fn test_apollo_studio_metrics_not_affected_by_rename() {
     // 4. Apollo Studio continues to send telemetry reports (confirming Apollo provider works)
 
     let mut router = IntegrationTest::builder()
-        .config(include_str!("fixtures/prometheus_apollo_isolation.router.yaml"))
+        .config(include_str!(
+            "fixtures/prometheus_apollo_isolation.router.yaml"
+        ))
         .build()
         .await;
 
