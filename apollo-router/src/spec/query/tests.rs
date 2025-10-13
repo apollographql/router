@@ -1662,12 +1662,12 @@ fn reformat_response_coersion_propagation_into_list() {
          * does not produce these errors.
             {
                 "message": "Invalid value found for field Query.thing.a",
-                "path": ["thing", "a"],
+                "path": ["thing", "a", 0],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
                 "message": "Invalid value found for field Query.thing.a",
-                "path": ["thing", "a"],
+                "path": ["thing", "a", 1],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
         */
@@ -1702,12 +1702,12 @@ fn reformat_response_coersion_propagation_into_list() {
          * does not produce these errors.
             {
                 "message": "Invalid value found for field Query.thing.a",
-                "path": ["thing", "a"],
+                "path": ["thing", "a", 0],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
                 "message": "Invalid value found for field Query.thing.a",
-                "path": ["thing", "a"],
+                "path": ["thing", "a", 1],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
@@ -1745,12 +1745,12 @@ fn reformat_response_coersion_propagation_into_list() {
          * does not produce these errors.
             {
                 "message": "Invalid value found for field Query.thing.a",
-                "path": ["thing", "a"],
+                "path": ["thing", "a", 0],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
                 "message": "Invalid value found for field Query.thing.a",
-                "path": ["thing", "a"],
+                "path": ["thing", "a", 1],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
