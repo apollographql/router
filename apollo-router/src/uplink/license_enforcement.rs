@@ -323,8 +323,9 @@ impl LicenseEnforcementReport {
             && schema_state.is_external_registry
         {
             schema_startup_violations.push(SchemaStartupRestriction::ExternalRegistry {
-                explanation: "An Enterprise license is required to use non-Apollo artifact registries"
-                    .to_string(),
+                explanation: 
+                    "An Enterprise license is required to use non-Apollo artifact registries"
+                        .to_string(),
             });
         }
 
