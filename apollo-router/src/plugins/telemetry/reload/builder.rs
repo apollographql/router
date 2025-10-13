@@ -50,7 +50,7 @@ use crate::plugins::telemetry::tracing::datadog;
 use crate::plugins::telemetry::tracing::zipkin;
 
 /// Static counter for tracking Prometheus reload calls.
-static PROMETHEUS_CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
+static PROMETHEUS_CALL_COUNT: AtomicUsize = AtomicUsize::new(1);
 
 /// Orchestrates telemetry reload preparation by detecting configuration changes
 /// and constructing new providers as needed.
