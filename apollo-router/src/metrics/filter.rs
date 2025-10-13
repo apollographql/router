@@ -282,7 +282,7 @@ mod test {
                 .with_reader(PeriodicReader::builder(exporter.clone()).build())
                 .build(),
         );
-        let filtered = meter_provider.versioned_meter("filtered", "".into(), "".into(), None);
+        let filtered = meter_provider.delegate.versioned_meter("filtered", "".into(), "".into(), None);
         // Matches allow
         filtered
             .u64_counter("apollo.router.operations")
@@ -394,7 +394,7 @@ mod test {
                 .with_reader(PeriodicReader::builder(exporter.clone()).build())
                 .build(),
         );
-        let filtered = meter_provider.versioned_meter("filtered", "".into(), "".into(), None);
+        let filtered = meter_provider.delegate.versioned_meter("filtered", "".into(), "".into(), None);
         filtered
             .u64_counter("apollo.router.operations")
             .with_description("desc")
@@ -517,7 +517,7 @@ mod test {
                 .with_reader(PeriodicReader::builder(exporter.clone()).build())
                 .build(),
         );
-        let filtered = meter_provider.versioned_meter("filtered", "".into(), "".into(), None);
+        let filtered = meter_provider.delegate.versioned_meter("filtered", "".into(), "".into(), None);
         filtered
             .u64_counter("apollo.router.operations.error")
             .build()

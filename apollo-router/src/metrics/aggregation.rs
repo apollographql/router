@@ -392,6 +392,7 @@ impl InstrumentProvider for AggregateInstrumentProvider {
 #[cfg(test)]
 mod test {
     use std::sync::Arc;
+    use std::sync::Weak;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::AtomicI64;
     use std::time::Duration;
@@ -400,19 +401,46 @@ mod test {
     use crate::metrics::aggregation::MeterProviderType;
     use crate::metrics::filter::FilterMeterProvider;
     use async_trait::async_trait;
+    use opentelemetry::InstrumentationScope;
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::error::OTelSdkResult;
     use opentelemetry_sdk::metrics::ManualReader;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
     use opentelemetry_sdk::metrics::PeriodicReader;
+    use opentelemetry_sdk::metrics::Pipeline;
     use opentelemetry_sdk::metrics::Temporality;
-    use opentelemetry_sdk::metrics::data::Gauge;
     use opentelemetry_sdk::metrics::data::ResourceMetrics;
     use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
     use opentelemetry_sdk::metrics::reader::MetricReader;
 
     #[derive(Clone, Debug)]
     struct SharedReader(Arc<ManualReader>);
+
+    impl MetricReader for SharedReader {
+        fn register_pipeline(&self, pipeline: Weak<Pipeline>) {
+            self.0.register_pipeline(pipeline)
+        }
+
+        fn collect(&self, rm: &mut ResourceMetrics) -> OTelSdkResult {
+            self.0.collect(rm)
+        }
+
+        fn force_flush(&self) -> OTelSdkResult {
+            self.0.force_flush()
+        }
+
+        fn shutdown(&self) -> OTelSdkResult {
+            self.0.shutdown()
+        }
+
+        fn temporality(&self, _kind: opentelemetry_sdk::metrics::InstrumentKind) -> Temporality {
+            Temporality::Cumulative
+        }
+
+        fn shutdown_with_timeout(&self, _timeout: Duration) -> OTelSdkResult {
+            self.shutdown()
+        }
+    }
 
     #[test]
     fn test_i64_gauge_drop() {
@@ -437,7 +465,7 @@ mod test {
                     callback_observe_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 i.observe(count + 1, &[])
             })
-            .init();
+            .build();
 
         let mut result = ResourceMetrics::default();
 
@@ -486,7 +514,7 @@ mod test {
                     callback_observe_counter1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 i.observe(count + 1, &[])
             })
-            .init();
+            .build();
 
         let mut result = ResourceMetrics::default();
 
@@ -506,7 +534,7 @@ mod test {
                     callback_observe_counter2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 i.observe(count + 1, &[])
             })
-            .init();
+            .build();
 
         // Fetching metrics will call the observer ONLY on the remaining gauge
         reader
@@ -518,39 +546,22 @@ mod test {
     }
 
     fn get_gauge_value(result: &mut ResourceMetrics) -> i64 {
-        assert_eq!(result.scope_metrics().len(), 1);
-        assert_eq!(result.scope_metrics().first().unwrap().metrics().len(), 1);
-        assert_eq!(
-            result
-                .scope_metrics()
-                .first()
-                .unwrap()
-                .metrics
-                .first()
-                .unwrap()
-                .data
-                .as_any()
-                .downcast_ref::<Gauge<i64>>()
-                .unwrap()
-                .data_points
-                .len(),
-            1
-        );
-        result
-            .scope_metrics()
-            .first()
-            .unwrap()
-            .metrics
-            .first()
-            .unwrap()
-            .data
-            .as_any()
-            .downcast_ref::<Gauge<i64>>()
-            .unwrap()
-            .data_points
-            .first()
-            .unwrap()
-            .value
+        let scope_metrics: Vec<_> = result.scope_metrics().collect();
+        assert_eq!(scope_metrics.len(), 1);
+
+        let metrics: Vec<_> = scope_metrics.first().unwrap().metrics().collect();
+        assert_eq!(metrics.len(), 1);
+
+        let metric = metrics.first().unwrap();
+
+        match metric.data() {
+            opentelemetry_sdk::metrics::data::AggregatedMetrics::F64(_metric_data) => panic!("Expected i64 gauge metric"),
+            opentelemetry_sdk::metrics::data::AggregatedMetrics::U64(_metric_data) => panic!("Expected i64 gauge metric"),
+            opentelemetry_sdk::metrics::data::AggregatedMetrics::I64(metric_data) => match metric_data {
+                opentelemetry_sdk::metrics::data::MetricData::Gauge(gauge) => gauge.data_points().next().unwrap().value(),
+                _ => panic!("Expected gauge metric")
+            },
+        }
     }
 
     #[test]
@@ -571,13 +582,13 @@ mod test {
         );
 
         let counter = meter_provider
-            .versioned_meter("test", None::<String>, None::<String>, None)
+            .meter_with_scope(InstrumentationScope::builder("test").build())
             .u64_counter("test.counter")
-            .init();
+            .build();
         counter.add(1, &[]);
         let mut resource_metrics = ResourceMetrics::default();
         reader.collect(&mut resource_metrics).unwrap();
-        assert_eq!(1, resource_metrics.scope_metrics().len());
+        assert_eq!(1, resource_metrics.scope_metrics().count());
     }
 
     struct TestExporter {
@@ -625,9 +636,9 @@ mod test {
         fn count(&self) {
             let counter = self
                 .meter_provider
-                .versioned_meter("test", None::<String>, None::<String>, None)
+                .meter_with_scope(InstrumentationScope::builder("test").build())
                 .u64_counter("test.counter")
-                .init();
+                .build();
             counter.add(1, &[]);
         }
     }
@@ -703,7 +714,6 @@ mod test {
             shutdown: shutdown.clone(),
         })
         .with_interval(Duration::from_millis(10))
-        .with_timeout(Duration::from_millis(10))
         .build()
     }
 }
