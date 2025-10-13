@@ -141,6 +141,12 @@ impl Default for MetricsCommon {
 pub(crate) struct MetricView {
     /// The instrument name you're targeting
     pub(crate) name: String,
+    /// Rename the metric to this name
+    ///
+    /// This allows you to customize metric names for both OTLP and Prometheus exporters.
+    /// Note: Prometheus will apply additional transformations (dots to underscores, unit suffixes).
+    /// Apollo metrics are not affected by this rename - they will retain original names.
+    pub(crate) rename: Option<String>,
     /// New description to set to the instrument
     pub(crate) description: Option<String>,
     /// New unit to set to the instrument
@@ -168,6 +174,9 @@ impl TryInto<Box<dyn View>> for MetricView {
         });
         let instrument = Instrument::new().name(self.name);
         let mut mask = Stream::new();
+        if let Some(new_name) = self.rename {
+            mask = mask.name(new_name);
+        }
         if let Some(desc) = self.description {
             mask = mask.description(desc);
         }
@@ -848,5 +857,59 @@ mod tests {
         AttributeValue::try_from(json!([1, true])).expect_err("mixed conversion must fail");
         AttributeValue::try_from(json!([1.1, true])).expect_err("mixed conversion must fail");
         AttributeValue::try_from(json!([true, "bar"])).expect_err("mixed conversion must fail");
+    }
+
+    #[test]
+    fn test_metric_view_rename_deserialization() {
+        // Test deserialization of MetricView with rename field
+        let json_config = json!({
+            "name": "http.server.request.duration",
+            "rename": "apollo.router.http.duration"
+        });
+
+        let view: MetricView = serde_json::from_value(json_config).expect("should deserialize");
+        assert_eq!(view.name, "http.server.request.duration");
+        assert_eq!(view.rename, Some("apollo.router.http.duration".to_string()));
+        assert_eq!(view.description, None);
+        assert_eq!(view.unit, None);
+        assert_eq!(view.aggregation, None);
+        assert_eq!(view.allowed_attribute_keys, None);
+    }
+
+    #[test]
+    fn test_metric_view_without_rename() {
+        // Test backward compatibility - MetricView without rename field
+        let json_config = json!({
+            "name": "http.server.request.duration",
+            "description": "HTTP request duration"
+        });
+
+        let view: MetricView = serde_json::from_value(json_config).expect("should deserialize");
+        assert_eq!(view.name, "http.server.request.duration");
+        assert_eq!(view.rename, None);
+        assert_eq!(view.description, Some("HTTP request duration".to_string()));
+    }
+
+    #[test]
+    fn test_metric_view_with_all_fields() {
+        // Test MetricView with rename combined with other fields
+        let json_config = json!({
+            "name": "http.server.request.duration",
+            "rename": "custom.metric.name",
+            "description": "Custom description",
+            "unit": "s",
+            "aggregation": {
+                "histogram": {
+                    "buckets": [0.1, 0.5, 1.0, 5.0]
+                }
+            }
+        });
+
+        let view: MetricView = serde_json::from_value(json_config).expect("should deserialize");
+        assert_eq!(view.name, "http.server.request.duration");
+        assert_eq!(view.rename, Some("custom.metric.name".to_string()));
+        assert_eq!(view.description, Some("Custom description".to_string()));
+        assert_eq!(view.unit, Some("s".to_string()));
+        assert!(view.aggregation.is_some());
     }
 }
