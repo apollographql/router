@@ -120,8 +120,7 @@ mod test {
 
         let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
             .with_simple_exporter(
-                opentelemetry_otlp::SpanExporter::builder()
-                    .build(),
+                opentelemetry_stdout::SpanExporter::default()
             )
             .build();
         let tracer = provider.tracer("noop");
