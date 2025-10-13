@@ -93,6 +93,7 @@ pub(crate) mod filter;
 /// otherwise drift can occur.
 #[derive(Debug)]
 #[doc(hidden)]
+#[must_use = "without holding the guard updown counters will immediately zero out"]
 pub struct UpDownCounterGuard<T>
 where
     T: std::ops::Neg<Output = T> + Copy,
