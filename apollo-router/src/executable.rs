@@ -43,13 +43,14 @@ use crate::uplink::UplinkConfig;
 const APOLLO_REGISTRY_HOST: &str = "apollographql.com";
 
 /// Determines if a graph artifact reference points to an external registry (not Apollo's registry)
-fn is_external_registry(graph_artifact_reference: &Option<String>) -> bool {
+/// Returns true (external) if the URL cannot be parsed or is invalid, as a safe default
+fn is_external_host(graph_artifact_reference: &Option<String>) -> bool {
     graph_artifact_reference
         .as_ref()
         .and_then(|ref_str| url::Url::parse(ref_str).ok())
         .and_then(|url| url.host_str().map(|host| host.to_lowercase()))
         .map(|host| !host.ends_with(APOLLO_REGISTRY_HOST))
-        .unwrap_or(false)
+        .unwrap_or(true) // Return true (external) for invalid URLs as safe default
 }
 
 #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
@@ -665,7 +666,7 @@ impl Executable {
                         Some(_) => {
                             let oci_config = opt.oci_config()?;
                             let is_external_registry =
-                                is_external_registry(&opt.graph_artifact_reference);
+                                is_external_host(&opt.graph_artifact_reference);
                             SchemaSource::OCI {
                                 config: oci_config,
                                 is_external_registry,
@@ -681,8 +682,7 @@ impl Executable {
                     None => SchemaSource::Registry(opt.uplink_config()?),
                     Some(_) => {
                         let oci_config = opt.oci_config()?;
-                        let is_external_registry =
-                            is_external_registry(&opt.graph_artifact_reference);
+                        let is_external_registry = is_external_host(&opt.graph_artifact_reference);
                         SchemaSource::OCI {
                             config: oci_config,
                             is_external_registry,
@@ -836,6 +836,7 @@ fn setup_panic_handler() {
 #[cfg(test)]
 mod tests {
     use crate::executable::add_log_filter;
+    use crate::executable::is_external_host;
 
     #[test]
     fn simplest_logging_modifications() {
@@ -971,5 +972,50 @@ mod tests {
                 reference
             );
         }
+    }
+
+    #[test]
+    fn test_is_external_host_apollo_registry() {
+        // Apollo registry URLs return false
+        let apollo_urls = vec![
+            "https://apollographql.com/my-graph:latest",
+            "https://subdomain.apollographql.com/my-graph:latest",
+            "https://APOLLOGRAPHQL.COM/my-graph:latest",
+        ];
+
+        for url in apollo_urls {
+            assert!(
+                !is_external_host(&Some(url.to_string())),
+                "Registry URL '{}' from Apollo should be internal",
+                url
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_external_host_external_registries() {
+        // External or invalid URLs return true
+        let external_urls = vec![
+            "https://registry.example.com/my-graph:latest",
+            "https://apollographql.com.aliceandbob.com/my-graph:latest",
+            "https://aliceandbob.apollo.graphql.com/my-graph:latest",
+            "not-a-url",
+            "://invalid",
+            "",
+        ];
+
+        for url in external_urls {
+            assert!(
+                is_external_host(&Some(url.to_string())),
+                "External registry URL '{}' should be considered external",
+                url
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_external_host_none() {
+        // Test None input (should return true - external as safe default)
+        assert!(is_external_host(&None));
     }
 }
