@@ -160,6 +160,7 @@ opentelemetry_sdk = { version = "0.30.0", default-features = false, features = [
     "experimental_metrics_custom_reader",
     "experimental_metrics_periodicreader_with_async_runtime",
 ] }
+opentelemetry-appender-tracing = "0.27.0"
 opentelemetry-aws = "0.18.0"
 opentelemetry-datadog = { version = "0.18.0", features = ["agent-sampling", "reqwest-client"] }
 rmp = "0.8"

@@ -26,6 +26,7 @@ use http::header;
 use metrics::apollo::studio::SingleLimitsStats;
 use metrics::local_type_stats::LocalTypeStatRecorder;
 use multimap::MultiMap;
+use opentelemetry::InstrumentationScope;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry::global::GlobalTracerProvider;
@@ -56,6 +57,9 @@ use tokio::runtime::Handle;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tracing_subscriber::filter::filter_fn;
+use tracing_subscriber::fmt::Layer;
+use tracing_subscriber::prelude::*;
 use uuid::Uuid;
 
 use self::apollo::ForwardValues;
@@ -365,7 +369,6 @@ impl PluginPrivate for Telemetry {
     type Config = config::Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-
         let mut config = init.config;
         config.instrumentation.spans.update_defaults();
         config.instrumentation.instruments.update_defaults();
@@ -379,6 +382,19 @@ impl PluginPrivate for Telemetry {
             config.calculate_field_level_instrumentation_ratio()?;
         let metrics_builder = Self::create_metrics_builder(&config)?;
         let tracer_provider = Self::create_tracer_provider(&config)?;
+
+        // handle OpenTelemetry internal logs and stop them from propagating to tracing bridge/appender
+        // capture logs with the opentelemetry prefix and print them to eprintln!
+        let opentelemetry_layer = Layer::new()
+            .with_writer(std::io::stderr)
+            .with_filter(filter_fn(|metadata| {
+                metadata.target().starts_with("opentelemetry")
+            }));
+
+        // register layer in tracing registry
+        tracing_subscriber::registry()
+            .with(opentelemetry_layer) // OpenTelemetry internal logs (filtered out)
+            .init();
 
         if config.instrumentation.spans.mode == SpanMode::Deprecated {
             ::tracing::warn!(
@@ -1171,8 +1187,10 @@ impl PluginPrivate for Telemetry {
                 .take()
                 .expect("must have new tracer_provider");
 
-            let tracer = tracer_provider
-                .tracer(GLOBAL_TRACER_NAME);
+            let scope = InstrumentationScope::builder(GLOBAL_TRACER_NAME)
+                .with_version(env!("CARGO_PKG_VERSION"))
+                .build();
+            let tracer = tracer_provider.tracer_with_scope(scope);
             hot_tracer.reload(tracer);
 
             let last_provider = opentelemetry::global::set_tracer_provider(tracer_provider);
