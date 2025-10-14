@@ -1,14 +1,14 @@
 ---
-title: Cache Expiration
-subtitle: Control cache freshness with TTL and invalidation
-description: Configure time-to-live (TTL) for automatic expiration and use active invalidation to remove stale cache entries on demand.
+title: Invalidation
+subtitle: Control cache freshness with passive TTL and active invalidation
+description: Configure time-to-live (TTL) for passive invalidation and use active invalidation to remove stale cache entries on demand.
 minVersion: Router v2.8.0
 releaseStage: preview
 ---
 
-Cache expiration ensures that cached data stays fresh. The router supports two approaches: passive expiration based on time to live (TTL) and active invalidation when you know data has changed.
+Cache invalidation ensures that cached data stays fresh. The router supports two approaches: passive TTL-based invalidation and active invalidation when you know data has changed.
 
-## Passive vs. active expiration
+## Passive vs. active invalidation
 
 - **Passive (TTL-based)**: Data automatically expires after its configured TTL. This works well for data that changes predictably or where slightly stale data is acceptable.
 - **Active (invalidation)**: You explicitly tell the router to remove cached data when you know it has changed. This works well for data that changes unpredictably or where stale data is unacceptable.
@@ -133,48 +133,6 @@ type User {
 ```
 
 See the [Customization](/router/performance/caching/response-caching/customization#private-data-caching) page for details on caching private data.
-
-#### Complete example
-
-This schema example uses both `@cacheTag` (for invalidation) and `@cacheControl` (for TTL):
-
-```graphql
-extend schema
-  @link(
-    url: "https://specs.apollo.dev/federation/v2.12"
-    import: ["@key", "@requires", "@external", "@cacheTag"]
-  )
-
-enum CacheControlScope {
-  PUBLIC
-  PRIVATE
-}
-
-directive @cacheControl(
-  maxAge: Int
-  scope: CacheControlScope
-  inheritMaxAge: Boolean
-) on FIELD_DEFINITION | OBJECT | INTERFACE | UNION
-
-type Query {
-  user(id: ID!): User
-  users: [User!]!
-}
-
-type User @key(fields: "id") @cacheTag(format: "user-{$key.id}") @cacheControl(maxAge: 10) {
-  id: ID!
-  name: String!
-  email: String!
-  posts: [Post!]! @external
-}
-
-type Post @key(fields: "id") {
-  id: ID!
-  content: String! @external
-}
-```
-
-In this example, the `User` type has a TTL of 10 seconds and a cache tag of `user-42` when the user ID is `42`.
 
 #### Learn more about TTL
 
@@ -526,3 +484,36 @@ Content-Type: application/json
 ```
 
 The `count` field indicates the number of keys that were removed from Redis.
+
+## Combining both approaches
+
+You can use both `@cacheControl` (for TTL-based passive invalidation) and `@cacheTag` (for active invalidation) together on the same types and fields. This gives you the flexibility to set reasonable TTLs as a safety net while also having the ability to invalidate data immediately when needed.
+
+Here's a simple example combining both directives:
+
+```graphql
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/federation/v2.12"
+    import: ["@key", "@cacheTag"]
+  )
+
+directive @cacheControl(
+  maxAge: Int
+  scope: CacheControlScope
+) on FIELD_DEFINITION | OBJECT | INTERFACE | UNION
+
+type User @key(fields: "id") 
+         @cacheControl(maxAge: 60) 
+         @cacheTag(format: "user-{$key.id}") {
+  id: ID!
+  name: String!
+  email: String!
+}
+```
+
+In this example:
+- The `@cacheControl(maxAge: 60)` directive sets a 60-second TTL—data automatically expires after one minute
+- The `@cacheTag(format: "user-{$key.id}")` directive enables immediate invalidation when user data changes
+
+This combined approach means you get automatic passive invalidation after 60 seconds, but you can also actively invalidate specific users (like `user-42`) the moment their data changes in your backend.

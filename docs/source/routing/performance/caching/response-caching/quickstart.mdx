@@ -206,7 +206,7 @@ Response times are also faster, as shown in the right panel of this screenshot:
 
 ### Invalidation
 
-With cached data based on TTL, you might want to increase these TTLs and automatically invalidate specific data when you know it has changed. Response caching provides several ways to invalidate data. For more details, see [Cache Expiration](./cache-expiration). For this quickstart, we'll use cache tags, which work like surrogate cache keys for REST APIs. You can tag data in your schema to enable targeted invalidation.
+With cached data based on TTL, you might want to increase these TTLs and automatically invalidate specific data when you know it has changed. Response caching provides several ways to invalidate data. For more details, see [Invalidation](./invalidation). For this quickstart, we'll use cache tags, which work like surrogate cache keys for REST APIs. You can tag data in your schema to enable targeted invalidation.
 
 Use the `@cacheTag` directive introduced in Federation v2.12. It takes a `format` argument to create your cache tag. For the `User` type and the `posts` root field, create different cache tags:
 
