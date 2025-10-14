@@ -30,7 +30,7 @@ The main goal of response caching is to reduce the load on your subgraphs and im
 
 GraphQL responses present unique caching challenges that traditional HTTP caching doesn't address well. A typical GraphQL response combines data from multiple sources with varying freshness requirements and visibility constraints:
 
-- **Mixed TTLs**: A single response might include product prices (change weekly), inventory (change constantly), and user reviews (change rarely). Traditional response caching forces you to use the shortest time to live (TTL)—the duration data remains valid in cache—for the entire response.
+- **Mixed TTLs**: A single response might include product prices (change weekly), inventory (change constantly), and user reviews (change occasionally). Traditional response caching forces you to use the shortest time to live (TTL)—the duration data remains valid in cache—for the entire response.
 - **Personalized and public data**: Responses often mix public data (product details) with private data (user's cart, viewing history). This makes full-response caching either impossible or requires separate cache entries per user.
 - **High duplication**: Different queries requesting similar entities result in duplicate cached data. For example, a product list query and a product detail query both cache the same product name and price.
 
