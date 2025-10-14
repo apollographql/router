@@ -1440,7 +1440,9 @@ where
                     let (selector, increment) = match (&instrument.value).into() {
                         InstrumentValue::Standard(incr) => {
                             let incr = match incr {
-                                Standard::Duration => Increment::Duration(Instant::now(), instrument.unit.clone()),
+                                Standard::Duration => {
+                                    Increment::Duration(Instant::now(), instrument.unit.clone())
+                                }
                                 Standard::Unit => Increment::Unit,
                             };
                             (None, incr)
@@ -1449,7 +1451,10 @@ where
                             (Some(Arc::new(selector)), Increment::Custom(None))
                         }
                         InstrumentValue::Chunked(incr) => match incr {
-                            Event::Duration => (None, Increment::EventDuration(Instant::now(), instrument.unit.clone())),
+                            Event::Duration => (
+                                None,
+                                Increment::EventDuration(Instant::now(), instrument.unit.clone()),
+                            ),
                             Event::Unit => (None, Increment::EventUnit),
                             Event::Custom(selector) => {
                                 (Some(Arc::new(selector)), Increment::EventCustom(None))
@@ -1496,7 +1501,9 @@ where
                     let (selector, increment) = match (&instrument.value).into() {
                         InstrumentValue::Standard(incr) => {
                             let incr = match incr {
-                                Standard::Duration => Increment::Duration(Instant::now(), instrument.unit.clone()),
+                                Standard::Duration => {
+                                    Increment::Duration(Instant::now(), instrument.unit.clone())
+                                }
                                 Standard::Unit => Increment::Unit,
                             };
                             (None, incr)
@@ -1505,7 +1512,10 @@ where
                             (Some(Arc::new(selector)), Increment::Custom(None))
                         }
                         InstrumentValue::Chunked(incr) => match incr {
-                            Event::Duration => (None, Increment::EventDuration(Instant::now(), instrument.unit.clone())),
+                            Event::Duration => (
+                                None,
+                                Increment::EventDuration(Instant::now(), instrument.unit.clone()),
+                            ),
                             Event::Unit => (None, Increment::EventUnit),
                             Event::Custom(selector) => {
                                 (Some(Arc::new(selector)), Increment::EventCustom(None))
@@ -1924,7 +1934,8 @@ where
 
         let increment = match inner.increment {
             Increment::Unit | Increment::EventUnit | Increment::FieldUnit => 1f64,
-            Increment::Duration(instant, ref unit) | Increment::EventDuration(instant, ref unit) => {
+            Increment::Duration(instant, ref unit)
+            | Increment::EventDuration(instant, ref unit) => {
                 duration_to_f64(instant.elapsed(), unit)
             }
             Increment::Custom(val) | Increment::EventCustom(val) | Increment::FieldCustom(val) => {
@@ -2030,7 +2041,8 @@ where
             if let Some(counter) = inner.counter.take() {
                 let incr: f64 = match &inner.increment {
                     Increment::Unit | Increment::EventUnit => 1f64,
-                    Increment::Duration(instant, unit) | Increment::EventDuration(instant, unit) => {
+                    Increment::Duration(instant, unit)
+                    | Increment::EventDuration(instant, unit) => {
                         duration_to_f64(instant.elapsed(), unit)
                     }
                     Increment::Custom(val) | Increment::EventCustom(val) => match val {
@@ -2264,7 +2276,9 @@ where
 
         let increment = match inner.increment {
             Increment::Unit => Some(1f64),
-            Increment::Duration(instant, ref unit) => Some(duration_to_f64(instant.elapsed(), unit)),
+            Increment::Duration(instant, ref unit) => {
+                Some(duration_to_f64(instant.elapsed(), unit))
+            }
             Increment::Custom(val) => val.map(|incr| incr as f64),
             Increment::EventUnit
             | Increment::EventDuration(_, _)
@@ -2357,7 +2371,8 @@ where
 
         let increment = match inner.increment {
             Increment::Unit | Increment::EventUnit | Increment::FieldUnit => Some(1f64),
-            Increment::Duration(instant, ref unit) | Increment::EventDuration(instant, ref unit) => {
+            Increment::Duration(instant, ref unit)
+            | Increment::EventDuration(instant, ref unit) => {
                 Some(duration_to_f64(instant.elapsed(), unit))
             }
             Increment::Custom(val) | Increment::EventCustom(val) | Increment::FieldCustom(val) => {
@@ -2459,7 +2474,8 @@ where
             if let Some(histogram) = inner.histogram.take() {
                 let increment = match &inner.increment {
                     Increment::Unit | Increment::EventUnit => Some(1f64),
-                    Increment::Duration(instant, unit) | Increment::EventDuration(instant, unit) => {
+                    Increment::Duration(instant, unit)
+                    | Increment::EventDuration(instant, unit) => {
                         Some(duration_to_f64(instant.elapsed(), unit))
                     }
                     Increment::Custom(val) | Increment::EventCustom(val) => {
