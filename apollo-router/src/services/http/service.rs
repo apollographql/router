@@ -177,6 +177,16 @@ impl HttpClientService {
         HttpClientService::new(name, tls_client_config, client_config)
     }
 
+    pub(crate) fn from_config_for_coprocessor(
+        tls_root_store: &RootCertStore,
+        client_config: crate::configuration::shared::Client,
+    ) -> Result<Self, BoxError> {
+        // Coprocessors don't use client certificates, so use no client auth
+        let tls_client_config = generate_tls_client_config(tls_root_store.clone(), None)?;
+
+        HttpClientService::new("coprocessor".to_string(), tls_client_config, client_config)
+    }
+
     pub(crate) fn new(
         service: impl Into<String>,
         tls_config: ClientConfig,
