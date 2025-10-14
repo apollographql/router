@@ -33,6 +33,8 @@ pub(super) struct ExecutionRequestConf {
     pub(super) method: bool,
     /// Send the query plan
     pub(super) query_plan: bool,
+    /// The coprocessor URL for this stage (overrides the global URL if specified)
+    pub(super) url: Option<String>,
 }
 
 /// What information is passed to a router request/response stage
@@ -49,6 +51,8 @@ pub(super) struct ExecutionResponseConf {
     pub(super) sdl: bool,
     /// Send the HTTP status
     pub(super) status_code: bool,
+    /// The coprocessor URL for this stage (overrides the global URL if specified)
+    pub(super) url: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
@@ -65,7 +69,7 @@ impl ExecutionStage {
         &self,
         http_client: C,
         service: execution::BoxService,
-        coprocessor_url: String,
+        default_url: String,
         sdl: Arc<String>,
         response_validation: bool,
     ) -> execution::BoxService
@@ -82,7 +86,7 @@ impl ExecutionStage {
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
-            let coprocessor_url = coprocessor_url.clone();
+            let coprocessor_url = request_config.url.clone().unwrap_or(default_url.clone());
             let http_client = http_client.clone();
             let sdl = sdl.clone();
 
@@ -123,6 +127,7 @@ impl ExecutionStage {
 
         let response_layer = (self.response != Default::default()).then_some({
             let response_config = self.response.clone();
+            let coprocessor_url = response_config.url.clone().unwrap_or(default_url);
 
             MapFutureLayer::new(move |fut| {
                 let coprocessor_url = coprocessor_url.clone();
@@ -596,6 +601,7 @@ mod tests {
                 sdl: false,
                 method: false,
                 query_plan: false,
+                url: None,
             },
             response: Default::default(),
         };
@@ -731,6 +737,7 @@ mod tests {
                 sdl: false,
                 method: false,
                 query_plan: false,
+                url: None,
             },
             response: Default::default(),
         };
@@ -803,6 +810,7 @@ mod tests {
                 body: true,
                 sdl: true,
                 status_code: false,
+                url: None,
             },
             request: Default::default(),
         };
@@ -939,6 +947,7 @@ mod tests {
                 body: true,
                 sdl: true,
                 status_code: false,
+                url: None,
             },
             request: Default::default(),
         };
@@ -1050,6 +1059,7 @@ mod tests {
                 body: true,
                 sdl: true,
                 status_code: false,
+                url: None,
             },
         }
     }
@@ -1081,6 +1091,7 @@ mod tests {
                 sdl: true,
                 method: true,
                 query_plan: true,
+                url: None,
             },
             response: Default::default(),
         }
