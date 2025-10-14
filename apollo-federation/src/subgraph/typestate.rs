@@ -1206,6 +1206,7 @@ mod tests {
             vec![
                 name!("deprecated"),
                 name!("federation__authenticated"),
+                name!("federation__cacheInvalidation"),
                 name!("federation__cacheTag"),
                 name!("federation__composeDirective"),
                 name!("federation__context"),

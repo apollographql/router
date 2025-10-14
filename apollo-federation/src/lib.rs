@@ -62,6 +62,7 @@ use crate::error::MultiTryAll;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::link::authenticated_spec_definition::AUTHENTICATED_VERSIONS;
+use crate::link::cache_invalidation_spec_definition::CACHE_INVALIDATION_VERSIONS;
 use crate::link::context_spec_definition::CONTEXT_VERSIONS;
 use crate::link::context_spec_definition::ContextSpecDefinition;
 use crate::link::cost_spec_definition::COST_VERSIONS;
@@ -91,7 +92,7 @@ pub mod internal_lsp_api {
 /// Internal API for the apollo-composition crate.
 pub mod internal_composition_api {
     use super::*;
-    use crate::schema::validators::cache_tag;
+    use crate::schema::validators::{cache_invalidation, cache_tag};
     use crate::subgraph::typestate;
 
     #[derive(Default)]
@@ -119,6 +120,36 @@ pub mod internal_composition_api {
             .map_err(|e| e.into_federation_error())?;
         let mut result = ValidationResult::default();
         cache_tag::validate_cache_tag_directives(subgraph.schema(), &mut result.errors)?;
+        Ok(result)
+    }
+
+    #[derive(Default)]
+    pub struct CacheInvalidationValidationResult {
+        /// If `errors` is empty, validation was successful.
+        pub errors: Vec<cache_invalidation::Message>,
+    }
+    /// Validates `@cacheInvalidation` directives in the original (unexpanded) subgraph schema.
+    /// * name: Subgraph name
+    /// * url: Subgraph URL
+    /// * sdl: Subgraph schema
+    /// * Returns a `CacheInvalidationValidationResult` if validation finished (either successfully or with
+    ///   validation errors).
+    /// * Or, a `FederationError` if validation stopped due to an internal error.
+    pub fn validate_cache_invalidation_directives(
+        name: &str,
+        url: &str,
+        sdl: &str,
+    ) -> Result<CacheInvalidationValidationResult, FederationError> {
+        let subgraph =
+            typestate::Subgraph::parse(name, url, sdl).map_err(|e| e.into_federation_error())?;
+        let subgraph = subgraph
+            .expand_links()
+            .map_err(|e| e.into_federation_error())?;
+        let mut result = CacheInvalidationValidationResult::default();
+        cache_invalidation::validate_cache_invalidation_directives(
+            subgraph.schema(),
+            &mut result.errors,
+        )?;
         Ok(result)
     }
 }
@@ -292,6 +323,7 @@ pub fn router_supported_supergraph_specs() -> Vec<Url> {
         .chain(urls(&CONTEXT_VERSIONS))
         .chain(urls(&COST_VERSIONS))
         .chain(urls(&CACHE_TAG_VERSIONS))
+        .chain(urls(&CACHE_INVALIDATION_VERSIONS))
         .chain(ConnectSpec::iter().map(|s| s.url()))
         .collect()
 }
@@ -363,7 +395,9 @@ mod test_supergraph {
     use pretty_assertions::assert_str_eq;
 
     use super::*;
+    use crate::internal_composition_api::CacheInvalidationValidationResult;
     use crate::internal_composition_api::ValidationResult;
+    use crate::internal_composition_api::validate_cache_invalidation_directives;
     use crate::internal_composition_api::validate_cache_tag_directives;
 
     #[test]
@@ -397,14 +431,14 @@ mod test_supergraph {
     }
 
     #[track_caller]
-    fn build_and_validate(name: &str, url: &str, sdl: &str) -> ValidationResult {
+    fn build_and_validate_cache_tag(name: &str, url: &str, sdl: &str) -> ValidationResult {
         validate_cache_tag_directives(name, url, sdl).unwrap()
     }
 
     #[test]
     fn it_validates_cache_tag_directives() {
         // Ok with older federation versions without @cacheTag directive.
-        let res = build_and_validate(
+        let res = build_and_validate_cache_tag(
             "accounts",
             "accounts.graphql",
             r#"
@@ -432,7 +466,7 @@ mod test_supergraph {
         assert!(res.errors.is_empty());
 
         // validation error test
-        let res = build_and_validate(
+        let res = build_and_validate_cache_tag(
             "accounts",
             "https://accounts",
             r#"
@@ -469,7 +503,7 @@ mod test_supergraph {
         );
 
         // valid usage test
-        let res = build_and_validate(
+        let res = build_and_validate_cache_tag(
             "accounts",
             "accounts.graphql",
             r#"
@@ -483,6 +517,109 @@ mod test_supergraph {
                     topProducts(first: Int = 5): [Product]
                         @cacheTag(format: "topProducts")
                         @cacheTag(format: "topProducts-{$args.first}")
+                }
+
+                type Product
+                    @key(fields: "upc")
+                    @cacheTag(format: "product-{$key.upc}") {
+                    upc: String!
+                    name: String!
+                    price: Int
+                    weight: Int
+                }
+            "#,
+        );
+
+        assert!(res.errors.is_empty());
+    }
+
+    #[track_caller]
+    fn build_and_validate_cache_invalidation(
+        name: &str,
+        url: &str,
+        sdl: &str,
+    ) -> CacheInvalidationValidationResult {
+        validate_cache_invalidation_directives(name, url, sdl).unwrap()
+    }
+
+    #[test]
+    fn it_validates_cache_invalidation_directives() {
+        // Ok with older federation versions without @cacheTag directive.
+        let res = build_and_validate_cache_invalidation(
+            "accounts",
+            "accounts.graphql",
+            r#"
+                extend schema
+                    @link(
+                        url: "https://specs.apollo.dev/federation/v2.11"
+                        import: ["@key"]
+                    )
+
+                type Query {
+                    topProducts(first: Int = 5): [Product]
+                }
+
+                type Product
+                    @key(fields: "upc")
+                    @key(fields: "name") {
+                    upc: String!
+                    name: String!
+                    price: Int
+                    weight: Int
+                }
+            "#,
+        );
+
+        assert!(res.errors.is_empty());
+
+        // validation error test
+        let res = build_and_validate_cache_invalidation(
+            "accounts",
+            "https://accounts",
+            r#"
+            extend schema
+                @link(
+                    url: "https://specs.apollo.dev/federation/v2.12"
+                    import: ["@key", "@cacheInvalidation"]
+                )
+
+            type Mutation {
+                updateProduct(productUpc: String): User @cacheInvalidation(cacheTag: "product-{$args.productUpc}")
+            }
+
+            type Product
+                @key(fields: "upc")
+                @key(fields: "name")
+                @cacheTag(format: "product-{$key.upc}") {
+                upc: String!
+                name: String!
+                price: Int
+                weight: Int
+            }
+        "#,
+        );
+
+        assert_eq!(
+            res.errors
+                .into_iter()
+                .map(|err| err.to_string())
+                .collect::<Vec<String>>(),
+            vec!["Unknown arguments used with $args in cacheInvalidation cacheTag \"product-{$args.productUpc}\" on field \"updateProduct\" for type \"Mutation\"".to_string()]
+        );
+
+        // valid usage test
+        let res = build_and_validate_cache_invalidation(
+            "accounts",
+            "accounts.graphql",
+            r#"
+                extend schema
+                @link(
+                    url: "https://specs.apollo.dev/federation/v2.12"
+                    import: ["@key", "@cacheInvalidation"]
+                )
+
+                type Mutation {
+                    updateProduct(productUpc: String!): User @cacheInvalidation(cacheTag: "product-{$args.productUpc}") @cacheInvalidation(cacheTag: "product")
                 }
 
                 type Product

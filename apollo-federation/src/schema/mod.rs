@@ -35,6 +35,7 @@ use crate::link::LinksMetadata;
 use crate::link::context_spec_definition::ContextSpecDefinition;
 use crate::link::cost_spec_definition;
 use crate::link::cost_spec_definition::CostSpecDefinition;
+use crate::link::federation_spec_definition::CacheInvalidationDirectiveArguments;
 use crate::link::federation_spec_definition::CacheTagDirectiveArguments;
 use crate::link::federation_spec_definition::ComposeDirectiveArguments;
 use crate::link::federation_spec_definition::ContextDirectiveArguments;
@@ -183,6 +184,11 @@ impl FederationSchema {
             .schema_definition
             .iter_root_operations()
             .any(|op| *op.1 == *type_name)
+    }
+
+    pub(crate) fn is_mutation_root_type(&self, type_name: &Name) -> bool {
+        let mutation = &self.schema().schema_definition.mutation;
+        mutation.as_ref().is_some_and(|name| name == type_name)
     }
 
     pub(crate) fn is_subscription_root_type(&self, type_name: &Name) -> bool {
@@ -1046,6 +1052,30 @@ impl FederationSchema {
         Ok(applications)
     }
 
+    pub(crate) fn cache_invalidation_directive_applications(
+        &self,
+    ) -> FallibleDirectiveIterator<CacheInvalidationDirective<'_>> {
+        let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
+        let Ok(cache_invalidation_directive_definition) =
+            federation_spec.cache_invalidation_directive_definition(self)
+        else {
+            return Ok(Vec::new());
+        };
+
+        let result = self
+            .referencers()
+            .get_directive_applications(self, &cache_invalidation_directive_definition.name)?
+            .map(|(pos, application)| {
+                let arguments = federation_spec.cache_invalidation_directive_arguments(application);
+                arguments.map(|args| CacheInvalidationDirective {
+                    arguments: args,
+                    target: pos,
+                })
+            })
+            .collect();
+        Ok(result)
+    }
+
     pub(crate) fn cache_tag_directive_applications(
         &self,
     ) -> FallibleDirectiveIterator<CacheTagDirective<'_>> {
@@ -1236,6 +1266,13 @@ pub(crate) struct TagDirective<'schema> {
 pub(crate) struct CacheTagDirective<'schema> {
     /// The parsed arguments of this `@cacheTag` application
     arguments: CacheTagDirectiveArguments<'schema>,
+    /// The schema position to which this directive is applied
+    target: DirectiveTargetPosition,
+}
+
+pub(crate) struct CacheInvalidationDirective<'schema> {
+    /// The parsed arguments of this `@cacheInvalidation` application
+    arguments: CacheInvalidationDirectiveArguments<'schema>,
     /// The schema position to which this directive is applied
     target: DirectiveTargetPosition,
 }

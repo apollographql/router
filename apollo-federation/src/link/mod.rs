@@ -24,6 +24,7 @@ use crate::link::spec::Url;
 
 pub(crate) mod argument;
 pub(crate) mod authenticated_spec_definition;
+pub(crate) mod cache_invalidation_spec_definition;
 pub(crate) mod cache_tag_spec_definition;
 pub(crate) mod context_spec_definition;
 pub mod cost_spec_definition;

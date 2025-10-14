@@ -42,6 +42,8 @@ use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecificati
 
 pub(crate) const FEDERATION_ANY_TYPE_NAME_IN_SPEC: Name = name!("_Any");
 pub(crate) const FEDERATION_CACHE_TAG_DIRECTIVE_NAME_IN_SPEC: Name = name!("cacheTag");
+pub(crate) const FEDERATION_CACHE_INVALIDATION_DIRECTIVE_NAME_IN_SPEC: Name =
+    name!("cacheInvalidation");
 pub(crate) const FEDERATION_ENTITY_TYPE_NAME_IN_SPEC: Name = name!("_Entity");
 pub(crate) const FEDERATION_SERVICE_TYPE_NAME_IN_SPEC: Name = name!("_Service");
 pub(crate) const FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC: Name = name!("key");
@@ -61,6 +63,7 @@ pub(crate) const FEDERATION_COMPOSEDIRECTIVE_DIRECTIVE_NAME_IN_SPEC: Name =
 pub(crate) const FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC: Name = name!("FieldSet");
 pub(crate) const FEDERATION_FIELDS_ARGUMENT_NAME: Name = name!("fields");
 pub(crate) const FEDERATION_FORMAT_ARGUMENT_NAME: Name = name!("format");
+pub(crate) const FEDERATION_CACHE_TAG_ARGUMENT_NAME: Name = name!("cacheTag");
 pub(crate) const FEDERATION_RESOLVABLE_ARGUMENT_NAME: Name = name!("resolvable");
 pub(crate) const FEDERATION_REASON_ARGUMENT_NAME: Name = name!("reason");
 pub(crate) const FEDERATION_FROM_ARGUMENT_NAME: Name = name!("from");
@@ -115,6 +118,11 @@ pub(crate) struct OverrideDirectiveArguments<'doc> {
 
 pub(crate) struct CacheTagDirectiveArguments<'doc> {
     pub(crate) format: &'doc str,
+}
+
+pub(crate) struct CacheInvalidationDirectiveArguments<'doc> {
+    pub(crate) cache_tag: Option<&'doc str>,
+    pub(crate) r#type: Option<&'doc str>,
 }
 
 #[derive(Clone)]
@@ -678,6 +686,34 @@ impl FederationSpecDefinition {
         })
     }
 
+    pub(crate) fn cache_invalidation_directive_definition<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema Node<DirectiveDefinition>, FederationError> {
+        self.directive_definition(schema, &FEDERATION_CACHE_INVALIDATION_DIRECTIVE_NAME_IN_SPEC)?
+            .ok_or_else(|| {
+                FederationError::internal(format!(
+                    "Unexpectedly could not find federation spec's \"@{FEDERATION_CACHE_INVALIDATION_DIRECTIVE_NAME_IN_SPEC}\" directive definition",
+                ))
+            })
+    }
+
+    pub(crate) fn cache_invalidation_directive_arguments<'doc>(
+        &self,
+        application: &'doc Node<Directive>,
+    ) -> Result<CacheInvalidationDirectiveArguments<'doc>, FederationError> {
+        Ok(CacheInvalidationDirectiveArguments {
+            cache_tag: directive_optional_string_argument(
+                application,
+                &FEDERATION_CACHE_TAG_ARGUMENT_NAME,
+            )?,
+            r#type: directive_optional_string_argument(
+                application,
+                &FEDERATION_TYPE_ARGUMENT_NAME,
+            )?,
+        })
+    }
+
     pub(crate) fn cache_tag_directive_definition<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -900,6 +936,35 @@ impl FederationSpecDefinition {
         )
     }
 
+    fn cache_invalidation_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_CACHE_INVALIDATION_DIRECTIVE_NAME_IN_SPEC,
+            &[
+                DirectiveArgumentSpecification {
+                    base_spec: ArgumentSpecification {
+                        name: FEDERATION_CACHE_TAG_ARGUMENT_NAME,
+                        get_type: |_, _| Ok(ty!(String)),
+                        default_value: None,
+                    },
+                    composition_strategy: None,
+                },
+                DirectiveArgumentSpecification {
+                    base_spec: ArgumentSpecification {
+                        name: FEDERATION_TYPE_ARGUMENT_NAME,
+                        get_type: |_, _| Ok(ty!(String)),
+                        default_value: None,
+                    },
+                    composition_strategy: None,
+                },
+            ],
+            true,
+            &[DirectiveLocation::FieldDefinition],
+            false,
+            None,
+            None,
+        )
+    }
+
     fn cache_tag_directive_specification() -> DirectiveSpecification {
         DirectiveSpecification::new(
             FEDERATION_CACHE_TAG_DIRECTIVE_NAME_IN_SPEC,
@@ -1015,6 +1080,13 @@ impl SpecDefinition for FederationSpecDefinition {
             minor: 12,
         }) {
             specs.push(Box::new(Self::cache_tag_directive_specification()));
+        }
+
+        if self.version().satisfies(&Version {
+            major: 2,
+            minor: 12,
+        }) {
+            specs.push(Box::new(Self::cache_invalidation_directive_specification()));
         }
 
         specs
