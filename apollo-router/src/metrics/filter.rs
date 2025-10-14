@@ -331,7 +331,7 @@ mod test {
             .get_finished_metrics()
             .unwrap()
             .into_iter()
-            .flat_map(|m| m.scope_metrics().into_iter())
+            .flat_map(|m: opentelemetry_sdk::metrics::data::ResourceMetrics| m.scope_metrics().collect())
             .flat_map(|m| m.metrics().into_iter())
             .collect();
 
@@ -407,8 +407,8 @@ mod test {
             .get_finished_metrics()
             .unwrap()
             .into_iter()
-            .flat_map(|m| m.scope_metrics().into_iter())
-            .flat_map(|m| m.metrics().into_iter())
+            .flat_map(|m: opentelemetry_sdk::metrics::data::ResourceMetrics| m.scope_metrics())
+            .flat_map(|m: &opentelemetry_sdk::metrics::data::ScopeMetrics| m.metrics())
             .collect();
         assert!(
             metrics
@@ -532,7 +532,7 @@ mod test {
             .get_finished_metrics()
             .unwrap()
             .into_iter()
-            .flat_map(|m| m.scope_metrics().into_iter())
+            .flat_map(|m: opentelemetry_sdk::metrics::data::ResourceMetrics| m.scope_metrics().collect())
             .flat_map(|m| m.metrics().into_iter())
             .collect();
         // Matches
