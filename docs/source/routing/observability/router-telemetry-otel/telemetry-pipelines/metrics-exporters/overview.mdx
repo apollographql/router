@@ -119,7 +119,7 @@ telemetry:
 
 ### `views`
 
-You can customize metrics behavior using OpenTelemetry views, including renaming metrics, overriding attributes, changing default buckets, or dropping metrics entirely.
+OpenTelemetry views enable you to customize metrics behavior, including renaming metrics, overriding attributes, changing default buckets, or dropping metrics entirely.
 
 #### Renaming metrics
 
@@ -143,9 +143,9 @@ Important naming considerations:
 
 - OTLP exporters use the renamed metric name exactly as specified.
 - Prometheus exporters automatically transform metric names:
-  - Dots (`.`) are converted to underscores (`_`)
-  - Unit suffixes are added (e.g., `_seconds`, `_bytes`)
-  - Example: `apollo.router.http.duration` becomes `apollo_router_http_duration_seconds`
+  - Dots (`.`) are converted to underscores (`_`).
+  - Unit suffixes are added (e.g., `_seconds`, `_bytes`).
+  - For example, `apollo.router.http.duration` becomes `apollo_router_http_duration_seconds`.
 - Apollo Studio metrics aren't affected by renaming and continue to use the original metric names.
 
 </Note>
