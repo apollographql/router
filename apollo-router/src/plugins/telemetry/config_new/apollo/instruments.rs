@@ -122,7 +122,7 @@ impl ApolloSubgraphInstruments {
         let apollo_router_operations_fetch_duration =
             apollo_config.subgraph_metrics.then(|| {
                 CustomHistogram::builder()
-                    .increment(Increment::Duration(Instant::now()))
+                    .increment(Increment::Duration(Instant::now(), "s".to_string()))
                     .attributes(Vec::with_capacity(attribute_count))
                     .selectors(Arc::new(selectors))
                     .histogram(static_instruments
@@ -246,7 +246,7 @@ impl ApolloConnectorInstruments {
         let apollo_router_operations_fetch_duration =
             apollo_config.subgraph_metrics.then(|| {
                 CustomHistogram::builder()
-                    .increment(Increment::Duration(Instant::now()))
+                    .increment(Increment::Duration(Instant::now(), "s".to_string()))
                     .attributes(Vec::with_capacity(attribute_count))
                     .selectors(Arc::new(selectors))
                     .histogram(static_instruments
