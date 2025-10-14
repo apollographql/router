@@ -11,6 +11,7 @@ use tower::BoxError;
 use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::config::GenericWith;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
+use crate::plugins::telemetry::error_handler::NamedSpanExporter;
 use crate::plugins::telemetry::otel::named_runtime_channel::NamedTokioRuntime;
 use crate::plugins::telemetry::reload::tracing::TracingBuilder;
 use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
@@ -62,8 +63,9 @@ impl TracingConfigurator for Config {
             .with_trace_config(common)
             .init_exporter()?;
 
+        let named_exporter = NamedSpanExporter::new(exporter, "zipkin");
         builder.with_span_processor(
-            BatchSpanProcessor::builder(exporter, NamedTokioRuntime::new("zipkin-tracing"))
+            BatchSpanProcessor::builder(named_exporter, NamedTokioRuntime::new("zipkin-tracing"))
                 .with_batch_config(self.batch_processor.clone().into())
                 .build()
                 .filtered(),

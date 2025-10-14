@@ -1,11 +1,7 @@
-use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::OnceLock;
-
-use parking_lot::Mutex;
-use parking_lot::MutexGuard;
 
 use crate::ListenAddr;
+use crate::metrics::UpDownCounterGuard;
 use crate::services::router::pipeline_handle::PipelineRef;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -14,76 +10,279 @@ pub(crate) enum ConnectionState {
     Terminating,
 }
 
-/// A ConnectionRef is used to keep track of how many connections we have active. It's associated with an instance of RouterCreator
-/// Pipeline ref represents a unique pipeline
-#[derive(Clone, Hash, Eq, PartialEq, Debug)]
-pub(crate) struct ConnectionRef {
+/// A connection handle does the actual tracking of connections
+/// Creating a new connection handle will increment the updown counter.
+/// Dropping the connection handle will decrement the updown counter
+/// Clone MUST NOT be implemented for this type. Cloning will make extra copies that when dropped will throw off the count.
+pub(crate) struct ConnectionHandle {
     pub(crate) pipeline_ref: Arc<PipelineRef>,
     pub(crate) address: ListenAddr,
-    /// The state of this connection. When we are trying to shut it down, for instance on reload, it will switch to terminating.
-    pub(crate) state: ConnectionState,
-}
-
-/// A connection handle does the actual tracking of connections
-/// Creating a new connection handle will insert a ConnectionRef into a static map.
-/// Dropping all connection handles associated with the internal ref will remove the ConnectionRef
-/// Clone MUST NOT be implemented for this type. Cloning will make extra copies that when dropped will throw off the global count.
-pub(crate) struct ConnectionHandle {
-    pub(crate) connection_ref: ConnectionRef,
-}
-
-static CONNECTION_COUNTS: OnceLock<Mutex<HashMap<ConnectionRef, u64>>> = OnceLock::new();
-pub(crate) fn connection_counts() -> MutexGuard<'static, HashMap<ConnectionRef, u64>> {
-    CONNECTION_COUNTS.get_or_init(Default::default).lock()
+    state: ConnectionState,
+    guard: UpDownCounterGuard<i64>,
 }
 
 impl ConnectionHandle {
     pub(crate) fn new(pipeline_ref: Arc<PipelineRef>, address: ListenAddr) -> Self {
-        let connection_ref = ConnectionRef {
+        let guard = Self::create_counter_guard(&pipeline_ref, &address, ConnectionState::Active);
+
+        ConnectionHandle {
             pipeline_ref,
             address,
             state: ConnectionState::Active,
-        };
-        Self::increment(&mut connection_counts(), &connection_ref);
-        ConnectionHandle { connection_ref }
+            guard,
+        }
     }
 
     pub(crate) fn shutdown(&mut self) {
-        // We obtain the guard across decrement and increment so that telemetry sees this as atomic
-        let mut connections = connection_counts();
-        Self::decrement(&mut connections, &self.connection_ref);
-        self.connection_ref.state = ConnectionState::Terminating;
-        Self::increment(&mut connections, &self.connection_ref);
-    }
-
-    fn increment(
-        connections: &mut MutexGuard<HashMap<ConnectionRef, u64>>,
-        connection_ref: &ConnectionRef,
-    ) {
-        connections
-            .entry(connection_ref.clone())
-            .and_modify(|p| *p += 1)
-            .or_insert(1);
-    }
-
-    fn decrement(
-        connections: &mut MutexGuard<HashMap<ConnectionRef, u64>>,
-        connection_ref: &ConnectionRef,
-    ) {
-        let value = connections
-            .get_mut(connection_ref)
-            .expect("connection_ref MUST be greater than zero");
-        *value -= 1;
-        if *value == 0 {
-            connections.remove(connection_ref);
+        if self.state != ConnectionState::Terminating {
+            self.state = ConnectionState::Terminating;
+            // Replace the guard with a new one for terminating state
+            self.guard = Self::create_counter_guard(
+                &self.pipeline_ref,
+                &self.address,
+                ConnectionState::Terminating,
+            );
         }
     }
-}
 
-impl Drop for ConnectionHandle {
-    fn drop(&mut self) {
-        Self::decrement(&mut connection_counts(), &self.connection_ref);
+    fn create_counter_guard(
+        pipeline_ref: &Arc<PipelineRef>,
+        address: &ListenAddr,
+        state: ConnectionState,
+    ) -> UpDownCounterGuard<i64> {
+        use opentelemetry::KeyValue;
+
+        let state_str = match state {
+            ConnectionState::Active => "active",
+            ConnectionState::Terminating => "terminating",
+        };
+
+        let mut attributes = Vec::with_capacity(6);
+
+        if let Some((ip, port)) = address.ip_and_port() {
+            attributes.push(KeyValue::new("server.address", ip.to_string()));
+            attributes.push(KeyValue::new("server.port", port.to_string()));
+        } else {
+            attributes.push(KeyValue::new("server.address", address.to_string()));
+        }
+
+        attributes.push(KeyValue::new("schema.id", pipeline_ref.schema_id.clone()));
+        attributes.push(KeyValue::new(
+            "launch.id",
+            pipeline_ref.launch_id.clone().unwrap_or_default(),
+        ));
+        attributes.push(KeyValue::new(
+            "config.hash",
+            pipeline_ref.config_hash.clone(),
+        ));
+        attributes.push(KeyValue::new("http.connection.state", state_str));
+
+        i64_up_down_counter_with_unit!(
+            "apollo.router.open_connections",
+            "Number of currently connected clients",
+            "{connection}",
+            1,
+            attributes
+        )
     }
 }
 
-pub(crate) const OPEN_CONNECTIONS_METRIC: &str = "apollo.router.open_connections";
+#[cfg(test)]
+mod tests {
+    use std::net::SocketAddr;
+
+    use super::*;
+    use crate::metrics::FutureMetricsExt;
+
+    #[tokio::test]
+    async fn test_connection_handle_increments_counter() {
+        async {
+            let pipeline_ref = Arc::new(PipelineRef {
+                schema_id: "schema1".to_string(),
+                launch_id: Some("launch1".to_string()),
+                config_hash: "config1".to_string(),
+            });
+
+            let addr = ListenAddr::SocketAddr(SocketAddr::from(([127, 0, 0, 1], 4000)));
+            let _handle = ConnectionHandle::new(pipeline_ref, addr);
+
+            assert_up_down_counter!(
+                "apollo.router.open_connections",
+                1,
+                "server.address" = "127.0.0.1",
+                "server.port" = "4000",
+                "schema.id" = "schema1",
+                "launch.id" = "launch1",
+                "config.hash" = "config1",
+                "http.connection.state" = "active"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_connection_handle_decrements_on_drop() {
+        async {
+            let pipeline_ref = Arc::new(PipelineRef {
+                schema_id: "schema1".to_string(),
+                launch_id: Some("launch1".to_string()),
+                config_hash: "config1".to_string(),
+            });
+
+            let addr = ListenAddr::SocketAddr(SocketAddr::from(([127, 0, 0, 1], 4000)));
+
+            {
+                let _handle = ConnectionHandle::new(pipeline_ref.clone(), addr.clone());
+
+                assert_up_down_counter!(
+                    "apollo.router.open_connections",
+                    1,
+                    "server.address" = "127.0.0.1",
+                    "server.port" = "4000",
+                    "schema.id" = "schema1",
+                    "launch.id" = "launch1",
+                    "config.hash" = "config1",
+                    "http.connection.state" = "active"
+                );
+            }
+
+            // After dropping, counter should be back to 0
+            assert_up_down_counter!(
+                "apollo.router.open_connections",
+                0,
+                "server.address" = "127.0.0.1",
+                "server.port" = "4000",
+                "schema.id" = "schema1",
+                "launch.id" = "launch1",
+                "config.hash" = "config1",
+                "http.connection.state" = "active"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_connection_handle_shutdown_changes_state() {
+        async {
+            let pipeline_ref = Arc::new(PipelineRef {
+                schema_id: "schema1".to_string(),
+                launch_id: Some("launch1".to_string()),
+                config_hash: "config1".to_string(),
+            });
+
+            let addr = ListenAddr::SocketAddr(SocketAddr::from(([127, 0, 0, 1], 4000)));
+            let mut handle = ConnectionHandle::new(pipeline_ref, addr);
+
+            // Initially active
+            assert_up_down_counter!(
+                "apollo.router.open_connections",
+                1,
+                "server.address" = "127.0.0.1",
+                "server.port" = "4000",
+                "schema.id" = "schema1",
+                "launch.id" = "launch1",
+                "config.hash" = "config1",
+                "http.connection.state" = "active"
+            );
+
+            // Shutdown changes to terminating
+            handle.shutdown();
+
+            assert_up_down_counter!(
+                "apollo.router.open_connections",
+                0,
+                "server.address" = "127.0.0.1",
+                "server.port" = "4000",
+                "schema.id" = "schema1",
+                "launch.id" = "launch1",
+                "config.hash" = "config1",
+                "http.connection.state" = "active"
+            );
+
+            assert_up_down_counter!(
+                "apollo.router.open_connections",
+                1,
+                "server.address" = "127.0.0.1",
+                "server.port" = "4000",
+                "schema.id" = "schema1",
+                "launch.id" = "launch1",
+                "config.hash" = "config1",
+                "http.connection.state" = "terminating"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_connection_handle_multiple_connections() {
+        async {
+            let pipeline_ref = Arc::new(PipelineRef {
+                schema_id: "schema1".to_string(),
+                launch_id: None,
+                config_hash: "config1".to_string(),
+            });
+
+            let addr1 = ListenAddr::SocketAddr(SocketAddr::from(([127, 0, 0, 1], 4000)));
+            let addr2 = ListenAddr::SocketAddr(SocketAddr::from(([127, 0, 0, 1], 4001)));
+
+            let _handle1 = ConnectionHandle::new(pipeline_ref.clone(), addr1);
+            let _handle2 = ConnectionHandle::new(pipeline_ref, addr2);
+
+            // Check first connection
+            assert_up_down_counter!(
+                "apollo.router.open_connections",
+                1,
+                "server.address" = "127.0.0.1",
+                "server.port" = "4000",
+                "schema.id" = "schema1",
+                "launch.id" = "",
+                "config.hash" = "config1",
+                "http.connection.state" = "active"
+            );
+
+            // Check second connection
+            assert_up_down_counter!(
+                "apollo.router.open_connections",
+                1,
+                "server.address" = "127.0.0.1",
+                "server.port" = "4001",
+                "schema.id" = "schema1",
+                "launch.id" = "",
+                "config.hash" = "config1",
+                "http.connection.state" = "active"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_connection_handle_unix_socket() {
+        async {
+            let pipeline_ref = Arc::new(PipelineRef {
+                schema_id: "schema1".to_string(),
+                launch_id: Some("launch1".to_string()),
+                config_hash: "config1".to_string(),
+            });
+
+            let addr = ListenAddr::UnixSocket("/tmp/router.sock".into());
+            let _handle = ConnectionHandle::new(pipeline_ref, addr);
+
+            assert_up_down_counter!(
+                "apollo.router.open_connections",
+                1,
+                "server.address" = "/tmp/router.sock",
+                "schema.id" = "schema1",
+                "launch.id" = "launch1",
+                "config.hash" = "config1",
+                "http.connection.state" = "active"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+}

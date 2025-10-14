@@ -259,7 +259,6 @@ struct BuiltinInstruments {
     connector_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     apollo_connector_instruments: Arc<HashMap<String, StaticInstrument>>,
     cache_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
-    _pipeline_instruments: Arc<HashMap<String, StaticInstrument>>,
 }
 
 fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments {
@@ -272,7 +271,6 @@ fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments 
         connector_custom_instruments: Arc::new(config.new_builtin_connector_instruments()),
         apollo_connector_instruments: Arc::new(config.new_builtin_apollo_connector_instruments()),
         cache_custom_instruments: Arc::new(config.new_builtin_cache_instruments()),
-        _pipeline_instruments: Arc::new(config.new_pipeline_instruments()),
     }
 }
 
@@ -339,7 +337,6 @@ impl PluginPrivate for Telemetry {
         let (activation, custom_endpoints, apollo_metrics_sender) =
             reload::prepare(&init.previous_config, &config)?;
 
-        ::tracing::info!("custom endpoints {:?}", custom_endpoints);
         if config.instrumentation.spans.mode == SpanMode::Deprecated {
             ::tracing::warn!(
                 "telemetry.instrumentation.spans.mode is currently set to 'deprecated', either explicitly or via defaulting. Set telemetry.instrumentation.spans.mode explicitly in your router.yaml to 'spec_compliant' for log and span attributes that follow OpenTelemetry semantic conventions. This option will be defaulted to 'spec_compliant' in a future release and eventually removed altogether"
