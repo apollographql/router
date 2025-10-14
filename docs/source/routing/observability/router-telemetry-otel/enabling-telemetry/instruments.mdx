@@ -409,20 +409,20 @@ telemetry:
 
 For instruments with `value: duration` or `value: event_duration`, the router automatically converts the measured duration to match the configured `unit`. This feature supports the following time units:
 
-- `s` - seconds (default, **recommended**)
+- `s` - seconds (default, recommended)
 - `ms` - milliseconds
 - `us` - microseconds
 - `ns` - nanoseconds
 
 <Note>
 
-Best practice: Follow the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/#instrument-units) and use **seconds (`s`)** as the unit for duration measurements whenever possible.
+Best practice: Follow the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/#instrument-units) and use seconds (`s`) as the unit for duration measurements whenever possible.
 
-Only use non-second units (`ms`, `us`, `ns`) when integrating with an observability platform that **requires** a specific unit and does not properly translate time units automatically.
+Only use non-second units (`ms`, `us`, `ns`) when integrating with an observability platform that requires a specific unit and does not properly translate time units automatically.
 
 </Note>
 
-**Example:**
+Example:
 
 ```yaml title="router.yaml"
 telemetry:
