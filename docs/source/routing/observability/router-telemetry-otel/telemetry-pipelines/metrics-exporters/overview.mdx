@@ -139,14 +139,14 @@ telemetry:
 
 <Note>
 
-**Important naming considerations:**
+Important naming considerations:
 
 - **OTLP exporters** use the renamed metric name exactly as specified
 - **Prometheus exporters** automatically transform metric names:
   - Dots (`.`) are converted to underscores (`_`)
   - Unit suffixes are added (e.g., `_seconds`, `_bytes`)
   - Example: `apollo.router.http.duration` becomes `apollo_router_http_duration_seconds`
-- **Apollo Studio metrics** are not affected by renaming—they continue to use original metric names
+- **Apollo Studio metrics** are not affected by renaming, they continue to use original metric names
 
 </Note>
 
@@ -215,12 +215,12 @@ telemetry:
 
 ## Metrics common reference
 
-| Attribute           | Default                  | Description                                                   |
-|---------------------|--------------------------|---------------------------------------------------------------|
-| `service_name`      | `unknown_service:router` | The OpenTelemetry service name.                               |
-| `service_namespace` |                          | The OpenTelemetry namespace.                                  |
-| `resource`          |                          | The OpenTelemetry resource to attach to metrics.              |
-| `views`             |                          | Customize metrics using OpenTelemetry views: rename metrics, override default buckets or attributes, or drop metrics entirely. |
+| Attribute           | Default                  | Description                                                                                                                     |
+|---------------------|--------------------------|---------------------------------------------------------------------------------------------------------------------------------|
+| `service_name`      | `unknown_service:router` | The OpenTelemetry service name.                                                                                                 |
+| `service_namespace` |                          | The OpenTelemetry namespace.                                                                                                    |
+| `resource`          |                          | The OpenTelemetry resource to attach to metrics.                                                                                |
+| `views`             |                          | Customizes metrics using OpenTelemetry views: rename metrics, override default buckets or attributes, or drop metrics entirely. |
 
 
 ## Related topics
