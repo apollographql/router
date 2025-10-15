@@ -307,15 +307,17 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             excluded_destinations,
             excluded_conditions,
             &parameters.override_conditions,
-            initial_subgraph_constraint,
+            initial_subgraph_constraint.clone(),
             &parameters.disabled_subgraphs,
         )?;
 
         traversal.open_branches = map_options_to_selections(selection_set, initial_options);
 
         if let Some(non_local_selection_state) = non_local_selection_state
-            && traversal
-                .check_non_local_selections_limit_exceeded_at_root(non_local_selection_state)?
+            && traversal.check_non_local_selections_limit_exceeded_at_root(
+                non_local_selection_state,
+                initial_subgraph_constraint.is_some(),
+            )?
         {
             return Err(SingleFederationError::QueryPlanComplexityExceeded {
                 message: format!(
