@@ -20,8 +20,11 @@ telemetry:
   instrumentation:
     instruments:
       subgraph:
-        mycompany.http.client.request.duration:
-          unit: "ms"  # Values are now automatically converted to milliseconds
+        acme.request.duration:
+          value: duration
+          type: histogram
+          unit: ms # Values are now automatically converted to milliseconds
+          description: "Metric to get the request duration in milliseconds"
 ```
 
 By [Jon Christiansen](https://github.com/theJC) in https://github.com/apollographql/router/pull/8415
