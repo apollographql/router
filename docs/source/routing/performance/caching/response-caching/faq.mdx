@@ -38,7 +38,7 @@ The router returns whatever cached data is available and populates the rest of t
 
 ### How do `@cacheControl` and `@cacheTag` work differently?
 
-`@cacheControl` is interpreted by your subgraph (like Apollo Server) to generate the `Cache-Control` HTTP header that tells the router how long to cache data. `@cacheTag` is interpreted by the router itself to assign tags for invalidation. This separation mirrors HTTP caching conventions—`Cache-Control` headers manage TTL, while separate headers (like `Surrogate-Key` in CDNs) manage invalidation tags.
+`@cacheControl` is interpreted by your subgraph (like Apollo Server) to generate the `Cache-Control` HTTP header that tells the router how long to cache data. `@cacheTag` is interpreted by the router itself to assign tags for invalidation. This separation mirrors HTTP caching conventions: `Cache-Control` headers manage TTL, and separate headers (like `Surrogate-Key` in CDNs) manage invalidation tags.
 
 ### Where is `@cacheTag` defined and where is it interpreted?
 
