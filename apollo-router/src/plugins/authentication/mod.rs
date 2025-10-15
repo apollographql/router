@@ -246,7 +246,7 @@ impl PluginPrivate for AuthenticationPlugin {
                     AUTHENTICATION_SPAN_NAME,
                     "authentication service" = stringify!(router::Request),
                     "otel.kind" = "INTERNAL",
-                    "authentication.jwt.failed" = tracing::field::Empty,
+                    "authentication.jwt.failed" = false,
                     "authentication.jwt.source" = tracing::field::Empty
                 )
             }
