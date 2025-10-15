@@ -14,15 +14,15 @@ Developer and Standard plans require Router v2.6.0 or later.
 
 </PlanRequired>
 
-Learn how the GraphOS Router can cache subgraph query responses using Redis to improve your query latency for entities in the supergraph.
+Learn how GraphOS Router can cache subgraph query responses using Redis to improve your query latency for entities in the supergraph.
 
 ## Quickstart
 
-Follow this guide to enable and add a minimal configuration for response caching in the GraphOS Router.
+Follow this guide to enable and add a minimal configuration for response caching in GraphOS Router.
 
 ### Prerequisites
 
-To use response caching in the GraphOS Router, you must set up:
+To use response caching in GraphOS Router, you must set up:
 
 - A Redis instance or cluster that your router instances can communicate with
 - A router that [connects to GraphOS](/router/configuration/overview/#environment-variables)
@@ -40,7 +40,7 @@ For example:
 # Enable response caching globally
 preview_response_cache:
   enabled: true
-  debug: true # Enable the ability to return debugging data for caching debugger. Avoid enabling this in production.
+  debug: true # Enable the ability to return data to the cache debugger. Avoid enabling this in production.
   invalidation:
     listen: 0.0.0.0:4000
     path: /invalidation
@@ -95,7 +95,7 @@ You can now use the `apollo.router.operations.response.cache` metric to create a
 The left chart shows cache hits per subgraph and type. No cache hits appear because your subgraphs don't return any `Cache-Control` headers. The right chart shows cache misses and potential cache hits. In this example, caching the `User` type from the `posts` subgraph would be beneficial given the high number of cache misses.
 
 
-### Schema integration
+### Integrate with your schema
 Consider an example with two subgraphs: users and posts.
 
 ```graphql title="users.graphql"
@@ -149,7 +149,7 @@ type Post @key(fields: "id") {
 Based on the metrics, caching the `User` type on the `posts` subgraph would provide significant benefits. Enable this using the `@cacheControl` directive.
 
 <Note>
-    This example using `@cacheControl` only works if you're using Apollo Server as a subgraph. If you're using another server implementation, update your codebase to return the correct `Cache-Control` header.
+    This example using `@cacheControl` only works if you're using a subgraph which supports `@cacheControl`, like Apollo Server. If you're using another server, update your codebase to return the correct `Cache-Control` header using the method provided by that server according to its documentation.
 </Note>
 
 Here is the new version of the schema for subgraph `posts`:

@@ -52,7 +52,7 @@ For root fields, use `{$args.XXX}` to interpolate field arguments into the tag f
 
 For entities, use `{$key.XXX}` where `key` is a map of the entity's key fields. The field must be non-nullable. When you have multiple `@key` directives on a type (like `@key(fields: "id")` and `@key(fields: "id name")`), you can only reference fields present in every `@key` directive. In this example, only `{$key.id}` would be valid because `id` appears in both keys.
 
-The tag format must always generate a valid string value. For nested objects in keys, reference the specific field you need—for example, use `{$key.country.name}` rather than `{$key.country}` when `country` is an object.
+The tag format must always generate a valid string value. For nested objects in keys, reference the specific field you need—for example, use `{$key.country.name}` instead of `{$key.country}` when `country` is an object.
 
 ### How does `@cacheControl` work?
 
@@ -68,7 +68,7 @@ The router caches the entire operation response as a single unit. This means ope
 
 ### When should I use invalidation vs. TTL-based caching?
 
-TTL-based caching works great for predictable data refresh patterns. Active invalidation becomes essential when you have event-driven architectures where data changes unpredictably—it lets you remove stale cache entries immediately when you know data has changed, rather than waiting for TTL expiration.
+TTL-based caching works great for predictable data refresh patterns. Active invalidation becomes essential when you have event-driven architectures where data changes unpredictably—it lets you remove stale cache entries immediately when you know data has changed, instead of waiting for TTL expiration.
 
 ### Why was "Entity Caching" renamed to "Response Caching"?
 
@@ -76,7 +76,7 @@ TTL-based caching works great for predictable data refresh patterns. Active inva
 
 ### What changed between the 2024 preview and the current implementation?
 
-The 2024 preview used a linear scan approach for active invalidation that scaled with total cache size rather than the number of invalidated entries. The current implementation uses an index-based approach that scales only with the entries you're actually invalidating, making it practical for production use at scale.
+The 2024 preview used a linear scan approach for active invalidation that scaled with total cache size instead of the number of invalidated entries. The current version uses an index-based approach that scales only with the entries you're actually invalidating, making it practical for production use at scale.
 
 ### How does the current release affect existing users?
 

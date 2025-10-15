@@ -18,7 +18,7 @@ Learn how the GraphOS Router can cache subgraph query responses using Redis to i
 
 ## Overview
 
-An entity gets its fields from one or more subgraphs. To respond to a client request for an entity, the GraphOS Router must make multiple subgraph requests. Different clients requesting the same entity can make redundant, identical subgraph requests.
+An entity gets its fields from one or more subgraphs. To respond to a client request for an entity, GraphOS Router must make multiple subgraph requests. Different clients requesting the same entity can make redundant, identical subgraph requests.
 
 Entity caching enables the router to respond to identical subgraph queries with cached subgraph responses. The router uses Redis to cache data from subgraph query responses. Because cached data is keyed per subgraph and entity, different clients making the same client query&mdash;with the same or different query arguments&mdash;hit the same cache entries of subgraph response data.
 

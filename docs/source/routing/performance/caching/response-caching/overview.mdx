@@ -14,11 +14,11 @@ Developer and Standard plans require Router v2.6.0 or later.
 
 </PlanRequired>
 
-Learn how the GraphOS Router can cache subgraph query responses using Redis to improve your query latency for entities in the supergraph.
+Learn how GraphOS Router can cache subgraph query responses using Redis to improve your query latency for entities in the supergraph.
 
 ## Overview
 
-An entity gets its fields from one or more subgraphs. To respond to a client request for an entity, the GraphOS Router must make multiple subgraph requests. Different clients requesting the same entity can make redundant, identical subgraph requests.
+An entity gets its fields from one or more subgraphs. To respond to a client request for an entity, GraphOS Router must make multiple subgraph requests. Different clients requesting the same entity can make redundant, identical subgraph requests.
 
 Response caching enables the router to respond to identical subgraph queries with cached subgraph responses. The router uses Redis to cache data from subgraph query responses. Because cached data is keyed per subgraph and entity, different clients making the same client query (with the same or different query arguments) hit the same cache entries of subgraph response data.
 
