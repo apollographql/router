@@ -17,14 +17,14 @@ Cache invalidation ensures that cached data stays fresh. The router supports two
 
 ## Time to live (TTL)
 
-Time to live (TTL) determines how long cached data remains valid before the router must fetch fresh data from your subgraphs.
+Time to live (TTL) determines how long the router keeps cached subgraph responses before fetching fresh data.
 
 ### How TTLs work
 
-The GraphOS Router honors the [`Cache-Control` header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control) returned with subgraph responses. The router uses the `max-age` value from this header to determine how long to cache each piece of data.
+The router caches complete subgraph query responses—not individual fields or data fragments. To determine how long to cache each response, the router reads the [`Cache-Control` header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control) that the subgraph returns. The router uses the `max-age` value from this header as the TTL for that entire subgraph response.
 
 When responding to client queries, the router:
-1. Calculates the overall response TTL by taking the **minimum TTL** from all cached data included in the response
+1. Calculates the overall response TTL by taking the **minimum TTL** from all cached subgraph responses included in the client response
 2. Generates a `Cache-Control` header for the client response reflecting this minimum TTL
 3. Returns cached data as long as the TTL hasn't expired
 
@@ -47,7 +47,7 @@ preview_response_cache:
 
 ### Control TTL with `@cacheControl`
 
-For subgraphs that support the `@cacheControl` directive (such as Apollo Server), you can set field-level and type-level TTLs directly in your schema. The subgraph translates these directives into `Cache-Control` headers that the router respects.
+For subgraphs that support the `@cacheControl` directive (such as Apollo Server), you can set field-level and type-level TTLs directly in your schema. The subgraph translates these directives into `Cache-Control` headers in its responses. The router reads those `Cache-Control` headers to determine TTLs—the directives themselves don't affect what the router caches, only the headers the subgraph sends back.
 
 #### Add the directive to your schema
 
@@ -86,9 +86,9 @@ type Post {
 }
 ```
 
-In this example:
-- The `votes` field caches for 30 seconds
-- The `readByCurrentUser` field caches for 10 seconds and is marked as private (user-specific)
+These `@cacheControl` directives tell the subgraph to include `Cache-Control` headers in its responses—that's all they do. The router reads those `Cache-Control` headers to determine TTLs.
+
+When a subgraph query requests both the `votes` field (30-second TTL) and the `readByCurrentUser` field (10-second TTL), the subgraph returns a `Cache-Control` header with `max-age=10` (the minimum). The router then caches that entire subgraph response for 10 seconds.
 
 #### Type-level TTLs
 
@@ -108,6 +108,8 @@ type Comment {
 }
 ```
 
+The `@cacheControl` directive on the `Post` type tells the subgraph to include `Cache-Control: max-age=240` in responses that return `Post` data. When the router queries for a `Comment` that includes a `post` field, the subgraph sends back that header, and the router caches the entire subgraph response for up to 240 seconds.
+
 Field-level settings override type-level settings:
 
 ```graphql
@@ -116,6 +118,8 @@ type Comment {
   body: String!
 }
 ```
+
+Here, the subgraph sends `Cache-Control: max-age=120` instead of 240 when this field is queried.
 
 #### Scope: PUBLIC vs PRIVATE
 
