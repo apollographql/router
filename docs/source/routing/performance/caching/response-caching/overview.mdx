@@ -34,7 +34,7 @@ GraphQL responses present unique caching challenges that traditional HTTP cachin
 - **Personalized and public data**: Responses often mix public data (product details) with private data (user's cart, viewing history). This makes full-response caching either impossible or requires separate cache entries per user.
 - **High duplication**: Different queries requesting similar entities result in duplicate cached data. For example, a product list query and a product detail query both cache the same product name and price.
 
-Response caching solves these challenges by caching at the entity and field level. Each piece of data can have its own TTL and visibility settings, enabling granular cache control that matches how your data actually behaves.
+Response caching solves these challenges by caching complete subgraph responses with flexible cache control. Different subgraph responses can have different TTLs and visibility settings, and you can actively invalidate cached data when you know it has changed.
 
 ### Benefits of response caching
 
