@@ -116,5 +116,21 @@
         ]
 
         paths = [
-            '''^apollo-router/tests/integration/oci.rs$''',            
+            '''^apollo-router/tests/integration/oci.rs$''',
+        ]
+
+[[ rules ]]
+    id = "generic-api-key"
+
+    [ rules.allowlist ]
+        paths = [
+            '''^docs/source/routing/performance/caching/response_caching/invalidation.mdx$''',
+        ]
+
+[[ rules ]]
+    id = "curl-auth-header"
+
+    [ rules.allowlist ]
+        paths = [
+            '''^docs/source/routing/performance/caching/response_caching/invalidation.mdx$''',
         ]
