@@ -231,12 +231,16 @@ impl SymbolResolver {
                 if symbols_resolved > 0 {
                     tracing::debug!(
                         "Symbol resolution successful for {}/{} addresses ({:.1}%)",
-                        symbols_resolved, total_addresses, success_rate
+                        symbols_resolved,
+                        total_addresses,
+                        success_rate
                     );
                 } else {
                     tracing::debug!(
                         "No symbols resolved, all {}/{} addresses failed ({:.1}% success rate)",
-                        symbols_failed, total_addresses, success_rate
+                        symbols_failed,
+                        total_addresses,
+                        success_rate
                     );
                 }
 
