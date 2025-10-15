@@ -434,12 +434,14 @@ telemetry:
           value: duration
           type: histogram
           unit: s
+          description: "Request Duration"
 
         # Only if required by your observability platform
         otheracme.request.duration:
           value: duration
           type: histogram
           unit: ms # Values automatically converted to milliseconds
+          description: "Request Duration in ms"
 ```
 
 #### `description`
