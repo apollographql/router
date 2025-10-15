@@ -13,7 +13,7 @@ Cache invalidation ensures that cached data stays fresh. The router supports two
 - **Passive (TTL-based)**: Data automatically expires after its configured TTL. This works well for data that changes predictably or where slightly stale data is acceptable.
 - **Active (invalidation)**: You explicitly tell the router to remove cached data when you know it has changed. This works well for data that changes unpredictably or where stale data is unacceptable.
 
-**Best practice**: Combine both approaches—set reasonable TTLs as a safety net, and actively invalidate when you know data has changed.
+Combine both approaches by setting reasonable TTLs as a safety net and actively invalidating when you know data has changed.
 
 ## Time to live (TTL)
 
@@ -24,7 +24,7 @@ Time to live (TTL) determines how long the router keeps cached subgraph response
 The router caches complete subgraph query responses—not individual fields or data fragments. To determine how long to cache each response, the router reads the [`Cache-Control` header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control) that the subgraph returns. The router uses the `max-age` value from this header as the TTL for that entire subgraph response.
 
 When responding to client queries, the router:
-1. Calculates the overall response TTL by taking the **minimum TTL** from all cached subgraph responses included in the client response
+1. Calculates the overall response TTL by taking the minimum TTL from all cached subgraph responses included in the client response
 2. Generates a `Cache-Control` header for the client response reflecting this minimum TTL
 3. Returns cached data as long as the TTL hasn't expired
 

@@ -68,7 +68,7 @@ Assume the client for a shopping cart application requests the following for eac
 - The product's name and price from the `Products` subgraph.
 - The product's availability in inventory from the `Inventory` subgraph.
 
-If caching the entire client response, it would require a short TTL because the cart data can change often and the real-time inventory has to be up to date. A client-response cache couldn't be shared between users, because each cart is personal.  A client-response cache might also duplicate data because the same products might appear in multiple carts.
+If caching the entire client response, it would require a short TTL because the cart data can change often and the real-time inventory has to be up to date. A client-response cache couldn't be shared between users, because each cart is personal. A client-response cache might also duplicate data because the same products might appear in multiple carts.
 
 With response caching enabled for this example, the router can:
 - Store each product's description and price separately with a long TTL.
@@ -77,7 +77,7 @@ With response caching enabled for this example, the router can:
 - Cache the cart per user, with a small amount of data.
 - Cache inventory data with a short TTL or not cache it at all.
 
-For example, the diagram below shows how a price entity can be cached and then combined with purchase and inventory fragments to serve a `products` query. Because price data is subject to change less often than inventory data, it makes sense to cache it with a different TTL.
+For example, the following diagram shows how a price entity can be cached and then combined with purchase and inventory fragments to serve a `products` query. Because price data is subject to change less often than inventory data, it makes sense to cache it with a different TTL.
 
 ```mermaid
 flowchart RL

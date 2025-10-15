@@ -441,7 +441,7 @@ Entity caching will greatly reduce traffic to subgraphs. Should there be an avai
 
 #### Scalability and performance
 
-The scalability and performance of entity cache invalidation is based on its implementation with the Redis [`SCAN` command](https://redis.io/docs/latest/commands/scan/). The `SCAN` command provides a cursor for iterating over the entire key space and returns a list of keys matching a pattern. When executing an invalidation request, the router first runs a series of `SCAN` calls and then it runs [`DEL`](https://redis.io/docs/latest/commands/del/) calls for any matching keys.
+The scalability and performance of entity cache invalidation is based on its use of the Redis [`SCAN` command](https://redis.io/docs/latest/commands/scan/). The `SCAN` command provides a cursor for iterating over the entire key space and returns a list of keys matching a pattern. When executing an invalidation request, the router first runs a series of `SCAN` calls and then it runs [`DEL`](https://redis.io/docs/latest/commands/del/) calls for any matching keys.
 
 The time complexity of a single invalidation request grows linearly with the number of entries, as each entry requires `SCAN` to iterate over. The router can also execute multiple invalidation requests simultaneously. This lowers latency but might increase the load on Redis instances.
 
