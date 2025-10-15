@@ -2,7 +2,7 @@ use std::fmt;
 use std::ops::Range;
 
 use apollo_compiler::Name;
-use apollo_compiler::ast;
+use apollo_compiler::ast::Type;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable;
 use apollo_compiler::executable::SelectionSet;
@@ -152,15 +152,8 @@ fn validate_args_on_field(
                         .arguments
                         .iter()
                         .map(|arg| (arg.name.clone(), arg.ty.as_ref()))
-                        .collect::<IndexMap<Name, &ast::Type>>();
-                    match validate_args_selection(schema, &fields, &var_ref.selection) {
-                        Ok(_) => None,
-                        Err(_err) => Some(CacheTagValidationError::CacheTagFormatArgumentUnknown {
-                            type_name: field.type_name.clone(),
-                            field_name: field.field_name.clone(),
-                            format: format.to_string(),
-                        }),
-                    }
+                        .collect::<IndexMap<Name, &Type>>();
+                    validate_args_selection(schema, &fields, &var_ref.selection).err()
                 }
                 None => None,
             },
@@ -172,7 +165,7 @@ fn validate_args_on_field(
 
 fn validate_args_selection(
     schema: &FederationSchema,
-    fields: &IndexMap<Name, &ast::Type>,
+    fields: &IndexMap<Name, &Type>,
     selection: &SelectionTrie,
 ) -> Result<(), CacheTagValidationError> {
     for (key, sel) in selection.iter() {
@@ -185,7 +178,12 @@ fn validate_args_selection(
                 .ok_or_else(|| CacheTagValidationError::CacheTagInvalidFormat {
                     message: format!("unknown field \"{name}\""),
                 })?;
-
+        let is_nullable = matches!(field, Type::Named(_) | Type::List(_));
+        if is_nullable {
+            return Err(CacheTagValidationError::CacheTagNullableFieldFormat {
+                field_name: name.clone(),
+            });
+        }
         let type_name = field.inner_named_type();
         let type_def = schema.get_type(type_name.clone())?;
         if !sel.is_leaf() {
@@ -351,6 +349,13 @@ fn build_selection_set(
                 message: format!("invalid field selection name \"{key}\""),
             })?;
 
+        let is_nullable = matches!(new_field.ty(), Type::Named(_) | Type::List(_));
+        if is_nullable {
+            return Err(CacheTagValidationError::CacheTagNullableFieldFormat {
+                field_name: name.clone(),
+            });
+        }
+
         if !sel.is_leaf() {
             ObjectOrInterfaceTypeDefinitionPosition::try_from(new_field_type_def).map_err(
                 |_| CacheTagValidationError::CacheTagInvalidFormat {
@@ -435,17 +440,11 @@ enum CacheTagValidationError {
     )]
     CacheTagEntityNotResolvable(Name),
     #[error(
-        "Unknown arguments used with $args in cacheTag format \"{format}\" on field \"{field_name}\" for type \"{type_name}\""
-    )]
-    CacheTagFormatArgumentUnknown {
-        type_name: Name,
-        field_name: Name,
-        format: String,
-    },
-    #[error(
         "Each entity field referenced in a @cacheTag format (applied on entity type) must be a member of every @key field set. In other words, when there are multiple @key fields on the type, the referenced field(s) must be limited to their intersection. Bad cacheTag format \"{format}\" on type \"{type_name}\""
     )]
     CacheTagInvalidFormatFieldSetOnEntity { type_name: Name, format: String },
+    #[error("@cacheTag can only use non nullable field but \"{field_name}\" in format is nullable")]
+    CacheTagNullableFieldFormat { field_name: Name },
 }
 
 impl CacheTagValidationError {
@@ -558,7 +557,7 @@ mod tests {
             }
 
             type Query {
-                topProducts(first: Int = 5): [Product]
+                topProducts(first: Int! = 5): [Product]
                     @cacheTag(format: "topProducts")
                     @cacheTag(format: "topProducts-{$args.first}")
             }
@@ -582,7 +581,10 @@ mod tests {
                     @cacheTag(format: "topProducts-{$args.first}")
             }
         "#;
-        assert!(!build_for_errors(SCHEMA).is_empty());
+        assert_eq!(
+            build_for_errors(SCHEMA),
+            vec!["@cacheTag can only use non nullable field but \"first\" in format is nullable"]
+        );
     }
 
     #[test]
@@ -619,13 +621,15 @@ mod tests {
             type Test {
                 a: Int!
                 b: Int!
+                c: Int
             }
 
-            type Product @key(fields: "upc test { a }")
+            type Product @key(fields: "upc test { a c }")
                          @cacheTag(format: "product-{$key.somethingElse}")
                          @cacheTag(format: "product-{$key.test}")
                          @cacheTag(format: "product-{$key.test.a}")
                          @cacheTag(format: "product-{$key.test.b}")
+                         @cacheTag(format: "product-{$key.test.c}")
             {
                 upc: String!
                 test: Test!
@@ -644,7 +648,8 @@ mod tests {
                 "cacheTag format is invalid: cannot create selection set with \"somethingElse\"",
                 "cacheTag format is invalid: invalid path ending at \"test\", which is not a scalar type",
                 "Each entity field referenced in a @cacheTag format (applied on entity type) must be a member of every @key field set. In other words, when there are multiple @key fields on the type, the referenced field(s) must be limited to their intersection. Bad cacheTag format \"product-{$key.test.b}\" on type \"Product\"",
-                "Unknown arguments used with $args in cacheTag format \"topProducts-{$args.second}\" on field \"topProducts\" for type \"Query\"",
+                "@cacheTag can only use non nullable field but \"c\" in format is nullable",
+                "cacheTag format is invalid: unknown field \"second\""
             ]
         );
     }
