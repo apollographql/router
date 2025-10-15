@@ -58,7 +58,6 @@ preview_response_cache:
       inventory:
         enabled: false # Disable caching for inventory subgraph
       products:
-        shared_key: ${env.INVALIDATION_SHARED_KEY_PRODUCTS} # Use different key for products
         redis:
           urls: ["redis://products-cache:6379"] # Use different Redis for products
 ```

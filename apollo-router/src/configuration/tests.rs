@@ -464,6 +464,7 @@ fn validate_project_config_files() {
                     .mocked_env_var("PARSER_MAX_RECURSION", "500")
                     .mocked_env_var("AWS_ROLE_ARN", "arn:aws:iam::12345678:role/SomeRole")
                     .mocked_env_var("INVALIDATION_SHARED_KEY", "invalidation")
+                    .mocked_env_var("INVALIDATION_SHARED_KEY_PRODUCTS", "invalidation-for-products")
                     .build()
                     .unwrap();
 
