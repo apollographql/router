@@ -58,6 +58,7 @@ preview_response_cache:
       inventory:
         enabled: false # Disable caching for inventory subgraph
       products:
+        shared_key: ${env.INVALIDATION_SHARED_KEY_PRODUCTS} # Use different key for products
         redis:
           urls: ["redis://products-cache:6379"] # Use different Redis for products
 ```
@@ -65,7 +66,7 @@ preview_response_cache:
 
 ### Identify what data to cache
 
-To identify which subgraphs would benefit most from caching, you can enable metrics and increase their granularity. Keep in mind that more granularity leads to higher metric cardinality, which may increase costs in your APM.
+To identify which subgraphs would benefit most from caching, you can enable metrics and increase their granularity. Keep in mind that more granularity leads to higher metric cardinality, which might increase costs in your APM.
 
 Configure this metric as follows:
 
@@ -206,7 +207,7 @@ Response times are also faster, as shown in the right panel of this screenshot:
 
 ### Invalidation
 
-With cached data based on TTL, you might want to increase these TTLs and automatically invalidate specific data when you know it has changed. Response caching provides several ways to invalidate data. For more details, see [Invalidation](./invalidation). For this quickstart, we'll use cache tags, which work like surrogate cache keys for REST APIs. You can tag data in your schema to enable targeted invalidation.
+With cached data based on TTL, you might want to increase these TTLs and automatically invalidate specific data when you know it has changed. Response caching provides multiple ways to invalidate data. For more details, see [Invalidation](./invalidation). This quickstart uses cache tags, which work like surrogate cache keys for REST APIs. You can tag data in your schema to enable targeted invalidation.
 
 Use the `@cacheTag` directive introduced in Federation v2.12. It takes a `format` argument to create your cache tag. For the `User` type and the `posts` root field, create different cache tags:
 
@@ -250,7 +251,7 @@ type Post @key(fields: "id") @cacheControl(maxAge: 60) {
 
 The `User` type is tagged with a static cache tag format `user` and a dynamic one with variable interpolation using the entity key `id` to generate the cache tag. For example, if the fetched `User` has an `id` of `42`, it generates `user-42` as a cache tag.
 
-With tagged data, you can invalidate it using a `curl` command to invalidate the user with id `42`:
+With tagged data, you can invalidate it using a `curl` command to invalidate the user with ID `42`:
 
 ```
 curl --request POST \
@@ -262,7 +263,7 @@ curl --request POST \
 
 `INVALIDATION_SHARED_KEY` is an environment variable containing a token for authenticating requests to this endpoint. This was configured in the router setup at the beginning of this page.
 
-The call returns the number of invalidated entries. For example, if only 1 entry was invalidated:
+The call returns the number of invalidated entries. For example, if only one entry was invalidated:
 
 ```json
 {
@@ -270,4 +271,4 @@ The call returns the number of invalidated entries. For example, if only 1 entry
 }
 ```
 
-To explore response caching and see what data has been cached in a query, use the cache debugger documented [here](./observability#cache-debugger).
+To explore response caching and see what data has been cached in a query, use the [cache debugger](./observability#cache-debugger).

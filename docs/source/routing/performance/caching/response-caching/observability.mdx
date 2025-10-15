@@ -214,7 +214,7 @@ preview_response_cache:
 - A list of cached or potentially cached entries appears. This list helps you understand the cache status of your data:
   - If the `Created at` column contains data, the value has been stored in the cache
   - If the `source` column is `products`, the data for this call was fetched from the `products` subgraph, even if it is now cached
-  - If the `Created at` column is empty, the entry hasn't been cached. This might happen for several reasons (see [Troubleshoot](#troubleshoot)). In this example, the `accounts` subgraph entry isn't cached because it contains private, uncacheable data.
+  - If the `Created at` column is empty, the entry hasn't been cached. This might happen for multiple reasons (see [Troubleshoot](#troubleshoot)). In this example, the `accounts` subgraph entry isn't cached because it contains private, uncacheable data.
 
 <img
   className="screenshot"
@@ -260,10 +260,10 @@ preview_response_cache:
 
 - You disabled response caching in the router configuration for a specific subgraph or all subgraphs.
 
-- Redis is unavailable or times out. Use the [metrics](#metrics), [traces](#traces), and [logs](#logs) described above to measure errors.
+- Redis is unavailable or times out. Use the [metrics](#metrics), [traces](#traces), and [logs](#logs) described earlier in this page to measure errors.
 
 ### Slow latencies
 
-- Redis is slow or times out. Use the [metrics](#metrics), [traces](#traces), and [logs](#logs) described above to measure errors.
+- Redis is slow or times out. Use the [metrics](#metrics), [traces](#traces), and [logs](#logs) described earlier in this page to measure errors.
 - TTLs are too low, resulting in fewer cache hits and minimal latency improvements.
 - Data is invalidated too frequently, reducing caching benefits.

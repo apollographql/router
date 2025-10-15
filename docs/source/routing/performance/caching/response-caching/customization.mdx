@@ -21,7 +21,7 @@ For basic response caching setup, see the [Quickstart](/router/performance/cachi
 
 ## Private data caching
 
-A subgraph can return a response with the header `Cache-Control: private`, indicating that it contains user-personalized data. Although this usually forbids intermediate servers from storing data, the router may be able to recognize different users and store their data in different parts of the cache.
+A subgraph can return a response with the header `Cache-Control: private`, indicating that it contains user-personalized data. Although this usually forbids intermediate servers from storing data, the router can recognize different users and store their data in different parts of the cache.
 
 ### When to use private data caching
 
@@ -37,9 +37,9 @@ Don't use private data caching if:
 - You can't reliably identify users across requests
 - User-specific data changes too frequently to benefit from caching
 
-### Configure private_id
+### Configure `private_id`
 
-To set up private information caching, configure the `private_id` option. `private_id` is a string pointing at a field in the request context that contains data used to recognize users (for example, user id, or `sub` claim in JWT).
+To set up private information caching, configure the `private_id` option. This option is a string pointing at a field in the request context that contains data used to recognize users (for example, a user id, or `sub` claim in JWT).
 
 As an example, if you are using the router's JWT authentication plugin, first configure the `private_id` option in the `accounts` subgraph to point to the `user_id` key in the context. Then, use a Rhai script to set that key from the JWT's `sub` claim:
 
@@ -85,7 +85,7 @@ The router implements the following sequence to determine whether a particular q
 - The router stores the query in a list of known queries with private data.
 - When the router subsequently sees a known query:
   - If the private ID isn't provided, the router doesn't check the cache and instead transmits the subgraph response directly.
-  - If the private id is provided, the router queries the part of the cache for the current user and checks the subgraph if nothing is available.
+  - If the private ID is provided, the router queries the part of the cache for the current user and checks the subgraph if nothing is available.
 
 ## Custom cache keys
 
@@ -164,7 +164,7 @@ fn supergraph_service(service) {
 
 ## Advanced Redis configuration
 
-The router provides several Redis options to ensure you can scale properly and achieve the best performance.
+The router provides multiple Redis options to ensure you can scale properly and achieve the best performance.
 
 For basic Redis setup, see the [Quickstart](/router/performance/caching/response-caching/quickstart) page.
 
@@ -284,7 +284,7 @@ preview_response_cache:
 
 The `ttl` option defines the default global expiration for Redis entries. By default it doesn't set any expiration for response caching.
 
-To prevent potential cache overflow, consider setting the TTL to 24 hours or twice the median publish interval (whichever's lesser), and monitor cache utilization in your environment, especially if you cache a lot of different data:
+To prevent potential cache overflow, consider setting the TTL to 24 hours or twice the median publish interval (whichever is less), and monitor cache utilization in your environment, especially if you cache a lot of different data:
 
 ```yaml title="router.yaml"
 preview_response_cache:
@@ -314,7 +314,7 @@ preview_response_cache:
 
 ### Required to start
 
-When active, the `required_to_start` option will prevent the router from starting if it cannot connect to Redis. By default, the router will still start without a connection to Redis, which would result in only using the in-memory cache for APQ and query planning, and entity caching sending the requests to subgraphs undisturbed:
+When active, the `required_to_start` option prevents the router from starting if it cannot connect to Redis. By default, the router starts without a connection to Redis, which would result in only using response caching sending the requests to subgraphs undisturbed:
 
 ```yaml title="router.yaml"
 preview_response_cache:
