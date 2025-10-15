@@ -1607,11 +1607,14 @@ where
                     && matches!(
                         edge_weight.transition,
                         QueryGraphEdgeTransition::RootTypeResolution { .. }
+                            | QueryGraphEdgeTransition::KeyResolution
                     )
                     && !(to_advance.defer_on_tail.is_some()
                         && self.graph.is_self_key_or_root_edge(edge)?)
                 {
-                    debug!(r#"Ignored: edge is a top-level "RootTypeResolution""#);
+                    debug!(
+                        r#"Ignored: edge is a top-level "RootTypeResolution" or "KeyResolution""#
+                    );
                     continue;
                 }
 
