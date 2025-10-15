@@ -30,7 +30,7 @@ expression: cache_keys
     }
   },
   {
-    "key": "polymorphic_private_and_public-version:1.0:subgraph:user:type:Query:hash:fa8ff6a034f5ccb3f49e51bc30ff031104ba420310e67764f9e9f82702437592:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+    "key": "version:1.0:subgraph:user:type:Query:hash:fa8ff6a034f5ccb3f49e51bc30ff031104ba420310e67764f9e9f82702437592:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [
       "currentUser"
     ],

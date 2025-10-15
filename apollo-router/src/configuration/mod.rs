@@ -972,10 +972,13 @@ pub(crate) struct QueryPlanRedisCache {
     /// Redis password if not provided in the URLs. This field takes precedence over the password in the URL
     pub(crate) password: Option<String>,
 
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_timeout"
+    )]
     #[schemars(with = "Option<String>", default)]
-    /// Redis request timeout (default: 2ms)
-    pub(crate) timeout: Option<Duration>,
+    /// Redis request timeout (default: 500ms)
+    pub(crate) timeout: Duration,
 
     #[serde(
         deserialize_with = "humantime_serde::deserialize",
@@ -1061,10 +1064,13 @@ pub(crate) struct RedisCache {
     /// Redis password if not provided in the URLs. This field takes precedence over the password in the URL
     pub(crate) password: Option<String>,
 
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_timeout"
+    )]
     #[schemars(with = "Option<String>", default)]
-    /// Redis request timeout (default: 2ms)
-    pub(crate) timeout: Option<Duration>,
+    /// Redis request timeout (default: 500ms)
+    pub(crate) timeout: Duration,
 
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
@@ -1098,11 +1104,15 @@ pub(crate) struct RedisCache {
     pub(crate) metrics_interval: Duration,
 }
 
-fn default_required_to_start() -> bool {
+fn default_timeout() -> Duration {
+    Duration::from_millis(500)
+}
+
+pub(crate) fn default_required_to_start() -> bool {
     false
 }
 
-fn default_pool_size() -> u32 {
+pub(crate) fn default_pool_size() -> u32 {
     1
 }
 

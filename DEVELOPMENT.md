@@ -4,33 +4,14 @@ The **Apollo Router Core** is a configurable, high-performance **graph router** 
 
 ## Crates
 
-* `configuration` - Config model and loading.
-* `query planner` - Query plan model and a caching wrapper for calling out to the nodejs query planner.
-* `execution` - Converts a query plan to a stream.
-* `server` - Handles requests,
-     obtains a query plan from the query planner,
-     obtains an execution pipeline,
-     returns the results
-
-## Binaries
-
-* `router` - Starts a server.
+* `apollo-federation` - federated graph composition and query planning
+* `apollo-router` - the Apollo Router server
 
 ## Development
 
-You will need a recent version of rust, as specified in `rust-toolchain.toml`.
-We recommend [using rustup](https://www.rust-lang.org/tools/install)
-as it will automatically install the requiried toolchain version,
-including rustfmt and clippy
-that are not always included by default in other rust distribution channels.
-
-In addition, you will need to [install protoc](https://grpc.io/docs/protoc-installation/).
-
-Set up your git hooks:
-
-```shell
-git config --local core.hooksPath .githooks/
-```
+We use [`mise`](https://mise.jdx.dev/) to manage toolchain dependencies.
+Example commands in this document assume that mise shims are available in the environment.
+If you do not use `mise activate`, you can use `mise x -- <COMMAND>` in place of the commands below, for example `mise x -- cargo build`.
 
 ### Getting started
 
@@ -43,11 +24,11 @@ Some tests require external services for caching, telemetry, and database functi
 To start these services:
 
 ```shell
-docker-compose up -d
+docker compose up -d
 ```
 
 This starts:
-- **Redis** (port 6379) - Required for entity caching, response caching, and Redis-related integration tests
+- **Redis** (port 6379-7005) - Required for entity caching, response caching, and Redis-related integration tests
 - **PostgreSQL** (port 5432) - Used by database integration tests
 - **Zipkin** (port 9411) - For distributed tracing tests
 - **Datadog Agent** (port 8126) - For Datadog telemetry integration tests
@@ -72,22 +53,14 @@ export TEST_APOLLO_GRAPH_REF="your-graph-ref@variant"
 
 ### Testing
 
-Tests on this repository are run using [nextest](https://nexte.st/).
-
-#### Installing nextest
-
-If you don't already have nextest installed:
-
-```shell
-cargo install cargo-nextest --locked
-```
+Tests on this repository are run using [nextest](https://nexte.st/). nextest is installed automatically when you use `mise`.
 
 #### Test environment setup
 
 **For basic unit and integration tests:**
 ```shell
 # Start external services (eg, Redis, PostgreSQL)
-docker-compose up -d
+docker compose up -d
 ```
 
 **For enterprise/GraphOS feature tests:**

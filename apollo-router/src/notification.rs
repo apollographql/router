@@ -29,6 +29,7 @@ use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use crate::Configuration;
 use crate::graphql;
 use crate::metrics::FutureMetricsExt;
+use crate::metrics::UpDownCounterGuard;
 use crate::spec::Schema;
 
 static NOTIFY_CHANNEL_SIZE: usize = 1024;
@@ -763,7 +764,7 @@ struct Subscription<V> {
     closing_signal: broadcast::Sender<()>,
     heartbeat_enabled: bool,
     updated_at: Instant,
-    operation_name: Option<String>,
+    _metric_guard: UpDownCounterGuard<i64>,
 }
 
 impl<V> Subscription<V> {
@@ -773,12 +774,19 @@ impl<V> Subscription<V> {
         heartbeat_enabled: bool,
         operation_name: Option<String>,
     ) -> Self {
+        let metric_guard = i64_up_down_counter!(
+            "apollo.router.opened.subscriptions",
+            "Number of opened subscriptions",
+            1,
+            graphql.operation.name = operation_name.unwrap_or_default()
+        );
+
         Self {
             msg_sender,
             closing_signal,
             heartbeat_enabled,
             updated_at: Instant::now(),
-            operation_name,
+            _metric_guard: metric_guard,
         }
     }
     // Update the updated_at value
@@ -832,26 +840,15 @@ where
         operation_name: Option<String>,
     ) -> broadcast::Receiver<()> {
         let (closing_signal_tx, closing_signal_rx) = broadcast::channel(1);
-        let existed = self
-            .subscriptions
-            .insert(
-                topic,
-                Subscription::new(
-                    sender,
-                    closing_signal_tx,
-                    heartbeat_enabled,
-                    operation_name.clone(),
-                ),
-            )
-            .is_some();
-        if !existed {
-            i64_up_down_counter!(
-                "apollo.router.opened.subscriptions",
-                "Number of opened subscriptions",
-                1,
-                graphql.operation.name = operation_name.unwrap_or_default()
-            );
-        }
+        self.subscriptions.insert(
+            topic,
+            Subscription::new(
+                sender,
+                closing_signal_tx,
+                heartbeat_enabled,
+                operation_name.clone(),
+            ),
+        );
 
         closing_signal_rx
     }
@@ -1005,12 +1002,6 @@ where
 
     fn _force_delete(&mut self, sub: Subscription<V>, error_message: Option<&V>) {
         tracing::trace!("deleting subscription from _force_delete");
-        i64_up_down_counter!(
-            "apollo.router.opened.subscriptions",
-            "Number of opened subscriptions",
-            -1,
-            graphql.operation.name = sub.operation_name.unwrap_or_default()
-        );
         if let Some(error_message) = error_message {
             let _ = sub.msg_sender.send(error_message.clone().into());
         }

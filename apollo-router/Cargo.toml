@@ -227,12 +227,6 @@ serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
 strum = "0.27.0"
 strum_macros = "0.27.0"
-sqlx = { version = "0.8", features = [
-    "postgres",
-    "runtime-tokio",
-    "tls-rustls-ring-native-roots",
-    "chrono",
-] }
 sys-info = "0.9.1"
 sysinfo = { version = "0.37.0", features = [
     "system",
@@ -240,7 +234,7 @@ sysinfo = { version = "0.37.0", features = [
 ], default-features = false }
 thiserror = "2.0.0"
 tokio.workspace = true
-tokio-stream = { version = "0.1.15", features = ["sync", "net"] }
+tokio-stream = { version = "0.1.15", features = ["sync", "net", "fs"] }
 tokio-util = { version = "0.7.11", features = ["net", "codec", "time", "compat"] }
 tonic = { version = "0.12.3", features = [
     "transport",
@@ -313,7 +307,7 @@ tikv-jemalloc-sys = { version = "0.6.0", features = ["profiling"] }
 [dev-dependencies]
 axum = { version = "0.8.1", features = ["http2", "ws"] }
 axum-server = "0.7.1"
-ctor = "0.5.0"
+ctor = "0.6.0"
 ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
 encoding_rs.workspace = true
 fred = { version = "10.1.0", features = [

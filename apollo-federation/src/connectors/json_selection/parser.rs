@@ -924,6 +924,10 @@ pub(crate) enum PathList {
 }
 
 impl PathList {
+    pub(crate) fn is_empty(&self) -> bool {
+        matches!(self, PathList::Empty)
+    }
+
     pub(super) fn parse(input: Span) -> ParseResult<WithRange<Self>> {
         match Self::parse_with_depth(input.clone(), 0) {
             Ok((_, parsed)) if matches!(*parsed, Self::Empty) => Err(nom_error_message(

@@ -31,7 +31,7 @@ use crate::configuration::schema::Mode;
 use crate::configuration::validate_yaml_configuration;
 use crate::metrics::meter_provider_internal;
 use crate::plugin::plugins;
-use crate::plugins::telemetry::reload::init_telemetry;
+use crate::plugins::telemetry::reload::otel::init_telemetry;
 use crate::registry::OciConfig;
 use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
@@ -172,7 +172,7 @@ pub struct Opt {
     // Should be a Vec<Url> when https://github.com/clap-rs/clap/discussions/3796 is solved
     apollo_uplink_endpoints: Option<String>,
 
-    /// An OCI reference to an image that contains the supergraph schema for the router.
+    /// An OCI reference to a graph artifact that contains the supergraph schema for the router to run.
     #[clap(long, env = "APOLLO_GRAPH_ARTIFACT_REFERENCE", action = ArgAction::Append)]
     graph_artifact_reference: Option<String>,
 

@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -236,11 +237,6 @@ expression: "&schema"
           ],
           "description": "Percentage of traces to send via the OTel protocol when sending to Apollo Studio."
         },
-        "preview_subgraph_metrics": {
-          "default": false,
-          "description": "Enable sending additional subgraph metrics to Apollo Studio via OTLP",
-          "type": "boolean"
-        },
         "send_headers": {
           "allOf": [
             {
@@ -265,6 +261,11 @@ expression: "&schema"
           ],
           "default": "enhanced",
           "description": "Set the signature normalization algorithm to use when sending Apollo usage reports."
+        },
+        "subgraph_metrics": {
+          "default": false,
+          "description": "Enable sending additional subgraph metrics to Apollo Studio via OTLP",
+          "type": "boolean"
         },
         "tracing": {
           "allOf": [
@@ -1157,6 +1158,133 @@ expression: "&schema"
         }
       ]
     },
+    "ConditionHttpClientSelector": {
+      "description": "Specify a condition for when an [instrument][] should be mutated or an [event][] should be triggered.\n\n[instrument]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/instruments\n[event]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/events",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A condition to check a selection against a value.",
+          "properties": {
+            "eq": {
+              "items": {
+                "$ref": "#/definitions/HttpClientSelectorOrValue"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "eq"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The first selection must be greater than the second selection.",
+          "properties": {
+            "gt": {
+              "items": {
+                "$ref": "#/definitions/HttpClientSelectorOrValue"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "gt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The first selection must be less than the second selection.",
+          "properties": {
+            "lt": {
+              "items": {
+                "$ref": "#/definitions/HttpClientSelectorOrValue"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "lt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A condition to check a selection against a selector.",
+          "properties": {
+            "exists": {
+              "$ref": "#/definitions/HttpClientSelector"
+            }
+          },
+          "required": [
+            "exists"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "All sub-conditions must be true.",
+          "properties": {
+            "all": {
+              "items": {
+                "$ref": "#/definitions/ConditionHttpClientSelector"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "all"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "At least one sub-conditions must be true.",
+          "properties": {
+            "any": {
+              "items": {
+                "$ref": "#/definitions/ConditionHttpClientSelector"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "any"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The sub-condition must not be true",
+          "properties": {
+            "not": {
+              "$ref": "#/definitions/ConditionHttpClientSelector"
+            }
+          },
+          "required": [
+            "not"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "true",
+          "description": "Static true condition",
+          "type": "string"
+        },
+        {
+          "const": "false",
+          "description": "Static false condition",
+          "type": "string"
+        }
+      ]
+    },
     "ConditionRouterSelector": {
       "description": "Specify a condition for when an [instrument][] should be mutated or an [event][] should be triggered.\n\n[instrument]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/instruments\n[event]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/events",
       "oneOf": [
@@ -1553,6 +1681,21 @@ expression: "&schema"
         }
       ]
     },
+    "ConditionalHttpClientSelector": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/HttpClientSelector"
+        },
+        {
+          "properties": {
+            "condition": {
+              "$ref": "#/definitions/ConditionHttpClientSelector"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    },
     "ConditionalRouterSelector": {
       "anyOf": [
         {
@@ -1774,6 +1917,132 @@ expression: "&schema"
       "type": "object"
     },
     "Config7": {
+      "additionalProperties": false,
+      "description": "Redis cache configuration",
+      "properties": {
+        "fetch_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Timeout for Redis fetch commands (default: 150ms)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "insert_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Timeout for Redis insert commands (default: 500ms)\n\nInserts are processed asynchronously, so this will not affect response duration.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "invalidate_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Timeout for Redis invalidation commands (default: 1s)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "maintenance_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Timeout for Redis maintenance commands (default: 500ms)\n\nMaintenance tasks are processed asynchronously, so this will not affect response duration.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "metrics_interval": {
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Interval for collecting Redis metrics (default: 1s)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "namespace": {
+          "description": "namespace used to prefix Redis keys",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "password": {
+          "description": "Redis password if not provided in the URLs. This field takes precedence over the password in the URL",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pool_size": {
+          "default": 5,
+          "description": "The size of the Redis connection pool (default: 5)",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "required_to_start": {
+          "default": false,
+          "description": "Prevents the router from starting if it cannot connect to Redis",
+          "type": "boolean"
+        },
+        "tls": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TlsClient"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "TLS client configuration"
+        },
+        "ttl": {
+          "default": null,
+          "description": "TTL for entries",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "urls": {
+          "description": "List of URLs to the Redis cluster",
+          "items": {
+            "format": "uri",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "username": {
+          "description": "Redis username if not provided in the URLs. This field takes precedence over the username in the URL",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "urls"
+      ],
+      "type": "object"
+    },
+    "Config8": {
       "description": "Configuration for the progressive override plugin",
       "type": "object"
     },
@@ -2382,7 +2651,7 @@ expression: "&schema"
           "type": "string"
         },
         "url": {
-          "description": "The url you'd like to offload processing to",
+          "description": "The url you'd like to offload processing to (can be overridden per-stage)",
           "type": "string"
         }
       },
@@ -3196,6 +3465,14 @@ expression: "&schema"
           "default": false,
           "description": "Send the SDL",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -3231,6 +3508,14 @@ expression: "&schema"
           "default": false,
           "description": "Send the HTTP status",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -3622,6 +3907,12 @@ expression: "&schema"
           ],
           "description": "A histogram of the length of a selected field in the GraphQL response"
         }
+      },
+      "type": "object"
+    },
+    "ExtendedHttpClientAttributesWithConditionalHttpClientSelector": {
+      "additionalProperties": {
+        "$ref": "#/definitions/ConditionalHttpClientSelector"
       },
       "type": "object"
     },
@@ -5153,6 +5444,86 @@ expression: "&schema"
           "type": "string"
         }
       ]
+    },
+    "HttpClientSelector": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "description": "A header from the HTTP request",
+          "properties": {
+            "default": {
+              "description": "Optional default value.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "request_header": {
+              "description": "The name of the request header.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_header"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A header from the HTTP response",
+          "properties": {
+            "default": {
+              "description": "Optional default value.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "response_header": {
+              "description": "The name of the response header.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "response_header"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "HttpClientSelectorOrValue": {
+      "anyOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AttributeValue"
+            }
+          ],
+          "description": "A constant value."
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/definitions/HttpClientSelector"
+            }
+          ],
+          "description": "Selector to extract a value from the pipeline."
+        }
+      ]
+    },
+    "HttpClientSpans": {
+      "additionalProperties": false,
+      "properties": {
+        "attributes": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ExtendedHttpClientAttributesWithConditionalHttpClientSelector"
+            }
+          ],
+          "description": "Custom attributes that are attached to the HTTP client span."
+        }
+      },
+      "type": "object"
     },
     "HttpExporter": {
       "additionalProperties": false,
@@ -6774,98 +7145,6 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "PostgresCacheConfig": {
-      "additionalProperties": false,
-      "description": "Postgres cache configuration",
-      "properties": {
-        "acquire_timeout": {
-          "default": {
-            "nanos": 50000000,
-            "secs": 0
-          },
-          "description": "PostgreSQL the maximum amount of time to spend waiting for a connection (default: 50ms)",
-          "type": "string"
-        },
-        "batch_size": {
-          "default": 100,
-          "description": "The size of batch when inserting cache entries in PG (default: 100)",
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "cleanup_interval": {
-          "default": {
-            "nanos": 0,
-            "secs": 3600
-          },
-          "description": "Specifies the interval between cache cleanup operations (e.g., \"2 hours\", \"30min\"). Default: 1 hour",
-          "type": "string"
-        },
-        "idle_timeout": {
-          "default": {
-            "nanos": 0,
-            "secs": 60
-          },
-          "description": "PostgreSQL maximum idle duration for individual connection (default: 1min)",
-          "type": "string"
-        },
-        "namespace": {
-          "default": null,
-          "description": "Useful when running tests in parallel to avoid conflicts",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "password": {
-          "description": "PostgreSQL password if not provided in the URLs. This field takes precedence over the password in the URL",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "pool_size": {
-          "default": 5,
-          "description": "The size of the PostgreSQL connection pool",
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "required_to_start": {
-          "default": false,
-          "description": "Prevents the router from starting if it cannot connect to PostgreSQL",
-          "type": "boolean"
-        },
-        "tls": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/TlsConfig"
-            }
-          ],
-          "default": {
-            "certificate_authorities": null,
-            "client_authentication": null
-          },
-          "description": "Postgres TLS client configuration"
-        },
-        "url": {
-          "description": "List of URL to Postgres",
-          "format": "uri",
-          "type": "string"
-        },
-        "username": {
-          "description": "PostgreSQL username if not provided in the URLs. This field takes precedence over the username in the URL",
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "url"
-      ],
-      "type": "object"
-    },
     "PrometheusMetricsConfig": {
       "additionalProperties": false,
       "description": "Prometheus configuration",
@@ -7095,8 +7374,11 @@ expression: "&schema"
           "type": "boolean"
         },
         "timeout": {
-          "default": null,
-          "description": "Redis request timeout (default: 2ms)",
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Redis request timeout (default: 500ms)",
           "type": [
             "string",
             "null"
@@ -7378,8 +7660,11 @@ expression: "&schema"
           "type": "boolean"
         },
         "timeout": {
-          "default": null,
-          "description": "Redis request timeout (default: 2ms)",
+          "default": {
+            "nanos": 0,
+            "secs": 0
+          },
+          "description": "Redis request timeout (default: 500ms)",
           "type": [
             "string",
             "null"
@@ -7598,6 +7883,14 @@ expression: "&schema"
           "default": false,
           "description": "Send the SDL",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -7641,6 +7934,14 @@ expression: "&schema"
           "default": false,
           "description": "Send the HTTP status",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -8239,6 +8540,14 @@ expression: "&schema"
           ],
           "description": "The attributes to include by default in spans based on their level as specified in the otel semantic conventions and Apollo documentation."
         },
+        "http_client": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/HttpClientSpans"
+            }
+          ],
+          "description": "Attributes to include on the HTTP client span.\nHTTP client spans contain information about HTTP requests made to subgraphs, including any changes made by Rhai scripts."
+        },
         "mode": {
           "allOf": [
             {
@@ -8730,18 +9039,6 @@ expression: "&schema"
           "default": null,
           "description": "Invalidation configuration"
         },
-        "postgres": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/PostgresCacheConfig"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "PostgreSQL configuration"
-        },
         "private_id": {
           "default": null,
           "description": "Context key used to separate cache sections per user",
@@ -8749,6 +9046,18 @@ expression: "&schema"
             "string",
             "null"
           ]
+        },
+        "redis": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Config7"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Redis configuration"
         },
         "ttl": {
           "anyOf": [
@@ -9088,6 +9397,14 @@ expression: "&schema"
           "default": false,
           "description": "Send the subgraph URI",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -9136,6 +9453,14 @@ expression: "&schema"
           "default": false,
           "description": "Send the subgraph request id",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -9897,8 +10222,8 @@ expression: "&schema"
           "default": {
             "enabled": true,
             "invalidation": null,
-            "postgres": null,
             "private_id": null,
+            "redis": null,
             "ttl": null
           },
           "description": "options applying to all subgraphs"
@@ -10152,6 +10477,14 @@ expression: "&schema"
           "default": false,
           "description": "Send the SDL",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -10195,6 +10528,14 @@ expression: "&schema"
           "default": false,
           "description": "Send the HTTP status",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -10794,50 +11135,6 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "TlsClientAuth2": {
-      "additionalProperties": false,
-      "description": "TLS client authentication",
-      "properties": {
-        "certificate": {
-          "description": "Sets the SSL client certificate as a PEM",
-          "type": "string"
-        },
-        "key": {
-          "description": "key in PEM format",
-          "type": "string"
-        }
-      },
-      "required": [
-        "certificate",
-        "key"
-      ],
-      "type": "object"
-    },
-    "TlsConfig": {
-      "additionalProperties": false,
-      "description": "Postgres TLS client configuration",
-      "properties": {
-        "certificate_authorities": {
-          "description": "list of certificate authorities in PEM format",
-          "type": "string"
-        },
-        "client_authentication": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/TlsClientAuth2"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "client certificate authentication"
-        }
-      },
-      "required": [
-        "certificate_authorities"
-      ],
-      "type": "object"
-    },
     "TlsSupergraph": {
       "additionalProperties": false,
       "description": "Configuration options pertaining to the supergraph server component.",
@@ -11169,11 +11466,18 @@ expression: "&schema"
       "type": "object"
     },
     "WebSocketProtocol": {
-      "enum": [
-        "graphql_ws",
-        "graphql_transport_ws"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "const": "graphql_ws",
+          "description": "The modern graphql-ws protocol. The subprotocol name is \"graphql-transport-ws\".\n\nSpec URL: https://github.com/enisdenjo/graphql-ws/blob/0c0eb499c3a0278c6d9cc799064f22c5d24d2f60/PROTOCOL.md",
+          "type": "string"
+        },
+        {
+          "const": "graphql_transport_ws",
+          "description": "The legacy subscriptions-transport-ws protocol. Confusingly, the subprotocol name is\n\"graphql-ws\".\n\nhttps://github.com/apollographql/subscriptions-transport-ws/blob/36f3f6f780acc1a458b768db13fd39c65e5e6518/PROTOCOL.md",
+          "type": "string"
+        }
+      ]
     },
     "ZipkinConfig": {
       "additionalProperties": false,
@@ -11606,7 +11910,7 @@ expression: "&schema"
       "$ref": "#/definitions/FileUploadsConfig"
     },
     "progressive_override": {
-      "$ref": "#/definitions/Config7"
+      "$ref": "#/definitions/Config8"
     },
     "rhai": {
       "$ref": "#/definitions/RhaiConfig"

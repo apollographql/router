@@ -34,7 +34,7 @@ use crate::configuration::Configuration;
 use crate::configuration::Discussed;
 use crate::configuration::ListenAddr;
 use crate::configuration::metrics::Metrics;
-use crate::plugins::telemetry::reload::apollo_opentelemetry_initialized;
+use crate::plugins::telemetry::reload::otel::apollo_opentelemetry_initialized;
 use crate::router::Event::UpdateLicense;
 use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
