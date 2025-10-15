@@ -575,7 +575,12 @@ impl Merger {
                 |d| d.try_get(self.merged.schema())
                         .and_then(|f| Some(format!("default value {}", f.default_value.as_ref()?))), 
                 |s, idx| s.try_get(self.subgraphs[idx].schema().schema())
-                        .and_then(|f| Some(format!("default value {}", f.default_value.as_ref()?))),
+                        .and_then(|f| if let Some(def) = &f.default_value {
+                            Some(format!("default value {}", def))
+                        } else {
+                            Some("no default value".to_string())
+                        })
+                ,
             );
         }
 
