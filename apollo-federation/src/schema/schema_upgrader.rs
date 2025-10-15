@@ -1009,7 +1009,10 @@ pub fn upgrade_subgraphs_if_necessary(
         .into_iter()
         .filter_map(|subgraph| match subgraph {
             Either::Left(s) => {
-                // This subgraph was not upgraded nor normalized. No further validation is necessary.
+                // This subgraph was not upgraded nor normalized in this function, which implies
+                // this subgraph is originally Fed v2. Since Fed v2 schemas are already fully
+                // validated in the `expand_links` method, it's safe to transition to the
+                // `Validated` state.
                 Some(s.assume_validated())
             }
             Either::Right(s) => match s.validate() {
