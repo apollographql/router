@@ -15,12 +15,12 @@ Important Note: This should only be used in cases where you are required to inte
 customers should follow the OLTP convention indicating you "SHOULD" use seconds as the unit.
 
 **Example:**
-```yaml
+```yaml title="router.yaml"
 telemetry:
   instrumentation:
     instruments:
-      router:
-        http.server.request.duration:
+      subgraph:
+        mycompany.http.client.request.duration:
           unit: "ms"  # Values are now automatically converted to milliseconds
 ```
 
