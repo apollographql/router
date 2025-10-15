@@ -210,7 +210,7 @@ The path to listen on for invalidation requests.
 
 ##### `shared_key`
 
-A string that will be used to authenticate invalidation requests. Store this securely and provide it in the `Authorization` header when making invalidation requests.
+A string that is used to authenticate invalidation requests. Store this securely and provide it in the `Authorization` header when making invalidation requests.
 
 ### Send invalidation requests
 
@@ -263,7 +263,7 @@ flowchart RL
 	style n2 text-align:left
 ```
 
-One invalidation request can invalidate multiple cached entries at once. It can invalidate:
+One invalidation request can invalidate multiple cached entries at the same time. It can invalidate:
 - All cached entries for a specific subgraph
 - All cached entries for a specific type in a specific subgraph
 - All cached entries marked with a cache tag in specific subgraphs
@@ -366,7 +366,7 @@ The `@cacheTag` directive has the following constraints regarding its applicatio
   - If you have multiple `@key` directives (e.g., `@key(fields: "id")` and `@key(fields: "id name")`), you can only access fields present in _every_ `@key` directive (in this case, only `{$key.id}`)
 - The `format` must always generate a valid string (not an object)
 
-**Invalid example** (field not in all keys):
+❌ Invalid example (field not in all keys):
 ```graphql
 type Product
   @key(fields: "upc") @key(fields: "name")
@@ -378,7 +378,7 @@ type Product
 }
 ```
 
-**Valid example** (field in all keys):
+✅ Valid example (field in all keys):
 ```graphql
 type Product
   @key(fields: "upc") @key(fields: "upc isbn")
@@ -390,7 +390,7 @@ type Product
 }
 ```
 
-**Invalid example** (format generates an object):
+❌ Invalid example (format generates an object):
 ```graphql
 type Product
   @key(fields: "upc country { name }")
@@ -402,7 +402,7 @@ type Product
 }
 ```
 
-**Valid example** (format generates a string):
+✅ Valid example (format generates a string):
 ```graphql
 type Product
   @key(fields: "upc country { name }")
@@ -452,7 +452,7 @@ Example of response payload if you want to set cache tags for root fields return
 
 ### Invalidation HTTP endpoint
 
-The invalidation endpoint exposed by the router expects to receive an array of invalidation requests and will process them in sequence. For authorization, you must provide a shared key in the request header. For example, with the previous configuration you should send the following request:
+The invalidation endpoint exposed by the router expects to receive an array of invalidation requests and processes them in sequence. For authorization, you must provide a shared key in the request header. For example, with the previous configuration, send the following request:
 
 ```
 curl --request POST \
