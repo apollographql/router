@@ -161,7 +161,7 @@ expression: response
         ]
       },
       {
-        "message": "Cannot return null for non-nullable field Query.t",
+        "message": "Cannot return null for non-nullable field T!.t",
         "path": [
           "t"
         ]
