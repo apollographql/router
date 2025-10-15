@@ -137,6 +137,13 @@ services:
   # working theory, it might be wrong)
   redis-cluster-startup:
     image: cimg/redis:7.4.5
+    depends_on:
+      - redis-cluster-7000
+      - redis-cluster-7001
+      - redis-cluster-7002
+      - redis-cluster-7003
+      - redis-cluster-7004
+      - redis-cluster-7005
     command: |
       sh -c "
 
@@ -159,12 +166,55 @@ services:
         echo 'waiting 30s for cluster sync'
         sleep 30
 
-        redis-cli -h redis-cluster-7000 -p 7000 CONFIG SET cluster-announce-hostname localhost
-        redis-cli -h redis-cluster-7001 -p 7001 CONFIG SET cluster-announce-hostname localhost
-        redis-cli -h redis-cluster-7002 -p 7002 CONFIG SET cluster-announce-hostname localhost
-        redis-cli -h redis-cluster-7003 -p 7003 CONFIG SET cluster-announce-hostname localhost
-        redis-cli -h redis-cluster-7004 -p 7004 CONFIG SET cluster-announce-hostname localhost
-        redis-cli -h redis-cluster-7005 -p 7005 CONFIG SET cluster-announce-hostname localhost 
+        redis-cli -h redis-cluster-7000 -p 7000 CONFIG SET cluster-announce-hostname 127.0.0.1 
+        redis-cli -h redis-cluster-7001 -p 7001 CONFIG SET cluster-announce-hostname 127.0.0.1 
+        redis-cli -h redis-cluster-7002 -p 7002 CONFIG SET cluster-announce-hostname 127.0.0.1 
+        redis-cli -h redis-cluster-7003 -p 7003 CONFIG SET cluster-announce-hostname 127.0.0.1 
+        redis-cli -h redis-cluster-7004 -p 7004 CONFIG SET cluster-announce-hostname 127.0.0.1 
+        redis-cli -h redis-cluster-7005 -p 7005 CONFIG SET cluster-announce-hostname 127.0.0.1  
+
+        redis-cli -h redis-cluster-7000 -p 7000 CLUSTER MEET 127.0.0.1 7000 
+        redis-cli -h redis-cluster-7000 -p 7000 CLUSTER MEET 127.0.0.1 7001 
+        redis-cli -h redis-cluster-7000 -p 7000 CLUSTER MEET 127.0.0.1 7002 
+        redis-cli -h redis-cluster-7000 -p 7000 CLUSTER MEET 127.0.0.1 7003 
+        redis-cli -h redis-cluster-7000 -p 7000 CLUSTER MEET 127.0.0.1 7004 
+        redis-cli -h redis-cluster-7000 -p 7000 CLUSTER MEET 127.0.0.1 7005 
+
+        redis-cli -h redis-cluster-7001 -p 7001 CLUSTER MEET 127.0.0.1 7000 
+        redis-cli -h redis-cluster-7001 -p 7001 CLUSTER MEET 127.0.0.1 7001 
+        redis-cli -h redis-cluster-7001 -p 7001 CLUSTER MEET 127.0.0.1 7002 
+        redis-cli -h redis-cluster-7001 -p 7001 CLUSTER MEET 127.0.0.1 7003 
+        redis-cli -h redis-cluster-7001 -p 7001 CLUSTER MEET 127.0.0.1 7004 
+        redis-cli -h redis-cluster-7001 -p 7001 CLUSTER MEET 127.0.0.1 7005 
+
+        redis-cli -h redis-cluster-7002 -p 7002 CLUSTER MEET 127.0.0.1 7000 
+        redis-cli -h redis-cluster-7002 -p 7002 CLUSTER MEET 127.0.0.1 7001 
+        redis-cli -h redis-cluster-7002 -p 7002 CLUSTER MEET 127.0.0.1 7002 
+        redis-cli -h redis-cluster-7002 -p 7002 CLUSTER MEET 127.0.0.1 7003 
+        redis-cli -h redis-cluster-7002 -p 7002 CLUSTER MEET 127.0.0.1 7004 
+        redis-cli -h redis-cluster-7002 -p 7002 CLUSTER MEET 127.0.0.1 7005 
+
+        redis-cli -h redis-cluster-7003 -p 7003 CLUSTER MEET 127.0.0.1 7000 
+        redis-cli -h redis-cluster-7003 -p 7003 CLUSTER MEET 127.0.0.1 7001 
+        redis-cli -h redis-cluster-7003 -p 7003 CLUSTER MEET 127.0.0.1 7002 
+        redis-cli -h redis-cluster-7003 -p 7003 CLUSTER MEET 127.0.0.1 7003 
+        redis-cli -h redis-cluster-7003 -p 7003 CLUSTER MEET 127.0.0.1 7004 
+        redis-cli -h redis-cluster-7003 -p 7003 CLUSTER MEET 127.0.0.1 7005 
+
+        redis-cli -h redis-cluster-7004 -p 7004 CLUSTER MEET 127.0.0.1 7000 
+        redis-cli -h redis-cluster-7004 -p 7004 CLUSTER MEET 127.0.0.1 7001 
+        redis-cli -h redis-cluster-7004 -p 7004 CLUSTER MEET 127.0.0.1 7002 
+        redis-cli -h redis-cluster-7004 -p 7004 CLUSTER MEET 127.0.0.1 7003 
+        redis-cli -h redis-cluster-7004 -p 7004 CLUSTER MEET 127.0.0.1 7004 
+        redis-cli -h redis-cluster-7004 -p 7004 CLUSTER MEET 127.0.0.1 7005 
+
+        redis-cli -h redis-cluster-7005 -p 7005 CLUSTER MEET 127.0.0.1 7000 
+        redis-cli -h redis-cluster-7005 -p 7005 CLUSTER MEET 127.0.0.1 7001 
+        redis-cli -h redis-cluster-7005 -p 7005 CLUSTER MEET 127.0.0.1 7002 
+        redis-cli -h redis-cluster-7005 -p 7005 CLUSTER MEET 127.0.0.1 7003 
+        redis-cli -h redis-cluster-7005 -p 7005 CLUSTER MEET 127.0.0.1 7004 
+        redis-cli -h redis-cluster-7005 -p 7005 CLUSTER MEET 127.0.0.1 7005 
+
 
         echo 'waiting 30s for cluster config'
         sleep 30
