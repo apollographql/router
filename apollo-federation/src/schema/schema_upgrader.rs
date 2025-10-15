@@ -903,6 +903,9 @@ impl SchemaUpgrader {
 fn inner_upgrade_subgraphs_if_necessary(
     subgraphs: Vec<Subgraph<Expanded>>,
 ) -> Result<Vec<Either<Subgraph<Expanded>, Subgraph<Upgraded>>>, Vec<CompositionError>> {
+    let all_fed_2 = subgraphs
+        .iter()
+        .all(|subgraph| subgraph.metadata().is_fed_2_schema());
     let mut subgraphs_using_interface_object = vec![];
     let mut fed_1_subgraphs = vec![];
     let mut errors: Vec<CompositionError> = vec![];
@@ -914,9 +917,12 @@ fn inner_upgrade_subgraphs_if_necessary(
                 fed_1_subgraphs.push(subgraph.name.clone());
                 schema_upgrader.upgrade(subgraph).map(Either::Right)
             } else {
-                if is_interface_object_used(&subgraph)
-                    .map_err(|e| SubgraphError::new_without_locations(subgraph.name.clone(), e))?
+                if !all_fed_2
+                    && is_interface_object_used(&subgraph).map_err(|e| {
+                        SubgraphError::new_without_locations(subgraph.name.clone(), e)
+                    })?
                 {
+                    // If not all subgraphs are fed 2, we report all use of @interfaceObject below.
                     subgraphs_using_interface_object.push(subgraph.name.clone())
                 };
                 Ok(Either::Left(subgraph))
@@ -969,18 +975,6 @@ fn inner_upgrade_subgraphs_if_necessary(
 pub fn upgrade_subgraphs_if_necessary(
     subgraphs: Vec<Subgraph<Expanded>>,
 ) -> Result<Vec<Subgraph<Validated>>, Vec<CompositionError>> {
-    // if all subgraphs are fed 2, there is no upgrade to be done
-    if subgraphs
-        .iter()
-        .all(|subgraph| subgraph.metadata().is_fed_2_schema())
-    {
-        // TODO: We may need to normalize root types even in that case, too.
-        return Ok(subgraphs
-            .into_iter()
-            .map(|s| s.assume_validated())
-            .collect());
-    }
-
     // Upgrade subgraphs (if necessary)
     let upgraded = inner_upgrade_subgraphs_if_necessary(subgraphs)?;
 
