@@ -92,7 +92,6 @@ fn validate_args_on_field(
         validate_arg_on_field(
             schema,
             errors,
-            field,
             "cacheTag",
             cache_tag,
             field_def,
@@ -100,15 +99,7 @@ fn validate_args_on_field(
         )?;
     }
     if let Some(r#type) = args.r#type {
-        validate_arg_on_field(
-            schema,
-            errors,
-            field,
-            "type",
-            r#type,
-            field_def,
-            connect_spec,
-        )?;
+        validate_arg_on_field(schema, errors, "type", r#type, field_def, connect_spec)?;
     }
 
     Ok(())
@@ -117,7 +108,6 @@ fn validate_args_on_field(
 fn validate_arg_on_field(
     schema: &FederationSchema,
     errors: &mut Vec<Message>,
-    field: &ObjectFieldDefinitionPosition,
     arg_name: &'static str,
     arg_input: &str,
     field_def: &apollo_compiler::schema::Component<ast::FieldDefinition>,
@@ -162,15 +152,7 @@ fn validate_arg_on_field(
                         .iter()
                         .map(|arg| (arg.name.clone(), arg.ty.as_ref()))
                         .collect::<IndexMap<Name, &Type>>();
-                    match validate_args_selection(arg_name, schema, &fields, &var_ref.selection) {
-                        Ok(_) => None,
-                        Err(_err) => Some(CacheInvalidationValidationError::ArgumentUnknown {
-                            type_name: field.type_name.clone(),
-                            field_name: field.field_name.clone(),
-                            arg_name,
-                            arg_value: arg_value.to_string(),
-                        }),
-                    }
+                    validate_args_selection(arg_name, schema, &fields, &var_ref.selection).err()
                 }
                 None => None,
             },
@@ -291,37 +273,30 @@ impl fmt::Display for Message {
 enum CacheInvalidationValidationError {
     #[error("{error}")]
     FederationError { error: FederationError },
-    #[error("{arg_name} format is invalid: {message}")]
+    #[error("@cacheInvalidation {arg_name} format is invalid: {message}")]
     InvalidArgument {
         arg_name: &'static str,
         message: String,
     },
-    #[error("cacheInvalidation {arg_name} because it uses nullable argument \"{field_name}\"")]
+    #[error(
+        "@cacheInvalidation can only use non nullable argument but \"{field_name}\" in {arg_name} is nullable"
+    )]
     NullableArguments {
         arg_name: &'static str,
         field_name: Name,
     },
     #[error(
-        "error on field \"{field_name}\" on type \"{type_name}\": cacheInvalidation should either have \"cacheTag\" argument or \"type\" argument set"
+        "error on field \"{field_name}\" on type \"{type_name}\": @cacheInvalidation should either have \"cacheTag\" argument or \"type\" argument set"
     )]
     InvalidArguments { type_name: Name, field_name: Name },
     #[error(
-        "error on field \"{field_name}\" on type \"{type_name}\": cacheTag can only apply on root fields"
+        "error on field \"{field_name}\" on type \"{type_name}\": @cacheInvalidation can only apply on root fields"
     )]
     NotOnRootField { type_name: Name, field_name: Name },
     #[error(
-        "cacheInvalidation applied on mutation root fields can only reference arguments in {arg_name} using $args"
+        "@cacheInvalidation applied on mutation root fields can only reference arguments in {arg_name} using $args"
     )]
     InvalidArgumentOnRootField { arg_name: &'static str },
-    #[error(
-        "Unknown arguments used with $args in cacheInvalidation {arg_name} \"{arg_value}\" on field \"{field_name}\" for type \"{type_name}\""
-    )]
-    ArgumentUnknown {
-        type_name: Name,
-        field_name: Name,
-        arg_name: &'static str,
-        arg_value: String,
-    },
 }
 
 impl CacheInvalidationValidationError {
@@ -346,7 +321,7 @@ impl CacheInvalidationValidationError {
             // For the rest of cases
             _ => {
                 let code: &str = self.into();
-                code.to_string()
+                format!("CACHE_INVALIDATION_{code}")
             }
         }
     }
@@ -361,184 +336,139 @@ impl From<FederationError> for CacheInvalidationValidationError {
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Unit tests
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::subgraph::test_utils::BuildOption;
-//     use crate::subgraph::test_utils::build_inner_expanded;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::subgraph::test_utils::BuildOption;
+    use crate::subgraph::test_utils::build_inner_expanded;
 
-//     #[test]
-//     fn test_api_test() {
-//         const SCHEMA: &str = r#"
-//             type Product @key(fields: "upc")
-//                          @cacheTag(format: "{ namedField }")
-//                          @cacheTag(format: "{$args}")
-//             {
-//                 upc: String!
-//                 name: String
-//             }
+    #[test]
+    fn test_api_test() {
+        const SCHEMA: &str = r#"
+            type Product @key(fields: "upc")
+            {
+                upc: String!
+                name: String
+            }
 
-//             type Query {
-//                 topProducts(first: Int = 5): [Product]
-//                     @cacheTag(format: "{$this}")
-//                     @cacheTag(format: "{$key}")
-//             }
-//         "#;
+            type Mutation {
+                updateProduct(productUpc: String!): [Product]
+                    @cacheInvalidation(cacheTag: "{$this}")
+                    @cacheInvalidation(cacheTag: "{$key}")
+            }
+        "#;
 
-//         let subgraph = build_inner_expanded(SCHEMA, BuildOption::AsFed2).unwrap();
-//         let mut errors = Vec::new();
-//         validate_cache_tag_directives(subgraph.schema(), &mut errors).unwrap();
-//         assert_eq!(
-//             errors.iter().map(|e| e.code()).collect::<Vec<_>>(),
-//             vec![
-//                 "CACHE_TAG_INVALID_FORMAT",
-//                 "CACHE_TAG_INVALID_FORMAT_ARGUMENT_ON_ENTITY",
-//                 "CACHE_TAG_INVALID_FORMAT_ARGUMENT_ON_ROOT_FIELD",
-//                 "CACHE_TAG_INVALID_FORMAT_ARGUMENT_ON_ROOT_FIELD",
-//             ],
-//         );
-//     }
+        let subgraph = build_inner_expanded(SCHEMA, BuildOption::AsFed2).unwrap();
+        let mut errors = Vec::new();
+        validate_cache_invalidation_directives(subgraph.schema(), &mut errors).unwrap();
+        assert_eq!(
+            errors.iter().map(|e| e.code()).collect::<Vec<_>>(),
+            vec![
+                "CACHE_INVALIDATION_INVALID_ARGUMENT_ON_ROOT_FIELD",
+                "CACHE_INVALIDATION_INVALID_ARGUMENT_ON_ROOT_FIELD"
+            ],
+        );
+    }
 
-//     #[track_caller]
-//     fn build_and_validate(schema: &str) {
-//         let subgraph = build_inner_expanded(schema, BuildOption::AsFed2).unwrap();
-//         let mut errors = Vec::new();
-//         validate_cache_tag_directives(subgraph.schema(), &mut errors).unwrap();
-//         assert!(errors.is_empty());
-//     }
+    #[track_caller]
+    fn build_and_validate(schema: &str) {
+        let subgraph = build_inner_expanded(schema, BuildOption::AsFed2).unwrap();
+        let mut errors = Vec::new();
+        validate_cache_invalidation_directives(subgraph.schema(), &mut errors).unwrap();
+        assert!(errors.is_empty());
+    }
 
-//     #[track_caller]
-//     fn build_for_errors(schema: &str) -> Vec<String> {
-//         let subgraph = build_inner_expanded(schema, BuildOption::AsFed2).unwrap();
-//         let mut errors = Vec::new();
-//         validate_cache_tag_directives(subgraph.schema(), &mut errors).unwrap();
-//         errors.iter().map(|e| e.to_string()).collect()
-//     }
+    #[track_caller]
+    fn build_for_errors(schema: &str) -> Vec<String> {
+        let subgraph = build_inner_expanded(schema, BuildOption::AsFed2).unwrap();
+        let mut errors = Vec::new();
+        validate_cache_invalidation_directives(subgraph.schema(), &mut errors).unwrap();
+        errors.iter().map(|e| e.to_string()).collect()
+    }
 
-//     #[test]
-//     fn test_valid_format_string() {
-//         const SCHEMA: &str = r#"
-//             type Product @key(fields: "upc")
-//                          @cacheTag(format: "product-{$key.upc}")
-//             {
-//                 upc: String!
-//                 name: String
-//             }
+    #[test]
+    fn test_valid_format_string() {
+        const SCHEMA: &str = r#"
+            type Product @key(fields: "upc")
+            {
+                upc: String!
+                name: String
+            }
 
-//             type Query {
-//                 topProducts(first: Int = 5): [Product]
-//                     @cacheTag(format: "topProducts")
-//                     @cacheTag(format: "topProducts-{$args.first}")
-//             }
-//         "#;
-//         build_and_validate(SCHEMA);
-//     }
+            type Mutation {
+                updateProduct(productUpc: String!): [Product]
+                    @cacheInvalidation(cacheTag: "product")
+                    @cacheInvalidation(type: "Product")
+                    @cacheInvalidation(cacheTag: "product-{$args.productUpc}")
+            }
+        "#;
+        build_and_validate(SCHEMA);
+    }
 
-//     #[test]
-//     fn test_invalid_format_selection() {
-//         const SCHEMA: &str = r#"
-//             type Product @key(fields: "upc")
-//                          @cacheTag(format: "{ namedField }")
-//                          @cacheTag(format: "{$args}")
-//             {
-//                 upc: String!
-//                 name: String
-//             }
+    #[test]
+    fn test_invalid_format_selection() {
+        const SCHEMA: &str = r#"
+            type Product @key(fields: "upc")
+            {
+                upc: String!
+                name: String
+            }
 
-//             type Query {
-//                 topProducts(first: Int = 5): [Product]
-//                     @cacheTag(format: "{$this}")
-//                     @cacheTag(format: "{$key}")
-//             }
-//         "#;
-//         assert_eq!(
-//             build_for_errors(SCHEMA),
-//             vec![
-//                 "cacheTag format is invalid: \"namedField\"",
-//                 "cacheTag applied on types can only reference arguments in format using $key",
-//                 "cacheTag applied on root fields can only reference arguments in format using $args",
-//                 "cacheTag applied on root fields can only reference arguments in format using $args",
-//             ]
-//         );
-//     }
+            type Mutation {
+                updateProduct(productUpc: String): [Product]
+                    @cacheInvalidation(cacheTag: "{$this}")
+                    @cacheInvalidation(cacheTag: "{$key}")
+                    @cacheInvalidation(cacheTag: "product-{$args.productUpc}")
+            }
+        "#;
+        assert_eq!(
+            build_for_errors(SCHEMA),
+            vec![
+                "@cacheInvalidation applied on mutation root fields can only reference arguments in cacheTag using $args",
+                "@cacheInvalidation applied on mutation root fields can only reference arguments in cacheTag using $args",
+                "@cacheInvalidation can only use non nullable argument but \"productUpc\" in cacheTag is nullable"
+            ]
+        );
+    }
 
-//     #[test]
-//     fn test_invalid_format_path_selection() {
-//         const SCHEMA: &str = r#"
-//             type Test {
-//                 a: Int!
-//                 b: Int!
-//             }
+    #[test]
+    fn test_invalid_format_path_selection() {
+        const SCHEMA: &str = r#"
+            type Test {
+                a: Int!
+                b: Int!
+            }
 
-//             type Product @key(fields: "upc test { a }")
-//                          @cacheTag(format: "product-{$key.somethingElse}")
-//                          @cacheTag(format: "product-{$key.test}")
-//                          @cacheTag(format: "product-{$key.test.a}")
-//                          @cacheTag(format: "product-{$key.test.b}")
-//             {
-//                 upc: String!
-//                 test: Test!
-//                 name: String
-//             }
+            type Product @key(fields: "upc test { a }")
+            {
+                upc: String!
+                test: Test!
+                name: String
+            }
 
-//             type Query {
-//                 topProducts(first: Int = 5): [Product]
-//                     @cacheTag(format: "topProducts")
-//                     @cacheTag(format: "topProducts-{$args.second}")
-//             }
-//         "#;
-//         assert_eq!(
-//             build_for_errors(SCHEMA),
-//             vec![
-//                 "cacheTag format is invalid: cannot create selection set with \"somethingElse\"",
-//                 "cacheTag format is invalid: invalid path ending at \"test\", which is not a scalar type",
-//                 "Each entity field referenced in a @cacheTag format (applied on entity type) must be a member of every @key field set. In other words, when there are multiple @key fields on the type, the referenced field(s) must be limited to their intersection. Bad cacheTag format \"product-{$key.test.b}\" on type \"Product\"",
-//                 "Unknown arguments used with $args in cacheTag format \"topProducts-{$args.second}\" on field \"topProducts\" for type \"Query\"",
-//             ]
-//         );
-//     }
+            type Mutation {
+                updateProduct(product: Product!): Product
+                    @cacheInvalidation(cacheTag: "{$args.product.somethingElse}")
+                    @cacheInvalidation(cacheTag: "{$args.product.test}")
+                    @cacheInvalidation(cacheTag: "{$args.product.test.a}")
+                    @cacheInvalidation(cacheTag: "{$args.product.test.b}")
+                    @cacheInvalidation(cacheTag: "{$args.product.name}")
+            }
+        "#;
+        assert_eq!(
+            build_for_errors(SCHEMA),
+            vec![
+                "@cacheInvalidation cacheTag format is invalid: unknown field \"somethingElse\"",
+                "@cacheInvalidation cacheTag format is invalid: invalid path ending at \"test\", which is not a scalar type",
+                "@cacheInvalidation can only use non nullable argument but \"name\" in cacheTag is nullable"
+            ]
+        );
+    }
 
-//     #[test]
-//     fn test_valid_format_string_multiple_keys() {
-//         const SCHEMA: &str = r#"
-//             type Product @key(fields: "upc x")
-//                          @key(fields: "upc y")
-//                          @cacheTag(format: "product-{$key.upc}")
-//             {
-//                 upc: String!
-//                 x: Int!
-//                 y: Int!
-//                 name: String
-//             }
-//         "#;
-//         build_and_validate(SCHEMA);
-//     }
-
-//     #[test]
-//     fn test_invalid_format_string_multiple_keys() {
-//         const SCHEMA: &str = r#"
-//             type Product @key(fields: "upc x")
-//                          @key(fields: "upc y")
-//                          @cacheTag(format: "product-{$key.x}")
-//             {
-//                 upc: String!
-//                 x: Int!
-//                 y: Int!
-//                 name: String
-//             }
-//         "#;
-//         assert_eq!(
-//             build_for_errors(SCHEMA),
-//             vec![
-//                 "Each entity field referenced in a @cacheTag format (applied on entity type) must be a member of every @key field set. In other words, when there are multiple @key fields on the type, the referenced field(s) must be limited to their intersection. Bad cacheTag format \"product-{$key.x}\" on type \"Product\""
-//             ]
-//         );
-//     }
-
-//     #[test]
-//     fn test_latest_connect_spec() {
-//         // This test exists to find out when ConnectSpec::latest() changes, so
-//         // we can decide whether to update DEFAULT_CONNECT_SPEC.
-//         assert_eq!(DEFAULT_CONNECT_SPEC, ConnectSpec::latest());
-//     }
-// }
+    #[test]
+    fn test_latest_connect_spec() {
+        // This test exists to find out when ConnectSpec::latest() changes, so
+        // we can decide whether to update DEFAULT_CONNECT_SPEC.
+        assert_eq!(DEFAULT_CONNECT_SPEC, ConnectSpec::latest());
+    }
+}

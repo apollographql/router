@@ -604,7 +604,7 @@ mod test_supergraph {
                 .into_iter()
                 .map(|err| err.to_string())
                 .collect::<Vec<String>>(),
-            vec!["Unknown arguments used with $args in cacheInvalidation cacheTag \"product-{$args.productUpc}\" on field \"updateProduct\" for type \"Mutation\"".to_string()]
+            vec!["@cacheInvalidation can only use non nullable argument but \"productUpc\" in cacheTag is nullable".to_string()]
         );
 
         // valid usage test
