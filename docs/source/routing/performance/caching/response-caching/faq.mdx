@@ -46,7 +46,7 @@ The `@cacheTag` directive is defined in your subgraph schema, but it's only inte
 
 ### Where can the `@cacheTag` directive be applied?
 
-You can apply `@cacheTag` on root query fields or on resolvable entities (types marked with `@key` where `resolvable` is unset or `true`). 
+You can apply `@cacheTag` on root query fields or on resolvable entities (types marked with `@key` where `resolvable` is unset or `true`).
 
 For root fields, use `{$args.XXX}` to interpolate field arguments into the tag format—`args` is a map of all arguments for that field. The argument must be non-nullable.
 

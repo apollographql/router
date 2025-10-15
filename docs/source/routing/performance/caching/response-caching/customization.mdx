@@ -79,10 +79,10 @@ fn supergraph_service(service) {
 
 The router performs the following sequence to determine whether a particular query returns private data:
 
-- Upon seeing a query for the first time, the router requests the cache as if it were a public-only query.
-- When the subgraph returns the response with private data, the router recognizes it and stores the data in a user-specific part of the cache.
-- The router stores the query in a list of known queries with private data.
-- When the router subsequently sees a known query:
+1. Upon seeing a query for the first time, the router requests the cache as if it were a public-only query.
+2. When the subgraph returns the response with private data, the router recognizes it and stores the data in a user-specific part of the cache.
+3. The router stores the query in a list of known queries with private data.
+4. When the router subsequently sees a known query:
   - If the private ID isn't provided, the router doesn't check the cache and instead transmits the subgraph response directly.
   - If the private ID is provided, the router queries the part of the cache for the current user and checks the subgraph if nothing is available.
 
@@ -312,7 +312,7 @@ preview_response_cache:
 
 ### Required to start
 
-When active, the `required_to_start` option prevents the router from starting if it cannot connect to Redis. By default, the router starts without a connection to Redis, which means it sends requests to subgraphs directly, bypassing the cache:
+When active, the `required_to_start` option prevents the router from starting if it can't connect to Redis. By default, the router starts without a connection to Redis, which means it sends requests to subgraphs directly, bypassing the cache:
 
 ```yaml title="router.yaml"
 preview_response_cache:
