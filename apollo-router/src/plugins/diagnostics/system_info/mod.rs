@@ -1,8 +1,58 @@
 //! System information collection module
 //!
 //! This module handles the collection of comprehensive system information
-//! for diagnostic purposes, including OS details, CPU info, memory info,
-//! build information, and relevant environment variables.
+//! for diagnostic purposes. The following information is collected and output:
+//!
+//! - **System Information**
+//!   - Operating system
+//!   - Architecture (x86_64, aarch64, etc.)
+//!   - Target family (unix, windows, etc.)
+//!   - Container environment detection (Docker, Podman, Kubernetes, generic containers)
+//!
+//! - **Rust & Build Information**
+//!   - Router version
+//!   - Rust version
+//!   - Build type (Debug/Release)
+//!   - Build profile
+//!   - Target triple
+//!   - Optimization level
+//!
+//! - **Memory Information**
+//!   - Total memory
+//!   - Available memory
+//!   - Used memory
+//!   - Free memory
+//!   - Swap usage (total and used)
+//!   - Linux-specific details from /proc/meminfo (Buffers, Cached, SReclaimable, Shmem, MemAvailable)
+//!
+//! - **Jemalloc Memory Statistics** (when available)
+//!   - Allocated memory
+//!   - Active memory
+//!   - Mapped memory
+//!   - Retained memory
+//!   - Resident memory
+//!   - Metadata memory
+//!   - Number of arenas
+//!   - Memory efficiency percentage (allocated/resident)
+//!   - Memory utilization percentage (active/mapped)
+//!
+//! - **CPU Information**
+//!   - Physical CPU cores
+//!   - CPU model/brand
+//!   - Average CPU frequency
+//!   - Available parallelism (thread count)
+//!   - Container/cgroup CPU limits (effective CPU count)
+//!   - CPU priority/shares/weight (cgroup v1/v2)
+//!   - Kubernetes CPU requests and limits
+//!
+//! - **System Load**
+//!   - Load averages (1, 5, and 15 minutes)
+//!   - Load per CPU
+//!   - Individual CPU core usage percentages
+//!   - Average CPU usage
+//!
+//! - **Environment Variables**
+//!   - Apollo-specific configuration variables (APOLLO_GRAPH_REF)
 
 use std::env::consts::ARCH;
 use std::env::consts::OS;
