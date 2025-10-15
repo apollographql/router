@@ -92,7 +92,8 @@ pub mod internal_lsp_api {
 /// Internal API for the apollo-composition crate.
 pub mod internal_composition_api {
     use super::*;
-    use crate::schema::validators::{cache_invalidation, cache_tag};
+    use crate::schema::validators::cache_invalidation;
+    use crate::schema::validators::cache_tag;
     use crate::subgraph::typestate;
 
     #[derive(Default)]
