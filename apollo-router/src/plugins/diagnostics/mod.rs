@@ -25,8 +25,9 @@
 //! ## Security
 //!
 //! **⚠️ This plugin is disabled by default.** When enabled, it binds to `127.0.0.1:8089` to prevent
-//! network exposure. Only enable in trusted environments with proper network isolation, as endpoints
+//! network exposure. Only enable in trusted environments with network isolation, as endpoints
 //! expose sensitive configuration data and memory contents.
+//! Do not expose this endpoint directly to the internet.
 //!
 //! ## Platform Support
 //!
@@ -111,6 +112,7 @@ pub(crate) struct Config {
 
     /// The socket address and port to listen on
     /// Defaults to 127.0.0.1:8089
+    /// Do not expose this endpoint to the internet as it exposes sensitive information.
     pub(crate) listen: ListenAddr,
 
     /// Directory path for memory dump files
@@ -126,7 +128,7 @@ impl Default for Config {
         Self {
             // SECURITY: Plugin disabled by default to prevent accidental exposure
             // Diagnostics endpoints expose sensitive information and should only be enabled
-            // during development/debugging with proper network isolation
+            // during development/debugging with network isolation.
             enabled: false,
 
             // SECURITY: Bind to localhost only by default to prevent network exposure
