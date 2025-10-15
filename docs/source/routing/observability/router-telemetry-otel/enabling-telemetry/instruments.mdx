@@ -416,9 +416,9 @@ For instruments with `value: duration` or `value: event_duration`, the router au
 
 <Note>
 
-Best practice: Follow the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/#instrument-units) and use seconds (`s`) as the unit for duration measurements whenever possible.
+Best practice: Follow the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/#instrument-units) and use seconds (`s`) as the unit for duration measurements.
 
-Only use non-second units (`ms`, `us`, `ns`) when integrating with an observability platform that requires a specific unit and does not properly translate time units automatically.
+Only use non-second units (`ms`, `us`, `ns`) when integrating with an observability platform that requires a specific unit and doesn't automatically convert time units.
 
 </Note>
 
