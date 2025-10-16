@@ -1676,19 +1676,16 @@ fn reformat_response_coersion_propagation_into_list() {
             }
         }))
         .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
             {
-                "message": "Invalid value found for field Query.thing.a",
-                "path": ["thing", "a", 0],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Invalid value found for field Query.thing.a",
+                "message": "Invalid value found for the type Int",
                 "path": ["thing", "a", 1],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
-        */
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "a", 2],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
         ]))
         .test();
 
@@ -1716,16 +1713,24 @@ fn reformat_response_coersion_propagation_into_list() {
             }
         }))
         .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
             {
-                "message": "Invalid value found for field Query.thing.a",
-                "path": ["thing", "a", 0],
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "a", 1],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.thing.a",
+                "message": "Cannot return null for non-nullable array element of type Int",
                 "path": ["thing", "a", 1],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "a", 2],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Cannot return null for non-nullable array element of type Int",
+                "path": ["thing", "a", 2],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
@@ -1733,7 +1738,6 @@ fn reformat_response_coersion_propagation_into_list() {
                 "path": ["thing", "a"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
-        */
         ]))
         .test();
 
@@ -1759,16 +1763,24 @@ fn reformat_response_coersion_propagation_into_list() {
             "thing": null
         }))
         .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
             {
-                "message": "Invalid value found for field Query.thing.a",
-                "path": ["thing", "a", 0],
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "a", 1],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.thing.a",
+                "message": "Cannot return null for non-nullable array element of type Int",
                 "path": ["thing", "a", 1],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "a", 2],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Cannot return null for non-nullable array element of type Int",
+                "path": ["thing", "a", 2],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
@@ -1777,11 +1789,10 @@ fn reformat_response_coersion_propagation_into_list() {
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.thing",
-                "path": ["thing"],
+                "message": "Cannot return null for non-nullable field Thing.a",
+                "path": ["thing", "a"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
-        */
         ]))
         .test();
 }

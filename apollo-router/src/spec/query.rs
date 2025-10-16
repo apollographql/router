@@ -146,6 +146,7 @@ impl Query {
                                 variables: &variables,
                                 schema,
                                 errors: Vec::new(),
+                                coersion_errors: Vec::new(),
                                 nullified: Vec::new(),
                             };
 
@@ -203,6 +204,7 @@ impl Query {
                         variables: &all_variables,
                         schema,
                         errors: Vec::new(),
+                        coersion_errors: Vec::new(),
                         nullified: Vec::new(),
                     };
 
@@ -225,6 +227,10 @@ impl Query {
                         response
                             .extensions
                             .insert(EXTENSIONS_VALUE_COMPLETION_KEY, value);
+                    }
+
+                    if !parameters.coersion_errors.is_empty() {
+                        response.errors.append(&mut parameters.coersion_errors);
                     }
 
                     return parameters.nullified;
@@ -342,7 +348,7 @@ impl Query {
         // and return Ok(()), because values are optional by default
         match field_type {
             executable::Type::Named(name) => match name.as_str() {
-                "Int" => self.format_integer(input, output),
+                "Int" => self.format_integer(parameters, path, input, output),
                 "Float" => self.format_float(input, output),
                 "Boolean" => self.format_boolean(input, output),
                 "String" => self.format_string(input, output),
@@ -421,15 +427,22 @@ impl Query {
                 Some(ResponsePathElement::Key(k)) => {
                     format!("Cannot return null for non-nullable field {parent_type}.{k}")
                 }
-                Some(ResponsePathElement::Index(i)) => format!(
-                    "Cannot return null for non-nullable array element of type {inner_type} at index {i}"
+                Some(ResponsePathElement::Index(_)) => format!(
+                    "Cannot return null for non-nullable array element of type {inner_type}"
                 ),
                 _ => todo!(),
             };
             parameters.errors.push(
                 Error::builder()
+                    .message(&message)
+                    .path(Path::from_response_slice(path))
+                    .build(),
+            );
+            parameters.coersion_errors.push(
+                Error::builder()
                     .message(message)
                     .path(Path::from_response_slice(path))
+                    .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
                     .build(),
             );
 
@@ -477,6 +490,14 @@ impl Query {
             path.pop();
         }
         if nullify {
+            parameters.coersion_errors.push(
+                Error::builder()
+                    // FIXME: This needs to be a real error message
+                    .message("Invalid value found for field Query.thing.a")
+                    .path(Path::from_response_slice(path))
+                    .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
+                    .build(),
+            );
             *output = Value::Null;
         }
         Ok(())
@@ -572,7 +593,13 @@ impl Query {
     }
 
     #[inline]
-    fn format_integer(&self, input: &mut Value, output: &mut Value) {
+    fn format_integer(
+        &self,
+        parameters: &mut FormatParameters,
+        path: &[ResponsePathElement<'_>],
+        input: &mut Value,
+        output: &mut Value,
+    ) {
         // if the value is invalid, we do not insert it in the output object
         // which is equivalent to inserting null
         if input.as_i64().is_some_and(|i| i32::try_from(i).is_ok())
@@ -580,6 +607,15 @@ impl Query {
         {
             *output = input.clone();
         } else {
+            if !input.is_null() {
+                parameters.coersion_errors.push(
+                    Error::builder()
+                        .message("Invalid value found for the type Int")
+                        .path(Path::from_response_slice(path))
+                        .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
+                        .build(),
+                );
+            }
             *output = Value::Null;
         }
     }
@@ -1081,6 +1117,7 @@ impl Query {
 struct FormatParameters<'a> {
     variables: &'a Object,
     errors: Vec<Error>,
+    coersion_errors: Vec<Error>,
     nullified: Vec<Path>,
     schema: &'a ApiSchema,
 }
