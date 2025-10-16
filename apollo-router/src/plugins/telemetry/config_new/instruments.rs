@@ -39,10 +39,7 @@ use super::subgraph::instruments::SubgraphInstrumentsConfig;
 use super::supergraph::instruments::SupergraphCustomInstruments;
 use super::supergraph::instruments::SupergraphInstrumentsConfig;
 use crate::Context;
-use crate::axum_factory::connection_handle::ConnectionState;
-use crate::axum_factory::connection_handle::OPEN_CONNECTIONS_METRIC;
 use crate::metrics;
-use crate::metrics::meter_provider;
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::config_new::apollo::instruments::ApolloConnectorInstruments;
@@ -72,8 +69,6 @@ use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphSele
 use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphValue;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::router;
-use crate::services::router::pipeline_handle::PIPELINE_METRIC;
-use crate::services::router::pipeline_handle::pipeline_counts;
 use crate::services::supergraph;
 
 pub(crate) const METER_NAME: &str = "apollo/router";
@@ -1051,80 +1046,6 @@ impl InstrumentsConfig {
                 }
             }),
         }
-    }
-
-    pub(crate) fn new_pipeline_instruments(&self) -> HashMap<String, StaticInstrument> {
-        let meter = meter_provider().meter("apollo/router");
-        let mut instruments = HashMap::new();
-        instruments.insert(
-            PIPELINE_METRIC.to_string(),
-            StaticInstrument::GaugeU64(
-                meter
-                    .u64_observable_gauge(PIPELINE_METRIC)
-                    .with_description("The number of request pipelines active in the router")
-                    .with_callback(|i| {
-                        for (pipeline, count) in &*pipeline_counts() {
-                            let mut attributes = Vec::with_capacity(3);
-                            attributes.push(KeyValue::new("schema.id", pipeline.schema_id.clone()));
-                            if let Some(launch_id) = &pipeline.launch_id {
-                                attributes.push(KeyValue::new("launch.id", launch_id.clone()));
-                            }
-                            attributes
-                                .push(KeyValue::new("config.hash", pipeline.config_hash.clone()));
-
-                            i.observe(*count, &attributes);
-                        }
-                    })
-                    .init(),
-            ),
-        );
-        instruments.insert(
-            OPEN_CONNECTIONS_METRIC.to_string(),
-            StaticInstrument::GaugeU64(
-                meter
-                    .u64_observable_gauge(OPEN_CONNECTIONS_METRIC)
-                    .with_description("Number of currently connected clients")
-                    .with_callback(move |gauge| {
-                        let connections =
-                            crate::axum_factory::connection_handle::connection_counts();
-                        for (connection, count) in connections.iter() {
-                            let mut attributes = Vec::with_capacity(6);
-                            if let Some((ip, port)) = connection.address.ip_and_port() {
-                                attributes.push(KeyValue::new("server.address", ip.to_string()));
-                                attributes.push(KeyValue::new("server.port", port.to_string()));
-                            } else {
-                                // Unix socket
-                                attributes.push(KeyValue::new(
-                                    "server.address",
-                                    connection.address.to_string(),
-                                ));
-                            }
-                            attributes.push(KeyValue::new(
-                                "schema.id",
-                                connection.pipeline_ref.schema_id.clone(),
-                            ));
-                            if let Some(launch_id) = &connection.pipeline_ref.launch_id {
-                                attributes.push(KeyValue::new("launch.id", launch_id.clone()));
-                            }
-                            attributes.push(KeyValue::new(
-                                "config.hash",
-                                connection.pipeline_ref.config_hash.clone(),
-                            ));
-                            // Technically we need to support `idle` state, but that will have to be a follow-up,
-                            attributes.push(KeyValue::new(
-                                "http.connection.state",
-                                match connection.state {
-                                    ConnectionState::Active => "active",
-                                    ConnectionState::Terminating => "terminating",
-                                },
-                            ));
-                            gauge.observe(*count, &attributes);
-                        }
-                    })
-                    .init(),
-            ),
-        );
-        instruments
     }
 }
 

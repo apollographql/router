@@ -131,6 +131,42 @@ impl ErrorReporter {
     }
 
     #[allow(clippy::too_many_arguments)]
+    pub(crate) fn report_mismatch_error_with_specifics<D: Display, S, L>(
+        &mut self,
+        error: CompositionError,
+        mismatched_element: &D,
+        subgraph_elements: &Sources<S>,
+        supergraph_mismatch_accessor: impl Fn(&D) -> Option<String>,
+        subgraph_mismatch_accessor: impl Fn(&S, usize) -> Option<String>,
+        supergraph_element_printer: impl Fn(&str, Option<String>) -> String,
+        other_elements_printer: impl Fn(&str, &str) -> String,
+        include_missing_sources: bool,
+    ) {
+        self.report_mismatch::<D, S, L>(
+            Some(mismatched_element),
+            subgraph_elements,
+            supergraph_mismatch_accessor,
+            subgraph_mismatch_accessor,
+            supergraph_element_printer,
+            other_elements_printer,
+            |myself, mut distribution, _| {
+                let mut distribution_str = distribution.remove(0);
+                distribution_str.push_str(&join_strings(
+                    distribution.iter(),
+                    JoinStringsOptions {
+                        first_separator: None,
+                        separator: " and ",
+                        last_separator: None,
+                        output_length_limit: None,
+                    },
+                ));
+                myself.add_error(error.append_message(distribution_str));
+            },
+            include_missing_sources,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn report_mismatch_hint<D: Display, S, L>(
         &mut self,
         code: HintCode,

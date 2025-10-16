@@ -1,7 +1,7 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 28
 expression: "&schema"
-snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -237,11 +237,6 @@ snapshot_kind: text
           ],
           "description": "Percentage of traces to send via the OTel protocol when sending to Apollo Studio."
         },
-        "preview_subgraph_metrics": {
-          "default": false,
-          "description": "Enable sending additional subgraph metrics to Apollo Studio via OTLP",
-          "type": "boolean"
-        },
         "send_headers": {
           "allOf": [
             {
@@ -266,6 +261,11 @@ snapshot_kind: text
           ],
           "default": "enhanced",
           "description": "Set the signature normalization algorithm to use when sending Apollo usage reports."
+        },
+        "subgraph_metrics": {
+          "default": false,
+          "description": "Enable sending additional subgraph metrics to Apollo Studio via OTLP",
+          "type": "boolean"
         },
         "tracing": {
           "allOf": [
@@ -2651,7 +2651,7 @@ snapshot_kind: text
           "type": "string"
         },
         "url": {
-          "description": "The url you'd like to offload processing to",
+          "description": "The url you'd like to offload processing to (can be overridden per-stage)",
           "type": "string"
         }
       },
@@ -3465,6 +3465,14 @@ snapshot_kind: text
           "default": false,
           "description": "Send the SDL",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -3500,6 +3508,14 @@ snapshot_kind: text
           "default": false,
           "description": "Send the HTTP status",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -7867,6 +7883,14 @@ snapshot_kind: text
           "default": false,
           "description": "Send the SDL",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -7910,6 +7934,14 @@ snapshot_kind: text
           "default": false,
           "description": "Send the HTTP status",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -9365,6 +9397,14 @@ snapshot_kind: text
           "default": false,
           "description": "Send the subgraph URI",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -9413,6 +9453,14 @@ snapshot_kind: text
           "default": false,
           "description": "Send the subgraph request id",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -10429,6 +10477,14 @@ snapshot_kind: text
           "default": false,
           "description": "Send the SDL",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -10472,6 +10528,14 @@ snapshot_kind: text
           "default": false,
           "description": "Send the HTTP status",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
