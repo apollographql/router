@@ -1,18 +1,18 @@
+use apollo_federation::composition::compose;
+use apollo_federation::subgraph::typestate::Subgraph;
 use insta::assert_snapshot;
+use test_log::test;
 
 use super::ServiceDefinition;
 use super::assert_composition_errors;
 use super::compose_as_fed2_subgraphs;
 use super::print_sdl;
-use apollo_federation::composition::compose;
-use apollo_federation::subgraph::typestate::Subgraph;
 
 // =============================================================================
 // DIRECTIVE MERGING - Tests for GraphQL built-in directive merging
 // =============================================================================
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn directive_merging_propagates_graphql_built_in_directives() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -45,7 +45,6 @@ fn directive_merging_propagates_graphql_built_in_directives() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn directive_merging_merges_graphql_built_in_directives() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -78,7 +77,6 @@ fn directive_merging_merges_graphql_built_in_directives() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn directive_merging_propagates_built_in_directives_even_if_redefined() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",

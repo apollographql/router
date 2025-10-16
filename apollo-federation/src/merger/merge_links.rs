@@ -265,24 +265,12 @@ impl Merger {
                 } else {
                     None
                 };
-                let Some(definition) = self
-                    .merged
-                    .schema()
-                    .directive_definitions
-                    .get(&supergraph_core_directive.name_in_supergraph)
-                else {
-                    bail!(
-                        "Could not find directive definition for @{} in supergraph schema",
-                        supergraph_core_directive.name_in_supergraph
-                    );
-                };
                 self.merged_federation_directive_names
                     .insert(supergraph_core_directive.name_in_supergraph.to_string());
                 self.merged_federation_directive_in_supergraph_by_directive_name
                     .insert(
                         supergraph_core_directive.name_in_supergraph.clone(),
                         MergedDirectiveInfo {
-                            definition: (**definition).clone(),
                             arguments_merger,
                             static_argument_transform: supergraph_core_directive
                                 .composition_spec
