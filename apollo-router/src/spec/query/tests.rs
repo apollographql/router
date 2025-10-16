@@ -3423,6 +3423,14 @@ fn filter_list_errors() {
                 {
                     "message": "Cannot return null for non-nullable array element of type String at index 1",
                     "path": ["list", "l2", 1]
+                },
+                {
+                    "message": "Cannot return null for non-nullable array element of type String at index 2",
+                    "path": ["list", "l2", 2]
+                },
+                {
+                    "message": "Cannot return null for non-nullable array element of type String at index 3",
+                    "path": ["list", "l2", 3]
                 }
             ]
         }},)

@@ -451,33 +451,33 @@ impl Query {
         path: &mut Vec<ResponsePathElement<'b>>,
         selection_set: &'a [Selection],
     ) -> Result<(), InvalidValue> {
-        if let Value::Array(input_array) = input {
-            if output.is_null() {
-                *output = Value::Array(vec![Value::Null; input_array.len()]);
-            }
-            let output_array = output.as_array_mut().ok_or(InvalidValue)?;
-            if let Err(InvalidValue) =
-                input_array
-                    .iter_mut()
-                    .enumerate()
-                    .try_for_each(|(i, element)| {
-                        path.push(ResponsePathElement::Index(i));
-                        let res = self.format_value(
-                            parameters,
-                            inner_type,
-                            element,
-                            &mut output_array[i],
-                            path,
-                            field_type,
-                            selection_set,
-                        );
-                        path.pop();
-                        res
-                    })
-            {
+        let Value::Array(input_array) = input else {
+            return Ok(());
+        };
+        if output.is_null() {
+            *output = Value::Array(vec![Value::Null; input_array.len()]);
+        }
+        let output_array = output.as_array_mut().ok_or(InvalidValue)?;
+        let mut nullify = false;
+        for (i, element) in input_array.iter_mut().enumerate() {
+            path.push(ResponsePathElement::Index(i));
+            if let Err(InvalidValue) = self.format_value(
+                parameters,
+                inner_type,
+                element,
+                &mut output_array[i],
+                path,
+                field_type,
+                selection_set,
+            ) {
+                // TODO: Insert error
                 parameters.nullified.push(Path::from_response_slice(path));
-                *output = Value::Null;
+                nullify = true;
             }
+            path.pop();
+        }
+        if nullify {
+            *output = Value::Null;
         }
         Ok(())
     }
