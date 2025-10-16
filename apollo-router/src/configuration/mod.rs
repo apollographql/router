@@ -206,8 +206,8 @@ pub struct Configuration {
     #[serde(skip)]
     pub uplink: Option<UplinkConfig>,
 
-    /// FIXME(@goto-bus-stop): Sticking this on Configuration is a serious hack just to have
-    /// it available everywhere, it is actually not configuration at all
+    // FIXME(@goto-bus-stop): Sticking this on Configuration is a serious hack just to have
+    // it available everywhere, it is actually not configuration at all
     #[serde(default, skip_serializing, skip_deserializing)]
     pub(crate) notify: Notify<String, graphql::Response>,
 
