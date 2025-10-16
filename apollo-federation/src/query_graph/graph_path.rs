@@ -1607,11 +1607,14 @@ where
                     && matches!(
                         edge_weight.transition,
                         QueryGraphEdgeTransition::RootTypeResolution { .. }
+                            | QueryGraphEdgeTransition::KeyResolution
                     )
                     && !(to_advance.defer_on_tail.is_some()
                         && self.graph.is_self_key_or_root_edge(edge)?)
                 {
-                    debug!(r#"Ignored: edge is a top-level "RootTypeResolution""#);
+                    debug!(
+                        r#"Ignored: edge is a top-level "RootTypeResolution" or "KeyResolution""#
+                    );
                     continue;
                 }
 
@@ -1801,10 +1804,17 @@ where
                                     "Encountered non-root path with a subgraph-entering transition",
                                 ));
                             };
-                            self.graph
-                                .root_kinds_to_nodes_by_source(&edge_tail_weight.source)?
-                                .get(root_kind)
-                                .copied()
+                            // Since mutation options need to originate from the same subgraph, we
+                            // pretend we cannot find a root node  in another subgraph (effectively
+                            // skipping the optimization).
+                            if *root_kind == SchemaRootDefinitionKind::Mutation {
+                                None
+                            } else {
+                                self.graph
+                                    .root_kinds_to_nodes_by_source(&edge_tail_weight.source)?
+                                    .get(root_kind)
+                                    .copied()
+                            }
                         } else {
                             Some(last_subgraph_entering_edge_head)
                         };
