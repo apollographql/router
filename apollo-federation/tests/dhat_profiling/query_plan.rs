@@ -95,3 +95,23 @@ fn valid_query_plan() {
     dhat::assert!(stats.max_bytes < MAX_BYTES_QUERY_PLAN);
     dhat::assert!(stats.total_blocks < MAX_ALLOCATIONS_QUERY_PLAN);
 }
+
+#[test]
+fn rh_1038() {
+    const SCHEMA: &str = "../customer-supergraph.graphql";
+
+    let schema = std::fs::read_to_string(SCHEMA).unwrap();
+
+    let _profiler = dhat::Profiler::builder().testing().build();
+
+    let supergraph =
+        apollo_federation::Supergraph::new(&schema).expect("supergraph should be valid");
+    let qp_config = apollo_federation::query_plan::query_planner::QueryPlannerConfig::default();
+    apollo_federation::query_plan::query_planner::QueryPlanner::new(&supergraph, qp_config)
+        .expect("query planner should be created");
+    let stats = dhat::HeapStats::get();
+    println!("MAX BYTES: {}", stats.max_bytes);
+    println!("MAX ALLOCATIONS: {}", stats.max_blocks);
+    println!("TOTAL BYTES: {}", stats.total_bytes);
+    println!("TOTAL ALLOCATIONS: {}", stats.total_blocks);
+}
