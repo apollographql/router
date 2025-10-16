@@ -402,9 +402,11 @@ impl Query {
         let inner_type = match field_type {
             executable::Type::NonNullList(ty) => ty.clone().list(),
             executable::Type::NonNullNamed(name) => executable::Type::Named(name.clone()),
+            // This function should never be called for non-nullable types
             _ => unreachable!(),
         };
-        match self.format_value(
+
+        self.format_value(
             parameters,
             &inner_type,
             input,
@@ -412,31 +414,28 @@ impl Query {
             path,
             field_type,
             selection_set,
-        ) {
-            Err(_) => Err(InvalidValue),
-            Ok(_) => {
-                if output.is_null() {
-                    let message = match path.last() {
-                        Some(ResponsePathElement::Key(k)) => {
-                            format!("Cannot return null for non-nullable field {parent_type}.{k}")
-                        }
-                        Some(ResponsePathElement::Index(i)) => format!(
-                            "Cannot return null for non-nullable array element of type {inner_type} at index {i}"
-                        ),
-                        _ => todo!(),
-                    };
-                    parameters.errors.push(
-                        Error::builder()
-                            .message(message)
-                            .path(Path::from_response_slice(path))
-                            .build(),
-                    );
+        )?;
 
-                    Err(InvalidValue)
-                } else {
-                    Ok(())
+        if output.is_null() {
+            let message = match path.last() {
+                Some(ResponsePathElement::Key(k)) => {
+                    format!("Cannot return null for non-nullable field {parent_type}.{k}")
                 }
-            }
+                Some(ResponsePathElement::Index(i)) => format!(
+                    "Cannot return null for non-nullable array element of type {inner_type} at index {i}"
+                ),
+                _ => todo!(),
+            };
+            parameters.errors.push(
+                Error::builder()
+                    .message(message)
+                    .path(Path::from_response_slice(path))
+                    .build(),
+            );
+
+            Err(InvalidValue)
+        } else {
+            Ok(())
         }
     }
 
@@ -503,98 +502,82 @@ impl Query {
                 return Ok(());
             }
             Some(ExtendedType::Enum(enum_type)) => {
-                return match input.as_str() {
-                    Some(s) => {
-                        if enum_type.values.contains_key(s) {
-                            *output = input.clone();
-                            Ok(())
-                        } else {
-                            *output = Value::Null;
-                            Ok(())
-                        }
-                    }
-                    None => {
-                        *output = Value::Null;
-                        Ok(())
-                    }
-                };
+                *output = input
+                    .as_str()
+                    .filter(|s| enum_type.values.contains_key(*s))
+                    .map(|_| input.clone())
+                    .unwrap_or_default();
+                return Ok(());
             }
             _ => {}
         }
 
-        match input {
-            Value::Object(input_object) => {
-                if let Some(input_type) = input_object.get(TYPENAME).and_then(|val| val.as_str()) {
-                    // If there is a __typename, make sure the pointed type is a valid type of the schema. Otherwise, something is wrong, and in case we might
-                    // be inadvertently leaking some data for an @inacessible type or something, nullify the whole object. However, do note that due to `@interfaceObject`,
-                    // some subgraph can have returned a __typename that is the name of an interface in the supergraph, and this is fine (that is, we should not
-                    // return such a __typename to the user, but as long as it's not returned, having it in the internal data is ok and sometimes expected).
-                    let Some(ExtendedType::Object(_) | ExtendedType::Interface(_)) =
-                        parameters.schema.types.get(input_type)
-                    else {
-                        parameters.nullified.push(Path::from_response_slice(path));
-                        *output = Value::Null;
-                        return Ok(());
-                    };
-                }
-
-                if output.is_null() {
-                    *output = Value::Object(Object::with_capacity(selection_set.len()));
-                }
-                let output_object = output.as_object_mut().ok_or(InvalidValue)?;
-
-                let typename = input_object
-                    .get(TYPENAME)
-                    .and_then(|val| val.as_str())
-                    .and_then(|s| apollo_compiler::ast::NamedType::new(s).ok())
-                    .map(apollo_compiler::ast::Type::Named);
-
-                let current_type = match parameters.schema.types.get(field_type.inner_named_type())
-                {
-                    Some(ExtendedType::Interface(..) | ExtendedType::Union(..)) => {
-                        typename.as_ref().unwrap_or(field_type)
-                    }
-                    _ => field_type,
-                };
-
-                if self
-                    .apply_selection_set(
-                        selection_set,
-                        parameters,
-                        input_object,
-                        output_object,
-                        path,
-                        current_type,
-                    )
-                    .is_err()
-                {
+        if let Value::Object(input_object) = input {
+            if let Some(input_type) = input_object.get(TYPENAME).and_then(|val| val.as_str()) {
+                // If there is a __typename, make sure the pointed type is a valid type of the
+                // schema. Otherwise, something is wrong, and in case we might be inadvertently
+                // leaking some data for an @inacessible type or something, nullify the whole
+                // object. However, do note that due to `@interfaceObject`, some subgraph can have
+                // returned a __typename that is the name of an interface in the supergraph, and
+                // this is fine (that is, we should not return such a __typename to the user, but
+                // as long as it's not returned, having it in the internal data is ok and sometimes
+                // expected).
+                let Some(ExtendedType::Object(_) | ExtendedType::Interface(_)) =
+                    parameters.schema.types.get(input_type)
+                else {
                     parameters.nullified.push(Path::from_response_slice(path));
                     *output = Value::Null;
-                }
-
-                Ok(())
+                    return Ok(());
+                };
             }
-            _ => {
+
+            if output.is_null() {
+                *output = Value::Object(Object::with_capacity(selection_set.len()));
+            }
+            let output_object = output.as_object_mut().ok_or(InvalidValue)?;
+
+            let typename = input_object
+                .get(TYPENAME)
+                .and_then(|val| val.as_str())
+                .and_then(|s| apollo_compiler::ast::NamedType::new(s).ok())
+                .map(apollo_compiler::ast::Type::Named);
+
+            let current_type = match parameters.schema.types.get(field_type.inner_named_type()) {
+                Some(ExtendedType::Interface(..) | ExtendedType::Union(..)) => {
+                    typename.as_ref().unwrap_or(field_type)
+                }
+                _ => field_type,
+            };
+
+            if self
+                .apply_selection_set(
+                    selection_set,
+                    parameters,
+                    input_object,
+                    output_object,
+                    path,
+                    current_type,
+                )
+                .is_err()
+            {
                 parameters.nullified.push(Path::from_response_slice(path));
                 *output = Value::Null;
-                Ok(())
             }
+        } else {
+            parameters.nullified.push(Path::from_response_slice(path));
+            *output = Value::Null;
         }
+
+        Ok(())
     }
 
     #[inline]
     fn format_integer(&self, input: &mut Value, output: &mut Value) {
-        let opt = if input.is_i64() {
-            input.as_i64().and_then(|i| i32::try_from(i).ok())
-        } else if input.is_u64() {
-            input.as_i64().and_then(|i| i32::try_from(i).ok())
-        } else {
-            None
-        };
-
         // if the value is invalid, we do not insert it in the output object
         // which is equivalent to inserting null
-        if opt.is_some() {
+        if input.as_i64().is_some_and(|i| i32::try_from(i).is_ok())
+            || input.as_i64().is_some_and(|i| i32::try_from(i).is_ok())
+        {
             *output = input.clone();
         } else {
             *output = Value::Null;
