@@ -38,6 +38,7 @@ use http_body_util::BodyExt as _;
 use once_cell::sync::Lazy;
 use prost::Message;
 use proto::reports::Report;
+use serde_json::json;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tower::Service;
@@ -120,7 +121,7 @@ async fn get_router_service(
         .try_log_level("INFO")
         .configuration_json(config)
         .expect("test harness had config errors")
-        .schema(include_str!("fixtures/supergraph.graphql"));
+        .schema(include_str!("fixtures/reports/supergraph.graphql"));
     let builder = if mocked {
         builder.subgraph_hook(|subgraph, _service| tracing_common::subgraph_mocks(subgraph))
     } else {
@@ -157,7 +158,7 @@ async fn get_batch_router_service(
         .try_log_level("INFO")
         .configuration_json(config)
         .expect("test harness had config errors")
-        .schema(include_str!("fixtures/supergraph.graphql"));
+        .schema(include_str!("fixtures/reports/supergraph.graphql"));
     let builder = if mocked {
         builder.subgraph_hook(|subgraph, _service| tracing_common::subgraph_mocks(subgraph))
     } else {
@@ -665,6 +666,33 @@ async fn test_stats() {
     let req: router::Request = request.try_into().expect("could not convert request");
     let reports = Arc::new(Mutex::new(vec![]));
     let report = get_metrics_report(reports, req, false, false, None).await;
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_invalid_enum_argument() {
+    let request = supergraph::Request::fake_builder()
+        .query("mutation($upc: ID!, $color: Color!) { createProduct(upc: $upc, color: $color){ name } }")
+        .variable("upc", "asdf")
+        .variable("color", "myInvalidColor")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_metrics_report_mocked(reports, req).await;
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_invalid_enum_input_field() {
+    let request = supergraph::Request::fake_builder()
+        .query("mutation($description: ProductDescription){ createProductFromDescription(description: $description){ name } }")
+        .variable("description",  json!({ "upc": "asdf", "color": "myInvalidColor" }))
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_metrics_report_mocked(reports, req).await;
     assert_report!(report);
 }
 

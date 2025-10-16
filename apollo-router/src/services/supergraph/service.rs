@@ -31,6 +31,8 @@ use tracing_futures::Instrument;
 use crate::Configuration;
 use crate::Context;
 use crate::Notify;
+use crate::apollo_studio_interop::ExtendedReferenceStats;
+use crate::apollo_studio_interop::ReferencedEnums;
 use crate::apollo_studio_interop::UsageReporting;
 use crate::batching::BatchQuery;
 use crate::configuration::Batching;
@@ -83,6 +85,7 @@ use crate::services::router::ClientRequestAccepts;
 use crate::services::subgraph::BoxGqlStream;
 use crate::services::subgraph_service::MakeSubgraphService;
 use crate::services::supergraph;
+use crate::spec::GRAPHQL_VALIDATION_FAILURE_ERROR_KEY;
 use crate::spec::Schema;
 use crate::spec::operation_limits::OperationLimits;
 
@@ -183,7 +186,7 @@ async fn service_call(
 ) -> Result<SupergraphResponse, BoxError> {
     let context = req.context;
     let body = req.supergraph_request.body();
-    let variables = body.variables.clone();
+    let variables = &body.variables;
 
     let QueryPlannerResponse { content, errors } = match plan_query(
         planning,
@@ -257,7 +260,7 @@ async fn service_call(
                 let _ = lock.insert::<OperationLimits<u32>>(query_metrics);
             });
 
-            let is_deferred = plan.is_deferred(&variables);
+            let is_deferred = plan.is_deferred(variables);
             let is_subscription = plan.is_subscription();
 
             if let Some(batching) = context
@@ -289,7 +292,7 @@ async fn service_call(
                     .extensions()
                     .with_lock(|lock| lock.get::<BatchQuery>().cloned());
                 if let Some(batch_query) = batch_query_opt {
-                    let query_hashes = plan.query_hashes(batching, &variables)?;
+                    let query_hashes = plan.query_hashes(batching, variables)?;
                     batch_query
                         .set_query_hashes(query_hashes)
                         .await
@@ -339,6 +342,24 @@ async fn service_call(
                 *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
                 Ok(response)
             } else if let Some(err) = plan.query.validate_variables(body, &schema).err() {
+                // Replace the existing usage report so we do not report invalid variable values to
+                // Studio.
+                context.extensions().with_lock(|lock| {
+                    // This will remove most stats from the usage report, but not all.
+                    // The best long-term solution would be to validate variables earilier as
+                    // part of or before query analysis, but this is difficult and higher risk. We
+                    // clear what we can here as a stop-gap.
+                    lock.insert(Arc::new(UsageReporting {
+                        stats_report_key: GRAPHQL_VALIDATION_FAILURE_ERROR_KEY.to_string(),
+                        referenced_fields_by_type: Default::default(),
+                    }));
+                    lock.insert(ExtendedReferenceStats {
+                        referenced_input_fields: Default::default(),
+                        referenced_enums: Default::default(),
+                    });
+                    lock.insert(ReferencedEnums::default())
+                });
+
                 let mut res = SupergraphResponse::new_from_graphql_response(err, context);
                 *res.response.status_mut() = StatusCode::BAD_REQUEST;
                 Ok(res)
