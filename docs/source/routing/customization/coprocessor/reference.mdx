@@ -361,9 +361,9 @@ List of context keys available from the router's request context, which is share
 - `apollo::authentication::jwt_status` - JWT validation status (internal only)
 
 #### Authorization
-- `apollo::authorization::authentication_required` - True if the operation contains type of fields marked with `@authenticated`
-- `apollo::authorization::required_scopes` - If the operation contains type of fields marked with `@requiresScopes`, it contains the list of scopes used
-- `apollo::authorization::required_policies` - If the query contains type of fields marked with `@policy`, it contains a map of `policy name -> Option<bool>`. A coprocessor or Rhai script can edit this map to mark `true` on authorization policies that succeed or `false` on ones that fail
+- `apollo::authorization::authentication_required` - `true` if the operation contains fields marked with `@authenticated`
+- `apollo::authorization::required_scopes` - If the operation contains fields marked with `@requiresScopes`, it contains the list of scopes used
+- `apollo::authorization::required_policies` - If the query contains fields marked with `@policy`, it contains a map of `policy name -> Option<bool>`. A coprocessor or Rhai script can edit this map to mark `true` on authorization policies that succeed or `false` on ones that fail
 
 ### Telemetry
 
@@ -403,7 +403,7 @@ The following keys are populated by the demand control plugin:
 
 #### Automatic persisted queries (APQ)
 - `apollo::apq::cache_hit` - Present if the request used APQ; true if we got a cache hit for the query ID, false otherwise
-- `apollo::apq::registered` - True if the request registered a query in APQ
+- `apollo::apq::registered` - `true` if the request registered a query in APQ
 
 ### Query plan exposure
 
