@@ -21,6 +21,7 @@ use apollo_compiler::validation::Valid;
 use indexmap::IndexSet;
 use itertools::Itertools;
 use strum::IntoEnumIterator as _;
+use tracing::instrument;
 use tracing::trace;
 
 use crate::LinkSpecDefinition;
@@ -1322,6 +1323,7 @@ impl Merger {
     /// - For input positions: uses the most specific (subtype) when types are compatible
     /// - Reports errors for incompatible types, hints for compatible but inconsistent types
     /// - Tracks enum usage for validation purposes
+    #[instrument(skip(self, sources, dest))]
     pub(crate) fn merge_type_reference<T>(
         &mut self,
         sources: &Sources<T>,
@@ -1349,29 +1351,31 @@ impl Merger {
             };
             let subgraph = &self.subgraphs[*idx];
             let source_ty = source.get_type(subgraph.schema())?;
+            trace!("Subgraph {} has type {}", subgraph.name, source_ty);
             let Some(ty) = ty.as_mut() else {
                 ty = Some(source_ty.clone());
                 continue;
             };
 
             if Self::same_type(ty, source_ty) {
-                // Types are identical
+                trace!("Types are identical");
                 continue;
-            } else if let Ok(true) = self.is_strict_subtype(source_ty, ty) {
-                // current typ is a subtype of source_type (source_type is more general)
+            } else if let Ok(true) = self.is_strict_subtype(ty, source_ty) {
+                trace!("Current {ty} is a strict subtype of source {source_ty}");
                 has_subtypes = true;
                 if is_input_position {
                     // For input: upgrade to the supertype
                     *ty = source_ty.clone();
                 }
-            } else if let Ok(true) = self.is_strict_subtype(ty, source_ty) {
-                // source_type is a subtype of current typ (current typ is more general)
+            } else if let Ok(true) = self.is_strict_subtype(source_ty, ty) {
+                trace!("Source {source_ty} is a strict subtype of current {ty}");
                 has_subtypes = true;
                 if !is_input_position {
                     // For output: keep the supertype; for input: adopt the subtype
                     *ty = source_ty.clone();
                 }
             } else {
+                trace!("Types {ty} and source {source_ty} are incompatible");
                 has_incompatible = true;
             }
         }
@@ -1380,6 +1384,7 @@ impl Merger {
             bail!("No type sources provided for merging {dest}");
         };
 
+        trace!("Setting merged type of {dest} to {ty}");
         dest.set_type(&mut self.merged, ty.clone())?;
 
         let ast_node = dest.enum_example_ast(&self.merged).ok();

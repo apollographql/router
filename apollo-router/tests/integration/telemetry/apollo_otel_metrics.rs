@@ -572,6 +572,85 @@ async fn test_router_layer_error_emits_metric() {
     router.graceful_shutdown().await;
 }
 
+// This test verifies that Apollo Studio metrics (using Apollo/ApolloRealtime meter providers)
+// are NOT affected by rename views.
+//
+// Architecture:
+// - Public MeterProvider -> Prometheus & OTLP (views APPLIED)
+// - Apollo MeterProvider -> Apollo Studio backend (views NOT APPLIED)
+// - ApolloRealtime MeterProvider -> Apollo Realtime backend (views NOT APPLIED)
+#[tokio::test(flavor = "multi_thread")]
+async fn test_apollo_studio_metrics_not_affected_by_rename() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    // Empty service indicates a router error
+    let expected_service = "";
+    let expected_error_code = "CSRF_ERROR";
+    let expected_client_name = "CLIENT_NAME";
+    let expected_client_version = "v0.14";
+
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp { endpoint: None })
+        .config(
+            r#"
+          telemetry:
+            apollo:
+              experimental_otlp_metrics_protocol: http
+              batch_processor:
+                scheduled_delay: 10ms
+              errors:
+                preview_extended_error_metrics: enabled
+            exporters:
+              metrics:
+                common:
+                  service_name: router
+                  views:
+                    - name: apollo.router.operations.error
+                      rename: renamed.apollo.router.operations.error
+          csrf:
+            required_headers:
+              - x-not-matched-header
+        "#,
+        )
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    router
+        .execute_query(
+            Query::builder()
+                .header("apollographql-client-name", expected_client_name)
+                .header("apollographql-client-version", expected_client_version)
+                // Content type cannot be application/json to trigger the error
+                .content_type("")
+                .build(),
+        )
+        .await;
+
+    let metrics = router
+        .wait_for_emitted_otel_metrics(Duration::from_millis(20))
+        .await;
+
+    assert!(!metrics.is_empty());
+
+    assert_metrics_contain(
+        &metrics,
+        Metric::builder()
+            .name("apollo.router.operations.error".to_string())
+            .attribute("apollo.client.name", expected_client_name)
+            .attribute("apollo.client.version", expected_client_version)
+            .attribute("graphql.error.extensions.code", expected_error_code)
+            .attribute("apollo.router.error.service", expected_service)
+            .value(1)
+            .build(),
+    );
+    router.graceful_shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subgraph_request_emits_histogram() {
     if !graph_os_enabled() {

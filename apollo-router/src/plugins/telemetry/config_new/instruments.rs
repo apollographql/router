@@ -39,10 +39,7 @@ use super::subgraph::instruments::SubgraphInstrumentsConfig;
 use super::supergraph::instruments::SupergraphCustomInstruments;
 use super::supergraph::instruments::SupergraphInstrumentsConfig;
 use crate::Context;
-use crate::axum_factory::connection_handle::ConnectionState;
-use crate::axum_factory::connection_handle::OPEN_CONNECTIONS_METRIC;
 use crate::metrics;
-use crate::metrics::meter_provider;
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::config_new::apollo::instruments::ApolloConnectorInstruments;
@@ -72,8 +69,6 @@ use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphSele
 use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphValue;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::router;
-use crate::services::router::pipeline_handle::PIPELINE_METRIC;
-use crate::services::router::pipeline_handle::pipeline_counts;
 use crate::services::supergraph;
 
 pub(crate) const METER_NAME: &str = "apollo/router";
@@ -297,7 +292,7 @@ impl InstrumentsConfig {
             .is_enabled()
             .then(|| CustomHistogram {
                 inner: Mutex::new(CustomHistogramInner {
-                    increment: Increment::Duration(Instant::now()),
+                    increment: Increment::Duration(Instant::now(), "s".to_string()),
                     condition: Condition::True,
                     histogram: Some(
                         static_instruments
@@ -610,7 +605,7 @@ impl InstrumentsConfig {
                     };
                     CustomHistogram {
                         inner: Mutex::new(CustomHistogramInner {
-                            increment: Increment::Duration(Instant::now()),
+                            increment: Increment::Duration(Instant::now(), "s".to_string()),
                             condition: Condition::True,
                             histogram: Some(static_instruments
                                 .get(HTTP_CLIENT_REQUEST_DURATION_METRIC)
@@ -1052,80 +1047,6 @@ impl InstrumentsConfig {
             }),
         }
     }
-
-    pub(crate) fn new_pipeline_instruments(&self) -> HashMap<String, StaticInstrument> {
-        let meter = meter_provider().meter("apollo/router");
-        let mut instruments = HashMap::new();
-        instruments.insert(
-            PIPELINE_METRIC.to_string(),
-            StaticInstrument::GaugeU64(
-                meter
-                    .u64_observable_gauge(PIPELINE_METRIC)
-                    .with_description("The number of request pipelines active in the router")
-                    .with_callback(|i| {
-                        for (pipeline, count) in &*pipeline_counts() {
-                            let mut attributes = Vec::with_capacity(3);
-                            attributes.push(KeyValue::new("schema.id", pipeline.schema_id.clone()));
-                            if let Some(launch_id) = &pipeline.launch_id {
-                                attributes.push(KeyValue::new("launch.id", launch_id.clone()));
-                            }
-                            attributes
-                                .push(KeyValue::new("config.hash", pipeline.config_hash.clone()));
-
-                            i.observe(*count, &attributes);
-                        }
-                    })
-                    .init(),
-            ),
-        );
-        instruments.insert(
-            OPEN_CONNECTIONS_METRIC.to_string(),
-            StaticInstrument::GaugeU64(
-                meter
-                    .u64_observable_gauge(OPEN_CONNECTIONS_METRIC)
-                    .with_description("Number of currently connected clients")
-                    .with_callback(move |gauge| {
-                        let connections =
-                            crate::axum_factory::connection_handle::connection_counts();
-                        for (connection, count) in connections.iter() {
-                            let mut attributes = Vec::with_capacity(6);
-                            if let Some((ip, port)) = connection.address.ip_and_port() {
-                                attributes.push(KeyValue::new("server.address", ip.to_string()));
-                                attributes.push(KeyValue::new("server.port", port.to_string()));
-                            } else {
-                                // Unix socket
-                                attributes.push(KeyValue::new(
-                                    "server.address",
-                                    connection.address.to_string(),
-                                ));
-                            }
-                            attributes.push(KeyValue::new(
-                                "schema.id",
-                                connection.pipeline_ref.schema_id.clone(),
-                            ));
-                            if let Some(launch_id) = &connection.pipeline_ref.launch_id {
-                                attributes.push(KeyValue::new("launch.id", launch_id.clone()));
-                            }
-                            attributes.push(KeyValue::new(
-                                "config.hash",
-                                connection.pipeline_ref.config_hash.clone(),
-                            ));
-                            // Technically we need to support `idle` state, but that will have to be a follow-up,
-                            attributes.push(KeyValue::new(
-                                "http.connection.state",
-                                match connection.state {
-                                    ConnectionState::Active => "active",
-                                    ConnectionState::Terminating => "terminating",
-                                },
-                            ));
-                            gauge.observe(*count, &attributes);
-                        }
-                    })
-                    .init(),
-            ),
-        );
-        instruments
-    }
 }
 
 #[derive(Debug)]
@@ -1519,7 +1440,9 @@ where
                     let (selector, increment) = match (&instrument.value).into() {
                         InstrumentValue::Standard(incr) => {
                             let incr = match incr {
-                                Standard::Duration => Increment::Duration(Instant::now()),
+                                Standard::Duration => {
+                                    Increment::Duration(Instant::now(), instrument.unit.clone())
+                                }
                                 Standard::Unit => Increment::Unit,
                             };
                             (None, incr)
@@ -1528,7 +1451,10 @@ where
                             (Some(Arc::new(selector)), Increment::Custom(None))
                         }
                         InstrumentValue::Chunked(incr) => match incr {
-                            Event::Duration => (None, Increment::EventDuration(Instant::now())),
+                            Event::Duration => (
+                                None,
+                                Increment::EventDuration(Instant::now(), instrument.unit.clone()),
+                            ),
                             Event::Unit => (None, Increment::EventUnit),
                             Event::Custom(selector) => {
                                 (Some(Arc::new(selector)), Increment::EventCustom(None))
@@ -1575,7 +1501,9 @@ where
                     let (selector, increment) = match (&instrument.value).into() {
                         InstrumentValue::Standard(incr) => {
                             let incr = match incr {
-                                Standard::Duration => Increment::Duration(Instant::now()),
+                                Standard::Duration => {
+                                    Increment::Duration(Instant::now(), instrument.unit.clone())
+                                }
                                 Standard::Unit => Increment::Unit,
                             };
                             (None, incr)
@@ -1584,7 +1512,10 @@ where
                             (Some(Arc::new(selector)), Increment::Custom(None))
                         }
                         InstrumentValue::Chunked(incr) => match incr {
-                            Event::Duration => (None, Increment::EventDuration(Instant::now())),
+                            Event::Duration => (
+                                None,
+                                Increment::EventDuration(Instant::now(), instrument.unit.clone()),
+                            ),
                             Event::Unit => (None, Increment::EventUnit),
                             Event::Custom(selector) => {
                                 (Some(Arc::new(selector)), Increment::EventCustom(None))
@@ -1739,8 +1670,8 @@ pub(crate) enum Increment {
     Unit,
     EventUnit,
     FieldUnit,
-    Duration(Instant),
-    EventDuration(Instant),
+    Duration(Instant, String),
+    EventDuration(Instant, String),
     Custom(Option<i64>),
     EventCustom(Option<i64>),
     FieldCustom(Option<i64>),
@@ -1753,6 +1684,18 @@ fn to_i64(value: opentelemetry::Value) -> Option<i64> {
         opentelemetry::Value::F64(f) => Some(f.floor() as i64),
         opentelemetry::Value::Bool(_) => None,
         opentelemetry::Value::Array(_) => None,
+    }
+}
+
+/// Convert a duration to f64 based on the specified unit.
+/// Supported units: "s" (seconds), "ms" (milliseconds), "us" (microseconds), "ns" (nanoseconds)
+/// Defaults to seconds for any other unit string.
+fn duration_to_f64(duration: std::time::Duration, unit: &str) -> f64 {
+    match unit {
+        "ms" => duration.as_secs_f64() * 1000.0,
+        "us" => duration.as_micros() as f64,
+        "ns" => duration.as_nanos() as f64,
+        _ => duration.as_secs_f64(), // Default to seconds for "s" or any other unit
     }
 }
 
@@ -1856,7 +1799,7 @@ where
             if !matches!(
                 &inner.increment,
                 Increment::EventCustom(_)
-                    | Increment::EventDuration(_)
+                    | Increment::EventDuration(_, _)
                     | Increment::EventUnit
                     | Increment::FieldCustom(_)
                     | Increment::FieldUnit
@@ -1893,13 +1836,13 @@ where
 
         let increment = match inner.increment {
             Increment::Unit => 1f64,
-            Increment::Duration(instant) => instant.elapsed().as_secs_f64(),
+            Increment::Duration(instant, ref unit) => duration_to_f64(instant.elapsed(), unit),
             Increment::Custom(val) => match val {
                 Some(incr) => incr as f64,
                 None => 0f64,
             },
             Increment::EventUnit
-            | Increment::EventDuration(_)
+            | Increment::EventDuration(_, _)
             | Increment::EventCustom(_)
             | Increment::FieldUnit
             | Increment::FieldCustom(_) => {
@@ -1952,8 +1895,8 @@ where
 
         let increment = match &mut inner.increment {
             Increment::EventUnit => 1f64,
-            Increment::EventDuration(instant) => {
-                let incr = instant.elapsed().as_secs_f64();
+            Increment::EventDuration(instant, unit) => {
+                let incr = duration_to_f64(instant.elapsed(), unit);
                 // Set it to new instant for the next event
                 *instant = Instant::now();
                 incr
@@ -1991,8 +1934,9 @@ where
 
         let increment = match inner.increment {
             Increment::Unit | Increment::EventUnit | Increment::FieldUnit => 1f64,
-            Increment::Duration(instant) | Increment::EventDuration(instant) => {
-                instant.elapsed().as_secs_f64()
+            Increment::Duration(instant, ref unit)
+            | Increment::EventDuration(instant, ref unit) => {
+                duration_to_f64(instant.elapsed(), unit)
             }
             Increment::Custom(val) | Increment::EventCustom(val) | Increment::FieldCustom(val) => {
                 match val {
@@ -2049,9 +1993,9 @@ where
                 incr
             }
             Increment::Unit
-            | Increment::Duration(_)
+            | Increment::Duration(_, _)
             | Increment::Custom(_)
-            | Increment::EventDuration(_)
+            | Increment::EventDuration(_, _)
             | Increment::EventCustom(_)
             | Increment::EventUnit => {
                 // Nothing to do because we're incrementing on fields
@@ -2097,8 +2041,9 @@ where
             if let Some(counter) = inner.counter.take() {
                 let incr: f64 = match &inner.increment {
                     Increment::Unit | Increment::EventUnit => 1f64,
-                    Increment::Duration(instant) | Increment::EventDuration(instant) => {
-                        instant.elapsed().as_secs_f64()
+                    Increment::Duration(instant, unit)
+                    | Increment::EventDuration(instant, unit) => {
+                        duration_to_f64(instant.elapsed(), unit)
                     }
                     Increment::Custom(val) | Increment::EventCustom(val) => match val {
                         Some(incr) => *incr as f64,
@@ -2295,7 +2240,7 @@ where
             if !matches!(
                 &inner.increment,
                 Increment::EventCustom(_)
-                    | Increment::EventDuration(_)
+                    | Increment::EventDuration(_, _)
                     | Increment::EventUnit
                     | Increment::FieldCustom(_)
                     | Increment::FieldUnit
@@ -2331,10 +2276,12 @@ where
 
         let increment = match inner.increment {
             Increment::Unit => Some(1f64),
-            Increment::Duration(instant) => Some(instant.elapsed().as_secs_f64()),
+            Increment::Duration(instant, ref unit) => {
+                Some(duration_to_f64(instant.elapsed(), unit))
+            }
             Increment::Custom(val) => val.map(|incr| incr as f64),
             Increment::EventUnit
-            | Increment::EventDuration(_)
+            | Increment::EventDuration(_, _)
             | Increment::EventCustom(_)
             | Increment::FieldUnit
             | Increment::FieldCustom(_) => {
@@ -2386,8 +2333,8 @@ where
 
         let increment: Option<f64> = match &mut inner.increment {
             Increment::EventUnit => Some(1f64),
-            Increment::EventDuration(instant) => {
-                let incr = Some(instant.elapsed().as_secs_f64());
+            Increment::EventDuration(instant, unit) => {
+                let incr = Some(duration_to_f64(instant.elapsed(), unit));
                 // Need a new instant for the next event
                 *instant = Instant::now();
                 incr
@@ -2399,7 +2346,7 @@ where
                 incr
             }
             Increment::Unit
-            | Increment::Duration(_)
+            | Increment::Duration(_, _)
             | Increment::Custom(_)
             | Increment::FieldUnit
             | Increment::FieldCustom(_) => {
@@ -2424,8 +2371,9 @@ where
 
         let increment = match inner.increment {
             Increment::Unit | Increment::EventUnit | Increment::FieldUnit => Some(1f64),
-            Increment::Duration(instant) | Increment::EventDuration(instant) => {
-                Some(instant.elapsed().as_secs_f64())
+            Increment::Duration(instant, ref unit)
+            | Increment::EventDuration(instant, ref unit) => {
+                Some(duration_to_f64(instant.elapsed(), unit))
             }
             Increment::Custom(val) | Increment::EventCustom(val) | Increment::FieldCustom(val) => {
                 val.map(|incr| incr as f64)
@@ -2479,9 +2427,9 @@ where
                 incr
             }
             Increment::Unit
-            | Increment::Duration(_)
+            | Increment::Duration(_, _)
             | Increment::Custom(_)
-            | Increment::EventDuration(_)
+            | Increment::EventDuration(_, _)
             | Increment::EventCustom(_)
             | Increment::EventUnit => {
                 // Nothing to do because we're incrementing on fields
@@ -2526,8 +2474,9 @@ where
             if let Some(histogram) = inner.histogram.take() {
                 let increment = match &inner.increment {
                     Increment::Unit | Increment::EventUnit => Some(1f64),
-                    Increment::Duration(instant) | Increment::EventDuration(instant) => {
-                        Some(instant.elapsed().as_secs_f64())
+                    Increment::Duration(instant, unit)
+                    | Increment::EventDuration(instant, unit) => {
+                        Some(duration_to_f64(instant.elapsed(), unit))
                     }
                     Increment::Custom(val) | Increment::EventCustom(val) => {
                         val.map(|incr| incr as f64)
@@ -3918,5 +3867,45 @@ mod tests {
         }
         .with_metrics()
         .await;
+    }
+
+    #[test]
+    fn test_duration_to_f64_seconds() {
+        let duration = std::time::Duration::from_secs(2);
+        assert_eq!(duration_to_f64(duration, "s"), 2.0);
+        assert_eq!(duration_to_f64(duration, ""), 2.0); // empty unit defaults to seconds
+        assert_eq!(duration_to_f64(duration, "unknown"), 2.0); // unknown unit defaults to seconds
+    }
+
+    #[test]
+    fn test_duration_to_f64_milliseconds() {
+        let duration = std::time::Duration::from_millis(1500);
+        assert_eq!(duration_to_f64(duration, "ms"), 1500.0);
+    }
+
+    #[test]
+    fn test_duration_to_f64_microseconds() {
+        let duration = std::time::Duration::from_micros(500);
+        assert_eq!(duration_to_f64(duration, "us"), 500.0);
+    }
+
+    #[test]
+    fn test_duration_to_f64_nanoseconds() {
+        let duration = std::time::Duration::from_nanos(1234567);
+        assert_eq!(duration_to_f64(duration, "ns"), 1234567.0);
+    }
+
+    #[test]
+    fn test_duration_to_f64_fractional_seconds() {
+        let duration = std::time::Duration::from_millis(1500);
+        // When unit is "s", 1500ms should be 1.5 seconds
+        assert_eq!(duration_to_f64(duration, "s"), 1.5);
+    }
+
+    #[test]
+    fn test_duration_to_f64_fractional_milliseconds() {
+        let duration = std::time::Duration::from_micros(1500);
+        // When unit is "ms", 1500us should be 1.5 milliseconds
+        assert_eq!(duration_to_f64(duration, "ms"), 1.5);
     }
 }
