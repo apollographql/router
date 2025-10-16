@@ -31,6 +31,7 @@ use serde_json_bytes::Entry;
 use serde_json_bytes::json;
 use tokio::select;
 use tokio::sync::oneshot;
+use tokio_tungstenite::Connector;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::connect_async_tls_with_config;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -137,6 +138,7 @@ pub(crate) struct SubgraphService {
     /// Subscription config if enabled
     subscription_config: Option<SubscriptionConfig>,
     notify: Notify<String, graphql::Response>,
+    tls_config: Option<Arc<rustls::ClientConfig>>,
 }
 
 impl SubgraphService {
@@ -156,6 +158,23 @@ impl SubgraphService {
             .map(|apq| apq.enabled)
             .unwrap_or(configuration.apq.subgraph.all.enabled);
 
+        let tls_config = configuration
+            .tls
+            .subgraph
+            .subgraphs
+            .get(&name)
+            .or(Some(&configuration.tls.subgraph.all))
+            .and_then(|tls| {
+                let tls_cert_store = tls.create_certificate_store().transpose().ok()?;
+                let client_cert_config = tls.client_authentication.as_ref();
+                generate_tls_client_config(
+                    tls_cert_store,
+                    client_cert_config.map(|arc| arc.as_ref()),
+                )
+                .ok()
+            })
+            .map(Arc::new);
+
         SubgraphService::new(
             name,
             enable_apq,
@@ -163,6 +182,7 @@ impl SubgraphService {
             configuration.notify.clone(),
             client_factory,
         )
+        .map(|service| service.with_tls_config(tls_config))
     }
 
     pub(crate) fn new(
@@ -178,7 +198,13 @@ impl SubgraphService {
             apq: Arc::new(<AtomicBool>::new(enable_apq)),
             subscription_config,
             notify,
+            tls_config: None,
         })
+    }
+
+    pub(crate) fn with_tls_config(mut self, config: Option<Arc<rustls::ClientConfig>>) -> Self {
+        self.tls_config = config;
+        self
     }
 }
 
@@ -258,6 +284,8 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
 
         let mut notify = self.notify.clone();
 
+        let tls_config = self.tls_config.clone();
+
         let make_calls = async move {
             // Subscription handling
             if request.operation_kind == OperationKind::Subscription
@@ -281,6 +309,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                             service_name,
                             ws_conf,
                             hashed_request,
+                            tls_config.as_deref(),
                         )
                         .await;
                     }
@@ -482,6 +511,7 @@ async fn call_websocket(
     service_name: String,
     subgraph_cfg: &WebSocketConfiguration,
     subscription_hash: String,
+    tls_config: Option<&rustls::ClientConfig>,
 ) -> Result<SubgraphResponse, BoxError> {
     let subgraph_request_event = context
         .extensions()
@@ -633,9 +663,12 @@ async fn call_websocket(
 
     let (ws_stream, resp) = match request.uri().scheme_str() {
         Some("wss") => {
-            connect_async_tls_with_config(request, None, false, None)
-                .instrument(subgraph_req_span)
-                .await
+            let connector = tls_config.map(|config| Connector::Rustls(Arc::new(config.clone())));
+
+            match connector {
+                Some(conn) => connect_async_tls_with_config(request, None, false, Some(conn)).await,
+                None => connect_async(request).await,
+            }
         }
         _ => connect_async(request).instrument(subgraph_req_span).await,
     }
