@@ -22,6 +22,8 @@
 // "EX" "10"
 // ```
 
+use std::time::Duration;
+
 use apollo_router::Context;
 use apollo_router::MockedSubgraphs;
 use apollo_router::plugin::test::MockSubgraph;
@@ -1695,4 +1697,110 @@ async fn test_redis_emits_configuration_error_metric() {
         .await;
 
     router.graceful_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_redis_uses_replicas_when_clustered() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let router_config = include_str!("fixtures/clustered_redis_query_planning.router.yaml");
+    //let router_config = include_str!("fixtures/redis_connection_closure.router.yaml");
+    let mut router = IntegrationTest::builder()
+        .config(router_config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let assert_redis_readonly_sent_to_replica_handle =
+        tokio::spawn(IntegrationTest::assert_redis_command_sent_to_node(
+            "READONLY",
+            // read reps
+            vec!["7003".to_string(), "7004".to_string(), "7005".to_string()],
+        ));
+    let assert_redis_get_command_sent_to_replica_handle =
+        tokio::spawn(IntegrationTest::assert_redis_command_sent_to_node(
+            "GET",
+            // read reps
+            vec!["7003".to_string(), "7004".to_string(), "7005".to_string()],
+        ));
+
+    // the assert_redis_command_sent_to_node starts a handful of redis-cli binaries to MONITOR
+    // commands; this sleep gives it a little bit of buffer time-wise before we send commands over
+    tokio::time::sleep(Duration::from_secs(5)).await;
+
+    // two queries to ensure a cache hit
+    router.execute_default_query().await;
+    router.execute_default_query().await;
+
+    let _ = assert_redis_get_command_sent_to_replica_handle
+        .await
+        .expect("redis GET command not sent to a replica");
+
+    let _ = assert_redis_readonly_sent_to_replica_handle
+        .await
+        .expect("redis READONLY command not sent to a replica");
+
+    // check that there were no I/O errors
+    let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="query planner",otel_scope_name="apollo/router"}"#;
+
+    // check that there were no parse errors; these might show up when fred can't read the cluster
+    // state properly
+    let parse_error = r#"apollo_router_cache_redis_errors_total{error_type="parse",kind="query planner",otel_scope_name="apollo/router"}"#;
+
+    router.assert_metrics_does_not_contain(io_error).await;
+    router.assert_metrics_does_not_contain(parse_error).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_redis_doesnt_use_replicas_in_standalone_mode() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let router_config = include_str!("fixtures/redis_connection_closure.router.yaml");
+    let mut router = IntegrationTest::builder()
+        .config(router_config)
+        .log("trace,jsonpath_lib=info")
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let assert_redis_get_command_sent_to_replica_handle =
+        tokio::spawn(IntegrationTest::assert_redis_command_sent_to_node(
+            "GET",
+            // read reps
+            //vec!["7003".to_string(), "7004".to_string(), "7005".to_string()],
+            vec!["6379".to_string()],
+        ));
+
+    // the assert_redis_command_sent_to_node starts a handful of redis-cli binaries to MONITOR
+    // commands; this sleep gives it a little bit of buffer time-wise before we send commands over
+    tokio::time::sleep(Duration::from_secs(5)).await;
+
+    // two queries to ensure a cache hit
+    router.execute_default_query().await;
+    router.execute_default_query().await;
+
+    let _ = assert_redis_get_command_sent_to_replica_handle
+        .await
+        .expect("redis GET command not sent to a replica");
+
+    // check that there were no I/O errors
+    let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="query planner",otel_scope_name="apollo/router"}"#;
+
+    // check that there were no parse errors; these might show up when fred can't read the cluster
+    // state properly
+    let parse_error = r#"apollo_router_cache_redis_errors_total{error_type="parse",kind="query planner",otel_scope_name="apollo/router"}"#;
+
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    router.force_flush();
+    router.print_logs();
+    router.assert_metrics_does_not_contain(io_error).await;
+    router.assert_metrics_does_not_contain(parse_error).await;
 }

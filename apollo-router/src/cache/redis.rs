@@ -57,9 +57,9 @@ const SUPPORTED_REDIS_SCHEMES: [&str; 6] = [
 ];
 
 /// Timeout applied to internal Redis operations, such as TCP connection initialization, TLS handshakes, AUTH or HELLO, cluster health checks, etc.
-const DEFAULT_INTERNAL_REDIS_TIMEOUT: Duration = Duration::from_secs(5);
+const DEFAULT_INTERNAL_REDIS_TIMEOUT: Duration = Duration::from_secs(15);
 /// Interval on which we send PING commands to the Redis servers.
-const REDIS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
+const REDIS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Record a Redis error as a metric, independent of having an active connection
 fn record_redis_error(error: &RedisError, caller: &'static str) {
@@ -86,12 +86,8 @@ fn record_redis_error(error: &RedisError, caller: &'static str) {
         RedisErrorKind::Replica => "replica",
     };
 
-    tracing::error!(
-        "AWA :: error string: {}, details: {}, source: {:?}",
-        error.to_string(),
-        error.details(),
-        error.source()
-    );
+    tracing::error!("AWA :: redis error: {error:?}");
+
     u64_counter_with_unit!(
         "apollo.router.cache.redis.errors",
         "Number of Redis errors by type",
@@ -379,7 +375,7 @@ impl RedisCacheStorage {
                 };
                 config.unresponsive = UnresponsiveConfig {
                     max_timeout: Some(DEFAULT_INTERNAL_REDIS_TIMEOUT),
-                    interval: Duration::from_secs(3),
+                    interval: Duration::from_secs(5),
                 };
             })
             .with_performance_config(|config| {
@@ -395,6 +391,19 @@ impl RedisCacheStorage {
             let mut unresponsive_rx = client.unresponsive_rx();
 
             ACTIVE_CLIENT_COUNT.fetch_add(1, Ordering::Relaxed);
+
+            client.on_error(|e| async move {
+                let _ = std::fs::write(
+                    "/tmp/fred-error.txt",
+                    format!(
+                        "{}\n{:?}\n---\n",
+                        std::fs::read_to_string("/tmp/fred-error.txt").unwrap_or_default(),
+                        e
+                    ),
+                );
+
+                Ok(())
+            });
 
             tokio::spawn(async move {
                 loop {
@@ -623,35 +632,56 @@ impl RedisCacheStorage {
         options: Options,
     ) -> Result<RedisValue<V>, RedisError> {
         let key = self.make_key(key);
+
+        let replica_client = self.client().with_options(&options);
+        //let replica_client = self.inner.replicas().with_options(&options);
+        let id = replica_client.id();
+        let clustered = replica_client.is_clustered();
+        let pipeline = replica_client.pipeline();
+        //let pipeline_id = pipeline.id();
+
+        u64_counter_with_unit!(
+            "apollo.router.cache.redis.get",
+            "Counter for Redis client GET requests",
+            "{event}",
+            1,
+            kind = self.inner.caller,
+            clustered = clustered //pipeline_id = pipeline_id
+        );
+
         match self.ttl {
             Some(ttl) if self.reset_ttl => {
-                let pipeline = self.inner.replicas().pipeline().with_options(&options);
-
-                let _: () = pipeline
-                    .get(&key)
-                    .await
-                    .inspect_err(|e| self.record_error(e))?;
+                let _: () = pipeline.get(&key).await.inspect_err(|e| {
+                    eprintln!("FRED ERROR: {:?}", e);
+                    self.record_error(e)
+                })?;
 
                 let _: () = pipeline
                     .expire(&key, ttl.as_secs() as i64, None)
                     .await
-                    .inspect_err(|e| self.record_error(e))?;
+                    .inspect_err(|e| {
+                        eprintln!("FRED ERROR: {:?}", e);
+                        self.record_error(e)
+                    })?;
 
                 let (value, _timeout_set): (RedisValue<V>, bool) =
-                    pipeline.all().await.inspect_err(|e| self.record_error(e))?;
+                    pipeline.all().await.inspect_err(|e| {
+                        eprintln!("FRED ERROR: {:?}", e);
+                        self.record_error(e)
+                    })?;
                 Ok(value)
             }
-            _ => self
-                .inner
-                .replicas()
-                .with_options(&options)
+            _ => pipeline
                 .get::<RedisValue<V>, _>(key)
                 .await
-                .inspect_err(|e| self.record_error(e)),
+                .inspect_err(|e| {
+                    eprintln!("FRED ERROR: {:?}", e);
+                    self.record_error(e)
+                }),
         }
     }
 
-    pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
+    async fn get_multiple<K: KeyType, V: ValueType>(
         &self,
         keys: Vec<RedisKey<K>>,
     ) -> Vec<Option<RedisValue<V>>> {
@@ -673,6 +703,7 @@ impl RedisCacheStorage {
 
         // TODO: figure out if this client is alright for non-replica use
         let replica_client = self.inner.replicas().with_options(&options);
+        //let replica_client = self.inner.next().with_options(&options);
 
         if keys.len() == 1 {
             let res = replica_client
@@ -702,6 +733,7 @@ impl RedisCacheStorage {
                 tasks.push(async move {
                     // TODO: figure out if this client is good for non-replica use
                     let replica_client = self.inner.replicas().with_options(&options);
+                    //let replica_client = self.inner.next().with_options(&options);
                     let result: Result<Vec<Option<RedisValue<V>>>, _> =
                         replica_client.mget(keys).await;
                     (indexes, result)

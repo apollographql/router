@@ -19,6 +19,7 @@ use fred::prelude::Config as RedisConfig;
 use fred::types::scan::ScanType;
 use fred::types::scan::Scanner;
 use futures::StreamExt;
+use futures::future::join_all;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use mime::APPLICATION_JSON;
@@ -1335,6 +1336,42 @@ impl IntegrationTest {
         }
         panic!("'{text}' not detected in metrics\n{last_metrics}");
     }
+
+    // TODO: docs
+    #[allow(dead_code)]
+    pub async fn assert_metric_zero(&self, text: &str, duration: Option<Duration>) {
+        let now = Instant::now();
+        let mut last_metrics = String::new();
+
+        let pattern = regex::escape(text);
+        let pattern_exists = Regex::new(&format!("(?m)^{pattern}")).expect("Invalid regex");
+        let matches_zero_re =
+            Regex::new(&format!("(?m)^{}\\s+0(\\s|$)", pattern)).expect("Invalid regex");
+
+        while now.elapsed() < duration.unwrap_or_else(|| Duration::from_secs(15)) {
+            if let Ok(metrics) = self
+                .get_metrics_response()
+                .await
+                .expect("failed to fetch metrics")
+                .text()
+                .await
+            {
+                // metric exists and matches zero
+                if pattern_exists.is_match(&metrics) && matches_zero_re.is_match(&metrics) {
+                    return;
+                }
+                last_metrics = metrics;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        if pattern_exists.is_match(&last_metrics) {
+            panic!("'{text}' detected in metrics but was non-zero\n{last_metrics}");
+        } else {
+            panic!("'{text}' not detected in metrics\n{last_metrics}");
+        }
+    }
+
     #[allow(dead_code)]
     /// Checks the metrics contain the supplied string in prometheus format.
     /// To allow checking of metrics where the value is not stable the magic tag `<any>` can be used.
@@ -1516,6 +1553,83 @@ impl IntegrationTest {
         client.quit().await.expect("could not quit redis");
         // calling quit ends the connection and event listener tasks
         let _ = connection_task.await;
+    }
+
+    /// Asserts that a particular command was sent to a target redis node (identified by port). Use
+    /// simple commands, like "GET" or "READONLY", to match on. If you're unsure which ports to
+    /// target, either look at the docker-compose.yml for both the clustered and standalone setups
+    ///
+    /// The command_fragment is case sensitive, so make sure to use the actual command
+    #[allow(dead_code)]
+    pub async fn assert_redis_command_sent_to_node(command_fragment: &str, ports: Vec<String>) {
+        let mut handles = vec![];
+        let mut commands = vec![];
+
+        for port in &ports {
+            let port = port.clone();
+            let command_fragment_re = regex::Regex::new(&format!(r#""{}""#, command_fragment))
+                .expect(&format!(
+                    "the fragment, {command_fragment}, produced invalid regex"
+                ));
+
+            // this looks for any port that's passed in (eg, for read-replicas, only primaries, or both) that's
+            // received a command of the command fragment's shape (eg, "GET" or "READONLY")
+            let mut cmd = tokio::process::Command::new("redis-cli")
+                .args(&["-h", "127.0.0.1", "-p", &port, "MONITOR"])
+                .stdout(Stdio::piped())
+                .spawn()
+                .expect("failed to create redis-cli command for monitoring redis commands");
+
+            let stdout = cmd.stdout.take().unwrap();
+            let reader = BufReader::new(stdout).lines();
+
+            let ports = ports.clone();
+            // Spawn task to read each monitor
+            let handle = tokio::spawn(async move {
+                let mut lines = reader;
+                while let Ok(Some(line)) = lines.next_line().await {
+                    tracing::debug!("{line}");
+                    if command_fragment_re.is_match(&line) && ports.contains(&port) {
+                        return Some((port, line));
+                    }
+                }
+                // no matching line found :(
+                None
+            });
+
+            handles.push(handle);
+            commands.push(cmd);
+        }
+
+        //tokio::time::sleep(Duration::from_secs(10)).await;
+        match tokio::time::timeout(
+            Duration::from_secs(10),
+            futures::future::select_all(handles),
+        )
+        .await
+        {
+            Ok((res, _idx, remaining_handles)) => {
+                for handle in remaining_handles {
+                    handle.abort();
+                }
+
+                if let Ok(Some((port, line))) = res {
+                    println!(
+                        "\n\nredis-cli MONITOR result: \n\nline: {line}\n\nnode port: {port}\n\n"
+                    );
+                } else {
+                    panic!("failed to find {command_fragment} in {ports:?}");
+                }
+            }
+            Err(_timed_out) => {
+                panic!("timed out while trying to find {command_fragment} in {ports:?}");
+            }
+        }
+
+        // clean up the redis-cli binaries
+        for mut cmd in commands {
+            cmd.kill().await.expect("failed to kill redis-cli command");
+        }
     }
 
     #[allow(dead_code)]
