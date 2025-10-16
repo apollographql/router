@@ -350,84 +350,84 @@ List of the context keys used in the Apollo Router for passing data through the 
 
 ### Core operation 
 
-- **`apollo::supergraph::operation_name`** - Operation name from GraphQL query
-- **`apollo::supergraph::operation_kind`** - Operation kind (Query/Mutation/Subscription)
-- **`apollo::supergraph::operation_id`** - Apollo operation ID
-- **`apollo::supergraph::first_event`** - First event marker for subscriptions
-- **`apollo::supergraph_schema_id`** - Supergraph schema ID
+- `apollo::supergraph::operation_name` - Operation name from GraphQL query
+- `apollo::supergraph::operation_kind` - Operation kind (Query/Mutation/Subscription)
+- `apollo::supergraph::operation_id` - Apollo operation ID
+- `apollo::supergraph::first_event` - First event marker for subscriptions
+- `apollo::supergraph_schema_id` - Supergraph schema ID
 
 ### Authentication & Authorization
 
 #### Authentication
-- **`apollo::authentication::jwt_claims`** - JWT claims data
-- **`apollo::authentication::jwt_status`** - JWT validation status (internal only)
+- `apollo::authentication::jwt_claims` - JWT claims data
+- `apollo::authentication::jwt_status` - JWT validation status (internal only)
 
 #### Authorization
-- **`apollo::authorization::authentication_required`** - Authentication requirement flag
-- **`apollo::authorization::required_scopes`** - Required OAuth scopes
-- **`apollo::authorization::required_policies`** - Required authorization policies
+- `apollo::authorization::authentication_required` - Authentication requirement flag
+- `apollo::authorization::required_scopes` - Required OAuth scopes
+- `apollo::authorization::required_policies` - Required authorization policies
 
 ### Telemetry
 
 #### Client Information
-- **`apollo::telemetry::client_name`** - Client application name
-- **`apollo::telemetry::client_version`** - Client application version
-- **`apollo::telemetry::client_library_name`** - Client library name
-- **`apollo::telemetry::client_library_version`** - Client library version
+- `apollo::telemetry::client_name` - Client application name
+- `apollo::telemetry::client_version` - Client application version
+- `apollo::telemetry::client_library_name` - Client library name
+- `apollo::telemetry::client_library_version` - Client library version
 
 #### Telemetry Control
-- **`apollo::telemetry::subgraph_ftv1`** - FTV1 tracing for subgraph
-- **`apollo::telemetry::studio_exclude`** - Exclude from Studio reporting
-- **`apollo::telemetry::contains_graphql_error`** - Response contains GraphQL errors
-- **`apollo::telemetry::counted_errors`** - Map of already-counted errors (internal)
-- **`apollo::telemetry::http_request_resend_count_{subgraph_req_id}`** - HTTP retry count (dynamic key with subgraph request ID suffix)
+- `apollo::telemetry::subgraph_ftv1` - FTV1 tracing for subgraph
+- `apollo::telemetry::studio_exclude` - Exclude from Studio reporting
+- `apollo::telemetry::contains_graphql_error` - Response contains GraphQL errors
+- `apollo::telemetry::counted_errors` - Map of already-counted errors (internal)
+- `apollo::telemetry::http_request_resend_count_{subgraph_req_id}` - HTTP retry count (dynamic key with subgraph request ID suffix)
 
 ### Demand Control (COST)
 
-- **`apollo::demand_control::estimated_cost`** - Estimated query cost
-- **`apollo::demand_control::actual_cost`** - Actual query cost
-- **`apollo::demand_control::result`** - Cost calculation result
-- **`apollo::demand_control::strategy`** - Cost calculation strategy used
+- `apollo::demand_control::estimated_cost` - Estimated query cost
+- `apollo::demand_control::actual_cost` - Actual query cost
+- `apollo::demand_control::result` - Cost calculation result
+- `apollo::demand_control::strategy` - Cost calculation strategy used
 
 ### Caching
 
 #### Response Cache
-- **`apollo::response_cache::key`** - Response cache key
-- **`apollo::response_cache::debug_cached_keys`** - Debug info for cached keys
-- **`apollo::router::response_cache::cache_info_subgraph_{subgraph_name}`** - Response cache info per subgraph (dynamic key with subgraph name suffix)
+- `apollo::response_cache::key` - Response cache key
+- `apollo::response_cache::debug_cached_keys` - Debug info for cached keys
+- `apollo::router::response_cache::cache_info_subgraph_{subgraph_name}` - Response cache info per subgraph (dynamic key with subgraph name suffix)
 
 #### Entity Cache
-- **`apollo_entity_cache::key`** - Entity cache key
-- **`apollo::entity_cache::cached_keys_status`** - Entity cache keys status
-- **`apollo::router::entity_cache_info_subgraph_{subgraph_name}`** - Entity cache info per subgraph (dynamic key with subgraph name suffix)
+- `apollo_entity_cache::key` - Entity cache key
+- `apollo::entity_cache::cached_keys_status` - Entity cache keys status
+- `apollo::router::entity_cache_info_subgraph_{subgraph_name}` - Entity cache info per subgraph (dynamic key with subgraph name suffix)
 
 #### APQ (Automatic Persisted Queries)
-- **`apollo::apq::cache_hit`** - APQ cache hit indicator
-- **`apollo::apq::registered`** - APQ registration indicator
+- `apollo::apq::cache_hit` - APQ cache hit indicator
+- `apollo::apq::registered` - APQ registration indicator
 
 ### Query Plan Exposure
 
-- **`apollo::expose_query_plan::plan`** - Query plan object
-- **`apollo::expose_query_plan::formatted_plan`** - Formatted query plan string
-- **`apollo::expose_query_plan::enabled`** - Query plan exposure enabled flag
+- `apollo::expose_query_plan::plan` - Query plan object
+- `apollo::expose_query_plan::formatted_plan` - Formatted query plan string
+- `apollo::expose_query_plan::enabled` - Query plan exposure enabled flag
 
 ### Progressive Override 
 
-- **`apollo::progressive_override::unresolved_labels`** - Unresolved override labels
-- **`apollo::progressive_override::labels_to_override`** - Labels to override
+- `apollo::progressive_override::unresolved_labels` - Unresolved override labels
+- `apollo::progressive_override::labels_to_override` - Labels to override
 
 ### Subscriptions
 
-- **`apollo::subscriptions::fatal_error`** - Fatal subscription error flag
+- `apollo::subscriptions::fatal_error` - Fatal subscription error flag
 
 ### Persisted Queries
 
-- **`apollo_persisted_queries::client_name`** - Client name for PQ operations
-- **`apollo_persisted_queries::safelist::skip_enforcement`** - Skip safelist enforcement
+- `apollo_persisted_queries::client_name` - Client name for PQ operations
+- `apollo_persisted_queries::safelist::skip_enforcement` - Skip safelist enforcement
 
 ### Connectors
 
-- **`apollo_connectors::sources_in_query_plan`** - List of connector sources in query plan
+- `apollo_connectors::sources_in_query_plan` - List of connector sources in query plan
 
 --- 
 
