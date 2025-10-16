@@ -4,6 +4,8 @@ use super::ServiceDefinition;
 use super::assert_composition_errors;
 use super::compose_as_fed2_subgraphs;
 use super::print_sdl;
+use apollo_federation::composition::compose;
+use apollo_federation::subgraph::typestate::Subgraph;
 
 // =============================================================================
 // DIRECTIVE MERGING - Tests for GraphQL built-in directive merging
@@ -118,7 +120,6 @@ fn directive_merging_propagates_built_in_directives_even_if_redefined() {
 // =============================================================================
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn field_sharing_errors_if_non_shareable_fields_shared_in_value_types() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -162,7 +163,6 @@ fn field_sharing_errors_if_non_shareable_fields_shared_in_value_types() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn field_sharing_errors_if_non_shareable_fields_shared_in_entity_type() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -200,7 +200,6 @@ fn field_sharing_errors_if_non_shareable_fields_shared_in_entity_type() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn field_sharing_errors_if_query_shared_without_shareable() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -231,45 +230,56 @@ fn field_sharing_errors_if_query_shared_without_shareable() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn field_sharing_errors_if_provided_fields_not_marked_shareable() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
         type_defs: r#"
-        type Query {
-          products: [Product]
-        }
+          type Query {
+            e: E
+          }
 
-        type Product @key(fields: "sku") {
-          sku: String!
-          name: String! @external
-          weight: String! @provides(fields: "name")
-        }
+          type E @key(fields: "id") {
+            id: ID!
+            a: Int
+            b: Int
+            c: Int
+          }
         "#,
     };
 
     let subgraph_b = ServiceDefinition {
         name: "subgraphB",
         type_defs: r#"
-        type Product @key(fields: "sku") {
-          sku: String!
-          name: String!
-        }
+          type Query {
+            eWithProvided: E @provides(fields: "a c")
+          }
+
+          type E @key(fields: "id") {
+            id: ID!
+            a: Int @external
+            c: Int @external
+            d: Int
+          }
         "#,
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
     assert_composition_errors(
         &result,
-        &[(
-            "INVALID_FIELD_SHARING",
-            r#"Field "Product.name" is provided by subgraph "subgraphA" but is not marked @shareable"#,
-        )],
+        &[
+            (
+                "INVALID_FIELD_SHARING",
+                r#"Non-shareable field "E.a" is resolved from multiple subgraphs: it is resolved from subgraphs "subgraphA" and "subgraphB" and defined as non-shareable in subgraph "subgraphA""#,
+            ),
+            (
+                "INVALID_FIELD_SHARING",
+                r#"Non-shareable field "E.c" is resolved from multiple subgraphs: it is resolved from subgraphs "subgraphA" and "subgraphB" and defined as non-shareable in subgraph "subgraphA""#,
+            ),
+        ],
     );
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn field_sharing_applies_shareable_on_type_only_to_fields_within_definition() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -309,7 +319,6 @@ fn field_sharing_applies_shareable_on_type_only_to_fields_within_definition() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn field_sharing_include_hint_in_error_for_targetless_override() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -346,51 +355,41 @@ fn field_sharing_include_hint_in_error_for_targetless_override() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn field_sharing_allows_shareable_on_type_definition_and_extensions() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
         type_defs: r#"
-        type Query {
-          a: A
-        }
+          type Query {
+            e: E
+          }
 
-        type A @shareable {
-          x: Int
-          y: Int
-        }
+          type E @shareable {
+            id: ID!
+            a: Int
+          }
+
+          extend type E @shareable {
+            b: Int
+          }
         "#,
     };
 
     let subgraph_b = ServiceDefinition {
         name: "subgraphB",
         type_defs: r#"
-        type A @shareable {
-          x: Int
-        }
-
-        extend type A @shareable {
-          z: String
-        }
+          type E @shareable {
+            id: ID!
+            a: Int
+            b: Int
+          }
         "#,
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    let supergraph = result.expect("Expected composition to succeed");
-    let api_schema = supergraph
-        .to_api_schema(Default::default())
-        .expect("Expected API schema generation to succeed");
-    assert_snapshot!(print_sdl(api_schema.schema()), @r###"
-    type A {
-      x: Int
-      y: Int
-      z: String
-    }
-
-    type Query {
-      a: A
-    }
-    "###);
+    // Note that a previous test makes sure that _not_ having @shareable on the type extension ends up failing (as `b` is
+    // not considered shareable in `subgraphA`. So succeeding here shows both that @shareable is accepted in the 2 places
+    // (definition and extension) but also that it's properly taking into account.
+    let _supergraph = result.expect("Expected composition to succeed");
 }
 
 // =============================================================================
@@ -398,11 +397,11 @@ fn field_sharing_allows_shareable_on_type_definition_and_extensions() {
 // =============================================================================
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn federation_directive_handles_renamed_federation_directives() {
-    let subgraph_a = ServiceDefinition {
-        name: "subgraphA",
-        type_defs: r#"
+    let subgraph_a = Subgraph::parse(
+        "subgraphA", 
+        "http://subgraphA",
+        r#"
         extend schema @link(
           url: "https://specs.apollo.dev/federation/v2.0",
           import: [{ name: "@key", as: "@identity"}, {name: "@requires", as: "@gimme"}, {name: "@external", as: "@notInThisSubgraph"}]
@@ -419,11 +418,12 @@ fn federation_directive_handles_renamed_federation_directives() {
           age: Int! @gimme(fields: "birthdate")
         }
         "#,
-    };
+    ).expect("subgraphA should parse successfully");
 
-    let subgraph_b = ServiceDefinition {
-        name: "subgraphB",
-        type_defs: r#"
+    let subgraph_b = Subgraph::parse(
+        "subgraphB",
+        "http://subgraphB",
+        r#"
         extend schema @link(
           url: "https://specs.apollo.dev/federation/v2.0",
           import: [{ name: "@key", as: "@myKey"}]
@@ -434,11 +434,10 @@ fn federation_directive_handles_renamed_federation_directives() {
           birthdate: String!
         }
         "#,
-    };
+    )
+    .expect("subgraphB should parse successfully");
 
-    // Note: This test uses manual federation links, not composeAsFed2Subgraphs
-    // TODO: Need to implement equivalent of composeServices for manual @link handling
-    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    let result = compose(vec![subgraph_a, subgraph_b]);
     let supergraph =
         result.expect("Expected composition to succeed with renamed federation directives");
     let api_schema = supergraph
