@@ -350,8 +350,8 @@ List of the context keys used in the Apollo Router for passing data through the 
 
 ### Core operation 
 
-- `apollo::supergraph::operation_name` - Operation name from GraphQL query
-- `apollo::supergraph::operation_kind` - Operation kind (Query/Mutation/Subscription)
+- `apollo::supergraph::operation_name` - Operation name
+- `apollo::supergraph::operation_kind` - Operation kind (`Query`, `Mutation`, or `Subscription`)
 - `apollo::supergraph::operation_id` - Apollo operation ID
 - `apollo::supergraph::first_event` - First event marker for subscriptions
 - `apollo::supergraph_schema_id` - Supergraph schema ID
@@ -382,7 +382,7 @@ List of the context keys used in the Apollo Router for passing data through the 
 - `apollo::telemetry::counted_errors` - Map of already-counted errors (internal)
 - `apollo::telemetry::http_request_resend_count_{subgraph_req_id}` - HTTP retry count (dynamic key with subgraph request ID suffix)
 
-### Demand Control (COST)
+### Demand / Cost Control 
 
 - `apollo::demand_control::estimated_cost` - Estimated query cost
 - `apollo::demand_control::actual_cost` - Actual query cost
@@ -401,7 +401,7 @@ List of the context keys used in the Apollo Router for passing data through the 
 - `apollo::entity_cache::cached_keys_status` - Entity cache keys status
 - `apollo::router::entity_cache_info_subgraph_{subgraph_name}` - Entity cache info per subgraph (dynamic key with subgraph name suffix)
 
-#### APQ (Automatic Persisted Queries)
+#### Automatic Persisted Queries (APQ)
 - `apollo::apq::cache_hit` - APQ cache hit indicator
 - `apollo::apq::registered` - APQ registration indicator
 
