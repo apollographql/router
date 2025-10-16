@@ -8,6 +8,7 @@ use petgraph::visit::EdgeRef;
 use petgraph::visit::IntoNodeReferences;
 
 use crate::bail;
+use crate::ensure;
 use crate::error::FederationError;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
@@ -25,9 +26,13 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
 
     /// This calls `check_non_local_selections_limit_exceeded()` for each of the selections in the
     /// open branches stack; see that function's doc comment for more information.
+    ///
+    /// To support mutations, we allow indicating the initial subgraph is constrained, in which case
+    /// indirect options will be ignored until the first field (similar to query planning).
     pub(super) fn check_non_local_selections_limit_exceeded_at_root(
         &self,
         state: &mut State,
+        is_initial_subgraph_constrained: bool,
     ) -> Result<bool, FederationError> {
         for branch in &self.open_branches {
             let tail_nodes = branch
@@ -36,7 +41,10 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 .iter()
                 .flat_map(|option| option.paths.0.iter().map(|path| path.tail()))
                 .collect::<IndexSet<_>>();
-            let tail_nodes_info = self.estimate_nodes_with_indirect_options(tail_nodes)?;
+            let tail_nodes_info = self.estimate_nodes_with_indirect_options(
+                tail_nodes,
+                is_initial_subgraph_constrained,
+            )?;
 
             // Note that top-level selections aren't avoided via fully-local selection set
             // optimization, so we always add them here.
@@ -51,16 +59,21 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             for selection in &branch.selections {
                 if let Some(selection_set) = selection.selection_set() {
                     let selection_has_defer = selection.element().has_defer();
+                    let is_initial_subgraph_constrained_after_element =
+                        is_initial_subgraph_constrained
+                            && matches!(selection, Selection::InlineFragment(_));
                     let next_nodes = self.estimate_next_nodes_for_selection(
                         &selection.element(),
                         &tail_nodes_info,
                         state,
+                        is_initial_subgraph_constrained_after_element,
                     )?;
                     if self.check_non_local_selections_limit_exceeded(
                         selection_set,
                         &next_nodes,
                         selection_has_defer,
                         state,
+                        is_initial_subgraph_constrained_after_element,
                     )? {
                         return Ok(true);
                     }
@@ -89,12 +102,16 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
     ///
     /// Note that this function takes in whether the parent selection of the selection set has
     /// @defer, as that affects whether the optimization is disabled for that selection set.
+    ///
+    /// To support mutations, we allow indicating the initial subgraph is constrained, in which case
+    /// indirect options will be ignored until the first field (similar to query planning).
     fn check_non_local_selections_limit_exceeded(
         &self,
         selection_set: &SelectionSet,
         parent_nodes: &NextNodesInfo,
         parent_selection_has_defer: bool,
         state: &mut State,
+        is_initial_subgraph_constrained: bool,
     ) -> Result<bool, FederationError> {
         // Compute whether the selection set is non-local, and if so, add its selections to the
         // count. Any of the following causes the selection set to be non-local.
@@ -128,16 +145,20 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
 
             let old_count = state.count;
             if let Some(selection_set) = selection.selection_set() {
+                let is_initial_subgraph_constrained_after_element = is_initial_subgraph_constrained
+                    && matches!(selection, Selection::InlineFragment(_));
                 let next_nodes = self.estimate_next_nodes_for_selection(
                     &selection.element(),
                     parent_nodes,
                     state,
+                    is_initial_subgraph_constrained_after_element,
                 )?;
                 if self.check_non_local_selections_limit_exceeded(
                     selection_set,
                     &next_nodes,
                     selection_has_defer,
                     state,
+                    is_initial_subgraph_constrained_after_element,
                 )? {
                     return Ok(true);
                 }
@@ -240,12 +261,48 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
     /// In `check_non_local_selections_limit_exceeded()`, when handling a given selection for a set
     /// of parent nodes (including indirect options), this function can be used to estimate an
     /// upper bound on the next nodes after taking the selection (also with indirect options).
+    ///
+    /// To support mutations, we allow indicating the initial subgraph will be constrained after
+    /// taking the element, in which case indirect options will be ignored (and caching will be
+    /// skipped). This is to ensure that top-level mutation fields are not executed on a different
+    /// subgraph than the initial one during query planning.
     fn estimate_next_nodes_for_selection(
         &self,
         element: &OpPathElement,
         parent_nodes: &NextNodesInfo,
         state: &mut State,
+        is_initial_subgraph_constrained_after_element: bool,
     ) -> Result<NextNodesInfo, FederationError> {
+        if is_initial_subgraph_constrained_after_element {
+            if let OpPathElement::InlineFragment(inline_fragment) = element
+                && inline_fragment.type_condition_position.is_none()
+            {
+                return Ok(parent_nodes.clone());
+            }
+
+            // When the initial subgraph is constrained, skip caching entirely. Note that caching
+            // is not skipped when the initial subgraph is constrained before this element but not
+            // after. Because of that, there may be cache entries for remaining nodes that were
+            // actually part of a complete digraph, but this is only a slight caching inefficiency
+            // and doesn't affect the computation's result.
+            ensure!(
+                parent_nodes
+                    .next_nodes_with_indirect_options
+                    .types
+                    .is_empty(),
+                "Initial subgraph was constrained which indicates no indirect options should be \
+                taken, but the parent nodes unexpectedly had a complete digraph which indicates \
+                indirect options were taken upstream in the path."
+            );
+            return self.estimate_next_nodes_for_selection_without_caching(
+                element,
+                parent_nodes
+                    .next_nodes_with_indirect_options
+                    .remaining_nodes
+                    .iter(),
+                true,
+            );
+        }
         let cache = state
             .next_nodes_cache
             .entry(match element {
@@ -277,6 +334,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                     let new_next_nodes = self.estimate_next_nodes_for_selection_without_caching(
                         element,
                         indirect_options.same_type_options.iter(),
+                        false,
                     )?;
                     next_nodes.extend(entry.insert(new_next_nodes));
                 }
@@ -292,6 +350,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                     let new_next_nodes = self.estimate_next_nodes_for_selection_without_caching(
                         element,
                         std::iter::once(node),
+                        false,
                     )?;
                     next_nodes.extend(entry.insert(new_next_nodes));
                 }
@@ -302,18 +361,23 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
 
     /// Estimate an upper bound on the next nodes after taking the selection on the given parent
     /// nodes. Because we're just trying for an upper bound, we assume we can always take
-    /// type-preserving non-collecting transitions, we ignore any conditions on the selection
-    /// edge, and we always type-explode. (We do account for override conditions, which are
-    /// relatively straightforward.)
+    /// type-preserving non-collecting transitions, we ignore any conditions on the selection edge,
+    /// and we always type-explode. (We do account for override conditions, which are relatively
+    /// straightforward.)
     ///
-    /// Since we're iterating through next nodes in the process, for efficiency sake we also
-    /// compute whether there are any reachable cross-subgraph edges from the next nodes
-    /// (without indirect options). This method assumes that inline fragments have type
-    /// conditions.
+    /// Since we're iterating through next nodes in the process, for efficiency's sake we also
+    /// compute whether there are any reachable cross-subgraph edges from the next nodes (without
+    /// indirect options). This method assumes that inline fragments have type conditions.
+    ///
+    /// To support mutations, we allow indicating the initial subgraph will be constrained after
+    /// taking the element, in which case indirect options will be ignored. This is to ensure that
+    /// top-level mutation fields are not executed on a different subgraph than the initial one
+    /// during query planning.
     fn estimate_next_nodes_for_selection_without_caching<'c>(
         &self,
         element: &OpPathElement,
         parent_nodes: impl Iterator<Item = &'c NodeIndex>,
+        is_initial_subgraph_constrained_after_element: bool,
     ) -> Result<NextNodesInfo, FederationError> {
         let mut next_nodes = IndexSet::default();
         let nodes_to_object_type_downcasts = &self
@@ -348,7 +412,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                     }
                 };
                 for node in parent_nodes {
-                    // As an upper bound for efficiency sake, we consider both non-type-exploded
+                    // As an upper bound for efficiency's sake, we consider both non-type-exploded
                     // and type-exploded options.
                     process_head_node(*node);
                     let Some(object_type_downcasts) = nodes_to_object_type_downcasts.get(node)
@@ -436,15 +500,30 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             }
         }
 
-        self.estimate_nodes_with_indirect_options(next_nodes)
+        self.estimate_nodes_with_indirect_options(
+            next_nodes,
+            is_initial_subgraph_constrained_after_element,
+        )
     }
 
-    /// Estimate the indirect options for the given next nodes, and add them to the given nodes.
-    /// As an upper bound for efficiency's sake, we assume we can take any indirect option (i.e.
-    /// ignore any edge conditions).
+    /// Estimate the indirect options for the given next nodes, and return the given next nodes
+    /// along with `next_nodes_with_indirect_options` which contains these direct and indirect
+    /// options. As an upper bound for efficiency's sake, we assume we can take any indirect option
+    /// (i.e. ignore any edge conditions).
+    ///
+    /// Since we're iterating through next nodes in the process, for efficiency's sake we also
+    /// compute whether there are any reachable cross-subgraph edges from the next nodes (without
+    /// indirect options).
+    ///
+    /// To support mutations, we allow ignoring indirect options, as we don't want top-level
+    /// mutation fields to be executed on a different subgraph than the initial one. In that case,
+    /// `next_nodes_with_indirect_options` will not have any `types`, and the given nodes will be
+    /// added to `remaining_nodes` (despite them potentially being part of the complete digraph for
+    /// their type). This is fine, as caching logic accounts for this accordingly.
     fn estimate_nodes_with_indirect_options(
         &self,
         next_nodes: IndexSet<NodeIndex>,
+        ignore_indirect_options: bool,
     ) -> Result<NextNodesInfo, FederationError> {
         let mut next_nodes_info = NextNodesInfo {
             next_nodes,
@@ -458,6 +537,16 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             next_nodes_info.next_nodes_have_reachable_cross_subgraph_edges = next_nodes_info
                 .next_nodes_have_reachable_cross_subgraph_edges
                 || next_node_weight.has_reachable_cross_subgraph_edges;
+
+            // As noted above, we don't want top-level mutation fields to be executed on a different
+            // subgraph than the initial one, so we support ignoring indirect options here.
+            if ignore_indirect_options {
+                next_nodes_info
+                    .next_nodes_with_indirect_options
+                    .remaining_nodes
+                    .insert(*next_node);
+                continue;
+            }
 
             let next_node_type_pos: CompositeTypeDefinitionPosition =
                 next_node_weight.type_.clone().try_into()?;
@@ -488,25 +577,23 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                     continue;
                 }
             }
-            // We need to add the remaining node, and if its our first time seeing it, we also
+            // We need to add the remaining node, and if it's our first time seeing it, we also
             // add any of its interface object options.
             if next_nodes_info
                 .next_nodes_with_indirect_options
                 .remaining_nodes
                 .insert(*next_node)
-            {
-                if let Some(options) = self
+                && let Some(options) = self
                     .parameters
                     .federated_query_graph
                     .non_local_selection_metadata()
                     .remaining_nodes_to_interface_object_options
                     .get(next_node)
-                {
-                    next_nodes_info
-                        .next_nodes_with_indirect_options
-                        .types
-                        .extend(options.iter().cloned());
-                }
+            {
+                next_nodes_info
+                    .next_nodes_with_indirect_options
+                    .types
+                    .extend(options.iter().cloned());
             }
         }
 
@@ -635,13 +722,12 @@ pub(crate) fn precompute_non_local_selection_metadata(
         if let Some(options_metadata) = metadata
             .types_to_indirect_options
             .get_mut(node_type_pos.type_name())
+            && options_metadata.same_type_options.contains(&node)
         {
-            if options_metadata.same_type_options.contains(&node) {
-                options_metadata
-                    .interface_object_options
-                    .extend(options.into_iter());
-                continue;
-            }
+            options_metadata
+                .interface_object_options
+                .extend(options.into_iter());
+            continue;
         }
         metadata
             .remaining_nodes_to_interface_object_options

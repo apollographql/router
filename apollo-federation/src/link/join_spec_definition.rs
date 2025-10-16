@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::sync::LazyLock;
 
 use apollo_compiler::Name;
@@ -15,6 +16,7 @@ use apollo_compiler::schema::EnumType;
 use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::ty;
+use indexmap::IndexMap;
 use itertools::Itertools;
 
 use super::argument::directive_optional_list_argument;
@@ -74,6 +76,8 @@ pub(crate) const JOIN_USEROVERRIDDEN_ARGUMENT_NAME: Name = name!("usedOverridden
 pub(crate) const JOIN_INTERFACE_ARGUMENT_NAME: Name = name!("interface");
 pub(crate) const JOIN_MEMBER_ARGUMENT_NAME: Name = name!("member");
 pub(crate) const JOIN_CONTEXTARGUMENTS_ARGUMENT_NAME: Name = name!("contextArguments");
+pub(crate) const JOIN_DIRECTIVE_ARGS_ARGUMENT_NAME: Name = name!("args");
+pub(crate) const JOIN_DIRECTIVE_GRAPHS_ARGUMENT_NAME: Name = name!("graphs");
 
 pub(crate) struct GraphDirectiveArguments<'doc> {
     pub(crate) name: &'doc str,
@@ -248,8 +252,7 @@ impl JoinSpecDefinition {
         } else {
             Err(SingleFederationError::Internal {
                 message: format!(
-                    "Unexpectedly found non-enum for join spec's \"{}\" enum definition",
-                    JOIN_GRAPH_ENUM_NAME_IN_SPEC,
+                    "Unexpectedly found non-enum for join spec's \"{JOIN_GRAPH_ENUM_NAME_IN_SPEC}\" enum definition",
                 ),
             }
             .into())
@@ -612,6 +615,62 @@ impl JoinSpecDefinition {
         )
     }
 
+    pub(crate) fn type_directive(
+        &self,
+        schema: &FederationSchema,
+        graph: Name,
+        key_fields: Option<Node<Value>>,
+        extension: Option<bool>,
+        resolvable: Option<bool>,
+        is_interface_object: Option<bool>,
+    ) -> Result<Directive, FederationError> {
+        let mut args = vec![Node::new(Argument {
+            name: JOIN_GRAPH_ARGUMENT_NAME,
+            value: Node::new(Value::Enum(graph)),
+        })];
+        if let Some(key_fields) = key_fields {
+            args.push(Node::new(Argument {
+                name: JOIN_KEY_ARGUMENT_NAME,
+                value: key_fields,
+            }));
+        }
+
+        if *self.version() >= (Version { major: 0, minor: 2 }) {
+            if let Some(extension) = extension {
+                args.push(Node::new(Argument {
+                    name: JOIN_EXTENSION_ARGUMENT_NAME,
+                    value: Node::new(Value::Boolean(extension)),
+                }));
+            }
+            if let Some(resolvable) = resolvable {
+                args.push(Node::new(Argument {
+                    name: JOIN_RESOLVABLE_ARGUMENT_NAME,
+                    value: Node::new(Value::Boolean(resolvable)),
+                }));
+            }
+        }
+
+        if *self.version() >= (Version { major: 0, minor: 3 })
+            && let Some(is_interface_object) = is_interface_object
+        {
+            args.push(Node::new(Argument {
+                name: JOIN_ISINTERFACEOBJECT_ARGUMENT_NAME,
+                value: Node::new(Value::Boolean(is_interface_object)),
+            }));
+        }
+
+        let Some(name) =
+            self.directive_name_in_schema(schema, &JOIN_TYPE_DIRECTIVE_NAME_IN_SPEC)?
+        else {
+            bail!("Unexpectedly could not find @join__type directive in schema")
+        };
+
+        Ok(Directive {
+            name,
+            arguments: args,
+        })
+    }
+
     /// @join__field
     fn field_directive_specification(&self) -> DirectiveSpecification {
         let mut args = vec![
@@ -794,6 +853,33 @@ impl JoinSpecDefinition {
         ))
     }
 
+    /// Creates an instance of the `@join__implements` directive.
+    pub(crate) fn implements_directive(
+        &self,
+        schema: &FederationSchema,
+        graph: Name,
+        interface: &str,
+    ) -> Result<Directive, FederationError> {
+        let Some(name) =
+            self.directive_name_in_schema(schema, &JOIN_IMPLEMENTS_DIRECTIVE_NAME_IN_SPEC)?
+        else {
+            bail!("Unexpectedly could not find @join__implements directive in schema");
+        };
+        Ok(Directive {
+            name,
+            arguments: vec![
+                Node::new(Argument {
+                    name: JOIN_GRAPH_ARGUMENT_NAME,
+                    value: Node::new(Value::Enum(graph)),
+                }),
+                Node::new(Argument {
+                    name: JOIN_INTERFACE_ARGUMENT_NAME,
+                    value: Node::new(Value::String(interface.to_owned())),
+                }),
+            ],
+        })
+    }
+
     /// @join__unionMember
     fn union_member_directive_spec(&self) -> Option<DirectiveSpecification> {
         if *self.version() < (Version { major: 0, minor: 3 }) {
@@ -870,7 +956,7 @@ impl JoinSpecDefinition {
             &[
                 DirectiveArgumentSpecification {
                     base_spec: ArgumentSpecification {
-                        name: name!("graphs"),
+                        name: JOIN_DIRECTIVE_GRAPHS_ARGUMENT_NAME,
                         get_type: |_schema, link| {
                             let graph_name = link.map_or(JOIN_GRAPH_ENUM_NAME_IN_SPEC, |link| {
                                 link.type_name_in_schema(&JOIN_GRAPH_ENUM_NAME_IN_SPEC)
@@ -891,7 +977,7 @@ impl JoinSpecDefinition {
                 },
                 DirectiveArgumentSpecification {
                     base_spec: ArgumentSpecification {
-                        name: name!("args"),
+                        name: JOIN_DIRECTIVE_ARGS_ARGUMENT_NAME,
                         get_type: |_schema, link| {
                             let directive_args_name =
                                 link.map_or(JOIN_DIRECTIVE_ARGUMENTS_NAME_IN_SPEC, |link| {
@@ -915,6 +1001,49 @@ impl JoinSpecDefinition {
             Some(&|v| JOIN_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
+    }
+
+    /// Creates an instance of the `@join__directive` directive. Since we do not allow renaming of
+    /// join spec directives, this is infallible and always applies the directive with the standard
+    /// name.
+    pub(crate) fn directive_directive(
+        &self,
+        schema: &FederationSchema,
+        name: &Name,
+        graphs: impl IntoIterator<Item = Name>,
+        args: impl IntoIterator<Item = Node<Argument>>,
+    ) -> Result<Directive, FederationError> {
+        let Some(directive_name) =
+            self.directive_name_in_schema(schema, &JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC)?
+        else {
+            bail!("Unexpectedly could not find @join__directive directive in schema");
+        };
+        Ok(Directive {
+            name: directive_name,
+            arguments: vec![
+                Node::new(Argument {
+                    name: JOIN_NAME_ARGUMENT_NAME,
+                    value: Node::new(Value::String(name.to_string())),
+                }),
+                Node::new(Argument {
+                    name: JOIN_DIRECTIVE_GRAPHS_ARGUMENT_NAME,
+                    value: Node::new(Value::List(
+                        graphs
+                            .into_iter()
+                            .map(|g| Node::new(Value::Enum(g)))
+                            .collect(),
+                    )),
+                }),
+                Node::new(Argument {
+                    name: JOIN_DIRECTIVE_ARGS_ARGUMENT_NAME,
+                    value: Node::new(Value::Object(
+                        args.into_iter()
+                            .map(|arg| (arg.name.clone(), arg.value.clone()))
+                            .collect(),
+                    )),
+                }),
+            ],
+        })
     }
 
     /// @join__owner
@@ -953,8 +1082,8 @@ impl JoinSpecDefinition {
         subgraphs: &[Subgraph<Validated>],
     ) -> Result<HashMap<String, Name>, FederationError> {
         // Collect sanitized names and group subgraphs by sanitized name (like JS MultiMap)
-        let mut sanitized_name_to_subgraphs: HashMap<String, Vec<&Subgraph<Validated>>> =
-            HashMap::new();
+        let mut sanitized_name_to_subgraphs: IndexMap<String, Vec<&Subgraph<Validated>>> =
+            IndexMap::with_capacity(subgraphs.len());
 
         for subgraph in subgraphs {
             let sanitized = sanitize_graphql_name(&subgraph.name);
@@ -988,7 +1117,7 @@ impl JoinSpecDefinition {
                     sanitized_name.clone()
                 } else {
                     // Subsequent subgraphs get _1, _2, etc.
-                    format!("{}_{}", sanitized_name, index)
+                    format!("{sanitized_name}_{index}")
                 };
 
                 let enum_value_name = Name::new(enum_name.as_str())?;
@@ -1165,6 +1294,103 @@ pub(crate) static JOIN_VERSIONS: LazyLock<SpecDefinitions<JoinSpecDefinition>> =
         ));
         definitions
     });
+
+/// Represents a valid enum value in GraphQL, used for building `join__Graph`.
+///
+/// This was previously duplicated in both `merge.rs` and `merger.rs` but has been
+/// consolidated here as it's specifically related to join spec functionality.
+#[derive(Clone, Debug)]
+pub(crate) struct EnumValue(Name);
+
+impl EnumValue {
+    pub(crate) fn new(raw: &str) -> Result<Self, String> {
+        let prefix = if raw.starts_with(char::is_numeric) {
+            Some('_')
+        } else {
+            None
+        };
+        let name = prefix
+            .into_iter()
+            .chain(raw.chars())
+            .map(|c| match c {
+                'a'..='z' => c.to_ascii_uppercase(),
+                'A'..='Z' | '0'..='9' => c,
+                _ => '_',
+            })
+            .collect::<String>();
+        Name::new(&name)
+            .map(Self)
+            .map_err(|_| format!("Failed to transform {raw} into a valid GraphQL name. Got {name}"))
+    }
+
+    pub(crate) fn to_name(&self) -> Name {
+        self.0.clone()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl From<EnumValue> for Name {
+    fn from(ev: EnumValue) -> Self {
+        ev.0
+    }
+}
+
+impl From<Name> for EnumValue {
+    fn from(name: Name) -> Self {
+        EnumValue(name)
+    }
+}
+
+impl Display for EnumValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[cfg(test)]
+mod test_enum_value {
+    use super::EnumValue;
+
+    #[test]
+    fn basic() {
+        let ev = EnumValue::new("subgraph").unwrap();
+        assert_eq!(ev.as_str(), "SUBGRAPH");
+    }
+
+    #[test]
+    fn with_underscores() {
+        let ev = EnumValue::new("a_subgraph").unwrap();
+        assert_eq!(ev.as_str(), "A_SUBGRAPH");
+    }
+
+    #[test]
+    fn with_hyphens() {
+        let ev = EnumValue::new("a-subgraph").unwrap();
+        assert_eq!(ev.as_str(), "A_SUBGRAPH");
+    }
+
+    #[test]
+    fn special_symbols() {
+        let ev = EnumValue::new("a$ubgraph").unwrap();
+        assert_eq!(ev.as_str(), "A_UBGRAPH");
+    }
+
+    #[test]
+    fn digit_first_char() {
+        let ev = EnumValue::new("1subgraph").unwrap();
+        assert_eq!(ev.as_str(), "_1SUBGRAPH");
+    }
+
+    #[test]
+    fn digit_last_char() {
+        let ev = EnumValue::new("subgraph_1").unwrap();
+        assert_eq!(ev.as_str(), "SUBGRAPH_1");
+    }
+}
 
 #[cfg(test)]
 mod test {

@@ -87,8 +87,11 @@ use crate::spec::Schema;
 use crate::spec::operation_limits::OperationLimits;
 
 pub(crate) const FIRST_EVENT_CONTEXT_KEY: &str = "apollo::supergraph::first_event";
+pub(crate) const SUBSCRIPTION_ERROR_EXTENSION_KEY: &str = "apollo::subscriptions::fatal_error";
 const SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE: &str = "SUBSCRIPTION_CONFIG_RELOAD";
 const SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE: &str = "SUBSCRIPTION_SCHEMA_RELOAD";
+const SUBSCRIPTION_JWT_EXPIRED_EXTENSION_CODE: &str = "SUBSCRIPTION_JWT_EXPIRED";
+const SUBSCRIPTION_EXECUTION_ERROR_EXTENSION_CODE: &str = "SUBSCRIPTION_EXECUTION_ERROR";
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
@@ -464,6 +467,19 @@ pub struct SubscriptionTaskParams {
     pub(crate) stream_rx: ReceiverStream<BoxGqlStream>,
 }
 
+fn subscription_fatal_error(message: impl Into<String>, extension_code: &str) -> Response {
+    Response::builder()
+        .subscribed(false)
+        .extension(SUBSCRIPTION_ERROR_EXTENSION_KEY, true)
+        .error(
+            graphql::Error::builder()
+                .message(message)
+                .extension_code(extension_code)
+                .build(),
+        )
+        .build()
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn subscription_task(
     execution_service: execution::BoxCloneService,
@@ -498,16 +514,10 @@ async fn subscription_task(
         }),
         _ => {
             let _ = sender
-                .send(
-                    graphql::Response::builder()
-                        .error(
-                            graphql::Error::builder()
-                                .message("cannot execute the subscription event")
-                                .extension_code("SUBSCRIPTION_EXECUTION_ERROR")
-                                .build(),
-                        )
-                        .build(),
-                )
+                .send(subscription_fatal_error(
+                    "cannot execute the subscription event",
+                    SUBSCRIPTION_EXECUTION_ERROR_EXTENSION_CODE,
+                ))
                 .await;
             return;
         }
@@ -564,23 +574,14 @@ async fn subscription_task(
                 break;
             }
             _ = &mut timeout => {
-                let response = Response::builder()
-                    .subscribed(false)
-                    .error(
-                        crate::error::Error::builder()
-                            .message("subscription closed because the JWT has expired")
-                            .extension_code("SUBSCRIPTION_JWT_EXPIRED")
-                            .build(),
-                    )
-                    .build();
-                let _ = sender.send(response).await;
+                let _ = sender.send(subscription_fatal_error("subscription closed because the JWT has expired", SUBSCRIPTION_JWT_EXPIRED_EXTENSION_CODE)).await;
                 break;
             },
             message = receiver.next() => {
                 match message {
                     Some(mut val) => {
                         val.created_at = Some(Instant::now());
-                        let res = dispatch_event(&supergraph_req, execution_service.clone(), query_plan.as_ref(), context.clone(), val, sender.clone())
+                        let res = dispatch_subscription_event(&supergraph_req, execution_service.clone(), query_plan.as_ref(), context.clone(), val, sender.clone())
                             .instrument(tracing::info_span!(SUBSCRIPTION_EVENT_SPAN_NAME,
                                 graphql.operation.name = %operation_name,
                                 otel.kind = "INTERNAL",
@@ -588,7 +589,7 @@ async fn subscription_task(
                                 apollo_private.duration_ns = field::Empty,)
                             ).await;
                         if let Err(err) = res {
-                                tracing::error!("cannot send the subscription to the client: {err:?}");
+                            tracing::error!("cannot send the subscription to the client: {err:?}");
                             break;
                         }
                     }
@@ -597,32 +598,12 @@ async fn subscription_task(
             }
             Some(_new_configuration) = configuration_updated_rx.next() => {
                 let _ = sender
-                    .send(
-                        Response::builder()
-                            .subscribed(false)
-                            .error(
-                                graphql::Error::builder()
-                                    .message("subscription has been closed due to a configuration reload")
-                                    .extension_code(SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE)
-                                    .build(),
-                            )
-                            .build(),
-                    )
+                    .send(subscription_fatal_error("subscription has been closed due to a configuration reload", SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE))
                     .await;
             }
             Some(_new_schema) = schema_updated_rx.next() => {
                 let _ = sender
-                    .send(
-                        Response::builder()
-                            .subscribed(false)
-                            .error(
-                                graphql::Error::builder()
-                                    .message("subscription has been closed due to a schema reload")
-                                    .extension_code(SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE)
-                                    .build(),
-                            )
-                            .build(),
-                    )
+                    .send(subscription_fatal_error("subscription has been closed due to a schema reload", SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE))
                     .await;
 
                 break;
@@ -636,7 +617,7 @@ async fn subscription_task(
     }
 }
 
-async fn dispatch_event(
+async fn dispatch_subscription_event(
     supergraph_req: &SupergraphRequest,
     execution_service: execution::BoxCloneService,
     query_plan: Option<&Arc<QueryPlan>>,
@@ -666,16 +647,10 @@ async fn dispatch_event(
                 Err(err) => {
                     tracing::error!("cannot execute the subscription event: {err:?}");
                     let _ = sender
-                        .send(
-                            graphql::Response::builder()
-                                .error(
-                                    graphql::Error::builder()
-                                        .message("cannot execute the subscription event")
-                                        .extension_code("SUBSCRIPTION_EXECUTION_ERROR")
-                                        .build(),
-                                )
-                                .build(),
-                        )
+                        .send(subscription_fatal_error(
+                            "cannot execute the subscription event",
+                            SUBSCRIPTION_EXECUTION_ERROR_EXTENSION_CODE,
+                        ))
                         .await;
                     return Ok(());
                 }

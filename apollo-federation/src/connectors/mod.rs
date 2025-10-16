@@ -26,7 +26,7 @@ use std::hash::Hasher;
 use apollo_compiler::Name;
 
 pub mod expand;
-mod header;
+pub mod header;
 mod id;
 mod json_selection;
 mod models;
@@ -159,7 +159,10 @@ impl ConnectId {
 
 impl PartialEq<&str> for ConnectId {
     fn eq(&self, other: &&str) -> bool {
-        &self.directive.coordinate() == other
+        let coordinate = self.directive.coordinate();
+        let coordinate_non_indexed = coordinate.strip_suffix("[0]").unwrap_or(&coordinate);
+        &coordinate == other
+            || &coordinate_non_indexed == other
             || self
                 .named
                 .as_ref()
@@ -169,11 +172,7 @@ impl PartialEq<&str> for ConnectId {
 
 impl PartialEq<String> for ConnectId {
     fn eq(&self, other: &String) -> bool {
-        &self.directive.coordinate() == other
-            || self
-                .named
-                .as_ref()
-                .is_some_and(|name| name.as_str() == other)
+        self == &other.as_str()
     }
 }
 
@@ -198,5 +197,46 @@ impl Serialize for ConnectId {
         S: serde::Serializer,
     {
         serializer.serialize_str(&self.name())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn id_eq_str_with_index_0() {
+        let id = ConnectId::new(
+            "subgraph".to_string(),
+            None,
+            name!("type"),
+            name!("field"),
+            Some(name!("my_id")),
+            0,
+        );
+
+        assert_eq!(id, "type.field[0]");
+        assert_eq!(id, "type.field[0]".to_string());
+        assert_eq!(id, "type.field");
+        assert_eq!(id, "type.field".to_string());
+        assert_eq!(id, "my_id");
+        assert_eq!(id, "my_id".to_string());
+    }
+
+    #[test]
+    fn id_eq_str_with_index_non_zero() {
+        let id = ConnectId::new(
+            "subgraph".to_string(),
+            None,
+            name!("type"),
+            name!("field"),
+            Some(name!("my_id")),
+            10,
+        );
+
+        assert_eq!(id, "type.field[10]");
+        assert_eq!(id, "type.field[10]".to_string());
+        assert!(id != "type.field");
+        assert_eq!(id, "my_id");
     }
 }

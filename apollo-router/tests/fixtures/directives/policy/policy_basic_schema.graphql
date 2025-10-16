@@ -1,0 +1,60 @@
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY)
+{
+  query: Query
+}
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
+directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+directive @tag(name: String!) repeatable on FIELD_DEFINITION | INTERFACE | OBJECT | UNION
+directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
+
+directive @policy(policies: [[String]]) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+
+enum join__Graph {
+  SUBGRAPH_A @join__graph(name: "subgraph_a", url: "http://localhost:4001/")
+}
+
+enum link__Purpose {
+    """
+    `SECURITY` features provide metadata necessary to securely resolve fields.
+    """
+    SECURITY
+  
+    """
+    `EXECUTION` features provide metadata necessary for operation execution.
+    """
+    EXECUTION
+}
+
+scalar federation__Scope
+scalar join__FieldSet
+scalar link__Import
+
+type Query 
+    @join__type(graph: SUBGRAPH_A)
+{  
+    private: Private @join__field(graph: SUBGRAPH_A) @policy(policies: [["admin"]])
+    public: Public @join__field(graph: SUBGRAPH_A)
+}
+
+type Private
+    @join__type(graph: SUBGRAPH_A)
+{
+    id: ID @join__field(graph: SUBGRAPH_A)
+}
+
+type Public 
+    @join__type(graph: SUBGRAPH_A)
+{
+    id: ID @join__field(graph: SUBGRAPH_A)
+}
+

@@ -54,6 +54,7 @@ struct Rhai {
 /// Configuration for the Rhai Plugin
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(rename = "RhaiConfig")]
 pub(crate) struct Conf {
     /// The directory where Rhai scripts can be found
     scripts: Option<PathBuf>,
@@ -221,7 +222,10 @@ macro_rules! gen_map_request {
                         execute(&$rhai_service, &$callback, (shared_request.clone(),));
                     if let Err(error) = result {
                         let error_details = process_error(error);
-                        tracing::error!("map_request callback failed: {error_details:#?}");
+                        if error_details.body.is_none() {
+                            tracing::error!("map_request callback failed: {error_details:#?}");
+                        }
+
                         let mut guard = shared_request.lock();
                         let request_opt = guard.take();
                         return $base::request_failure(request_opt.unwrap().context, error_details);
@@ -268,8 +272,10 @@ macro_rules! gen_map_router_deferred_request {
                     let result = execute(&$rhai_service, &$callback, (shared_request.clone(),));
 
                     if let Err(error) = result {
-                        tracing::error!("map_request callback failed: {error}");
                         let error_details = process_error(error);
+                        if error_details.body.is_none() {
+                            tracing::error!("map_request callback failed: {error_details:#?}");
+                        }
                         let mut guard = shared_request.lock();
                         let request_opt = guard.take();
                         return $base::request_failure(request_opt.unwrap().context, error_details);
@@ -355,8 +361,10 @@ macro_rules! gen_map_response {
                         execute(&$rhai_service, &$callback, (shared_response.clone(),));
 
                     if let Err(error) = result {
-                        tracing::error!("map_response callback failed: {error}");
                         let error_details = process_error(error);
+                        if error_details.body.is_none() {
+                            tracing::error!("map_request callback failed: {error_details:#?}");
+                        }
                         let mut guard = shared_response.lock();
                         let response_opt = guard.take();
                         return $base::response_failure(
@@ -401,8 +409,11 @@ macro_rules! gen_map_router_deferred_response {
                     let result =
                         execute(&$rhai_service, &$callback, (shared_response.clone(),));
                     if let Err(error) = result {
-                        tracing::error!("map_response callback failed: {error}");
+
                         let error_details = process_error(error);
+                        if error_details.body.is_none() {
+                            tracing::error!("map_request callback failed: {error_details:#?}");
+                        }
                         let response_opt = shared_response.lock().take();
                         return Ok($base::response_failure(
                             response_opt.unwrap().context,
@@ -518,8 +529,10 @@ macro_rules! gen_map_deferred_response {
                     let result =
                         execute(&$rhai_service, &$callback, (shared_response.clone(),));
                     if let Err(error) = result {
-                        tracing::error!("map_response callback failed: {error}");
                         let error_details = process_error(error);
+                        if error_details.body.is_none() {
+                            tracing::error!("map_request callback failed: {error_details:#?}");
+                        }
                         let mut guard = shared_response.lock();
                         let response_opt = guard.take();
                         return Ok($base::response_failure(
@@ -553,8 +566,10 @@ macro_rules! gen_map_deferred_response {
                                 (shared_response.clone(),),
                             );
                             if let Err(error) = result {
-                                tracing::error!("map_response callback failed: {error}");
                                 let error_details = process_error(error);
+                                if error_details.body.is_none() {
+                                    tracing::error!("map_request callback failed: {error_details:#?}");
+                                }
                                 let mut guard = shared_response.lock();
                                 let response_opt = guard.take();
                                 let $base::DeferredResponse { mut response, .. } = response_opt.unwrap();
@@ -633,7 +648,7 @@ struct Position {
 impl fmt::Display for Position {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some((line, pos)) = self.line.zip(self.pos) {
-            write!(f, "line {}, position {}", line, pos)
+            write!(f, "line {line}, position {pos}")
         } else {
             write!(f, "none")
         }

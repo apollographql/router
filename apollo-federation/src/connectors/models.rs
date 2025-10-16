@@ -30,7 +30,7 @@ use super::ConnectId;
 use super::JSONSelection;
 use super::PathSelection;
 use super::id::ConnectorPosition;
-use super::json_selection::ExternalVarPaths;
+use super::json_selection::VarPaths;
 use super::spec::connect::ConnectBatchArguments;
 use super::spec::connect::ConnectDirectiveArguments;
 use super::spec::errors::ErrorsArguments;
@@ -199,7 +199,7 @@ impl Connector {
             .http
             .ok_or_else(|| internal_error!("@connect(http:) missing"))?;
         let source_http = source.map(|s| &s.http);
-        let transport = HttpJsonTransport::from_directive(connect_http, source_http)?;
+        let transport = HttpJsonTransport::from_directive(connect_http, source_http, spec)?;
 
         // Get our batch and error settings
         let batch_settings = connect.batch;
@@ -487,7 +487,7 @@ mod tests {
         let subgraphs = get_subgraphs(SIMPLE_SUPERGRAPH);
         let subgraph = subgraphs.get("connectors").unwrap();
         let connectors = Connector::from_schema(subgraph.schema.schema(), "connectors").unwrap();
-        assert_debug_snapshot!(&connectors, @r#"
+        assert_debug_snapshot!(&connectors, @r###"
         [
             Connector {
                 id: ConnectId {
@@ -559,39 +559,70 @@ mod tests {
                     connect_path: None,
                     connect_query_params: None,
                 },
-                selection: Named(
-                    SubSelection {
-                        selections: [
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "id",
-                                    ),
-                                    range: Some(
-                                        0..2,
-                                    ),
+                selection: JSONSelection {
+                    inner: Named(
+                        SubSelection {
+                            selections: [
+                                NamedSelection {
+                                    prefix: None,
+                                    path: PathSelection {
+                                        path: WithRange {
+                                            node: Key(
+                                                WithRange {
+                                                    node: Field(
+                                                        "id",
+                                                    ),
+                                                    range: Some(
+                                                        0..2,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Empty,
+                                                    range: Some(
+                                                        2..2,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                0..2,
+                                            ),
+                                        },
+                                    },
                                 },
-                                None,
-                            ),
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "name",
-                                    ),
-                                    range: Some(
-                                        3..7,
-                                    ),
+                                NamedSelection {
+                                    prefix: None,
+                                    path: PathSelection {
+                                        path: WithRange {
+                                            node: Key(
+                                                WithRange {
+                                                    node: Field(
+                                                        "name",
+                                                    ),
+                                                    range: Some(
+                                                        3..7,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Empty,
+                                                    range: Some(
+                                                        7..7,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                3..7,
+                                            ),
+                                        },
+                                    },
                                 },
-                                None,
+                            ],
+                            range: Some(
+                                0..7,
                             ),
-                        ],
-                        range: Some(
-                            0..7,
-                        ),
-                    },
-                ),
+                        },
+                    ),
+                    spec: V0_1,
+                },
                 config: None,
                 max_requests: None,
                 entity_resolver: None,
@@ -681,51 +712,96 @@ mod tests {
                     connect_path: None,
                     connect_query_params: None,
                 },
-                selection: Named(
-                    SubSelection {
-                        selections: [
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "id",
-                                    ),
-                                    range: Some(
-                                        0..2,
-                                    ),
+                selection: JSONSelection {
+                    inner: Named(
+                        SubSelection {
+                            selections: [
+                                NamedSelection {
+                                    prefix: None,
+                                    path: PathSelection {
+                                        path: WithRange {
+                                            node: Key(
+                                                WithRange {
+                                                    node: Field(
+                                                        "id",
+                                                    ),
+                                                    range: Some(
+                                                        0..2,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Empty,
+                                                    range: Some(
+                                                        2..2,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                0..2,
+                                            ),
+                                        },
+                                    },
                                 },
-                                None,
-                            ),
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "title",
-                                    ),
-                                    range: Some(
-                                        3..8,
-                                    ),
+                                NamedSelection {
+                                    prefix: None,
+                                    path: PathSelection {
+                                        path: WithRange {
+                                            node: Key(
+                                                WithRange {
+                                                    node: Field(
+                                                        "title",
+                                                    ),
+                                                    range: Some(
+                                                        3..8,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Empty,
+                                                    range: Some(
+                                                        8..8,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                3..8,
+                                            ),
+                                        },
+                                    },
                                 },
-                                None,
-                            ),
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "body",
-                                    ),
-                                    range: Some(
-                                        9..13,
-                                    ),
+                                NamedSelection {
+                                    prefix: None,
+                                    path: PathSelection {
+                                        path: WithRange {
+                                            node: Key(
+                                                WithRange {
+                                                    node: Field(
+                                                        "body",
+                                                    ),
+                                                    range: Some(
+                                                        9..13,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Empty,
+                                                    range: Some(
+                                                        13..13,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                9..13,
+                                            ),
+                                        },
+                                    },
                                 },
-                                None,
+                            ],
+                            range: Some(
+                                0..13,
                             ),
-                        ],
-                        range: Some(
-                            0..13,
-                        ),
-                    },
-                ),
+                        },
+                    ),
+                    spec: V0_1,
+                },
                 config: None,
                 max_requests: None,
                 entity_resolver: None,
@@ -746,7 +822,7 @@ mod tests {
                 ),
             },
         ]
-        "#);
+        "###);
     }
 
     #[test]

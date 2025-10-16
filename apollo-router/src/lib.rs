@@ -108,6 +108,7 @@ pub use crate::test_harness::http_snapshot::SnapshotServer;
 pub use crate::test_harness::http_snapshot::standalone::main as snapshot_server;
 pub use crate::test_harness::make_fake_batch;
 pub use crate::uplink::UplinkConfig;
+pub use crate::uplink::license_enforcement::AllowedFeature;
 
 /// Not part of the public API
 #[doc(hidden)]

@@ -1,6 +1,5 @@
 use std::fmt;
 use std::ops::Range;
-use std::str::FromStr;
 
 use apollo_compiler::Name;
 use apollo_compiler::ast;
@@ -12,10 +11,11 @@ use apollo_compiler::validation::Valid;
 use itertools::Itertools;
 
 use crate::bail;
-use crate::connectors::JSONSelection;
+use crate::connectors::ConnectSpec;
 use crate::connectors::SelectionTrie;
 use crate::connectors::StringTemplate;
 use crate::connectors::StringTemplateError;
+use crate::connectors::spec::connect_spec_from_schema;
 use crate::error::ErrorCode;
 use crate::error::FederationError;
 use crate::internal_error;
@@ -27,6 +27,8 @@ use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
+
+const DEFAULT_CONNECT_SPEC: ConnectSpec = ConnectSpec::V0_2;
 
 pub(crate) fn validate_cache_tag_directives(
     schema: &FederationSchema,
@@ -121,50 +123,49 @@ fn validate_args_on_field(
     args: &CacheTagDirectiveArguments,
 ) -> Result<(), FederationError> {
     let field_def = field.get(schema.schema())?;
-    let format = match StringTemplate::from_str(args.format) {
+    let connect_spec = connect_spec_from_schema(schema.schema()).unwrap_or(DEFAULT_CONNECT_SPEC);
+    let format = match StringTemplate::parse_with_spec(args.format, connect_spec) {
         Ok(format) => format,
         Err(err) => {
             errors.push(Message::new(schema, field_def, err.into()));
             return Ok(());
         }
     };
-    let new_errors = format
-        .expressions()
-        .filter_map(|expr| match &expr.expression {
-            JSONSelection::Named(_named) => Some(CacheTagValidationError::CacheTagInvalidFormat {
-                message: format!("\"{}\"", expr.expression),
-            }),
-            JSONSelection::Path(path_selection) => {
-                match path_selection.variable_reference::<String>() {
-                    Some(var_ref) => {
-                        // Check the namespace
-                        if var_ref.namespace.namespace != "$args" {
-                            return Some(
-                                CacheTagValidationError::CacheTagInvalidFormatArgumentOnRootField,
-                            );
-                        }
-
-                        // Check the selection
-                        let fields = field_def
-                            .arguments
-                            .iter()
-                            .map(|arg| (arg.name.clone(), arg.ty.as_ref()))
-                            .collect::<IndexMap<Name, &ast::Type>>();
-                        match validate_args_selection(schema, &fields, &var_ref.selection) {
-                            Ok(_) => None,
-                            Err(_err) => {
-                                Some(CacheTagValidationError::CacheTagFormatArgumentUnknown {
-                                    type_name: field.type_name.clone(),
-                                    field_name: field.field_name.clone(),
-                                    format: format.to_string(),
-                                })
-                            }
-                        }
+    let new_errors = format.expressions().filter_map(|expr| {
+        expr.expression.if_named_else_path(
+            |_named| {
+                Some(CacheTagValidationError::CacheTagInvalidFormat {
+                    message: format!("\"{}\"", expr.expression),
+                })
+            },
+            |path| match path.variable_reference::<String>() {
+                Some(var_ref) => {
+                    // Check the namespace
+                    if var_ref.namespace.namespace != "$args" {
+                        return Some(
+                            CacheTagValidationError::CacheTagInvalidFormatArgumentOnRootField,
+                        );
                     }
-                    None => None,
+
+                    // Check the selection
+                    let fields = field_def
+                        .arguments
+                        .iter()
+                        .map(|arg| (arg.name.clone(), arg.ty.as_ref()))
+                        .collect::<IndexMap<Name, &ast::Type>>();
+                    match validate_args_selection(schema, &fields, &var_ref.selection) {
+                        Ok(_) => None,
+                        Err(_err) => Some(CacheTagValidationError::CacheTagFormatArgumentUnknown {
+                            type_name: field.type_name.clone(),
+                            field_name: field.field_name.clone(),
+                            format: format.to_string(),
+                        }),
+                    }
                 }
-            }
-        });
+                None => None,
+            },
+        )
+    });
     errors.extend(new_errors.map(|err| Message::new(schema, field_def, err)));
     Ok(())
 }
@@ -228,46 +229,45 @@ fn validate_args_on_object_type(
     args: &CacheTagDirectiveArguments,
 ) -> Result<(), FederationError> {
     let type_def = type_pos.get(schema.schema())?;
-    let format = match StringTemplate::from_str(args.format) {
+    let connect_spec = connect_spec_from_schema(schema.schema()).unwrap_or(DEFAULT_CONNECT_SPEC);
+    let format = match StringTemplate::parse_with_spec(args.format, connect_spec) {
         Ok(format) => format,
         Err(err) => {
             errors.push(Message::new(schema, type_def, err.into()));
             return Ok(());
         }
     };
-    let res = format
-        .expressions()
-        .filter_map(|expr| match &expr.expression {
-            JSONSelection::Named(_named) => {
+    let res = format.expressions().filter_map(|expr| {
+        expr.expression.if_named_else_path(
+            |_named| {
                 Some(Err(CacheTagValidationError::CacheTagInvalidFormat {
                     message: format!("\"{}\"", expr.expression),
                 }))
-            }
-            JSONSelection::Path(path_selection) => {
-                match path_selection.variable_reference::<String>() {
-                    Some(var_ref) => {
-                        // Check the namespace
-                        if var_ref.namespace.namespace != "$key" {
-                            return Some(Err(
-                                CacheTagValidationError::CacheTagInvalidFormatArgumentOnEntity {
-                                    type_name: type_pos.type_name.clone(),
-                                    format: format.to_string(),
-                                },
-                            ));
-                        }
-
-                        // Build the selection set based on what's in the variable, so if it's
-                        // $key.a.b it will generate { a { b } }
-                        let mut selection_set = SelectionSet::new(type_pos.type_name.clone());
-                        match build_selection_set(&mut selection_set, schema, &var_ref.selection) {
-                            Ok(_) => Some(Ok(selection_set)),
-                            Err(err) => Some(Err(err)),
-                        }
+            },
+            |path| match path.variable_reference::<String>() {
+                Some(var_ref) => {
+                    // Check the namespace
+                    if var_ref.namespace.namespace != "$key" {
+                        return Some(Err(
+                            CacheTagValidationError::CacheTagInvalidFormatArgumentOnEntity {
+                                type_name: type_pos.type_name.clone(),
+                                format: format.to_string(),
+                            },
+                        ));
                     }
-                    None => None,
+
+                    // Build the selection set based on what's in the variable, so if it's
+                    // $key.a.b it will generate { a { b } }
+                    let mut selection_set = SelectionSet::new(type_pos.type_name.clone());
+                    match build_selection_set(&mut selection_set, schema, &var_ref.selection) {
+                        Ok(_) => Some(Ok(selection_set)),
+                        Err(err) => Some(Err(err)),
+                    }
                 }
-            }
-        });
+                None => None,
+            },
+        )
+    });
     let mut format_selections = Vec::new();
     let mut has_error = false;
     for item in res {
@@ -392,7 +392,7 @@ impl Message {
     ) -> Self {
         Self {
             error,
-            locations: make_locations(node, schema),
+            locations: schema.node_locations(node).collect(),
         }
     }
 
@@ -409,15 +409,6 @@ impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.error)
     }
-}
-
-fn make_locations<T>(
-    node: &apollo_compiler::Node<T>,
-    schema: &FederationSchema,
-) -> Vec<Range<LineColumn>> {
-    node.line_column_range(&schema.schema().sources)
-        .into_iter()
-        .collect()
 }
 
 /// `@cacheTag` validation errors
@@ -672,5 +663,12 @@ mod tests {
                 "Each entity field referenced in a @cacheTag format (applied on entity type) must be a member of every @key field set. In other words, when there are multiple @key fields on the type, the referenced field(s) must be limited to their intersection. Bad cacheTag format \"product-{$key.x}\" on type \"Product\""
             ]
         );
+    }
+
+    #[test]
+    fn test_latest_connect_spec() {
+        // This test exists to find out when ConnectSpec::latest() changes, so
+        // we can decide whether to update DEFAULT_CONNECT_SPEC.
+        assert_eq!(DEFAULT_CONNECT_SPEC, ConnectSpec::latest());
     }
 }

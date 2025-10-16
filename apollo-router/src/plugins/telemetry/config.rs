@@ -51,6 +51,7 @@ impl<T> GenericWith<T> for T where Self: Sized {}
 /// Telemetry configuration
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
+#[schemars(rename = "TelemetryConfig")]
 pub(crate) struct Conf {
     /// Apollo reporting configuration
     pub(crate) apollo: apollo::Config,
@@ -63,7 +64,7 @@ pub(crate) struct Conf {
 }
 
 /// Exporter configuration
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Exporters {
     /// Logging configuration
@@ -95,7 +96,7 @@ impl Instrumentation {
 }
 
 /// Metrics configuration
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Metrics {
     /// Common metrics configuration across all exporters
@@ -106,7 +107,7 @@ pub(crate) struct Metrics {
     pub(crate) prometheus: metrics::prometheus::Config,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct MetricsCommon {
     /// Set a service.name resource in your metrics
@@ -195,7 +196,7 @@ pub(crate) enum MetricAggregation {
 }
 
 /// Tracing configuration
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Tracing {
     // TODO: when deleting the `experimental_` prefix, check the usage when enabling dev mode
@@ -215,7 +216,7 @@ pub(crate) struct Tracing {
     pub(crate) datadog: tracing::datadog::Config,
 }
 
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct ExposeTraceId {
     /// Expose the trace_id in response headers
@@ -257,7 +258,7 @@ impl TraceIdFormat {
     pub(crate) fn format(&self, trace_id: TraceId) -> String {
         match self {
             TraceIdFormat::Hexadecimal | TraceIdFormat::OpenTelemetry => {
-                format!("{:032x}", trace_id)
+                format!("{trace_id:032x}")
             }
             TraceIdFormat::Decimal => format!("{}", u128::from_be_bytes(trace_id.to_bytes())),
             TraceIdFormat::Datadog => trace_id.to_datadog(),
@@ -280,7 +281,7 @@ pub(crate) enum ApolloSignatureNormalizationAlgorithm {
 }
 
 /// Apollo usage report reference generation modes.
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema, Copy)]
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema, Copy, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub(crate) enum ApolloMetricsReferenceMode {
     /// Use the extended mode to report input object fields and enum value references as well as object fields.
@@ -292,7 +293,7 @@ pub(crate) enum ApolloMetricsReferenceMode {
 
 /// Configure propagation of traces. In general you won't have to do this as these are automatically configured
 /// along with any exporter you configure.
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Propagation {
     /// Select a custom request header to set your own trace_id (header value must be convertible from hexadecimal to set a correct trace_id)
@@ -311,7 +312,7 @@ pub(crate) struct Propagation {
     pub(crate) aws_xray: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, Default, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RequestPropagation {
     /// Choose the header name to expose trace_id (default: apollo-trace-id)
@@ -324,7 +325,7 @@ pub(crate) struct RequestPropagation {
     pub(crate) format: TraceIdFormat,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 #[non_exhaustive]
 pub(crate) struct TracingCommon {
@@ -616,7 +617,7 @@ impl From<opentelemetry::Array> for AttributeArray {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, untagged)]
 pub(crate) enum SamplerOption {
     /// Sample a given fraction. Fractions >= 1 will always sample.
@@ -624,7 +625,7 @@ pub(crate) enum SamplerOption {
     Always(Sampler),
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Sampler {
     /// Always sample

@@ -7,6 +7,7 @@ use std::ops::Range;
 use apollo_compiler::Node;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::Value;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
@@ -23,9 +24,9 @@ use crate::connectors::SubSelection;
 use crate::connectors::expand::visitors::FieldVisitor;
 use crate::connectors::expand::visitors::GroupVisitor;
 use crate::connectors::id::ConnectedElement;
-use crate::connectors::json_selection::ExternalVarPaths;
 use crate::connectors::json_selection::NamedSelection;
 use crate::connectors::json_selection::Ranged;
+use crate::connectors::json_selection::VarPaths;
 use crate::connectors::spec::connect::CONNECT_SELECTION_ARGUMENT_NAME;
 use crate::connectors::validation::coordinates::ConnectDirectiveCoordinate;
 use crate::connectors::validation::coordinates::SelectionCoordinate;
@@ -93,6 +94,7 @@ impl<'schema> Selection<'schema> {
             schema,
             context,
             self.parsed.external_var_paths(),
+            &self.parsed.local_var_names(),
         )?;
 
         match coordinate.element {
@@ -163,9 +165,10 @@ pub(super) fn validate_selection_variables<'a>(
     selection_str: &Node<Value>,
     schema: &SchemaInfo,
     context: VariableContext,
-    variable_paths: impl IntoIterator<Item = &'a PathSelection>,
+    external_var_paths: impl IntoIterator<Item = &'a PathSelection>,
+    local_var_names: &IndexSet<String>,
 ) -> Result<(), Message> {
-    for path in variable_paths {
+    for path in external_var_paths {
         if let Some(reference) = path.variable_reference() {
             variable_resolver
                 .resolve(&reference, selection_str)
@@ -174,10 +177,19 @@ pub(super) fn validate_selection_variables<'a>(
                     err
                 })?;
         } else if let Some(reference) = path.variable_reference::<String>() {
+            let locals_suffix = {
+                let local_var_vec = local_var_names.iter().cloned().collect::<Vec<_>>();
+                if local_var_vec.is_empty() {
+                    "".to_string()
+                } else {
+                    format!(", {}", local_var_vec.join(", "))
+                }
+            };
+
             return Err(Message {
                 code: context.error_code(),
                 message: format!(
-                    "In {coordinate}: unknown variable `{namespace}`, must be one of {available}",
+                    "In {coordinate}: unknown variable `{namespace}`, must be one of {available}{locals_suffix}",
                     namespace = reference.namespace.namespace.as_str(),
                     available = context.namespaces_joined(),
                 ),
@@ -279,7 +291,7 @@ impl SelectionValidator<'_> {
             .into_iter()
     }
 
-    fn path_with_root(&self) -> impl Iterator<Item = PathPart> {
+    fn path_with_root(&self) -> impl Iterator<Item = PathPart<'_>> {
         once(self.root).chain(self.path.iter().copied())
     }
 
@@ -293,7 +305,7 @@ impl SelectionValidator<'_> {
             .join(".")
     }
 
-    fn last_field(&self) -> &PathPart {
+    fn last_field(&self) -> &PathPart<'_> {
         self.path.last().unwrap_or(&self.root)
     }
 }

@@ -7,17 +7,23 @@ use opentelemetry::StringValue;
 use opentelemetry::Value;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use sha2::Digest;
 use tower::BoxError;
 
 use crate::Context;
+use crate::context::OPERATION_KIND;
+use crate::context::OPERATION_NAME;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::Stage;
+use crate::plugins::telemetry::config_new::ToOtelValue;
 use crate::plugins::telemetry::config_new::connector::ConnectorRequest;
 use crate::plugins::telemetry::config_new::connector::ConnectorResponse;
 use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
 use crate::plugins::telemetry::config_new::instruments::Standard;
 use crate::plugins::telemetry::config_new::selectors::ErrorRepr;
+use crate::plugins::telemetry::config_new::selectors::OperationKind;
+use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
@@ -46,8 +52,12 @@ impl From<&ConnectorValue> for InstrumentValue<ConnectorSelector> {
 #[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum MappingProblems {
+    /// String representation of all problems
     Problems,
+    /// The count of mapping problems
     Count,
+    /// Whether there are any mapping problems
+    Boolean,
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Derivative)]
@@ -109,6 +119,37 @@ pub(crate) enum ConnectorSelector {
     ResponseMappingProblems {
         /// Response mapping problems, if any
         connector_response_mapping_problems: MappingProblems,
+    },
+    RequestContext {
+        /// The request context key.
+        request_context: String,
+        #[serde(skip)]
+        #[allow(dead_code)]
+        /// Optional redaction pattern.
+        redact: Option<String>,
+        /// Optional default value.
+        default: Option<AttributeValue>,
+    },
+    SupergraphOperationName {
+        /// The supergraph query operation name.
+        supergraph_operation_name: OperationName,
+        #[serde(skip)]
+        #[allow(dead_code)]
+        /// Optional redaction pattern.
+        redact: Option<String>,
+        /// Optional default value.
+        default: Option<String>,
+    },
+    SupergraphOperationKind {
+        /// The supergraph query operation kind (query|mutation|subscription).
+        // Allow dead code is required because there is only one variant in OperationKind and we need to avoid the dead code warning.
+        #[allow(dead_code)]
+        supergraph_operation_kind: OperationKind,
+    },
+    OnResponseError {
+        /// Boolean set to true if the response's `is_successful` condition is false. If this is not
+        /// set, returns true when the response contains a non-200 status code
+        connector_on_response_error: bool,
     },
 }
 
@@ -172,8 +213,42 @@ impl Selector for ConnectorSelector {
                         .map(|problem| problem.count as i64)
                         .sum(),
                 )),
+                MappingProblems::Boolean => Some(Value::Bool(!request.mapping_problems.is_empty())),
             },
             ConnectorSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            ConnectorSelector::RequestContext {
+                request_context,
+                default,
+                ..
+            } => request
+                .context
+                .get_json_value(request_context)
+                .as_ref()
+                .and_then(|v| v.maybe_to_otel_value())
+                .or_else(|| default.maybe_to_otel_value()),
+            ConnectorSelector::SupergraphOperationName {
+                supergraph_operation_name,
+                default,
+                ..
+            } => {
+                let op_name = request.context.get(OPERATION_NAME).ok().flatten();
+                match supergraph_operation_name {
+                    OperationName::String => op_name.or_else(|| default.clone()),
+                    OperationName::Hash => op_name.or_else(|| default.clone()).map(|op_name| {
+                        let mut hasher = sha2::Sha256::new();
+                        hasher.update(op_name.as_bytes());
+                        let result = hasher.finalize();
+                        hex::encode(result)
+                    }),
+                }
+                .map(opentelemetry::Value::from)
+            }
+            ConnectorSelector::SupergraphOperationKind { .. } => request
+                .context
+                .get::<_, String>(OPERATION_KIND)
+                .ok()
+                .flatten()
+                .map(opentelemetry::Value::from),
             _ => None,
         }
     }
@@ -228,16 +303,22 @@ impl Selector for ConnectorSelector {
                         MappingProblems::Count => Some(Value::I64(
                             problems.iter().map(|problem| problem.count as i64).sum(),
                         )),
+                        MappingProblems::Boolean => Some(Value::Bool(!problems.is_empty())),
                     }
                 } else {
                     None
                 }
             }
+            ConnectorSelector::OnResponseError {
+                connector_on_response_error,
+            } if *connector_on_response_error => {
+                Some(matches!(response.mapped_response, MappedResponse::Error { .. }).into())
+            }
             _ => None,
         }
     }
 
-    fn on_error(&self, error: &BoxError, _: &Context) -> Option<Value> {
+    fn on_error(&self, error: &BoxError, _ctx: &Context) -> Option<Value> {
         match self {
             ConnectorSelector::Error { .. } => Some(error.to_string().into()),
             ConnectorSelector::StaticField { r#static } => Some(r#static.clone().into()),
@@ -263,6 +344,9 @@ impl Selector for ConnectorSelector {
                     | ConnectorSelector::ConnectorUrlTemplate { .. }
                     | ConnectorSelector::StaticField { .. }
                     | ConnectorSelector::RequestMappingProblems { .. }
+                    | ConnectorSelector::RequestContext { .. }
+                    | ConnectorSelector::SupergraphOperationName { .. }
+                    | ConnectorSelector::SupergraphOperationKind { .. }
             ),
             Stage::Response => matches!(
                 self,
@@ -274,6 +358,7 @@ impl Selector for ConnectorSelector {
                     | ConnectorSelector::ConnectorUrlTemplate { .. }
                     | ConnectorSelector::StaticField { .. }
                     | ConnectorSelector::ResponseMappingProblems { .. }
+                    | ConnectorSelector::OnResponseError { .. }
             ),
             Stage::ResponseEvent => false,
             Stage::ResponseField => false,
@@ -302,8 +387,10 @@ mod tests {
     use apollo_federation::connectors::Connector;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::ProblemLocation;
     use apollo_federation::connectors::SourceName;
     use apollo_federation::connectors::StringTemplate;
+    use apollo_federation::connectors::runtime::errors::RuntimeError;
     use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
     use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
     use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
@@ -321,7 +408,12 @@ mod tests {
     use super::ConnectorSource;
     use super::MappingProblems;
     use crate::Context;
+    use crate::context::OPERATION_KIND;
+    use crate::context::OPERATION_NAME;
     use crate::plugins::telemetry::config_new::Selector;
+    use crate::plugins::telemetry::config_new::selectors::ErrorRepr;
+    use crate::plugins::telemetry::config_new::selectors::OperationKind;
+    use crate::plugins::telemetry::config_new::selectors::OperationName;
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
@@ -333,10 +425,6 @@ mod tests {
     const TEST_HEADER_NAME: &str = "test_header_name";
     const TEST_HEADER_VALUE: &str = "test_header_value";
     const TEST_STATIC: &str = "test_static";
-
-    fn context() -> Context {
-        Context::default()
-    }
 
     fn connector() -> Connector {
         Connector {
@@ -389,23 +477,20 @@ mod tests {
         http_request
     }
 
-    fn connector_request(http_request: http::Request<String>) -> Request {
-        connector_request_with_mapping_problems(http_request, vec![])
-    }
-
-    fn connector_request_with_mapping_problems(
+    fn connector_request(
         http_request: http::Request<String>,
-        mapping_problems: Vec<Problem>,
+        context: Option<Context>,
+        mapping_problems: Option<Vec<Problem>>,
     ) -> Request {
         Request {
-            context: context(),
+            context: context.unwrap_or_default(),
             connector: Arc::new(connector()),
             transport_request: TransportRequest::Http(HttpRequest {
                 inner: http_request,
                 debug: Default::default(),
             }),
             key: response_key(),
-            mapping_problems,
+            mapping_problems: mapping_problems.unwrap_or_default(),
             supergraph_request: Default::default(),
         }
     }
@@ -437,6 +522,24 @@ mod tests {
         }
     }
 
+    fn connector_response_with_mapped_error(status_code: StatusCode) -> Response {
+        Response {
+            transport_result: Ok(TransportResponse::Http(HttpResponse {
+                inner: http::Response::builder()
+                    .status(status_code)
+                    .body(body::empty())
+                    .expect("expecting valid response")
+                    .into_parts()
+                    .0,
+            })),
+            mapped_response: MappedResponse::Error {
+                error: RuntimeError::new("Internal server errror", &response_key()),
+                key: response_key(),
+                problems: vec![],
+            },
+        }
+    }
+
     fn connector_response_with_header() -> Response {
         Response {
             transport_result: Ok(TransportResponse::Http(HttpResponse {
@@ -464,16 +567,19 @@ mod tests {
                 count: 1,
                 message: "error message".to_string(),
                 path: "@.id".to_string(),
+                location: ProblemLocation::Selection,
             },
             Problem {
                 count: 2,
                 message: "warn message".to_string(),
                 path: "@.id".to_string(),
+                location: ProblemLocation::Selection,
             },
             Problem {
                 count: 3,
                 message: "info message".to_string(),
                 path: "@.id".to_string(),
+                location: ProblemLocation::Selection,
             },
         ]
     }
@@ -481,13 +587,13 @@ mod tests {
     fn mapping_problem_array() -> Value {
         Value::Array(Array::String(vec![
             StringValue::from(String::from(
-                "{\"message\":\"error message\",\"path\":\"@.id\",\"count\":1}",
+                r#"{"message":"error message","path":"@.id","count":1,"location":"Selection"}"#,
             )),
             StringValue::from(String::from(
-                "{\"message\":\"warn message\",\"path\":\"@.id\",\"count\":2}",
+                r#"{"message":"warn message","path":"@.id","count":2,"location":"Selection"}"#,
             )),
             StringValue::from(String::from(
-                "{\"message\":\"info message\",\"path\":\"@.id\",\"count\":3}",
+                r#"{"message":"info message","path":"@.id","count":3,"location":"Selection"}"#,
             )),
         ]))
     }
@@ -499,7 +605,7 @@ mod tests {
         };
         assert_eq!(
             Some(TEST_STATIC.into()),
-            selector.on_request(&connector_request(http_request()))
+            selector.on_request(&connector_request(http_request(), None, None))
         );
     }
 
@@ -510,7 +616,7 @@ mod tests {
         };
         assert_eq!(
             Some(TEST_SUBGRAPH_NAME.into()),
-            selector.on_request(&connector_request(http_request()))
+            selector.on_request(&connector_request(http_request(), None, None))
         );
     }
 
@@ -521,7 +627,7 @@ mod tests {
         };
         assert_eq!(
             Some(TEST_SOURCE_NAME.into()),
-            selector.on_request(&connector_request(http_request()))
+            selector.on_request(&connector_request(http_request(), None, None))
         );
     }
 
@@ -532,7 +638,7 @@ mod tests {
         };
         assert_eq!(
             Some(TEST_URL_TEMPLATE.into()),
-            selector.on_request(&connector_request(http_request()))
+            selector.on_request(&connector_request(http_request(), None, None))
         );
     }
 
@@ -545,7 +651,7 @@ mod tests {
         };
         assert_eq!(
             Some("defaulted".into()),
-            selector.on_request(&connector_request(http_request()))
+            selector.on_request(&connector_request(http_request(), None, None))
         );
     }
 
@@ -558,7 +664,7 @@ mod tests {
         };
         assert_eq!(
             Some(TEST_HEADER_VALUE.into()),
-            selector.on_request(&connector_request(http_request_with_header()))
+            selector.on_request(&connector_request(http_request_with_header(), None, None))
         );
     }
 
@@ -628,7 +734,7 @@ mod tests {
         };
         assert_eq!(
             Some(Value::Array(Array::String(vec![]))),
-            selector.on_request(&connector_request(http_request()))
+            selector.on_request(&connector_request(http_request(), None, None))
         );
     }
 
@@ -639,7 +745,7 @@ mod tests {
         };
         assert_eq!(
             Some(0.into()),
-            selector.on_request(&connector_request(http_request()))
+            selector.on_request(&connector_request(http_request(), None, None))
         );
     }
 
@@ -650,9 +756,10 @@ mod tests {
         };
         assert_eq!(
             Some(mapping_problem_array()),
-            selector.on_request(&connector_request_with_mapping_problems(
+            selector.on_request(&connector_request(
                 http_request(),
-                mapping_problems()
+                None,
+                Some(mapping_problems())
             ))
         );
     }
@@ -664,9 +771,25 @@ mod tests {
         };
         assert_eq!(
             Some(6.into()),
-            selector.on_request(&connector_request_with_mapping_problems(
+            selector.on_request(&connector_request(
                 http_request(),
-                mapping_problems()
+                None,
+                Some(mapping_problems()),
+            ))
+        );
+    }
+
+    #[test]
+    fn connector_on_request_mapping_problems_boolean() {
+        let selector = ConnectorSelector::RequestMappingProblems {
+            connector_request_mapping_problems: MappingProblems::Boolean,
+        };
+        assert_eq!(
+            Some(true.into()),
+            selector.on_request(&connector_request(
+                http_request(),
+                None,
+                Some(mapping_problems()),
             ))
         );
     }
@@ -722,10 +845,135 @@ mod tests {
     }
 
     #[test]
+    fn connector_on_response_mapping_problems_boolean() {
+        let selector = ConnectorSelector::ResponseMappingProblems {
+            connector_response_mapping_problems: MappingProblems::Boolean,
+        };
+        assert_eq!(
+            Some(true.into()),
+            selector.on_response(&connector_response_with_mapping_problems(
+                StatusCode::OK,
+                mapping_problems()
+            ))
+        );
+    }
+
+    #[test]
     fn connector_on_drop_static_field() {
         let selector = ConnectorSelector::StaticField {
             r#static: TEST_STATIC.into(),
         };
         assert_eq!(Some(TEST_STATIC.into()), selector.on_drop());
+    }
+
+    #[test]
+    fn connector_request_context() {
+        let selector = ConnectorSelector::RequestContext {
+            request_context: "context_key".to_string(),
+            redact: None,
+            default: Some("defaulted".into()),
+        };
+        let context = Context::new();
+        let _ = context.insert("context_key".to_string(), "context_value".to_string());
+        assert_eq!(
+            selector
+                .on_request(&connector_request(http_request(), Some(context), None))
+                .unwrap(),
+            "context_value".into()
+        );
+
+        assert_eq!(
+            selector
+                .on_request(&connector_request(http_request(), None, None))
+                .unwrap(),
+            "defaulted".into()
+        );
+    }
+
+    #[test]
+    fn connector_supergraph_operation_name_string() {
+        let selector = ConnectorSelector::SupergraphOperationName {
+            supergraph_operation_name: OperationName::String,
+            redact: None,
+            default: Some("defaulted".to_string()),
+        };
+        let context = Context::new();
+        let _ = context.insert(OPERATION_NAME, "topProducts".to_string());
+
+        assert_eq!(
+            selector.on_request(&connector_request(http_request(), None, None)),
+            Some("defaulted".into())
+        );
+        assert_eq!(
+            selector.on_request(&connector_request(http_request(), Some(context), None)),
+            Some("topProducts".into())
+        );
+    }
+
+    #[test]
+    fn connector_supergraph_operation_name_hash() {
+        let selector = ConnectorSelector::SupergraphOperationName {
+            supergraph_operation_name: OperationName::Hash,
+            redact: None,
+            default: Some("defaulted".to_string()),
+        };
+        let context = Context::new();
+        let _ = context.insert(OPERATION_NAME, "topProducts".to_string());
+        assert_eq!(
+            selector.on_request(&connector_request(http_request(), None, None)),
+            Some("96294f50edb8f006f6b0a2dadae50d3c521e9841d07d6395d91060c8ccfed7f0".into())
+        );
+
+        assert_eq!(
+            selector.on_request(&connector_request(http_request(), Some(context), None)),
+            Some("bd141fca26094be97c30afd42e9fc84755b252e7052d8c992358319246bd555a".into())
+        );
+    }
+
+    #[test]
+    fn connector_supergraph_operation_kind() {
+        let selector = ConnectorSelector::SupergraphOperationKind {
+            supergraph_operation_kind: OperationKind::String,
+        };
+        let context = Context::new();
+        let _ = context.insert(OPERATION_KIND, "query".to_string());
+        assert_eq!(
+            selector.on_request(&connector_request(http_request(), Some(context), None)),
+            Some("query".into())
+        );
+    }
+
+    #[test]
+    fn connector_on_response_error() {
+        let selector = ConnectorSelector::OnResponseError {
+            connector_on_response_error: true,
+        };
+        assert_eq!(
+            selector
+                .on_response(&connector_response_with_mapped_error(
+                    StatusCode::INTERNAL_SERVER_ERROR
+                ))
+                .unwrap(),
+            Value::Bool(true)
+        );
+
+        assert_eq!(
+            selector
+                .on_response(&connector_response(StatusCode::OK))
+                .unwrap(),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn error_reason() {
+        let selector = ConnectorSelector::Error {
+            error: ErrorRepr::Reason,
+        };
+        let err = "NaN".parse::<u32>().unwrap_err();
+        assert_eq!(
+            selector.on_error(&err.into(), &Context::new()).unwrap(),
+            Value::String("invalid digit found in string".into())
+        );
     }
 }

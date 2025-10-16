@@ -1,15 +1,15 @@
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
-use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(EchoMethod, echo_method, echo_shape);
@@ -32,11 +32,12 @@ fn echo_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
-    if let Some(MethodArgs { args, .. }) = method_args {
-        if let Some(arg) = args.first() {
-            return arg.apply_to_path(data, vars, input_path);
-        }
+    if let Some(MethodArgs { args, .. }) = method_args
+        && let Some(arg) = args.first()
+    {
+        return arg.apply_to_path(data, vars, input_path, spec);
     }
     (
         None,
@@ -44,29 +45,24 @@ fn echo_method(
             format!("Method ->{} requires one argument", method_name.as_ref()),
             input_path.to_vec(),
             method_name.range(),
+            spec,
         )],
     )
 }
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn echo_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
     if let Some(first_arg) = method_args.and_then(|args| args.args.first()) {
-        return first_arg.compute_output_shape(
-            input_shape,
-            dollar_shape,
-            named_var_shapes,
-            source_id,
-        );
+        return first_arg.compute_output_shape(context, input_shape, dollar_shape);
     }
     Shape::error(
         format!("Method ->{} requires one argument", method_name.as_ref()),
-        method_name.shape_location(source_id),
+        method_name.shape_location(context.source_id()),
     )
 }
 
@@ -74,6 +70,8 @@ fn echo_shape(
 mod tests {
     use serde_json_bytes::json;
 
+    use crate::connectors::ConnectSpec;
+    use crate::connectors::json_selection::ApplyToError;
     use crate::selection;
 
     #[test]
@@ -212,6 +210,24 @@ mod tests {
                     "hobbies": ["reading", "fishing", "painting"],
                 })),
                 vec![],
+            ),
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn echo_should_return_none_when_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!("$->echo($.missing)", spec).apply_to(&json!({})),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Property .missing not found in object",
+                    "path": ["missing"],
+                    "range": [10, 17],
+                    "spec": spec.to_string(),
+                }))]
             ),
         );
     }

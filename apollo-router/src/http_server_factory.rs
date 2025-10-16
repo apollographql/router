@@ -31,7 +31,7 @@ pub(crate) trait HttpServerFactory {
         main_listener: Option<Listener>,
         previous_listeners: ExtraListeners,
         extra_endpoints: MultiMap<ListenAddr, Endpoint>,
-        license: LicenseState,
+        license: Arc<LicenseState>,
         all_connections_stopped_sender: mpsc::Sender<()>,
     ) -> Self::Future
     where
@@ -127,7 +127,7 @@ impl HttpServerHandle {
         router: RF,
         configuration: Arc<Configuration>,
         web_endpoints: MultiMap<ListenAddr, Endpoint>,
-        license: LicenseState,
+        license: Arc<LicenseState>,
     ) -> Result<Self, ApolloRouterError>
     where
         SF: HttpServerFactory,

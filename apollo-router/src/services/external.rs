@@ -26,7 +26,7 @@ use super::subgraph::SubgraphRequestId;
 use crate::Context;
 use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
-use crate::plugins::telemetry::reload::prepare_context;
+use crate::plugins::telemetry::reload::otel::prepare_context;
 use crate::query_planner::QueryPlan;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
@@ -305,7 +305,7 @@ where
                 0
             }
         });
-        let otel_name = format!("POST {}", schema_uri);
+        let otel_name = format!("POST {schema_uri}");
 
         let http_req_span = tracing::info_span!(HTTP_REQUEST_SPAN_NAME,
             "otel.kind" = "CLIENT",

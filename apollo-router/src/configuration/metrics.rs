@@ -63,10 +63,10 @@ impl InstrumentData {
     ) {
         if let Ok(json_path) = JsonPathInst::from_str(path) {
             let value_at_path = json_path.find_slice(value).into_iter().next();
-            if let Some(Value::Object(children)) = value_at_path.as_deref() {
-                if let Some(first_key) = children.keys().next() {
-                    attributes.insert(attr_name.to_string(), first_key.clone().into());
-                }
+            if let Some(Value::Object(children)) = value_at_path.as_deref()
+                && let Some(first_key) = children.keys().next()
+            {
+                attributes.insert(attr_name.to_string(), first_key.clone().into());
             }
         }
     }
@@ -323,17 +323,15 @@ impl InstrumentData {
 
         populate_config_instrument!(
             apollo.router.config.response_cache,
-            "$.experimental_response_cache",
+            "$.preview_response_cache",
             opt.enabled,
             "$[?(@.enabled)]",
             opt.debug,
             "$[?(@.debug)]",
             opt.subgraph.enabled,
             "$[?(@.subgraph.all.enabled)]",
-            opt.subgraph.postgres.required_to_start,
-            "$[?(@.subgraph.all.postgres.required_to_start || @.subgraph.subgraphs..postgres.required_to_start)]",
-            opt.subgraph.postgres.cleanup_interval,
-            "$[?(@.subgraph.all.postgres.cleanup_interval || @.subgraph.subgraphs..postgres.cleanup_interval)]",
+            opt.subgraph.redis.required_to_start,
+            "$[?(@.subgraph.all.redis.required_to_start || @.subgraph.subgraphs..redis.required_to_start)]",
             opt.subgraph.enabled,
             "$[?(@.subgraph.subgraphs..enabled)]",
             opt.subgraph.ttl,
@@ -389,7 +387,9 @@ impl InstrumentData {
             opt.spans.subgraph,
             "$..spans.subgraph",
             opt.spans.supergraph,
-            "$..spans.supergraph"
+            "$..spans.supergraph",
+            opt.tracing.common.sampler,
+            "$..tracing.common.sampler"
         );
 
         populate_config_instrument!(
@@ -423,7 +423,32 @@ impl InstrumentData {
             opt.metrics_reference_mode,
             "$.metrics_reference_mode",
             opt.errors.preview_extended_error_metrics,
-            "$.errors.preview_extended_error_metrics"
+            "$.errors.preview_extended_error_metrics",
+            opt.field_level_instrumentation_sampler,
+            "$.field_level_instrumentation_sampler",
+            opt.tracing.batch_processor.scheduled_delay,
+            "$.tracing.batch_processor.scheduled_delay",
+            opt.tracing.batch_processor.max_concurrent_exports,
+            "$.tracing.batch_processor.max_concurrent_exports",
+            opt.tracing.batch_processor.max_export_batch_size,
+            "$.tracing.batch_processor.max_export_batch_size",
+            opt.tracing.batch_processor.max_export_timeout,
+            "$.tracing.batch_processor.max_export_timeout",
+            opt.tracing.batch_processor.max_queue_size,
+            "$.tracing.batch_processor.max_queue_size",
+            opt.metrics.otlp.batch_processor.scheduled_delay,
+            "$.metrics.otlp.batch_processor.scheduled_delay",
+            opt.metrics.otlp.batch_processor.max_export_timeout,
+            "$.metrics.otlp.batch_processor.max_export_timeout",
+            opt.metrics.usage_reports.batch_processor.scheduled_delay,
+            "$.metrics.usage_reports.batch_processor.scheduled_delay",
+            opt.metrics
+                .usage_reports
+                .batch_processor
+                .max_concurrent_exports,
+            "$.metrics.usage_reports.batch_processor.max_concurrent_exports",
+            opt.metrics.usage_reports.batch_processor.max_export_timeout,
+            "$.metrics.usage_reports.batch_processor.max_export_timeout"
         );
 
         populate_config_instrument!(

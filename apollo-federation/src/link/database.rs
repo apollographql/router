@@ -99,6 +99,7 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
     let mut by_name_in_schema = IndexMap::default();
     let mut types_by_imported_name = IndexMap::default();
     let mut directives_by_imported_name = IndexMap::default();
+    let mut directives_by_original_name = IndexMap::default();
     let link_applications = schema
         .schema_definition
         .directives
@@ -149,30 +150,38 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
                 // the name of each spec (in the schema) acts as an implicit import for a
                 // directive of the same name. So one cannot import a direcitive with the
                 // same name than a linked spec.
-                if let Some(other) = by_name_in_schema.get(imported_name) {
-                    if !Arc::ptr_eq(other, link) {
-                        return Err(LinkError::BootstrapError(format!(
-                            "import for '{}' of {} conflicts with spec {}",
-                            import.imported_display_name(),
-                            link.url,
-                            other.url
-                        )));
-                    }
+                if let Some(other) = by_name_in_schema.get(imported_name)
+                    && !Arc::ptr_eq(other, link)
+                {
+                    return Err(LinkError::BootstrapError(format!(
+                        "import for '{}' of {} conflicts with spec {}",
+                        import.imported_display_name(),
+                        link.url,
+                        other.url
+                    )));
                 }
                 &mut directives_by_imported_name
             } else {
                 &mut types_by_imported_name
             };
+            // Conflicting imports are not allowed, except for duplicate imports within the same
+            // @link application. Although it's odd, JS composition allows it.
             if let Some((other_link, _)) = element_map.insert(
                 imported_name.clone(),
                 (Arc::clone(link), Arc::clone(import)),
-            ) {
+            ) && !Arc::ptr_eq(&other_link, link)
+            {
                 return Err(LinkError::BootstrapError(format!(
                     "name conflict: both {} and {} import {}",
                     link.url,
                     other_link.url,
                     import.imported_display_name()
                 )));
+            }
+
+            if import.is_directive {
+                directives_by_original_name
+                    .insert(import.element.clone(), (link.clone(), import.clone()));
             }
         }
     }
@@ -183,6 +192,7 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
         by_name_in_schema,
         types_by_imported_name,
         directives_by_imported_name,
+        directives_by_original_name,
     }))
 }
 
@@ -192,6 +202,8 @@ pub fn links_metadata(schema: &Schema) -> Result<Option<LinksMetadata>, LinkErro
 /// ```graphql
 /// directive @_ANY_NAME_(url: String!, as: String) repeatable on SCHEMA
 /// directive @_ANY_NAME_(url: String, as: String) repeatable on SCHEMA
+/// directive @_ANY_NAME_(url: String!) repeatable on SCHEMA
+/// directive @_ANY_NAME_(url: String) repeatable on SCHEMA
 /// ```
 fn is_link_directive_definition(definition: &DirectiveDefinition) -> bool {
     definition.repeatable
@@ -206,7 +218,7 @@ fn is_link_directive_definition(definition: &DirectiveDefinition) -> bool {
         })
         && definition
             .argument_by_name("as")
-            .is_some_and(|argument| *argument.ty == ty!(String))
+            .is_none_or(|argument| *argument.ty == ty!(String))
 }
 
 /// Returns true if the given definition matches the @core definition.
@@ -660,5 +672,26 @@ mod tests {
             let errors = links_metadata(&schema).expect_err("should error");
             insta::assert_snapshot!(errors, @"Unknown import: Cannot import unknown federation directive \"@sharable\".");
         }
+    }
+
+    #[test]
+    fn allowed_link_directive_definitions() -> Result<(), LinkError> {
+        let link_defs = [
+            "directive @link(url: String!, as: String) repeatable on SCHEMA",
+            "directive @link(url: String, as: String) repeatable on SCHEMA",
+            "directive @link(url: String!) repeatable on SCHEMA",
+            "directive @link(url: String) repeatable on SCHEMA",
+        ];
+        let schema_prefix = r#"
+          extend schema @link(url: "https://specs.apollo.dev/link/v1.0")
+          type Query { x: Int }
+        "#;
+        for link_def in link_defs {
+            let schema_doc = format!("{schema_prefix}\n{link_def}");
+            let schema = Schema::parse(&schema_doc, "test.graphql").unwrap();
+            let meta = links_metadata(&schema)?;
+            assert!(meta.is_some(), "should have metadata for: {link_def}");
+        }
+        Ok(())
     }
 }

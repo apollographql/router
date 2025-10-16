@@ -5,6 +5,7 @@ use shape::location::Location;
 use shape::location::SourceId;
 
 use super::ParseResult;
+use crate::connectors::ConnectSpec;
 
 // Currently, all our error messages are &'static str, which allows the Span
 // type to remain Copy, which is convenient to avoid having to clone Spans
@@ -19,10 +20,57 @@ use super::ParseResult;
 // parsing and then only set Some(message) when we need to report an error, so
 // we would not be cloning long String messages very often (and the rest of the
 // Span fields are cheap to clone).
-pub(crate) type Span<'a> = LocatedSpan<&'a str, Option<&'static str>>;
+pub(crate) type Span<'a> = LocatedSpan<&'a str, SpanExtra>;
 
-pub(super) fn new_span(input: &str) -> Span {
-    Span::new_extra(input, None)
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+pub(crate) struct SpanExtra {
+    pub(super) spec: ConnectSpec,
+    /// A list of (message, offset) tuples representing errors encountered
+    /// during parsing. The offset is relative to the start of the original
+    /// input string.
+    pub(super) errors: Vec<(String, usize)>,
+    /// Names of local variables currently bound by the `->as($var)` method.
+    pub(super) local_vars: Vec<String>,
+}
+
+#[cfg(test)]
+pub(crate) fn new_span(input: &str) -> Span<'_> {
+    Span::new_extra(
+        input,
+        SpanExtra {
+            spec: super::JSONSelection::default_connect_spec(),
+            local_vars: Vec::new(),
+            errors: Vec::new(),
+        },
+    )
+}
+
+pub(crate) fn new_span_with_spec(input: &str, spec: ConnectSpec) -> Span<'_> {
+    Span::new_extra(
+        input,
+        SpanExtra {
+            spec,
+            local_vars: Vec::new(),
+            errors: Vec::new(),
+        },
+    )
+}
+
+pub(super) fn get_connect_spec(input: &Span) -> ConnectSpec {
+    input.extra.spec
+}
+
+impl SpanExtra {
+    pub(super) fn is_local_var(&self, name: &String) -> bool {
+        self.local_vars.contains(name)
+    }
+
+    pub(super) fn with_local_var(mut self, name: String) -> Self {
+        if !self.local_vars.contains(&name) {
+            self.local_vars.push(name);
+        }
+        self
+    }
 }
 
 // Some parsed AST structures, like PathSelection and NamedSelection, can
@@ -153,6 +201,7 @@ pub(crate) mod strip_ranges {
 
     use super::super::known_var::KnownVariable;
     use super::super::lit_expr::LitExpr;
+    use super::super::lit_expr::LitOp;
     use super::super::parser::*;
     use super::WithRange;
 
@@ -171,36 +220,36 @@ pub(crate) mod strip_ranges {
         }
     }
 
+    impl StripRanges for WithRange<LitOp> {
+        fn strip_ranges(&self) -> Self {
+            WithRange::new(self.as_ref().clone(), None)
+        }
+    }
+
     impl StripRanges for JSONSelection {
         fn strip_ranges(&self) -> Self {
-            match self {
-                JSONSelection::Named(subselect) => JSONSelection::Named(subselect.strip_ranges()),
-                JSONSelection::Path(path) => JSONSelection::Path(path.strip_ranges()),
+            match &self.inner {
+                TopLevelSelection::Named(subselect) => Self {
+                    inner: TopLevelSelection::Named(subselect.strip_ranges()),
+                    spec: self.spec,
+                },
+                TopLevelSelection::Path(path) => Self {
+                    inner: TopLevelSelection::Path(path.strip_ranges()),
+                    spec: self.spec,
+                },
             }
         }
     }
 
     impl StripRanges for NamedSelection {
         fn strip_ranges(&self) -> Self {
-            match self {
-                Self::Field(alias, key, sub) => Self::Field(
-                    alias.as_ref().map(|a| a.strip_ranges()),
-                    key.strip_ranges(),
-                    sub.as_ref().map(|s| s.strip_ranges()),
-                ),
-                Self::Path {
-                    alias,
-                    path,
-                    inline,
-                } => {
-                    let stripped_alias = alias.as_ref().map(|a| a.strip_ranges());
-                    Self::Path {
-                        alias: stripped_alias,
-                        path: path.strip_ranges(),
-                        inline: *inline,
-                    }
-                }
-                Self::Group(alias, sub) => Self::Group(alias.strip_ranges(), sub.strip_ranges()),
+            Self {
+                prefix: match &self.prefix {
+                    NamingPrefix::None => NamingPrefix::None,
+                    NamingPrefix::Alias(alias) => NamingPrefix::Alias(alias.strip_ranges()),
+                    NamingPrefix::Spread(_) => NamingPrefix::Spread(None),
+                },
+                path: self.path.strip_ranges(),
             }
         }
     }
@@ -231,6 +280,7 @@ pub(crate) mod strip_ranges {
                         opt_args.as_ref().map(|args| args.strip_ranges()),
                         rest.strip_ranges(),
                     ),
+                    PathList::Question(tail) => PathList::Question(tail.strip_ranges()),
                     PathList::Selection(sub) => PathList::Selection(sub.strip_ranges()),
                     PathList::Empty => PathList::Empty,
                 },
@@ -298,6 +348,13 @@ pub(crate) mod strip_ranges {
                     LitExpr::LitPath(literal, subpath) => {
                         LitExpr::LitPath(literal.strip_ranges(), subpath.strip_ranges())
                     }
+                    LitExpr::OpChain(op, operands) => LitExpr::OpChain(
+                        op.strip_ranges(),
+                        operands
+                            .iter()
+                            .map(|operand| operand.strip_ranges())
+                            .collect(),
+                    ),
                 },
                 None,
             )

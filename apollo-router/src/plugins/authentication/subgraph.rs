@@ -208,6 +208,7 @@ pub(crate) enum AuthConfig {
 /// Configure subgraph authentication
 #[derive(Clone, Debug, Default, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[schemars(rename = "AuthenticationSubgraphConfig")]
 pub(crate) struct Config {
     /// Configuration that will apply to all subgraphs.
     #[serde(default)]
@@ -355,7 +356,7 @@ impl SigningParamsConfig {
         let (signing_instructions, _signature) = sign(signable_request, &signing_params.into())
             .map_err(|err| {
                 increment_failure_counter(subgraph_name);
-                let error = format!("failed to sign GraphQL body for AWS SigV4: {}", err);
+                let error = format!("failed to sign GraphQL body for AWS SigV4: {err}");
                 tracing::error!("{}", error);
                 error
             })?
@@ -394,7 +395,7 @@ impl SigningParamsConfig {
         let (signing_instructions, _signature) = sign(signable_request, &signing_params.into())
             .map_err(|err| {
                 increment_failure_counter(subgraph_name);
-                let error = format!("failed to sign GraphQL body for AWS SigV4: {}", err);
+                let error = format!("failed to sign GraphQL body for AWS SigV4: {err}");
                 tracing::error!("{}", error);
                 error
             })?
@@ -425,7 +426,7 @@ impl SigningParamsConfig {
             .await
             .map_err(|err| {
                 increment_failure_counter(self.subgraph_name.as_str());
-                let error = format!("failed to get credentials for AWS SigV4 signing: {}", err);
+                let error = format!("failed to get credentials for AWS SigV4 signing: {err}");
                 tracing::error!("{}", error);
                 error.into()
             })

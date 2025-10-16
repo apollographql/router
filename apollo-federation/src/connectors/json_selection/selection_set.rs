@@ -23,10 +23,8 @@ use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::name;
-use apollo_compiler::validation::Valid;
 use multimap::MultiMap;
 
-use super::JSONSelectionParseError;
 use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
 use super::location::Ranged;
@@ -38,14 +36,8 @@ use crate::connectors::PathSelection;
 use crate::connectors::SubSelection;
 use crate::connectors::json_selection::Alias;
 use crate::connectors::json_selection::NamedSelection;
-
-impl TryFrom<Valid<FieldSet>> for JSONSelection {
-    type Error = JSONSelectionParseError;
-
-    fn try_from(field_set: Valid<FieldSet>) -> Result<Self, Self::Error> {
-        Self::parse(&field_set.serialize().no_indent().to_string())
-    }
-}
+use crate::connectors::json_selection::NamingPrefix;
+use crate::connectors::json_selection::TopLevelSelection;
 
 impl JSONSelection {
     /// Apply a selection set to create a new [`JSONSelection`]
@@ -74,9 +66,15 @@ impl JSONSelection {
             },
         );
 
-        match self {
-            Self::Named(sub) => Self::Named(sub.apply_selection_set(document, &selection_set)),
-            Self::Path(path) => Self::Path(path.apply_selection_set(document, &selection_set)),
+        match &self.inner {
+            TopLevelSelection::Named(sub) => Self {
+                inner: TopLevelSelection::Named(sub.apply_selection_set(document, &selection_set)),
+                spec: self.spec,
+            },
+            TopLevelSelection::Path(path) => Self {
+                inner: TopLevelSelection::Path(path.apply_selection_set(document, &selection_set)),
+                spec: self.spec,
+            },
         }
     }
 }
@@ -101,8 +99,8 @@ impl SubSelection {
         // TODO: this must change before we support interfaces and unions
         // because it will emit the abstract type's name which is invalid.
         if field_map.contains_key("__typename") && selection_set.ty != name!(_Entity) {
-            new_selections.push(NamedSelection::Path {
-                alias: Some(Alias::new("__typename")),
+            new_selections.push(NamedSelection {
+                prefix: NamingPrefix::Alias(Alias::new("__typename")),
                 path: PathSelection {
                     path: WithRange::new(
                         PathList::Var(
@@ -125,78 +123,62 @@ impl SubSelection {
                         None,
                     ),
                 },
-                inline: false,
             });
         }
 
         for selection in &self.selections {
-            match selection {
-                NamedSelection::Field(alias, name, sub) => {
-                    let key = alias
-                        .as_ref()
-                        .map(|a| a.name.as_str())
-                        .unwrap_or(name.as_str());
-                    if let Some(fields) = field_map.get_vec(key) {
-                        for field in fields {
-                            let field_response_key = field.response_key().as_str();
-                            new_selections.push(NamedSelection::Field(
-                                if field_response_key == name.as_str() {
-                                    None
-                                } else {
-                                    Some(Alias::new(field_response_key))
-                                },
-                                name.clone(),
-                                sub.as_ref().map(|sub| {
-                                    sub.apply_selection_set(document, &field.selection_set)
-                                }),
-                            ));
-                        }
-                    }
-                }
-                NamedSelection::Path {
-                    alias,
-                    path: path_selection,
-                    inline,
-                } => {
-                    let inline = *inline;
-                    if let Some(key) = alias.as_ref().map(|a| a.name.as_str()) {
-                        // If the NamedSelection::Path has an alias (meaning
-                        // it's a NamedPathSelection according to the grammar),
-                        // use the alias name to look up the corresponding
-                        // fields in the selection set.
-                        if let Some(fields) = field_map.get_vec(key) {
-                            for field in fields {
-                                new_selections.push(NamedSelection::Path {
-                                    alias: Some(Alias::new(field.response_key().as_str())),
-                                    path: path_selection
-                                        .apply_selection_set(document, &field.selection_set),
-                                    inline,
+            if let Some(single_key_for_selection) = selection.get_single_key() {
+                if let Some(fields) = field_map.get_vec(single_key_for_selection.as_str()) {
+                    for field in fields {
+                        let response_key = field.response_key().as_str();
+                        let applied_path = selection
+                            .path
+                            .apply_selection_set(document, &field.selection_set);
+
+                        if let Some(single_key_for_path_only) = applied_path.get_single_key() {
+                            if response_key == single_key_for_path_only.as_str() {
+                                // No need for an Alias if the path by
+                                // itself has a single key that equals
+                                // the desired response_key.
+                                new_selections.push(NamedSelection {
+                                    prefix: NamingPrefix::None,
+                                    path: applied_path,
                                 });
+                                continue;
+                            }
+
+                            if response_key == single_key_for_selection.as_str() {
+                                // The response_key matched the existing alias,
+                                // so we don't need to change the alias.
+                                new_selections.push(NamedSelection {
+                                    prefix: selection.prefix.clone(),
+                                    path: applied_path,
+                                });
+                                continue;
                             }
                         }
-                    } else {
-                        // If the NamedSelection::Path has no alias (meaning
-                        // it's a PathWithSubSelection according to the
-                        // grammar), apply the selection set to the path and add
-                        // the new PathWithSubSelection to the new_selections.
-                        new_selections.push(NamedSelection::Path {
-                            alias: None,
-                            path: path_selection.apply_selection_set(document, selection_set),
-                            inline,
+
+                        // The response_key is different from both the
+                        // alias and single_key_for_path_only, so we
+                        // need a new explicit alias to ensure
+                        // response_key is generated.
+                        new_selections.push(NamedSelection {
+                            prefix: NamingPrefix::Alias(Alias::new(response_key)),
+                            path: applied_path,
                         });
                     }
                 }
-                NamedSelection::Group(alias, sub) => {
-                    let key = alias.name.as_str();
-                    if let Some(fields) = field_map.get_vec(key) {
-                        for field in fields {
-                            new_selections.push(NamedSelection::Group(
-                                Alias::new(field.response_key().as_str()),
-                                sub.apply_selection_set(document, &field.selection_set),
-                            ));
-                        }
-                    }
-                }
+            } else {
+                // If the NamedSelection::Path does not have a single
+                // output key (has no alias and is not a single field
+                // selection), then the path's output will be inlined
+                // into the parent, which means we care only about the
+                // intersection between the path's output and the
+                // incoming selection_set.
+                new_selections.push(NamedSelection {
+                    prefix: NamingPrefix::None,
+                    path: selection.path.apply_selection_set(document, selection_set),
+                });
             }
         }
 
@@ -262,6 +244,10 @@ impl PathList {
                     path.range(),
                 ),
             ),
+            Self::Question(tail) => Self::Question(WithRange::new(
+                tail.apply_selection_set(document, selection_set),
+                tail.range(),
+            )),
             Self::Selection(sub) => {
                 Self::Selection(sub.apply_selection_set(document, selection_set))
             }

@@ -1,0 +1,17 @@
+---
+source: apollo-router/tests/integration/response_cache.rs
+expression: v
+---
+{
+  "reviews": [
+    {
+      "body": "I can sit on it"
+    },
+    {
+      "body": "I can sit on it2"
+    },
+    {
+      "body": "I can sit on it3"
+    }
+  ]
+}

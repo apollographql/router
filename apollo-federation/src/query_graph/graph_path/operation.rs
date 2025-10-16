@@ -162,7 +162,7 @@ pub(crate) enum OpPathElement {
 }
 
 impl HasSelectionKey for OpPathElement {
-    fn key(&self) -> SelectionKey {
+    fn key(&self) -> SelectionKey<'_> {
         match self {
             OpPathElement::Field(field) => field.key(),
             OpPathElement::InlineFragment(fragment) => fragment.key(),
@@ -229,8 +229,7 @@ impl OpPathElement {
             if let Some(application) = self.directives().get(directive_name) {
                 let Some(arg) = application.specified_argument_by_name("if") else {
                     return Err(FederationError::internal(format!(
-                        "@{} missing required argument \"if\"",
-                        directive_name
+                        "@{directive_name} missing required argument \"if\""
                     )));
                 };
                 let value = match arg.deref() {
@@ -516,12 +515,10 @@ impl OpIndirectPaths {
                 if matches!(
                     last_edge_weight.transition,
                     QueryGraphEdgeTransition::KeyResolution
-                ) {
-                    if let Some(conditions) = &last_edge_weight.conditions {
-                        if conditions.contains_top_level_field(field)? {
-                            continue;
-                        }
-                    }
+                ) && let Some(conditions) = &last_edge_weight.conditions
+                    && conditions.contains_top_level_field(field)?
+                {
+                    continue;
                 }
             }
             filtered.push(path.clone())
@@ -1182,8 +1179,7 @@ impl OpGraphPath {
                             {
                                 let edge_weight = self.graph.edge_weight(edge)?;
                                 return Err(FederationError::internal(format!(
-                                    "Unexpectedly missing {} for {} from path {}",
-                                    operation_field, edge_weight, self,
+                                    "Unexpectedly missing {operation_field} for {edge_weight} from path {self}",
                                 )));
                             }
                             operation_field = Field {
@@ -1252,8 +1248,7 @@ impl OpGraphPath {
                                 let interface_edge_weight =
                                     self.graph.edge_weight(*interface_edge)?;
                                 return Err(FederationError::internal(format!(
-                                    "Interface edge {} unexpectedly had conditions",
-                                    interface_edge_weight
+                                    "Interface edge {interface_edge_weight} unexpectedly had conditions"
                                 )));
                             }
                             field_path
@@ -1456,8 +1451,7 @@ impl OpGraphPath {
                                 // condition (only fragments can).
                                 if field_options_for_implementation.is_empty() {
                                     return Err(FederationError::internal(format!(
-                                        "Unexpected unsatisfiable path after {}",
-                                        operation_field
+                                        "Unexpected unsatisfiable path after {operation_field}"
                                     )));
                                 }
                                 debug!(
@@ -1529,8 +1523,7 @@ impl OpGraphPath {
                         // the query should have been flagged invalid if a field was selected on
                         // something else.
                         Err(FederationError::internal(format!(
-                            "Unexpectedly found field {} on non-composite type {}",
-                            operation_field, tail_type_pos,
+                            "Unexpectedly found field {operation_field} on non-composite type {tail_type_pos}",
                         )))
                     }
                 }
@@ -1684,42 +1677,38 @@ impl OpGraphPath {
                         let type_condition_pos = supergraph_schema.get_type(type_condition_name)?;
                         let abstract_type_condition_pos: Option<AbstractTypeDefinitionPosition> =
                             type_condition_pos.clone().try_into().ok();
-                        if let Some(type_condition_pos) = abstract_type_condition_pos {
-                            if supergraph_schema
+                        if let Some(type_condition_pos) = abstract_type_condition_pos
+                            && supergraph_schema
                                 .possible_runtime_types(type_condition_pos.into())?
                                 .contains(tail_type_pos)
-                            {
-                                debug!("Type is a super-type of the current type. No edge to take");
-                                // Type condition is applicable on the tail type, so the types are
-                                // already exploded but the condition can reference types from the
-                                // supergraph that are not present in the local subgraph.
-                                //
-                                // If the operation element has applied directives we need to
-                                // convert it to an inline fragment without type condition,
-                                // otherwise we ignore the fragment altogether.
-                                if operation_inline_fragment.directives.is_empty() {
-                                    return Ok((Some(vec![self.clone().into()]), None));
-                                }
-                                let operation_inline_fragment = InlineFragment {
-                                    schema: self
-                                        .graph
-                                        .schema_by_source(&tail_weight.source)?
-                                        .clone(),
-                                    parent_type_position: tail_type_pos.clone().into(),
-                                    type_condition_position: None,
-                                    directives: operation_inline_fragment.directives.clone(),
-                                    selection_id: SelectionId::new(),
-                                };
-                                let defer_directive_arguments =
-                                    operation_inline_fragment.defer_directive_arguments()?;
-                                let fragment_path = self.add(
-                                    operation_inline_fragment.into(),
-                                    None,
-                                    ConditionResolution::no_conditions(),
-                                    defer_directive_arguments,
-                                )?;
-                                return Ok((Some(vec![fragment_path.into()]), None));
+                        {
+                            debug!("Type is a super-type of the current type. No edge to take");
+                            // Type condition is applicable on the tail type, so the types are
+                            // already exploded but the condition can reference types from the
+                            // supergraph that are not present in the local subgraph.
+                            //
+                            // If the operation element has applied directives we need to
+                            // convert it to an inline fragment without type condition,
+                            // otherwise we ignore the fragment altogether.
+                            if operation_inline_fragment.directives.is_empty() {
+                                return Ok((Some(vec![self.clone().into()]), None));
                             }
+                            let operation_inline_fragment = InlineFragment {
+                                schema: self.graph.schema_by_source(&tail_weight.source)?.clone(),
+                                parent_type_position: tail_type_pos.clone().into(),
+                                type_condition_position: None,
+                                directives: operation_inline_fragment.directives.clone(),
+                                selection_id: SelectionId::new(),
+                            };
+                            let defer_directive_arguments =
+                                operation_inline_fragment.defer_directive_arguments()?;
+                            let fragment_path = self.add(
+                                operation_inline_fragment.into(),
+                                None,
+                                ConditionResolution::no_conditions(),
+                                defer_directive_arguments,
+                            )?;
+                            return Ok((Some(vec![fragment_path.into()]), None));
                         }
 
                         if self.tail_is_interface_object()? {
@@ -1772,8 +1761,7 @@ impl OpGraphPath {
                     _ => {
                         // We shouldn't have a fragment on a non-composite type.
                         Err(FederationError::internal(format!(
-                            "Unexpectedly found inline fragment {} on non-composite type {}",
-                            operation_inline_fragment, tail_type_pos,
+                            "Unexpectedly found inline fragment {operation_inline_fragment} on non-composite type {tail_type_pos}",
                         )))
                     }
                 }
@@ -2194,8 +2182,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
                         // exited the method early).
                         if advance_options.is_empty() {
                             return Err(FederationError::internal(format!(
-                                "Unexpected empty options after non-collecting path {} for {}",
-                                path_with_non_collecting_edges, operation_element,
+                                "Unexpected empty options after non-collecting path {path_with_non_collecting_edges} for {operation_element}",
                             )));
                         }
                         // There is a special case we can deal with now. Namely, suppose we have a
@@ -2302,6 +2289,7 @@ pub(crate) fn create_initial_options(
     excluded_edges: ExcludedDestinations,
     excluded_conditions: ExcludedConditions,
     override_conditions: &OverrideConditions,
+    initial_subgraph_constraint: Option<Arc<str>>,
     disabled_subgraphs: &IndexSet<Arc<str>>,
 ) -> Result<Vec<SimultaneousPathsWithLazyIndirectPaths>, FederationError> {
     let initial_paths = SimultaneousPaths::from(initial_path);
@@ -2323,8 +2311,18 @@ pub(crate) fn create_initial_options(
             .paths
             .iter()
             .cloned()
-            .map(SimultaneousPaths::from)
-            .collect();
+            .map(|path| {
+                let Some(initial_subgraph_constraint) = &initial_subgraph_constraint else {
+                    return Ok::<_, FederationError>(Some(path));
+                };
+                let tail_weight = path.graph.node_weight(path.tail)?;
+                Ok(if &tail_weight.source == initial_subgraph_constraint {
+                    Some(path)
+                } else {
+                    None
+                })
+            })
+            .process_results(|iter| iter.flatten().map(SimultaneousPaths::from).collect())?;
         Ok(lazy_initial_path.create_lazy_options(options, initial_context))
     } else {
         Ok(vec![lazy_initial_path])

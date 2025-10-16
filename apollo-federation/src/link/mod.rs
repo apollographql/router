@@ -192,13 +192,13 @@ impl Import {
                         alias: alias.map(Name::new).transpose()?,
                     })
                 } else {
-                    if let Some(alias) = &alias {
-                        if alias.starts_with('@') {
-                            return Err(LinkError::BootstrapError(format!(
-                                r#"in "{}", invalid alias '{alias}' for import name '{element}': should not start with '@' (or, if {element} is a directive, then the name should start with '@')"#,
-                                value.serialize().no_indent()
-                            )));
-                        }
+                    if let Some(alias) = &alias
+                        && alias.starts_with('@')
+                    {
+                        return Err(LinkError::BootstrapError(format!(
+                            r#"in "{}", invalid alias '{alias}' for import name '{element}': should not start with '@' (or, if {element} is a directive, then the name should start with '@')"#,
+                            value.serialize().no_indent()
+                        )));
                     }
                     Ok(Import {
                         element: Name::new(element)?,
@@ -433,18 +433,18 @@ impl fmt::Display for Link {
         let alias = self
             .spec_alias
             .as_ref()
-            .map(|a| format!(r#", as: "{}""#, a))
+            .map(|a| format!(r#", as: "{a}""#))
             .unwrap_or("".to_string());
         let purpose = self
             .purpose
             .as_ref()
-            .map(|p| format!(r#", for: {}"#, p))
+            .map(|p| format!(r#", for: {p}"#))
             .unwrap_or("".to_string());
         write!(f, r#"@link(url: "{}"{alias}{imports}{purpose})"#, self.url)
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LinkedElement {
     pub link: Arc<Link>,
     pub import: Option<Arc<Import>>,
@@ -457,6 +457,7 @@ pub struct LinksMetadata {
     pub(crate) by_name_in_schema: IndexMap<Name, Arc<Link>>,
     pub(crate) types_by_imported_name: IndexMap<Name, (Arc<Link>, Arc<Import>)>,
     pub(crate) directives_by_imported_name: IndexMap<Name, (Arc<Link>, Arc<Import>)>,
+    pub(crate) directives_by_original_name: IndexMap<Name, (Arc<Link>, Arc<Import>)>,
 }
 
 impl LinksMetadata {

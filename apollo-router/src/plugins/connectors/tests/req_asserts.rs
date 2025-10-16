@@ -52,37 +52,37 @@ impl Matcher {
     }
 
     fn matches(&self, request: &wiremock::Request, index: usize) -> Result<(), String> {
-        if let Some(method) = self.method.as_ref() {
-            if method != &request.method.to_string() {
-                return Err(format!(
-                    "[Request {index}]: Expected method {method}, got {}",
-                    request.method
-                ));
-            }
+        if let Some(method) = self.method.as_ref()
+            && method != &request.method.to_string()
+        {
+            return Err(format!(
+                "[Request {index}]: Expected method {method}, got {}",
+                request.method
+            ));
         }
 
-        if let Some(path) = self.path.as_ref() {
-            if path != request.url.path() {
-                return Err(format!(
-                    "[Request {index}]: Expected path {path}, got {}",
-                    request.url.path()
-                ));
-            }
+        if let Some(path) = self.path.as_ref()
+            && path != request.url.path()
+        {
+            return Err(format!(
+                "[Request {index}]: Expected path {path}, got {}",
+                request.url.path()
+            ));
         }
 
-        if let Some(query) = self.query.as_ref() {
-            if query != request.url.query().unwrap_or_default() {
-                return Err(format!(
-                    "[Request {index}]: Expected query {query}, got {}",
-                    request.url.query().unwrap_or_default()
-                ));
-            }
+        if let Some(query) = self.query.as_ref()
+            && query != request.url.query().unwrap_or_default()
+        {
+            return Err(format!(
+                "[Request {index}]: Expected query {query}, got {}",
+                request.url.query().unwrap_or_default()
+            ));
         }
 
-        if let Some(body) = self.body.as_ref() {
-            if body != &request.body_json::<serde_json::Value>().unwrap() {
-                return Err(format!("[Request {index}]: incorrect body"));
-            }
+        if let Some(body) = self.body.as_ref()
+            && body != &request.body_json::<serde_json::Value>().unwrap()
+        {
+            return Err(format!("[Request {index}]: incorrect body"));
         }
 
         for (name, expected) in self.headers.iter() {
@@ -190,7 +190,7 @@ impl Plan {
                             continue 'requests;
                         }
                     }
-                    panic!("No plan matched request {:?}", request);
+                    panic!("No plan matched request {request:?}");
                 }
             }
         }

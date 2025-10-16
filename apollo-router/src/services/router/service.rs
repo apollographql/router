@@ -772,7 +772,7 @@ impl RouterService {
 
                     attrs.push(KeyValue::new(
                         HTTP_REQUEST_HEADERS,
-                        opentelemetry::Value::String(format!("{:?}", headers).into()),
+                        opentelemetry::Value::String(format!("{headers:?}").into()),
                     ));
                     attrs.push(KeyValue::new(
                         HTTP_REQUEST_METHOD,
@@ -821,6 +821,8 @@ pub(crate) struct RouterCreator {
     pub(crate) supergraph_creator: Arc<SupergraphCreator>,
     sb: Buffer<router::Request, BoxFuture<'static, router::ServiceResult>>,
     pipeline_handle: Arc<PipelineHandle>,
+    /// The configuration used to create this router, stored for hot reload previous config extraction
+    pub(crate) configuration: Arc<Configuration>,
 }
 
 impl ServiceFactory<router::Request> for RouterCreator {
@@ -914,6 +916,7 @@ impl RouterCreator {
             supergraph_creator,
             sb,
             pipeline_handle: Arc::new(pipeline_handle),
+            configuration,
         })
     }
 

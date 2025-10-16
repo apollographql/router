@@ -22,6 +22,7 @@ use crate::connectors::JSONSelection;
 use crate::connectors::Namespace;
 use crate::connectors::id::ConnectedElement;
 use crate::connectors::id::ObjectCategory;
+use crate::connectors::json_selection::VarPaths;
 use crate::connectors::string_template::Expression;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
@@ -85,6 +86,7 @@ impl<'schema> Context<'schema> {
             } => {
                 let mut var_lookup: IndexMap<Namespace, Shape> = [
                     (Namespace::Args, shape_for_arguments(field_def)),
+                    // TODO Should these be Dict<Unknown> instead of Unknown?
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Request, REQUEST_SHAPE.clone()),
@@ -371,7 +373,7 @@ fn resolve_shape(
             }
             Ok(Shape::all(inners, []))
         }
-        ShapeCase::Name(name, key) => {
+        ShapeCase::Name(name, subpath) => {
             let mut resolved = if name.value == "$root" {
                 // For response mapping, $root (aka the response body) is allowed so we will exit out early here
                 // However, $root is not allowed for requests so we will error below
@@ -379,18 +381,63 @@ fn resolve_shape(
                     return Ok(Shape::unknown([]));
                 }
 
-                let mut key_str = key.iter().map(|key| key.to_string()).join(".");
-                if !key_str.is_empty() {
-                    key_str = format!("`{key_str}` ");
+                // This path implicitly starts with the $root variable, and may
+                // have a prefix like $root.*.foo or even $root?.**.foo. Since
+                // we want the error message to focus on the foo identifier, we
+                // skip not only the $root base name but any non-key/index path
+                // elements, like ?, .*, and .**.
+                let mut key_str = String::new();
+                let mut skipping = true;
+                for key in subpath.iter() {
+                    if skipping
+                        && matches!(
+                            key.value,
+                            NamedShapePathKey::AnyIndex
+                                | NamedShapePathKey::AnyField
+                                | NamedShapePathKey::Question
+                                | NamedShapePathKey::NotNone
+                        )
+                    {
+                        continue;
+                    } else {
+                        key_str.push_str(key.to_string().as_str());
+                        // We only skip until we stop skipping, and then all key
+                        // variants become fair game.
+                        skipping = false;
+                    }
                 }
+                if key_str.is_empty() {
+                    // If we ended up converting a path like $ to $root and then
+                    // losing $root due to the logic above, fall back to
+                    // printing the whole path for clarity/debuggability.
+                    key_str = shape.to_string();
+                } else if key_str.starts_with('.') {
+                    // Remove initial . from field keys
+                    key_str.remove(0);
+                }
+                key_str = format!("`{key_str}` ");
+
+                let locals_suffix = {
+                    let local_vars = expression.expression.local_var_names();
+                    if local_vars.is_empty() {
+                        "".to_string()
+                    } else {
+                        format!(
+                            ", {}",
+                            local_vars.into_iter().collect::<Vec<_>>().join(", ")
+                        )
+                    }
+                };
+
                 return Err(Message {
                     code: context.code,
                     message: format!(
-                        "{key_str}must start with one of {namespaces}",
+                        "{key_str}must start with one of {namespaces}{locals_suffix}",
                         namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", "),
                     ),
                     locations: transform_locations(
-                        key.first()
+                        subpath
+                            .first()
                             .map(|key| &key.locations)
                             .unwrap_or(&shape.locations),
                         context,
@@ -432,16 +479,23 @@ fn resolve_shape(
             };
             resolved.locations.extend(shape.locations.iter().cloned());
             let mut path = name.value.clone();
-            for key in key {
+            for key in subpath {
                 let child = resolved.child(key.clone());
-                if child.is_none() {
+                if child.is_none() || child.is_never() {
+                    let key_string = key.to_string();
+                    let key_without_dot = key_string.trim_start_matches('.');
+
                     let message = match key.value {
                         NamedShapePathKey::AnyIndex | NamedShapePathKey::Index(_) => {
                             format!("`{path}` is not an array or string")
                         }
 
                         NamedShapePathKey::AnyField | NamedShapePathKey::Field(_) => {
-                            format!("`{path}` doesn't have a field named `{key}`")
+                            format!("`{path}` doesn't have a field named `{key_without_dot}`")
+                        }
+
+                        NamedShapePathKey::Question | NamedShapePathKey::NotNone => {
+                            format!("`{path}{key}` evaluated to nothing")
                         }
                     };
                     return Err(Message {
@@ -451,7 +505,7 @@ fn resolve_shape(
                     });
                 }
                 resolved = child;
-                path = format!("{path}.{key}");
+                path = format!("{path}{key}");
             }
             resolve_shape(&resolved, context, expression)
         }
@@ -572,7 +626,7 @@ pub(crate) fn parse_mapping_argument(
         });
     };
 
-    let selection = match JSONSelection::parse(string) {
+    let selection = match JSONSelection::parse_with_spec(string, schema.connect_link.spec) {
         Ok(selection) => selection,
         Err(e) => {
             return Err(Message {
@@ -612,12 +666,13 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+    use crate::connectors::ConnectSpec;
     use crate::connectors::JSONSelection;
     use crate::connectors::validation::ConnectLink;
 
-    fn expression(selection: &str) -> Expression {
+    fn expression(selection: &str, spec: ConnectSpec) -> Expression {
         Expression {
-            expression: JSONSelection::parse(selection).unwrap(),
+            expression: JSONSelection::parse_with_spec(selection, spec).unwrap(),
             location: 0..0,
         }
     }
@@ -625,7 +680,7 @@ mod tests {
     const SCHEMA: &str = r#"
         extend schema
           @link(
-            url: "https://specs.apollo.dev/connect/v0.1"
+            url: "https://specs.apollo.dev/connect/CONNECT_SPEC_VERSION",
             import: ["@connect", "@source"]
           )
           @source(name: "v2", http: { baseURL: "http://127.0.0.1" })
@@ -661,18 +716,26 @@ mod tests {
         }
     "#;
 
-    fn schema_for(selection: &str) -> String {
-        SCHEMA.replace("EXPRESSION", selection)
+    fn schema_for(selection: &str, spec: ConnectSpec) -> String {
+        let version_string = format!("v{}", spec.as_str());
+        SCHEMA
+            .replace("CONNECT_SPEC_VERSION", version_string.as_str())
+            .replace("EXPRESSION", selection)
     }
 
-    fn validate_with_context(selection: &str, expected: Shape) -> Result<(), Message> {
-        let schema_str = schema_for(selection);
+    fn validate_with_context(
+        selection: &str,
+        expected: Shape,
+        spec: ConnectSpec,
+    ) -> Result<(), Message> {
+        let schema_str = schema_for(selection, spec);
         let schema = Schema::parse(&schema_str, "schema").unwrap();
         let object = schema.get_object("Query").unwrap();
         let field = &object.fields["aField"];
         let directive = field.directives.get("connect").unwrap();
         let schema_info =
             SchemaInfo::new(&schema, &schema_str, ConnectLink::new(&schema).unwrap()?);
+        debug_assert_eq!(schema_info.connect_link.spec, spec);
         let expr_string = directive
             .argument_by_name("http", &schema)
             .unwrap()
@@ -692,12 +755,16 @@ mod tests {
         };
         let context =
             Context::for_connect_request(&schema_info, coordinate, &expr_string, Code::InvalidUrl);
-        validate(&expression(selection), &context, &expected)
+        validate(&expression(selection, spec), &context, &expected)
     }
 
     /// Given a full expression replaced in `{EXPRESSION}` above, find the line/col of a substring.
-    fn location_of_expression(part: &str, full_expression: &str) -> Range<LineColumn> {
-        let schema = schema_for(full_expression);
+    fn location_of_expression(
+        part: &str,
+        full_expression: &str,
+        spec: ConnectSpec,
+    ) -> Range<LineColumn> {
+        let schema = schema_for(full_expression, spec);
         let line_col_lookup = LineColLookup::new(&schema);
         let expression_offset = schema.find(full_expression).unwrap() - 1;
         let start_offset = expression_offset + full_expression.find(part).unwrap();
@@ -747,8 +814,16 @@ mod tests {
     #[case::first("$args.array->first.bool")]
     #[case::last("$args.array->last.bool")]
     #[case::multi_level_input("$args.multiLevel.inner.nested")]
+    #[case::entries_when_type_unknown("$config.something->entries->first.value")]
+    #[case::methods_with_unknown_input(r#"$config->get("something")->slice(0, 1)"#)]
     fn valid_expressions(#[case] selection: &str) {
-        validate_with_context(selection, scalars()).unwrap();
+        // If this fails, another ConnectSpec version has probably been added,
+        // and should be accounted for in the loop below.
+        assert_eq!(ConnectSpec::next(), ConnectSpec::V0_3);
+
+        for spec in [ConnectSpec::V0_1, ConnectSpec::V0_2, ConnectSpec::V0_3] {
+            validate_with_context(selection, scalars(), spec).unwrap();
+        }
     }
 
     #[rstest]
@@ -763,20 +838,78 @@ mod tests {
     #[case::unknown_field_on_object("$args.object.unknown")]
     #[case::this_on_query("$this.something")]
     #[case::bare_field_no_var("something")]
-    // TODO: Re-enable these tests when method type checking is back
-    // #[case::echo_invalid_constants("$->echo([])")]
-    // #[case::map_scalar("$(1)->map(@)")]
-    // #[case::map_array("$([])->map(@)")]
-    // #[case::match_some_invalid_values("$config->match([1, 1], [2, {}])")]
-    // #[case::slice_of_array("$([])->slice(0, 2)")]
-    // #[case::entries("$config.something->entries")]
-    // #[case::map_array("$args.array->map(@)")]
-    // #[case::slice_array("$args.array->slice(0, 2)")]
-    // #[case::entries_scalar("$args.int->entries")]
-    // #[case::first("$args.array->first")]
-    // #[case::last("$args.array->last")]
-    fn invalid_expressions(#[case] selection: &str) {
-        let err = validate_with_context(selection, scalars());
+    fn common_invalid_expressions(#[case] selection: &str) {
+        // If this fails, another ConnectSpec version has probably been added,
+        // and should be accounted for in the loop below.
+        assert_eq!(ConnectSpec::next(), ConnectSpec::V0_3);
+
+        for spec in [ConnectSpec::V0_1, ConnectSpec::V0_2, ConnectSpec::V0_3] {
+            let err = validate_with_context(selection, scalars(), spec);
+            assert!(err.is_err());
+            assert!(
+                !err.err().unwrap().locations.is_empty(),
+                "Every error should have at least one location"
+            );
+        }
+    }
+
+    #[rstest]
+    // These cases require method shape checking, which was enabled in v0.3:
+    #[case::echo_invalid_constants("$->echo([])")]
+    #[case::map_scalar("$(1)->map(@)")]
+    #[case::map_array("$([])->map(@)")]
+    #[case::match_some_invalid_values("$config->match([1, 1], [2, {}])")]
+    #[case::slice_of_array("$([])->slice(0, 2)")]
+    #[case::entries("$config.something->entries")]
+    #[case::map_array("$args.array->map(@)")]
+    #[case::slice_array("$args.array->slice(0, 2)")]
+    #[case::entries_scalar("$args.int->entries")]
+    #[case::first("$args.array->first")]
+    #[case::last("$args.array->last")]
+    fn invalid_expressions_with_method_shape_checking(#[case] selection: &str) {
+        // If this fails, another ConnectSpec version has probably been added,
+        // and should probably be tested here in addition to v0.3.
+        assert_eq!(ConnectSpec::next(), ConnectSpec::V0_3);
+
+        let spec = ConnectSpec::V0_3;
+        let err = validate_with_context(selection, scalars(), spec);
+        assert!(err.is_err());
+        assert!(
+            !err.err().unwrap().locations.is_empty(),
+            "Every error should have at least one location"
+        );
+    }
+
+    #[rstest]
+    #[case::args_object_as_echo_bool("$args.object->as($o)->echo($o.bool)")]
+    #[case::args_object_as_echo_bool("$args.object->as($o)->echo(@.bool->eq($o.bool))")]
+    #[case::args_object_as_echo_bool(
+        "$->as($true, false->not)->as($false, true->not)->echo($true->or($false))"
+    )]
+    #[case::method_math("$([1, 2, 3])->as($arr)->first->add($arr->last)")]
+    #[case::redundant_as("$args.object->as($o)->as($o)->echo($o.bool)")]
+    #[case::unnecessary_as("$args.object->as($obj)->as($o)->echo($o.bool)")]
+    #[case::as_int_addition("$args.int->as($i)->add(1, $i, $i)")]
+    #[case::as_string_concat(
+        "$args.string->as($s, @->slice(0, 100))->echo({ full: @, first100: $s })->jsonStringify"
+    )]
+    fn valid_as_var_bindings(#[case] selection: &str) {
+        let spec = ConnectSpec::V0_3;
+        validate_with_context(selection, scalars(), spec).unwrap();
+    }
+
+    #[rstest]
+    #[case::args_object_as_echo_bool_var_mismatch("$args.object->as($obj)->echo($o.bool)")]
+    #[case::args_object_as_echo_missing_string("$args.object->as($o)->echo($o.string)")]
+    #[case::args_object_as_echo_missing_int("$args.object->as($o)->echo($o.int)")]
+    #[case::as_without_args("$args.object->as")]
+    #[case::as_with_no_args("$args.object->as()")]
+    #[case::as_with_non_variable("$args.object->as(true)")]
+    #[case::as_with_wrong_args("$args.object->as(1, 2, 3)")]
+    #[case::as_with_reused_var("$([1, 2, 3])->as($o, $o)->echo($o)")]
+    fn invalid_expressions_with_as_var_binding(#[case] selection: &str) {
+        let spec = ConnectSpec::V0_3;
+        let err = validate_with_context(selection, scalars(), spec);
         assert!(err.is_err());
         assert!(
             !err.err().unwrap().locations.is_empty(),
@@ -785,11 +918,23 @@ mod tests {
     }
 
     #[test]
+    fn coalescing() {
+        let spec = ConnectSpec::V0_3;
+        validate_with_context(
+            r#"$($args.string ?? "unknown error")"#,
+            Shape::string([]),
+            spec,
+        )
+        .expect("coalescing type checks in expressions");
+    }
+
+    #[test]
     fn bare_field_with_path() {
         let selection = "something.blah";
-        let err =
-            validate_with_context(selection, scalars()).expect_err("missing property is unknown");
-        let expected_location = location_of_expression("something", selection);
+        let err = validate_with_context(selection, scalars(), ConnectSpec::latest())
+            .expect_err("missing property is unknown");
+        let expected_location =
+            location_of_expression("something", selection, ConnectSpec::latest());
         assert!(
             err.message.contains("`something.blah`"),
             "{} didn't reference missing arg",
@@ -811,8 +956,9 @@ mod tests {
     #[test]
     fn object_in_url() {
         let selection = "$args.object";
-        let err = validate_with_context(selection, scalars()).expect_err("objects are not allowed");
-        let expected_location = location_of_expression("object", selection);
+        let err = validate_with_context(selection, scalars(), ConnectSpec::latest())
+            .expect_err("objects are not allowed");
+        let expected_location = location_of_expression("object", selection, ConnectSpec::latest());
         assert!(
             err.locations.contains(&expected_location),
             "The expected location {:?} wasn't included in {:?}",
@@ -824,8 +970,8 @@ mod tests {
     #[test]
     fn nested_unknown_property() {
         let selection = "$args.multiLevel.inner.unknown";
-        let err =
-            validate_with_context(selection, scalars()).expect_err("missing property is unknown");
+        let err = validate_with_context(selection, scalars(), ConnectSpec::latest())
+            .expect_err("missing property is unknown");
         assert!(
             err.message.contains("`MultiLevel`"),
             "{} didn't reference type",
@@ -837,8 +983,11 @@ mod tests {
             err.message
         );
         assert!(
-            err.locations
-                .contains(&location_of_expression("unknown", selection)),
+            err.locations.contains(&location_of_expression(
+                "unknown",
+                selection,
+                ConnectSpec::latest()
+            )),
             "The relevant piece of the expression wasn't included in {:?}",
             err.locations
         );
@@ -847,7 +996,7 @@ mod tests {
     #[test]
     fn unknown_var_in_scalar() {
         let selection = r#"$({"something": $blahblahblah})"#;
-        let err = validate_with_context(selection, Shape::unknown([]))
+        let err = validate_with_context(selection, Shape::unknown([]), ConnectSpec::latest())
             .expect_err("unknown variable is unknown");
         assert!(
             err.message.contains("`$blahblahblah`"),
@@ -855,8 +1004,11 @@ mod tests {
             err.message
         );
         assert!(
-            err.locations
-                .contains(&location_of_expression("$blahblahblah", selection)),
+            err.locations.contains(&location_of_expression(
+                "$blahblahblah",
+                selection,
+                ConnectSpec::latest()
+            )),
             "The relevant piece of the expression wasn't included in {:?}",
             err.locations
         );
@@ -865,7 +1017,7 @@ mod tests {
     #[test]
     fn subselection_of_literal_with_missing_field() {
         let selection = r#"$({"a": 1}) { b }"#;
-        let err = validate_with_context(selection, Shape::unknown([]))
+        let err = validate_with_context(selection, Shape::unknown([]), ConnectSpec::latest())
             .expect_err("invalid property is an error");
         assert!(
             err.message.contains("`b`"),
@@ -873,8 +1025,11 @@ mod tests {
             err.message
         );
         assert!(
-            err.locations
-                .contains(&location_of_expression("b", selection)),
+            err.locations.contains(&location_of_expression(
+                "b",
+                selection,
+                ConnectSpec::latest()
+            )),
             "The relevant piece of the expression wasn't included in {:?}",
             err.locations
         );
@@ -883,7 +1038,7 @@ mod tests {
     #[test]
     fn subselection_of_literal_in_array_with_missing_field() {
         let selection = r#"$([{"a": 1}]) { b }"#;
-        let err = validate_with_context(selection, Shape::unknown([]))
+        let err = validate_with_context(selection, Shape::unknown([]), ConnectSpec::latest())
             .expect_err("invalid property is an error");
         assert!(
             err.message.contains("`b`"),
@@ -891,8 +1046,11 @@ mod tests {
             err.message
         );
         assert!(
-            err.locations
-                .contains(&location_of_expression("b", selection)),
+            err.locations.contains(&location_of_expression(
+                "b",
+                selection,
+                ConnectSpec::latest()
+            )),
             "The relevant piece of the expression wasn't included in {:?}",
             err.locations
         );

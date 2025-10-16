@@ -214,20 +214,13 @@ async fn fetch_chunk(http_client: Client, chunk_url: &String) -> Result<SignedUr
         .await
         .and_then(|r| r.error_for_status())
         .map_err(|e| -> BoxError {
-            format!(
-                "error fetching persisted queries manifest chunk from {}: {}",
-                chunk_url, e
-            )
-            .into()
+            format!("error fetching persisted queries manifest chunk from {chunk_url}: {e}").into()
         })?
         .json::<SignedUrlChunk>()
         .await
         .map_err(|e| -> BoxError {
-            format!(
-                "error reading body of persisted queries manifest chunk from {}: {}",
-                chunk_url, e
-            )
-            .into()
+            format!("error reading body of persisted queries manifest chunk from {chunk_url}: {e}")
+                .into()
         })?;
 
     chunk.validate()
@@ -338,11 +331,7 @@ async fn load_local_manifests(paths: Vec<String>) -> Result<PersistedQueryManife
 
     for path in paths.iter() {
         let raw_file_contents = read_to_string(path).await.map_err(|e| -> BoxError {
-            format!(
-                "Failed to read persisted query list file at path: {}, {}",
-                path, e
-            )
-            .into()
+            format!("Failed to read persisted query list file at path: {path}, {e}").into()
         })?;
 
         let chunk = SignedUrlChunk::parse_and_validate(&raw_file_contents)?;

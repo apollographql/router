@@ -1,11 +1,11 @@
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
-use shape::location::SourceId;
 
+use crate::connectors::ConnectSpec;
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
@@ -29,6 +29,7 @@ fn lt_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     let Some(first_arg) = method_args.and_then(|args| args.args.first()) else {
         return (
@@ -40,25 +41,26 @@ fn lt_method(
                 ),
                 input_path.to_vec(),
                 method_name.range(),
+                spec,
             )],
         );
     };
 
-    let (value_opt, arg_errors) = first_arg.apply_to_path(data, vars, input_path);
+    let (value_opt, arg_errors) = first_arg.apply_to_path(data, vars, input_path, spec);
     let mut apply_to_errors = arg_errors;
     // We have to do this because Value doesn't implement PartialOrd
     let matches = value_opt.and_then(|value| {
         match (data, &value) {
             // Number comparisons
             (JSON::Number(left), JSON::Number(right)) => {
-                let left = match number_value_as_float(left, method_name, input_path) {
+                let left = match number_value_as_float(left, method_name, input_path, spec) {
                     Ok(f) => f,
                     Err(err) => {
                         apply_to_errors.push(err);
                         return None;
                     }
                 };
-                let right = match number_value_as_float(right, method_name, input_path) {
+                let right = match number_value_as_float(right, method_name, input_path, spec) {
                     Ok(f) => f,
                     Err(err) => {
                         apply_to_errors.push(err);
@@ -79,6 +81,7 @@ fn lt_method(
                     ),
                     input_path.to_vec(),
                     method_name.range(),
+                    spec,
                 ));
 
                 None
@@ -91,12 +94,11 @@ fn lt_method(
 
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn lt_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
     let arg_count = method_args.map(|args| args.args.len()).unwrap_or_default();
     if arg_count > 1 {
@@ -112,27 +114,22 @@ fn lt_shape(
     let Some(first_arg) = method_args.and_then(|args| args.args.first()) else {
         return Shape::error(
             format!("Method ->{} requires one argument", method_name.as_ref()),
-            method_name.shape_location(source_id),
+            method_name.shape_location(context.source_id()),
         );
     };
 
-    let arg_shape = first_arg.compute_output_shape(
-        input_shape.clone(),
-        dollar_shape,
-        named_var_shapes,
-        source_id,
-    );
+    let arg_shape = first_arg.compute_output_shape(context, input_shape.clone(), dollar_shape);
 
     if is_comparable_shape_combination(&arg_shape, &input_shape) {
-        Shape::bool(method_name.shape_location(source_id))
+        Shape::bool(method_name.shape_location(context.source_id()))
     } else {
         Shape::error_with_partial(
             format!(
                 "Method ->{} can only compare two numbers or two strings. Found {input_shape} < {arg_shape}",
                 method_name.as_ref()
             ),
-            Shape::bool(method_name.shape_location(source_id)),
-            method_name.shape_location(source_id),
+            Shape::bool(method_name.shape_location(context.source_id())),
+            method_name.shape_location(context.source_id()),
         )
     }
 }
@@ -141,6 +138,8 @@ fn lt_shape(
 mod method_tests {
     use serde_json_bytes::json;
 
+    use crate::connectors::ConnectSpec;
+    use crate::connectors::json_selection::ApplyToError;
     use crate::selection;
 
     #[test]
@@ -356,12 +355,33 @@ mod method_tests {
                 .contains("Method ->lt requires exactly one argument")
         );
     }
+
+    #[rstest::rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn lt_should_return_none_when_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!("$.a->lt($.missing)", spec).apply_to(&json!({
+                "a": 5,
+            })),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Property .missing not found in object",
+                    "path": ["missing"],
+                    "range": [10, 17],
+                    "spec": spec.to_string(),
+                }))]
+            ),
+        );
+    }
 }
 
 #[cfg(test)]
 mod shape_tests {
     use serde_json::Number;
     use shape::location::Location;
+    use shape::location::SourceId;
 
     use super::*;
     use crate::connectors::json_selection::lit_expr::LitExpr;
@@ -376,12 +396,11 @@ mod shape_tests {
     fn get_shape(args: Vec<WithRange<LitExpr>>, input: Shape) -> Shape {
         let location = get_location();
         lt_shape(
+            &ShapeContext::new(location.source_id),
             &WithRange::new("lt".to_string(), Some(location.span)),
             Some(&MethodArgs { args, range: None }),
             input,
             Shape::none(),
-            &IndexMap::default(),
-            &location.source_id,
         )
     }
 
@@ -456,12 +475,11 @@ mod shape_tests {
         let location = get_location();
         assert_eq!(
             lt_shape(
+                &ShapeContext::new(location.source_id),
                 &WithRange::new("lt".to_string(), Some(location.span)),
                 None,
                 Shape::string([]),
                 Shape::none(),
-                &IndexMap::default(),
-                &location.source_id
             ),
             Shape::error(
                 "Method ->lt requires one argument".to_string(),

@@ -111,7 +111,7 @@ where
                 .serve_connection_with_upgrades(io, svc)
                 .await
             {
-                eprintln!("server error: {}", err);
+                eprintln!("server error: {err}");
             }
         });
     }
@@ -136,7 +136,7 @@ where
                 .serve_connection_with_upgrades(io, svc)
                 .await
             {
-                eprintln!("server error: {}", err);
+                eprintln!("server error: {err}");
             }
         });
     }
@@ -852,7 +852,7 @@ async fn test_unix_socket() {
     async fn handle(mut req: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
         let data = router::body::into_bytes(req.body_mut()).await.unwrap();
         let body = std::str::from_utf8(&data).unwrap();
-        println!("{:?}", body);
+        println!("{body:?}");
         let response = http::Response::builder()
             .status(StatusCode::OK)
             .header(CONTENT_TYPE, "application/json")

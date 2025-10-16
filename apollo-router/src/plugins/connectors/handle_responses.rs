@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use apollo_federation::connectors::Connector;
-use apollo_federation::connectors::ProblemLocation;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
-use apollo_federation::connectors::runtime::debug::ConnectorDebugHttpRequest;
+use apollo_federation::connectors::runtime::debug::DebugRequest;
+use apollo_federation::connectors::runtime::debug::SelectionData;
 use apollo_federation::connectors::runtime::errors::Error;
 use apollo_federation::connectors::runtime::errors::RuntimeError;
 use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
@@ -12,16 +12,14 @@ use apollo_federation::connectors::runtime::key::ResponseKey;
 use apollo_federation::connectors::runtime::mapping::Problem;
 use apollo_federation::connectors::runtime::responses::HandleResponseError;
 use apollo_federation::connectors::runtime::responses::MappedResponse;
-use apollo_federation::connectors::runtime::responses::RawResponse;
+use apollo_federation::connectors::runtime::responses::deserialize_response;
 use apollo_federation::connectors::runtime::responses::handle_raw_response;
 use axum::body::HttpBody;
-use encoding_rs::Encoding;
-use encoding_rs::UTF_8;
-use http::header::CONTENT_LENGTH;
-use http::header::CONTENT_TYPE;
-use mime::Mime;
+use http::response::Parts;
+use http_body_util::BodyExt;
 use opentelemetry::KeyValue;
 use parking_lot::Mutex;
+use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 use tracing::Span;
 
@@ -41,7 +39,6 @@ use crate::plugins::telemetry::tracing::apollo_telemetry::emit_error_event;
 use crate::services::connect::Response;
 use crate::services::connector;
 use crate::services::fetch::AddSubgraphNameExt;
-use crate::services::router;
 
 // --- ERRORS ------------------------------------------------------------------
 
@@ -71,28 +68,20 @@ pub(crate) async fn process_response<T: HttpBody>(
     response_key: ResponseKey,
     connector: Arc<Connector>,
     context: &Context,
-    debug_request: (
-        Option<Box<ConnectorDebugHttpRequest>>,
-        Vec<(ProblemLocation, Problem)>,
-    ),
-    debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
+    debug_request: DebugRequest,
+    debug_context: Option<&Arc<Mutex<ConnectorContext>>>,
     supergraph_request: Arc<http::Request<crate::graphql::Request>>,
 ) -> connector::request_service::Response {
     let (mapped_response, result) = match result {
         // This occurs when we short-circuit the request when over the limit
         Err(error) => {
-            let raw = RawResponse::Error {
-                error: error.to_runtime_error(&connector, &response_key),
-                key: response_key,
-            };
             Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
             (
-                raw.map_error(
-                    &connector,
-                    context,
-                    debug_context,
-                    supergraph_request.headers(),
-                ),
+                MappedResponse::Error {
+                    error: error.to_runtime_error(&connector, &response_key),
+                    key: response_key,
+                    problems: Vec::new(),
+                },
                 Err(error),
             )
         }
@@ -103,45 +92,93 @@ pub(crate) async fn process_response<T: HttpBody>(
                 inner: parts.clone(),
             }));
 
+            let make_err = || {
+                let mut err = RuntimeError::new(
+                    "The server returned data in an unexpected format.".to_string(),
+                    &response_key,
+                );
+                err.subgraph_name = Some(connector.id.subgraph_name.clone());
+                err = err.with_code("CONNECTOR_RESPONSE_INVALID");
+                err.coordinate = Some(connector.id.coordinate());
+                err = err.extension(
+                    "http",
+                    Value::Object(Map::from_iter([(
+                        "status".into(),
+                        Value::Number(parts.status.as_u16().into()),
+                    )])),
+                );
+                err
+            };
+
+            let deserialized_body = body
+                .collect()
+                .await
+                .map_err(|_| ())
+                .and_then(|body| {
+                    let body = body.to_bytes();
+                    let raw = deserialize_response(&body, &parts.headers).map_err(|_| {
+                        if let Some(debug_context) = debug_context {
+                            debug_context.lock().push_invalid_response(
+                                debug_request.0.clone(),
+                                &parts,
+                                &body,
+                                &connector.error_settings,
+                                debug_request.1.clone(),
+                            );
+                        }
+                    });
+                    log_connectors_event(context, &body, &parts, response_key.clone(), &connector);
+                    raw
+                })
+                .map_err(|()| make_err());
+
             // If this errors, it will write to the debug context because it
             // has access to the raw bytes, so we can't write to it again
             // in any RawResponse::Error branches.
-            let raw = match deserialize_response(
-                body,
-                &parts,
-                connector.clone(),
-                context,
-                &response_key,
-                debug_context,
-                &debug_request,
-            )
-            .await
-            {
-                Ok(data) => RawResponse::Data {
-                    parts,
+            let mapped = match &deserialized_body {
+                Err(error) => MappedResponse::Error {
+                    error: error.clone(),
+                    key: response_key,
+                    problems: Vec::new(),
+                },
+                Ok(data) => handle_raw_response(
                     data,
-                    key: response_key,
-                    debug_request,
-                },
-                Err(error) => RawResponse::Error {
-                    error,
-                    key: response_key,
-                },
+                    &parts,
+                    response_key,
+                    &connector,
+                    context,
+                    supergraph_request.headers(),
+                ),
             };
 
-            let (mapped, is_success) = handle_raw_response(
-                raw,
-                &connector,
-                context,
-                debug_context,
-                supergraph_request.headers(),
-            );
+            if let Some(debug) = debug_context {
+                let mut debug_problems: Vec<Problem> = mapped.problems().to_vec();
+                debug_problems.extend(debug_request.1);
 
-            if is_success {
+                let selection_data = if let MappedResponse::Data { key, data, .. } = &mapped {
+                    Some(SelectionData {
+                        source: connector.selection.to_string(),
+                        transformed: key.selection().to_string(),
+                        result: Some(data.clone()),
+                    })
+                } else {
+                    None
+                };
+
+                debug.lock().push_response(
+                    debug_request.0,
+                    &parts,
+                    deserialized_body.ok().as_ref().unwrap_or(&Value::Null),
+                    selection_data,
+                    &connector.error_settings,
+                    debug_problems,
+                );
+            }
+            if matches!(mapped, MappedResponse::Data { .. }) {
                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
             } else {
                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-            };
+            }
 
             (mapped, result)
         }
@@ -195,49 +232,18 @@ pub(crate) fn aggregate_responses(
     })
 }
 
-/// Converts the response body to bytes and deserializes it into a json Value.
-/// This is the last time we have access to the original bytes, so it's the only
-/// opportunity to write the invalid response to the debug context.
-async fn deserialize_response<T: HttpBody>(
-    body: T,
-    parts: &http::response::Parts,
-    connector: Arc<Connector>,
+fn log_connectors_event(
     context: &Context,
-    response_key: &ResponseKey,
-    debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
-    debug_request: &(
-        Option<Box<ConnectorDebugHttpRequest>>,
-        Vec<(ProblemLocation, Problem)>,
-    ),
-) -> Result<Value, RuntimeError> {
-    use serde_json_bytes::*;
-
-    let make_err = || {
-        let mut err = RuntimeError::new(
-            "The server returned data in an unexpected format.".to_string(),
-            response_key,
-        );
-        err.subgraph_name = Some(connector.id.subgraph_name.clone());
-        err = err.with_code("CONNECTOR_RESPONSE_INVALID");
-        err.coordinate = Some(connector.id.coordinate());
-        err = err.extension(
-            "http",
-            Value::Object(Map::from_iter([(
-                "status".into(),
-                Value::Number(parts.status.as_u16().into()),
-            )])),
-        );
-        err
-    };
-
-    let body = &router::body::into_bytes(body)
-        .await
-        .map_err(|_| make_err())?;
-
+    body: &[u8],
+    parts: &Parts,
+    response_key: ResponseKey,
+    connector: &Connector,
+) {
     let log_response_level = context
         .extensions()
         .with_lock(|lock| lock.get::<ConnectorEventResponse>().cloned())
         .and_then(|event| {
+            // TODO: evaluate if this is still needed now that we're cloning the body anyway
             // Create a temporary response here so we can evaluate the condition. This response
             // is missing any information about the mapped response, because we don't have that
             // yet. This means that we cannot correctly evaluate any condition that relies on
@@ -254,7 +260,7 @@ async fn deserialize_response<T: HttpBody>(
                 })),
                 mapped_response: MappedResponse::Data {
                     data: Value::Null,
-                    key: response_key.clone(),
+                    key: response_key,
                     problems: vec![],
                 },
             };
@@ -271,9 +277,8 @@ async fn deserialize_response<T: HttpBody>(
         let headers = {
             let mut headers: indexmap::IndexMap<String, http::HeaderValue> = parts
                 .headers
-                .clone()
-                .into_iter()
-                .filter_map(|(name, val)| Some((name?.to_string(), val)))
+                .iter()
+                .map(|(name, val)| (name.to_string(), val.clone()))
                 .collect();
             headers.sort_keys();
             headers
@@ -283,7 +288,7 @@ async fn deserialize_response<T: HttpBody>(
 
         attrs.push(KeyValue::new(
             HTTP_RESPONSE_HEADERS,
-            opentelemetry::Value::String(format!("{:?}", headers).into()),
+            opentelemetry::Value::String(format!("{headers:?}").into()),
         ));
         attrs.push(KeyValue::new(
             HTTP_RESPONSE_STATUS,
@@ -295,11 +300,7 @@ async fn deserialize_response<T: HttpBody>(
         ));
         attrs.push(KeyValue::new(
             HTTP_RESPONSE_BODY,
-            opentelemetry::Value::String(
-                String::from_utf8(body.clone().to_vec())
-                    .unwrap_or_default()
-                    .into(),
-            ),
+            opentelemetry::Value::String(String::from_utf8_lossy(body).into_owned().into()),
         ));
 
         log_event(
@@ -308,76 +309,6 @@ async fn deserialize_response<T: HttpBody>(
             attrs,
             &format!("Response from connector {label:?}", label = connector.label),
         );
-    }
-
-    // If the body is obviously empty, don't try to parse it
-    if let Some(content_length) = parts
-        .headers
-        .get(CONTENT_LENGTH)
-        .and_then(|len| len.to_str().ok())
-        .and_then(|s| s.parse::<usize>().ok())
-    {
-        if content_length == 0 {
-            return Ok(Value::Null);
-        }
-    }
-
-    let content_type = parts
-        .headers
-        .get(CONTENT_TYPE)
-        .and_then(|h| h.to_str().ok()?.parse::<Mime>().ok());
-
-    if content_type.is_none()
-        || content_type
-            .as_ref()
-            .is_some_and(|ct| ct.subtype() == mime::JSON || ct.suffix() == Some(mime::JSON))
-    {
-        // Treat any JSON-y like content types as JSON
-        // Also, because the HTTP spec says we should effectively "guess" the content type if there is no content type (None), we're going to guess it is JSON if the server has not specified one
-        match serde_json::from_slice::<Value>(body) {
-            Ok(json_data) => Ok(json_data),
-            Err(_) => {
-                if let Some(debug_context) = debug_context {
-                    debug_context.lock().push_invalid_response(
-                        debug_request.0.clone(),
-                        parts,
-                        body,
-                        &connector.error_settings,
-                        debug_request.1.clone(),
-                    );
-                }
-                Err(make_err())
-            }
-        }
-    } else if content_type
-        .as_ref()
-        .is_some_and(|ct| ct.type_() == mime::TEXT && ct.subtype() == mime::PLAIN)
-    {
-        // Plain text we can't parse as JSON so we'll instead return it as a JSON string
-        // Before we can do that, we need to figure out the charset and attempt to decode the string
-        let encoding = content_type
-            .as_ref()
-            .and_then(|ct| Encoding::for_label(ct.get_param("charset")?.as_str().as_bytes()))
-            .unwrap_or(UTF_8);
-        let (decoded_body, _, had_errors) = encoding.decode(body);
-
-        if had_errors {
-            if let Some(debug_context) = debug_context {
-                debug_context.lock().push_invalid_response(
-                    debug_request.0.clone(),
-                    parts,
-                    body,
-                    &connector.error_settings,
-                    debug_request.1.clone(),
-                );
-            }
-            return Err(make_err());
-        }
-
-        Ok(Value::String(decoded_body.into_owned().into()))
-    } else {
-        // For any other content types, all we can do is treat it as a JSON null cause we don't know what it is
-        Ok(Value::Null)
     }
 }
 
@@ -388,18 +319,22 @@ mod tests {
     use apollo_compiler::Schema;
     use apollo_compiler::collections::IndexMap;
     use apollo_compiler::name;
+    use apollo_compiler::response::JsonValue;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
     use apollo_federation::connectors::Connector;
+    use apollo_federation::connectors::ConnectorErrorsSettings;
     use apollo_federation::connectors::EntityResolver;
     use apollo_federation::connectors::HTTPMethod;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::Label;
     use apollo_federation::connectors::Namespace;
     use apollo_federation::connectors::runtime::inputs::RequestInputs;
     use apollo_federation::connectors::runtime::key::ResponseKey;
     use insta::assert_debug_snapshot;
     use itertools::Itertools;
+    use serde_json_bytes::json;
 
     use crate::Context;
     use crate::graphql;
@@ -468,7 +403,7 @@ mod tests {
                 connector.clone(),
                 &Context::default(),
                 (None, Default::default()),
-                &None,
+                None,
                 supergraph_request.clone(),
             )
             .await
@@ -479,7 +414,7 @@ mod tests {
                 connector,
                 &Context::default(),
                 (None, Default::default()),
-                &None,
+                None,
                 supergraph_request,
             )
             .await
@@ -579,7 +514,7 @@ mod tests {
                 connector.clone(),
                 &Context::default(),
                 (None, Default::default()),
-                &None,
+                None,
                 supergraph_request.clone(),
             )
             .await
@@ -590,7 +525,7 @@ mod tests {
                 connector,
                 &Context::default(),
                 (None, Default::default()),
-                &None,
+                None,
                 supergraph_request,
             )
             .await
@@ -704,7 +639,7 @@ mod tests {
                 connector.clone(),
                 &Context::default(),
                 (None, Default::default()),
-                &None,
+                None,
                 supergraph_request,
             )
             .await
@@ -820,7 +755,7 @@ mod tests {
                 connector.clone(),
                 &Context::default(),
                 (None, Default::default()),
-                &None,
+                None,
                 supergraph_request.clone(),
             )
             .await
@@ -831,7 +766,7 @@ mod tests {
                 connector,
                 &Context::default(),
                 (None, Default::default()),
-                &None,
+                None,
                 supergraph_request,
             )
             .await
@@ -963,7 +898,7 @@ mod tests {
                 connector.clone(),
                 &Context::default(),
                 (None, Default::default()),
-                &None,
+                None,
                 supergraph_request.clone(),
             )
             .await
@@ -974,7 +909,7 @@ mod tests {
                 connector.clone(),
                 &Context::default(),
                 (None, Default::default()),
-                &None,
+                None,
                 supergraph_request.clone(),
             )
             .await
@@ -985,7 +920,7 @@ mod tests {
                 connector.clone(),
                 &Context::default(),
                 (None, Default::default()),
-                &None,
+                None,
                 supergraph_request.clone(),
             )
             .await
@@ -996,7 +931,7 @@ mod tests {
                 connector,
                 &Context::default(),
                 (None, Default::default()),
-                &None,
+                None,
                 supergraph_request,
             )
             .await
@@ -1059,7 +994,7 @@ mod tests {
                                 ),
                                 "connector": Object({
                                     "coordinate": String(
-                                        "subgraph_name:Query.user@connect[0]",
+                                        "subgraph_name:Query.user[0]",
                                     ),
                                 }),
                                 "http": Object({
@@ -1096,7 +1031,7 @@ mod tests {
                                 ),
                                 "connector": Object({
                                     "coordinate": String(
-                                        "subgraph_name:Query.user@connect[0]",
+                                        "subgraph_name:Query.user[0]",
                                     ),
                                 }),
                                 "http": Object({
@@ -1133,7 +1068,7 @@ mod tests {
                                 ),
                                 "connector": Object({
                                     "coordinate": String(
-                                        "subgraph_name:Query.user@connect[0]",
+                                        "subgraph_name:Query.user[0]",
                                     ),
                                 }),
                                 "http": Object({
@@ -1211,7 +1146,7 @@ mod tests {
                 connector,
                 &Context::default(),
                 (None, Default::default()),
-                &None,
+                None,
                 supergraph_request,
             )
             .await
@@ -1243,5 +1178,113 @@ mod tests {
             },
         }
         "###);
+    }
+
+    #[tokio::test]
+    async fn test_handle_response_with_is_success() {
+        let is_success = JSONSelection::parse("$status ->eq(400)").unwrap();
+        let selection = JSONSelection::parse("$status").unwrap();
+        let error_settings: ConnectorErrorsSettings = ConnectorErrorsSettings {
+            message: Default::default(),
+            source_extensions: Default::default(),
+            connect_extensions: Default::default(),
+            connect_is_success: Some(is_success.clone()),
+        };
+        let connector = Arc::new(Connector {
+            spec: ConnectSpec::V0_1,
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(hello),
+                None,
+                0,
+            ),
+            transport: HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            },
+            selection: selection.clone(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: IndexMap::from_iter([(Namespace::Status, Default::default())]),
+            error_settings,
+            label: Label::from("test label"),
+        });
+
+        // First request should be marked as error as status is NOT 400
+        let response_fail: http::Response<RouterBody> = http::Response::builder()
+            .status(201)
+            .body(router::body::from_bytes(r#"{}"#))
+            .unwrap();
+        let response_fail_key = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$status").unwrap()),
+        };
+
+        // Second response should be marked as a success as the status is 400!
+        let response_succeed: http::Response<RouterBody> = http::Response::builder()
+            .status(400)
+            .body(router::body::from_bytes(r#"{}"#))
+            .unwrap();
+        let response_succeed_key = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$status").unwrap()),
+        };
+
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
+        // Make failing request
+        let res_expect_fail = super::aggregate_responses(vec![
+            process_response(
+                Ok(response_fail),
+                response_fail_key,
+                connector.clone(),
+                &Context::default(),
+                (None, Default::default()),
+                None,
+                supergraph_request.clone(),
+            )
+            .await
+            .mapped_response,
+        ])
+        .unwrap()
+        .response;
+        assert_eq!(res_expect_fail.body().data, Some(JsonValue::Null));
+        assert_eq!(res_expect_fail.body().errors.len(), 1);
+
+        // Make succeeding request
+        let res_expect_success = super::aggregate_responses(vec![
+            process_response(
+                Ok(response_succeed),
+                response_succeed_key,
+                connector.clone(),
+                &Context::default(),
+                (None, Default::default()),
+                None,
+                supergraph_request.clone(),
+            )
+            .await
+            .mapped_response,
+        ])
+        .unwrap()
+        .response;
+        assert!(res_expect_success.body().errors.is_empty());
+        assert_eq!(
+            &res_expect_success.body().data,
+            &Some(json!({"hello": json!(400)}))
+        );
     }
 }

@@ -164,10 +164,10 @@ impl CacheControl {
             HeaderValue::from_str(&self.to_cache_control_header()?)?,
         );
 
-        if let Some(age) = self.age {
-            if age != 0 {
-                headers.insert(AGE, age.into());
-            }
+        if let Some(age) = self.age
+            && age != 0
+        {
+            headers.insert(AGE, age.into());
         }
 
         Ok(())

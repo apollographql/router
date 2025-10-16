@@ -19,7 +19,7 @@ async fn test_subscription_callback() -> Result<(), BoxError> {
 
     // Start callback server to receive router callbacks
     let (callback_addr, callback_state) = start_callback_server().await;
-    let callback_url = format!("http://{}/callback", callback_addr);
+    let callback_url = format!("http://{callback_addr}/callback");
 
     // Start mock subgraph server that will send callbacks
     let subgraph_server =
@@ -108,7 +108,7 @@ async fn verify_callback_events(
 ) -> Result<(), BoxError> {
     use pretty_assertions::assert_eq;
 
-    let callbacks = callback_state.received_callbacks.lock().unwrap().clone();
+    let callbacks = callback_state.received_callbacks.lock().clone();
 
     // Should have received: expected_user_events.len() "next" callbacks + 1 "complete" callback
     let next_callbacks: Vec<_> = callbacks.iter().filter(|c| c.action == "next").collect();
@@ -131,15 +131,14 @@ async fn verify_callback_events(
     // Extract userWasCreated events for validation
     let mut actual_user_events = Vec::new();
     for callback in &next_callbacks {
-        if let Some(payload) = &callback.payload {
-            if let Some(data) = payload.get("data") {
-                if let Some(user_created) = data.get("userWasCreated") {
-                    actual_user_events.push(user_created.clone());
-                }
-                // If there's a data field but no userWasCreated, it's an empty/error case
-            }
-            // If there's no data field (pure error payload), we don't extract anything
+        if let Some(payload) = &callback.payload
+            && let Some(data) = payload.get("data")
+            && let Some(user_created) = data.get("userWasCreated")
+        {
+            actual_user_events.push(user_created.clone());
         }
+        // If there's a data field but no userWasCreated, it's an empty/error case
+        // If there's no data field (pure error payload), we don't extract anything
     }
 
     // Simple equality comparison using pretty_assertions
@@ -161,7 +160,7 @@ async fn test_subscription_callback_error_scenarios() -> Result<(), BoxError> {
     let (callback_addr, callback_state) = start_callback_server().await;
 
     let client = reqwest::Client::new();
-    let callback_url = format!("http://{}/callback/test-id", callback_addr);
+    let callback_url = format!("http://{callback_addr}/callback/test-id");
 
     // Test invalid payload - missing required fields
     let invalid_payload = serde_json::json!({
@@ -217,7 +216,7 @@ async fn test_subscription_callback_error_scenarios() -> Result<(), BoxError> {
 
     // Test 4: Add subscription ID and test success scenarios
     {
-        let mut ids = callback_state.subscription_ids.lock().unwrap();
+        let mut ids = callback_state.subscription_ids.lock();
         ids.push("test-id".to_string());
     }
 
@@ -320,7 +319,7 @@ async fn test_subscription_callback_error_payload() -> Result<(), BoxError> {
 
     // Start callback server to receive router callbacks
     let (callback_addr, callback_state) = start_callback_server().await;
-    let callback_url = format!("http://{}/callback", callback_addr);
+    let callback_url = format!("http://{callback_addr}/callback");
 
     // Start mock subgraph server with custom payloads
     let subgraph_server = start_callback_subgraph_server_with_payloads(
@@ -426,7 +425,7 @@ async fn test_subscription_callback_pure_error_payload() -> Result<(), BoxError>
 
     // Start callback server to receive router callbacks
     let (callback_addr, callback_state) = start_callback_server().await;
-    let callback_url = format!("http://{}/callback", callback_addr);
+    let callback_url = format!("http://{callback_addr}/callback");
 
     // Start mock subgraph server with custom payloads
     let subgraph_server = start_callback_subgraph_server_with_payloads(

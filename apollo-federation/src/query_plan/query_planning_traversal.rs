@@ -222,6 +222,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         root_kind: SchemaRootDefinitionKind,
         cost_processor: FetchDependencyGraphToCostProcessor,
         non_local_selection_state: Option<&mut non_local_selections_estimation::State>,
+        initial_subgraph_constraint: Option<Arc<str>>,
     ) -> Result<Self, FederationError> {
         Self::new_inner(
             parameters,
@@ -231,6 +232,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             root_kind,
             cost_processor,
             non_local_selection_state,
+            initial_subgraph_constraint,
             Default::default(),
             Default::default(),
             Default::default(),
@@ -251,6 +253,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         root_kind: SchemaRootDefinitionKind,
         cost_processor: FetchDependencyGraphToCostProcessor,
         non_local_selection_state: Option<&mut non_local_selections_estimation::State>,
+        initial_subgraph_constraint: Option<Arc<str>>,
         initial_context: OpGraphPathContext,
         excluded_destinations: ExcludedDestinations,
         excluded_conditions: ExcludedConditions,
@@ -304,23 +307,25 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             excluded_destinations,
             excluded_conditions,
             &parameters.override_conditions,
+            initial_subgraph_constraint.clone(),
             &parameters.disabled_subgraphs,
         )?;
 
         traversal.open_branches = map_options_to_selections(selection_set, initial_options);
 
-        if let Some(non_local_selection_state) = non_local_selection_state {
-            if traversal
-                .check_non_local_selections_limit_exceeded_at_root(non_local_selection_state)?
-            {
-                return Err(SingleFederationError::QueryPlanComplexityExceeded {
-                    message: format!(
-                        "Number of non-local selections exceeds limit of {}",
-                        Self::MAX_NON_LOCAL_SELECTIONS,
-                    ),
-                }
-                .into());
+        if let Some(non_local_selection_state) = non_local_selection_state
+            && traversal.check_non_local_selections_limit_exceeded_at_root(
+                non_local_selection_state,
+                initial_subgraph_constraint.is_some(),
+            )?
+        {
+            return Err(SingleFederationError::QueryPlanComplexityExceeded {
+                message: format!(
+                    "Number of non-local selections exceeds limit of {}",
+                    Self::MAX_NON_LOCAL_SELECTIONS,
+                ),
             }
+            .into());
         }
 
         Ok(traversal)
@@ -442,16 +447,15 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 .set(evaluated_paths_count.get() + simultaneous_indirect_path_count);
 
             new_options.extend(followups_for_option);
-            if let Some(options_limit) = self.parameters.config.debug.paths_limit {
-                if new_options.len() > options_limit as usize {
-                    return Err(SingleFederationError::QueryPlanComplexityExceeded {
+            if let Some(options_limit) = self.parameters.config.debug.paths_limit
+                && new_options.len() > options_limit as usize
+            {
+                return Err(SingleFederationError::QueryPlanComplexityExceeded {
                         message: format!(
-                            "Too many options generated for {}, reached the limit of {}.",
-                            selection, options_limit,
+                            "Too many options generated for {selection}, reached the limit of {options_limit}.",
                         ),
                     }
                     .into());
-                }
             }
         }
 
@@ -521,12 +525,12 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             // If we have no options, it means there is no way to build a plan for that branch, and
             // that means the whole query planning process will generate no plan. This should never
             // happen for a top-level query planning (unless the supergraph has *not* been
-            // validated), but can happen when computing sub-plans for a key condition.
-            return if self.is_top_level {
+            // validated), but can happen when computing sub-plans for a key condition and when
+            // computing a top-level plan for a mutation field on a specific subgraph.
+            return if self.is_top_level && self.root_kind != SchemaRootDefinitionKind::Mutation {
                 if self.parameters.disabled_subgraphs.is_empty() {
                     Err(FederationError::internal(format!(
-                        "Was not able to find any options for {}: This shouldn't have happened.",
-                        selection,
+                        "Was not able to find any options for {selection}: This shouldn't have happened.",
                     )))
                 } else {
                     // If subgraphs were disabled, this could be expected, and we indicate this in
@@ -1163,6 +1167,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             self.id_generator.clone(),
             self.root_kind,
             self.cost_processor,
+            None,
             None,
             context.clone(),
             excluded_destinations.clone(),

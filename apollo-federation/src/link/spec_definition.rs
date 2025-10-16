@@ -26,6 +26,7 @@ use crate::error::SingleFederationError;
 use crate::link::Import;
 use crate::link::Link;
 use crate::link::Purpose;
+use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
@@ -34,7 +35,6 @@ use crate::schema::type_and_directive_specification::DirectiveCompositionSpecifi
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
-#[allow(dead_code)]
 pub(crate) trait SpecDefinition {
     fn url(&self) -> &Url;
 
@@ -52,6 +52,23 @@ pub(crate) trait SpecDefinition {
 
     fn version(&self) -> &Version {
         &self.url().version
+    }
+
+    fn is_spec_directive_name(
+        &self,
+        schema: &FederationSchema,
+        name_in_schema: &Name,
+    ) -> Result<bool, FederationError> {
+        let Some(metadata) = schema.metadata() else {
+            return Err(SingleFederationError::Internal {
+                message: "Schema is not a core schema (add @link first)".to_owned(),
+            }
+            .into());
+        };
+        Ok(metadata
+            .source_link_of_directive(name_in_schema)
+            .map(|e| e.link.url.identity == *self.identity())
+            .unwrap_or(false))
     }
 
     fn is_spec_type_name(
@@ -106,8 +123,7 @@ pub(crate) trait SpecDefinition {
                 .ok_or_else(|| {
                     SingleFederationError::Internal {
                         message: format!(
-                            "Unexpectedly could not find spec directive \"@{}\" in schema",
-                            name
+                            "Unexpectedly could not find spec directive \"@{name}\" in schema"
                         ),
                     }
                     .into()
@@ -130,8 +146,7 @@ pub(crate) trait SpecDefinition {
                 .ok_or_else(|| {
                     SingleFederationError::Internal {
                         message: format!(
-                            "Unexpectedly could not find spec type \"{}\" in schema",
-                            name
+                            "Unexpectedly could not find spec type \"{name}\" in schema"
                         ),
                     }
                     .into()
@@ -218,7 +233,7 @@ impl<T: SpecDefinition> SpecDefinitions<T> {
         self.definitions.get(requested)
     }
 
-    pub(crate) fn versions(&self) -> Keys<Version, T> {
+    pub(crate) fn versions(&self) -> Keys<'_, Version, T> {
         self.definitions.keys()
     }
 
@@ -231,6 +246,16 @@ impl<T: SpecDefinition> SpecDefinitions<T> {
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = (&Version, &T)> {
         self.definitions.iter()
+    }
+
+    pub(crate) fn get_maximum_allowed_version(
+        &'static self,
+        federation_version: &Version,
+    ) -> Option<&'static T> {
+        self.definitions
+            .values()
+            .rev()
+            .find(|spec| federation_version.satisfies(spec.minimum_federation_version()))
     }
 
     pub(crate) fn get_minimum_required_version(
@@ -290,7 +315,6 @@ impl SpecRegistry {
     /// directive. An alternative would be to mark everything as `Sync` and store them on the
     /// individual feature specs, but we have omitted this for now due to a non-trivial (~10%)
     /// increase in heap usage that affects query planning.
-    #[allow(dead_code)]
     pub(crate) fn get_composition_spec(
         &self,
         source: &Link,
@@ -312,6 +336,7 @@ pub(crate) static SPEC_REGISTRY: LazyLock<SpecRegistry> = LazyLock::new(|| {
     registry.extend(&CONNECT_VERSIONS);
     registry.extend(&CONTEXT_VERSIONS);
     registry.extend(&COST_VERSIONS);
+    registry.extend(&FEDERATION_VERSIONS);
     registry.extend(&INACCESSIBLE_VERSIONS);
     registry.extend(&POLICY_VERSIONS);
     registry.extend(&REQUIRES_SCOPES_VERSIONS);

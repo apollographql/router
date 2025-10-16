@@ -3,10 +3,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use apollo_compiler::Schema;
+use futures::StreamExt;
 use http::HeaderName;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
-use tokio::sync::broadcast;
+use tokio_stream::wrappers::IntervalStream;
 use tower::Service;
 use tower::ServiceExt;
 
@@ -14,22 +15,17 @@ use super::plugin::ResponseCache;
 use crate::Context;
 use crate::MockedSubgraphs;
 use crate::TestHarness;
+use crate::graphql;
 use crate::metrics::FutureMetricsExt;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::MockSubgraphService;
-use crate::plugins::response_cache::cache_control::CacheControl;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
-use crate::plugins::response_cache::metrics;
-use crate::plugins::response_cache::plugin::CACHE_DEBUG_EXTENSIONS_KEY;
 use crate::plugins::response_cache::plugin::CACHE_DEBUG_HEADER_NAME;
-use crate::plugins::response_cache::plugin::CONTEXT_DEBUG_CACHE_KEYS;
 use crate::plugins::response_cache::plugin::CacheKeysContext;
 use crate::plugins::response_cache::plugin::Subgraph;
-use crate::plugins::response_cache::postgres::PostgresCacheConfig;
-use crate::plugins::response_cache::postgres::PostgresCacheStorage;
-use crate::plugins::response_cache::postgres::default_batch_size;
-use crate::plugins::response_cache::postgres::default_cleanup_interval;
-use crate::plugins::response_cache::postgres::default_pool_size;
+use crate::plugins::response_cache::storage::CacheStorage;
+use crate::plugins::response_cache::storage::redis::Config;
+use crate::plugins::response_cache::storage::redis::Storage;
 use crate::services::subgraph;
 use crate::services::supergraph;
 
@@ -37,6 +33,100 @@ const SCHEMA: &str = include_str!("../../testdata/orga_supergraph_cache_key.grap
 const SCHEMA_REQUIRES: &str = include_str!("../../testdata/supergraph_cache_key.graphql");
 const SCHEMA_NESTED_KEYS: &str =
     include_str!("../../testdata/supergraph_nested_fields_cache_key.graphql");
+
+/// Cache inserts happen asynchronously, so there's no way to wait for a cache insert based on the
+/// `TestHarness` service return value.
+///
+/// Instead, we wait for up to 5 seconds for the keys we expected to be present in the cache storage.
+async fn wait_for_cache(storage: &Storage, keys: Vec<String>) {
+    if keys.is_empty() {
+        return;
+    }
+
+    let keys_strs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+    let mut interval_stream =
+        IntervalStream::new(tokio::time::interval(Duration::from_millis(100))).take(50);
+
+    while interval_stream.next().await.is_some() {
+        if let Ok(values) = storage.fetch_multiple(&keys_strs, "").await
+            && values.iter().all(Option::is_some)
+        {
+            return;
+        }
+    }
+
+    panic!("insert not complete");
+}
+
+/// Extracts a list of cache keys from `CacheKeysContext` that we expect to be cached. This is
+/// mostly used in `wait_for_cache`.
+///
+/// NB: this is not always accurate! For example, a key might not be stored if it's private but
+/// wasn't passed the private ID. But it's a good approximation for most test cases.
+fn expected_cached_keys(cache_keys_context: &CacheKeysContext) -> Vec<String> {
+    cache_keys_context
+        .iter()
+        .filter(|context| context.cache_control.max_age.is_some())
+        .filter(|context| !context.cache_control.no_store)
+        .map(|context| context.key.clone())
+        .collect()
+}
+
+/// Extract `CacheKeysContext` from `supergraph::Response` and prepare it for a snapshot, sorting
+/// the invalidation keys and setting `created` to zero.
+fn get_cache_keys_context(response: &supergraph::Response) -> Option<CacheKeysContext> {
+    let mut cache_keys: CacheKeysContext = response
+        .context
+        .get(super::plugin::CONTEXT_DEBUG_CACHE_KEYS)
+        .ok()??;
+    cache_keys.iter_mut().for_each(|ck| {
+        ck.invalidation_keys.sort();
+        ck.cache_control.created = 0;
+    });
+    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    Some(cache_keys)
+}
+
+fn get_cache_control_header(response: &supergraph::Response) -> Option<Vec<String>> {
+    Some(
+        response
+            .response
+            .headers()
+            .get(CACHE_CONTROL)?
+            .to_str()
+            .ok()?
+            .split(',')
+            .map(ToString::to_string)
+            .collect(),
+    )
+}
+
+fn cache_control_contains_no_store(cache_control_header: &[String]) -> bool {
+    cache_control_header.iter().any(|h| h == "no-store")
+}
+
+fn cache_control_contains_public(cache_control_header: &[String]) -> bool {
+    cache_control_header.iter().any(|h| h == "public")
+}
+
+fn cache_control_contains_private(cache_control_header: &[String]) -> bool {
+    cache_control_header.iter().any(|h| h == "private")
+}
+
+fn cache_control_contains_max_age(cache_control_header: &[String]) -> bool {
+    cache_control_header
+        .iter()
+        .any(|h| h.starts_with("max-age="))
+}
+
+/// Removes `CACHE_DEBUG_EXTENSIONS_KEY` to avoid messing up snapshots. Returns true to indicate
+/// that the key was present.
+fn remove_debug_extensions_key(response: &mut graphql::Response) -> bool {
+    response
+        .extensions
+        .remove(super::plugin::CACHE_DEBUG_EXTENSIONS_KEY)
+        .is_some()
+}
 
 #[tokio::test]
 async fn insert() {
@@ -70,26 +160,15 @@ async fn insert() {
         },
     });
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-        cleanup_interval: default_cleanup_interval(),
-        tls: Default::default(),
-        url: "postgres://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: Some(String::from("test_insert_simple")),
-    })
-    .await
-    .unwrap();
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, "test_insert_simple"), drop_rx)
+        .await
+        .unwrap();
     let map = [
         (
             "user".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -99,7 +178,7 @@ async fn insert() {
         (
             "orga".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -110,7 +189,7 @@ async fn insert() {
     .into_iter()
     .collect();
     let response_cache =
-        ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
             .await
             .unwrap();
 
@@ -136,48 +215,20 @@ async fn insert() {
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
     insta::with_settings!({
         description => "Make sure everything is in status 'new' and we have all the entities and root fields"
     }, {
         insta::assert_json_snapshot!(cache_keys);
     });
 
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains("max-age="),
-    );
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains(",public"),
-    );
+    let cache_control_header = get_cache_control_header(&response).expect("missing header");
+    assert!(cache_control_contains_max_age(&cache_control_header));
+    assert!(cache_control_contains_public(&cache_control_header));
+
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
-    insta::assert_json_snapshot!(response, @r###"
+    assert!(remove_debug_extensions_key(&mut response));
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -191,8 +242,9 @@ async fn insert() {
         }
       }
     }
-    "###);
+    "#);
 
+    wait_for_cache(&storage, expected_cached_keys(&cache_keys)).await;
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
@@ -213,34 +265,11 @@ async fn insert() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
 
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains("max-age="),
-    );
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains(",public"),
-    );
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    let cache_control_header = get_cache_control_header(&response).expect("missing header");
+    assert!(cache_control_contains_max_age(&cache_control_header));
+    assert!(cache_control_contains_public(&cache_control_header));
+
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
     insta::with_settings!({
         description => "Make sure everything is in status 'cached' and we have all the entities and root fields"
     }, {
@@ -248,13 +277,8 @@ async fn insert() {
     });
 
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
-    insta::assert_json_snapshot!(response, @r###"
+    assert!(remove_debug_extensions_key(&mut response));
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -268,7 +292,7 @@ async fn insert() {
         }
       }
     }
-    "###);
+    "#);
 }
 
 #[tokio::test]
@@ -303,26 +327,15 @@ async fn insert_without_debug_header() {
         },
     });
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-        tls: Default::default(),
-        url: "postgres://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        cleanup_interval: Duration::from_secs(60 * 60),
-        namespace: Some(String::from("insert_without_debug_header")),
-    })
-    .await
-    .unwrap();
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, "insert_without_debug_header"), drop_rx)
+        .await
+        .unwrap();
     let map = [
         (
             "user".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -332,7 +345,7 @@ async fn insert_without_debug_header() {
         (
             "orga".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -343,7 +356,7 @@ async fn insert_without_debug_header() {
     .into_iter()
     .collect();
     let response_cache =
-        ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
             .await
             .unwrap();
 
@@ -365,41 +378,15 @@ async fn insert_without_debug_header() {
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
-    assert!(
-        response
-            .context
-            .get::<_, CacheKeysContext>(CONTEXT_DEBUG_CACHE_KEYS)
-            .ok()
-            .flatten()
-            .is_none()
-    );
+    assert!(get_cache_keys_context(&response).is_none());
 
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains("max-age="),
-    );
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains(",public"),
-    );
+    let cache_control_header = get_cache_control_header(&response).expect("missing header");
+    assert!(cache_control_contains_max_age(&cache_control_header));
+    assert!(cache_control_contains_public(&cache_control_header));
+
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_none()
-    );
-    insta::assert_json_snapshot!(response, @r###"
+    assert!(!remove_debug_extensions_key(&mut response));
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -413,7 +400,7 @@ async fn insert_without_debug_header() {
         }
       }
     }
-    "###);
+    "#);
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -431,41 +418,15 @@ async fn insert_without_debug_header() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
 
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains("max-age="),
-    );
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains(",public"),
-    );
-    assert!(
-        response
-            .context
-            .get::<_, CacheKeysContext>(CONTEXT_DEBUG_CACHE_KEYS)
-            .ok()
-            .flatten()
-            .is_none()
-    );
+    let cache_control_header = get_cache_control_header(&response).expect("missing header");
+    assert!(cache_control_contains_max_age(&cache_control_header));
+    assert!(cache_control_contains_public(&cache_control_header));
+
+    assert!(get_cache_keys_context(&response).is_none());
 
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_none()
-    );
-    insta::assert_json_snapshot!(response, @r###"
+    assert!(!remove_debug_extensions_key(&mut response));
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -479,7 +440,7 @@ async fn insert_without_debug_header() {
         }
       }
     }
-    "###);
+    "#);
 }
 
 #[tokio::test]
@@ -490,17 +451,17 @@ async fn insert_with_requires() {
 
     let subgraphs = MockedSubgraphs([
         ("products", MockSubgraph::builder().with_json(
-                serde_json::json!{{"query":"{ topProducts { __typename upc name price weight } }"}},
-                serde_json::json!{{"data": {"topProducts": [{
+            serde_json::json! {{"query":"{ topProducts { __typename upc name price weight } }"}},
+            serde_json::json! {{"data": {"topProducts": [{
                     "__typename": "Product",
                     "upc": "1",
                     "name": "Test",
                     "price": 150,
                     "weight": 5
-                }]}}}
+                }]}}},
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build()),
         ("inventory", MockSubgraph::builder().with_json(
-            serde_json::json!{{
+            serde_json::json! {{
                 "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { shippingEstimate } } }",
                 "variables": {
                     "representations": [
@@ -512,34 +473,23 @@ async fn insert_with_requires() {
                         }
                     ]
             }}},
-            serde_json::json!{{"data": {
+            serde_json::json! {{"data": {
                 "_entities": [{
                     "shippingEstimate": 15
                 }]
-            }}}
+            }}},
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build())
     ].into_iter().collect());
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-        cleanup_interval: default_cleanup_interval(),
-        tls: Default::default(),
-        url: "postgres://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: Some(String::from("test_insert_with_requires")),
-    })
-    .await
-    .unwrap();
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, "test_insert_with_requires"), drop_rx)
+        .await
+        .unwrap();
     let map: HashMap<String, Subgraph> = [
         (
             "products".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -549,7 +499,7 @@ async fn insert_with_requires() {
         (
             "inventory".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -560,11 +510,11 @@ async fn insert_with_requires() {
     .into_iter()
     .collect();
     let response_cache = ResponseCache::for_test(
-        pg_cache.clone(),
+        storage.clone(),
         map.clone(),
         valid_schema.clone(),
         true,
-        false,
+        drop_tx,
     )
     .await
     .unwrap();
@@ -589,49 +539,21 @@ async fn insert_with_requires() {
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
     insta::with_settings!({
         description => "Make sure everything is in status 'new' and we have all the entities and root fields"
     }, {
         insta::assert_json_snapshot!(cache_keys);
     });
 
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains("max-age="),
-    );
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains(",public"),
-    );
-    let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    let cache_control_header = get_cache_control_header(&response).expect("missing header");
+    assert!(cache_control_contains_max_age(&cache_control_header));
+    assert!(cache_control_contains_public(&cache_control_header));
 
-    insta::assert_json_snapshot!(response, @r###"
+    let mut response = response.next_response().await.unwrap();
+    assert!(remove_debug_extensions_key(&mut response));
+
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "topProducts": [
@@ -643,8 +565,9 @@ async fn insert_with_requires() {
         ]
       }
     }
-    "###);
+    "#);
 
+    wait_for_cache(&storage, expected_cached_keys(&cache_keys)).await;
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
@@ -665,49 +588,20 @@ async fn insert_with_requires() {
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
     insta::with_settings!({
         description => "Make sure everything is in status 'cached' and we have all the entities and root fields"
     }, {
         insta::assert_json_snapshot!(cache_keys);
     });
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains("max-age="),
-    );
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains(",public"),
-    );
+    let cache_control_header = get_cache_control_header(&response).expect("missing header");
+    assert!(cache_control_contains_max_age(&cache_control_header));
+    assert!(cache_control_contains_public(&cache_control_header));
 
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "topProducts": [
@@ -719,7 +613,7 @@ async fn insert_with_requires() {
         ]
       }
     }
-    "###);
+    "#);
 }
 
 #[tokio::test]
@@ -751,26 +645,18 @@ async fn insert_with_nested_field_set() {
         }
     });
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-        cleanup_interval: default_cleanup_interval(),
-        tls: Default::default(),
-        url: "postgres://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: Some(String::from("test_insert_with_nested_field_set")),
-    })
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(
+        &Config::test(false, "test_insert_with_nested_field_set"),
+        drop_rx,
+    )
     .await
     .unwrap();
     let map = [
         (
             "products".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -780,7 +666,7 @@ async fn insert_with_nested_field_set() {
         (
             "users".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -791,7 +677,7 @@ async fn insert_with_nested_field_set() {
     .into_iter()
     .collect();
     let response_cache =
-        ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
             .await
             .unwrap();
 
@@ -814,50 +700,21 @@ async fn insert_with_nested_field_set() {
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
     insta::with_settings!({
         description => "Make sure everything is in status 'new' and we have all the entities and root fields"
     }, {
         insta::assert_json_snapshot!(cache_keys);
     });
 
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains("max-age="),
-    );
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains(",public"),
-    );
+    let cache_control_header = get_cache_control_header(&response).expect("missing header");
+    assert!(cache_control_contains_max_age(&cache_control_header));
+    assert!(cache_control_contains_public(&cache_control_header));
 
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "allProducts": [
@@ -873,8 +730,9 @@ async fn insert_with_nested_field_set() {
         ]
       }
     }
-    "###);
+    "#);
 
+    wait_for_cache(&storage, expected_cached_keys(&cache_keys)).await;
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
         .unwrap()
@@ -895,34 +753,11 @@ async fn insert_with_nested_field_set() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
 
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains("max-age="),
-    );
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap()
-            .contains(",public"),
-    );
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    let cache_control_header = get_cache_control_header(&response).expect("missing header");
+    assert!(cache_control_contains_max_age(&cache_control_header));
+    assert!(cache_control_contains_public(&cache_control_header));
+
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
     insta::with_settings!({
         description => "Make sure everything is in status 'cached' and we have all the entities and root fields"
     }, {
@@ -930,14 +765,9 @@ async fn insert_with_nested_field_set() {
     });
 
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "allProducts": [
@@ -953,7 +783,7 @@ async fn insert_with_nested_field_set() {
         ]
       }
     }
-    "###);
+    "#);
 }
 
 #[tokio::test]
@@ -986,27 +816,16 @@ async fn no_cache_control() {
         },
     });
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-        cleanup_interval: default_cleanup_interval(),
-        tls: Default::default(),
-        url: "postgres://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: Some(String::from("test_no_cache_control")),
-    })
-    .await
-    .unwrap();
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, "test_no_cache_control"), drop_rx)
+        .await
+        .unwrap();
     let response_cache = ResponseCache::for_test(
-        pg_cache.clone(),
+        storage.clone(),
         HashMap::new(),
         valid_schema.clone(),
         false,
-        false,
+        drop_tx,
     )
     .await
     .unwrap();
@@ -1031,24 +850,12 @@ async fn no_cache_control() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
 
-    assert_eq!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap(),
-        "no-store"
-    );
+    let cache_control_header = get_cache_control_header(&response).expect("missing header");
+    assert!(cache_control_contains_no_store(&cache_control_header));
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -1062,7 +869,7 @@ async fn no_cache_control() {
         }
       }
     }
-    "###);
+    "#);
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -1084,24 +891,12 @@ async fn no_cache_control() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
 
-    assert_eq!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap(),
-        "no-store"
-    );
+    let cache_control_header = get_cache_control_header(&response).expect("missing header");
+    assert!(cache_control_contains_no_store(&cache_control_header));
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -1115,7 +910,7 @@ async fn no_cache_control() {
         }
       }
     }
-    "###);
+    "#);
 }
 
 #[tokio::test]
@@ -1148,27 +943,16 @@ async fn no_store_from_request() {
         },
     });
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-        cleanup_interval: default_cleanup_interval(),
-        tls: Default::default(),
-        url: "postgres://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: Some(String::from("test_no_store_from_client")),
-    })
-    .await
-    .unwrap();
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, "test_no_store_from_client"), drop_rx)
+        .await
+        .unwrap();
     let response_cache = ResponseCache::for_test(
-        pg_cache.clone(),
+        storage.clone(),
         HashMap::new(),
         valid_schema.clone(),
         false,
-        false,
+        drop_tx,
     )
     .await
     .unwrap();
@@ -1202,18 +986,11 @@ async fn no_store_from_request() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
 
-    assert_eq!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap(),
-        "no-store"
-    );
+    let cache_control_header = get_cache_control_header(&response).expect("missing header");
+    assert!(cache_control_contains_no_store(&cache_control_header));
     let response = response.next_response().await.unwrap();
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -1227,23 +1004,22 @@ async fn no_store_from_request() {
         }
       }
     }
-    "###);
+    "#);
 
     // Just to make sure it doesn't invalidate anything, which means nothing has been stored
-    assert!(
-        pg_cache
-            .invalidate(
-                vec![
-                    "user".to_string(),
-                    "organization".to_string(),
-                    "currentUser".to_string()
-                ],
-                vec!["orga".to_string(), "user".to_string()]
-            )
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    let invalidations_by_subgraph = storage
+        .invalidate(
+            vec![
+                "user".to_string(),
+                "organization".to_string(),
+                "currentUser".to_string(),
+            ],
+            vec!["orga".to_string(), "user".to_string()],
+            "test_bulk_invalidation",
+        )
+        .await
+        .unwrap();
+    assert_eq!(invalidations_by_subgraph.into_values().sum::<u64>(), 0);
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone(), "headers": {
@@ -1274,18 +1050,12 @@ async fn no_store_from_request() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
 
-    assert_eq!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .and_then(|h| h.to_str().ok())
-            .unwrap(),
-        "no-store"
-    );
+    let cache_control_header = get_cache_control_header(&response).expect("missing header");
+    assert!(cache_control_contains_no_store(&cache_control_header));
+
     let response = response.next_response().await.unwrap();
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -1299,23 +1069,22 @@ async fn no_store_from_request() {
         }
       }
     }
-    "###);
+    "#);
 
     // Just to make sure it doesn't invalidate anything, which means nothing has been stored
-    assert!(
-        pg_cache
-            .invalidate(
-                vec![
-                    "user".to_string(),
-                    "organization".to_string(),
-                    "currentUser".to_string()
-                ],
-                vec!["orga".to_string(), "user".to_string()]
-            )
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    let invalidations_by_subgraph = storage
+        .invalidate(
+            vec![
+                "user".to_string(),
+                "organization".to_string(),
+                "currentUser".to_string(),
+            ],
+            vec!["orga".to_string(), "user".to_string()],
+            "test_bulk_invalidate",
+        )
+        .await
+        .unwrap();
+    assert_eq!(invalidations_by_subgraph.into_values().sum::<u64>(), 0);
 }
 
 #[tokio::test]
@@ -1351,26 +1120,15 @@ async fn private_only() {
             },
         });
 
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-            cleanup_interval: default_cleanup_interval(),
-            tls: Default::default(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from("private_only")),
-        })
-        .await
-        .unwrap();
+        let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false,"private_only"), drop_rx)
+            .await
+            .unwrap();
         let map = [
             (
                 "user".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -1380,7 +1138,7 @@ async fn private_only() {
             (
                 "orga".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -1388,10 +1146,10 @@ async fn private_only() {
                 },
             ),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         let response_cache =
-            ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
                 .await
                 .unwrap();
 
@@ -1417,28 +1175,14 @@ async fn private_only() {
             .build()
             .unwrap();
         let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
 
         assert_gauge!("apollo.router.response_cache.private_queries.lru.size", 1);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
-        insta::assert_json_snapshot!(response, @r###"
+        assert!(remove_debug_extensions_key(&mut response));
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -1452,7 +1196,7 @@ async fn private_only() {
             }
           }
         }
-        "###);
+        "#);
         // First request with only private response cache-control
         let mut service = TestHarness::builder()
             .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -1476,37 +1220,15 @@ async fn private_only() {
             .build()
             .unwrap();
         let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .contains("private")
-        );
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_control_header = get_cache_control_header(&response).expect("missing header");
+        assert!(cache_control_contains_private(&cache_control_header));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -1520,7 +1242,7 @@ async fn private_only() {
             }
           }
         }
-        "###);
+        "#);
 
         let context = Context::new();
         context.insert_json_value("sub", "5678".into());
@@ -1534,37 +1256,15 @@ async fn private_only() {
             .build()
             .unwrap();
         let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .contains("private")
-        );
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_control_header = get_cache_control_header(&response).expect("missing header");
+        assert!(cache_control_contains_private(&cache_control_header));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -1578,7 +1278,7 @@ async fn private_only() {
             }
           }
         }
-        "###);
+        "#);
     }.with_metrics().await;
 }
 
@@ -1622,26 +1322,15 @@ async fn private_and_public() {
         },
     });
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-        cleanup_interval: default_cleanup_interval(),
-        tls: Default::default(),
-        url: "postgres://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: Some(String::from("private_and_public")),
-    })
-    .await
-    .unwrap();
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, "private_and_public"), drop_rx)
+        .await
+        .unwrap();
     let map = [
         (
             "user".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -1651,7 +1340,7 @@ async fn private_and_public() {
         (
             "orga".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -1662,7 +1351,7 @@ async fn private_and_public() {
     .into_iter()
     .collect();
     let response_cache =
-        ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
             .await
             .unwrap();
 
@@ -1688,26 +1377,12 @@ async fn private_and_public() {
         .build()
         .unwrap();
     let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
     insta::assert_json_snapshot!(cache_keys);
 
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
-    insta::assert_json_snapshot!(response, @r###"
+    assert!(remove_debug_extensions_key(&mut response));
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -1724,7 +1399,7 @@ async fn private_and_public() {
         }
       }
     }
-    "###);
+    "#);
 
     let mut service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -1748,37 +1423,15 @@ async fn private_and_public() {
         .build()
         .unwrap();
     let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .contains("private")
-    );
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    let cache_control_header = get_cache_control_header(&response).expect("missing header");
+    assert!(cache_control_contains_private(&cache_control_header));
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
     insta::assert_json_snapshot!(cache_keys);
 
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -1795,7 +1448,7 @@ async fn private_and_public() {
         }
       }
     }
-    "###);
+    "#);
 
     let context = Context::new();
     context.insert_json_value("sub", "5678".into());
@@ -1809,37 +1462,15 @@ async fn private_and_public() {
         .build()
         .unwrap();
     let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-    assert!(
-        response
-            .response
-            .headers()
-            .get(CACHE_CONTROL)
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .contains("private")
-    );
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    let cache_control_header = get_cache_control_header(&response).expect("missing header");
+    assert!(cache_control_contains_private(&cache_control_header));
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
     insta::assert_json_snapshot!(cache_keys);
 
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -1856,7 +1487,7 @@ async fn private_and_public() {
         }
       }
     }
-    "###);
+    "#);
 }
 
 // In this test we want to make sure when we have a subgraph query that could be either public or private depending of private_id it still works
@@ -1900,26 +1531,15 @@ async fn polymorphic_private_and_public() {
             },
         });
 
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-            cleanup_interval: default_cleanup_interval(),
-            tls: Default::default(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from("polymorphic_private_and_public")),
-        })
-        .await
-        .unwrap();
+        let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false,"polymorphic_private_and_public"), drop_rx)
+            .await
+            .unwrap();
         let map = [
             (
                 "user".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -1929,7 +1549,7 @@ async fn polymorphic_private_and_public() {
             (
                 "orga".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -1937,10 +1557,10 @@ async fn polymorphic_private_and_public() {
                 },
             ),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         let response_cache =
-            ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
                 .await
                 .unwrap();
 
@@ -1966,16 +1586,7 @@ async fn polymorphic_private_and_public() {
             .build()
             .unwrap();
         let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::with_settings!({
             description => "Make sure everything is in status 'new' and we have all the entities and root fields"
         }, {
@@ -1983,13 +1594,8 @@ async fn polymorphic_private_and_public() {
         });
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
-        insta::assert_json_snapshot!(response, @r###"
+        assert!(remove_debug_extensions_key(&mut response));
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -2006,7 +1612,7 @@ async fn polymorphic_private_and_public() {
             }
           }
         }
-        "###);
+        "#);
 
         let subgraphs_public = serde_json::json!({
             "user": {
@@ -2063,37 +1669,15 @@ async fn polymorphic_private_and_public() {
             .build()
             .unwrap();
         let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .contains("public")
-        );
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_control_header = get_cache_control_header(&response).expect("missing header");
+        assert!(cache_control_contains_public(&cache_control_header));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -2110,7 +1694,7 @@ async fn polymorphic_private_and_public() {
             }
           }
         }
-        "###);
+        "#);
 
         // Put back private cache-control to check it's still in cache
         let mut service = TestHarness::builder()
@@ -2134,37 +1718,15 @@ async fn polymorphic_private_and_public() {
             .build()
             .unwrap();
         let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .contains("private")
-        );
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_control_header = get_cache_control_header(&response).expect("missing header");
+        assert!(cache_control_contains_private(&cache_control_header));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -2181,7 +1743,7 @@ async fn polymorphic_private_and_public() {
             }
           }
         }
-        "###);
+        "#);
 
         // Test again with subgraph public to make sure it's still cached
         let mut service = TestHarness::builder()
@@ -2204,37 +1766,15 @@ async fn polymorphic_private_and_public() {
             .build()
             .unwrap();
         let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .contains("public")
-        );
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_control_header = get_cache_control_header(&response).expect("missing header");
+        assert!(cache_control_contains_public(&cache_control_header));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -2251,7 +1791,7 @@ async fn polymorphic_private_and_public() {
             }
           }
         }
-        "###);
+        "#);
         assert_gauge!("apollo.router.response_cache.private_queries.lru.size", 1);
 
         // Test again with public subgraph but with a private_id set, it should be private because this query is private once we have private_id set, even if the subgraph is public, it's coming from the cache
@@ -2267,37 +1807,15 @@ async fn polymorphic_private_and_public() {
             .build()
             .unwrap();
         let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .contains("private")
-        );
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_control_header = get_cache_control_header(&response).expect("missing header");
+        assert!(cache_control_contains_private(&cache_control_header));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -2314,7 +1832,7 @@ async fn polymorphic_private_and_public() {
             }
           }
         }
-        "###);
+        "#);
         assert_gauge!("apollo.router.response_cache.private_queries.lru.size", 1);
 
         // Test again with private subgraph but without private_id set, it should give the public values because it's cached and it knows even if the subgraphs are private it was public without private_id
@@ -2337,37 +1855,15 @@ async fn polymorphic_private_and_public() {
             .build()
             .unwrap();
         let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .contains("public")
-        );
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_control_header = get_cache_control_header(&response).expect("missing header");
+        assert!(cache_control_contains_public(&cache_control_header));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -2384,7 +1880,7 @@ async fn polymorphic_private_and_public() {
             }
           }
         }
-        "###);
+        "#);
         assert_gauge!("apollo.router.response_cache.private_queries.lru.size", 1);
     }.with_metrics().await;
 }
@@ -2422,26 +1918,15 @@ async fn private_without_private_id() {
             },
         });
 
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-            cleanup_interval: default_cleanup_interval(),
-            tls: Default::default(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from("private_without_private_id")),
-        })
-        .await
-        .unwrap();
+        let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false,"private_without_private_id"), drop_rx)
+            .await
+            .unwrap();
         let map = [
             (
                 "user".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     enabled: true.into(),
                     ttl: None,
                     ..Default::default()
@@ -2450,17 +1935,17 @@ async fn private_without_private_id() {
             (
                 "orga".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     enabled: true.into(),
                     ttl: None,
                     ..Default::default()
                 },
             ),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         let response_cache =
-            ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
                 .await
                 .unwrap();
 
@@ -2485,38 +1970,16 @@ async fn private_without_private_id() {
             .build()
             .unwrap();
         let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .contains("private")
-        );
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_control_header = get_cache_control_header(&response).expect("missing header");
+        assert!(cache_control_contains_private(&cache_control_header));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
 
         assert_gauge!("apollo.router.response_cache.private_queries.lru.size", 1);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
-        insta::assert_json_snapshot!(response, @r###"
+        assert!(remove_debug_extensions_key(&mut response));
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -2530,7 +1993,7 @@ async fn private_without_private_id() {
             }
           }
         }
-        "###);
+        "#);
         // Now testing without any mock subgraphs, all the data should come from the cache
         let mut service = TestHarness::builder()
             .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -2553,37 +2016,15 @@ async fn private_without_private_id() {
             .build()
             .unwrap();
         let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .contains("private")
-        );
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_control_header = get_cache_control_header(&response).expect("missing header");
+        assert!(cache_control_contains_private(&cache_control_header));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -2597,7 +2038,7 @@ async fn private_without_private_id() {
             }
           }
         }
-        "###);
+        "#);
     }.with_metrics().await;
 }
 
@@ -2608,8 +2049,8 @@ async fn no_data() {
 
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
-                serde_json::json!{{"query":"{currentUser{allOrganizations{__typename id}}}"}},
-                serde_json::json!{{"data": {"currentUser": { "allOrganizations": [
+            serde_json::json! {{"query":"{currentUser{allOrganizations{__typename id}}}"}},
+            serde_json::json! {{"data": {"currentUser": { "allOrganizations": [
                     {
                         "__typename": "Organization",
                         "id": "1"
@@ -2618,10 +2059,10 @@ async fn no_data() {
                         "__typename": "Organization",
                         "id": "3"
                     }
-                ] }}}}
+                ] }}}},
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("no-store")).build()),
         ("orga", MockSubgraph::builder().with_json(
-            serde_json::json!{{
+            serde_json::json! {{
                 "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
             "variables": {
                 "representations": [
@@ -2635,7 +2076,7 @@ async fn no_data() {
                     }
                 ]
             }}},
-            serde_json::json!{{
+            serde_json::json! {{
                 "data": {
                     "_entities": [{
                     "name": "Organization 1",
@@ -2644,30 +2085,19 @@ async fn no_data() {
                     "name": "Organization 3"
                 }]
             }
-            }}
+            }},
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
     ].into_iter().collect());
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-        cleanup_interval: default_cleanup_interval(),
-        tls: Default::default(),
-        url: "postgres://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: Some(String::from("no_data")),
-    })
-    .await
-    .unwrap();
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, "no_data"), drop_rx)
+        .await
+        .unwrap();
     let map = [
         (
             "user".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -2677,7 +2107,7 @@ async fn no_data() {
         (
             "orga".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -2687,8 +2117,9 @@ async fn no_data() {
     ]
     .into_iter()
     .collect();
+
     let response_cache =
-        ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
             .await
             .unwrap();
 
@@ -2713,16 +2144,7 @@ async fn no_data() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
 
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
     insta::assert_json_snapshot!(cache_keys, {
         "[].cache_control" => insta::dynamic_redaction(|value, _path| {
             let cache_control = value.as_str().unwrap().to_string();
@@ -2733,14 +2155,9 @@ async fn no_data() {
     });
 
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -2757,7 +2174,7 @@ async fn no_data() {
         }
       }
     }
-    "###);
+    "#);
 
     let subgraphs = MockedSubgraphs(
         [(
@@ -2820,26 +2237,12 @@ async fn no_data() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
 
-    let mut cache_keys: CacheKeysContext = response
-        .context
-        .get(CONTEXT_DEBUG_CACHE_KEYS)
-        .unwrap()
-        .unwrap();
-    cache_keys.iter_mut().for_each(|ck| {
-        ck.invalidation_keys.sort();
-        ck.cache_control.created = 0;
-    });
-    cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
     insta::assert_json_snapshot!(cache_keys);
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -2875,7 +2278,7 @@ async fn no_data() {
         }
       ]
     }
-    "###);
+    "#);
 }
 
 #[tokio::test]
@@ -2884,8 +2287,8 @@ async fn missing_entities() {
     let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
-                serde_json::json!{{"query":"{currentUser{allOrganizations{__typename id}}}"}},
-                serde_json::json!{{"data": {"currentUser": { "allOrganizations": [
+            serde_json::json! {{"query":"{currentUser{allOrganizations{__typename id}}}"}},
+            serde_json::json! {{"data": {"currentUser": { "allOrganizations": [
                     {
                         "__typename": "Organization",
                         "id": "1"
@@ -2894,10 +2297,10 @@ async fn missing_entities() {
                         "__typename": "Organization",
                         "id": "2"
                     }
-                ] }}}}
+                ] }}}},
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("no-store")).build()),
         ("orga", MockSubgraph::builder().with_json(
-            serde_json::json!{{
+            serde_json::json! {{
                 "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
             "variables": {
                 "representations": [
@@ -2911,7 +2314,7 @@ async fn missing_entities() {
                     }
                 ]
             }}},
-            serde_json::json!{{
+            serde_json::json! {{
                 "data": {
                     "_entities": [
                         {
@@ -2922,30 +2325,15 @@ async fn missing_entities() {
                         }
                     ]
             }
-            }}
+            }},
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
     ].into_iter().collect());
 
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-        cleanup_interval: default_cleanup_interval(),
-        tls: Default::default(),
-        url: "postgres://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: Some(String::from("missing_entities")),
-    })
-    .await
-    .unwrap();
     let map = [
         (
             "user".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -2955,7 +2343,7 @@ async fn missing_entities() {
         (
             "orga".to_string(),
             Subgraph {
-                postgres: None,
+                redis: None,
                 private_id: Some("sub".to_string()),
                 enabled: true.into(),
                 ttl: None,
@@ -2965,8 +2353,13 @@ async fn missing_entities() {
     ]
     .into_iter()
     .collect();
+
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, "missing_entities"), drop_rx)
+        .await
+        .unwrap();
     let response_cache =
-        ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+        ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
             .await
             .unwrap();
 
@@ -2991,28 +2384,27 @@ async fn missing_entities() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
     insta::assert_json_snapshot!(response);
 
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, "missing_entities"), drop_rx)
+        .await
+        .unwrap();
     let response_cache = ResponseCache::for_test(
-        pg_cache.clone(),
+        storage.clone(),
         HashMap::new(),
         valid_schema.clone(),
         false,
-        false,
+        drop_tx,
     )
     .await
     .unwrap();
 
     let subgraphs = MockedSubgraphs([
-            ("user", MockSubgraph::builder().with_json(
-                    serde_json::json!{{"query":"{currentUser{allOrganizations{__typename id}}}"}},
-                    serde_json::json!{{"data": {"currentUser": { "allOrganizations": [
+        ("user", MockSubgraph::builder().with_json(
+            serde_json::json! {{"query":"{currentUser{allOrganizations{__typename id}}}"}},
+            serde_json::json! {{"data": {"currentUser": { "allOrganizations": [
                         {
                             "__typename": "Organization",
                             "id": "1"
@@ -3025,10 +2417,10 @@ async fn missing_entities() {
                             "__typename": "Organization",
                             "id": "3"
                         }
-                    ] }}}}
-            ).with_header(CACHE_CONTROL, HeaderValue::from_static("no-store")).build()),
-            ("orga", MockSubgraph::builder().with_json(
-                serde_json::json!{{
+                    ] }}}},
+        ).with_header(CACHE_CONTROL, HeaderValue::from_static("no-store")).build()),
+        ("orga", MockSubgraph::builder().with_json(
+            serde_json::json! {{
                     "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
                 "variables": {
                     "representations": [
@@ -3038,14 +2430,14 @@ async fn missing_entities() {
                         }
                     ]
                 }}},
-                serde_json::json!{{
+            serde_json::json! {{
                     "data": null,
                     "errors": [{
                         "message": "Organization not found",
                     }]
-                }}
-            ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
-        ].into_iter().collect());
+                }},
+        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
+    ].into_iter().collect());
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -3068,12 +2460,7 @@ async fn missing_entities() {
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
     let mut response = response.next_response().await.unwrap();
-    assert!(
-        response
-            .extensions
-            .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-            .is_some()
-    );
+    assert!(remove_debug_extensions_key(&mut response));
 
     insta::assert_json_snapshot!(response);
 }
@@ -3110,26 +2497,15 @@ async fn invalidate_by_cache_tag() {
             },
         });
 
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-            cleanup_interval: default_cleanup_interval(),
-            tls: Default::default(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from("test_invalidate_by_cache_tag")),
-        })
-        .await
-        .unwrap();
+        let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false,"test_invalidate_by_cache_tag"), drop_rx)
+            .await
+            .unwrap();
         let map = [
             (
                 "user".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -3139,7 +2515,7 @@ async fn invalidate_by_cache_tag() {
             (
                 "orga".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -3147,10 +2523,10 @@ async fn invalidate_by_cache_tag() {
                 },
             ),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         let response_cache =
-            ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
                 .await
                 .unwrap();
 
@@ -3175,44 +2551,15 @@ async fn invalidate_by_cache_tag() {
             .build()
             .unwrap();
         let mut response = service.oneshot(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .and_then(|h| h.to_str().ok())
-                .unwrap()
-                .contains("max-age="),
-        );
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .and_then(|h| h.to_str().ok())
-                .unwrap()
-                .contains(",public"),
-        );
+        let cache_control_header = get_cache_control_header(&response).expect("missing header");
+        assert!(cache_control_contains_max_age(&cache_control_header));
+        assert!(cache_control_contains_public(&cache_control_header));
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -3226,11 +2573,11 @@ async fn invalidate_by_cache_tag() {
             }
           }
         }
-        "###);
+        "#);
         assert_histogram_sum!("apollo.router.operations.response_cache.fetch.entity", 1u64, "subgraph.name" = "orga", "graphql.type" = "Organization");
 
-
         // Now testing without any mock subgraphs, all the data should come from the cache
+        wait_for_cache(&storage, expected_cached_keys(&cache_keys)).await;
         let service = TestHarness::builder()
             .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
             .unwrap()
@@ -3250,45 +2597,16 @@ async fn invalidate_by_cache_tag() {
             .build()
             .unwrap();
         let mut response = service.clone().oneshot(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .and_then(|h| h.to_str().ok())
-                .unwrap()
-                .contains("max-age="),
-        );
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .and_then(|h| h.to_str().ok())
-                .unwrap()
-                .contains(",public"),
-        );
+        let cache_control_header = get_cache_control_header(&response).expect("missing header");
+        assert!(cache_control_contains_max_age(&cache_control_header));
+        assert!(cache_control_contains_public(&cache_control_header));
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
         assert_histogram_sum!("apollo.router.operations.response_cache.fetch.entity", 2u64, "subgraph.name" = "orga", "graphql.type" = "Organization");
 
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -3302,7 +2620,7 @@ async fn invalidate_by_cache_tag() {
             }
           }
         }
-        "###);
+        "#);
 
         // now we invalidate data
         let res = invalidation
@@ -3314,7 +2632,7 @@ async fn invalidate_by_cache_tag() {
             .unwrap();
         assert_eq!(res, 1);
 
-        assert_counter!("apollo.router.operations.response_cache.invalidation.entry", 1u64, "subgraph.name" = "orga");
+        assert_counter!("apollo.router.operations.response_cache.invalidation.entry", 1u64, "subgraph.name" = "orga", "kind" = "cache_tag", "cache.tag" = "organization-1");
 
         let service = TestHarness::builder()
             .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -3335,44 +2653,15 @@ async fn invalidate_by_cache_tag() {
             .build()
             .unwrap();
         let mut response = service.clone().oneshot(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .and_then(|h| h.to_str().ok())
-                .unwrap()
-                .contains("max-age="),
-        );
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .and_then(|h| h.to_str().ok())
-                .unwrap()
-                .contains(",public"),
-        );
+        let cache_control_header = get_cache_control_header(&response).expect("missing header");
+        assert!(cache_control_contains_max_age(&cache_control_header));
+        assert!(cache_control_contains_public(&cache_control_header));
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -3386,9 +2675,8 @@ async fn invalidate_by_cache_tag() {
             }
           }
         }
-        "###);
+        "#);
         assert_histogram_sum!("apollo.router.operations.response_cache.fetch.entity", 3u64, "subgraph.name" = "orga", "graphql.type" = "Organization");
-
     }.with_metrics().await;
 }
 
@@ -3424,26 +2712,15 @@ async fn invalidate_by_type() {
             },
         });
 
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-            tls: Default::default(),
-            cleanup_interval: default_cleanup_interval(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from("test_invalidate_by_subgraph")),
-        })
-        .await
-        .unwrap();
+        let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false,"test_invalidate_by_subgraph"), drop_rx)
+            .await
+            .unwrap();
         let map = [
             (
                 "user".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -3453,7 +2730,7 @@ async fn invalidate_by_type() {
             (
                 "orga".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -3461,10 +2738,10 @@ async fn invalidate_by_type() {
                 },
             ),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
         let response_cache =
-            ResponseCache::for_test(pg_cache.clone(), map, valid_schema.clone(), true, false)
+            ResponseCache::for_test(storage.clone(), map, valid_schema.clone(), true, drop_tx)
                 .await
                 .unwrap();
 
@@ -3489,44 +2766,15 @@ async fn invalidate_by_type() {
             .build()
             .unwrap();
         let mut response = service.oneshot(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .and_then(|h| h.to_str().ok())
-                .unwrap()
-                .contains("max-age="),
-        );
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .and_then(|h| h.to_str().ok())
-                .unwrap()
-                .contains(",public"),
-        );
+        let cache_control_header = get_cache_control_header(&response).expect("missing header");
+        assert!(cache_control_contains_max_age(&cache_control_header));
+        assert!(cache_control_contains_public(&cache_control_header));
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
+        assert!(remove_debug_extensions_key(&mut response));
 
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -3540,9 +2788,10 @@ async fn invalidate_by_type() {
             }
           }
         }
-        "###);
+        "#);
 
         // Now testing without any mock subgraphs, all the data should come from the cache
+        wait_for_cache(&storage, expected_cached_keys(&cache_keys)).await;
         let service = TestHarness::builder()
             .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
             .unwrap()
@@ -3562,44 +2811,16 @@ async fn invalidate_by_type() {
             .build()
             .unwrap();
         let mut response = service.clone().oneshot(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .and_then(|h| h.to_str().ok())
-                .unwrap()
-                .contains("max-age="),
-        );
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .and_then(|h| h.to_str().ok())
-                .unwrap()
-                .contains(",public"),
-        );
-        let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
 
-        insta::assert_json_snapshot!(response, @r###"
+        let cache_control_header = get_cache_control_header(&response).expect("missing header");
+        assert!(cache_control_contains_max_age(&cache_control_header));
+        assert!(cache_control_contains_public(&cache_control_header));
+        let mut response = response.next_response().await.unwrap();
+        assert!(remove_debug_extensions_key(&mut response));
+
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -3613,16 +2834,16 @@ async fn invalidate_by_type() {
             }
           }
         }
-        "###);
+        "#);
 
         // now we invalidate data
         let res = invalidation
-            .invalidate(vec![InvalidationRequest::Type {subgraph:"orga".to_string(), r#type: "Organization".to_string() }])
+            .invalidate(vec![InvalidationRequest::Type { subgraph: "orga".to_string(), r#type: "Organization".to_string() }])
             .await
             .unwrap();
         assert_eq!(res, 1);
 
-        assert_counter!("apollo.router.operations.response_cache.invalidation.entry", 1u64, "subgraph.name" = "orga");
+        assert_counter!("apollo.router.operations.response_cache.invalidation.entry", 1u64, "subgraph.name" = "orga", "graphql.type" = "Organization", "kind" = "type");
 
         let service = TestHarness::builder()
             .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -3643,44 +2864,16 @@ async fn invalidate_by_type() {
             .build()
             .unwrap();
         let mut response = service.clone().oneshot(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::assert_json_snapshot!(cache_keys);
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .and_then(|h| h.to_str().ok())
-                .unwrap()
-                .contains("max-age="),
-        );
-        assert!(
-            response
-                .response
-                .headers()
-                .get(CACHE_CONTROL)
-                .and_then(|h| h.to_str().ok())
-                .unwrap()
-                .contains(",public"),
-        );
-        let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
 
-        insta::assert_json_snapshot!(response, @r###"
+        let cache_control_header = get_cache_control_header(&response).expect("missing header");
+        assert!(cache_control_contains_max_age(&cache_control_header));
+        assert!(cache_control_contains_public(&cache_control_header));
+        let mut response = response.next_response().await.unwrap();
+        assert!(remove_debug_extensions_key(&mut response));
+
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -3694,98 +2887,8 @@ async fn invalidate_by_type() {
             }
           }
         }
-        "###);
-
+        "#);
     }.with_metrics().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn interval_cleanup_config() {
-    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
-
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-        tls: Default::default(),
-        cleanup_interval: std::time::Duration::from_secs(60 * 7), // Every 7 minutes
-        url: "postgres://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: Some(String::from("interval_cleanup_config_1")),
-    })
-    .await
-    .unwrap();
-    let _response_cache = ResponseCache::for_test(
-        pg_cache.clone(),
-        Default::default(),
-        valid_schema.clone(),
-        true,
-        true,
-    )
-    .await
-    .unwrap();
-
-    let cron = pg_cache.get_cron().await.unwrap();
-    assert_eq!(cron.0, String::from("*/7 * * * *"));
-
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-        tls: Default::default(),
-        cleanup_interval: std::time::Duration::from_secs(60 * 60 * 7), // Every 7 hours
-        url: "postgres://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: Some(String::from("interval_cleanup_config_2")),
-    })
-    .await
-    .unwrap();
-    let _response_cache = ResponseCache::for_test(
-        pg_cache.clone(),
-        Default::default(),
-        valid_schema.clone(),
-        true,
-        true,
-    )
-    .await
-    .unwrap();
-
-    let cron = pg_cache.get_cron().await.unwrap();
-    assert_eq!(cron.0, String::from("0 */7 * * *"));
-
-    let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-        tls: Default::default(),
-        cleanup_interval: std::time::Duration::from_secs(60 * 60 * 24 * 7), // Every 7 days
-        url: "postgres://127.0.0.1".parse().unwrap(),
-        username: None,
-        password: None,
-        idle_timeout: std::time::Duration::from_secs(5),
-        acquire_timeout: std::time::Duration::from_millis(50),
-        required_to_start: true,
-        pool_size: default_pool_size(),
-        batch_size: default_batch_size(),
-        namespace: Some(String::from("interval_cleanup_config_2")),
-    })
-    .await
-    .unwrap();
-    let _response_cache = ResponseCache::for_test(
-        pg_cache.clone(),
-        Default::default(),
-        valid_schema.clone(),
-        true,
-        true,
-    )
-    .await
-    .unwrap();
-
-    let cron = pg_cache.get_cron().await.unwrap();
-    assert_eq!(cron.0, String::from("0 0 */7 * *"));
 }
 
 #[tokio::test]
@@ -3826,7 +2929,7 @@ async fn failure_mode() {
             (
                 "user".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -3836,7 +2939,7 @@ async fn failure_mode() {
             (
                 "orga".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -3874,7 +2977,7 @@ async fn failure_mode() {
             .unwrap();
         let mut response = service.oneshot(request).await.unwrap();
         let response = response.next_response().await.unwrap();
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -3888,7 +2991,7 @@ async fn failure_mode() {
             }
           }
         }
-        "###);
+        "#);
 
         assert_counter!(
             "apollo.router.operations.response_cache.fetch.error",
@@ -3928,7 +3031,7 @@ async fn failure_mode() {
         let mut response = service.oneshot(request).await.unwrap();
 
         let response = response.next_response().await.unwrap();
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -3942,7 +3045,7 @@ async fn failure_mode() {
             }
           }
         }
-        "###);
+        "#);
 
         assert_counter!(
             "apollo.router.operations.response_cache.fetch.error",
@@ -3956,60 +3059,6 @@ async fn failure_mode() {
             "subgraph.name" = "user",
             "code" = "NO_STORAGE"
         );
-    }
-    .with_metrics()
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn expired_data_count() {
-    async {
-        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
-
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-            tls: Default::default(),
-            cleanup_interval: std::time::Duration::from_secs(60 * 7), // Every 7 minutes
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from("expired_data_count")),
-        })
-        .await
-        .unwrap();
-        let _response_cache = ResponseCache::for_test(
-            pg_cache.clone(),
-            Default::default(),
-            valid_schema.clone(),
-            true,
-            true,
-        )
-        .await
-        .unwrap();
-        let cache_key = uuid::Uuid::new_v4().to_string();
-        pg_cache
-            .insert(
-                &cache_key,
-                std::time::Duration::from_millis(2),
-                vec![],
-                serde_json_bytes::json!({}),
-                CacheControl::default(),
-                "test",
-            )
-            .await
-            .unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        let (_drop_rx, drop_tx) = broadcast::channel(2);
-        tokio::spawn(
-            metrics::expired_data_task(pg_cache.clone(), drop_tx, None)
-                .with_current_meter_provider(),
-        );
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        assert_gauge!("apollo.router.response_cache.data.expired", 1);
     }
     .with_metrics()
     .await;
@@ -4053,7 +3102,7 @@ async fn failure_mode_reconnect() {
             (
                 "user".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -4063,7 +3112,7 @@ async fn failure_mode_reconnect() {
             (
                 "orga".to_string(),
                 Subgraph {
-                    postgres: None,
+                    redis: None,
                     private_id: Some("sub".to_string()),
                     enabled: true.into(),
                     ttl: None,
@@ -4071,25 +3120,13 @@ async fn failure_mode_reconnect() {
                 },
             ),
         ]
-        .into_iter()
-        .collect();
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-            tls: Default::default(),
-            cleanup_interval: std::time::Duration::from_secs(60 * 7), // Every 7 minutes
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from("failure_mode_reconnect")),
-        })
-        .await
-        .unwrap();
-        pg_cache.migrate().await.unwrap();
-        pg_cache.truncate_namespace().await.unwrap();
+            .into_iter()
+            .collect();
+        let (_drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false,"failure_mode_reconnect"), drop_rx)
+            .await
+            .unwrap();
+        storage.truncate_namespace().await.unwrap();
 
         let response_cache =
             ResponseCache::without_storage_for_failure_mode(map, valid_schema.clone())
@@ -4119,7 +3156,7 @@ async fn failure_mode_reconnect() {
             .unwrap();
         let mut response = service.oneshot(request).await.unwrap();
         let response = response.next_response().await.unwrap();
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -4133,7 +3170,7 @@ async fn failure_mode_reconnect() {
             }
           }
         }
-        "###);
+        "#);
 
         assert_counter!(
             "apollo.router.operations.response_cache.fetch.error",
@@ -4163,13 +3200,7 @@ async fn failure_mode_reconnect() {
             .unwrap();
 
         response_cache
-            .storage
-            .all
-            .as_ref()
-            .expect("the database all should already be Some")
-            .set(pg_cache)
-            .map_err(|_| "this should not be already set")
-            .unwrap();
+            .storage.replace_storage(storage).expect("must be able to replace");
 
         let request = supergraph::Request::fake_builder()
             .query(query)
@@ -4181,16 +3212,7 @@ async fn failure_mode_reconnect() {
             .build()
             .unwrap();
         let mut response = service.oneshot(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::with_settings!({
             description => "Make sure everything is in status 'new' and we have all the entities and root fields"
         }, {
@@ -4198,13 +3220,8 @@ async fn failure_mode_reconnect() {
         });
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
-        insta::assert_json_snapshot!(response, @r###"
+        assert!(remove_debug_extensions_key(&mut response));
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -4218,7 +3235,7 @@ async fn failure_mode_reconnect() {
             }
           }
         }
-        "###);
+        "#);
 
         assert_counter!(
             "apollo.router.operations.response_cache.fetch.error",
@@ -4256,16 +3273,7 @@ async fn failure_mode_reconnect() {
             .build()
             .unwrap();
         let mut response = service.oneshot(request).await.unwrap();
-        let mut cache_keys: CacheKeysContext = response
-            .context
-            .get(CONTEXT_DEBUG_CACHE_KEYS)
-            .unwrap()
-            .unwrap();
-        cache_keys.iter_mut().for_each(|ck| {
-            ck.invalidation_keys.sort();
-            ck.cache_control.created = 0;
-        });
-        cache_keys.sort_by(|a, b| a.invalidation_keys.cmp(&b.invalidation_keys));
+        let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
         insta::with_settings!({
             description => "Make sure everything is in status 'cached' and we have all the entities and root fields"
         }, {
@@ -4273,13 +3281,8 @@ async fn failure_mode_reconnect() {
         });
 
         let mut response = response.next_response().await.unwrap();
-        assert!(
-            response
-                .extensions
-                .remove(CACHE_DEBUG_EXTENSIONS_KEY)
-                .is_some()
-        );
-        insta::assert_json_snapshot!(response, @r###"
+        assert!(remove_debug_extensions_key(&mut response));
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -4293,7 +3296,7 @@ async fn failure_mode_reconnect() {
             }
           }
         }
-        "###);
+        "#);
 
         assert_counter!(
             "apollo.router.operations.response_cache.fetch.error",
@@ -4308,6 +3311,6 @@ async fn failure_mode_reconnect() {
             "code" = "NO_STORAGE"
         );
     }
-    .with_metrics()
-    .await;
+        .with_metrics()
+        .await;
 }

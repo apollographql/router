@@ -8,17 +8,13 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::trace::BatchConfig;
 use opentelemetry_sdk::trace::BatchConfigBuilder;
-use opentelemetry_sdk::trace::Builder;
 use opentelemetry_sdk::trace::Span;
 use opentelemetry_sdk::trace::SpanProcessor;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tower::BoxError;
 
-use super::config_new::spans::Spans;
 use super::formatters::APOLLO_CONNECTOR_PREFIX;
 use super::formatters::APOLLO_PRIVATE_PREFIX;
-use crate::plugins::telemetry::config::TracingCommon;
 use crate::plugins::telemetry::tracing::datadog::DatadogSpanProcessor;
 
 pub(crate) mod apollo;
@@ -29,16 +25,6 @@ pub(crate) mod datadog_exporter;
 pub(crate) mod otlp;
 pub(crate) mod reload;
 pub(crate) mod zipkin;
-
-pub(crate) trait TracingConfigurator {
-    fn enabled(&self) -> bool;
-    fn apply(
-        &self,
-        builder: Builder,
-        common: &TracingCommon,
-        spans: &Spans,
-    ) -> Result<Builder, BoxError>;
-}
 
 #[derive(Debug)]
 struct ApolloFilterSpanProcessor<T: SpanProcessor> {
@@ -110,7 +96,7 @@ where
 }
 
 /// Batch processor configuration
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq)]
 #[serde(default)]
 pub(crate) struct BatchProcessorConfig {
     #[serde(deserialize_with = "humantime_serde::deserialize")]
@@ -120,7 +106,7 @@ pub(crate) struct BatchProcessorConfig {
     pub(crate) scheduled_delay: Duration,
 
     /// The maximum queue size to buffer spans for delayed processing. If the
-    /// queue gets full it drops the spans. The default value of is 2048.
+    /// queue gets full it drops the spans. The default value is 2048.
     pub(crate) max_queue_size: usize,
 
     /// The maximum number of spans to process in a single batch. If there are
@@ -144,11 +130,11 @@ pub(crate) struct BatchProcessorConfig {
     pub(crate) max_concurrent_exports: usize,
 }
 
-fn scheduled_delay_default() -> Duration {
+pub(crate) fn scheduled_delay_default() -> Duration {
     Duration::from_secs(5)
 }
 
-fn max_queue_size_default() -> usize {
+pub(crate) fn max_queue_size_default() -> usize {
     2048
 }
 
@@ -156,7 +142,7 @@ fn max_export_batch_size_default() -> usize {
     512
 }
 
-fn max_export_timeout_default() -> Duration {
+pub(crate) fn max_export_timeout_default() -> Duration {
     Duration::from_secs(30)
 }
 

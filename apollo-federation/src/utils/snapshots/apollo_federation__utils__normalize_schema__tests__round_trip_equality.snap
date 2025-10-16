@@ -1,0 +1,93 @@
+---
+source: apollo-federation/src/utils/normalize_schema.rs
+expression: normalized_sdl
+---
+schema @d1(a3: "2") {
+  mutation: T1
+}
+
+extend schema @d1(a1: "0") {
+  query: T3
+}
+
+extend schema @d1(a1: "0", a3: "2") @d1(a1: "1") @d2(a1: "0")
+
+extend schema @d1(a1: "2") @d2(a1: "0")
+
+extend schema @d1(a1: "2") @d2(a1: "0")
+
+extend schema {
+  subscription: T2
+}
+
+directive @d1(a1: String, a2: I2, a3: String) repeatable on MUTATION | FRAGMENT_SPREAD | VARIABLE_DEFINITION | SCHEMA | SCALAR | OBJECT | FIELD_DEFINITION | ARGUMENT_DEFINITION | INTERFACE | UNION | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+directive @d2(a1: String, a2: I1) repeatable on QUERY | SUBSCRIPTION | FIELD | FRAGMENT_DEFINITION | INLINE_FRAGMENT | SCHEMA | SCALAR | OBJECT | FIELD_DEFINITION | ARGUMENT_DEFINITION | INTERFACE | UNION | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+enum E1 @d1(a1: "0") @d1(a1: "0") {
+  V2 @d2(a2: {f3: ["1", "3"]}) @d2(a2: {f3: ["2", "1"]})
+}
+
+extend enum E1 @d1(a1: "0") @d1(a1: "0") {
+  V1
+  V3
+}
+
+input I1 {
+  f2: I2
+}
+
+extend input I1 {
+  f1: String
+  f3: [String!]
+}
+
+input I2 {
+  f1: ID
+  f2: I1
+  f3: String
+}
+
+interface N1 {
+  f3: ID!
+}
+
+interface N2 @d1(a1: "2") @d2(a1: "1") {
+  f3: ID!
+}
+
+extend interface N2 implements N1 @d1(a1: "1") @d2(a1: "2") {
+  f1(a1: Int): String
+}
+
+interface N3 {
+  f2(a1: I2, a2: I1): T1
+}
+
+scalar S1 @d1(a3: "2")
+
+scalar S2
+
+type T1 {
+  f2(a1: I2): E1
+}
+
+type T2 {
+  f1: Float
+}
+
+type T3 implements N1 & N2 @d2(a1: "1") {
+  f2(
+    a1: I2 @d1(a2: {f1: "ID1", f3: "ID1"}) @d1(a2: {f1: "ID2", f3: "ID0"}),
+    a2: I1 @d1(a1: "ID0") @d1(a2: {f1: "ID1", f3: "ID2"}),
+  ): T1! @d1(a1: "1") @d2(a1: "1")
+}
+
+extend type T3 implements N3 @d1(a1: "1") {
+  f1(a1: Int): String
+  f3: ID!
+}
+
+union U1 @d1 @d2 @d2 = T1 | T2
+
+extend union U1 @d1 @d1 @d2 = T3

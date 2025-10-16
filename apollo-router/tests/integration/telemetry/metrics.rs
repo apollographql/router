@@ -70,15 +70,13 @@ async fn test_metrics_reloading() {
         .assert_metrics_does_not_contain(r#"_total_total{"#)
         .await;
 
-    if std::env::var("TEST_APOLLO_KEY").is_ok() && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok() {
-        router.assert_metrics_contains_multiple(vec![
-            r#"apollo_router_telemetry_studio_reports_total{report_type="metrics",otel_scope_name="apollo/router"} 2"#,
-            r#"apollo_router_telemetry_studio_reports_total{report_type="traces",otel_scope_name="apollo/router"} 2"#,
-            r#"apollo_router_uplink_fetch_duration_seconds_count{kind="unchanged",query="License",url="https://uplink.api.apollographql.com/",otel_scope_name="apollo/router"}"#,
-            r#"apollo_router_uplink_fetch_count_total{query="License",status="success",otel_scope_name="apollo/router"}"#
-            ], Some(Duration::from_secs(10)))
-            .await;
-    }
+    router.assert_metrics_contains_multiple(vec![
+        r#"apollo_router_telemetry_studio_reports_total{report_type="metrics",otel_scope_name="apollo/router"} 2"#,
+        r#"apollo_router_telemetry_studio_reports_total{report_type="traces",otel_scope_name="apollo/router"} 2"#,
+        r#"apollo_router_uplink_fetch_duration_seconds_count{kind="unchanged",query="License",url="https://uplink.api.apollographql.com/",otel_scope_name="apollo/router"}"#,
+        r#"apollo_router_uplink_fetch_count_total{query="License",status="success",otel_scope_name="apollo/router"}"#
+        ], Some(Duration::from_secs(10)))
+        .await;
 }
 
 #[track_caller]
@@ -353,4 +351,51 @@ async fn test_gauges_on_reload() {
             None,
         )
         .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_prom_reset_on_reload() {
+    let mut router = IntegrationTest::builder()
+        .config(include_str!("fixtures/prometheus.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    router.execute_default_query().await;
+    router.execute_default_query().await;
+
+    router
+        .assert_metrics_contains(
+            r#"http_server_request_duration_seconds_count{http_request_method="POST",status="200",otel_scope_name="apollo/router"} 2"#,
+            None,
+        )
+        .await;
+
+    // This config will NOT reload prometheus as the config did not change
+    router
+        .update_config(include_str!("fixtures/prometheus.router.yaml"))
+        .await;
+    router.assert_reloaded().await;
+    router
+        .assert_metrics_contains(
+            r#"http_server_request_duration_seconds_count{http_request_method="POST",status="200",otel_scope_name="apollo/router"} 2"#,
+            None,
+        )
+        .await;
+
+    // This config will force a reload as it changes the prometheus buckets
+    router
+        .update_config(include_str!("fixtures/prometheus_reload.router.yaml"))
+        .await;
+    router.assert_reloaded().await;
+    router.execute_default_query().await;
+    router
+        .assert_metrics_contains(
+            r#"http_server_request_duration_seconds_count{http_request_method="POST",status="200",otel_scope_name="apollo/router"} 1"#,
+            None,
+        )
+        .await;
+    router.graceful_shutdown().await;
 }

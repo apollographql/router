@@ -52,20 +52,17 @@ plugins:
   experimental.restricted:
     enabled: true
 
-preview_entity_cache:
+preview_response_cache:
   enabled: true
   invalidation:
-    listen: 127.0.0.1:4000
+    listen: 0.0.0.0:4000
     path: /invalidation
   subgraph:
     all:
+      enabled: true
       redis:
-        urls:
-          - https://example.com
-      enabled: false
-    subgraphs:
-      product:
-        enabled: false
+        urls: [ "redis://localhost:6379" ]
+      ttl: 360s # overrides the global TTL
 
 telemetry:
   apollo:

@@ -33,6 +33,8 @@ use crate::graphql::Request;
 use crate::http_ext;
 use crate::plugin::DynPlugin;
 use crate::plugin::test::MockExecutionService;
+use crate::plugin::test::MockRouterService;
+use crate::plugin::test::MockSubgraphService;
 use crate::plugin::test::MockSupergraphService;
 use crate::plugins::rhai::engine::RhaiExecutionDeferredResponse;
 use crate::plugins::rhai::engine::RhaiExecutionResponse;
@@ -900,7 +902,7 @@ async fn test_rhai_header_removal_with_non_utf8_header() -> Result<(), BoxError>
             .iter()
             .find(|e| e.message.contains("rhai execution error"))
             .expect("unexpected non-rhai error");
-        panic!("Got an unexpected rhai error: {:?}", rhai_error);
+        panic!("Got an unexpected rhai error: {rhai_error:?}");
     }
 
     // Check that the header was actually removed
@@ -911,4 +913,139 @@ async fn test_rhai_header_removal_with_non_utf8_header() -> Result<(), BoxError>
     );
 
     Ok(())
+}
+
+async fn test_supergraph_error_logging(script_name: &str) -> Result<(), BoxError> {
+    let mut mock_service = MockSupergraphService::new();
+    mock_service.expect_call().never();
+
+    let dyn_plugin = create_plugin(script_name).await?;
+
+    let mut service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+    let req = SupergraphRequest::fake_builder()
+        .context(Context::new())
+        .build()?;
+
+    let _response = service.ready().await?.call(req).await?;
+    Ok(())
+}
+
+async fn create_plugin(script_name: &str) -> Result<Box<dyn DynPlugin>, BoxError> {
+    let config = format!(
+        r#"{{"scripts":"tests/fixtures", "main":"{}"}}"#,
+        script_name
+    );
+    let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+        .find(|factory| factory.name == "apollo.rhai")
+        .expect("Plugin not found")
+        .create_instance_without_schema(&Value::from_str(&config)?)
+        .await?;
+    Ok(dyn_plugin)
+}
+
+async fn test_execution_error_logging(script_name: &str) -> Result<(), BoxError> {
+    let mut mock_service = MockExecutionService::new();
+    mock_service.expect_clone().return_once(move || {
+        let mut mock_service = MockExecutionService::new();
+        mock_service.expect_call().never();
+        mock_service
+    });
+    let dyn_plugin = create_plugin(script_name).await?;
+    let mut service = dyn_plugin.execution_service(BoxService::new(mock_service));
+    let fake_req = http_ext::Request::fake_builder()
+        .body(Request::builder().query(String::new()).build())
+        .build()?;
+    let req = ExecutionRequest::fake_builder()
+        .context(Context::new())
+        .supergraph_request(fake_req)
+        .build();
+
+    let _response = service.ready().await?.call(req).await?;
+    Ok(())
+}
+
+async fn test_router_error_logging(script_name: &str) -> Result<(), BoxError> {
+    let mut mock_service = MockRouterService::new();
+    mock_service.expect_call().never();
+
+    let dyn_plugin = create_plugin(script_name).await?;
+
+    let mut service = dyn_plugin.router_service(BoxService::new(mock_service));
+    let req = crate::services::RouterRequest::fake_builder()
+        .context(Context::new())
+        .build()?;
+
+    let _response = service.ready().await?.call(req).await?;
+    Ok(())
+}
+
+async fn test_subgraph_error_logging(script_name: &str) -> Result<(), BoxError> {
+    let mut mock_service = MockSubgraphService::new();
+    mock_service.expect_call().never();
+
+    let dyn_plugin = create_plugin(script_name).await?;
+
+    let mut service = dyn_plugin.subgraph_service("test_subgraph", BoxService::new(mock_service));
+    let req = SubgraphRequest::fake_builder()
+        .context(Context::new())
+        .build();
+
+    let _response = service.ready().await?.call(req).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_supergraph_error_logging_without_body() -> Result<(), BoxError> {
+    test_supergraph_error_logging("error_without_body.rhai")
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await
+}
+
+#[tokio::test]
+async fn test_supergraph_error_logging_with_body() -> Result<(), BoxError> {
+    test_supergraph_error_logging("error_with_body.rhai")
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await
+}
+
+#[tokio::test]
+async fn test_execution_error_logging_without_body() -> Result<(), BoxError> {
+    test_execution_error_logging("error_without_body.rhai")
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await
+}
+
+#[tokio::test]
+async fn test_execution_error_logging_with_body() -> Result<(), BoxError> {
+    test_execution_error_logging("error_with_body.rhai")
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await
+}
+
+#[tokio::test]
+async fn test_router_error_logging_without_body() -> Result<(), BoxError> {
+    test_router_error_logging("error_without_body.rhai")
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await
+}
+
+#[tokio::test]
+async fn test_router_error_logging_with_body() -> Result<(), BoxError> {
+    test_router_error_logging("error_with_body.rhai")
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await
+}
+
+#[tokio::test]
+async fn test_subgraph_error_logging_without_body() -> Result<(), BoxError> {
+    test_subgraph_error_logging("error_without_body.rhai")
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await
+}
+
+#[tokio::test]
+async fn test_subgraph_error_logging_with_body() -> Result<(), BoxError> {
+    test_subgraph_error_logging("error_with_body.rhai")
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await
 }

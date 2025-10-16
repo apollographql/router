@@ -36,9 +36,11 @@ use crate::axum_factory::compression::Compressor;
 use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
+use crate::plugins::telemetry::HttpClientAttributes;
 use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
+use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
-use crate::plugins::telemetry::reload::prepare_context;
+use crate::plugins::telemetry::reload::otel::prepare_context;
 use crate::plugins::traffic_shaping::Http2Config;
 use crate::services::hickory_dns_connector::AsyncHyperResolver;
 use crate::services::hickory_dns_connector::new_async_http_connector;
@@ -313,9 +315,15 @@ impl tower::Service<HttpRequest> for HttpClientService {
             "http.route" = %path,
             "http.url" = %schema_uri,
             "net.transport" = "ip_tcp",
-            //"apollo.subgraph.name" = %service_name,
-            //"graphql.operation.name" = %operation_name,
         );
+
+        // Apply any attributes that were stored by telemetry middleware
+        if let Some(client_attributes) = context
+            .extensions()
+            .with_lock(|lock| lock.get::<HttpClientAttributes>().cloned())
+        {
+            http_req_span.set_span_dyn_attributes(client_attributes.attributes);
+        }
         get_text_map_propagator(|propagator| {
             propagator.inject_context(
                 &prepare_context(http_req_span.context()),

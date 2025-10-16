@@ -289,7 +289,7 @@ impl<'schema> Transport<'schema> {
                     .collect(),
             }]
         })?;
-        let url = StringTemplate::from_str(url_string)
+        let url = StringTemplate::parse_with_spec(url_string, schema.connect_link.spec)
             .map_err(|string_template::Error { message, location }| Message {
                 code: Code::InvalidUrl,
                 message: format!("In {coordinate}: {message}"),

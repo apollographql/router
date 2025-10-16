@@ -2359,8 +2359,7 @@ impl FetchDependencyGraph {
                         .map_or_else(
                             |_| {
                                 Err(FederationError::internal(format!(
-                                    "Invalid call from {} starting at {}: {} is not composite",
-                                    path, parent_type, field_position
+                                    "Invalid call from {path} starting at {parent_type}: {field_position} is not composite"
                                 )))
                             },
                             Ok,
@@ -2374,8 +2373,7 @@ impl FetchDependencyGraph {
                             .map_or_else(
                                 |_| {
                                     Err(FederationError::internal(format!(
-                                        "Invalid call from {} starting at {}: {} is not composite",
-                                        path, parent_type, type_condition_position
+                                        "Invalid call from {path} starting at {parent_type}: {type_condition_position} is not composite"
                                     )))
                                 },
                                 Ok,
@@ -3313,7 +3311,7 @@ impl std::fmt::Display for FetchInputs {
                 // We can safely unwrap because we know the len >= 1.
                 write!(f, "{}", iter.next().unwrap())?;
                 for x in iter {
-                    write!(f, ",{}", x)?;
+                    write!(f, ",{x}")?;
                 }
                 write!(f, "]")
             }
@@ -3651,10 +3649,10 @@ fn compute_nodes_for_key_resolution<'a>(
         let mut iter = dependency_graph.parents_relations_of(condition_node);
         if let (Some(condition_node_parent), None) = (iter.next(), iter.next()) {
             // There is exactly one parent
-            if condition_node_parent.parent_node_id == stack_item.node_id {
-                if let Some(condition_path) = condition_node_parent.path_in_parent {
-                    path = condition_path.strip_prefix(path_in_parent).map(Arc::new)
-                }
+            if condition_node_parent.parent_node_id == stack_item.node_id
+                && let Some(condition_path) = condition_node_parent.path_in_parent
+            {
+                path = condition_path.strip_prefix(path_in_parent).map(Arc::new)
             }
         }
         drop(iter);
@@ -4146,47 +4144,45 @@ fn compute_nodes_for_op_path_element<'a>(
         }
     }
 
-    if let OpPathElement::Field(field) = &updated_operation {
-        if *field.name() == TYPENAME_FIELD {
-            // Because of the optimization done in `QueryPlanner.optimizeSiblingTypenames`,
-            // we will rarely get an explicit `__typename` edge here.
-            // But one case where it can happen is where an @interfaceObject was involved,
-            // and we had to force jumping to another subgraph for getting the "true" `__typename`.
-            // However, this case can sometimes lead to fetch dependency node
-            // that only exists for that `__typename` resolution and that "looks" useless.
-            // That is, we could have a fetch dependency node that looks like:
-            // ```
-            //   Fetch(service: "Subgraph2") {
-            //     {
-            //       ... on I {
-            //         __typename
-            //         id
-            //       }
-            //     } =>
-            //     {
-            //       ... on I {
-            //         __typename
-            //       }
-            //     }
-            //   }
-            // ```
-            // but the trick is that the `__typename` in the input
-            // will be the name of the interface itself (`I` in this case)
-            // but the one return after the fetch will the name of the actual implementation
-            // (some implementation of `I`).
-            // *But* we later have optimizations that would remove such a node,
-            // on the node that the output is included in the input,
-            // which is in general the right thing to do
-            // (and genuinely ensure that some useless nodes created when handling
-            // complex @require gets eliminated).
-            // So we "protect" the node in this case to ensure
-            // that later optimization doesn't kick in in this case.
-            let updated_node = FetchDependencyGraph::node_weight_mut(
-                &mut dependency_graph.graph,
-                updated.node_id,
-            )?;
-            updated_node.must_preserve_selection_set = true
-        }
+    if let OpPathElement::Field(field) = &updated_operation
+        && *field.name() == TYPENAME_FIELD
+    {
+        // Because of the optimization done in `QueryPlanner.optimizeSiblingTypenames`,
+        // we will rarely get an explicit `__typename` edge here.
+        // But one case where it can happen is where an @interfaceObject was involved,
+        // and we had to force jumping to another subgraph for getting the "true" `__typename`.
+        // However, this case can sometimes lead to fetch dependency node
+        // that only exists for that `__typename` resolution and that "looks" useless.
+        // That is, we could have a fetch dependency node that looks like:
+        // ```
+        //   Fetch(service: "Subgraph2") {
+        //     {
+        //       ... on I {
+        //         __typename
+        //         id
+        //       }
+        //     } =>
+        //     {
+        //       ... on I {
+        //         __typename
+        //       }
+        //     }
+        //   }
+        // ```
+        // but the trick is that the `__typename` in the input
+        // will be the name of the interface itself (`I` in this case)
+        // but the one return after the fetch will the name of the actual implementation
+        // (some implementation of `I`).
+        // *But* we later have optimizations that would remove such a node,
+        // on the node that the output is included in the input,
+        // which is in general the right thing to do
+        // (and genuinely ensure that some useless nodes created when handling
+        // complex @require gets eliminated).
+        // So we "protect" the node in this case to ensure
+        // that later optimization doesn't kick in in this case.
+        let updated_node =
+            FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, updated.node_id)?;
+        updated_node.must_preserve_selection_set = true
     }
     if let QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { .. } = &edge.transition {
         // We shouldn't add the operation "as is" as it's a down-cast but we're "faking it".
@@ -4804,14 +4800,56 @@ fn create_post_requires_node(
             parent.parent_node_id,
             parent_path,
         )?;
+
+        // The `post_requires_node_id` node needs a key. This can come from `fetch_node_id` (and
+        // code in `GraphPath::can_satisfy_conditions()` guarantees such a locally satisfiable key
+        // exists in `fetch_node_id`), but it can also potentially come from
+        // `parent.parent_node_id`, and previous code had (wrongfully) always assumed it could.
+        //
+        // To keep this previous optimization, we now explicitly check whether the known locally
+        // satisfiable key can be rebased in `parent.parent_node_id`, and we fall back to
+        // `fetch_node_id` if it doesn't.
+        let Some(key_condition) = dependency_graph
+            .federated_query_graph
+            .locally_satisfiable_key(query_graph_edge_id)?
+        else {
+            bail!(
+                "Due to @requires, validation should have required a key to be present for {}",
+                query_graph_edge_id.index()
+            );
+        };
+        let parent_fetch_node = dependency_graph.node_weight(parent.parent_node_id)?;
+        let type_at_path_for_parent = dependency_graph.type_at_path(
+            &parent_fetch_node.selection_set.selection_set.type_position,
+            &parent_fetch_node.selection_set.selection_set.schema,
+            &path_for_parent.path_in_node,
+        )?;
+        let (require_node_path, pre_require_node_id) = if !key_condition.can_rebase_on(
+            &type_at_path_for_parent,
+            &parent_fetch_node.selection_set.selection_set.schema,
+        )? {
+            // It's possible we didn't add `fetch_node_id` as a parent previously, so we do so here
+            // similarly to how `handle_conditions_tree()` specifies it.
+            dependency_graph.add_parent(
+                post_requires_node_id,
+                ParentRelation {
+                    parent_node_id: fetch_node_id,
+                    path_in_parent: Some(Arc::new(Default::default())),
+                },
+            );
+            (fetch_node_path, fetch_node_id)
+        } else {
+            (&path_for_parent, parent.parent_node_id)
+        };
+
         add_post_require_inputs(
             dependency_graph,
-            &path_for_parent,
+            require_node_path,
             &entity_type_schema,
             entity_type_position.clone(),
             query_graph_edge_id,
             context,
-            parent.parent_node_id,
+            pre_require_node_id,
             post_requires_node_id,
         )?;
         created_nodes.insert(post_requires_node_id);
