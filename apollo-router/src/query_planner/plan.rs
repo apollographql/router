@@ -23,7 +23,6 @@ use crate::query_planner::fetch::SubgraphSchemas;
 use crate::services::query_planner::PlanOptions;
 use crate::spec::Query;
 use crate::spec::QueryHash;
-use crate::spec::operation_limits::OperationLimits;
 
 /// A planner key.
 ///
@@ -45,7 +44,6 @@ pub struct QueryPlan {
     /// String representation of the query plan (not a json representation)
     pub(crate) formatted_query_plan: Option<Arc<String>>,
     pub(crate) query: Arc<Query>,
-    pub(crate) query_metrics: OperationLimits<u32>,
 
     /// The estimated size in bytes of the query plan
     #[serde(default)]
@@ -68,7 +66,6 @@ impl QueryPlan {
             root: Arc::new(root.unwrap_or_else(|| PlanNode::Sequence { nodes: Vec::new() })),
             formatted_query_plan: Default::default(),
             query: Arc::new(Query::empty_for_tests()),
-            query_metrics: Default::default(),
             estimated_size: Default::default(),
         }
     }

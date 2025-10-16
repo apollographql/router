@@ -89,6 +89,7 @@ use crate::layers::instrument::InstrumentLayer;
 use crate::metrics::meter_provider;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
+use crate::plugins::limits::OperationLimits;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
@@ -140,7 +141,6 @@ use crate::services::layers::persisted_queries::RequestPersistedQueryId;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::spec::operation_limits::OperationLimits;
 
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
@@ -1439,7 +1439,7 @@ impl Telemetry {
                 let root_error_stats = Self::per_path_error_stats(&traces);
                 let strategy = context.get_demand_control_context().map(|c| c.strategy);
                 let limits_stats = context.extensions().with_lock(|guard| {
-                    let query_limits = guard.get::<OperationLimits<u32>>();
+                    let query_limits = guard.get::<OperationLimits>();
                     SingleLimitsStats {
                         strategy: strategy.and_then(|s| serde_json::to_string(&s.mode).ok()),
                         cost_estimated: context.get_estimated_cost().ok().flatten(),
@@ -1902,7 +1902,7 @@ impl TextMapPropagator for CustomTraceIdPropagator {
 
 pub(crate) fn add_query_attributes(context: &Context, custom_attributes: &mut Vec<KeyValue>) {
     context.extensions().with_lock(|c| {
-        if let Some(limits) = c.get::<OperationLimits<u32>>() {
+        if let Some(limits) = c.get::<OperationLimits>() {
             custom_attributes.push(KeyValue::new(
                 APOLLO_PRIVATE_QUERY_ALIASES.clone(),
                 AttributeValue::I64(limits.aliases.into()),

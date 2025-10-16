@@ -7,8 +7,6 @@ use apollo_compiler::executable;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::Configuration;
-
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub(crate) struct OperationLimits<T> {
     pub(crate) depth: T,
@@ -56,14 +54,12 @@ impl OperationLimits<bool> {
 }
 
 /// Returns which limits are exceeded by the given query, if any
-pub(crate) fn check(
+pub(super) fn check(
     query_metrics_in: &mut OperationLimits<u32>,
-    configuration: &Configuration,
-    query: &str,
+    config_limits: &crate::plugins::limits::Config,
     document: &ExecutableDocument,
     operation_name: Option<&str>,
 ) -> Result<(), OperationLimits<bool>> {
-    let config_limits = &configuration.limits;
     let max = OperationLimits {
         depth: config_limits.max_depth,
         height: config_limits.max_height,
@@ -107,8 +103,9 @@ pub(crate) fn check(
         });
         let message = messages.join(", ");
         tracing::warn!(
-            "request exceeded complexity limits: {message}, \
-            query: {query:?}, operation name: {operation_name:?}"
+            message,
+            ?operation_name,
+            "request exceeded complexity limits"
         );
         if !config_limits.warn_only {
             return Err(exceeded);

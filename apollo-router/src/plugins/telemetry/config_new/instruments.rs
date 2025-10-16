@@ -2547,6 +2547,7 @@ mod tests {
     use crate::http_ext::TryIntoHeaderValue;
     use crate::json_ext::Path;
     use crate::metrics::FutureMetricsExt;
+    use crate::plugins::limits::OperationLimits;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ALIASES;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;
@@ -2561,7 +2562,6 @@ mod tests {
     use crate::services::RouterResponse;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
-    use crate::spec::operation_limits::OperationLimits;
 
     type JsonMap = serde_json_bytes::Map<ByteString, Value>;
 
@@ -3095,7 +3095,7 @@ mod tests {
                                         if key == APOLLO_PRIVATE_QUERY_ALIASES.to_string() {
                                             context.extensions().with_lock(|lock| {
                                                 let limits = lock
-                                                    .get_or_default_mut::<OperationLimits<u32>>();
+                                                    .get_or_default_mut::<OperationLimits>();
                                                 let value_as_u32 = value.as_u64().unwrap() as u32;
                                                 limits.aliases = value_as_u32;
                                             });
@@ -3103,7 +3103,7 @@ mod tests {
                                         if key == APOLLO_PRIVATE_QUERY_DEPTH.to_string() {
                                             context.extensions().with_lock(|lock| {
                                                 let limits = lock
-                                                    .get_or_default_mut::<OperationLimits<u32>>();
+                                                    .get_or_default_mut::<OperationLimits>();
                                                 let value_as_u32 = value.as_u64().unwrap() as u32;
                                                 limits.depth = value_as_u32;
                                             });
@@ -3111,7 +3111,7 @@ mod tests {
                                         if key == APOLLO_PRIVATE_QUERY_HEIGHT.to_string() {
                                             context.extensions().with_lock(|lock| {
                                                 let limits = lock
-                                                    .get_or_default_mut::<OperationLimits<u32>>();
+                                                    .get_or_default_mut::<OperationLimits>();
                                                 let value_as_u32 = value.as_u64().unwrap() as u32;
                                                 limits.height = value_as_u32;
                                             });
@@ -3119,7 +3119,7 @@ mod tests {
                                         if key == APOLLO_PRIVATE_QUERY_ROOT_FIELDS.to_string() {
                                             context.extensions().with_lock(|lock| {
                                                 let limits = lock
-                                                    .get_or_default_mut::<OperationLimits<u32>>();
+                                                    .get_or_default_mut::<OperationLimits>();
                                                 let value_as_u32 = value.as_u64().unwrap() as u32;
                                                 limits.root_fields = value_as_u32;
                                             });

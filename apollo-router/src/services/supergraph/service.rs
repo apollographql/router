@@ -84,7 +84,6 @@ use crate::services::subgraph::BoxGqlStream;
 use crate::services::subgraph_service::MakeSubgraphService;
 use crate::services::supergraph;
 use crate::spec::Schema;
-use crate::spec::operation_limits::OperationLimits;
 
 pub(crate) const FIRST_EVENT_CONTEXT_KEY: &str = "apollo::supergraph::first_event";
 pub(crate) const SUBSCRIPTION_ERROR_EXTENSION_KEY: &str = "apollo::subscriptions::fatal_error";
@@ -252,11 +251,6 @@ async fn service_call(
         }
 
         Some(QueryPlannerContent::Plan { plan }) => {
-            let query_metrics = plan.query_metrics;
-            context.extensions().with_lock(|lock| {
-                let _ = lock.insert::<OperationLimits<u32>>(query_metrics);
-            });
-
             let is_deferred = plan.is_deferred(&variables);
             let is_subscription = plan.is_subscription();
 
@@ -508,7 +502,6 @@ async fn subscription_task(
                 root: Arc::new(*r),
                 formatted_query_plan: query_plan.formatted_query_plan.clone(),
                 query: query_plan.query.clone(),
-                query_metrics: query_plan.query_metrics,
                 estimated_size: Default::default(),
             })
         }),

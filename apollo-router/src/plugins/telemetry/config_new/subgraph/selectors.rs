@@ -13,6 +13,7 @@ use crate::context::OPERATION_NAME;
 use crate::plugin::serde::deserialize_jsonpath;
 use crate::plugins::cache::entity::CacheSubgraph;
 use crate::plugins::cache::metrics::CacheMetricContextKey;
+use crate::plugins::limits::OperationLimits;
 use crate::plugins::response_cache;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::Selector;
@@ -31,7 +32,6 @@ use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::selectors::Query;
 use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
 use crate::services::subgraph;
-use crate::spec::operation_limits::OperationLimits;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
@@ -347,7 +347,7 @@ impl Selector for SubgraphSelector {
                 let limits_opt = request
                     .context
                     .extensions()
-                    .with_lock(|lock| lock.get::<OperationLimits<u32>>().cloned());
+                    .with_lock(|lock| lock.get::<OperationLimits>().cloned());
                 match supergraph_query {
                     Query::Aliases => {
                         limits_opt.map(|limits| opentelemetry::Value::I64(limits.aliases as i64))
