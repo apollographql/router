@@ -348,7 +348,7 @@ List of the context keys used in the Apollo Router for passing data through the 
 
 ---
 
-### Core operation 
+### Core operation
 
 - `apollo::supergraph::operation_name` - Operation name
 - `apollo::supergraph::operation_kind` - Operation kind (`Query`, `Mutation`, or `Subscription`)
@@ -356,7 +356,7 @@ List of the context keys used in the Apollo Router for passing data through the 
 - `apollo::supergraph::first_event` - First event marker for subscriptions
 - `apollo::supergraph_schema_id` - Supergraph schema ID
 
-### Authentication & Authorization
+### Authentication and authorization
 
 #### Authentication
 - `apollo::authentication::jwt_claims` - JWT claims data
@@ -369,20 +369,20 @@ List of the context keys used in the Apollo Router for passing data through the 
 
 ### Telemetry
 
-#### Client Information
+#### Client information
 - `apollo::telemetry::client_name` - Client application name
 - `apollo::telemetry::client_version` - Client application version
 - `apollo::telemetry::client_library_name` - Client library name
 - `apollo::telemetry::client_library_version` - Client library version
 
-#### Telemetry Control
+#### Telemetry control
 - `apollo::telemetry::subgraph_ftv1` - FTV1 tracing for subgraph
 - `apollo::telemetry::studio_exclude` - Exclude from Studio reporting
 - `apollo::telemetry::contains_graphql_error` - Response contains GraphQL errors
 - `apollo::telemetry::counted_errors` - Map of already-counted errors (internal)
 - `apollo::telemetry::http_request_resend_count_{subgraph_req_id}` - HTTP retry count (dynamic key with subgraph request ID suffix)
 
-### Demand / Cost Control 
+### Demand and cost control
 
 - `apollo::demand_control::estimated_cost` - Estimated query cost
 - `apollo::demand_control::actual_cost` - Actual query cost
@@ -391,27 +391,27 @@ List of the context keys used in the Apollo Router for passing data through the 
 
 ### Caching
 
-#### Response Cache
+#### Response cache
 - `apollo::response_cache::key` - Response cache key
 - `apollo::response_cache::debug_cached_keys` - Debug info for cached keys
 - `apollo::router::response_cache::cache_info_subgraph_{subgraph_name}` - Response cache info per subgraph (dynamic key with subgraph name suffix)
 
-#### Entity Cache
+#### Entity cache
 - `apollo_entity_cache::key` - Entity cache key
 - `apollo::entity_cache::cached_keys_status` - Entity cache keys status
 - `apollo::router::entity_cache_info_subgraph_{subgraph_name}` - Entity cache info per subgraph (dynamic key with subgraph name suffix)
 
-#### Automatic Persisted Queries (APQ)
+#### Automatic persisted queries (APQ)
 - `apollo::apq::cache_hit` - APQ cache hit indicator
 - `apollo::apq::registered` - APQ registration indicator
 
-### Query Plan Exposure
+### Query plan exposure
 
 - `apollo::expose_query_plan::plan` - Query plan object
 - `apollo::expose_query_plan::formatted_plan` - Formatted query plan string
 - `apollo::expose_query_plan::enabled` - Query plan exposure enabled flag
 
-### Progressive Override 
+### Progressive override
 
 - `apollo::progressive_override::unresolved_labels` - Unresolved override labels
 - `apollo::progressive_override::labels_to_override` - Labels to override
@@ -420,7 +420,7 @@ List of the context keys used in the Apollo Router for passing data through the 
 
 - `apollo::subscriptions::fatal_error` - Fatal subscription error flag
 
-### Persisted Queries
+### Persisted queries
 
 - `apollo_persisted_queries::client_name` - Client name for PQ operations
 - `apollo_persisted_queries::safelist::skip_enforcement` - Skip safelist enforcement
@@ -429,7 +429,7 @@ List of the context keys used in the Apollo Router for passing data through the 
 
 - `apollo_connectors::sources_in_query_plan` - List of connector sources in query plan
 
---- 
+---
 
 ## Example requests by stage
 
