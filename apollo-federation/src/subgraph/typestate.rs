@@ -860,7 +860,7 @@ fn is_fed_spec_link_directive(schema: &Schema, directive: &Directive) -> bool {
     };
     url_arg
         .as_str()
-        .is_some_and(|url| url.starts_with(&Identity::federation_identity().domain))
+        .is_some_and(|url| url.starts_with(&Identity::federation_identity().to_string()))
 }
 
 impl FederationSchema {
@@ -1011,6 +1011,27 @@ mod tests {
         .expect("expands subgraph");
 
         assert!(schema.state.metadata.is_fed_2_schema());
+    }
+
+    #[test]
+    fn avoid_mistaking_wrong_apollo_spec_link_as_federation_spec() {
+        // This used to panic from the `expand_links()` call.
+        let schema = Subgraph::parse(
+            "S",
+            "",
+            r#"
+                extend schema @link(url: "https://specs.apollo.dev/NotFederation/v2.0")
+
+                type Query {
+                    s: String
+                }"#,
+        )
+        .expect("valid schema")
+        .expand_links()
+        .expect("expands subgraph");
+
+        // This schema will be considered a Fed v1 schema.
+        assert!(!schema.metadata().is_fed_2_schema());
     }
 
     #[test]
