@@ -61,11 +61,11 @@ fn watch_with_duration(path: &Path, duration: Duration) -> impl Stream<Item = ()
                 ) && event.paths.contains(&watched_path)
                 {
                     match watch_sender.try_send(()) {
-                        Ok(_) => return,
+                        Ok(_) => (),
                         // If the sender is full, it means the receiver hasn't processed the
                         // update yet, so it's fine to drop the event. In effect, it's the same
                         // as if we had cancelled the previous event and pushed a new one.
-                        Err(TrySendError::Full(err)) => return,
+                        Err(TrySendError::Full(_err)) => (),
                         Err(err) => {
                             panic!("event channel failed: {err}");
                         }
