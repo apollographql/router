@@ -9,6 +9,7 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::validation::Valid;
 use itertools::Itertools;
+use petgraph::visit::EdgeRef;
 use serde::Deserialize;
 use serde::Serialize;
 use tracing::trace;
@@ -576,7 +577,7 @@ impl QueryPlanner {
     }
 }
 
-fn compute_root_serial_dependency_graph(
+fn compute_root_serial_dependency_graph_for_mutation(
     parameters: &QueryPlanningParameters,
     has_defers: bool,
     non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
@@ -606,7 +607,7 @@ fn compute_root_serial_dependency_graph(
         mut fetch_dependency_graph,
         path_tree: mut prev_path,
         ..
-    } = compute_root_parallel_best_plan(
+    } = compute_root_parallel_best_plan_for_mutation(
         parameters,
         selection_set,
         has_defers,
@@ -618,7 +619,7 @@ fn compute_root_serial_dependency_graph(
             fetch_dependency_graph: new_dep_graph,
             path_tree: new_path,
             ..
-        } = compute_root_parallel_best_plan(
+        } = compute_root_parallel_best_plan_for_mutation(
             parameters,
             selection_set,
             has_defers,
@@ -777,6 +778,7 @@ fn compute_root_parallel_best_plan(
         parameters.operation.root_kind,
         FetchDependencyGraphToCostProcessor,
         non_local_selection_state.as_mut(),
+        None,
     )?;
 
     // Getting no plan means the query is essentially unsatisfiable (it's a valid query, but we can prove it will never return a result),
@@ -784,6 +786,43 @@ fn compute_root_parallel_best_plan(
     Ok(planning_traversal
         .find_best_plan()?
         .unwrap_or_else(|| BestQueryPlanInfo::empty(parameters)))
+}
+
+fn compute_root_parallel_best_plan_for_mutation(
+    parameters: &QueryPlanningParameters,
+    selection: SelectionSet,
+    has_defers: bool,
+    non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
+) -> Result<BestQueryPlanInfo, FederationError> {
+    parameters.federated_query_graph.out_edges(parameters.head).into_iter().map(|edge_ref| {
+        let mutation_subgraph = parameters.federated_query_graph.node_weight(edge_ref.target())?.source.clone();
+        let planning_traversal = QueryPlanningTraversal::new(
+            parameters,
+            selection.clone(),
+            has_defers,
+            parameters.operation.root_kind,
+            FetchDependencyGraphToCostProcessor,
+            non_local_selection_state.as_mut(),
+            Some(mutation_subgraph),
+        )?;
+        planning_traversal.find_best_plan()
+    }).process_results(|iter| iter
+        .flatten()
+        .min_by(|a, b| a.cost.total_cmp(&b.cost))
+        .map(Ok)
+        .unwrap_or_else(|| {
+            if parameters.disabled_subgraphs.is_empty() {
+                Err(FederationError::internal(format!(
+                    "Was not able to plan {} starting from a single subgraph: This shouldn't have happened.",
+                    parameters.operation,
+                )))
+            } else {
+                // If subgraphs were disabled, this could be expected, and we indicate this in
+                // the error accordingly.
+                Err(SingleFederationError::NoPlanFoundWithDisabledSubgraphs.into())
+            }
+        })
+    )?
 }
 
 fn compute_plan_internal(
@@ -797,7 +836,7 @@ fn compute_plan_internal(
     let (main, deferred, primary_selection, cost) = if root_kind
         == SchemaRootDefinitionKind::Mutation
     {
-        let dependency_graphs = compute_root_serial_dependency_graph(
+        let dependency_graphs = compute_root_serial_dependency_graph_for_mutation(
             parameters,
             has_defers,
             non_local_selection_state,
