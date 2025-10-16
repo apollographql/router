@@ -216,11 +216,9 @@ where
     tracing::debug!(?payload, "externalized output");    
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    let succeeded = matches!(co_processor_result, Ok(_));
-    record_coprocessor_metrics(
-        PipelineStep::SupergraphRequest, 
-        start.elapsed(),
-        succeeded);
+    record_coprocessor_duration(PipelineStep::RouterRequest, 
+        start.elapsed());
+    record_coprocessor_operation(PipelineStep::RouterRequest, co_processor_result.is_ok());
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
@@ -364,11 +362,9 @@ where
     tracing::debug!(?payload, "externalized output");    
     let start = Instant::now();
     let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
-    let succeeded = matches!(co_processor_result, Ok(_));
-    record_coprocessor_metrics(
-        PipelineStep::SupergraphResponse, 
-        start.elapsed(),
-        succeeded);
+    record_coprocessor_duration(PipelineStep::RouterRequest, 
+        start.elapsed());
+    record_coprocessor_operation(PipelineStep::RouterRequest, co_processor_result.is_ok());
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;

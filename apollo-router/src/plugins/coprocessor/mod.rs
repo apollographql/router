@@ -487,20 +487,24 @@ fn default_response_validation() -> bool {
     true
 }
 
-fn record_coprocessor_metrics(
-    stage: PipelineStep, duration: Duration, succeeded: bool) {
+fn record_coprocessor_duration(
+    stage: PipelineStep, duration: Duration) {
     f64_histogram!(
         "apollo.router.operations.coprocessor.duration",
         "Time spent waiting for the coprocessor to answer, in seconds",
         duration.as_secs_f64(),
         coprocessor.stage = stage.to_string()
     );
+}
 
+fn record_coprocessor_operation(
+    stage: PipelineStep, succeeded: bool) {
+    //FIXME INSIDE FUNCTION
     u64_counter!(
         "apollo.router.operations.coprocessor",
         "Total run operations with co-processors enabled",
         1,
-        "coprocessor.stage" = format!("{:?}", stage),
+        "coprocessor.stage" = stage.to_string(),
         "coprocessor.succeeded" = succeeded
     );
 }
@@ -560,6 +564,8 @@ impl RouterStage {
                         tracing::error!("coprocessor: router request stage error: {error}");
                         error
                     });
+
+                    // BACK HERE
                     result
                 }
             })
@@ -794,12 +800,10 @@ where
 
     tracing::debug!(?payload, "externalized output");    
     let start = Instant::now();
-    let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    let succeeded = matches!(co_processor_result, Ok(_));
-    record_coprocessor_metrics(
-        PipelineStep::RouterRequest, 
-        start.elapsed(),
-        succeeded);
+    let co_processor_result = payload.call(http_client, &coprocessor_url).await;    
+    record_coprocessor_duration(PipelineStep::RouterRequest, 
+        start.elapsed());
+    record_coprocessor_operation(PipelineStep::RouterRequest, co_processor_result.is_ok());
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let mut co_processor_output = co_processor_result?;
@@ -963,11 +967,9 @@ where
     tracing::debug!(?payload, "externalized output");    
     let start = Instant::now();
     let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
-    let succeeded = matches!(co_processor_result, Ok(_));
-    record_coprocessor_metrics(
-        PipelineStep::RouterResponse, 
-        start.elapsed(),
-        succeeded);
+        record_coprocessor_duration(PipelineStep::RouterRequest, 
+        start.elapsed());
+    record_coprocessor_operation(PipelineStep::RouterRequest, co_processor_result.is_ok());
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
@@ -1154,11 +1156,9 @@ where
     tracing::debug!(?payload, "externalized output");    
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    let succeeded = matches!(co_processor_result, Ok(_));
-    record_coprocessor_metrics(
-        PipelineStep::SubgraphRequest, 
-        start.elapsed(),
-        succeeded);
+    record_coprocessor_duration(PipelineStep::RouterRequest, 
+        start.elapsed());
+    record_coprocessor_operation(PipelineStep::RouterRequest, co_processor_result.is_ok());
     
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
@@ -1307,11 +1307,9 @@ where
     tracing::debug!(?payload, "externalized output");    
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    let succeeded = matches!(co_processor_result, Ok(_));
-    record_coprocessor_metrics(
-        PipelineStep::SubgraphResponse, 
-        start.elapsed(),
-        succeeded);
+    record_coprocessor_duration(PipelineStep::RouterRequest, 
+        start.elapsed());
+    record_coprocessor_operation(PipelineStep::RouterRequest, co_processor_result.is_ok());
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
