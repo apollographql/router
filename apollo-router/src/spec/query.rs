@@ -341,7 +341,6 @@ impl Query {
         input: &mut Value,
         output: &mut Value,
         path: &mut Vec<ResponsePathElement<'b>>,
-        parent_type: &executable::Type,
         selection_set: &'a [Selection],
     ) -> Result<(), InvalidValue> {
         // for every type, if we have an invalid value, we will replace it with null
@@ -367,15 +366,9 @@ impl Query {
             // and should replace the entire list with null
             // if the types are nullable, the inner call to filter_errors will take care
             // of setting the current entry to null
-            executable::Type::List(inner_type) => self.format_list(
-                parameters,
-                field_type,
-                input,
-                inner_type,
-                output,
-                path,
-                selection_set,
-            )?,
+            executable::Type::List(inner_type) => {
+                self.format_list(parameters, input, inner_type, output, path, selection_set)?
+            }
             // for non null types, we validate with the inner type, then if we get an InvalidValue
             // we set it to null and immediately return an error instead of Ok(()), because we
             // want the error to go up until the next nullable parent
@@ -386,7 +379,6 @@ impl Query {
                     input,
                     output,
                     path,
-                    parent_type,
                     selection_set,
                 )?,
         }
@@ -402,7 +394,6 @@ impl Query {
         input: &mut Value,
         output: &mut Value,
         path: &mut Vec<ResponsePathElement<'b>>,
-        parent_type: &executable::Type,
         selection_set: &'a [Selection],
     ) -> Result<(), InvalidValue> {
         let inner_type = match field_type {
@@ -412,26 +403,10 @@ impl Query {
             _ => unreachable!(),
         };
 
-        self.format_value(
-            parameters,
-            &inner_type,
-            input,
-            output,
-            path,
-            field_type,
-            selection_set,
-        )?;
+        self.format_value(parameters, &inner_type, input, output, path, selection_set)?;
 
         if output.is_null() {
-            let message = match path.last() {
-                Some(ResponsePathElement::Key(k)) => {
-                    format!("Cannot return null for non-nullable field {parent_type}.{k}")
-                }
-                Some(ResponsePathElement::Index(_)) => format!(
-                    "Cannot return null for non-nullable array element of type {inner_type}"
-                ),
-                _ => todo!(),
-            };
+            let message = format!("Null value found for non-nullable type {inner_type}");
             parameters.errors.push(
                 Error::builder()
                     .message(&message)
@@ -457,7 +432,6 @@ impl Query {
     fn format_list<'a: 'b, 'b>(
         &'a self,
         parameters: &mut FormatParameters,
-        field_type: &executable::Type,
         input: &mut Value,
         inner_type: &executable::Type,
         output: &mut Value,
@@ -471,33 +445,37 @@ impl Query {
             *output = Value::Array(vec![Value::Null; input_array.len()]);
         }
         let output_array = output.as_array_mut().ok_or(InvalidValue)?;
-        let mut nullify = false;
-        for (i, element) in input_array.iter_mut().enumerate() {
-            path.push(ResponsePathElement::Index(i));
-            if let Err(InvalidValue) = self.format_value(
-                parameters,
-                inner_type,
-                element,
-                &mut output_array[i],
-                path,
-                field_type,
-                selection_set,
-            ) {
-                // TODO: Insert error
-                parameters.nullified.push(Path::from_response_slice(path));
-                nullify = true;
-            }
-            path.pop();
-        }
-        if nullify {
+        if let Err(InvalidValue) =
+            input_array
+                .iter_mut()
+                .enumerate()
+                .try_for_each(|(i, element)| {
+                    path.push(ResponsePathElement::Index(i));
+                    self.format_value(
+                        parameters,
+                        inner_type,
+                        element,
+                        &mut output_array[i],
+                        path,
+                        selection_set,
+                    )?;
+                    path.pop();
+                    Ok(())
+                })
+        {
+            parameters.nullified.push(Path::from_response_slice(path));
             parameters.coersion_errors.push(
                 Error::builder()
-                    // FIXME: This needs to be a real error message
-                    .message("Invalid value found for field Query.thing.a")
+                    .message(format!(
+                        "Invalid value found inside the array of type [{inner_type}]"
+                    ))
                     .path(Path::from_response_slice(path))
                     .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
                     .build(),
             );
+            // We pop here because, if an error is found, the path still contains the index of the
+            // invalid value and that needs to be removed.
+            path.pop();
             *output = Value::Null;
         }
         Ok(())
@@ -782,7 +760,6 @@ impl Query {
                             input_value,
                             output_value,
                             path,
-                            current_type,
                             selection_set,
                         );
                         path.pop();
@@ -818,12 +795,26 @@ impl Query {
                         continue;
                     }
 
+                    // NOTE: The subtype logic is strange. We are trying to determine if a fragment
+                    // should be applied, but we don't have the __typename of the selection set
+                    // (otherwise, we would be on a different branch). Consider the following query
+                    // for a union Thing = Foo | Bar:
+                    // { thing { ... on Foo { foo }, ... on Bar { bar } } }
+                    //
+                    // As we process the `... on Foo` fragment, `Foo` is `type_condition` and
+                    // `Thing` is `current_type`, we *could* reverse the order in calling
+                    // `is_subtype` and apply the fragment; however, the same is true for the `Bar`
+                    // fragment. Without the type info of the data we have in our response, we
+                    // can't know which to apply (or if both should apply in the case of
+                    // interfaces).
+                    //
+                    // Without that information, this is the best we can do without construction a
+                    // much more complicated reformatting heuristic.
                     let is_apply = current_type.inner_named_type().as_str()
                         == type_condition.as_str()
                         || parameters
                             .schema
-                            // NOTE(@TylerBloom): Were these in backwards order?
-                            .is_subtype(current_type.inner_named_type().as_str(), type_condition);
+                            .is_subtype(type_condition, current_type.inner_named_type().as_str());
 
                     if is_apply {
                         // if this is the filtered query, we must keep the __typename field because the original query must know the type
@@ -859,6 +850,8 @@ impl Query {
                         selection_set,
                     }) = self.fragments.get(name)
                     {
+                        // NOTE: This subtype logic is a bit strange. See the InlineFragment
+                        // branch for why its done this way.
                         let is_apply = current_type.inner_named_type().as_str()
                             == type_condition.as_str()
                             || parameters.schema.is_subtype(
@@ -944,7 +937,6 @@ impl Query {
                             input_value,
                             output_value,
                             path,
-                            &field_type.0,
                             selection_set,
                         );
                         path.pop();

@@ -1996,8 +1996,8 @@ fn reformat_response_coersion_propagation_into_union() {
             bar: String
         }"#;
 
-    let query_wo_type_info = r#"{ thing { ... on Foo { a, b, c } } }"#;
-    let query_with_type_info = r#"{ thing { __typename ... on Foo { a, b, c } } }"#;
+    let query_wo_type_info = r#"{ thing { ... on Foo { a, b } ... on Bar { bar } } }"#;
+    let query_with_type_info = r#"{ thing { __typename ... on Foo { a, b, c } ... on Bar { bar} } }"#;
 
     let resp_wo_type_info = json!({
         "thing": {
@@ -2018,13 +2018,14 @@ fn reformat_response_coersion_propagation_into_union() {
     // Case 1: __typename isn't queried and isn't returned
     FormatTest::builder()
         .schema(nullable_schema)
-        .query(query_wo_type_info)
-        .response(resp_wo_type_info.clone())
+        .query(query_with_type_info)
+        .response(resp_with_type_info.clone())
         .expected(json!({
             "thing": {
                 "a": 1,
                 "b": null,
                 "c": null,
+                "bar": null,
             }
         }))
         .expected_errors(json!([
@@ -2047,6 +2048,7 @@ fn reformat_response_coersion_propagation_into_union() {
             */
         ]))
         .test();
+    panic!();
 
     FormatTest::builder()
         .schema(non_nullable_schema)
