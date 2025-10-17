@@ -1351,22 +1351,18 @@ impl Merger {
         let ast_node = dest.enum_example_ast(&self.merged).ok();
         self.track_enum_usage(&ty, dest.to_string(), ast_node, is_input_position);
 
-        let element_kind = if is_input_position {
-            "argument"
-        } else {
-            "field"
-        };
-
         if has_incompatible {
-            let error = if is_input_position {
+            let error = if T::is_argument() {
                 CompositionError::FieldArgumentTypeMismatch {
                     message: format!(
-                        "Type of argument \"{dest}\" is incompatible across subgraphs",
+                        "Type of argument \"{dest}\" is incompatible across subgraphs: it has ",
                     ),
                 }
             } else {
                 CompositionError::FieldTypeMismatch {
-                    message: format!("Type of field \"{dest}\" is incompatible across subgraphs",),
+                    message: format!(
+                        "Type of field \"{dest}\" is incompatible across subgraphs: it has ",
+                    ),
                 }
             };
 
@@ -1385,10 +1381,16 @@ impl Merger {
             Ok(false)
         } else if has_subtypes {
             // Report compatibility hint for subtype relationships
-            let hint_code = if is_input_position {
+            let hint_code = if T::is_argument() {
                 HintCode::InconsistentButCompatibleArgumentType
             } else {
                 HintCode::InconsistentButCompatibleFieldType
+            };
+
+            let element_kind = if T::is_argument() {
+                "argument"
+            } else {
+                "field"
             };
 
             let type_class = if is_input_position {
