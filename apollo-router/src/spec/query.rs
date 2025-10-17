@@ -730,7 +730,6 @@ impl Query {
         // validate_variables should have already checked that
         // the variable is present and it is of the correct type
         for selection in selection_set {
-            println!("Applying selection set: {selection:?}");
             match selection {
                 Selection::Field {
                     name,
