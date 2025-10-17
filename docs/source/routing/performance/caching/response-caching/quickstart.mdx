@@ -204,6 +204,14 @@ Response times are also faster, as shown in the right panel of this screenshot:
   src="../../../../images/response-cache/cache_resp_time.png"
 />
 
+If you execute an example query twice in Apollo Sandbox with [cache debugger](./observability#cache-debugger) enabled you should see all the entries coming from `cache` in `source` column:
+
+<img
+  className="screenshot"
+  alt="Response cache debugger example"
+  src="../../../../images/response-cache/debugger-cache-query-ttl.png"
+/>
+
 ### Invalidation
 
 With cached data based on TTL, you might want to increase these TTLs and automatically invalidate specific data when you know it has changed. Response caching provides several ways to invalidate data. For more details, see [Cache Expiration](./cache-expiration). For this quickstart, we'll use cache tags, which work like surrogate cache keys for REST APIs. You can tag data in your schema to enable targeted invalidation.
@@ -269,5 +277,13 @@ The call returns the number of invalidated entries. For example, if only 1 entry
   "count": 1
 }
 ```
+
+If you execute an example query twice in Apollo Sandbox with [cache debugger](./observability#cache-debugger) enabled you should see all the entries coming from `cache` in `source` column and now you should see the generated cache tags for entities and root field `posts` in `Cache tags` column:
+
+<img
+  className="screenshot"
+  alt="Response cache debugger example"
+  src="../../../../images/response-cache/debugger-cache-query-tags.png"
+/>
 
 To explore response caching and see what data has been cached in a query, use the cache debugger documented [here](./observability#cache-debugger).
