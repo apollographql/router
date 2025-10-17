@@ -1,0 +1,87 @@
+# Example configuration demonstrating metric renaming via OpenTelemetry Views
+#
+# This feature allows you to rename metrics for both OTLP and Prometheus exporters.
+# Common use cases:
+# - Renaming OTLP semantic convention metrics to match your organization's naming standards
+# - Migrating from one metric naming convention to another
+# - Customizing metric names for specific monitoring tools
+#
+# Important notes:
+# - Prometheus automatically transforms metric names (dots → underscores, adds unit suffixes)
+# - Apollo Studio metrics are NOT affected by these renames (they use separate meter providers)
+# - Views are applied at the OpenTelemetry SDK level before export
+
+telemetry:
+  exporters:
+    metrics:
+      # Common configuration applies to both OTLP and Prometheus exporters
+      common:
+        # Define views to customize metric behavior
+        views:
+          # Example 1: Simple rename of HTTP request duration metric
+          - name: http.server.request.duration
+            rename: apollo.router.http.request.duration
+            # OTLP will export: apollo.router.http.request.duration
+            # Prometheus will export: apollo_router_http_request_duration_seconds
+            #   (dots converted to underscores, unit suffix added)
+
+          # Example 2: Rename with custom histogram buckets
+          - name: apollo.router.operations
+            rename: custom.graphql.operations
+            aggregation:
+              histogram:
+                buckets: [0.1, 0.5, 1.0, 5.0, 10.0]
+
+          # Example 3: Rename cache metrics
+          - name: apollo.router.cache.hit.time
+            rename: custom.cache.hit.duration
+
+          - name: apollo.router.cache.miss.time
+            rename: custom.cache.miss.duration
+
+          # Example 4: Rename with attribute filtering
+          - name: http.server.active_requests
+            rename: custom.http.active.connections
+            allowed_attribute_keys:
+              - http.request.method
+              - server.address
+            # Only these attributes will be preserved on the renamed metric
+
+          # Example 5: Rename with custom description and unit
+          - name: apollo.router.session.count.active
+            rename: custom.active.sessions
+            description: "Number of active GraphQL sessions"
+            unit: "{session}"
+
+      # OTLP exporter - receives renamed metrics
+      otlp:
+        enabled: true
+        endpoint: http://localhost:4317
+        protocol: grpc
+
+      # Prometheus exporter - receives renamed metrics (with Prometheus transformations)
+      prometheus:
+        enabled: true
+        listen: 127.0.0.1:9090
+        path: /metrics
+
+# Router configuration
+supergraph:
+  # Path to your supergraph schema
+  listen: 0.0.0.0:4000
+
+# Example of how metrics appear after renaming:
+#
+# Original metric: http.server.request.duration
+# After view rename: apollo.router.http.request.duration
+#
+# In OTLP:
+#   apollo.router.http.request.duration
+#
+# In Prometheus:
+#   apollo_router_http_request_duration_seconds_count
+#   apollo_router_http_request_duration_seconds_sum
+#   apollo_router_http_request_duration_seconds_bucket
+#
+# Apollo Studio metrics remain unchanged (use original names):
+#   apollo_router_*

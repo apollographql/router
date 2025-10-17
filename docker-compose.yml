@@ -7,15 +7,6 @@ services:
     read_only: true
     ports:
       - 6379:6379
-  postgres:
-    image: cimg/postgres:17.6
-    security_opt:
-      - no-new-privileges:true
-    environment:
-      POSTGRES_USER: ${USER}
-      POSTGRES_DB: ${USER}
-    ports:
-      - 5432:5432
   zipkin:
     image: openzipkin/zipkin:latest
     security_opt:

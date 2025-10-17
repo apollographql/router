@@ -1374,6 +1374,12 @@ impl std::fmt::Debug for ValidFederationSchema {
     }
 }
 
+impl From<ValidFederationSchema> for FederationSchema {
+    fn from(value: ValidFederationSchema) -> Self {
+        Arc::unwrap_or_clone(value.schema).into_inner()
+    }
+}
+
 pub(crate) trait SchemaElement {
     /// Iterates over the origins of the schema element.
     /// - Expected to use the apollo_compiler's `iter_origins` implementation.

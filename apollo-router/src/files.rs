@@ -60,20 +60,14 @@ fn watch_with_duration(path: &Path, duration: Duration) -> impl Stream<Item = ()
                         | EventKind::Modify(ModifyKind::Data(DataChange::Any))
                 ) && event.paths.contains(&watched_path)
                 {
-                    loop {
-                        match watch_sender.try_send(()) {
-                            Ok(_) => break,
-                            Err(err) => {
-                                tracing::warn!(
-                                    "could not process file watch notification. {}",
-                                    err.to_string()
-                                );
-                                if matches!(err, TrySendError::Full(_)) {
-                                    std::thread::sleep(Duration::from_millis(50));
-                                } else {
-                                    panic!("event channel failed: {err}");
-                                }
-                            }
+                    match watch_sender.try_send(()) {
+                        Ok(_) => (),
+                        // If the sender is full, it means the receiver hasn't processed the
+                        // update yet, so it's fine to drop the event. In effect, it's the same
+                        // as if we had cancelled the previous event and pushed a new one.
+                        Err(TrySendError::Full(_err)) => (),
+                        Err(err) => {
+                            panic!("event channel failed: {err}");
                         }
                     }
                 }
@@ -221,6 +215,26 @@ pub(crate) mod tests {
         assert!(futures::poll!(watch.next()).is_ready());
         write_and_flush(&mut file, "Some data 2").await;
         assert!(futures::poll!(watch.next()).is_ready())
+    }
+
+    #[test(tokio::test)]
+    async fn clog_watch() {
+        let (path, mut file) = create_temp_file();
+        let mut watch = watch_with_duration(&path, Duration::from_millis(100));
+        assert!(futures::poll!(watch.next()).is_ready());
+        write_and_flush(&mut file, "Some data 1").await;
+        write_and_flush(&mut file, "Some data 2").await;
+        write_and_flush(&mut file, "Some data 3").await;
+        write_and_flush(&mut file, "Some data 4").await;
+        assert!(
+            futures::poll!(watch.next()).is_ready(),
+            "polling the future should notice the event"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            !futures::poll!(watch.next()).is_ready(),
+            "should only have one event for multiple updates"
+        );
     }
 
     pub(crate) fn create_temp_file() -> (PathBuf, File) {

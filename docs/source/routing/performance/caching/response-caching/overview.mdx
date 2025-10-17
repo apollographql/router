@@ -1,0 +1,164 @@
+---
+title: Response Caching
+subtitle: Cache subgraph responses to improve query performance
+description: Learn how response caching in GraphOS Router enables entity-level caching to reduce subgraph load and improve query latency.
+minVersion: Router v2.8.0
+releaseStage: preview
+---
+
+<PlanRequired plans={["Free", "Developer", "Standard", "Enterprise"]}>
+
+Rate limits apply on the Free plan.
+Performance pricing applies on Developer and Standard plans.
+Developer and Standard plans require Router v2.6.0 or later.
+
+</PlanRequired>
+
+Learn how GraphOS Router can cache subgraph query responses using Redis to improve your query latency for entities in the supergraph.
+
+## Overview
+
+An entity gets its fields from one or more subgraphs. To respond to a client request for an entity, GraphOS Router must make multiple subgraph requests. Different clients requesting the same entity can make redundant, identical subgraph requests.
+
+Response caching enables the router to cache origin responses and reuse them across queries. (An _origin_ is a data source.) The router caches two kinds of data:
+
+- **Root query fields**: Cached as complete units (the entire response for that root field)
+- **Entity representations**: Cached independently—each origin's contribution to an entity is cached separately and can be reused across different queries. (See [_entities query](/federation/subgraph-spec/#understanding-query_entities).)
+
+The router uses Redis to cache data from origin query responses. The cache organizes data by origin and entity representation, so different clients requesting the same data hit shared cache entries. You can use the [cache debugger](/router/performance/caching/response-caching/observability#cache-debugger) to see exactly what's being cached during development.
+
+### Goals
+
+Response caching helps you:
+- Reduce the load on your underlying services
+- Improve overall latencies for client requests
+
+The router provides a GraphQL-aware cache with advantages over a generic CDN. It caches at the entity and root field level—GraphQL-native and reusable across users and requests.
+
+### The GraphQL caching challenge
+
+GraphQL responses present unique caching challenges that traditional HTTP caching doesn't address well. A typical GraphQL response combines data from multiple sources with varying freshness requirements and visibility constraints:
+
+- **Mixed TTLs**: A single response might include product prices (change weekly), inventory (change constantly), and user reviews (change occasionally). Traditional response caching forces you to use the shortest time to live (TTL)—the duration data remains valid in cache—for the entire response.
+- **Personalized and public data**: Responses often mix public data (product details) with private data (user's cart, viewing history). This makes full-response caching either impossible or requires separate cache entries per user.
+- **High duplication**: Different queries requesting similar entities result in duplicate cached data. For example, a product list query and a product detail query both cache the same product name and price.
+
+Response caching solves these challenges by caching origin responses with flexible cache control. The router determines cache TTLs from the `Cache-Control` HTTP headers returned by your origins—these headers are derived from `@cacheControl` directives in your schema. When an origin response contains multiple entity representations, the router uses the minimum TTL value. Different responses can have different TTLs and visibility settings, and you can actively invalidate cached data when you know it has changed.
+
+### Benefits of response caching
+
+Compared to caching entire client responses, response caching in the router supports finer control over:
+- the time to live (TTL) and programmatic invalidation of cached data
+- the amount of data being cached
+- sharing cached data across users while maintaining privacy for personalized data
+
+For example, consider the `Products` and `Inventory` subgraphs from the [Entities guide](/federation/entities):
+
+<CodeColumns>
+
+```graphql title="Products subgraph" disableCopy=true
+type Product @key(fields: "id") {
+  id: ID!
+  name: String!
+  price: Int
+}
+```
+
+```graphql title="Inventory subgraph" disableCopy=true
+type Product @key(fields: "id") {
+  id: ID!
+  inStock: Boolean!
+}
+```
+
+</CodeColumns>
+
+Assume the client for a shopping cart application requests the following for each product in the cart:
+- The product's name and price from the `Products` subgraph
+- The product's availability in inventory from the `Inventory` subgraph
+
+If caching the entire client response, it would require a short TTL because the cart data can change often and the real-time inventory has to be up to date. A client-response cache couldn't be shared between users, because each cart is personal. A client-response cache might also duplicate data because the same products might appear in multiple carts.
+
+With response caching enabled for this example, the router can:
+- Store each product's description and price separately with a long TTL
+- Minimize the number of subgraph requests made for each client request, with some client requests fetching all product data from the cache and requiring no subgraph requests
+- Share the product cache between all users
+- Cache the cart per user, with a small amount of data
+- Cache inventory data with a short TTL or not cache it at all
+
+For example, the following diagram shows how a price entity can be cached and then combined with purchase and inventory fragments to serve a `products` query. Because price data is subject to change less often than inventory data, it makes sense to cache it with a different TTL.
+
+```mermaid
+flowchart RL
+	subgraph QueryResponse["JSON Response"]
+		n1["{
+			&emsp;&emsp;&quot;products&quot;: [
+			&emsp;&emsp;&emsp;&emsp;{
+			&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&quot;name&quot;: &quot;DraftSnowboard&quot;,
+			&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&quot;pastPurchases&quot;: ...,
+			&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&quot;price&quot;: {
+			&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&quot;amount&quot;: &quot;1500&quot;,
+			&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&quot;currency_code&quot;: &quot;USD&quot;
+			&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;},
+			&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&quot;quantity&quot;: &quot;250&quot;
+			&emsp;&emsp;&emsp;&emsp;},
+			&emsp;&emsp;&emsp;&emsp;...
+			&emsp;&emsp;]
+		}"]
+    end
+
+	subgraph Subgraphs["Subgraphs"]
+		Purchases["Purchases"]
+		Inventory["Inventory"]
+		Price["Price"]
+	end
+
+	subgraph PriceQueryFragment["Price Query Fragment (e.g. TTL 2200)"]
+		n2["{
+    	&emsp;&emsp;&quot;price&quot;: {
+        &emsp;&emsp;&emsp;&emsp;&quot;id&quot;: 101,
+        &emsp;&emsp;&emsp;&emsp;&quot;product_id&quot;: 12,
+        &emsp;&emsp;&emsp;&emsp;&quot;amount&quot;: 1500,
+        &emsp;&emsp;&emsp;&emsp;&quot;currency_code&quot;: &quot;USD&quot;
+    	&emsp;&emsp;}
+		}"]
+	end
+
+	subgraph PurchaseHistoryQueryFragment["Purchase History Query Fragment"]
+		n3["{
+			&emsp;&emsp;&quot;purchases&quot;: {
+			&emsp;&emsp;&emsp;&emsp;&quot;product_id&quot;: 12,
+			&emsp;&emsp;&emsp;&emsp;&quot;user_id&quot;: 2932,
+			&emsp;&emsp;&emsp;&emsp;...
+			&emsp;&emsp;}
+		}"]
+	end
+
+	subgraph InventoryQueryFragment["Inventory Query Fragment"]
+		n4["{
+			&emsp;&emsp;&quot;inventory&quot;: {
+			&emsp;&emsp;&emsp;&emsp;&quot;id&quot;: 19,
+			&emsp;&emsp;&emsp;&emsp;&quot;product_id&quot;: 12,
+			&emsp;&emsp;&emsp;&emsp;&quot;quantity&quot;: 250
+			&emsp;&emsp;}
+		}"]
+	end
+
+	Router
+	Database[("&emsp;&emsp;&emsp;")]
+
+  Router --> QueryResponse
+	Purchases --> Router
+	Inventory --> Router
+	Price --- Router
+	PriceQueryFragment --> Database
+	PurchaseHistoryQueryFragment --> Purchases
+	InventoryQueryFragment --> Inventory
+	Database --> Router
+
+	style n1 text-align:left
+	style n2 text-align:left
+	style n3 text-align:left
+	style n4 text-align:left
+	style Price border:none,stroke-width:1px,stroke-dasharray:5 5,stroke:#A6A6A6
+```

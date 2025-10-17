@@ -1,6 +1,12 @@
 use std::collections::HashMap;
 
+use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceResponse;
+use prost::Message;
 use tower::BoxError;
+use wiremock::Mock;
+use wiremock::ResponseTemplate;
+use wiremock::matchers::method;
+use wiremock::matchers::path;
 
 use super::mock_otlp_server;
 use super::mock_otlp_server_delayed;
@@ -809,6 +815,82 @@ async fn test_plugin_overridden_client_name_is_included_in_telemetry() -> Result
             .await
             .unwrap_or_else(|_| panic!("Failed with header value {header_value:?}"));
     }
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_otlp_ipv6() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    // Create a TCP listener bound to IPv6 localhost
+    // Skip test if IPv6 is not available (common in CI environments)
+    let listener = match std::net::TcpListener::bind("[::1]:0") {
+        Ok(listener) => listener,
+        Err(e) if e.kind() == std::io::ErrorKind::AddrNotAvailable => {
+            eprintln!("Skipping test_otlp_ipv6: IPv6 not available");
+            return Ok(());
+        }
+        Err(e) => return Err(e.into()),
+    };
+    let ipv6_address = listener.local_addr().expect("Failed to get local address");
+    let ipv6_endpoint = format!("http://{}", ipv6_address);
+
+    // Create mock server using the IPv6 listener
+    let mock_server = wiremock::MockServer::builder()
+        .listener(listener)
+        .start()
+        .await;
+
+    // Set up the expected mocks for traces and metrics
+    Mock::given(method("POST"))
+        .and(path("/v1/traces"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            ExportTraceServiceResponse::default().encode_to_vec(),
+            "application/x-protobuf",
+        ))
+        .expect(1..)
+        .mount(&mock_server)
+        .await;
+
+    let config = include_str!("../fixtures/otlp.router.yaml")
+        .replace("<otel-collector-endpoint>", &ipv6_endpoint);
+
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp {
+            endpoint: Some(format!("{}/v1/traces", ipv6_endpoint)),
+        })
+        .config(&config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    TraceSpec::builder()
+        .operation_name("ExampleQuery")
+        .services(["client", "router", "subgraph"].into())
+        .span_names(
+            [
+                "query_planning",
+                "client_request",
+                "ExampleQuery__products__0",
+                "fetch",
+                "execution",
+                "query ExampleQuery",
+                "subgraph server",
+                "parse_query",
+                "http_request",
+            ]
+            .into(),
+        )
+        .subgraph_sampled(true)
+        .build()
+        .validate_otlp_trace(&mut router, &mock_server, Query::default())
+        .await?;
 
     router.graceful_shutdown().await;
     Ok(())

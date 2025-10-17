@@ -20,7 +20,7 @@ use crate::graphql;
 use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::json_ext::Object;
-use crate::notification::Handle;
+use crate::plugins::subscription::notification::Handle;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 

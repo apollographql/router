@@ -9,7 +9,7 @@ use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 use futures::Stream;
-use futures::StreamExt;
+use futures::StreamExt as _;
 use futures::future::BoxFuture;
 use futures::stream::once;
 use serde_json_bytes::Value;
@@ -22,7 +22,7 @@ use tokio::sync::mpsc::error::TryRecvError;
 use tokio_stream::wrappers::ReceiverStream;
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::ServiceExt;
+use tower::ServiceExt as _;
 use tower_service::Service;
 use tracing::Instrument;
 use tracing::Span;
