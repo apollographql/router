@@ -4,6 +4,7 @@ use apollo_federation::composition::Satisfiable;
 use apollo_federation::composition::compose;
 use apollo_federation::subgraph::typestate::Subgraph;
 use apollo_federation::supergraph::Supergraph;
+use itertools::Itertools;
 
 use super::ServiceDefinition;
 use super::assert_composition_errors;
@@ -15,75 +16,49 @@ fn validate_tag_propagation(supergraph: &Supergraph<Satisfiable>) {
     let schema = supergraph.schema().schema();
 
     // Check for @tag directive on Query.users field
-    if let Ok(users_field) = coord!(Query.users).lookup_field(schema) {
-        let tag_directives: Vec<_> = users_field
-            .directives
-            .iter()
-            .filter(|d| d.name == "tag")
-            .collect();
-        assert!(
-            !tag_directives.is_empty(),
-            "Expected @tag directive on Query.users field"
-        );
-
-        // Check for the specific tag name "aTaggedOperation"
-        let has_operation_tag = tag_directives.iter().any(|d| {
-            d.specified_argument_by_name("name")
-                .is_some_and(|arg| arg.to_string().contains("aTaggedOperation"))
-        });
-        assert!(
-            has_operation_tag,
-            "Expected @tag(name: \"aTaggedOperation\") on Query.users"
-        );
-    }
+    let users_field = coord!(Query.users)
+        .lookup_field(schema)
+        .expect("Query.users should exist");
+    let users_field_tags = users_field
+        .directives
+        .iter()
+        .filter(|d| d.name == "tag")
+        .join(" ");
+    assert_eq!(
+        users_field_tags, r#"@tag(name: "aTaggedOperation")"#,
+        "Query.users should have correct @tag directive"
+    );
 
     // Check for @tag directive on User type
-    if let Some(ExtendedType::Object(user_type)) = schema.types.get("User") {
-        let tag_directives: Vec<_> = user_type
-            .directives
-            .iter()
-            .filter(|d| d.name == "tag")
-            .collect();
-        assert!(
-            !tag_directives.is_empty(),
-            "Expected @tag directive on User type"
-        );
+    let user_type = coord!(User)
+        .lookup(schema)
+        .expect("User type should exist")
+        .as_object()
+        .expect("User should be an object type");
+    let user_type_tags = user_type
+        .directives
+        .iter()
+        .filter(|d| d.name == "tag")
+        .map(|d| d.to_string())
+        .join(" ");
+    assert_eq!(
+        user_type_tags, r#"@tag(name: "aTaggedType")"#,
+        "User type should have correct @tag directive"
+    );
 
-        // Check for the specific tag name "aTaggedType"
-        let has_type_tag = tag_directives.iter().any(|d| {
-            d.arguments
-                .iter()
-                .any(|arg| arg.name == "name" && arg.value.to_string().contains("aTaggedType"))
-        });
-        assert!(
-            has_type_tag,
-            "Expected @tag(name: \"aTaggedType\") on User type"
-        );
-
-        // Check for @tag directive on User.name field
-        if let Some(name_field) = user_type.fields.get("name") {
-            let field_tag_directives: Vec<_> = name_field
-                .directives
-                .iter()
-                .filter(|d| d.name == "tag")
-                .collect();
-            assert!(
-                !field_tag_directives.is_empty(),
-                "Expected @tag directive on User.name field"
-            );
-
-            // Check for the specific tag name "aTaggedField"
-            let has_field_tag = field_tag_directives.iter().any(|d| {
-                d.arguments
-                    .iter()
-                    .any(|arg| arg.name == "name" && arg.value.to_string().contains("aTaggedField"))
-            });
-            assert!(
-                has_field_tag,
-                "Expected @tag(name: \"aTaggedField\") on User.name field"
-            );
-        }
-    }
+    // Check for @tag directive on User.name field
+    let user_name_field = coord!(User.name)
+        .lookup_field(schema)
+        .expect("User.name field should exist");
+    let user_name_field_tags = user_name_field
+        .directives
+        .iter()
+        .filter(|d| d.name == "tag")
+        .join(" ");
+    assert_eq!(
+        user_name_field_tags, r#"@tag(name: "aTaggedField")"#,
+        "User.name should have correct @tag directive"
+    );
 }
 
 /// Validates that multiple @tag directives are properly merged
@@ -92,62 +67,37 @@ fn validate_tag_merging(supergraph: &Supergraph<Satisfiable>) {
     let schema = supergraph.schema().schema();
 
     // Check merged tags on User type
-    if let Some(ExtendedType::Object(user_type)) = schema.types.get("User") {
-        let tag_directives: Vec<_> = user_type
-            .directives
-            .iter()
-            .filter(|d| d.name == "tag")
-            .collect();
-
-        // Should have multiple @tag directives merged
-        assert!(
-            tag_directives.len() >= 2,
-            "Expected multiple @tag directives on User type, got {}",
-            tag_directives.len()
-        );
-
-        // Extract tag names for validation
-        let tag_names: Vec<String> = tag_directives
-            .iter()
-            .filter_map(|d| {
-                d.arguments.iter().find_map(|arg| {
-                    if arg.name == "name" {
-                        Some(arg.value.to_string().trim_matches('"').to_string())
-                    } else {
-                        None
-                    }
-                })
-            })
-            .collect();
-
-        // Should contain tags from both subgraphs plus merged tag
-        assert!(
-            tag_names.contains(&"aTagOnTypeFromSubgraphA".to_string()),
-            "Missing aTagOnTypeFromSubgraphA"
-        );
-        assert!(
-            tag_names.contains(&"aMergedTagOnType".to_string()),
-            "Missing aMergedTagOnType"
-        );
-        assert!(
-            tag_names.contains(&"aTagOnTypeFromSubgraphB".to_string()),
-            "Missing aTagOnTypeFromSubgraphB"
-        );
-    }
+    let user_type = coord!(User)
+        .lookup(schema)
+        .expect("User type should exist")
+        .as_object()
+        .expect("User should be an object type");
+    let user_type_tags = user_type
+        .directives
+        .iter()
+        .filter(|d| d.name == "tag")
+        .map(|d| d.to_string())
+        .join(" ");
+    assert_eq!(
+        user_type_tags,
+        r#"@tag(name: "aTagOnTypeFromSubgraphA") @tag(name: "aMergedTagOnType") @tag(name: "aTagOnTypeFromSubgraphB")"#,
+        "User type should have merged @tag directives"
+    );
 
     // Check merged tags on Name.firstName field
-    if let Ok(first_name_field) = coord!(Name.firstName).lookup_field(schema) {
-        let field_tag_directives: Vec<_> = first_name_field
-            .directives
-            .iter()
-            .filter(|d| d.name == "tag")
-            .collect();
-
-        assert!(
-            field_tag_directives.len() >= 2,
-            "Expected multiple @tag directives on Name.firstName field"
-        );
-    }
+    let first_name_field = coord!(Name.firstName)
+        .lookup_field(schema)
+        .expect("Name.firstName field should exist");
+    let field_tag_directives = first_name_field
+        .directives
+        .iter()
+        .filter(|d| d.name == "tag")
+        .join(" ");
+    assert_eq!(
+        field_tag_directives,
+        r#"@tag(name: "aTagOnFieldFromSubgraphA") @tag(name: "aTagOnFieldFromSubgraphB")"#,
+        "Name.firstName should have merged @tag directives"
+    );
 }
 
 // =============================================================================
