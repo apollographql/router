@@ -17,14 +17,16 @@ Combine both approaches by setting reasonable TTLs as a safety net and actively 
 
 ## Time to live (TTL)
 
-Time to live (TTL) determines how long the router keeps cached subgraph responses before fetching fresh data.
+Time to live (TTL) determines how long the router keeps cached origin responses before fetching fresh data.
 
 ### How TTLs work
 
-The router caches complete subgraph query responses—not individual fields or data fragments. To determine how long to cache each response, the router reads the [`Cache-Control` header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control) that the subgraph returns. The router uses the `max-age` value from this header as the TTL for that entire subgraph response.
+The router caches origin query responses—specifically, root query fields as complete units and entities as independent reusable units. To determine how long to cache each response, the router reads the [`Cache-Control` header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control) that the origin returns. The router uses the `max-age` value from this header as the TTL for that cached data.
+
+The `Cache-Control` header itself is derived from `@cacheControl` directives in your origin schema. When an origin response contains multiple entities, the origin generates a `Cache-Control` header with the minimum TTL value across all entities in that response. (You can use the [cache debugger](/router/performance/caching/response-caching/observability#cache-debugger) to inspect these headers.)
 
 When responding to client queries, the router:
-1. Calculates the overall response TTL by taking the minimum TTL from all cached subgraph responses included in the client response
+1. Calculates the overall response TTL by taking the minimum TTL from all cached origin responses included in the client response
 2. Generates a `Cache-Control` header for the client response reflecting this minimum TTL
 3. Returns cached data as long as the TTL hasn't expired
 
@@ -32,7 +34,7 @@ This ensures that client responses never claim to be fresher than their least-fr
 
 ### Configure default TTL
 
-Set a default TTL for all subgraphs using response caching. Define this in per-subgraph configuration or inherit it from global configuration. The router uses this default TTL if the subgraph returns a `Cache-Control` header without a `max-age` directive:
+Set a default TTL for all sources using response caching. Define this in per-subgraph configuration or inherit it from global configuration. The router uses this default TTL if the source returns a `Cache-Control` header without a `max-age` directive:
 
 ```yaml title="router.yaml"
 preview_response_cache:
@@ -47,7 +49,7 @@ preview_response_cache:
 
 ### Control TTL with `@cacheControl`
 
-For subgraphs that support the `@cacheControl` directive (such as Apollo Server), you can set field-level and type-level TTLs directly in your schema. The subgraph translates these directives into `Cache-Control` headers in its responses. The router reads those `Cache-Control` headers to determine TTLs—the directives themselves don't affect what the router caches, only the headers the subgraph sends back.
+For GraphQL origins that support the `@cacheControl` directive (such as Apollo Server), you can set field-level and type-level TTLs directly in your schema. The origin translates these directives into `Cache-Control` headers in its HTTP responses. The router reads those `Cache-Control` headers to determine TTLs—the directives themselves don't affect what the router caches, only the headers the source sends back.
 
 #### Add the directive to your schema
 
@@ -86,9 +88,9 @@ type Post {
 }
 ```
 
-These `@cacheControl` directives tell the subgraph to include `Cache-Control` headers in its responses—that's all they do. The router reads those `Cache-Control` headers to determine TTLs.
+These `@cacheControl` directives tell the GraphQL origin to include `Cache-Control` headers in its HTTP responses—that's all they do. The router reads those `Cache-Control` headers to determine TTLs.
 
-When a subgraph query requests both the `votes` field (30-second TTL) and the `readByCurrentUser` field (10-second TTL), the subgraph returns a `Cache-Control` header with `max-age=10` (the minimum). The router then caches that entire subgraph response for 10 seconds.
+When a query requests both the `votes` field (30-second TTL) and the `readByCurrentUser` field (10-second TTL), the origin returns a `Cache-Control` header with `max-age=10` (the minimum). The router then caches the data from that response for 10 seconds.
 
 #### Type-level TTLs
 
@@ -108,7 +110,7 @@ type Comment {
 }
 ```
 
-The `@cacheControl` directive on the `Post` type tells the subgraph to include `Cache-Control: max-age=240` in responses that return `Post` data. When the router queries for a `Comment` that includes a `post` field, the subgraph sends back that header, and the router caches the entire subgraph response for up to 240 seconds.
+The `@cacheControl` directive on the `Post` type tells the GraphQL origin to include `Cache-Control: max-age=240` in responses that return `Post` data. When the router queries for a `Comment` that includes a `post` field, the origin sends back that header, and the router caches the data for up to 240 seconds.
 
 Field-level settings override type-level settings:
 
@@ -119,7 +121,7 @@ type Comment {
 }
 ```
 
-Here, the subgraph sends `Cache-Control: max-age=120` instead of 240 when this field is queried.
+Here, the origin sends `Cache-Control: max-age=120` instead of 240 when this field is queried.
 
 #### Scope: PUBLIC vs PRIVATE
 

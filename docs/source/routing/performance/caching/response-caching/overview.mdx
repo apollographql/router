@@ -24,7 +24,11 @@ Response caching enables the router to respond to identical subgraph queries wit
 
 ### Goals
 
-The main goal of response caching is to reduce the load on your subgraphs and improve overall latencies for client requests. The router provides a GraphQL-aware cache, which offers advantages over a generic CDN. The router caches at the entity/query level, which is GraphQL-native and reusable across users and requests.
+Response caching helps you:
+- Reduce the load on your underlying services
+- Improve overall latencies for client requests
+
+The router provides a GraphQL-aware cache with advantages over a generic CDN. It caches at the entity and root field level—GraphQL-native and reusable across users and requests.
 
 ### The GraphQL caching challenge
 
@@ -34,7 +38,7 @@ GraphQL responses present unique caching challenges that traditional HTTP cachin
 - **Personalized and public data**: Responses often mix public data (product details) with private data (user's cart, viewing history). This makes full-response caching either impossible or requires separate cache entries per user.
 - **High duplication**: Different queries requesting similar entities result in duplicate cached data. For example, a product list query and a product detail query both cache the same product name and price.
 
-Response caching solves these challenges by caching complete subgraph responses with flexible cache control. Different subgraph responses can have different TTLs and visibility settings, and you can actively invalidate cached data when you know it has changed.
+Response caching solves these challenges by caching origin responses with flexible cache control. The router determines cache TTLs from the `Cache-Control` HTTP headers returned by your origins—these headers are derived from `@cacheControl` directives in your schema. When an origin response contains multiple entities, the router uses the minimum TTL value. Different responses can have different TTLs and visibility settings, and you can actively invalidate cached data when you know it has changed.
 
 ### Benefits of response caching
 

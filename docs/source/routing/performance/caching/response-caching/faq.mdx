@@ -16,9 +16,9 @@ Yes. Cache tags work like CDN surrogate key systems (used by Fastly, Cloudflare,
 
 The router caches at the GraphQL operation level, storing reusable sections of the response tree. When multiple operations request the same entities or root fields, the router can serve them from cache instead of querying your subgraphs repeatedly. This reduces load on your subgraphs and backend services.
 
-### What's the minimal requirement at the subgraph level to benefit from response caching?
+### What's the minimal requirement at the origin level to benefit from response caching?
 
-Your subgraph needs to return a `Cache-Control` header in its HTTP response. The router uses this header to determine which types and fields should be cached.
+Your origin needs to return a `Cache-Control` header in its HTTP response. The router uses this header to determine TTLs for cached data.
 
 ### How does response caching work with authorization?
 
