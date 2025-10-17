@@ -5,13 +5,10 @@ use tower::BoxError;
 use wiremock::ResponseTemplate;
 
 use crate::integration::ValueExt as _;
+use crate::integration::common::graph_os_enabled;
 
 const CONFIG: &str = include_str!("../fixtures/batching/all_enabled.router.yaml");
 const SHORT_TIMEOUTS_CONFIG: &str = include_str!("../fixtures/batching/short_timeouts.router.yaml");
-
-fn test_is_enabled() -> bool {
-    std::env::var("TEST_APOLLO_KEY").is_ok() && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok()
-}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn it_supports_single_subgraph_batching() -> Result<(), BoxError> {
@@ -34,7 +31,7 @@ async fn it_supports_single_subgraph_batching() -> Result<(), BoxError> {
     )
     .await?;
 
-    if test_is_enabled() {
+    if graph_os_enabled() {
         // Make sure that we got back what we wanted
         assert_yaml_snapshot!(responses, @r###"
     ---
@@ -88,7 +85,7 @@ async fn it_supports_multi_subgraph_batching() -> Result<(), BoxError> {
     )
     .await?;
 
-    if test_is_enabled() {
+    if graph_os_enabled() {
         // Make sure that we got back what we wanted
         assert_yaml_snapshot!(responses, @r###"
     ---
@@ -137,7 +134,7 @@ async fn it_batches_with_errors_in_single_graph() -> Result<(), BoxError> {
     )
     .await?;
 
-    if test_is_enabled() {
+    if graph_os_enabled() {
         // Make sure that we got back what we wanted
         assert_yaml_snapshot!(responses, @r###"
         ---
@@ -190,7 +187,7 @@ async fn it_batches_with_errors_in_multi_graph() -> Result<(), BoxError> {
     )
     .await?;
 
-    if test_is_enabled() {
+    if graph_os_enabled() {
         assert_yaml_snapshot!(responses, @r###"
         ---
         - data:
@@ -251,28 +248,27 @@ async fn it_handles_short_timeouts() -> Result<(), BoxError> {
     )
     .await?;
 
-    if test_is_enabled() {
-        assert_yaml_snapshot!(responses, @r###"
-        ---
+    if graph_os_enabled() {
+        assert_yaml_snapshot!(responses, @r"
         - data:
             entryA:
               index: 0
         - errors:
-            - message: Request timed out
+            - message: Your request has been timed out
               path: []
               extensions:
-                code: REQUEST_TIMEOUT
+                code: GATEWAY_TIMEOUT
                 service: b
         - data:
             entryA:
               index: 1
         - errors:
-            - message: Request timed out
+            - message: Your request has been timed out
               path: []
               extensions:
-                code: REQUEST_TIMEOUT
+                code: GATEWAY_TIMEOUT
                 service: b
-        "###);
+        ");
     }
 
     Ok(())
@@ -322,9 +318,8 @@ async fn it_handles_indefinite_timeouts() -> Result<(), BoxError> {
 
     // verify the output
     let responses = [results_a, results_b].concat();
-    if test_is_enabled() {
-        assert_yaml_snapshot!(responses, @r###"
-        ---
+    if graph_os_enabled() {
+        assert_yaml_snapshot!(responses, @r"
         - data:
             entryA:
               index: 0
@@ -335,24 +330,24 @@ async fn it_handles_indefinite_timeouts() -> Result<(), BoxError> {
             entryA:
               index: 2
         - errors:
-            - message: Request timed out
+            - message: Your request has been timed out
               path: []
               extensions:
-                code: REQUEST_TIMEOUT
+                code: GATEWAY_TIMEOUT
                 service: b
         - errors:
-            - message: Request timed out
+            - message: Your request has been timed out
               path: []
               extensions:
-                code: REQUEST_TIMEOUT
+                code: GATEWAY_TIMEOUT
                 service: b
         - errors:
-            - message: Request timed out
+            - message: Your request has been timed out
               path: []
               extensions:
-                code: REQUEST_TIMEOUT
+                code: GATEWAY_TIMEOUT
                 service: b
-        "###);
+        ");
     }
 
     Ok(())
@@ -389,7 +384,7 @@ async fn it_handles_cancelled_by_rhai() -> Result<(), BoxError> {
     )
     .await?;
 
-    if test_is_enabled() {
+    if graph_os_enabled() {
         assert_yaml_snapshot!(responses, @r###"
     ---
     - data:
@@ -477,7 +472,7 @@ async fn it_handles_single_request_cancelled_by_rhai() -> Result<(), BoxError> {
     )
     .await?;
 
-    if test_is_enabled() {
+    if graph_os_enabled() {
         assert_yaml_snapshot!(responses, @r###"
     ---
     - data:
@@ -571,7 +566,7 @@ async fn it_handles_cancelled_by_coprocessor() -> Result<(), BoxError> {
     )
     .await?;
 
-    if test_is_enabled() {
+    if graph_os_enabled() {
         assert_yaml_snapshot!(responses, @r###"
         ---
         - errors:
@@ -718,7 +713,7 @@ async fn it_handles_single_request_cancelled_by_coprocessor() -> Result<(), BoxE
     )
     .await?;
 
-    if test_is_enabled() {
+    if graph_os_enabled() {
         assert_yaml_snapshot!(responses, @r###"
         ---
         - data:
@@ -814,7 +809,7 @@ async fn it_handles_single_invalid_graphql() -> Result<(), BoxError> {
     )
     .await?;
 
-    if test_is_enabled() {
+    if graph_os_enabled() {
         // Make sure that we got back what we wanted
         assert_yaml_snapshot!(responses, @r###"
         ---
@@ -850,12 +845,12 @@ mod helper {
     use apollo_router::graphql::Request;
     use apollo_router::graphql::Response;
     use tower::BoxError;
-    use wiremock::matchers;
     use wiremock::MockServer;
     use wiremock::Respond;
     use wiremock::ResponseTemplate;
+    use wiremock::matchers;
 
-    use super::test_is_enabled;
+    use super::graph_os_enabled;
     use crate::integration::common::IntegrationTest;
     use crate::integration::common::Query;
 
@@ -893,7 +888,7 @@ mod helper {
         // Ensure that we have the test keys before running
         // Note: The [IntegrationTest] ensures that these test credentials get
         // set before running the router.
-        if !test_is_enabled() {
+        if !graph_os_enabled() {
             return Ok(Vec::new());
         };
 

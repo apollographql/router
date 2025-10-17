@@ -25,6 +25,9 @@ pub struct Test {
     /// Pass --features to cargo test
     #[clap(long)]
     features: Option<String>,
+
+    /// Test name filters
+    filters: Vec<String>,
 }
 
 impl Test {
@@ -37,7 +40,7 @@ impl Test {
         // desired by the configuration, but not any other arguments.
         // In the event that cargo-nextest is not available, we will
         // fall back to cargo test and pass all the arguments.
-        if let Ok(_) = which::which("cargo-nextest") {
+        if which::which("cargo-nextest").is_ok() {
             let mut args = NEXTEST_DEFAULT_ARGS
                 .iter()
                 .map(|s| s.to_string())
@@ -56,8 +59,10 @@ impl Test {
                 args.push(features.to_owned());
             }
 
+            args.extend(self.filters.iter().cloned());
+
             cargo!(args);
-            return Ok(());
+            Ok(())
         } else {
             eprintln!("cargo-nextest not found, falling back to cargo test");
 
@@ -78,6 +83,8 @@ impl Test {
                 args.push("--jobs".to_string());
                 args.push(jobs.to_string());
             }
+
+            args.extend(self.filters.iter().cloned());
 
             args.push("--".to_string());
 

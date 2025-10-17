@@ -9,11 +9,11 @@ rhai:
 
 preview_entity_cache:
   enabled: true
-  redis:
-    urls:
-      ["redis://localhost:6379",]
   subgraph:
     all:
+      redis:
+        urls:
+          ["redis://localhost:6379",]
       enabled: true
       ttl: 10s
     subgraphs:

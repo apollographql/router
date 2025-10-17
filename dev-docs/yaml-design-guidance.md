@@ -6,14 +6,16 @@ In general users should have a pretty good idea of what a configuration option d
 
 ## Migrations
 
-We won't always get things right, and sometimes we'll need to provide [migrations](apollo-router/src/configuration/migrations/README.md) from old config to new config.
+We won't always get things right, and sometimes we'll need to provide [migrations][] from old config to new config.
 
 Make sure you:
 1. Mention the change in the changelog
 2. Update docs
 3. Update any test configuration
-4. Create a migration test as detailed in [migrations](apollo-router/src/configuration/migrations/README.md)
+4. Create a migration test as detailed in [migrations][]
 5. In your migration description tell the users what they have to update.
+
+[migrations]: /apollo-router/src/configuration/migrations/README.md
 
 ## Process
 It should be obvious to the user what they are configuring and how it will affect Router behaviour. It's tricky for us as developers to know when something isn't obvious to users as often we are too close to the domain.

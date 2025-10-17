@@ -2,12 +2,17 @@
 title: Subgraph Entity Caching for the GraphOS Router
 subtitle: Configure Redis-backed caching for entities
 description: Subgraph entity caching for GraphOS Router with GraphOS Enterprise. Cache and reuse individual entities across queries.
-minVersion: 1.40.0
+minVersion: Router v1.40.0
+releaseStage: preview
 ---
 
-<EnterpriseFeature />
+<PlanRequired plans={["Free", "Developer", "Standard", "Enterprise"]}>
 
-<PreviewFeature />
+Rate limits apply on the Free plan.
+Performance pricing applies on Developer and Standard plans.
+Developer and Standard plans require Router v2.6.0 or later.
+
+</PlanRequired>
 
 Learn how the GraphOS Router can cache subgraph query responses using Redis to improve your query latency for entities in the supergraph.
 
@@ -213,7 +218,7 @@ This entry contains an object with the `all` field to affect all subgraph reques
 
 ### Entity cache invalidation
 
-You can invalidate entity cache entries with a [specifically formatted request](#invalidation-request-format once you [configure your router](#configuration) appropriately. For example, if price data changes before a price entity's TTL expires, you can send an invalidation request.
+You can invalidate entity cache entries with a [specifically formatted request](#invalidation-request-format) once you [configure your router](#configuration) appropriately. For example, if price data changes before a price entity's TTL expires, you can send an invalidation request.
 
 ```mermaid
 flowchart RL
@@ -295,6 +300,7 @@ preview_entity_cache:
       redis:
         urls: ["redis://..."]
       invalidation:
+        enabled: true
         # base64 string that will be provided in the `Authorization: Basic` header value
         shared_key: "agm3ipv7egb78dmxzv0gr5q0t5l6qs37"
     subgraphs:
@@ -340,7 +346,7 @@ Invalidation requests are defined as JSON objects with the following format:
 
 ```json
 {
-  "kind": "subgraph",
+  "kind": "type",
   "subgraph": "accounts",
   "type": "User"
 }
@@ -350,7 +356,7 @@ Invalidation requests are defined as JSON objects with the following format:
 
 ```json
 {
-  "kind": "subgraph",
+  "kind": "entity",
   "subgraph": "accounts",
   "type": "User",
   "key": {

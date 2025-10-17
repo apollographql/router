@@ -1,0 +1,38 @@
+---
+title: Router Configuration Overview
+subtitle: Overview and reference for router configuration
+description: Learn how to configure the Apollo GraphOS Router or Apollo Router Core with environment variables, command-line options and commands, and YAML configuration files.
+redirectFrom:
+    - /router/configuration/overview 
+---
+
+Running an Apollo Router instance involves some key steps:
+- Getting the schema of the federated supergraph that your router is running
+- Configuring runtime features declaratively in YAML
+- Deploying to different environments (dev, prod, etc.)
+- Providing configuration command-line options, YAML, and environment variables at startup
+
+## Getting supergraph schema
+
+As the runtime for a federated graph, a router needs to know the schema of the graph it's running. We call the schema for a federated graph a _supergraph schema_. 
+
+You need to configure the router at startup to know where to get its supergraph schema. That configuration depends on whether or not its supergraph schema is managed by GraphOS:
+
+- If your supergraph schema is managed by GraphOS, you can configure your router with the GraphOS graph ref and API key as environment variables (`APOLLO_GRAPH_REF` and `APOLLO_KEY`). Based on these, the router can automatically fetch the supergraph schema from GraphOS.
+- Otherwise, you can provide the router a supergraph schema file [via command line or environment variable](/graphos/routing/configuration/cli#-s----supergraph).
+
+## Configuring features in YAML
+
+Configuring the router's features happens primarily via a YAML configuration file. Named `router.yaml` by default, the router's YAML configuration file lets you configure all of a router's runtime features declaratively. 
+
+## Passing configuration at startup
+
+Command-line options, a YAML config, and environment variables are passed to the router at startup. 
+
+This example command would be for a router with a GraphOS-managed graph and a custom named `myrouter.yaml` config file:
+
+```bash showLineNumbers=false
+APOLLO_KEY="..." APOLLO_GRAPH_REF="..." router --config myrouter.yaml
+```
+
+> The router can hot-reload updated configuration. When enabled, changes in `router.yaml` trigger the router to restart with its updated configuration.

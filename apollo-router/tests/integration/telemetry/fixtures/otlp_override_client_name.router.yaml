@@ -1,0 +1,31 @@
+rhai:
+  scripts: "tests/integration/telemetry/fixtures"
+  main: "override_client_name.rhai"
+telemetry:
+  instrumentation:
+    spans:
+      mode: spec_compliant
+    events:
+      router:
+        request: info
+        response: info
+        error: info
+  exporters:
+    tracing:
+      common:
+        service_name: router
+      otlp:
+        enabled: true
+        protocol: http
+        endpoint: <otel-collector-endpoint>
+        batch_processor:
+          scheduled_delay: 10ms
+    metrics:
+      common:
+        service_name: router
+      otlp:
+        enabled: true
+        endpoint: <otel-collector-endpoint>/metrics
+        protocol: http
+        batch_processor:
+          scheduled_delay: 10ms

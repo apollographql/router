@@ -8,14 +8,16 @@ use http::Uri;
 use insta::assert_json_snapshot;
 use regex::Regex;
 use rust_embed::RustEmbed;
-use schemars::gen::SchemaSettings;
+use schemars::generate::SchemaSettings;
 use serde_json::json;
 use walkdir::DirEntry;
 use walkdir::WalkDir;
 
+use super::schema::Mode;
 use super::schema::validate_yaml_configuration;
 use super::subgraph::SubgraphConfiguration;
 use super::*;
+use crate::configuration::cors::Policy;
 use crate::error::SchemaError;
 
 #[cfg(unix)]
@@ -31,6 +33,12 @@ fn schema_generation() {
         json_schema.len() < 500 * 1024,
         "schema must be less than 500kb"
     );
+}
+
+#[test]
+fn schema_is_valid() {
+    let schema = generate_config_schema();
+    jsonschema::draft7::meta::validate(schema.as_value()).expect("generated schema must be valid");
 }
 
 #[test]
@@ -81,21 +89,39 @@ fn missing_subgraph_url() {
 #[test]
 fn cors_defaults() {
     let cors = Cors::builder().build();
-
-    assert_eq!(
-        ["https://studio.apollographql.com"],
-        cors.origins.as_slice()
-    );
+    let policies = cors.policies.unwrap();
+    assert_eq!(policies.len(), 1);
+    assert_eq!(policies[0].origins, ["https://studio.apollographql.com"]);
     assert!(
         !cors.allow_any_origin,
         "Allow any origin should be disabled by default"
     );
-    assert!(cors.allow_headers.is_empty());
+    assert_eq!(cors.methods, ["GET", "POST", "OPTIONS"]);
+    assert!(cors.max_age.is_none());
+}
 
-    assert!(
-        cors.match_origins.is_none(),
-        "No origin regex list should be present by default"
-    );
+#[test]
+fn cors_single_origin_config() {
+    let cors = Cors::builder()
+        .max_age(std::time::Duration::from_secs(3600))
+        .policies(vec![
+            Policy::builder()
+                .origins(vec!["https://trusted.com".into()])
+                .allow_credentials(true)
+                .allow_headers(vec!["content-type".into(), "authorization".into()])
+                .expose_headers(vec!["x-custom-header".into()])
+                .methods(vec!["GET".into(), "POST".into()])
+                .build(),
+        ])
+        .build();
+    let policies = cors.policies.unwrap();
+    assert_eq!(policies.len(), 1);
+    let oc = &policies[0];
+    assert_eq!(oc.origins, ["https://trusted.com"]);
+    assert!(oc.allow_credentials.unwrap());
+    assert_eq!(oc.allow_headers, ["content-type", "authorization"]);
+    assert_eq!(oc.expose_headers, ["x-custom-header"]);
+    assert_eq!(oc.methods, Some(vec!["GET".into(), "POST".into()]));
 }
 
 #[test]
@@ -104,7 +130,12 @@ fn bad_graphql_path_configuration_without_slash() {
         .supergraph(Supergraph::fake_builder().path("test").build())
         .build()
         .unwrap_err();
-    assert_eq!(error.to_string(), String::from("invalid 'server.graphql_path' configuration: 'test' is invalid, it must be an absolute path and start with '/', you should try with '/test'"));
+    assert_eq!(
+        error.to_string(),
+        String::from(
+            "invalid 'server.graphql_path' configuration: 'test' is invalid, it must be an absolute path and start with '/', you should try with '/test'"
+        )
+    );
 }
 
 #[test]
@@ -114,7 +145,12 @@ fn bad_graphql_path_configuration_with_wildcard_as_prefix() {
         .build()
         .unwrap_err();
 
-    assert_eq!(error.to_string(), String::from("invalid 'server.graphql_path' configuration: '/*/test' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'"));
+    assert_eq!(
+        error.to_string(),
+        String::from(
+            "invalid 'server.graphql_path' configuration: '/*/test' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'"
+        )
+    );
 }
 
 #[test]
@@ -292,7 +328,10 @@ cors:
         .cors
         .into_layer()
         .expect_err("should have resulted in an error");
-    assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Headers: *`");
+    assert_eq!(
+        error,
+        "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Headers: *`"
+    );
 }
 
 #[test]
@@ -311,11 +350,14 @@ cors:
         .cors
         .into_layer()
         .expect_err("should have resulted in an error");
-    assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Methods: *`");
+    assert_eq!(
+        error,
+        "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Methods: *`"
+    );
 }
 
 #[test]
-fn it_does_not_allow_invalid_cors_origins() {
+fn cors_does_not_allow_invalid_cors_origins() {
     let cfg = validate_yaml_configuration(
         r#"
 cors:
@@ -330,16 +372,19 @@ cors:
         .cors
         .into_layer()
         .expect_err("should have resulted in an error");
-    assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `allow_any_origin: true`");
+    assert_eq!(
+        error,
+        "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `allow_any_origin: true`"
+    );
 }
 
 #[test]
-fn it_doesnt_allow_origins_wildcard() {
+fn cors_doesnt_allow_origins_wildcard() {
     let cfg = validate_yaml_configuration(
         r#"
 cors:
-  origins:
-    - "*"
+  policies:
+    - origins: ["*"]
         "#,
         Expansion::default().unwrap(),
         Mode::NoUpgrade,
@@ -349,20 +394,14 @@ cors:
         .cors
         .into_layer()
         .expect_err("should have resulted in an error");
-    assert_eq!(error, "Invalid CORS configuration: use `allow_any_origin: true` to set `Access-Control-Allow-Origin: *`");
+    assert_eq!(
+        error,
+        "Invalid CORS configuration: use `allow_any_origin: true` to set `Access-Control-Allow-Origin: *`"
+    );
 }
 
 #[test]
 fn validate_project_config_files() {
-    std::env::set_var("DATADOG_AGENT_HOST", "http://example.com");
-    std::env::set_var("JAEGER_HOST", "http://example.com");
-    std::env::set_var("JAEGER_USERNAME", "username");
-    std::env::set_var("JAEGER_PASSWORD", "pass");
-    std::env::set_var("ZIPKIN_HOST", "http://example.com");
-    std::env::set_var("TEST_CONFIG_ENDPOINT", "http://example.com");
-    std::env::set_var("TEST_CONFIG_COLLECTOR_ENDPOINT", "http://example.com");
-    std::env::set_var("PARSER_MAX_RECURSION", "500");
-
     #[cfg(not(unix))]
     let filename_matcher = Regex::from_str("((.+[.])?router\\.yaml)|(.+\\.mdx)").unwrap();
     #[cfg(unix)]
@@ -374,7 +413,7 @@ fn validate_project_config_files() {
     let embedded_yaml_matcher =
         Regex::from_str(r#"(?ms)```yaml title="router(_unix)?.yaml"(.+?)```"#).unwrap();
 
-    fn it(path: &str) -> impl Iterator<Item = DirEntry> {
+    fn it(path: &str) -> impl Iterator<Item = DirEntry> + use<> {
         WalkDir::new(path).into_iter().filter_map(|e| e.ok())
     }
 
@@ -413,16 +452,20 @@ fn validate_project_config_files() {
             };
 
             for yaml in yamls {
-                #[cfg(not(feature = "hyper_header_limits"))]
-                if yaml.contains("http1_max_request_headers") {
-                    continue;
-                }
+                let expansion = Expansion::default_builder()
+                    .mocked_env_var("DATADOG_AGENT_HOST", "http://example.com")
+                    .mocked_env_var("JAEGER_HOST", "http://example.com")
+                    .mocked_env_var("JAEGER_USERNAME", "username")
+                    .mocked_env_var("JAEGER_PASSWORD", "pass")
+                    .mocked_env_var("ZIPKIN_HOST", "http://example.com")
+                    .mocked_env_var("TEST_CONFIG_ENDPOINT", "http://example.com")
+                    .mocked_env_var("TEST_CONFIG_COLLECTOR_ENDPOINT", "http://example.com")
+                    .mocked_env_var("PARSER_MAX_RECURSION", "500")
+                    .mocked_env_var("AWS_ROLE_ARN", "arn:aws:iam::12345678:role/SomeRole")
+                    .build()
+                    .unwrap();
 
-                if let Err(e) = validate_yaml_configuration(
-                    &yaml,
-                    Expansion::default().unwrap(),
-                    Mode::NoUpgrade,
-                ) {
+                if let Err(e) = validate_yaml_configuration(&yaml, expansion, Mode::NoUpgrade) {
                     panic!(
                         "{} configuration error: \n{}",
                         entry.path().to_string_lossy(),
@@ -436,13 +479,16 @@ fn validate_project_config_files() {
 
 #[test]
 fn it_does_not_leak_env_variable_values() {
-    std::env::set_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
+    let expansion = Expansion::default_builder()
+        .mocked_env_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5")
+        .build()
+        .unwrap();
     let error = validate_yaml_configuration(
         r#"
 supergraph:
   introspection: ${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}
         "#,
-        Expansion::default().unwrap(),
+        expansion,
         Mode::NoUpgrade,
     )
     .expect_err("Must have an error because we expect a boolean");
@@ -451,7 +497,10 @@ supergraph:
 
 #[test]
 fn line_precise_config_errors_with_inline_sequence_env_expansion() {
-    std::env::set_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
+    let expansion = Expansion::default_builder()
+        .mocked_env_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5")
+        .build()
+        .unwrap();
     let error = validate_yaml_configuration(
         r#"
 supergraph:
@@ -461,7 +510,7 @@ supergraph:
 cors:
   allow_headers: [ Content-Type, "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE}" ]
         "#,
-        Expansion::default().unwrap(),
+        expansion,
         Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
@@ -470,7 +519,10 @@ cors:
 
 #[test]
 fn line_precise_config_errors_with_sequence_env_expansion() {
-    std::env::set_var("env.TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
+    let expansion = Expansion::default_builder()
+        .mocked_env_var("env.TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5")
+        .build()
+        .unwrap();
 
     let error = validate_yaml_configuration(
         r#"
@@ -483,7 +535,7 @@ cors:
     - Content-Type
     - "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}"
         "#,
-        Expansion::default().unwrap(),
+        expansion,
         Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
@@ -492,6 +544,7 @@ cors:
 
 #[test]
 fn line_precise_config_errors_with_errors_after_first_field_env_expansion() {
+    #[allow(clippy::literal_string_with_formatting_args)]
     let error = validate_yaml_configuration(
         r#"
 supergraph:
@@ -541,13 +594,13 @@ supergraph:
 
 #[test]
 fn expansion_prefixing() {
-    std::env::set_var("TEST_CONFIG_NEEDS_PREFIX", "true");
     validate_yaml_configuration(
         r#"
 supergraph:
   introspection: ${env.NEEDS_PREFIX}
         "#,
         Expansion::builder()
+            .mocked_env_var("TEST_CONFIG_NEEDS_PREFIX", "true")
             .prefix("TEST_CONFIG")
             .supported_mode("env")
             .build(),
@@ -594,6 +647,7 @@ fn upgrade_old_configuration() {
             let new_config = crate::configuration::upgrade::upgrade_configuration(
                 &serde_yaml::from_str(&input).expect("config must be valid yaml"),
                 true,
+                upgrade::UpgradeMode::Major,
             )
             .expect("configuration could not be updated");
             let new_config =
@@ -612,8 +666,44 @@ fn upgrade_old_configuration() {
                     });
                 }
                 Err(e) => {
-                    panic!("migrated configuration had validation errors:\n{e}\n\noriginal configuration:\n{input}\n\nmigrated configuration:\n{new_config}")
+                    panic!(
+                        "migrated configuration had validation errors:\n{e}\n\noriginal configuration:\n{input}\n\nmigrated configuration:\n{new_config}"
+                    )
                 }
+            }
+        }
+    }
+}
+
+#[derive(RustEmbed)]
+#[folder = "src/configuration/testdata/migrations/minor"]
+struct AssetMinor;
+
+#[test]
+fn upgrade_old_minor_configuration() {
+    for file_name in AssetMinor::iter() {
+        if file_name.ends_with(".yaml") {
+            let source = AssetMinor::get(&file_name).expect("test file must exist");
+            let input = std::str::from_utf8(&source.data)
+                .expect("expected utf8")
+                .to_string();
+            let new_config = crate::configuration::upgrade::upgrade_configuration(
+                &serde_yaml::from_str(&input).expect("config must be valid yaml"),
+                true,
+                upgrade::UpgradeMode::Minor,
+            )
+            .expect("configuration could not be updated");
+            let new_config =
+                serde_yaml::to_string(&new_config).expect("must be able to serialize config");
+
+            let result = validate_yaml_configuration(
+                &new_config,
+                Expansion::builder().build(),
+                Mode::NoUpgrade,
+            );
+
+            if let Err(err) = result {
+                panic!("minor upgrade should not raise errors, but it did for {file_name}: {err:?}")
             }
         }
     }
@@ -621,8 +711,16 @@ fn upgrade_old_configuration() {
 
 #[test]
 fn all_properties_are_documented() {
-    let schema = serde_json::to_value(generate_config_schema())
-        .expect("must be able to convert the schema to json");
+    // Not using `generate_config_schema` here because of custom configuration.
+    // By inlining all sub-schemas we don't have to resolve references.
+    let generator = SchemaSettings::draft07()
+        .with(|s| {
+            s.inline_subschemas = true;
+        })
+        .into_generator();
+
+    let schema = generator.into_root_schema_for::<Configuration>();
+    let schema = serde_json::to_value(schema).expect("must be able to convert the schema to json");
 
     let mut errors = Vec::new();
     visit_schema("", &schema, &mut errors);
@@ -637,6 +735,14 @@ fn all_properties_are_documented() {
 #[test]
 fn default_config_has_defaults() {
     insta::assert_yaml_snapshot!(Configuration::default().validated_yaml);
+}
+
+#[rstest::rstest]
+#[case("")]
+#[case("plugins:")]
+fn unusual_configs_validate(#[case] input: &str) {
+    validate_yaml_configuration(input, Expansion::builder().build(), Mode::NoUpgrade)
+        .expect("should be valid configuration");
 }
 
 fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
@@ -682,7 +788,7 @@ fn test_configuration_validate_and_sanitize() {
         .unwrap()
         .validate()
         .unwrap();
-    assert_eq!(&conf.supergraph.sanitized_path(), "/g:supergraph_route");
+    assert_eq!(&conf.supergraph.sanitized_path(), "/g{supergraph_route}");
 
     let conf = Configuration::builder()
         .supergraph(Supergraph::builder().path("/graphql/g*").build())
@@ -692,16 +798,16 @@ fn test_configuration_validate_and_sanitize() {
         .unwrap();
     assert_eq!(
         &conf.supergraph.sanitized_path(),
-        "/graphql/g:supergraph_route"
+        "/graphql/g{supergraph_route}"
     );
 
     let conf = Configuration::builder()
-        .supergraph(Supergraph::builder().path("/*").build())
+        .supergraph(Supergraph::builder().path("/{*rest}").build())
         .build()
         .unwrap()
         .validate()
         .unwrap();
-    assert_eq!(&conf.supergraph.sanitized_path(), "/*router_extra_path");
+    assert_eq!(&conf.supergraph.sanitized_path(), "/{*rest}");
 
     let conf = Configuration::builder()
         .supergraph(Supergraph::builder().path("/test").build())
@@ -711,10 +817,12 @@ fn test_configuration_validate_and_sanitize() {
         .unwrap();
     assert_eq!(&conf.supergraph.sanitized_path(), "/test");
 
-    assert!(Configuration::builder()
-        .supergraph(Supergraph::builder().path("/*/whatever").build())
-        .build()
-        .is_err());
+    assert!(
+        Configuration::builder()
+            .supergraph(Supergraph::builder().path("/*/whatever").build())
+            .build()
+            .is_err()
+    );
 }
 
 #[test]
@@ -772,12 +880,10 @@ impl Default for PluginConfig {
 #[test]
 fn test_subgraph_override() {
     let settings = SchemaSettings::draft2019_09().with(|s| {
-        s.option_nullable = true;
-        s.option_add_null_type = false;
         s.inline_subschemas = true;
     });
-    let gen = settings.into_generator();
-    let schema = gen.into_root_schema_for::<TestSubgraphOverride>();
+    let generator = settings.into_generator();
+    let schema = generator.into_root_schema_for::<TestSubgraphOverride>();
     insta::assert_json_snapshot!(schema);
 }
 
@@ -855,7 +961,7 @@ fn test_deserialize_derive_default() {
     // Walk every source file and check that #[derive(Default)] is not used.
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("src");
-    fn it(path: &Path) -> impl Iterator<Item = DirEntry> {
+    fn it(path: &Path) -> impl Iterator<Item = DirEntry> + use<> {
         WalkDir::new(path).into_iter().filter_map(|e| e.ok())
     }
 
@@ -874,7 +980,7 @@ fn test_deserialize_derive_default() {
             if deserialize_regex.is_match(line) {
                 // Get the struct name
                 if let Some(struct_name) = find_struct_name(&lines, line_number) {
-                    let manual_implementation = format!("impl Default for {} ", struct_name);
+                    let manual_implementation = format!("impl Default for {struct_name} ");
 
                     let has_field_level_defaults =
                         has_field_level_serde_defaults(&lines, line_number);
@@ -920,7 +1026,12 @@ fn it_defaults_health_check_configuration() {
 #[test]
 fn it_sets_custom_health_check_path() {
     let conf = Configuration::builder()
-        .health_check(HealthCheck::new(None, None, Some("/healthz".to_string())))
+        .health_check(HealthCheck::new(
+            None,
+            None,
+            Some("/healthz".to_string()),
+            Default::default(),
+        ))
         .build()
         .unwrap();
 
@@ -931,7 +1042,12 @@ fn it_sets_custom_health_check_path() {
 fn it_adds_slash_to_custom_health_check_path_if_missing() {
     let conf = Configuration::builder()
         // NB the missing `/`
-        .health_check(HealthCheck::new(None, None, Some("healthz".to_string())))
+        .health_check(HealthCheck::new(
+            None,
+            None,
+            Some("healthz".to_string()),
+            Default::default(),
+        ))
         .build()
         .unwrap();
 
@@ -1062,6 +1178,61 @@ fn it_processes_batching_subgraph_accounts_override_enabled_correctly() {
 
     assert!(!config.batch_include("anything"));
     assert!(config.batch_include("accounts"));
+}
+
+#[test]
+fn it_processes_unspecified_maximum_batch_limit_correctly() {
+    let json_config = json!({
+        "enabled": true,
+        "mode": "batch_http_link",
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert_eq!(config.maximum_size, None);
+}
+
+#[test]
+fn it_processes_specified_maximum_batch_limit_correctly() {
+    let json_config = json!({
+        "enabled": true,
+        "mode": "batch_http_link",
+        "maximum_size": 10
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert_eq!(config.maximum_size, Some(10));
+}
+
+#[test]
+fn it_includes_default_header_read_timeout_when_server_config_omitted() {
+    let json_config = json!({});
+
+    let config: Configuration = serde_json::from_value(json_config).unwrap();
+
+    assert_eq!(
+        config.server.http.header_read_timeout,
+        Duration::from_secs(10)
+    );
+}
+
+#[test]
+fn it_processes_specified_server_config_correctly() {
+    let json_config = json!({
+        "server": {
+            "http": {
+                "header_read_timeout": "30s"
+            }
+        }
+    });
+
+    let config: Configuration = serde_json::from_value(json_config).unwrap();
+
+    assert_eq!(
+        config.server.http.header_read_timeout,
+        Duration::from_secs(30)
+    );
 }
 
 fn has_field_level_serde_defaults(lines: &[&str], line_number: usize) -> bool {

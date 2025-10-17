@@ -1,0 +1,6 @@
+---
+source: apollo-federation/src/connectors/expand/tests/mod.rs
+expression: connectors.by_service_name
+input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/directives.graphql
+---
+{}

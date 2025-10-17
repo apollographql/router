@@ -1,0 +1,5 @@
+---
+source: apollo-router/tests/integration/traffic_shaping.rs
+expression: response
+---
+"{\"data\":{\"posts\":[{\"id\":1}]}}"

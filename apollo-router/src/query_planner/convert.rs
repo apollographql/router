@@ -1,12 +1,9 @@
 use std::sync::Arc;
 
-use apollo_compiler::executable;
 use apollo_federation::query_plan as next;
 
-use crate::query_planner::fetch::SubgraphOperation;
 use crate::query_planner::plan;
 use crate::query_planner::rewrites;
-use crate::query_planner::selection;
 use crate::query_planner::subscription;
 
 pub(crate) fn convert_root_query_plan_node(js: &next::QueryPlan) -> Option<plan::PlanNode> {
@@ -75,10 +72,9 @@ impl From<&'_ Box<next::FetchNode>> for plan::PlanNode {
         } = &**value;
         Self::Fetch(super::fetch::FetchNode {
             service_name: subgraph_name.clone(),
-            requires: requires.as_deref().map(vec).unwrap_or_default(),
+            requires: requires.clone(),
             variable_usages: variable_usages.iter().map(|v| v.clone().into()).collect(),
-            // TODO: use Arc in apollo_federation to avoid this clone
-            operation: SubgraphOperation::from_parsed(Arc::new(operation_document.clone())),
+            operation: operation_document.clone(),
             operation_name: operation_name.clone().map(|n| n.into()),
             operation_kind: (*operation_kind).into(),
             id: id.map(|id| id.to_string()),
@@ -157,8 +153,7 @@ impl From<&'_ next::FetchNode> for subscription::SubscriptionNode {
         Self {
             service_name: subgraph_name.clone(),
             variable_usages: variable_usages.iter().map(|v| v.clone().into()).collect(),
-            // TODO: use Arc in apollo_federation to avoid this clone
-            operation: SubgraphOperation::from_parsed(Arc::new(operation_document.clone())),
+            operation: operation_document.clone(),
             operation_name: operation_name.clone().map(|n| n.into()),
             operation_kind: (*operation_kind).into(),
             input_rewrites: option_vec(input_rewrites),
@@ -175,7 +170,7 @@ impl From<&'_ next::PrimaryDeferBlock> for plan::Primary {
         } = value;
         Self {
             node: option(node).map(Box::new),
-            subselection: sub_selection.as_ref().map(|s| s.to_string()),
+            subselection: sub_selection.clone(),
         }
     }
 }
@@ -195,24 +190,21 @@ impl From<&'_ next::DeferredDeferBlock> for plan::DeferredNode {
             query_path: crate::json_ext::Path(
                 query_path
                     .iter()
-                    .filter_map(|e| match e {
-                        next::QueryPathElement::Field(field) => Some(
-                            // TODO: type conditioned fetching once it s available in the rust planner
-                            crate::graphql::JsonPathElement::Key(
-                                field.response_key().to_string(),
-                                None,
-                            ),
-                        ),
-                        next::QueryPathElement::InlineFragment(inline) => {
-                            inline.type_condition.as_ref().map(|cond| {
-                                crate::graphql::JsonPathElement::Fragment(cond.to_string())
-                            })
+                    .map(|e| match e {
+                        next::QueryPathElement::Field { response_key } =>
+                        // TODO: type conditioned fetching once it s available in the rust planner
+                        {
+                            crate::graphql::JsonPathElement::Key(response_key.to_string(), None)
+                        }
+
+                        next::QueryPathElement::InlineFragment { type_condition } => {
+                            crate::graphql::JsonPathElement::Fragment(type_condition.to_string())
                         }
                     })
                     .collect(),
             ),
             node: option(node).map(Arc::new),
-            subselection: sub_selection.as_ref().map(|s| s.to_string()),
+            subselection: sub_selection.clone(),
         }
     }
 }
@@ -221,54 +213,6 @@ impl From<&'_ next::DeferredDependency> for plan::Depends {
     fn from(value: &'_ next::DeferredDependency) -> Self {
         let next::DeferredDependency { id } = value;
         Self { id: id.clone() }
-    }
-}
-
-impl From<&'_ executable::Selection> for selection::Selection {
-    fn from(value: &'_ executable::Selection) -> Self {
-        match value {
-            executable::Selection::Field(field) => Self::Field(field.as_ref().into()),
-            executable::Selection::InlineFragment(inline) => {
-                Self::InlineFragment(inline.as_ref().into())
-            }
-            executable::Selection::FragmentSpread(_) => unreachable!(),
-        }
-    }
-}
-
-impl From<&'_ executable::Field> for selection::Field {
-    fn from(value: &'_ executable::Field) -> Self {
-        let executable::Field {
-            definition: _,
-            alias,
-            name,
-            arguments: _,
-            directives: _,
-            selection_set,
-        } = value;
-        Self {
-            alias: alias.clone(),
-            name: name.clone(),
-            selections: if selection_set.selections.is_empty() {
-                None
-            } else {
-                Some(vec(&selection_set.selections))
-            },
-        }
-    }
-}
-
-impl From<&'_ executable::InlineFragment> for selection::InlineFragment {
-    fn from(value: &'_ executable::InlineFragment) -> Self {
-        let executable::InlineFragment {
-            type_condition,
-            directives: _,
-            selection_set,
-        } = value;
-        Self {
-            type_condition: type_condition.clone(),
-            selections: vec(&selection_set.selections),
-        }
     }
 }
 

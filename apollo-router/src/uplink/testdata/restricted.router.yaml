@@ -52,6 +52,18 @@ plugins:
   experimental.restricted:
     enabled: true
 
+experimental_response_cache:
+  enabled: true
+  invalidation:
+    listen: 0.0.0.0:4000
+    path: /invalidation
+  subgraph:
+    all:
+      enabled: true
+      postgres:
+        url: "postgres://localhost:5432"
+      ttl: 360s # overrides the global TTL
+
 preview_entity_cache:
   enabled: true
   invalidation:

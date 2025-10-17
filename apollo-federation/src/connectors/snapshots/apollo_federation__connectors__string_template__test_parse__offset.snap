@@ -1,0 +1,63 @@
+---
+source: apollo-federation/src/connectors/string_template.rs
+expression: "StringTemplate::<String>::parse(\"text{$config.one}text\", 9).unwrap()"
+---
+StringTemplate {
+    parts: [
+        Constant(
+            Constant {
+                value: "text",
+                location: 9..13,
+            },
+        ),
+        Expression(
+            Expression {
+                expression: Path(
+                    PathSelection {
+                        path: WithRange {
+                            node: Var(
+                                WithRange {
+                                    node: $config,
+                                    range: Some(
+                                        0..7,
+                                    ),
+                                },
+                                WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "one",
+                                            ),
+                                            range: Some(
+                                                8..11,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                11..11,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        7..11,
+                                    ),
+                                },
+                            ),
+                            range: Some(
+                                0..11,
+                            ),
+                        },
+                    },
+                ),
+                location: 14..25,
+            },
+        ),
+        Constant(
+            Constant {
+                value: "text",
+                location: 26..30,
+            },
+        ),
+    ],
+}

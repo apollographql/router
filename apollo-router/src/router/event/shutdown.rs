@@ -15,15 +15,15 @@ type ShutdownFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 #[non_exhaustive]
 pub enum ShutdownSource {
     /// No graceful shutdown
-    #[display(fmt = "None")]
+    #[display("None")]
     None,
 
     /// A custom shutdown future.
-    #[display(fmt = "Custom")]
+    #[display("Custom")]
     Custom(#[derivative(Debug = "ignore")] ShutdownFuture),
 
     /// Watch for Ctl-C signal.
-    #[display(fmt = "CtrlC")]
+    #[display("CtrlC")]
     CtrlC,
 }
 

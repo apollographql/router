@@ -1,16 +1,31 @@
 ---
 title: Query Batching
 subtitle: Receive query batches with the GraphOS Router
-description: Handle multiple GraphQL requests with GraphOS Router's query batching capabilities. Aggregate operations into single HTTP requests, reducing overhead.
+description: Handle multiple GraphQL requests with GraphOS Router's query batching capabilities. Aggregate operations into single HTTP requests to preserve data consistency.
 ---
 
-<EnterpriseFeature />
+<PlanRequired plans={["Free", "Developer", "Standard", "Enterprise"]}>
 
-Learn about query batching and how to configure the GraphOS Router to receive query batches.
+Rate limits apply on the Free plan.
+Developer and Standard plans require Router v2.6.0 or later.
 
-## About query batching
+</PlanRequired>
 
-Modern applications often require several requests to render a single page. This is usually the result of a component-based architecture where individual micro-frontends (MFE) make requests separately to fetch data relevant to them. Not only does this cause a performance overhead—different components may be requesting the same data—it can also cause a consistency issue. To combat this, MFE-based UIs batch multiple client operations, issued close together, into a single HTTP request. This is supported in Apollo Client and Apollo Server.
+Learn how query batching can help preserve data consistency of responses, and learn how to configure the GraphOS Router to receive query batches.
+
+## About query batching 
+
+Modern applications often require several requests to render a single page. This is usually the result of a component-based architecture where individual micro-frontends (MFE) make requests separately to fetch data relevant to them. 
+
+Query batching makes response data consistent for MFEs making multiple requests per page. It primarily preserves data consistency rather than improve performance.
+
+### Preserving data consistency
+
+When the underlying data is changing rapidly, the separate requests of an application may result in responses with inconsistent data. Given two requests for a single page, the values returned in their responses may be different because the data's been updated or subgraph servers briefly had different values.
+
+To prevent this inconsistency from happening, clients can bundle multiple requests together into a batch so routers or servers can produce responses with consistent data. MFE-based UIs usually batch multiple client operations, issued close together, into a single HTTP request. Both Apollo Client and Apollo Server support this.
+
+### Router batching support
 
 The router's batching support is provided by two sets of functionality:
  - client batching
@@ -22,11 +37,13 @@ With subgraph batching, the router analyzes input client batch requests and issu
 
 The GraphOS Router supports client and subgraph query batching.
 
+The GraphOS Router must be configured to receive query batches, otherwise it rejects them. When processing a batch, the router deserializes and processes each operation of a batch independently. It responds to the client only after all operations of the batch have been completed. Each operation executes concurrently with respect to other operations in the batch.
+
+### Client batching support
+
 If you’re using Apollo Client, you can leverage the built-in support for batching to reduce the number of individual operations sent to the router.
 
 Once configured, Apollo Client automatically combines multiple operations into a single HTTP request. The number of operations within a batch is client-configurable, including the maximum number in a batch and the maximum duration to wait for operations to accumulate before sending the batch.
-
-The GraphOS Router must be configured to receive query batches, otherwise it rejects them. When processing a batch, the router deserializes and processes each operation of a batch independently. It responds to the client only after all operations of the batch have been completed. Each operation executes concurrently with respect to other operations in the batch.
 
 ## Configure client query batching
 
@@ -50,6 +67,7 @@ batching:
 | :-- | :-- | :-- | :-- |
 | `enabled` | Flag to enable reception of client query batches | boolean | `false` |
 | `mode` | Supported client batching mode | `batch_http_link`:  the client uses Apollo Link and its [`BatchHttpLink`](/react/api/link/apollo-link-batch-http) link. | No Default |
+| `maximum_size` | Maximum number of queries in a client batch (optional) | integer | `null` (no limit on number of queries) |
 
 #### Subgraph query batching
 
@@ -87,7 +105,7 @@ batching:
 
 - There are limitations on the ability of the router to preserve batches from the client request into the subgraph requests. In particular, certain forms of queries will require data to be present before they are processed. Consequently, the router will only be able to generate batches from queries which are processed which don't contain such constraints. This may result in the router issuing multiple batches or requests. 
 
-- If [query deduplication](/router/configuration/traffic-shaping/#query-deduplication) or [entity caching](/router/configuration/entity-caching) are enabled, they will not apply to batched queries. Batching will take precedence over query deduplication and entity caching. Query deduplication and Entity caching will still be performed for non-batched queries.
+- If [query deduplication](/router/configuration/traffic-shaping/#query-deduplication) or [entity caching](/router/configuration/entity-caching) are enabled, they will not apply to batched queries. Batching will take precedence over query deduplication and entity caching. Query deduplication and entity caching will still be performed for non-batched queries.
 
 </Note>
 
@@ -190,6 +208,11 @@ To enable batching in an Apollo client, configure `BatchHttpLink`. For details o
 ### Configuration compatibility
 
 If the router receives a query batch from a client, and batching is *not* enabled, the router sends a `BATCHING_NOT_ENABLED` error to the client.
+
+## Query batching and GraphOS plans
+When processing batched operations, the router counts each entry in the batch as a distinct billable operation that counts towards your graph usage. Sending a batch with `N` operations is counted the same as sending `N` requests of the same non-batched operation. 
+
+Note that GraphOS plans only track router operations, so configuring subgraph batching does not impact your graph usage count.
 
 ## Metrics for query batching
 
@@ -308,6 +331,53 @@ As a result, the router returns an invalid batch error:
 {"errors":
   [
     {"message":"Invalid GraphQL request","extensions":{"details":"failed to deserialize the request body into JSON: expected value at line 1 column 54","code":"INVALID_GRAPHQL_REQUEST"}}
+  ]
+}
+```
+
+### Excessive queries batch error
+
+If the number of queries provided exceeds the maximum batch size, the entire batch fails.
+
+For example, this configuration sets a batch size limit of 2, but three queries are provided:
+```yaml
+batching:
+  enabled: true
+  mode: batch_http_link
+  maximum_size: 2
+```
+
+```graphql
+[
+  query MyFirstQuery {
+    me {
+      id
+    }
+  },
+  query MySecondQuery {
+    me {
+      name
+    }
+  },
+  query MyThirdQuery {
+    me {
+      name
+    }
+  }
+]
+```
+
+As a result, the router returns an error:
+```json
+{
+  "errors": [
+    {
+      "message": "Invalid GraphQL request",
+      "extensions": {
+        "details": "Batch limits exceeded: you provided a batch with 3 entries, but the configured maximum router batch size is 2",
+        "code": "BATCH_LIMIT_EXCEEDED"
+      }
+    }
   ]
 }
 ```

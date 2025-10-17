@@ -1,32 +1,40 @@
-use std::collections::HashMap;
 use std::io;
 use std::net::SocketAddr;
-use std::num::NonZeroUsize;
 use std::pin::Pin;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::task::Poll;
 use std::time::Duration;
 
 use async_compression::tokio::write::GzipDecoder;
 use async_compression::tokio::write::GzipEncoder;
-use axum::body::BoxBody;
+use futures::Future;
+use futures::StreamExt;
 use futures::future::BoxFuture;
 use futures::stream;
 use futures::stream::poll_fn;
-use futures::Future;
-use futures::StreamExt;
+use http::HeaderMap;
+use http::HeaderValue;
 use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
 use http::header::{self};
-use http::HeaderMap;
-use http::HeaderValue;
-use http_body::Body;
+#[cfg(unix)]
+use http_body_util::BodyExt;
+#[cfg(unix)]
+use hyper::rt::ReadBufCursor;
+#[cfg(unix)]
+use hyper_util::rt::TokioIo;
 use mime::APPLICATION_JSON;
 use mockall::mock;
 use multimap::MultiMap;
+#[cfg(unix)]
+use pin_project_lite::pin_project;
+use reqwest::Client;
+use reqwest::Method;
+use reqwest::StatusCode;
 use reqwest::header::ACCEPT;
 use reqwest::header::ACCESS_CONTROL_ALLOW_HEADERS;
 use reqwest::header::ACCESS_CONTROL_ALLOW_METHODS;
@@ -35,63 +43,55 @@ use reqwest::header::ACCESS_CONTROL_MAX_AGE;
 use reqwest::header::ACCESS_CONTROL_REQUEST_HEADERS;
 use reqwest::header::ACCESS_CONTROL_REQUEST_METHOD;
 use reqwest::header::ORIGIN;
-use reqwest::redirect::Policy;
-use reqwest::Client;
-use reqwest::Method;
-use reqwest::StatusCode;
 use serde_json::json;
 use test_log::test;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncReadExt;
+#[cfg(unix)]
+use tokio::io::AsyncWrite;
 use tokio::io::AsyncWriteExt;
+#[cfg(unix)]
+use tokio::io::ReadBuf;
 use tokio::sync::mpsc;
 use tokio_util::io::StreamReader;
-use tower::service_fn;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceExt;
+use tower::service_fn;
 
-pub(crate) use super::axum_http_server_factory::make_axum_router;
 use super::*;
-use crate::configuration::cors::Cors;
-use crate::configuration::HealthCheck;
+use crate::ApolloRouterError;
+use crate::Configuration;
+use crate::ListenAddr;
+use crate::TestHarness;
+use crate::assert_response_eq_ignoring_error_id;
+use crate::axum_factory::connection_handle::connection_counts;
 use crate::configuration::Homepage;
 use crate::configuration::Sandbox;
 use crate::configuration::Supergraph;
+use crate::configuration::cors::Cors;
+use crate::configuration::cors::Policy;
 use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::json_ext::Path;
-use crate::plugin::test::MockSubgraph;
-use crate::query_planner::BridgeQueryPlannerPool;
-use crate::router_factory::create_plugins;
+use crate::metrics::FutureMetricsExt;
+use crate::plugins::healthcheck::Config as HealthCheck;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
-use crate::services::execution;
-use crate::services::layers::persisted_queries::PersistedQueryLayer;
-use crate::services::layers::query_analysis::QueryAnalysisLayer;
+use crate::services::MULTIPART_DEFER_ACCEPT;
+use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
+use crate::services::RouterRequest;
+use crate::services::RouterResponse;
+use crate::services::SupergraphResponse;
 use crate::services::layers::static_page::home_page_content;
 use crate::services::layers::static_page::sandbox_page_content;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
-use crate::services::router::service::RouterCreator;
-use crate::services::supergraph;
-use crate::services::HasSchema;
-use crate::services::PluggableSupergraphServiceBuilder;
-use crate::services::RouterRequest;
-use crate::services::RouterResponse;
-use crate::services::SupergraphResponse;
-use crate::services::MULTIPART_DEFER_ACCEPT;
-use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
-use crate::spec::Schema;
+use crate::services::router::pipeline_handle::PipelineRef;
 use crate::test_harness::http_client;
 use crate::test_harness::http_client::MaybeMultipart;
 use crate::uplink::license_enforcement::LicenseState;
-use crate::ApolloRouterError;
-use crate::Configuration;
-use crate::Context;
-use crate::ListenAddr;
-use crate::TestHarness;
 
 macro_rules! assert_header {
         ($response:expr, $header:expr, $expected:expr $(, $msg:expr)?) => {
@@ -164,16 +164,24 @@ impl RouterFactory for TestRouterFactory {
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         MultiMap::new()
     }
+
+    fn pipeline_ref(&self) -> Arc<PipelineRef> {
+        Arc::new(PipelineRef {
+            schema_id: "dummy".to_string(),
+            launch_id: None,
+            config_hash: "dummy".to_string(),
+        })
+    }
 }
 
 async fn init(
     mut mock: impl Service<
-            router::Request,
-            Response = router::Response,
-            Error = BoxError,
-            Future = BoxFuture<'static, router::ServiceResult>,
-        > + Send
-        + 'static,
+        router::Request,
+        Response = router::Response,
+        Error = BoxError,
+        Future = BoxFuture<'static, router::ServiceResult>,
+    > + Send
+    + 'static,
 ) -> (HttpServerHandle, Client) {
     let server_factory = AxumHttpServerFactory::new();
     let (service, mut handle) = tower_test::mock::spawn();
@@ -218,7 +226,7 @@ async fn init(
             None,
             vec![],
             MultiMap::new(),
-            LicenseState::Unlicensed,
+            Arc::new(LicenseState::Unlicensed),
             all_connections_stopped_sender,
         )
         .await
@@ -236,7 +244,7 @@ async fn init(
     let client = reqwest::Client::builder()
         .no_gzip()
         .default_headers(default_headers)
-        .redirect(Policy::none())
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .unwrap();
     (server, client)
@@ -244,12 +252,12 @@ async fn init(
 
 pub(super) async fn init_with_config(
     mut router_service: impl Service<
-            router::Request,
-            Response = router::Response,
-            Error = BoxError,
-            Future = BoxFuture<'static, router::ServiceResult>,
-        > + Send
-        + 'static,
+        router::Request,
+        Response = router::Response,
+        Error = BoxError,
+        Future = BoxFuture<'static, router::ServiceResult>,
+    > + Send
+    + 'static,
     conf: Arc<Configuration>,
     web_endpoints: MultiMap<ListenAddr, Endpoint>,
 ) -> Result<(HttpServerHandle, Client), ApolloRouterError> {
@@ -276,7 +284,7 @@ pub(super) async fn init_with_config(
             None,
             vec![],
             web_endpoints,
-            LicenseState::Unlicensed,
+            Arc::new(LicenseState::Unlicensed),
             all_connections_stopped_sender,
         )
         .await?;
@@ -293,7 +301,7 @@ pub(super) async fn init_with_config(
     let client = reqwest::Client::builder()
         .no_gzip()
         .default_headers(default_headers)
-        .redirect(Policy::none())
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .unwrap();
     Ok((server, client))
@@ -302,12 +310,12 @@ pub(super) async fn init_with_config(
 #[cfg(unix)]
 async fn init_unix(
     mut mock: impl Service<
-            router::Request,
-            Response = router::Response,
-            Error = BoxError,
-            Future = BoxFuture<'static, router::ServiceResult>,
-        > + Send
-        + 'static,
+        router::Request,
+        Response = router::Response,
+        Error = BoxError,
+        Future = BoxFuture<'static, router::ServiceResult>,
+    > + Send
+    + 'static,
     temp_dir: &tempfile::TempDir,
 ) -> HttpServerHandle {
     let server_factory = AxumHttpServerFactory::new();
@@ -343,7 +351,7 @@ async fn init_unix(
             None,
             vec![],
             MultiMap::new(),
-            LicenseState::Unlicensed,
+            Arc::new(LicenseState::Unlicensed),
             all_connections_stopped_sender,
         )
         .await
@@ -513,16 +521,20 @@ async fn it_compress_response_body() -> Result<(), ApolloRouterError> {
     Ok(())
 }
 
-#[tokio::test]
-async fn it_decompress_request_body() -> Result<(), ApolloRouterError> {
-    let original_body = json!({ "query": "query { me { name } }" });
+async fn gzip(json: serde_json::Value) -> Vec<u8> {
     let mut encoder = GzipEncoder::new(Vec::new());
     encoder
-        .write_all(original_body.to_string().as_bytes())
+        .write_all(json.to_string().as_bytes())
         .await
         .unwrap();
     encoder.shutdown().await.unwrap();
-    let compressed_body = encoder.into_inner();
+    encoder.into_inner()
+}
+
+#[tokio::test]
+async fn it_decompress_request_body() -> Result<(), ApolloRouterError> {
+    let original_body = json!({ "query": "query { me { name } }" });
+    let compressed_body = gzip(original_body).await;
     let expected_response = graphql::Response::builder()
         .data(json!({"response": "yayyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"})) // Body must be bigger than 32 to be compressed
         .build();
@@ -557,6 +569,54 @@ async fn it_decompress_request_body() -> Result<(), ApolloRouterError> {
         response.json::<graphql::Response>().await.unwrap(),
         expected_response,
     );
+
+    server.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn unsupported_compression() -> Result<(), ApolloRouterError> {
+    let original_body = json!({ "query": "query { me { name } }" });
+    let compressed_body = gzip(original_body).await;
+
+    let router_service = router::service::empty().await;
+    let (server, client) = init(router_service).await;
+    let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
+
+    let response = client
+        .post(url.as_str())
+        // Telling the router we used a compression algorithm it can't decompress
+        .header(CONTENT_ENCODING, HeaderValue::from_static("unsupported"))
+        .body(compressed_body.clone())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+
+    server.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn mismatched_compression_header() -> Result<(), ApolloRouterError> {
+    let original_body = json!({ "query": "query { me { name } }" });
+    let compressed_body = gzip(original_body).await;
+
+    let router_service = router::service::empty().await;
+    let (server, client) = init(router_service).await;
+    let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
+
+    let response = client
+        .post(url.as_str())
+        // Telling the router we used a different (valid) compression algorithm than the one we actually used
+        .header(CONTENT_ENCODING, HeaderValue::from_static("br"))
+        .body(compressed_body.clone())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 
     server.shutdown().await?;
     Ok(())
@@ -708,7 +768,7 @@ async fn response_with_root_wildcard() -> Result<(), ApolloRouterError> {
     let conf = Configuration::fake_builder()
         .supergraph(
             crate::configuration::Supergraph::fake_builder()
-                .path(String::from("/*"))
+                .path(String::from("/{*rest}"))
                 .build(),
         )
         .build()
@@ -858,7 +918,7 @@ async fn response_with_custom_prefix_endpoint() -> Result<(), ApolloRouterError>
     let conf = Configuration::fake_builder()
         .supergraph(
             crate::configuration::Supergraph::fake_builder()
-                .path(String::from("/:my_prefix/graphql"))
+                .path(String::from("/{my_prefix}/graphql"))
                 .build(),
         )
         .build()
@@ -923,7 +983,7 @@ async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterErro
     let conf = Configuration::fake_builder()
         .supergraph(
             crate::configuration::Supergraph::fake_builder()
-                .path(String::from("/graphql/*"))
+                .path(String::from("/graphql/{*rest}"))
                 .build(),
         )
         .build()
@@ -1012,7 +1072,7 @@ async fn response_failure() -> Result<(), ApolloRouterError> {
         .await
         .unwrap();
 
-    assert_eq!(
+    assert_response_eq_ignoring_error_id!(
         response,
         crate::error::FetchError::SubrequestHttpError {
             status_code: Some(200),
@@ -1055,7 +1115,7 @@ async fn cors_preflight() -> Result<(), ApolloRouterError> {
         .header(ACCESS_CONTROL_REQUEST_METHOD, "POST")
         .header(
             ACCESS_CONTROL_REQUEST_HEADERS,
-            "Content-type, x-an-other-test-header, apollo-require-preflight",
+            "content-type, x-an-other-test-header, apollo-require-preflight",
         )
         .send()
         .await
@@ -1071,7 +1131,11 @@ async fn cors_preflight() -> Result<(), ApolloRouterError> {
     assert_header_contains!(
         &response,
         ACCESS_CONTROL_ALLOW_HEADERS,
-        &["Content-type, x-an-other-test-header, apollo-require-preflight"],
+        &[
+            "content-type",
+            "x-an-other-test-header",
+            "apollo-require-preflight"
+        ],
         "Incorrect access control allow header header {headers:?}"
     );
     assert_header_contains!(
@@ -1342,9 +1406,9 @@ async fn it_refuses_to_start_if_homepage_and_sandbox_are_enabled() {
         .unwrap_err();
 
     assert_eq!(
-            "sandbox and homepage cannot be enabled at the same time: disable the homepage if you want to enable sandbox",
-            error.to_string()
-        )
+        "sandbox and homepage cannot be enabled at the same time: disable the homepage if you want to enable sandbox",
+        error.to_string()
+    )
 }
 
 #[test(tokio::test)]
@@ -1365,9 +1429,9 @@ async fn it_refuses_to_start_if_sandbox_is_enabled_and_introspection_is_not() {
         .unwrap_err();
 
     assert_eq!(
-            "sandbox and homepage cannot be enabled at the same time: disable the homepage if you want to enable sandbox",
-            error.to_string()
-        )
+        "sandbox and homepage cannot be enabled at the same time: disable the homepage if you want to enable sandbox",
+        error.to_string()
+    )
 }
 
 #[test(tokio::test)]
@@ -1419,7 +1483,7 @@ async fn cors_origin_default() -> Result<(), ApolloRouterError> {
 
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://studio.apollographql.com").await;
-    assert_cors_origin(response, "https://studio.apollographql.com");
+    assert_cors_origin(response, "https://studio.apollographql.com").await;
 
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://this.wont.work.com").await;
@@ -1462,7 +1526,33 @@ async fn cors_allow_any_origin() -> Result<(), ApolloRouterError> {
     let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
     let response = request_cors_with_origin(&client, url.as_str(), "https://thisisatest.com").await;
-    assert_cors_origin(response, "*");
+    assert_cors_origin(response, "*").await;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn cors_allow_any_origin_but_no_origin_header() -> Result<(), ApolloRouterError> {
+    let conf = Configuration::fake_builder()
+        .cors(Cors::builder().allow_any_origin(true).build())
+        .build()
+        .unwrap();
+    let (server, client) = init_with_config(
+        router::service::empty().await,
+        Arc::new(conf),
+        MultiMap::new(),
+    )
+    .await?;
+    let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
+
+    let response = client
+        .request(Method::OPTIONS, url)
+        .header("Access-Control-Request-Method", "POST")
+        .header("Access-Control-Request-Headers", "content-type")
+        .send()
+        .await
+        .unwrap();
+    assert_not_cors_origin(response, "*");
 
     Ok(())
 }
@@ -1474,7 +1564,11 @@ async fn cors_origin_list() -> Result<(), ApolloRouterError> {
     let conf = Configuration::fake_builder()
         .cors(
             Cors::builder()
-                .origins(vec![valid_origin.to_string()])
+                .policies(vec![
+                    Policy::builder()
+                        .origins(vec![valid_origin.to_string()])
+                        .build(),
+                ])
                 .build(),
         )
         .build()
@@ -1488,7 +1582,7 @@ async fn cors_origin_list() -> Result<(), ApolloRouterError> {
     let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
     let response = request_cors_with_origin(&client, url.as_str(), valid_origin).await;
-    assert_cors_origin(response, valid_origin);
+    assert_cors_origin(response, valid_origin).await;
 
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://thisoriginisinvalid").await;
@@ -1504,8 +1598,17 @@ async fn cors_origin_regex() -> Result<(), ApolloRouterError> {
     let conf = Configuration::fake_builder()
         .cors(
             Cors::builder()
-                .origins(vec!["https://anexactmatchorigin.com".to_string()])
-                .match_origins(vec![apollo_subdomains.to_string()])
+                .policies(vec![
+                    Policy::builder()
+                        .origins(vec!["https://anexactmatchorigin.com".to_string()])
+                        .match_origins(vec![regex::Regex::new(apollo_subdomains).unwrap()])
+                        .allow_headers(vec![
+                            "content-type".into(),
+                            "x-an-other-test-header".into(),
+                            "apollo-require-preflight".into(),
+                        ])
+                        .build(),
+                ])
                 .build(),
         )
         .build()
@@ -1521,10 +1624,10 @@ async fn cors_origin_regex() -> Result<(), ApolloRouterError> {
     // regex tests
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://www.apollographql.com").await;
-    assert_cors_origin(response, "https://www.apollographql.com");
+    assert_cors_origin(response, "https://www.apollographql.com").await;
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://staging.apollographql.com").await;
-    assert_cors_origin(response, "https://staging.apollographql.com");
+    assert_cors_origin(response, "https://staging.apollographql.com").await;
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://thisshouldnotwork.com").await;
     assert_not_cors_origin(response, "https://thisshouldnotwork.com");
@@ -1532,7 +1635,7 @@ async fn cors_origin_regex() -> Result<(), ApolloRouterError> {
     // exact match tests
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://anexactmatchorigin.com").await;
-    assert_cors_origin(response, "https://anexactmatchorigin.com");
+    assert_cors_origin(response, "https://anexactmatchorigin.com").await;
 
     // won't match
     let response =
@@ -1553,8 +1656,19 @@ async fn request_cors_with_origin(client: &Client, url: &str, origin: &str) -> r
         .unwrap()
 }
 
-fn assert_cors_origin(response: reqwest::Response, origin: &str) {
-    assert!(response.status().is_success());
+async fn assert_cors_origin(response: reqwest::Response, origin: &str) {
+    if !response.status().is_success() {
+        let status = response.status();
+        let headers = response.headers().clone();
+        let body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Failed to get response body".to_string());
+        println!("Response status: {status}");
+        println!("Response headers: {headers:?}");
+        println!("Response body: {body}");
+        panic!("Response status is not success: {status}");
+    }
     let headers = response.headers();
     assert_headers_valid(&response);
     assert!(origin_valid(headers, origin));
@@ -1641,12 +1755,14 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
                 .has_next(true)
                 .build(),
             graphql::Response::builder()
-                .incremental(vec![graphql::IncrementalResponse::builder()
-                    .data(json!({
-                        "name": "Ada"
-                    }))
-                    .path(Path::from("me"))
-                    .build()])
+                .incremental(vec![
+                    graphql::IncrementalResponse::builder()
+                        .data(json!({
+                            "name": "Ada"
+                        }))
+                        .path(Path::from("me"))
+                        .build(),
+                ])
                 .has_next(true)
                 .build(),
             graphql::Response::builder().has_next(false).build(),
@@ -1680,15 +1796,15 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
 
     let first = response.chunk().await.unwrap().unwrap();
     assert_eq!(
-            std::str::from_utf8(&first).unwrap(),
-            "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"me\":\"id\"},\"hasNext\":true}\r\n--graphql"
-        );
+        std::str::from_utf8(&first).unwrap(),
+        "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"me\":\"id\"},\"hasNext\":true}\r\n--graphql"
+    );
 
     let second = response.chunk().await.unwrap().unwrap();
     assert_eq!(
-            std::str::from_utf8(&second).unwrap(),
+        std::str::from_utf8(&second).unwrap(),
         "\r\ncontent-type: application/json\r\n\r\n{\"hasNext\":true,\"incremental\":[{\"data\":{\"name\":\"Ada\"},\"path\":[\"me\"]}]}\r\n--graphql"
-        );
+    );
 
     let third = response.chunk().await.unwrap().unwrap();
     assert_eq!(
@@ -1702,12 +1818,14 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
 #[test(tokio::test)]
 async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterError> {
     let router_service = router::service::from_supergraph_mock_callback(move |req| {
-        let body = stream::iter(vec![graphql::Response::builder()
-            .data(json!({
-                "me": "name",
-            }))
-            .has_next(false)
-            .build()])
+        let body = stream::iter(vec![
+            graphql::Response::builder()
+                .data(json!({
+                    "me": "name",
+                }))
+                .has_next(false)
+                .build(),
+        ])
         .boxed();
 
         Ok(SupergraphResponse::new_from_response(
@@ -1738,9 +1856,9 @@ async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterErr
 
     let first = response.chunk().await.unwrap().unwrap();
     assert_eq!(
-            std::str::from_utf8(&first).unwrap(),
-            "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"me\":\"name\"},\"hasNext\":false}\r\n--graphql--\r\n"
-        );
+        std::str::from_utf8(&first).unwrap(),
+        "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"me\":\"name\"},\"hasNext\":false}\r\n--graphql--\r\n"
+    );
 
     server.shutdown().await
 }
@@ -1774,7 +1892,7 @@ async fn it_supports_server_restart() {
             None,
             vec![],
             MultiMap::new(),
-            LicenseState::default(),
+            Arc::new(LicenseState::default()),
             all_connections_stopped_sender,
         )
         .await
@@ -1803,7 +1921,7 @@ async fn it_supports_server_restart() {
             supergraph_service_factory,
             new_configuration,
             MultiMap::new(),
-            LicenseState::default(),
+            Arc::new(LicenseState::default()),
         )
         .await
         .unwrap();
@@ -1843,10 +1961,8 @@ async fn http_compressed_service() -> impl Service<
     let counter = GraphQLResponseCounter::default();
     let service = TestHarness::builder()
         .configuration_json(json!({
-            "plugins": {
-                "apollo.include_subgraph_errors": {
-                    "all": true
-                }
+            "include_subgraph_errors": {
+                "all": true
             },
         }))
         .unwrap()
@@ -1895,10 +2011,8 @@ async fn http_deferred_service() -> impl Service<
     let counter = GraphQLResponseCounter::default();
     let service = TestHarness::builder()
         .configuration_json(json!({
-            "plugins": {
-                "apollo.include_subgraph_errors": {
-                    "all": true
-                }
+            "include_subgraph_errors": {
+                "all": true
             }
         }))
         .unwrap()
@@ -1918,12 +2032,12 @@ async fn http_deferred_service() -> impl Service<
         .await
         .unwrap()
         .map_err(Into::into)
-        .map_response(|response: http::Response<BoxBody>| {
+        .map_response(|response: http::Response<axum::body::Body>| {
             let response = response.map(|body| {
-                // Convert from axum’s BoxBody to AsyncBufRead
-                let mut body = Box::pin(body);
-                let stream = poll_fn(move |ctx| body.as_mut().poll_data(ctx))
-                    .map(|result| result.map_err(|e| io::Error::new(io::ErrorKind::Other, e)));
+                // Convert from axum's BoxBody to AsyncBufRead
+                let mut body = body.into_data_stream();
+                let stream = poll_fn(move |ctx| body.poll_next_unpin(ctx))
+                    .map(|result| result.map_err(io::Error::other));
                 StreamReader::new(stream)
             });
             response.map(|body| Box::pin(body) as _)
@@ -2036,8 +2150,8 @@ async fn test_defer_is_not_buffered() {
     // `counts` is `[2, 2]` since both parts have to be generated on the server side
     // before the first one reaches the client.
     //
-    // Conversly, observing the value `1` after receiving the first part
-    // means the didn’t wait for all parts to be in the compression buffer
+    // Conversely, observing the value `1` after receiving the first part
+    // means the didn't wait for all parts to be in the compression buffer
     // before sending any.
     assert_eq!(counts, [1, 2]);
 }
@@ -2090,23 +2204,124 @@ async fn listening_to_unix_socket() {
 }
 
 #[cfg(unix)]
+pin_project! {
+    /// Wrapper around [`tokio::net::UnixStream`].
+    #[derive(Debug)]
+    struct UnixStream {
+        #[pin]
+        unix_stream: tokio::net::UnixStream,
+    }
+}
+
+#[cfg(unix)]
+impl UnixStream {
+    async fn connect(path: impl AsRef<std::path::Path>) -> io::Result<Self> {
+        let unix_stream = tokio::net::UnixStream::connect(path).await?;
+        Ok(Self { unix_stream })
+    }
+}
+
+#[cfg(unix)]
+impl AsyncWrite for UnixStream {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, io::Error>> {
+        self.project().unix_stream.poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<(), io::Error>> {
+        self.project().unix_stream.poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<(), io::Error>> {
+        self.project().unix_stream.poll_shutdown(cx)
+    }
+
+    fn poll_write_vectored(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        bufs: &[io::IoSlice<'_>],
+    ) -> Poll<Result<usize, std::io::Error>> {
+        self.project().unix_stream.poll_write_vectored(cx, bufs)
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.unix_stream.is_write_vectored()
+    }
+}
+
+#[cfg(unix)]
+impl hyper::rt::Write for UnixStream {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, io::Error>> {
+        self.project().unix_stream.poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<(), io::Error>> {
+        self.project().unix_stream.poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<(), io::Error>> {
+        self.project().unix_stream.poll_shutdown(cx)
+    }
+}
+
+#[cfg(unix)]
+impl AsyncRead for UnixStream {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        self.project().unix_stream.poll_read(cx, buf)
+    }
+}
+
+#[cfg(unix)]
+impl hyper::rt::Read for UnixStream {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: ReadBufCursor<'_>,
+    ) -> Poll<Result<(), io::Error>> {
+        let mut t = TokioIo::new(self.project().unix_stream);
+        Pin::new(&mut t).poll_read(cx, buf)
+    }
+}
+
+#[cfg(unix)]
 async fn send_to_unix_socket(addr: &ListenAddr, method: Method, body: &str) -> String {
-    use tokio::net::UnixStream;
     let stream = UnixStream::connect(addr.to_string()).await.unwrap();
-    let (mut sender, conn) = hyper::client::conn::handshake(stream).await.unwrap();
+    let (mut sender, conn) = hyper::client::conn::http1::handshake(stream).await.unwrap();
     tokio::task::spawn(async move {
         if let Err(err) = conn.await {
-            println!("Connection failed: {:?}", err);
+            println!("Connection failed: {err:?}");
         }
     });
 
-    let http_body = hyper::Body::from(body.to_string());
     let mut request = http::Request::builder()
         .method(method.clone())
         .header("Host", "localhost:4100")
         .header("Content-Type", "application/json")
         .header("Accept", "application/json")
-        .body(http_body)
+        .body(body.to_string())
         .unwrap();
     if method == Method::GET {
         *request.uri_mut() = body.parse().unwrap();
@@ -2118,65 +2333,10 @@ async fn send_to_unix_socket(addr: &ListenAddr, method: Method, body: &str) -> S
 }
 
 #[tokio::test]
-async fn test_health_check() {
-    let router_service = router::service::from_supergraph_mock_callback(|_| {
-        Ok(supergraph::Response::builder()
-            .data(json!({ "__typename": "Query"}))
-            .context(Context::new())
-            .build()
-            .unwrap())
-    })
-    .await;
-
-    let (server, client) = init(router_service).await;
-    let url = format!(
-        "{}/health",
-        server.graphql_listen_address().as_ref().unwrap()
-    );
-
-    let response = client.get(url).send().await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(
-        json!({"status": "UP" }),
-        response.json::<serde_json::Value>().await.unwrap()
-    )
-}
-
-#[tokio::test]
-async fn test_health_check_custom_listener() {
-    let conf = Configuration::fake_builder()
-        .health_check(
-            HealthCheck::fake_builder()
-                .listen(ListenAddr::SocketAddr("127.0.0.1:4012".parse().unwrap()))
-                .enabled(true)
-                .build(),
-        )
-        .build()
-        .unwrap();
-
-    // keep the server handle around otherwise it will immediately shutdown
-    let (_server, client) = init_with_config(
-        router::service::empty().await,
-        Arc::new(conf),
-        MultiMap::new(),
-    )
-    .await
-    .unwrap();
-    let url = "http://localhost:4012/health";
-
-    let response = client.get(url).send().await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(
-        json!({"status": "UP" }),
-        response.json::<serde_json::Value>().await.unwrap()
-    )
-}
-
-#[tokio::test]
 async fn test_sneaky_supergraph_and_health_check_configuration() {
     let conf = Configuration::fake_builder()
         .health_check(
-            HealthCheck::fake_builder()
+            HealthCheck::builder()
                 .listen(ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()))
                 .enabled(true)
                 .build(),
@@ -2184,10 +2344,33 @@ async fn test_sneaky_supergraph_and_health_check_configuration() {
         .supergraph(Supergraph::fake_builder().path("/health").build()) // here be dragons
         .build()
         .unwrap();
+
+    // Manually add the endpoints, since they are only created if the health-check plugin is
+    // enabled and that won't happen in init_with_config()
+    let endpoint = service_fn(|req: router::Request| async move {
+        Ok::<_, BoxError>(
+            http::Response::builder()
+                .status(StatusCode::OK)
+                .body(format!(
+                    "{} + {}",
+                    req.router_request.method(),
+                    req.router_request.uri().path()
+                ))
+                .unwrap()
+                .into(),
+        )
+    })
+    .boxed_clone();
+    let mut web_endpoints = MultiMap::new();
+    web_endpoints.insert(
+        ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
+        Endpoint::from_router_service("/health".to_string(), endpoint.boxed()),
+    );
+
     let error = init_with_config(
         router::service::empty().await,
         Arc::new(conf),
-        MultiMap::new(),
+        web_endpoints,
     )
     .await
     .unwrap_err();
@@ -2202,7 +2385,7 @@ async fn test_sneaky_supergraph_and_health_check_configuration() {
 async fn test_sneaky_supergraph_and_disabled_health_check_configuration() {
     let conf = Configuration::fake_builder()
         .health_check(
-            HealthCheck::fake_builder()
+            HealthCheck::builder()
                 .listen(ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()))
                 .enabled(false)
                 .build(),
@@ -2223,7 +2406,7 @@ async fn test_sneaky_supergraph_and_disabled_health_check_configuration() {
 async fn test_supergraph_and_health_check_same_port_different_listener() {
     let conf = Configuration::fake_builder()
         .health_check(
-            HealthCheck::fake_builder()
+            HealthCheck::builder()
                 .listen(ListenAddr::SocketAddr("127.0.0.1:4013".parse().unwrap()))
                 .enabled(true)
                 .build(),
@@ -2249,111 +2432,74 @@ async fn test_supergraph_and_health_check_same_port_different_listener() {
     );
 }
 
+/// This tests that the apollo.router.open_connections metric is keeps track of connections
+/// It's a replacement for the session count total metric that is more in line with otel conventions
+/// It also has pipeline information attached to it.
 #[tokio::test]
-async fn test_supergraph_timeout() {
-    let config = serde_json::json!({
-        "supergraph": {
-            "listen": "127.0.0.1:0",
-            "defer_support": false,
-        },
-        "traffic_shaping": {
-            "router": {
-                "timeout": "1ns"
-            }
-        },
-    });
+async fn it_reports_open_connections_metric() {
+    let configuration = Configuration::fake_builder().build().unwrap();
 
-    let conf: Arc<Configuration> = Arc::new(serde_json::from_value(config).unwrap());
-
-    let schema = include_str!("..//testdata/minimal_supergraph.graphql");
-    let schema = Arc::new(Schema::parse(schema, &conf).unwrap());
-    let planner = BridgeQueryPlannerPool::new(
-        Vec::new(),
-        schema.clone(),
-        conf.clone(),
-        NonZeroUsize::new(1).unwrap(),
-    )
-    .await
-    .unwrap();
-
-    // we do the entire supergraph rebuilding instead of using `from_supergraph_mock_callback_and_configuration`
-    // because we need the plugins to apply on the supergraph
-    let mut plugins = create_plugins(&conf, &schema, planner.subgraph_schemas(), None, None)
+    async {
+        let (server, _client) = init_with_config(
+            router::service::empty().await,
+            Arc::new(configuration),
+            MultiMap::new(),
+        )
         .await
         .unwrap();
 
-    plugins.insert("delay".into(), Box::new(Delay));
+        let url = format!(
+            "{}/graphql",
+            server
+                .graphql_listen_address()
+                .as_ref()
+                .expect("listen address")
+        );
 
-    struct Delay;
+        let client = reqwest::Client::builder()
+            .pool_max_idle_per_host(1)
+            .build()
+            .unwrap();
 
-    #[async_trait::async_trait]
-    impl crate::plugin::Plugin for Delay {
-        type Config = ();
+        let second_client = reqwest::Client::builder()
+            .pool_max_idle_per_host(1)
+            .build()
+            .unwrap();
 
-        async fn new(_: crate::plugin::PluginInit<()>) -> Result<Self, BoxError> {
-            Ok(Self)
-        }
+        // Create a second client that does not reuse the same connection pool.
+        let _first_response = client
+            .post(url.clone())
+            .body(r#"{ "query": "{ me }" }"#)
+            .send()
+            .await
+            .unwrap();
 
-        fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
-            service
-                .map_future(|fut| async {
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                    fut.await
-                })
-                .boxed()
-        }
+        assert_eq!(*connection_counts().iter().next().unwrap().1, 1);
+
+        let _second_response = second_client
+            .post(url.clone())
+            .body(r#"{ "query": "{ me }" }"#)
+            .send()
+            .await
+            .unwrap();
+
+        // Both requests are in-flight
+        assert_eq!(*connection_counts().iter().next().unwrap().1, 2);
+
+        // Connection is still open in the pool even though the request is complete.
+        assert_eq!(*connection_counts().iter().next().unwrap().1, 2);
+
+        drop(client);
+        drop(second_client);
+
+        // XXX(@bryncooke): Not ideal, but we would probably have to drop down to very
+        // low-level hyper primitives to control the shutdown of connections to the required
+        // extent. 100ms is a long time so I hope it's not flaky.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // All connections are closed
+        assert_eq!(connection_counts().iter().count(), 0);
     }
-
-    let builder = PluggableSupergraphServiceBuilder::new(planner)
-        .with_configuration(conf.clone())
-        .with_subgraph_service("accounts", MockSubgraph::new(HashMap::new()));
-
-    let supergraph_creator = builder
-        .with_plugins(Arc::new(plugins))
-        .build()
-        .await
-        .unwrap();
-
-    let service = RouterCreator::new(
-        QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&conf)).await,
-        Arc::new(PersistedQueryLayer::new(&conf).await.unwrap()),
-        Arc::new(supergraph_creator),
-        conf.clone(),
-    )
-    .await
-    .unwrap()
-    .make();
-
-    // keep the server handle around otherwise it will immediately shutdown
-    let (server, client) = init_with_config(service, conf.clone(), MultiMap::new())
-        .await
-        .unwrap();
-    let url = server
-        .graphql_listen_address()
-        .as_ref()
-        .unwrap()
-        .to_string();
-
-    let response = client
-        .post(url)
-        .body(r#"{ "query": "{ me }" }"#)
-        .send()
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
-
-    let body = response.bytes().await.unwrap();
-    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(
-        body,
-        json!({
-             "errors": [{
-                 "message": "Request timed out",
-                 "extensions": {
-                     "code": "REQUEST_TIMEOUT"
-                 }
-             }]
-        })
-    );
+    .with_metrics()
+    .await;
 }

@@ -1,0 +1,19 @@
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/federation/v2.10"
+    import: ["@key", "@requires", "@override", "@external", "@shareable"]
+  )
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.2"
+    import: ["@source", "@connect"]
+  )
+
+type Cart @key(fields: "userId") {
+  userId: ID!
+  items: [Variant] # whoops forgot the @connect
+}
+
+type Variant @key(fields: "id", resolvable: false) {
+  id: ID!
+  price: Float! @shareable
+}

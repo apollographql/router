@@ -1,0 +1,134 @@
+---
+source: apollo-federation/src/connectors/string_template.rs
+expression: "StringTemplate::parse_with_spec(\"const{$config.one { two { three } }}another-const\",\nConnectSpec::latest()).unwrap()"
+---
+StringTemplate {
+    parts: [
+        Constant(
+            Constant {
+                value: "const",
+                location: 0..5,
+            },
+        ),
+        Expression(
+            Expression {
+                expression: JSONSelection {
+                    inner: Path(
+                        PathSelection {
+                            path: WithRange {
+                                node: Var(
+                                    WithRange {
+                                        node: $config,
+                                        range: Some(
+                                            0..7,
+                                        ),
+                                    },
+                                    WithRange {
+                                        node: Key(
+                                            WithRange {
+                                                node: Field(
+                                                    "one",
+                                                ),
+                                                range: Some(
+                                                    8..11,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Selection(
+                                                    SubSelection {
+                                                        selections: [
+                                                            NamedSelection {
+                                                                prefix: None,
+                                                                path: PathSelection {
+                                                                    path: WithRange {
+                                                                        node: Key(
+                                                                            WithRange {
+                                                                                node: Field(
+                                                                                    "two",
+                                                                                ),
+                                                                                range: Some(
+                                                                                    14..17,
+                                                                                ),
+                                                                            },
+                                                                            WithRange {
+                                                                                node: Selection(
+                                                                                    SubSelection {
+                                                                                        selections: [
+                                                                                            NamedSelection {
+                                                                                                prefix: None,
+                                                                                                path: PathSelection {
+                                                                                                    path: WithRange {
+                                                                                                        node: Key(
+                                                                                                            WithRange {
+                                                                                                                node: Field(
+                                                                                                                    "three",
+                                                                                                                ),
+                                                                                                                range: Some(
+                                                                                                                    20..25,
+                                                                                                                ),
+                                                                                                            },
+                                                                                                            WithRange {
+                                                                                                                node: Empty,
+                                                                                                                range: Some(
+                                                                                                                    25..25,
+                                                                                                                ),
+                                                                                                            },
+                                                                                                        ),
+                                                                                                        range: Some(
+                                                                                                            20..25,
+                                                                                                        ),
+                                                                                                    },
+                                                                                                },
+                                                                                            },
+                                                                                        ],
+                                                                                        range: Some(
+                                                                                            18..27,
+                                                                                        ),
+                                                                                    },
+                                                                                ),
+                                                                                range: Some(
+                                                                                    18..27,
+                                                                                ),
+                                                                            },
+                                                                        ),
+                                                                        range: Some(
+                                                                            14..27,
+                                                                        ),
+                                                                    },
+                                                                },
+                                                            },
+                                                        ],
+                                                        range: Some(
+                                                            12..29,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    12..29,
+                                                ),
+                                            },
+                                        ),
+                                        range: Some(
+                                            7..29,
+                                        ),
+                                    },
+                                ),
+                                range: Some(
+                                    0..29,
+                                ),
+                            },
+                        },
+                    ),
+                    spec: V0_2,
+                },
+                location: 6..35,
+            },
+        ),
+        Constant(
+            Constant {
+                value: "another-const",
+                location: 36..49,
+            },
+        ),
+    ],
+}

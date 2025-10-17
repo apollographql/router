@@ -1,0 +1,26 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/subgraph/events.rs
+expression: yaml
+---
+- fields:
+    kind: my.request.event
+  level: INFO
+  message: my event message
+  span:
+    name: subgraph
+    otel.kind: INTERNAL
+  spans:
+    - name: subgraph
+      otel.kind: INTERNAL
+- fields:
+    kind: my.response.event
+  level: ERROR
+  message: my response event message
+  span:
+    name: subgraph
+    otel.kind: INTERNAL
+    otel.status_code: OK
+  spans:
+    - name: subgraph
+      otel.kind: INTERNAL
+      otel.status_code: OK

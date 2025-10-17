@@ -1,0 +1,41 @@
+{
+  "enterprise": true,
+  "redis": false,
+  "snapshot": true,
+  "actions": [
+    {
+      "type": "Start",
+      "schema_path": "./supergraph.graphql",
+      "configuration_path": "./configuration.yaml",
+      "subgraphs": {
+        "test": {
+          "snapshot": {
+            "path": "./http_snapshots.json",
+            "base_url": "http://localhost:4007/"
+          }
+        }
+      }
+    },
+    {
+      "type": "Request",
+      "headers": {
+        "Accept": "multipart/mixed;deferSpec=20220824"
+      },
+      "request": {
+        "query": "mutation { m { f ... @defer { entity { id f } } } }"
+      },
+      "expected_response": [
+        { "data": { "m": { "f": "1" } }, "hasNext": true },
+        {
+          "hasNext": false,
+          "incremental": [
+            { "data": { "entity": { "id": "2", "f": "3" } }, "path": ["m"] }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Stop"
+    }
+  ]
+}

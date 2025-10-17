@@ -4,18 +4,15 @@
 
 macro_rules! schemar_fn {
     ($name:ident, $ty:ty, $description:expr) => {
-        schemar_fn!($name, $ty, None, $description);
+        schemar_fn!($name, $ty, (), $description);
     };
 
     ($name:ident, $ty:ty, $default:expr, $description:expr) => {
-        fn $name(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-            let schema = <$ty>::json_schema(gen);
-            let mut schema = schema.into_object();
-            let mut metadata = schemars::schema::Metadata::default();
-            metadata.description = Some($description.to_string());
-            metadata.default = $default;
-            schema.metadata = Some(Box::new(metadata));
-            schemars::schema::Schema::Object(schema)
+        fn $name(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+            let mut schema = <$ty>::json_schema(generator);
+            schema.insert("description".to_string(), $description.into());
+            schema.insert("default".to_string(), $default.into());
+            schema
         }
     };
 }
@@ -23,19 +20,27 @@ macro_rules! schemar_fn {
 pub(crate) mod authentication;
 pub(crate) mod authorization;
 pub(crate) mod cache;
+pub(crate) mod chaos;
+pub(crate) mod connectors;
 mod coprocessor;
+pub(crate) mod cors;
 pub(crate) mod csrf;
-mod demand_control;
-mod expose_query_plan;
+pub(crate) mod demand_control;
+pub(crate) mod enhanced_client_awareness;
+pub(crate) mod expose_query_plan;
 pub(crate) mod file_uploads;
 mod fleet_detector;
 mod forbid_mutations;
 mod headers;
+pub(crate) mod healthcheck;
 mod include_subgraph_errors;
+pub(crate) mod license_enforcement;
 pub(crate) mod limits;
+pub(crate) mod mock_subgraphs;
 pub(crate) mod override_url;
 pub(crate) mod progressive_override;
 mod record_replay;
+pub(crate) mod response_cache;
 pub(crate) mod rhai;
 pub(crate) mod subscription;
 pub(crate) mod telemetry;

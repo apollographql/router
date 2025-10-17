@@ -6,8 +6,12 @@
 #![allow(clippy::single_char_add_str)] // don’t care
 
 use std::fmt::Write;
+use std::time::Duration;
 
-use futures::stream::StreamExt;
+use apollo_router::services::router::body::RouterBody;
+use http_body_util::BodyExt;
+use http_body_util::Full;
+use hyper_util::rt::TokioExecutor;
 use serde_json_bytes::Value;
 use tokio::io::AsyncBufReadExt;
 use tokio::process::Command;
@@ -48,7 +52,7 @@ async fn main() {
         }};
     }
 
-    let _subgraph = spawn_subgraph();
+    let _subgraph = spawn_subgraph().await;
 
     let graphql_recursion_limit = 5_000;
     let _router = spawn_router(graphql_recursion_limit).await;
@@ -61,25 +65,31 @@ async fn main() {
     assert!(request!(125).is_ok());
 
     // JSON parser recursion limit in serde_json::Deserializier
-    assert!(request!(126)
-        .unwrap_err()
-        .contains("service 'subgraph_1' response was malformed: recursion limit exceeded"));
+    assert!(
+        request!(126)
+            .unwrap_err()
+            .contains("service 'subgraph_1' response was malformed: recursion limit exceeded")
+    );
 
     // Stack overflow: the router process aborts before it can send a response
     //
     // As of commit 6e426ddf2fe9480210dfa74c85040db498c780a2 (Router 1.33.2+),
     // with Rust 1.72.0 on aarch64-apple-darwin, this happens starting at ~2400 nesting levels.
-    assert!(request!(3000)
-        .unwrap_err()
-        .contains("connection closed before message completed"));
+    assert!(
+        request!(3000)
+            .unwrap_err()
+            .contains("connection closed before message completed")
+    );
 
     let graphql_recursion_limit = 500;
     let _router = spawn_router(graphql_recursion_limit).await;
 
     // GraphQL parser recursion limit in apollo-parser
-    assert!(request!(500)
-        .unwrap_err()
-        .contains("Error: parser recursion limit reached"));
+    assert!(
+        request!(500)
+            .unwrap_err()
+            .contains("Error: parser recursion limit reached")
+    );
 }
 
 async fn spawn_router(graphql_recursion_limit: usize) -> tokio::process::Child {
@@ -106,14 +116,14 @@ async fn spawn_router(graphql_recursion_limit: usize) -> tokio::process::Child {
     tokio::spawn(async move {
         let mut tx = Some(tx);
         while let Some(line) = router_stdout.next_line().await.unwrap() {
-            if line.contains("GraphQL endpoint exposed") {
-                if let Some(tx) = tx.take() {
-                    let _ = tx.send(());
-                    // Don’t stop here, keep consuming output so the pipe doesn’t block on a full buffer
-                }
+            if line.contains("GraphQL endpoint exposed")
+                && let Some(tx) = tx.take()
+            {
+                let _ = tx.send(());
+                // Don’t stop here, keep consuming output so the pipe doesn’t block on a full buffer
             }
             if VERBOSE {
-                println!("{}", line);
+                println!("{line}");
             }
         }
     });
@@ -133,45 +143,74 @@ async fn graphql_client(nesting_level: usize) -> Result<Value, String> {
     let request = http::Request::post(format!("http://127.0.0.1:{SUPERGRAPH_PORT}"))
         .header("content-type", "application/json")
         .header("fibonacci-iterations", nesting_level)
-        .body(json.into())
+        .body(json)
         .unwrap();
-    let client = hyper::Client::new();
+    let client = hyper_util::client::legacy::Client::builder(TokioExecutor::new()).build_http();
     let mut response = client.request(request).await.map_err(|e| e.to_string())?;
-    let body = hyper::body::to_bytes(response.body_mut())
+    let body = response
+        .body_mut()
+        .collect()
         .await
         .map_err(|e| e.to_string())?;
-    let json = serde_json::from_slice::<Value>(&body).map_err(|e| e.to_string())?;
-    if let Some(errors) = json.get("errors") {
-        if !errors.is_null() {
-            return Err(errors.to_string());
-        }
+    let json = serde_json::from_slice::<Value>(&body.to_bytes()).map_err(|e| e.to_string())?;
+    if let Some(errors) = json.get("errors")
+        && !errors.is_null()
+    {
+        return Err(errors.to_string());
     }
     Ok(json.get("data").cloned().unwrap_or(Value::Null))
 }
 
-fn spawn_subgraph() -> ShutdownOnDrop {
-    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+async fn spawn_subgraph() -> ShutdownOnDrop {
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(2);
     let shutdown_on_drop = ShutdownOnDrop(Some(tx));
 
-    let service = hyper::service::make_service_fn(|_| async {
-        Ok::<_, hyper::Error>(hyper::service::service_fn(subgraph))
-    });
-    let server = hyper::Server::bind(&([127, 0, 0, 1], SUBGRAPH_PORT).into())
-        .serve(service)
-        .with_graceful_shutdown(async {
-            let _ = rx.await;
-        });
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", SUBGRAPH_PORT))
+        .await
+        .unwrap();
+    let server = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
+    let graceful = hyper_util::server::graceful::GracefulShutdown::new();
+
     tokio::spawn(async move {
-        if let Err(e) = server.await {
-            eprintln!("server error: {}", e);
+        loop {
+            tokio::select! {
+                conn = listener.accept() => {
+                    let (stream, peer_addr) = conn.unwrap();
+                    let stream = hyper_util::rt::TokioIo::new(Box::pin(stream));
+                    let conn = server
+                        .serve_connection_with_upgrades(stream, hyper::service::service_fn(subgraph));
+                    let conn = graceful.watch(conn.into_owned());
+
+                    tokio::spawn(async move {
+                        if let Err(err) = conn.await {
+                            eprintln!("connection error: {err}");
+                        }
+                        eprintln!("connection dropped: {peer_addr}");
+                    });
+                }
+                _ = rx.recv() => {
+                    drop(listener);
+                    break;
+                }
+            }
+        }
+
+        tokio::select! {
+            _ = graceful.shutdown() => {
+                eprintln!("Gracefully shutdown!");
+            },
+            _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                eprintln!("Waited 10 seconds for graceful shutdown, aborting...");
+            }
         }
     });
+
     shutdown_on_drop
 }
 
 async fn subgraph(
-    request: http::Request<hyper::Body>,
-) -> Result<http::Response<hyper::Body>, hyper::Error> {
+    request: http::Request<hyper::body::Incoming>,
+) -> Result<http::Response<RouterBody>, hyper::Error> {
     let nesting_level = request
         .headers()
         .get("fibonacci-iterations")
@@ -180,14 +219,15 @@ async fn subgraph(
         .unwrap()
         .parse::<usize>()
         .unwrap();
-    // Read the request body and prompty ignore it
+    // Read the request body and promptly ignore it
     request
         .into_body()
-        .for_each(|chunk| {
-            let _: &[u8] = &chunk.unwrap();
-            async {}
-        })
-        .await;
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes()
+        .into_iter()
+        .for_each(|_chunk| {});
     // Assume we got a GraphQL request with that many nested selection sets
     let mut json = String::from(r#"{"data":{"value":0"#);
     let mut a = 1;
@@ -203,7 +243,11 @@ async fn subgraph(
         json.push_str("}");
     }
     json.push_str("}}");
-    let mut response = http::Response::new(hyper::Body::from(json));
+    let mut response = http::Response::new(
+        Full::new(json.into())
+            .map_err(|never| match never {})
+            .boxed_unsync(),
+    );
     let application_json = hyper::header::HeaderValue::from_static("application/json");
     response
         .headers_mut()
@@ -211,12 +255,12 @@ async fn subgraph(
     Ok(response)
 }
 
-struct ShutdownOnDrop(Option<tokio::sync::oneshot::Sender<()>>);
+struct ShutdownOnDrop(Option<tokio::sync::mpsc::Sender<()>>);
 
 impl Drop for ShutdownOnDrop {
     fn drop(&mut self) {
         if let Some(tx) = self.0.take() {
-            let _ = tx.send(());
+            drop(tx.send(()));
         }
     }
 }

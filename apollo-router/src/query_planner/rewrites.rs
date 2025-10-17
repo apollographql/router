@@ -21,7 +21,7 @@ use crate::spec::Schema;
 /// Given a path, separates the last element of path and the rest of it and return them as a pair.
 /// This will return `None` if the path is empty.
 fn split_path_last_element(path: &Path) -> Option<(Path, &PathElement)> {
-    // If we have a `last()`, then we have a `parent()` too, so unwrapping shoud be safe.
+    // If we have a `last()`, then we have a `parent()` too, so unwrapping should be safe.
     path.last().map(|last| (path.parent().unwrap(), last))
 }
 
@@ -72,18 +72,18 @@ impl DataRewrite {
                     split_path_last_element(&renamer.path)
                 {
                     data.select_values_and_paths_mut(schema, &parent, |_path, selected| {
-                        if let Some(obj) = selected.as_object_mut() {
-                            if let Some(value) = obj.remove(k.as_str()) {
-                                obj.insert(renamer.rename_key_to.as_str(), value);
-                            }
+                        if let Some(obj) = selected.as_object_mut()
+                            && let Some(value) = obj.remove(k.as_str())
+                        {
+                            obj.insert(renamer.rename_key_to.as_str(), value);
                         }
 
                         if let Some(arr) = selected.as_array_mut() {
                             for item in arr {
-                                if let Some(obj) = item.as_object_mut() {
-                                    if let Some(value) = obj.remove(k.as_str()) {
-                                        obj.insert(renamer.rename_key_to.as_str(), value);
-                                    }
+                                if let Some(obj) = item.as_object_mut()
+                                    && let Some(value) = obj.remove(k.as_str())
+                                {
+                                    obj.insert(renamer.rename_key_to.as_str(), value);
                                 }
                             }
                         }

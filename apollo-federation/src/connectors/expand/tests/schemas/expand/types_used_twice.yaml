@@ -1,0 +1,29 @@
+subgraphs:
+  connectors:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(
+            url: "https://specs.apollo.dev/federation/v2.7"
+            import: ["@key", "@external", "@requires"]
+          )
+          @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"])
+          @source(name: "example", http: { baseURL: "http://example" })
+
+        type Query {
+          ts: [T] @connect(source: "example", http: { GET: "/" }, selection: "a { id } b { a { id } }")
+        }
+
+        type T {
+          a: A
+          b: B
+        }
+
+        type A {
+          id: ID
+        }
+
+        type B {
+          a: A
+        }

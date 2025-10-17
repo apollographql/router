@@ -2,27 +2,28 @@ FROM debian:bookworm-slim AS downloader
 ARG ROUTER_RELEASE=latest
 ARG ARTIFACT_URL=
 ARG CIRCLE_TOKEN=
+ARG ARTIFACT_URL_SHA256SUM=
+# We will use TARGETPLATFORM inside the download_and_validate_router.sh script
+# It is set automatically by Docker when doing a buildx build, see:
+#  https://docs.docker.com/build/building/multi-platform/
+ARG TARGETPLATFORM
 
-# Install curl
 RUN \
   apt-get update -y \
   && apt-get install -y \
     curl
 
-WORKDIR /dist
+# We work in /, and the tarball produces /dist/router after extraction.
+WORKDIR /
 
-# Run the Router downloader which puts Router into current working directory
-RUN if [ -z "${ARTIFACT_URL}"]; then \
-    curl -sSL "https://router.apollo.dev/download/nix/${ROUTER_RELEASE}"/ | sh; \
-  else \
-    cd /; \
-    curl -sSL -H "Circle-Token: ${CIRCLE_TOKEN}" -o - "${ARTIFACT_URL}" | tar -xzf -; \
-    cd -; \
-  fi
+# Copy and run the router download script
+COPY download_and_validate_router.sh /tmp/download_and_validate_router.sh
+RUN chmod +x /tmp/download_and_validate_router.sh && /tmp/download_and_validate_router.sh
 
 FROM debian:bookworm-slim AS distro
 ARG DEBUG_IMAGE=false
 ARG REPO_URL=https://github.com/apollographql/router
+ARG BASE_VERSION
 
 # Add a user to run the router as
 RUN useradd -m router
@@ -52,16 +53,17 @@ RUN rm -rf /var/lib/apt/lists/*
 RUN mkdir config schema
 
 # Copy configuration for docker image
-COPY dockerfiles/router.yaml config
+COPY router.yaml config
 
 LABEL org.opencontainers.image.authors="Apollo Graph, Inc. ${REPO_URL}"
 LABEL org.opencontainers.image.source="${REPO_URL}"
+LABEL org.opencontainers.image.version="${BASE_VERSION}"
 
 ENV APOLLO_ROUTER_CONFIG_PATH="/dist/config/router.yaml"
 
 # Create a wrapper script to run the router, use exec to ensure signals are handled correctly
 RUN \
-  echo '#!/usr/bin/env bash \
+  echo '#!/bin/bash \
 \nset -e \
 \n \
 \nif [ -f "/usr/bin/heaptrack" ]; then \

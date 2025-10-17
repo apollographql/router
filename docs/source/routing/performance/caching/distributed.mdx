@@ -4,7 +4,13 @@ subtitle: Configure Redis-backed caching for query plans and APQ
 description: Distributed caching for GraphOS Router with GraphOS Enterprise. Configure a Redis-backed cache for query plans and automatic persisted queries (APQ).
 ---
 
-<EnterpriseFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
+<PlanRequired plans={["Free", "Developer", "Standard", "Enterprise"]}>
+
+Rate limits apply on the Free plan.
+Performance pricing applies on Developer and Standard plans.
+Developer and Standard plans require Router v2.6.0 or later.
+
+</PlanRequired>
 
 If you have multiple GraphOS Router instances, those instances can share a Redis-backed cache for their query plans and automatic persisted queries (APQ). This means that if _any_ of your router instances caches a particular value, _all_ of your instances can look up that value to significantly improve responsiveness. For more details on query plans and APQ, see the article on [in-memory caching](/router/configuration/in-memory-caching).
 
@@ -19,7 +25,7 @@ To use this feature:
 
 Whenever a router instance requires a query plan or APQ query string to resolve a client operation:
 
-1. The router instance checks its own [in-memory cache](#in-memory-caching) for the required value and uses it if found.
+1. The router instance checks its own [in-memory cache](/router/configuration/in-memory-caching) for the required value and uses it if found.
 2. If _not_ found, the router instance then checks the distributed Redis cache for the required value and uses it if found. It also then replicates the found value in its own in-memory cache.
 3. If _not_ found, the router instance _generates_ the required query plan or requests the full operation string from the client for APQ.
 4. The router instance stores the obtained value in both the distributed cache _and_ its in-memory cache. 
@@ -85,6 +91,13 @@ In your router's YAML config file, **you should specify your Redis URLs via envi
 
 </Tip>
 
+<Caution>
+
+Cached query plans are not evicted on schema refresh, which can quickly lead to distributed cache overflow when combined with [cache-warm up](/router/configuration/in-memory-caching#cache-warm-up) and frequent schema publishes. 
+Test your cache configuration with expected queries and consider decreasing the [TTL](/router/configuration/distributed-caching#ttl) to prevent cache overflow.
+
+</Caution>
+
 ### Distributed query plan caching
 
 To enable distributed caching of query plans, add the following to your router's [YAML config file](/router/configuration/overview/#yaml-config-file):
@@ -138,14 +151,26 @@ supergraph:
         pool_size: 4 # Optional, defaults to 1
 ```
 
-#### Timeout
+### Timeout
 
 Connecting and sending commands to Redis are subject to a timeout, set by default to 500ms, that can be overriden.
 
 
-#### TTL
+### TTL
 
 The `ttl` option defines the default global expiration for Redis entries. For APQ caching, the default is no expiration, while for query plan caching, the default expiration is set to 30 days.
+
+When enabling distributed caching, consider how frequently you publish new schemas and configure the TTL accordingly. When new schemas are published, the router [pre-warms](/router/configuration/in-memory-caching#cache-warm-up) the in-memory and distributed caches but doesn't invalidate existing cached query plans in the distributed cache,
+creating an additive effect on cache utilization. 
+
+To prevent cache overflow, consider decreasing the TTL to 24 hours or twice the median publish interval (whichever's lesser), and monitor cache utilization in your environment, especially during schema publish events.
+
+Also note that when [cache warm-up](/router/configuration/in-memory-caching#cache-warm-up) is enabled, each router instance will warm the distributed cache with query plans from *its own in-memory cache*. In the worst case, a schema publish will increase the number of query plans in the distributed cache by the number 
+of router instances multiplied by the number of warmed-up queries per instance, which may noticeably increase the total cache utilization.
+
+<Tip>
+Be sure to test your configuration with expected queries and during schema publish events to understand the impact of distributed caching on cache utilization.
+</Tip>
 
 ### Namespace
 
@@ -181,4 +206,4 @@ When this option is active, accessing a cache entry in Redis will reset its expi
 
 ### Pool size
 
-The `pool_size` option defines the number of connections to Redis that the router will open. By default, the router will open a single connection to Redis. If there is a lot of traffic between router and Redis and/or there is some latency in thos requests, it is recommended to increase the pool size to reduce that latency.
+The `pool_size` option defines the number of connections to Redis that the router will open. By default, the router will open a single connection to Redis. If there is a lot of traffic between router and Redis and/or there is some latency in those requests, it is recommended to increase the pool size to reduce that latency.

@@ -22,7 +22,7 @@ limits:
   parser_max_tokens: 15000 # Default value
   parser_max_recursion: 500 # Default value
 
-  # Operation-based limits (Enterprise only)
+  # Operation-based limits (License only)
   max_depth: 100
   max_height: 200
   max_aliases: 30
@@ -31,7 +31,12 @@ limits:
 
 ## Operation-based limits
 
-<EnterpriseFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
+<PlanRequired plans={["Free", "Developer", "Standard", "Enterprise"]}>
+
+Rate limits apply on the Free plan.
+Developer and Standard plans require Router v2.6.0 or later.
+
+</PlanRequired>
 
 You can define **operation limits** in your router's configuration to reject potentially malicious requests. An operation that exceeds _any_ specified limit is rejected (unless you run your router in [`warn_only` mode](#warn_only-mode)).
 
@@ -285,13 +290,6 @@ If router receives more headers than the buffer size, it responds to the client 
 ### `http1_max_request_buf_size`
 
 Limit the maximum buffer size for the HTTP1 connection. Default is ~400kib.
-
-Note for Rust Crate Users: If you are using the Router as a Rust crate, the `http1_request_max_buf_size` option requires the `hyper_header_limits` feature and also necessitates using Apollo's fork of the Hyper crate until the [changes are merged upstream](https://github.com/hyperium/hyper/pull/3523).
-You can include this fork by adding the following patch to your Cargo.toml file:
-```toml
-[patch.crates-io]
-"hyper" = { git = "https://github.com/apollographql/hyper.git", tag = "header-customizations-20241108" }
-```
 
 ## Parser-based limits
 

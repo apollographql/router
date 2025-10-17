@@ -3,13 +3,11 @@ use std::pin::Pin;
 use std::task::Poll;
 
 use async_compression::tokio::bufread::BrotliDecoder;
-use axum::body::BoxBody;
-use futures::stream::poll_fn;
+use axum::body::Body;
 use futures::Future;
 use futures::Stream;
 use futures::StreamExt;
 use http::HeaderValue;
-use http_body::Body;
 use mediatype::MediaType;
 use mediatype::ReadParams;
 use mime::APPLICATION_JSON;
@@ -20,7 +18,11 @@ use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
 
+use crate::services::router;
+use crate::services::router::body::RouterBody;
+
 /// Added by `response_decompression` to `http::Response::extensions`
+#[derive(Clone)]
 pub(crate) struct ResponseBodyWasCompressed(pub(crate) bool);
 
 pub(crate) enum MaybeMultipart<Part> {
@@ -53,7 +55,7 @@ pub(crate) fn response_decompression<InnerService, RequestBody>(
 >
 where
     InnerService:
-        Service<http::Request<RequestBody>, Response = http::Response<BoxBody>, Error = BoxError>,
+        Service<http::Request<RequestBody>, Response = http::Response<Body>, Error = BoxError>,
 {
     ServiceBuilder::new()
         .map_request(|mut request: http::Request<RequestBody>| {
@@ -62,12 +64,11 @@ where
                 .insert("accept-encoding", "br".try_into().unwrap());
             request
         })
-        .map_response(|response: http::Response<BoxBody>| {
+        .map_response(|response: http::Response<Body>| {
             let mut response = response.map(|body| {
-                // Convert from axum’s BoxBody to AsyncBufRead
-                let mut body = Box::pin(body);
-                let stream = poll_fn(move |ctx| body.as_mut().poll_data(ctx))
-                    .map(|result| result.map_err(|e| io::Error::new(io::ErrorKind::Other, e)));
+                let stream = body
+                    .into_data_stream()
+                    .map(|result| result.map_err(io::Error::other));
                 StreamReader::new(stream)
             });
             let content_encoding = response.headers().get("content-encoding");
@@ -101,10 +102,10 @@ pub(crate) fn defer_spec_20220824_multipart<InnerService, RequestBody>(
 >
 where
     InnerService: Service<
-        http::Request<RequestBody>,
-        Response = http::Response<Pin<Box<dyn AsyncRead + Send>>>,
-        Error = BoxError,
-    >,
+            http::Request<RequestBody>,
+            Response = http::Response<Pin<Box<dyn AsyncRead + Send>>>,
+            Error = BoxError,
+        >,
 {
     ServiceBuilder::new()
         .map_request(|mut request: http::Request<RequestBody>| {
@@ -243,10 +244,10 @@ pub(crate) fn json<InnerService>(
 >
 where
     InnerService: Service<
-        http::Request<hyper::Body>,
-        Response = http::Response<MaybeMultipart<Vec<u8>>>,
-        Error = BoxError,
-    >,
+            http::Request<RouterBody>,
+            Response = http::Response<MaybeMultipart<Vec<u8>>>,
+            Error = BoxError,
+        >,
 {
     ServiceBuilder::new()
         .map_request(|mut request: http::Request<serde_json::Value>| {
@@ -254,7 +255,7 @@ where
                 "content-type",
                 HeaderValue::from_static(APPLICATION_JSON.essence_str()),
             );
-            request.map(|body| serde_json::to_vec(&body).unwrap().into())
+            request.map(|body| router::body::from_bytes(serde_json::to_vec(&body).unwrap()))
         })
         .map_response(|response: http::Response<MaybeMultipart<Vec<u8>>>| {
             let (parts, body) = response.into_parts();

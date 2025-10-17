@@ -46,6 +46,13 @@ To prevent increased latency upon query plan cache invalidation, the router prec
 
 Precomputed plans will be cached before the router switches traffic over to the new schema.
 
+<Tip>
+
+You can also send the header `Apollo-Expose-Query-Plan: dry-run` for [generating query plans at runtime](https://www.apollographql.com/docs/graphos/reference/federation/query-plans#outputting-query-plans-with-headers) which can be used to warm up your cache instances with a custom defined operation list.
+
+</Tip>
+
+
 By default, the router warms up the cache with 30% of the queries already in cache, but it can be configured as follows:
 
 ```yaml title="router.yaml"
@@ -60,25 +67,38 @@ supergraph:
 To get more information on the planning and warm-up process use the following metrics (where `<storage>` can be `redis` for distributed cache or `memory`):
 
 * counters:
-  * `apollo_router_cache_hit_count{kind="query planner", storage="<storage>"}`
-  * `apollo_router_cache_miss_count{kind="query planner", storage="<storage>"}`
+  * `apollo.router.cache.hit.time.count{kind="query planner", storage="<storage>"}`
+  * `apollo.router.cache.miss.time.count{kind="query planner", storage="<storage>"}`
 
 * histograms:
   * `apollo.router.query_planning.plan.duration`: time spent planning queries
-  * `apollo_router_schema_loading_time`: time spent loading a schema
-  * `apollo_router_cache_hit_time{kind="query planner", storage="<storage>"}`: time to get a value from the cache
-  * `apollo_router_cache_miss_time{kind="query planner", storage="<storage>"}`
+    * `planner`: The query planner implementation used (`rust` or `js`)
+    * `outcome`: The outcome of the query planning process (`success`, `timeout`, `cancelled`, `error`)
+  * `apollo.router.schema.load.duration`: time spent loading a schema
+  * `apollo.router.cache.hit.time{kind="query planner", storage="<storage>"}`: time to get a value from the cache
+  * `apollo.router.cache.miss.time{kind="query planner", storage="<storage>"}`
 
 * gauges
-  * `apollo_router_cache_size{kind="query planner", storage="memory"}`: current size of the cache (only for in-memory cache)
+  * `apollo.router.cache.size{kind="query planner", storage="memory"}`: current size of the cache (only for in-memory cache)
   * `apollo.router.cache.storage.estimated_size{kind="query planner", storage="memory"}`: estimated storage size of the cache (only for in-memory query planner cache)
 
-Typically, we would look at `apollo_router_cache_size` and the cache hit rate to define the right size of the in memory cache,
-then look at `apollo_router_schema_loading_time` and `apollo.router.query_planning.plan.duration` to decide how much time we want to spend warming up queries.
+Typically, we would look at `apollo.router.cache.size` and the cache hit rate to define the right size of the in memory cache,
+then look at `apollo.router.schema.load.duration` and `apollo.router.query_planning.plan.duration` to decide how much time we want to spend warming up queries.
 
 #### Cache warm-up with distributed caching
 
 If the router is using distributed caching for query plans, the warm-up phase will also store the new query plans in Redis. Since all Router instances might have the same distributions of queries in their in-memory cache, the list of queries is shuffled before warm-up, so each Router instance can plan queries in a different order and share their results through the cache.
+
+#### Cache warm-up with headers
+
+<MinVersionBadge version="Router v1.61.0" />
+
+With router v1.61.0+  and v2.x+, if you have enabled exposing query plans via `--dev` mode or `plugins.experimental.expose_query_plan: true`, you can pass the `Apollo-Expose-Query-Plan` header to return query plans in the GraphQL response extensions. You must set the header to one of the following values:
+
+- `true`: Returns a human-readable string and JSON blob of the query plan while still executing the query to fetch data.
+- `dry-run`: Generates the query plan and aborts without executing the query.
+
+After using `dry-run`, query plans are saved to your configured cache locations. Using real, mirrored, or similar to production operations is a great way to warmup the caches before transitioning traffic to new router instances.
 
 ## Caching automatic persisted queries (APQ)
 

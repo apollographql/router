@@ -1,0 +1,816 @@
+---
+title: Router YAML Configuration Reference
+subtitle: ""
+description: Reference of YAML configuration properties for Apollo GraphOS Router and Apollo Router Core.
+---
+import RouterYaml from '../../../shared/router-yaml-complete.mdx';
+import RouterConfigTable from '../../../shared/router-config-properties-table.mdx';
+
+import Apq from '../../../shared/config/apq.mdx';
+import Authn from '../../../shared/config/authentication.mdx';
+import Authz from '../../../shared/config/authorization.mdx';
+import Batching from '../../../shared/config/batching.mdx';
+import Connectors from '../../../shared/config/connectors.mdx';
+import Coproc from '../../../shared/config/coprocessor.mdx';
+import Cors from '../../../shared/config/cors.mdx';
+import Csrf from '../../../shared/config/csrf.mdx';
+import DemandCtrl from '../../../shared/config/demand_control.mdx';
+import ExperimentalChaos from '../../../shared/config/experimental_chaos.mdx';
+import ExperimentalType from '../../../shared/config/experimental_type_conditioned_fetching.mdx';
+import FleetDetector from '../../../shared/config/fleet_detector.mdx';
+import ForbidMut from '../../../shared/config/forbid_mutations.mdx';
+import Headers from '../../../shared/config/headers.mdx';
+import HealthChk from '../../../shared/config/health_check.mdx';
+import Homepage from '../../../shared/config/homepage.mdx';
+import IncludeSubErr from '../../../shared/config/include_subgraph_errors.mdx';
+import LicenseEnf from '../../../shared/config/license_enforcement.mdx';
+import Limits from '../../../shared/config/limits.mdx';
+import OverrideSubUrl from '../../../shared/config/override_subgraph_url.mdx';
+import PersistedQueries from '../../../shared/config/persisted_queries.mdx';
+import Plugins from '../../../shared/config/plugins.mdx';
+import PreviewEntityCache from '../../../shared/config/preview_entity_cache.mdx';
+import PreviewFileUploads from '../../../shared/config/preview_file_uploads.mdx';
+import Rhai from '../../../shared/config/rhai.mdx';
+import Sandbox from '../../../shared/config/sandbox.mdx';
+import Subscription from '../../../shared/config/subscription.mdx';
+import Supergraph from '../../../shared/config/supergraph.mdx';
+import Telemetry from '../../../shared/config/telemetry.mdx';
+import Tls from '../../../shared/config/tls.mdx';
+import TrafficShaping from '../../../shared/config/traffic_shaping.mdx';
+
+This reference covers the YAML configuration file properties for configuring an Apollo Router. 
+
+## YAML configuration properties
+
+The router can be configured by a YAML configuration file. This file enables you to declaratively configure various runtime properties of your router's behavior.
+
+At startup, you set the config file for your router by providing its path with the [`--config`](#-c----config) option: 
+
+```bash
+./router --config router.yaml
+```
+
+<Tip>
+
+Enable your text editor to validate the format and content of your router YAML configuration file by [configuring it with the router's configuration schema](/graphos/routing/configuration/cli#configuration-schema-for-ide-validation).
+
+</Tip>
+
+## Example YAML with all properties
+
+Expand the code block to view an example YAML config file containing all properties.
+
+<ExpansionPanel title="Example router YAML config file with all properties">
+
+<RouterYaml/>
+
+</ExpansionPanel>
+
+## Properties
+
+---
+
+<Apq />
+
+Learn more in [Caching Automatic Persisted Queries](/graphos/routing/performance/caching/in-memory#caching-automatic-persisted-queries-apq).
+
+---
+
+<Authn />  
+
+- To learn about JWT authentication, go to [JWT authentication in the GraphOS Router](/router/configuration/authn-jwt).
+
+- To learn about subgraph authentication with AWS SigV4, go to a [subgraph authentication configuration example](/router/configuration/authn-subgraph/#configuration-example).
+
+---
+
+<Authz /> 
+
+- To configure authorization directives, see [Authorization directives](/router/configuration/authorization/#authorization-directives).
+
+- To configure the authorization plugin, see [Configuration options](/router/configuration/authorization/#configuration-options).
+
+---
+
+<Batching /> 
+
+Learn more in [query batching](/router/executing-operations/query-batching).
+
+---
+
+<Connectors /> 
+
+Learn more in [Working with router for Apollo Connectors](/graphos/connectors/router).
+
+---
+
+<Coproc /> 
+
+Learn more in [External coprocessing in the GraphOS Router](/router/customizations/coprocessor/).
+
+---
+
+<Cors /> 
+
+By default, the router only allows GraphOS Studio to initiate browser connections to it. If your supergraph serves data to other browser-based applications, you need to update its Cross-Origin Resource Sharing (CORS) configuration. 
+
+Learn more in [CORS](/graphos/routing/security/cors).
+
+---
+
+<Csrf /> 
+
+Learn more in [CSRF prevention in the router](/router/configuration/csrf).
+
+---
+
+<DemandCtrl /> 
+
+With demand control, the router analyzes the cost of operations and rejects requests with operations that exceed customizable cost limits.
+
+Learn more in [Demand Control](/router/executing-operations/demand-control) 
+
+---
+
+<ExperimentalChaos /> 
+
+---
+
+<ExperimentalType /> 
+
+---
+
+<FleetDetector />
+
+---
+
+<ForbidMut /> 
+
+---
+
+<Headers /> 
+
+Learn more in [Sending HTTP headers to subgraphs](/graphos/routing/header-propagation/).
+
+---
+
+<HealthChk /> 
+
+Learn more in [Health Checks](/graphos/routing/self-hosted/health-checks).
+
+---
+
+<Homepage /> 
+
+The router can serve a landing page to browsers that visit its endpoint path (`supergraph.path`):
+
+- A basic landing page that displays an example query `curl` command (default)
+
+  ```yaml title="router.yaml"
+  # This is the default behavior. You don't need to include this config.
+  homepage:
+    enabled: true
+  ```
+
+- _No_ landing page
+
+  ```yaml title="router.yaml"
+  homepage:
+    enabled: false
+  ```
+
+- Sending users to Apollo Explorer
+
+  ```yaml title="router.yaml"
+  homepage:
+    graph_ref: my-org-graph@production
+  ```
+
+  When you specify a `graph_ref`, the router's landing page includes an option for users to redirect to Apollo Explorer. Users can check a box that will remember their preference and automatically redirect them to Explorer on subsequent visits.
+
+  <Note>
+  The `graph_ref` value should match the format `organization-name@variant-name`, which is the same format used with the `APOLLO_GRAPH_REF` environment variable. Note that the router does not automatically use the value from the `APOLLO_GRAPH_REF` environment variable for this setting - you must explicitly set `graph_ref` in your YAML configuration even if you're already using the environment variable.
+  </Note>
+
+---
+
+<IncludeSubErr /> 
+
+---
+
+<LicenseEnf /> 
+
+---
+
+<Limits /> 
+
+Learn more in [Request Limits](/graphos/routing/security/request-limits).
+
+---
+
+<OverrideSubUrl /> 
+
+By default, the router obtains the routing URL for each of your subgraphs from the composed supergraph schema you provide it. In most cases, no additional configuration is required. The URL can use HTTP and HTTPS for network access to subgraph, or have the following shape for Unix sockets usage: `unix:///path/to/subgraph.sock`
+
+However, if you _do_ need to override a particular subgraph's routing URL (for example, to handle changing network topography), you can do so with the `override_subgraph_url` option:
+
+```yaml
+override_subgraph_url:
+  organizations: http://localhost:8080
+  accounts: "${env.ACCOUNTS_SUBGRAPH_HOST_URL}"
+```
+
+In this example, the `organizations` subgraph URL is overridden to point to `http://localhost:8080`, and the `accounts` subgraph URL is overridden to point to a new URL using [variable expansion](#variable-expansion). The URL specified in the supergraph schema is ignored.
+
+Any subgraphs that are _omitted_ from `override_subgraph_url` continue to use the routing URL specified in the supergraph schema.
+
+If you need to override the subgraph URL at runtime on a per-request basis, you can use [request customizations](/router/customizations/overview/#request-path) in the `SubgraphService` layer.
+
+<PersistedQueries /> 
+
+You can enhance your graph's security with GraphOS Router by maintaining a persisted query list (PQL), an operation safelist made by your first-party apps. As opposed to automatic persisted queries (APQ) where operations are automatically cached, operations must be preregistered to the PQL. Once configured, the router checks incoming requests against the PQL.
+
+Learn more in [Safelisting with persisted queries](/router/configuration/persisted-queries).
+
+---
+
+<Plugins /> 
+
+You can customize the router's behavior with [plugins](/router/customizations/overview). Each plugin can have its own section in the configuration file with arbitrary values:
+
+```yaml {4,8} title="example-plugin-router.yaml"
+plugins:
+  example.plugin:
+    var1: "hello"
+    var2: 1
+```
+
+Learn more in [Native Plugins for router](/graphos/routing/customization/native-plugins).
+
+---
+
+<PreviewEntityCache /> 
+
+Learn more in [Entity Caching](/graphos/routing/performance/caching/entity).
+
+---
+
+<PreviewFileUploads /> 
+
+Learn more in [File Uploads](/graphos/routing/operations/file-upload).
+
+---
+
+<Rhai /> 
+
+Learn more in [Rhai customization for router](/graphos/routing/customization/rhai).
+
+---
+
+<Sandbox /> 
+
+[Apollo Sandbox](/graphos/explorer/sandbox) is a GraphQL development environment. It runs a graph via introspection queries on the router's supergrpah schema, and it provides an IDE for making queries to the graph. 
+
+Running Sandbox in router requires configuring `sandbox.enabled`, `supergraph.instrospection`, and `homepage.enabled`:
+
+```yaml title="router.yaml"
+sandbox:
+  enabled: true
+
+# Sandbox uses introspection to obtain your router's schema.
+supergraph:
+  introspection: true
+
+# Sandbox requires the default landing page to be disabled.
+homepage:
+  enabled: false
+```
+
+<Caution>
+
+**Do not enable Sandbox in production.** Sandbox requires enabling introspection, which is strongly discouraged in production environments.
+
+</Caution>
+
+Learn more in [Apollo Sandbox](/graphos/platform/sandbox).
+
+---
+
+<Subscription /> 
+
+Learn more in [Subscriptions](/graphos/routing/operations/subscriptions).
+
+---
+
+<Supergraph /> 
+
+#### Supergraph listen address
+
+As the gateway and single endpoint to your supergraph, an Apollo Router has a socket address and port that it listens for client requests. This listen address is configurable in YAML as `supergraph.listen`.
+
+By default, the router starts an HTTP server that listens on `127.0.0.1:4000`. You can specify a different address by setting `supergraph.listen` for IPv4, IPv6, or Unix sockets.
+
+##### IPv4
+
+```yaml title="router.yaml"
+supergraph:
+  # The socket address and port to listen on (default: 127.0.0.1:400)
+  listen: 127.0.0.1:4000
+```
+
+##### IPv6
+
+```yaml title="router.yaml"
+supergraph:
+  # The socket address and port to listen on. (default: [::1]:4000)
+  # Note that this must be quoted to avoid interpretation as an array in YAML.
+  listen: "[::1]:4000"
+```
+
+##### Unix socket
+
+```yaml title="router_unix.yaml"
+supergraph:
+  # Absolute path to a Unix socket
+  listen: /tmp/router.sock
+```
+
+<Note>
+
+Listening on a Unix socket is not supported on Windows.
+
+</Note>
+
+#### Supergraph endpoint path
+
+The path of the HTTP endpoint of the supergraph that the router runs is configured by `supergraph.path`.
+
+By default, the router starts an HTTP server that exposes a `POST`/`GET` endpoint at path `/`. 
+
+```yaml title="router.yaml"
+supergraph:
+  # The path for GraphQL execution
+  # (Defaults to /)
+  path: /graphql
+```
+
+The path must start with `/`.
+
+A path can contain parameters and wildcards:
+
+- `/{parameter}` matches a single segment. For example:
+
+  - `/abc/{my_param}/def` matches `/abc/1/def` and `/abc/whatever/def`, but it doesn't match `/abc/1/2/def` or `/abc/def`
+
+- `/{*parameter}` matches all segments in the rest of a path. For example:
+  - `/abc/{*wildcard}` matches `/abc/1/def` and `/abc/w/h/a/t/e/v/e/r`, but it doesn't match `/abc/` or `/not_abc_at_all`
+
+<Note>
+
+- Both parameters and wildcards require a name, even though you can’t use those names anywhere.
+
+- The router doesn't support wildcards in the _middle_ of a path (e.g., `/{*wild}/graphql`). Instead, use a path parameter (e.g., `/{parameter}/graphql`).
+
+</Note>
+
+#### Introspection
+
+In GraphQL, introspection queries are used during development to learn about a GraphQL API's schema. The router can resolve introspection queries, based on the configuration of `supergraph.introspection`. 
+
+By default, the router doesn't resolve introspection queries. 
+
+To enable introspection queries during development, set the `supergraph.introspection` flag:
+
+```yaml title="router.yaml"
+# Do not enable introspection in production!
+supergraph:
+  introspection: true
+```
+
+##### Introspection recursion limit
+
+The [schema-introspection schema](https://spec.graphql.org/draft/#sec-Schema-Introspection.Schema-Introspection-Schema) is recursive: a client can query the fields of the types of some other fields, and so on arbitrarily deep. This can produce responses that grow much faster than the size of the request.
+
+To prevent this, the router is configured by default to not execute introspection queries that nest list fields that are too deep, instead returning an error. The criteria matches `MaxIntrospectionDepthRule` in graphql-js, and it may change in future versions.
+
+In case the router rejects legitimate queries, you can disable the limit by setting the `limits.introspection_max_depth` flag:
+
+```yaml title="router.yaml"
+# Do not enable introspection in production!
+supergraph:
+  introspection: true
+limits:
+  introspection_max_depth: false
+```
+
+#### Early cancel
+
+Up until [Apollo Router Core v1.43.1](https://github.com/apollographql/router/releases/tag/v1.43.1), when the client closed the connection without waiting for the response, the entire request was cancelled and did not go through the entire pipeline. Since this causes issues with request monitoring, the router introduced a new behavior in 1.43.1. Now, the entire pipeline is executed if the request is detected as cancelled, but subgraph requests are not actually done. The response will be reported with the `499` status code, but not actually sent to the client.
+
+To go back to the previous behavior of immediately cancelling the request, the following configuration can be used for `supergraph.early_cancel`:
+
+```yaml
+supergraph:
+  early_cancel: true
+```
+
+Additionally, since v1.43.1, the router can show a log when it detects that the client canceled the request. This log can be activated with:
+
+```yaml title="router.yaml"
+supergraph:
+  experimental_log_on_broken_pipe: true
+```
+
+#### Connection shutdown timeout
+
+When the Router schema or configuration updates all connections must be closed for resources to be freed.
+To ensure that long-lived connections do not hang on to resources, a maximum graceful shutdown timeout can be configured with `supergraph.connection_shutdown_timeout`:
+
+```yaml title="router.yaml"
+supergraph:
+  connection_shutdown_timeout: 60s
+```
+
+The default value is 60 seconds.
+
+Note that if `early_cancel` is `false` (default), then requests in progress will still hold onto pipeline resources.
+In that case, traffic shaping request timeouts should be used to prevent long-running requests:
+
+```yaml title="router.yaml"
+traffic_shaping:
+  router:
+    timeout: 60s
+```
+
+#### Automatic fragment generation
+
+By default, the router compresses subgraph requests by generating fragment definitions based on the shape of the subgraph operation. In many cases this significantly reduces the size of the query sent to subgraphs.
+
+You can explicitly opt-out of this behavior by specifying `supergraph.generate_query_fragments`:
+
+```yaml
+supergraph:
+  generate_query_fragments: false
+```
+
+---
+
+<Telemetry /> 
+
+#### Enhanced operation signature normalization
+
+<MinVersionBadge version="Router v1.49.0" />
+
+<Note>
+
+The router supports enhanced operation signature normalization in the following versions:
+
+- [General availability](/resources/product-launch-stages/#general-availability) in v1.54.0 and later
+- [Experimental](/resources/product-launch-stages/#experimental-features) in v1.49.0 to v1.53.0
+
+</Note>
+
+Apollo's legacy operation signature algorithm removes information about certain fields, such as input objects and aliases.
+This removal means some operations may have the same normalized signature though they are distinct operations.
+
+Enhanced normalization incorporates [input types](#input-types) and [aliases](#aliases) in signature generation.
+It also includes other improvements that make it more likely that two operations that only vary slightly have the same signature.
+
+Configure enhanced operation signature normalization in `router.yaml` with the `telemetry.apollo.signature_normalization_algorithm` option:
+
+```yaml title="router.yaml"
+telemetry:
+  apollo:
+    signature_normalization_algorithm: enhanced # Default is legacy
+```
+
+Once you enable this configuration, operations with enhanced signatures might appear with different operation IDs than they did previously in GraphOS Studio.
+
+##### Input types
+
+Enhanced signatures include input object type shapes, while still redacting any actual values.
+Legacy signatures [replace input object type with `{}`](/graphos/metrics/operation-signatures/#1-transform-in-line-argument-values).
+
+Given the following example operation:
+
+```graphql showLineNumbers=false
+query InlineInputTypeQuery {
+  inputTypeQuery(
+    input: {
+      inputString: "foo"
+      inputInt: 42
+      inputBoolean: null
+      nestedType: { someFloat: 4.2 }
+      enumInput: SOME_VALUE_1
+      nestedTypeList: [{ someFloat: 4.2, someNullableFloat: null }]
+      listInput: [1, 2, 3]
+    }
+  ) {
+    enumResponse
+  }
+}
+```
+
+The legacy normalization algorithm generates the following signature:
+
+```graphql showLineNumbers=false
+query InlineInputTypeQuery {
+  inputTypeQuery(input: {}) {
+    enumResponse
+  }
+}
+```
+
+The enhanced normalization algorithm generates the following signature:
+
+```graphql {3-11} showLineNumbers=false
+query InlineInputTypeQuery {
+  inputTypeQuery(
+    input: {
+      inputString: ""
+      inputInt: 0
+      inputBoolean: null
+      nestedType: { someFloat: 0 }
+      enumInput: SOME_VALUE_1
+      nestedTypeList: [{ someFloat: 0, someNullableFloat: null }]
+      listInput: []
+    }
+  ) {
+    enumResponse
+  }
+}
+```
+
+##### Aliases
+
+Enhanced signatures include any field aliases used in an operation.
+Legacy signatures [remove aliases completely](/graphos/metrics/operation-signatures/#field-aliases), meaning the signature may be invalid if the same field was used with multiple aliases.
+
+Given the following example operation:
+
+```graphql showLineNumbers=false
+query AliasedQuery {
+  noInputQuery {
+    interfaceAlias1: interfaceResponse {
+      sharedField
+    }
+    interfaceAlias2: interfaceResponse {
+      ... on InterfaceImplementation1 {
+        implementation1Field
+      }
+      ... on InterfaceImplementation2 {
+        implementation2Field
+      }
+    }
+    inputFieldAlias1: objectTypeWithInputField(boolInput: true) {
+      stringField
+    }
+    inputFieldAlias2: objectTypeWithInputField(boolInput: false) {
+      intField
+    }
+  }
+}
+```
+
+The legacy normalization algorithm generates the following signature:
+
+```graphql showLineNumbers=false
+query AliasedQuery {
+  noInputQuery {
+    interfaceResponse {
+      sharedField
+    }
+    interfaceResponse {
+      ... on InterfaceImplementation1 {
+        implementation1Field
+      }
+      ... on InterfaceImplementation2 {
+        implementation2Field
+      }
+    }
+    objectTypeWithInputField(boolInput: true) {
+      stringField
+    }
+    objectTypeWithInputField(boolInput: false) {
+      intField
+    }
+  }
+}
+```
+
+The enhanced normalization algorithm generates the following signature:
+
+```graphql showLineNumbers=false
+query AliasedQuery {
+  noInputQuery {
+    interfaceAlias1: interfaceResponse {
+      sharedField
+    }
+    interfaceAlias2: interfaceResponse {
+      ... on InterfaceImplementation1 {
+        implementation1Field
+      }
+      ... on InterfaceImplementation2 {
+        implementation2Field
+      }
+    }
+    inputFieldAlias1: objectTypeWithInputField(boolInput: true) {
+      stringField
+    }
+    inputFieldAlias2: objectTypeWithInputField(boolInput: false) {
+      intField
+    }
+  }
+}
+```
+
+#### Extended reference reporting
+
+<MinVersionBadge version="Router v1.50.0" />
+
+<Note>
+
+The router supports extended reference reporting in the following versions:
+
+- [General availability](/resources/product-launch-stages/#general-availability) in v1.54.0 and later
+- [Experimental](/resources/product-launch-stages/#experimental-features) in v1.50.0 to v1.53.0
+
+</Note>
+
+You can configure the router to report enum and input object references for enhanced insights and operation checks.
+Apollo's legacy reference reporting doesn't include data about enum values and input object fields, meaning you can't view enum and input object field usage in GraphOS Studio.
+Legacy reporting can also cause [inaccurate operation checks](#enhanced-operation-checks).
+
+Configure extended reference reporting in `router.yaml` with the `telemetry.apollo.metrics_reference_mode` option like so:
+
+```yaml title="router.yaml"
+telemetry:
+  apollo:
+    metrics_reference_mode: extended # Default is legacy
+```
+
+#### Extended error reporting
+
+<MinVersionBadge version="Router v2.1.2" />
+
+<PreviewFeature />
+
+<Note>
+
+The router supports extended error reporting in the following versions:
+
+- [Preview](/resources/product-launch-stages/#preview) in v2.1.2 and later
+- [Experimental](/resources/product-launch-stages/#experimental-features) in v2.0.0
+
+</Note>
+
+You can configure the router to report extended error information for improved diagnostics.
+Apollo's legacy error reporting doesn't include the service or error code, meaning you can't easily attribute errors to their root cause in GraphOS Studio.
+
+Configure extended reference reporting in `router.yaml` with the `telemetry.apollo.errors.preview_extended_error_metrics` option like so:
+
+```yaml title="router.yaml"
+telemetry:
+  apollo:
+    errors:
+      preview_extended_error_metrics: enabled # Default is disabled
+```
+
+[Learn more.](/graphos/routing/graphos-reporting#errors)
+
+##### Configuration effect timing
+
+Once you configure extended reference reporting, you can view enum value and input field usage alongside object [field usage in GraphOS Studio](/graphos/metrics/field-usage) for all subsequent operations.
+
+Configuring extended reference reporting automatically turns on [enhanced operation checks](#enhanced-operation-checks), though you won't see an immediate change in your operations check behavior.
+
+This delay is because operation checks rely on historical operation data.
+To ensure sufficient data to distinguish between genuinely unused values and those simply not reported in legacy data, enhanced checks require some operations with extended reference reporting turned on.
+
+##### Enhanced operation checks
+
+Thanks to extended reference reporting, operation checks can more accurately flag issues for changes to enum values and input object fields. See the comparison table below for differences between standard operation checks based on legacy reference reporting and enhanced checks based on extended reference reporting.
+
+<table class="field-table api-ref">
+  <thead>
+    <tr>
+      <th style={{ minWidth: '100px' }}></th>
+      <th style={{ minWidth: '200px' }}>
+        Standard Check Behavior<br/>
+        (Legacy reference reporting)
+      </th>
+      <th>
+        Enhanced Check Behavior<br/>
+        (Extended reference reporting)
+      </th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>
+
+###### Enum value removal
+
+      </td>
+      <td>Removing any enum values is considered a breaking change if any operations use the enum.</td>
+      <td>Removing enum values is only a breaking change if historical operations use the specific enum value(s) that were removed.</td>
+    </tr>
+    <tr>
+      <td>
+
+###### Default argument changes for input object fields
+
+      </td>
+      <td>
+        Changing or removing a default argument is generally considered a breaking change, but changing or removing default values for input object fields isn't.
+      </td>
+      <td>
+        Changing or removing default values for input object fields is considered a breaking change.
+
+You can [configure checks to ignore default values changes](/graphos/platform/schema-management/checks#ignored-conditions-settings).
+
+      </td>
+    </tr>
+    <tr>
+      <td>
+
+###### Nullable input object field removal
+
+      </td>
+      <td>Removing a nullable input object field is always considered a breaking change.</td>
+      <td>Removing a nullable input object field is only considered a breaking change if the nullable field is present in historical operations. If the nullable field is always omitted in historical operations, its removal isn't considered a breaking change.</td>
+    </tr>
+    <tr>
+      <td>
+
+###### Changing nullable input object fields to non-nullable
+
+      </td>
+      <td>Changing a nullable input object field to non-nullable is considered a breaking change.</td>
+      <td>Changing a nullable input object field to non-nullable is only considered a breaking change if the field had a <code>null</code> value in historical operations. If the field was always a non-null value in historical operations, changing it to non-nullable isn't considered a breaking change.</td>
+    </tr>
+
+  </tbody>
+</table>
+
+<Note>
+
+You won't see an immediate change in checks behavior when you first turn on extended reference reporting.
+[Learn more.](#configuration-effect-timing)
+
+</Note>
+
+---
+
+<Tls />
+
+Learn more in [TLS for the router](/graphos/routing/security/tls).
+
+---
+
+<TrafficShaping /> 
+
+Learn more in [Traffic Shaping](/graphos/routing/performance/traffic-shaping).
+
+---
+
+## YAML configuration utilities
+
+### Variable expansion
+
+You can reference variables directly in your YAML config file. This is useful for referencing secrets without including them in the file.
+
+Currently, the router supports expansion of environment variables and file paths. Corresponding variables are prefixed with `env.` and `file.`, respectively.
+
+The router uses Unix-style expansion. Here are some examples:
+
+- `${env.ENV_VAR_NAME}` expands to the value of environment variable `ENV_VAR_NAME`.
+- `${env.ENV_VAR_NAME:-some_default}` expands to the value of environment variable `ENV_VAR_NAME`, or falls back to the value `some_default` if the environment variable is not defined.
+- `${file.a.txt}` expands to the contents of the file `a.txt`.
+- `${file.a.txt:-some_default}` expands to the contents of the file `a.txt`, or falls back to the value `some_default` if the file does not exist.
+
+Variable expansions are valid only for YAML _values_, not keys.
+
+
+### Reusing configurations with YAML aliases
+
+You can reuse parts of your configuration file in multiple places using standard YAML aliasing syntax:
+
+```yaml title="router.yaml"
+headers:
+  subgraphs:
+    products:
+      request:
+        - insert: &insert_custom_header
+            name: "custom-header"
+            value: "something"
+    reviews:
+      request:
+        - insert: *insert_custom_header
+```
+
+Here, the `name` and `value` entries under `&insert_custom_header` are reused under `*insert_custom_header`.
+
+## Related topics
+
+- [Checklist for configuring the router for production](/technotes/TN0008-production-readiness-checklist/#apollo-router)

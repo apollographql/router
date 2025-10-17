@@ -7,17 +7,27 @@ redirectFrom:
 
 The GraphOS Router supports TLS to authenticate and encrypt communications, both on the client side and the subgraph side. It works automatically on the subgraph side if the subgraph URL starts with `https://`.
 
+```yaml title="Example TLS configuration"
+tls:
+  supergraph:
+    certificate: ${file./path/to/certificate.pem}
+    certificate_chain: ${file./path/to/certificate_chain.pem}
+    key: ${file./path/to/key.pem}
+```
+
 ## Configuring TLS
 
 TLS support is configured in the `tls` section, under the `supergraph` key for the client side, and the `subgraph` key for the subgraph side, with configuration possible for all subgraphs and overriding per subgraph.
 
-The list of supported TLS versions and algorithms is static, it cannot be configured.
+The list of supported TLS versions and algorithms is static.
 
-Supported TLS versions:
+### Supported TLS versions 
+
 * TLS 1.2
 * TLS 1.3
 
-Supported cipher suites:
+### Supported TLS cipher suites
+
 * TLS13_AES_256_GCM_SHA384
 * TLS13_AES_128_GCM_SHA256
 * TLS13_CHACHA20_POLY1305_SHA256
@@ -28,14 +38,15 @@ Supported cipher suites:
 * TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
 * TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
 
-Supported key exchange groups:
+### Supported key exchange groups
+
 * X25519
 * SECP256R1
 * SECP384R1
 
 ## TLS termination
 
-Clients can connect to the router directly over HTTPS, without terminating TLS in an intermediary. You can  configure this in the `tls` configuration section:
+Clients can connect to the router directly over HTTPS, without terminating TLS in an intermediary. You can configure this in the `tls` configuration section:
 
 ```yaml
 tls:

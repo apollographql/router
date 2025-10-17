@@ -1,13 +1,13 @@
 use ahash::HashMap;
 use ahash::HashMapExt;
 use ahash::HashSet;
+use apollo_compiler::Schema;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::parser::Parser;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Schema;
 use apollo_federation::link::cost_spec_definition::ListSizeDirective as ParsedListSizeDirective;
 use tower::BoxError;
 
@@ -49,12 +49,11 @@ impl<'schema> ListSizeDirective<'schema> {
         if let Some(slicing_argument_names) = parsed.slicing_argument_names.as_ref() {
             // First, collect the default values for each argument
             for argument in &field.definition.arguments {
-                if slicing_argument_names.contains(argument.name.as_str()) {
-                    if let Some(numeric_value) =
+                if slicing_argument_names.contains(argument.name.as_str())
+                    && let Some(numeric_value) =
                         argument.default_value.as_ref().and_then(|v| v.to_i32())
-                    {
-                        slicing_arguments.insert(&argument.name, numeric_value);
-                    }
+                {
+                    slicing_arguments.insert(&argument.name, numeric_value);
                 }
             }
             // Then, overwrite any default values with the actual values passed in the query

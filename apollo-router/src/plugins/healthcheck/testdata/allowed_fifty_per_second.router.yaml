@@ -1,0 +1,7 @@
+health_check:
+  listen: 127.0.0.1:8088
+  readiness:
+    allowed: 50
+    interval:
+      sampling: 1s
+      unready: 10s

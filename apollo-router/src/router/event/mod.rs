@@ -1,15 +1,15 @@
 mod configuration;
 mod license;
-mod reload;
+pub(crate) mod reload;
 mod schema;
 mod shutdown;
 
 use std::fmt::Debug;
 use std::fmt::Formatter;
+use std::sync::Arc;
 
 pub use configuration::ConfigurationSource;
 pub use license::LicenseSource;
-pub(crate) use reload::ReloadSource;
 pub use schema::SchemaSource;
 pub use shutdown::ShutdownSource;
 
@@ -17,18 +17,19 @@ use self::Event::NoMoreConfiguration;
 use self::Event::NoMoreLicense;
 use self::Event::NoMoreSchema;
 use self::Event::Reload;
+use self::Event::RhaiReload;
 use self::Event::Shutdown;
 use self::Event::UpdateConfiguration;
 use self::Event::UpdateLicense;
 use self::Event::UpdateSchema;
+use crate::Configuration;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::schema::SchemaState;
-use crate::Configuration;
 
 /// Messages that are broadcast across the app.
 pub(crate) enum Event {
     /// The configuration was updated.
-    UpdateConfiguration(Configuration),
+    UpdateConfiguration(Arc<Configuration>),
 
     /// There are no more updates to the configuration
     NoMoreConfiguration,
@@ -40,13 +41,16 @@ pub(crate) enum Event {
     NoMoreSchema,
 
     /// Update license {}
-    UpdateLicense(LicenseState),
+    UpdateLicense(Arc<LicenseState>),
 
     /// There were no more updates to license.
     NoMoreLicense,
 
     /// Artificial hot reload for chaos testing
     Reload,
+
+    /// Hot reload for rhai scripts
+    RhaiReload,
 
     /// The server should gracefully shutdown.
     Shutdown,
@@ -75,6 +79,9 @@ impl Debug for Event {
             }
             Reload => {
                 write!(f, "ForcedHotReload")
+            }
+            RhaiReload => {
+                write!(f, "RhaiReload")
             }
             Shutdown => {
                 write!(f, "Shutdown")

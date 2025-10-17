@@ -1,32 +1,56 @@
+//! Implements support for persisted queries and safelisting at the supergraph service stage.
+
+mod freeform_graphql_behavior;
 mod id_extractor;
+mod manifest;
 mod manifest_poller;
 
 #[cfg(test)]
 use std::sync::Arc;
 
-use http::header::CACHE_CONTROL;
 use http::HeaderValue;
 use http::StatusCode;
+use http::header::CACHE_CONTROL;
 use id_extractor::PersistedQueryIdExtractor;
-pub use manifest_poller::FullPersistedQueryOperationId;
-pub use manifest_poller::PersistedQueryManifest;
+pub use manifest::FullPersistedQueryOperationId;
+pub use manifest::ManifestOperation;
+pub use manifest::PersistedQueryManifest;
 pub(crate) use manifest_poller::PersistedQueryManifestPoller;
 use tower::BoxError;
 
 use super::query_analysis::ParsedDocument;
+use crate::Configuration;
 use crate::graphql::Error as GraphQLError;
 use crate::plugins::telemetry::CLIENT_NAME;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
-use crate::Configuration;
 
 const DONT_CACHE_RESPONSE_VALUE: &str = "private, no-cache, must-revalidate";
 const PERSISTED_QUERIES_CLIENT_NAME_CONTEXT_KEY: &str = "apollo_persisted_queries::client_name";
 const PERSISTED_QUERIES_SAFELIST_SKIP_ENFORCEMENT_CONTEXT_KEY: &str =
     "apollo_persisted_queries::safelist::skip_enforcement";
 
+/// Marker type for request context to identify requests that were expanded from a persisted query
+/// ID.
 struct UsedQueryIdFromManifest;
 
+/// Stores the PQ ID for an operation expanded from a PQ ID or an operation that matches a PQ body in the manifest.
+#[derive(Clone)]
+pub(crate) struct RequestPersistedQueryId {
+    pub(crate) pq_id: String,
+}
+
+/// Implements persisted query support, namely expanding requests using persisted query IDs and
+/// filtering free-form GraphQL requests based on router configuration.
+///
+/// Despite the name, this is not really in any way a layer today.
+///
+/// This type actually consists of two conceptual layers that must both be applied at the supergraph
+/// service stage, at different points:
+/// - [PersistedQueryLayer::supergraph_request] must be done *before* the GraphQL request is parsed
+///   and validated.
+/// - [PersistedQueryLayer::supergraph_request_with_analyzed_query] must be done *after* the
+///   GraphQL request is parsed and validated.
 #[derive(Debug)]
 pub(crate) struct PersistedQueryLayer {
     /// Manages polling uplink for persisted queries and caches the current
@@ -62,11 +86,18 @@ impl PersistedQueryLayer {
         }
     }
 
-    /// Run a request through the layer.
+    /// Handles pre-parsing work for requests using persisted queries.
+    ///
     /// Takes care of:
     /// 1) resolving a persisted query ID to a query body
-    /// 2) matching a freeform GraphQL request against persisted queries, optionally rejecting it based on configuration
-    /// 3) continuing to the next stage of the router
+    /// 2) rejecting free-form GraphQL requests if they are never allowed by configuration.
+    ///    Matching against safelists is done later in
+    ///    [`PersistedQueryLayer::supergraph_request_with_analyzed_query`].
+    ///
+    /// This functions similarly to a checkpoint service, short-circuiting the pipeline on error
+    /// (using an `Err()` return value).
+    /// The user of this function is responsible for propagating short-circuiting.
+    #[allow(clippy::result_large_err)]
     pub(crate) fn supergraph_request(
         &self,
         request: SupergraphRequest,
@@ -83,10 +114,16 @@ impl PersistedQueryLayer {
                 Ok(request)
             } else if let Some(log_unknown) = manifest_poller.never_allows_freeform_graphql() {
                 // If we don't have an ID and we require an ID, return an error immediately,
-                if log_unknown {
-                    if let Some(operation_body) = request.supergraph_request.body().query.as_ref() {
-                        log_unknown_operation(operation_body);
-                    }
+                if log_unknown
+                    && let Some(operation_body) = request.supergraph_request.body().query.as_ref()
+                {
+                    // Note: it's kind of inconsistent that if we require
+                    // IDs and skip_enforcement is set, we don't call
+                    // log_unknown_operation on freeform GraphQL, but if we
+                    // *don't* require IDs and skip_enforcement is set, we
+                    // *do* call log_unknown_operation on unknown
+                    // operations.
+                    log_unknown_operation(operation_body, false);
                 }
                 Err(supergraph_err_pq_id_required(request))
             } else {
@@ -103,6 +140,7 @@ impl PersistedQueryLayer {
     }
 
     /// Places an operation body on a [`SupergraphRequest`] if it has been persisted
+    #[allow(clippy::result_large_err)]
     pub(crate) fn replace_query_id_with_operation_body(
         &self,
         mut request: SupergraphRequest,
@@ -144,12 +182,15 @@ impl PersistedQueryLayer {
                 let body = request.supergraph_request.body_mut();
                 body.query = Some(persisted_query_body);
                 body.extensions.remove("persistedQuery");
-                // Record that we actually used our ID, so we can skip the
-                // safelist check later.
-                request
-                    .context
-                    .extensions()
-                    .with_lock(|mut lock| lock.insert(UsedQueryIdFromManifest));
+                request.context.extensions().with_lock(|lock| {
+                    // Record that we actually used our ID, so we can skip the
+                    // safelist check later.
+                    lock.insert(UsedQueryIdFromManifest);
+                    // Also store the actual PQ ID for usage reporting.
+                    lock.insert(RequestPersistedQueryId {
+                        pq_id: persisted_query_id.into(),
+                    });
+                });
                 u64_counter!(
                     "apollo.router.operations.persisted_queries",
                     "Total requests with persisted queries enabled",
@@ -178,6 +219,16 @@ impl PersistedQueryLayer {
         }
     }
 
+    /// Handles post-GraphQL-parsing work for requests using the persisted queries feature,
+    /// in particular safelisting.
+    ///
+    /// Any request that was expanded by the [`PersistedQueryLayer::supergraph_request`] call is
+    /// passed through immediately. Free-form GraphQL is matched against safelists and rejected or
+    /// passed through based on router configuration.
+    ///
+    /// This functions similarly to a checkpoint service, short-circuiting the pipeline on error
+    /// (using an `Err()` return value).
+    /// The user of this function is responsible for propagating short-circuiting.
     pub(crate) async fn supergraph_request_with_analyzed_query(
         &self,
         request: SupergraphRequest,
@@ -257,12 +308,21 @@ impl PersistedQueryLayer {
             ));
         }
         if freeform_graphql_action.should_log {
-            log_unknown_operation(operation_body);
+            log_unknown_operation(operation_body, skip_enforcement);
             metric_attributes.push(opentelemetry::KeyValue::new(
                 "persisted_queries.logged".to_string(),
                 true,
             ));
         }
+
+        // Store PQ ID for reporting if it was used
+        if let Some(pq_id) = freeform_graphql_action.pq_id {
+            request
+                .context
+                .extensions()
+                .with_lock(|lock| lock.insert(RequestPersistedQueryId { pq_id }));
+        }
+
         u64_counter!(
             "apollo.router.operations.persisted_queries",
             "Total requests with persisted queries enabled",
@@ -284,8 +344,12 @@ impl PersistedQueryLayer {
     }
 }
 
-fn log_unknown_operation(operation_body: &str) {
-    tracing::warn!(message = "unknown operation", operation_body);
+fn log_unknown_operation(operation_body: &str, enforcement_skipped: bool) {
+    tracing::warn!(
+        message = "unknown operation",
+        operation_body,
+        enforcement_skipped
+    );
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -321,11 +385,19 @@ impl ErrorCacheStrategy {
     }
 }
 
-fn graphql_err_operation_not_found(persisted_query_id: &str) -> GraphQLError {
-    graphql_err(
-        "PERSISTED_QUERY_NOT_IN_LIST",
-        &format!("Persisted query '{persisted_query_id}' not found in the persisted query list"),
-    )
+fn graphql_err_operation_not_found(
+    persisted_query_id: &str,
+    operation_name: Option<String>,
+) -> GraphQLError {
+    let mut builder = GraphQLError::builder()
+        .extension_code("PERSISTED_QUERY_NOT_IN_LIST")
+        .message(format!(
+            "Persisted query '{persisted_query_id}' not found in the persisted query list"
+        ));
+    if let Some(operation_name) = operation_name {
+        builder = builder.extension("operation_name", operation_name);
+    }
+    builder.build()
 }
 
 fn supergraph_err_operation_not_found(
@@ -333,7 +405,10 @@ fn supergraph_err_operation_not_found(
     persisted_query_id: &str,
 ) -> SupergraphResponse {
     supergraph_err(
-        graphql_err_operation_not_found(persisted_query_id),
+        graphql_err_operation_not_found(
+            persisted_query_id,
+            request.supergraph_request.body().operation_name.clone(),
+        ),
         request,
         ErrorCacheStrategy::DontCache,
         StatusCode::NOT_FOUND,
@@ -408,25 +483,26 @@ fn supergraph_err(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::time::Duration;
 
-    use maplit::hashmap;
     use serde_json::json;
     use tracing::instrument::WithSubscriber;
 
+    use super::manifest::ManifestOperation;
     use super::*;
+    use crate::Context;
+    use crate::assert_errors_eq_ignoring_id;
     use crate::assert_snapshot_subscriber;
     use crate::configuration::Apq;
     use crate::configuration::PersistedQueries;
     use crate::configuration::PersistedQueriesSafelist;
     use crate::configuration::Supergraph;
+    use crate::graphql;
     use crate::metrics::FutureMetricsExt;
-    use crate::services::layers::persisted_queries::manifest_poller::FreeformGraphQLBehavior;
+    use crate::services::layers::persisted_queries::freeform_graphql_behavior::FreeformGraphQLBehavior;
     use crate::services::layers::query_analysis::QueryAnalysisLayer;
     use crate::spec::Schema;
     use crate::test_harness::mocks::persisted_queries::*;
-    use crate::Context;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn disabled_pq_layer_has_no_poller() {
@@ -465,14 +541,16 @@ mod tests {
         let (_mock_guard, uplink_config) = mock_pq_uplink_with_delay(&manifest, delay).await;
         let now = tokio::time::Instant::now();
 
-        assert!(PersistedQueryManifestPoller::new(
-            Configuration::fake_builder()
-                .uplink(uplink_config)
-                .build()
-                .unwrap(),
-        )
-        .await
-        .is_ok());
+        assert!(
+            PersistedQueryManifestPoller::new(
+                Configuration::fake_builder()
+                    .uplink(uplink_config)
+                    .build()
+                    .unwrap(),
+            )
+            .await
+            .is_ok()
+        );
 
         assert!(now.elapsed() >= delay);
     }
@@ -500,29 +578,31 @@ mod tests {
         assert!(incoming_request.supergraph_request.body().query.is_none());
 
         let result = pq_layer.supergraph_request(incoming_request);
-        let request = result
-            .ok()
-            .expect("pq layer returned response instead of putting the query on the request");
+        let request =
+            result.expect("pq layer returned response instead of putting the query on the request");
         assert_eq!(request.supergraph_request.body().query, Some(body));
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn enabled_pq_layer_with_client_names() {
-        let (_mock_guard, uplink_config) = mock_pq_uplink(&hashmap! {
-            FullPersistedQueryOperationId {
-                operation_id: "both-plain-and-cliented".to_string(),
+        let manifest = PersistedQueryManifest::from(vec![
+            ManifestOperation {
+                id: "both-plain-and-cliented".to_string(),
+                body: "query { bpac_no_client: __typename }".to_string(),
                 client_name: None,
-            } => "query { bpac_no_client: __typename }".to_string(),
-            FullPersistedQueryOperationId {
-                operation_id: "both-plain-and-cliented".to_string(),
+            },
+            ManifestOperation {
+                id: "both-plain-and-cliented".to_string(),
+                body: "query { bpac_web_client: __typename }".to_string(),
                 client_name: Some("web".to_string()),
-            } => "query { bpac_web_client: __typename }".to_string(),
-            FullPersistedQueryOperationId {
-                operation_id: "only-cliented".to_string(),
+            },
+            ManifestOperation {
+                id: "only-cliented".to_string(),
+                body: "query { oc_web_client: __typename }".to_string(),
                 client_name: Some("web".to_string()),
-            } => "query { oc_web_client: __typename }".to_string(),
-        })
-        .await;
+            },
+        ]);
+        let (_mock_guard, uplink_config) = mock_pq_uplink(&manifest).await;
 
         let pq_layer = PersistedQueryLayer::new(
             &Configuration::fake_builder()
@@ -556,7 +636,6 @@ mod tests {
 
             pq_layer
                 .supergraph_request(incoming_request)
-                .ok()
                 .expect("pq layer returned response instead of putting the query on the request")
                 .supergraph_request
                 .body()
@@ -611,9 +690,8 @@ mod tests {
         assert!(incoming_request.supergraph_request.body().query.is_none());
 
         let result = pq_layer.supergraph_request(incoming_request);
-        let request = result
-            .ok()
-            .expect("pq layer returned response instead of continuing to APQ layer");
+        let request =
+            result.expect("pq layer returned response instead of continuing to APQ layer");
         assert!(request.supergraph_request.body().query.is_none());
     }
 
@@ -652,9 +730,9 @@ mod tests {
             .next_response()
             .await
             .expect("could not get response from pq layer");
-        assert_eq!(
+        assert_errors_eq_ignoring_id!(
             response.errors,
-            vec![graphql_err_operation_not_found(invalid_id)]
+            [graphql_err_operation_not_found(invalid_id, None)]
         );
     }
 
@@ -671,10 +749,12 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(pq_layer
-            .manifest_poller
-            .unwrap()
-            .augmenting_apq_with_pre_registration_and_no_safelisting())
+        assert!(
+            pq_layer
+                .manifest_poller
+                .unwrap()
+                .augmenting_apq_with_pre_registration_and_no_safelisting()
+        )
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -690,10 +770,12 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(!pq_layer
-            .manifest_poller
-            .unwrap()
-            .augmenting_apq_with_pre_registration_and_no_safelisting())
+        assert!(
+            !pq_layer
+                .manifest_poller
+                .unwrap()
+                .augmenting_apq_with_pre_registration_and_no_safelisting()
+        )
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -721,7 +803,6 @@ mod tests {
                 .unwrap()
                 .state
                 .read()
-                .unwrap()
                 .freeform_graphql_behavior,
             FreeformGraphQLBehavior::AllowIfInSafelist { .. }
         ))
@@ -755,12 +836,10 @@ mod tests {
         // the operation.
         let updated_request = pq_layer
             .supergraph_request(incoming_request)
-            .ok()
             .expect("pq layer returned error response instead of returning a request");
         query_analysis_layer
             .supergraph_request(updated_request)
             .await
-            .ok()
             .expect("QA layer returned error response instead of returning a request")
     }
 
@@ -785,10 +864,7 @@ mod tests {
             .next_response()
             .await
             .expect("could not get response from pq layer");
-        assert_eq!(
-            response.errors,
-            vec![graphql_err_operation_not_in_safelist()]
-        );
+        assert_errors_eq_ignoring_id!(response.errors, [graphql_err_operation_not_in_safelist()]);
         let mut metric_attributes = vec![opentelemetry::KeyValue::new(
             "persisted_queries.safelist.rejected.unknown".to_string(),
             true,
@@ -820,7 +896,6 @@ mod tests {
         pq_layer
             .supergraph_request_with_analyzed_query(request_with_analyzed_query)
             .await
-            .ok()
             .expect("pq layer second hook returned error response instead of returning a request");
 
         let mut metric_attributes = vec![];
@@ -846,22 +921,17 @@ mod tests {
 
     async fn pq_layer_freeform_graphql_with_safelist(log_unknown: bool) {
         async move {
-            let manifest = HashMap::from([
-                (
-                    FullPersistedQueryOperationId {
-                        operation_id: "valid-syntax".to_string(),
-                        client_name: None,
-                    },
-                    "fragment A on Query { me { id } }    query SomeOp { ...A ...B }    fragment,,, B on Query{me{name,username}  } # yeah"
-                        .to_string(),
-                ),
-                (
-                    FullPersistedQueryOperationId {
-                        operation_id: "invalid-syntax".to_string(),
-                        client_name: None,
-                    },
-                    "}}}".to_string(),
-                ),
+            let manifest = PersistedQueryManifest::from(vec![
+                ManifestOperation {
+                    id: "valid-syntax".to_string(),
+                    body: "fragment A on Query { me { id } }    query SomeOp { ...A ...B }    fragment,,, B on Query{me{name,username}  } # yeah".to_string(),
+                    client_name: None,
+                },
+                ManifestOperation {
+                    id: "invalid-syntax".to_string(),
+                    body: "}}}".to_string(),
+                    client_name: None,
+                },
             ]);
 
             let (_mock_guard, uplink_config) = mock_pq_uplink(&manifest).await;
@@ -1021,6 +1091,7 @@ mod tests {
                 "persistedQuery",
                 json!({"version": 1, "sha256Hash": invalid_id}),
             )
+            .operation_name("SomeOperation")
             .build()
             .unwrap();
 
@@ -1032,9 +1103,12 @@ mod tests {
             .next_response()
             .await
             .expect("could not get response from pq layer");
-        assert_eq!(
+        assert_errors_eq_ignoring_id!(
             response.errors,
-            vec![graphql_err_operation_not_found(invalid_id)]
+            [graphql_err_operation_not_found(
+                invalid_id,
+                Some("SomeOperation".to_string()),
+            )]
         );
     }
 
@@ -1042,17 +1116,19 @@ mod tests {
     async fn apq_and_pq_safelisting_is_invalid_config() {
         let (_mock_guard, uplink_config) = mock_empty_pq_uplink().await;
         let safelist_config = PersistedQueriesSafelist::builder().enabled(true).build();
-        assert!(Configuration::fake_builder()
-            .persisted_query(
-                PersistedQueries::builder()
-                    .enabled(true)
-                    .safelist(safelist_config)
-                    .build(),
-            )
-            .apq(Apq::fake_builder().enabled(true).build())
-            .uplink(uplink_config)
-            .build()
-            .is_err());
+        assert!(
+            Configuration::fake_builder()
+                .persisted_query(
+                    PersistedQueries::builder()
+                        .enabled(true)
+                        .safelist(safelist_config)
+                        .build(),
+                )
+                .apq(Apq::fake_builder().enabled(true).build())
+                .uplink(uplink_config)
+                .build()
+                .is_err()
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1080,7 +1156,6 @@ mod tests {
                 .unwrap()
                 .state
                 .read()
-                .unwrap()
                 .freeform_graphql_behavior,
             FreeformGraphQLBehavior::AllowIfInSafelist { .. }
         ))
@@ -1108,11 +1183,13 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(pq_layer
-            .manifest_poller
-            .unwrap()
-            .never_allows_freeform_graphql()
-            .is_some())
+        assert!(
+            pq_layer
+                .manifest_poller
+                .unwrap()
+                .never_allows_freeform_graphql()
+                .is_some()
+        )
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1153,7 +1230,7 @@ mod tests {
             .next_response()
             .await
             .expect("could not get response from pq layer");
-        assert_eq!(response.errors, vec![graphql_err_pq_id_required()]);
+        assert_errors_eq_ignoring_id!(response.errors, [graphql_err_pq_id_required()]);
 
         // Try again skipping enforcement.
         let context = Context::new();
@@ -1191,7 +1268,6 @@ mod tests {
                 .unwrap()
                 .state
                 .read()
-                .unwrap()
                 .freeform_graphql_behavior,
             FreeformGraphQLBehavior::AllowAll { apq_enabled: false }
         ))
@@ -1221,7 +1297,6 @@ mod tests {
                 .unwrap()
                 .state
                 .read()
-                .unwrap()
                 .freeform_graphql_behavior,
             FreeformGraphQLBehavior::AllowAll { apq_enabled: true }
         ))
@@ -1283,7 +1358,7 @@ mod tests {
             .next_response()
             .await
             .expect("could not get response from pq layer");
-        assert_eq!(response.errors, vec![graphql_err_cannot_send_id_and_body()]);
+        assert_errors_eq_ignoring_id!(response.errors, [graphql_err_cannot_send_id_and_body()]);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1316,6 +1391,6 @@ mod tests {
             .next_response()
             .await
             .expect("could not get response from pq layer");
-        assert_eq!(response.errors, vec![graphql_err_cannot_send_id_and_body()]);
+        assert_errors_eq_ignoring_id!(response.errors, [graphql_err_cannot_send_id_and_body()]);
     }
 }

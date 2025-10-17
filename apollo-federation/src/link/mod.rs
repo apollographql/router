@@ -1,27 +1,30 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::str;
 use std::sync::Arc;
 
+use apollo_compiler::InvalidNameError;
+use apollo_compiler::Name;
+use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
-use apollo_compiler::InvalidNameError;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
-use apollo_compiler::Schema;
 use thiserror::Error;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::link::link_spec_definition::LinkSpecDefinition;
 use crate::link::link_spec_definition::CORE_VERSIONS;
 use crate::link::link_spec_definition::LINK_VERSIONS;
+use crate::link::link_spec_definition::LinkSpecDefinition;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 
 pub(crate) mod argument;
+pub(crate) mod authenticated_spec_definition;
+pub(crate) mod cache_tag_spec_definition;
 pub(crate) mod context_spec_definition;
 pub mod cost_spec_definition;
 pub mod database;
@@ -30,12 +33,17 @@ pub(crate) mod graphql_definition;
 pub(crate) mod inaccessible_spec_definition;
 pub(crate) mod join_spec_definition;
 pub(crate) mod link_spec_definition;
+pub(crate) mod policy_spec_definition;
+pub(crate) mod requires_scopes_spec_definition;
 pub mod spec;
 pub(crate) mod spec_definition;
+pub(crate) mod tag_spec_definition;
 
 pub const DEFAULT_LINK_NAME: Name = name!("link");
 pub const DEFAULT_IMPORT_SCALAR_NAME: Name = name!("Import");
 pub const DEFAULT_PURPOSE_ENUM_NAME: Name = name!("Purpose");
+pub(crate) const IMPORT_AS_ARGUMENT: Name = name!("as");
+pub(crate) const IMPORT_NAME_ARGUMENT: Name = name!("name");
 
 // TODO: we should provide proper "diagnostic" here, linking to ast, accumulating more than one
 // error and whatnot.
@@ -59,7 +67,7 @@ impl From<LinkError> for FederationError {
     }
 }
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum Purpose {
     SECURITY,
     EXECUTION,
@@ -184,13 +192,13 @@ impl Import {
                         alias: alias.map(Name::new).transpose()?,
                     })
                 } else {
-                    if let Some(alias) = &alias {
-                        if alias.starts_with('@') {
-                            return Err(LinkError::BootstrapError(format!(
-                                r#"in "{}", invalid alias '{alias}' for import name '{element}': should not start with '@' (or, if {element} is a directive, then the name should start with '@')"#,
-                                value.serialize().no_indent()
-                            )));
-                        }
+                    if let Some(alias) = &alias
+                        && alias.starts_with('@')
+                    {
+                        return Err(LinkError::BootstrapError(format!(
+                            r#"in "{}", invalid alias '{alias}' for import name '{element}': should not start with '@' (or, if {element} is a directive, then the name should start with '@')"#,
+                            value.serialize().no_indent()
+                        )));
                     }
                     Ok(Import {
                         element: Name::new(element)?,
@@ -206,7 +214,7 @@ impl Import {
         }
     }
 
-    pub fn element_display_name(&self) -> impl fmt::Display + '_ {
+    pub fn element_display_name(&self) -> impl fmt::Display {
         DisplayName {
             name: &self.element,
             is_directive: self.is_directive,
@@ -217,7 +225,7 @@ impl Import {
         self.alias.as_ref().unwrap_or(&self.element)
     }
 
-    pub fn imported_display_name(&self) -> impl fmt::Display + '_ {
+    pub fn imported_display_name(&self) -> impl fmt::Display {
         DisplayName {
             name: self.imported_name(),
             is_directive: self.is_directive,
@@ -231,7 +239,7 @@ struct DisplayName<'s> {
     is_directive: bool,
 }
 
-impl<'s> fmt::Display for DisplayName<'s> {
+impl fmt::Display for DisplayName<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.is_directive {
             f.write_str("@")?;
@@ -255,7 +263,27 @@ impl fmt::Display for Import {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[allow(clippy::from_over_into)]
+impl Into<Value> for Import {
+    fn into(self) -> Value {
+        if let Some(alias) = self.alias {
+            Value::Object(vec![
+                (
+                    IMPORT_NAME_ARGUMENT,
+                    Node::new(Value::String(self.element.to_string())),
+                ),
+                (
+                    IMPORT_AS_ARGUMENT,
+                    Node::new(Value::String(alias.to_string())),
+                ),
+            ])
+        } else {
+            Value::String(self.element.to_string())
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Link {
     pub url: Url,
     pub spec_alias: Option<Name>,
@@ -280,6 +308,24 @@ impl Link {
         } else {
             // Both sides are `Name`s and we just add valid characters in between.
             Name::new_unchecked(&format!("{}__{}", self.spec_name_in_schema(), name))
+        }
+    }
+
+    pub(crate) fn directive_name_in_schema_for_core_arguments(
+        spec_url: &Url,
+        spec_name_in_schema: &Name,
+        imports: &[Import],
+        directive_name_in_spec: &Name,
+    ) -> Name {
+        if let Some(element_import) = imports
+            .iter()
+            .find(|i| i.element == *directive_name_in_spec)
+        {
+            element_import.imported_name().clone()
+        } else if spec_url.identity.name == *directive_name_in_spec {
+            spec_name_in_schema.clone()
+        } else {
+            Name::new_unchecked(format!("{spec_name_in_schema}__{directive_name_in_spec}").as_str())
         }
     }
 
@@ -387,33 +433,35 @@ impl fmt::Display for Link {
         let alias = self
             .spec_alias
             .as_ref()
-            .map(|a| format!(r#", as: "{}""#, a))
+            .map(|a| format!(r#", as: "{a}""#))
             .unwrap_or("".to_string());
         let purpose = self
             .purpose
             .as_ref()
-            .map(|p| format!(r#", for: {}"#, p))
+            .map(|p| format!(r#", for: {p}"#))
             .unwrap_or("".to_string());
         write!(f, r#"@link(url: "{}"{alias}{imports}{purpose})"#, self.url)
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LinkedElement {
     pub link: Arc<Link>,
     pub import: Option<Arc<Import>>,
 }
 
-#[derive(Default, Eq, PartialEq, Debug)]
+#[derive(Clone, Default, Eq, PartialEq, Debug)]
 pub struct LinksMetadata {
     pub(crate) links: Vec<Arc<Link>>,
     pub(crate) by_identity: IndexMap<Identity, Arc<Link>>,
     pub(crate) by_name_in_schema: IndexMap<Name, Arc<Link>>,
     pub(crate) types_by_imported_name: IndexMap<Name, (Arc<Link>, Arc<Import>)>,
     pub(crate) directives_by_imported_name: IndexMap<Name, (Arc<Link>, Arc<Import>)>,
+    pub(crate) directives_by_original_name: IndexMap<Name, (Arc<Link>, Arc<Import>)>,
 }
 
 impl LinksMetadata {
+    // PORT_NOTE: Call this as a replacement for `CoreFeatures.coreItself` from JS.
     pub(crate) fn link_spec_definition(
         &self,
     ) -> Result<&'static LinkSpecDefinition, FederationError> {
@@ -440,11 +488,11 @@ impl LinksMetadata {
     }
 
     pub fn all_links(&self) -> &[Arc<Link>] {
-        return self.links.as_ref();
+        self.links.as_ref()
     }
 
     pub fn for_identity(&self, identity: &Identity) -> Option<Arc<Link>> {
-        return self.by_identity.get(identity).cloned();
+        self.by_identity.get(identity).cloned()
     }
 
     pub fn source_link_of_type(&self, type_name: &Name) -> Option<LinkedElement> {
@@ -495,5 +543,18 @@ impl LinksMetadata {
                     import: None,
                 })
         })
+    }
+
+    pub(crate) fn import_to_feature_url_map(&self) -> HashMap<String, Url> {
+        let directive_entries = self
+            .directives_by_imported_name
+            .iter()
+            .map(|(name, (link, _))| (name.to_string(), link.url.clone()));
+        let type_entries = self
+            .types_by_imported_name
+            .iter()
+            .map(|(name, (link, _))| (name.to_string(), link.url.clone()));
+
+        directive_entries.chain(type_entries).collect()
     }
 }

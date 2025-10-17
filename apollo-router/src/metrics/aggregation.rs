@@ -3,12 +3,15 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::DerefMut;
 use std::sync::Arc;
-use std::sync::Mutex;
 
 use derive_more::From;
 use itertools::Itertools;
+use opentelemetry::KeyValue;
+use opentelemetry::metrics::AsyncInstrument;
 use opentelemetry::metrics::Callback;
+use opentelemetry::metrics::CallbackRegistration;
 use opentelemetry::metrics::Counter;
+use opentelemetry::metrics::Gauge;
 use opentelemetry::metrics::Histogram;
 use opentelemetry::metrics::InstrumentProvider;
 use opentelemetry::metrics::Meter;
@@ -16,15 +19,13 @@ use opentelemetry::metrics::MeterProvider;
 use opentelemetry::metrics::ObservableCounter;
 use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
+use opentelemetry::metrics::Observer;
 use opentelemetry::metrics::SyncCounter;
+use opentelemetry::metrics::SyncGauge;
 use opentelemetry::metrics::SyncHistogram;
 use opentelemetry::metrics::SyncUpDownCounter;
-use opentelemetry::metrics::Unit;
 use opentelemetry::metrics::UpDownCounter;
-use opentelemetry::KeyValue;
-use opentelemetry_api::metrics::AsyncInstrument;
-use opentelemetry_api::metrics::CallbackRegistration;
-use opentelemetry_api::metrics::Observer;
+use parking_lot::Mutex;
 
 use crate::metrics::filter::FilterMeterProvider;
 
@@ -39,6 +40,7 @@ use crate::metrics::filter::FilterMeterProvider;
 pub(crate) enum MeterProviderType {
     PublicPrometheus,
     Apollo,
+    ApolloRealtime,
     Public,
     OtelDefault,
 }
@@ -60,7 +62,7 @@ impl Default for AggregateMeterProvider {
         meter_provider.set(
             MeterProviderType::OtelDefault,
             Some(FilterMeterProvider::public(
-                opentelemetry_api::global::meter_provider(),
+                opentelemetry::global::meter_provider(),
             )),
         );
 
@@ -119,13 +121,15 @@ impl AggregateMeterProvider {
         meter_provider_type: MeterProviderType,
         meter_provider: Option<FilterMeterProvider>,
     ) -> Option<FilterMeterProvider> {
-        let mut inner = self.inner.lock().expect("lock poisoned");
+        let mut inner = self.inner.lock();
         // As we are changing a meter provider we need to invalidate any registered instruments.
         // Clearing these allows any weak references at callsites to be invalidated.
+        // This must be done BEFORE the old provider is dropped to ensure that metrics are not lost.
+        // Once invalidated all metrics callsites will try to obtain new instruments, but will be blocked on the mutex.
         inner.registered_instruments.clear();
 
         //Now update the meter provider
-        if let Some(meter_provider) = meter_provider {
+        let old = if let Some(meter_provider) = meter_provider {
             inner
                 .providers
                 .insert(
@@ -135,13 +139,29 @@ impl AggregateMeterProvider {
                 .map(|(old_provider, _)| old_provider)
         } else {
             None
-        }
+        };
+        // Important! The mutex MUST be dropped before the old meter provider is dropped to avoid deadlocks in the case that the export function has metrics.
+        // This implicitly happens by returning the old meter provider.
+        // However, to avoid a potential footgun where someone removes the return value of this function I will explicitly drop the mutex guard.
+        drop(inner);
+
+        // Important! Now it is safe to drop the old meter provider, we return it, so we should be OK. If someone removes the return value of this function then
+        // this must instead be converted to a drop call.
+        old
     }
 
     /// Shutdown MUST be called from a blocking thread.
     pub(crate) fn shutdown(&self) {
-        let inner = self.inner.lock().expect("lock poisoned");
-        for (meter_provider_type, (meter_provider, _)) in &inner.providers {
+        // Make sure that we don't deadlock by dropping the mutex guard before actual shutdown happens
+        // This means that if we have any misbehaving code that tries to access the meter provider during shutdown, e.g. for export metrics
+        // then we don't get stuck on the mutex.
+        let mut inner = self.inner.lock();
+        let mut swap = Inner::default();
+        std::mem::swap(&mut *inner, &mut swap);
+        drop(inner);
+
+        // Now that we have dropped the mutex guard we can safely shutdown the meter providers
+        for (meter_provider_type, (meter_provider, _)) in &swap.providers {
             if let Err(e) = meter_provider.shutdown() {
                 ::tracing::error!(error = %e, meter_provider_type = ?meter_provider_type, "failed to shutdown meter provider")
             }
@@ -156,7 +176,7 @@ impl AggregateMeterProvider {
     where
         Arc<T>: Into<InstrumentWrapper>,
     {
-        let mut guard = self.inner.lock().expect("lock poisoned");
+        let mut guard = self.inner.lock();
         let instrument = Arc::new((create_fn)(guard.deref_mut()));
         guard.registered_instruments.push(instrument.clone().into());
         instrument
@@ -164,11 +184,7 @@ impl AggregateMeterProvider {
 
     #[cfg(test)]
     pub(crate) fn registered_instruments(&self) -> usize {
-        self.inner
-            .lock()
-            .expect("lock poisoned")
-            .registered_instruments
-            .len()
+        self.inner.lock().registered_instruments.len()
     }
 }
 
@@ -225,7 +241,7 @@ impl MeterProvider for AggregateMeterProvider {
         schema_url: Option<impl Into<Cow<'static, str>>>,
         attributes: Option<Vec<KeyValue>>,
     ) -> Meter {
-        let mut inner = self.inner.lock().expect("lock poisoned");
+        let mut inner = self.inner.lock();
         inner.versioned_meter(name, version, schema_url, attributes)
     }
 }
@@ -302,6 +318,18 @@ impl<T: Copy> AsyncInstrument<T> for AggregateObservableUpDownCounter<T> {
     }
 }
 
+pub(crate) struct AggregateGauge<T> {
+    delegates: Vec<Gauge<T>>,
+}
+
+impl<T: Copy> SyncGauge<T> for AggregateGauge<T> {
+    fn record(&self, value: T, attributes: &[KeyValue]) {
+        for gauge in &self.delegates {
+            gauge.record(value, attributes)
+        }
+    }
+}
+
 pub(crate) struct AggregateObservableGauge<T> {
     delegates: Vec<(ObservableGauge<T>, Option<DroppingUnregister>)>,
 }
@@ -324,7 +352,7 @@ macro_rules! aggregate_observable_instrument_fn {
             &self,
             name: Cow<'static, str>,
             description: Option<Cow<'static, str>>,
-            unit: Option<Unit>,
+            unit: Option<Cow<'static, str>>,
             callback: Vec<Callback<$ty>>,
         ) -> opentelemetry::metrics::Result<$wrapper<$ty>> {
             let callback: Vec<Arc<Callback<$ty>>> =
@@ -342,7 +370,7 @@ macro_rules! aggregate_observable_instrument_fn {
                     }
                     // We must not set callback in the builder as it will leak memory.
                     // Instead we use callback registration on the meter provider as it allows unregistration
-                    // Also we need to filter out no-op instruments as passing these to the meter provider as these will fail witha crptic message about different implementation.
+                    // Also we need to filter out no-op instruments as passing these to the meter provider as these will fail with a cryptic message about different implementations.
                     // Confusingly the implementation of as_any() on an instrument will return 'other stuff'. In particular no-ops return Arc<()>. This is why we need to check for this.
                     let delegate: $wrapper<$ty> = builder.try_init()?;
                     let registration = if delegate.clone().as_any().downcast_ref::<()>().is_some() {
@@ -377,7 +405,7 @@ macro_rules! aggregate_instrument_fn {
             &self,
             name: Cow<'static, str>,
             description: Option<Cow<'static, str>>,
-            unit: Option<Unit>,
+            unit: Option<Cow<'static, str>>,
         ) -> opentelemetry::metrics::Result<$wrapper<$ty>> {
             let delegates = self
                 .meters
@@ -424,7 +452,6 @@ impl InstrumentProvider for AggregateInstrumentProvider {
 
     aggregate_instrument_fn!(u64_histogram, u64, Histogram, AggregateHistogram);
     aggregate_instrument_fn!(f64_histogram, f64, Histogram, AggregateHistogram);
-    aggregate_instrument_fn!(i64_histogram, i64, Histogram, AggregateHistogram);
 
     aggregate_instrument_fn!(
         i64_up_down_counter,
@@ -438,6 +465,9 @@ impl InstrumentProvider for AggregateInstrumentProvider {
         UpDownCounter,
         AggregateUpDownCounter
     );
+    aggregate_instrument_fn!(u64_gauge, u64, Gauge, AggregateGauge);
+    aggregate_instrument_fn!(i64_gauge, i64, Gauge, AggregateGauge);
+    aggregate_instrument_fn!(f64_gauge, f64, Gauge, AggregateGauge);
 
     aggregate_observable_instrument_fn!(
         i64_observable_up_down_counter,
@@ -475,7 +505,7 @@ impl InstrumentProvider for AggregateInstrumentProvider {
         &self,
         _instruments: &[Arc<dyn Any>],
         _callbacks: Box<dyn Fn(&dyn Observer) + Send + Sync>,
-    ) -> opentelemetry_api::metrics::Result<Box<dyn CallbackRegistration>> {
+    ) -> opentelemetry::metrics::Result<Box<dyn CallbackRegistration>> {
         // We may implement this in future, but for now we don't need it and it's a pain to implement because we need to unwrap the aggregate instruments and pass them to the meter provider that owns them.
         unimplemented!("register_callback is not supported on AggregateInstrumentProvider");
     }
@@ -483,26 +513,30 @@ impl InstrumentProvider for AggregateInstrumentProvider {
 
 #[cfg(test)]
 mod test {
-    use std::sync::atomic::AtomicI64;
     use std::sync::Arc;
     use std::sync::Weak;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::AtomicI64;
+    use std::time::Duration;
 
-    use opentelemetry::sdk::metrics::data::Gauge;
-    use opentelemetry::sdk::metrics::data::ResourceMetrics;
-    use opentelemetry::sdk::metrics::data::Temporality;
-    use opentelemetry::sdk::metrics::reader::AggregationSelector;
-    use opentelemetry::sdk::metrics::reader::MetricProducer;
-    use opentelemetry::sdk::metrics::reader::MetricReader;
-    use opentelemetry::sdk::metrics::reader::TemporalitySelector;
-    use opentelemetry::sdk::metrics::Aggregation;
-    use opentelemetry::sdk::metrics::InstrumentKind;
-    use opentelemetry::sdk::metrics::ManualReader;
-    use opentelemetry::sdk::metrics::MeterProviderBuilder;
-    use opentelemetry::sdk::metrics::Pipeline;
-    use opentelemetry_api::global::GlobalMeterProvider;
-    use opentelemetry_api::metrics::MeterProvider;
-    use opentelemetry_api::metrics::Result;
-    use opentelemetry_api::Context;
+    use async_trait::async_trait;
+    use opentelemetry::global::GlobalMeterProvider;
+    use opentelemetry::metrics::MeterProvider;
+    use opentelemetry::metrics::Result;
+    use opentelemetry_sdk::metrics::Aggregation;
+    use opentelemetry_sdk::metrics::InstrumentKind;
+    use opentelemetry_sdk::metrics::ManualReader;
+    use opentelemetry_sdk::metrics::MeterProviderBuilder;
+    use opentelemetry_sdk::metrics::PeriodicReader;
+    use opentelemetry_sdk::metrics::Pipeline;
+    use opentelemetry_sdk::metrics::data::Gauge;
+    use opentelemetry_sdk::metrics::data::ResourceMetrics;
+    use opentelemetry_sdk::metrics::data::Temporality;
+    use opentelemetry_sdk::metrics::exporter::PushMetricsExporter;
+    use opentelemetry_sdk::metrics::reader::AggregationSelector;
+    use opentelemetry_sdk::metrics::reader::MetricReader;
+    use opentelemetry_sdk::metrics::reader::TemporalitySelector;
+    use opentelemetry_sdk::runtime;
 
     use crate::metrics::aggregation::AggregateMeterProvider;
     use crate::metrics::aggregation::MeterProviderType;
@@ -528,16 +562,12 @@ mod test {
             self.0.register_pipeline(pipeline)
         }
 
-        fn register_producer(&self, producer: Box<dyn MetricProducer>) {
-            self.0.register_producer(producer)
-        }
-
         fn collect(&self, rm: &mut ResourceMetrics) -> Result<()> {
             self.0.collect(rm)
         }
 
-        fn force_flush(&self, cx: &Context) -> Result<()> {
-            self.0.force_flush(cx)
+        fn force_flush(&self) -> Result<()> {
+            self.0.force_flush()
         }
 
         fn shutdown(&self) -> Result<()> {
@@ -720,5 +750,137 @@ mod test {
         };
         reader.collect(&mut resource_metrics).unwrap();
         assert_eq!(1, resource_metrics.scope_metrics.len());
+    }
+
+    struct TestExporter {
+        meter_provider: AggregateMeterProvider,
+        shutdown: Arc<AtomicBool>,
+    }
+
+    impl AggregationSelector for TestExporter {
+        fn aggregation(&self, _kind: InstrumentKind) -> Aggregation {
+            Aggregation::Default
+        }
+    }
+
+    impl TemporalitySelector for TestExporter {
+        fn temporality(&self, _kind: InstrumentKind) -> Temporality {
+            Temporality::Cumulative
+        }
+    }
+
+    #[async_trait]
+    impl PushMetricsExporter for TestExporter {
+        async fn export(&self, _metrics: &mut ResourceMetrics) -> Result<()> {
+            self.count();
+            Ok(())
+        }
+
+        async fn force_flush(&self) -> Result<()> {
+            self.count();
+            Ok(())
+        }
+
+        fn shutdown(&self) -> Result<()> {
+            self.count();
+            self.shutdown
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    impl TestExporter {
+        fn count(&self) {
+            let counter = self
+                .meter_provider
+                .versioned_meter("test", None::<String>, None::<String>, None)
+                .u64_counter("test.counter")
+                .init();
+            counter.add(1, &[]);
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_shutdown_exporter_metrics() {
+        // See the `shutdown` method implementation as to why this is tricky.
+        // This test calls the meter provider from within the exporter to ensure there is no deadlock possible.
+        let meter_provider = AggregateMeterProvider::default();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let periodic_reader = reader(&meter_provider, &shutdown);
+
+        let delegate = MeterProviderBuilder::default()
+            .with_reader(periodic_reader)
+            .build();
+
+        meter_provider.set(
+            MeterProviderType::OtelDefault,
+            Some(FilterMeterProvider::public(GlobalMeterProvider::new(
+                delegate,
+            ))),
+        );
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        meter_provider.shutdown();
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(shutdown.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_reload_exporter_metrics() {
+        // When exporters that interact with the meter provider are being refreshed we want to ensure that they don't deadlock.
+        // I don't think that this could have ever happened, but best to be safe and add a test.
+        let meter_provider = AggregateMeterProvider::default();
+        let shutdown1 = Arc::new(AtomicBool::new(false));
+        let periodic_reader = reader(&meter_provider, &shutdown1);
+
+        let delegate = MeterProviderBuilder::default()
+            .with_reader(periodic_reader)
+            .build();
+
+        meter_provider.set(
+            MeterProviderType::OtelDefault,
+            Some(FilterMeterProvider::public(GlobalMeterProvider::new(
+                delegate,
+            ))),
+        );
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let shutdown2 = Arc::new(AtomicBool::new(false));
+        let periodic_reader = reader(&meter_provider, &shutdown2);
+
+        let delegate = MeterProviderBuilder::default()
+            .with_reader(periodic_reader)
+            .build();
+
+        // Setting the meter provider should not deadlock.
+        meter_provider.set(
+            MeterProviderType::OtelDefault,
+            Some(FilterMeterProvider::public(GlobalMeterProvider::new(
+                delegate,
+            ))),
+        );
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        // The first meter provider should be shut down and the second is still active
+        assert!(shutdown1.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(!shutdown2.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    fn reader(
+        meter_provider: &AggregateMeterProvider,
+        shutdown: &Arc<AtomicBool>,
+    ) -> PeriodicReader {
+        PeriodicReader::builder(
+            TestExporter {
+                meter_provider: meter_provider.clone(),
+                shutdown: shutdown.clone(),
+            },
+            runtime::Tokio,
+        )
+        .with_interval(Duration::from_millis(10))
+        .with_timeout(Duration::from_millis(10))
+        .build()
     }
 }

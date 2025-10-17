@@ -1,15 +1,14 @@
-use std::borrow::Cow;
 use std::pin::Pin;
 use std::task::Poll;
 use std::time::Duration;
 
-use futures::future;
-use futures::stream::SplitStream;
 use futures::Future;
 use futures::Sink;
 use futures::SinkExt;
 use futures::Stream;
 use futures::StreamExt;
+use futures::future;
+use futures::stream::SplitStream;
 use http::HeaderValue;
 use pin_project_lite::pin_project;
 use schemars::JsonSchema;
@@ -19,10 +18,10 @@ use serde_json_bytes::Value;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 use tokio_stream::wrappers::IntervalStream;
-use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
-use tokio_tungstenite::tungstenite::protocol::CloseFrame;
-use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 
 use crate::graphql;
 
@@ -147,7 +146,7 @@ pub(crate) enum ServerMessage {
     },
     #[serde(alias = "connection_error")]
     Error {
-        id: String,
+        id: Option<String>,
         payload: ServerError,
     },
     Complete {
@@ -211,9 +210,8 @@ impl ServerMessage {
             | ServerMessage::KeepAlive
             | ServerMessage::Ping { .. }
             | ServerMessage::Pong { .. } => None,
-            ServerMessage::Next { id, .. }
-            | ServerMessage::Error { id, .. }
-            | ServerMessage::Complete { id } => Some(id.to_string()),
+            ServerMessage::Next { id, .. } | ServerMessage::Complete { id } => Some(id.to_string()),
+            ServerMessage::Error { id, .. } => id.clone(),
         }
     }
 }
@@ -283,7 +281,7 @@ where
             })?;
         if !matches!(resp, Some(Ok(ServerMessage::ConnectionAck))) {
             return Err(graphql::Error::builder()
-                .message(format!("didn't receive the connection ack from websocket connection but instead got: {:?}", resp))
+                .message(format!("didn't receive the connection ack from websocket connection but instead got: {resp:?}"))
                 .extension_code("WEBSOCKET_ACK_ERROR")
                 .build());
         }
@@ -344,12 +342,12 @@ where
                 ClientMessage::CloseWebsocket => {
                     future::ready(Ok(Message::Close(Some(CloseFrame{
                         code: CloseCode::Normal,
-                        reason: Cow::default(),
+                        reason: Default::default(),
                     }))))
                 },
                 message => {
                     future::ready(match serde_json::to_string(&message) {
-                        Ok(client_message_str) => Ok(Message::Text(client_message_str)),
+                        Ok(client_message_str) => Ok(Message::text(client_message_str)),
                         Err(err) => Err(Error::SerdeError(err)),
                     })
                 },
@@ -371,7 +369,7 @@ where
                     Ok(ServerMessage::Complete { id: id.to_string() })
                 } else {
                     Ok(ServerMessage::Error {
-                        id: id.to_string(),
+                        id: Some(id.to_string()),
                         payload: ServerError::Error(
                             graphql::Error::builder()
                                 .message(format!("websocket connection has been closed with error code '{code}' and reason '{reason}'"))
@@ -386,7 +384,7 @@ where
                 tracing::error!("cannot consume more message on websocket stream: {err:?}");
 
                 Ok(ServerMessage::Error {
-                    id: id.to_string(),
+                    id: Some(id.to_string()),
                     payload: ServerError::Error(
                         graphql::Error::builder()
                             .message("cannot read message from websocket")
@@ -430,10 +428,10 @@ where
                     .take_until(close_sentinel);
                 if let Err(err) = sink.send_all(&mut heartbeat_stream).await {
                     tracing::trace!("cannot send heartbeat: {err:?}");
-                    if let Some(close_sentinel) = heartbeat_stream.take_future() {
-                        if let Err(err) = close_sentinel.await {
-                            tracing::trace!("cannot shutdown sink: {err:?}");
-                        }
+                    if let Some(close_sentinel) = heartbeat_stream.take_future()
+                        && let Err(err) = close_sentinel.await
+                    {
+                        tracing::trace!("cannot shutdown sink: {err:?}");
                     }
                 }
             } else if let Err(err) = close_sentinel.await {
@@ -462,10 +460,10 @@ where
 
 impl<S> Drop for SubscriptionStream<S> {
     fn drop(&mut self) {
-        if let Some(close_signal) = self.close_signal.take() {
-            if let Err(err) = close_signal.send(()) {
-                tracing::trace!("cannot close the websocket stream: {err:?}");
-            }
+        if let Some(close_signal) = self.close_signal.take()
+            && let Err(err) = close_signal.send(())
+        {
+            tracing::trace!("cannot close the websocket stream: {err:?}");
         }
     }
 }
@@ -530,11 +528,13 @@ where
             Poll::Ready(message) => match message {
                 Some(server_message) => match server_message {
                     Ok(server_message) => {
-                        if let Some(id) = &server_message.id() {
-                            if this.id != id {
-                                tracing::error!("we should not receive data from other subscriptions, closing the stream");
-                                return Poll::Ready(None);
-                            }
+                        if let Some(id) = &server_message.id()
+                            && this.id != id
+                        {
+                            tracing::error!(
+                                "we should not receive data from other subscriptions, closing the stream"
+                            );
+                            return Poll::Ready(None);
                         }
                         if let ServerMessage::Ping { .. } = server_message {
                             // Send pong asynchronously
@@ -640,19 +640,17 @@ where
                 }
             }
         }
-        if let WebSocketProtocol::SubscriptionsTransportWs = this.protocol {
-            if !*this.terminated {
-                match Pin::new(
-                    &mut Pin::new(&mut this.stream).send(ClientMessage::ConnectionTerminate),
-                )
+        if let WebSocketProtocol::SubscriptionsTransportWs = this.protocol
+            && !*this.terminated
+        {
+            match Pin::new(&mut Pin::new(&mut this.stream).send(ClientMessage::ConnectionTerminate))
                 .poll(cx)
-                {
-                    Poll::Ready(_) => {
-                        *this.terminated = true;
-                    }
-                    Poll::Pending => {
-                        return Poll::Pending;
-                    }
+            {
+                Poll::Ready(_) => {
+                    *this.terminated = true;
+                }
+                Poll::Pending => {
+                    return Poll::Pending;
                 }
             }
         }
@@ -685,11 +683,10 @@ mod tests {
     use std::convert::Infallible;
     use std::net::SocketAddr;
 
-    use axum::extract::ws::Message as AxumWsMessage;
-    use axum::extract::WebSocketUpgrade;
-    use axum::routing::get;
     use axum::Router;
-    use axum::Server;
+    use axum::extract::WebSocketUpgrade;
+    use axum::extract::ws::Message as AxumWsMessage;
+    use axum::routing::get;
     use futures::FutureExt;
     use http::HeaderValue;
     use tokio_tungstenite::connect_async;
@@ -697,6 +694,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
+    use crate::assert_response_eq_ignoring_error_id;
     use crate::graphql::Request;
 
     async fn emulate_correct_websocket_server_new_protocol(
@@ -705,7 +703,7 @@ mod tests {
         port: Option<u16>,
     ) -> SocketAddr {
         let ws_handler = move |ws: WebSocketUpgrade| async move {
-            let res = ws.on_upgrade(move |mut socket| async move {
+            let res = ws.protocols(["graphql-transport-ws"]).on_upgrade(move |mut socket| async move {
                 let connection_ack = socket.recv().await.unwrap().unwrap().into_text().unwrap();
                 let ack_msg: ClientMessage = serde_json::from_str(&connection_ack).unwrap();
                 if let ClientMessage::ConnectionInit { payload } = ack_msg {
@@ -719,7 +717,7 @@ mod tests {
                 if send_ping {
                     // It turns out some servers may send Pings before they even ack the connection.
                     socket
-                        .send(AxumWsMessage::Text(
+                        .send(AxumWsMessage::text(
                             serde_json::to_string(&ServerMessage::Ping { payload: None }).unwrap(),
                         ))
                         .await
@@ -730,7 +728,7 @@ mod tests {
                 }
 
                 socket
-                    .send(AxumWsMessage::Text(
+                    .send(AxumWsMessage::text(
                         serde_json::to_string(&ServerMessage::ConnectionAck).unwrap(),
                     ))
                     .await
@@ -753,9 +751,7 @@ mod tests {
                 }
 
                 socket
-                    .send(AxumWsMessage::Text(
-                        "coucou".to_string(),
-                    ))
+                    .send(AxumWsMessage::text("coucou"))
                     .await
                     .unwrap();
 
@@ -768,7 +764,7 @@ mod tests {
 
                    tokio::time::sleep(duration).await;
                    let ping_message = socket.next().await.unwrap().unwrap();
-                   assert_eq!(ping_message, AxumWsMessage::Text(
+                   assert_eq!(ping_message, AxumWsMessage::text(
                        serde_json::to_string(&ClientMessage::Ping { payload: None }).unwrap(),
                    ));
 
@@ -780,38 +776,38 @@ mod tests {
                 }
 
                 socket
-                    .send(AxumWsMessage::Text(
+                    .send(AxumWsMessage::text(
                         serde_json::to_string(&ServerMessage::Next { id: client_id.clone().unwrap(), payload: graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}})).build() }).unwrap(),
                     ))
                     .await
                     .unwrap();
 
                 socket
-                    .send(AxumWsMessage::Text(
+                    .send(AxumWsMessage::text(
                         serde_json::to_string(&ServerMessage::Ping { payload: None }).unwrap(),
                     ))
                     .await
                     .unwrap();
 
                 let pong_message = socket.next().await.unwrap().unwrap();
-                assert_eq!(pong_message, AxumWsMessage::Text(
+                assert_eq!(pong_message, AxumWsMessage::text(
                     serde_json::to_string(&ClientMessage::Pong { payload: None }).unwrap(),
                 ));
 
                 socket
-                    .send(AxumWsMessage::Text(
+                    .send(AxumWsMessage::text(
                         serde_json::to_string(&ServerMessage::Ping { payload: None }).unwrap(),
                     ))
                     .await
                     .unwrap();
 
                 let pong_message = socket.next().await.unwrap().unwrap();
-                assert_eq!(pong_message, AxumWsMessage::Text(
+                assert_eq!(pong_message, AxumWsMessage::text(
                     serde_json::to_string(&ClientMessage::Pong { payload: None }).unwrap(),
                 ));
 
                 socket
-                    .send(AxumWsMessage::Text(
+                    .send(AxumWsMessage::text(
                         serde_json::to_string(&ServerMessage::Complete { id: client_id.unwrap() }).unwrap(),
                     ))
                     .await
@@ -827,13 +823,12 @@ mod tests {
         };
 
         let app = Router::new().route("/ws", get(ws_handler));
-        let server = Server::bind(
-            &format!("127.0.0.1:{}", port.unwrap_or_default())
-                .parse()
-                .unwrap(),
-        )
-        .serve(app.into_make_service());
-        let local_addr = server.local_addr();
+        let listener =
+            tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port.unwrap_or_default()))
+                .await
+                .unwrap();
+        let server = axum::serve(listener, app);
+        let local_addr = server.local_addr().unwrap();
         tokio::spawn(async { server.await.unwrap() });
         local_addr
     }
@@ -843,7 +838,7 @@ mod tests {
         port: Option<u16>,
     ) -> SocketAddr {
         let ws_handler = move |ws: WebSocketUpgrade| async move {
-            let res = ws.on_upgrade(move |mut socket| async move {
+            let res = ws.protocols(["graphql-ws"]).on_upgrade(move |mut socket| async move {
                 let init_connection = socket.recv().await.unwrap().unwrap().into_text().unwrap();
                 let init_msg: ClientMessage = serde_json::from_str(&init_connection).unwrap();
                 assert!(matches!(init_msg, ClientMessage::ConnectionInit { .. }));
@@ -851,7 +846,7 @@ mod tests {
                 if send_ping {
                     // It turns out some servers may send Pings before they even ack the connection.
                     socket
-                        .send(AxumWsMessage::Text(
+                        .send(AxumWsMessage::text(
                             serde_json::to_string(&ServerMessage::Ping { payload: None }).unwrap(),
                         ))
                         .await
@@ -861,13 +856,13 @@ mod tests {
                     assert!(matches!(pong_message, ClientMessage::Pong { payload: None }));
                 }
                 socket
-                    .send(AxumWsMessage::Text(
+                    .send(AxumWsMessage::text(
                         serde_json::to_string(&ServerMessage::ConnectionAck).unwrap(),
                     ))
                     .await
                     .unwrap();
                 socket
-                    .send(AxumWsMessage::Text(
+                    .send(AxumWsMessage::text(
                         serde_json::to_string(&ServerMessage::KeepAlive).unwrap(),
                     ))
                     .await
@@ -890,20 +885,18 @@ mod tests {
                 }
 
                 socket
-                    .send(AxumWsMessage::Text(
-                        "coucou".to_string(),
-                    ))
+                    .send(AxumWsMessage::text("coucou"))
                     .await
                     .unwrap();
 
                 socket
-                    .send(AxumWsMessage::Text(
+                    .send(AxumWsMessage::text(
                         serde_json::to_string(&ServerMessage::Next { id: client_id.clone().unwrap(), payload: graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}})).build() }).unwrap(),
                     ))
                     .await
                     .unwrap();
                 socket
-                    .send(AxumWsMessage::Text(
+                    .send(AxumWsMessage::text(
                         serde_json::to_string(&ServerMessage::KeepAlive).unwrap(),
                     ))
                     .await
@@ -924,13 +917,12 @@ mod tests {
         };
 
         let app = Router::new().route("/ws", get(ws_handler));
-        let server = Server::bind(
-            &format!("127.0.0.1:{}", port.unwrap_or_default())
-                .parse()
-                .unwrap(),
-        )
-        .serve(app.into_make_service());
-        let local_addr = server.local_addr();
+        let listener =
+            tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port.unwrap_or_default()))
+                .await
+                .unwrap();
+        let server = axum::serve(listener, app);
+        let local_addr = server.local_addr().unwrap();
         tokio::spawn(async { server.await.unwrap() });
         local_addr
     }
@@ -958,7 +950,7 @@ mod tests {
         let socket_addr =
             emulate_correct_websocket_server_new_protocol(send_ping, heartbeat_interval, port)
                 .await;
-        let url = url::Url::parse(format!("ws://{}/ws", socket_addr).as_str()).unwrap();
+        let url = format!("ws://{socket_addr}/ws");
         let mut request = url.into_client_request().unwrap();
         request.headers_mut().insert(
             http::header::SEC_WEBSOCKET_PROTOCOL,
@@ -988,7 +980,7 @@ mod tests {
             .unwrap();
 
         let next_payload = gql_read_stream.next().await.unwrap();
-        assert_eq!(next_payload, graphql::Response::builder()
+        assert_response_eq_ignoring_error_id!(next_payload, graphql::Response::builder()
             .error(
                 graphql::Error::builder()
                     .message(
@@ -1014,6 +1006,80 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_ws_connection_new_proto_error_on_init() {
+        let ws_handler = move |ws: WebSocketUpgrade| async move {
+            let res =
+                ws.protocols(["graphql-transport-ws"])
+                    .on_upgrade(move |mut socket| async move {
+                        let connection_ack =
+                            socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                        let ack_msg: ClientMessage = serde_json::from_str(&connection_ack).unwrap();
+                        if let ClientMessage::ConnectionInit { payload } = ack_msg {
+                            assert_eq!(
+                                payload,
+                                Some(serde_json_bytes::json!({"connectionParams": {
+                                    "token": "XXX"
+                                }}))
+                            );
+                        } else {
+                            panic!("it should be a connection init message");
+                        }
+
+                        socket
+                            .send(AxumWsMessage::text(
+                                r#"{"type": "connection_error", "payload": {"message": "PAYLOAD_MESSAGE_ERROR"}}"#,
+                            ))
+                            .await
+                            .unwrap();
+
+                        socket.close().await.unwrap();
+                    });
+
+            Ok::<_, Infallible>(res)
+        };
+
+        let app = Router::new().route("/ws", get(ws_handler));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let server = axum::serve(listener, app);
+        let socket_addr = server.local_addr().unwrap();
+        tokio::spawn(async { server.await.unwrap() });
+
+        let url = format!("ws://{socket_addr}/ws");
+        let mut request = url.into_client_request().unwrap();
+        request.headers_mut().insert(
+            http::header::SEC_WEBSOCKET_PROTOCOL,
+            HeaderValue::from_static("graphql-transport-ws"),
+        );
+        let (ws_stream, _resp) = connect_async(request).await.unwrap();
+
+        let sub_uuid = Uuid::new_v4();
+        let res = GraphqlWebSocket::new(
+            convert_websocket_stream(ws_stream, sub_uuid.to_string()),
+            sub_uuid.to_string(),
+            WebSocketProtocol::GraphqlWs,
+            Some(serde_json_bytes::json!({
+                "token": "XXX"
+            })),
+        )
+        .await;
+
+        assert!(res.is_err());
+        let err = res.err().unwrap();
+        println!("err: {err:?}");
+        assert!(
+            err.message
+                .as_str()
+                .starts_with("didn't receive the connection ack from websocket connection")
+        );
+        assert!(
+            err.message
+                .as_str()
+                .contains(r#"Error(Error { message: "PAYLOAD_MESSAGE_ERROR"#)
+        );
+        assert_eq!(err.extensions.get("code").unwrap(), "WEBSOCKET_ACK_ERROR");
+    }
+
+    #[tokio::test]
     async fn test_ws_connection_old_proto_with_ping() {
         test_ws_connection_old_proto(true, None).await
     }
@@ -1025,7 +1091,7 @@ mod tests {
 
     async fn test_ws_connection_old_proto(send_ping: bool, port: Option<u16>) {
         let socket_addr = emulate_correct_websocket_server_old_protocol(send_ping, port).await;
-        let url = url::Url::parse(format!("ws://{}/ws", socket_addr).as_str()).unwrap();
+        let url = format!("ws://{socket_addr}/ws");
         let mut request = url.into_client_request().unwrap();
         request.headers_mut().insert(
             http::header::SEC_WEBSOCKET_PROTOCOL,
@@ -1050,7 +1116,8 @@ mod tests {
             .unwrap();
 
         let next_payload = gql_read_stream.next().await.unwrap();
-        assert_eq!(next_payload, graphql::Response::builder()
+
+        assert_response_eq_ignoring_error_id!(next_payload, graphql::Response::builder()
             .error(
                 graphql::Error::builder()
                     .message(

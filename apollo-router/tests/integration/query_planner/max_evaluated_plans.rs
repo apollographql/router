@@ -1,7 +1,7 @@
 use serde_json::json;
 
-use crate::integration::common::Query;
 use crate::integration::IntegrationTest;
+use crate::integration::common::Query;
 
 fn assert_evaluated_plans(prom: &str, expected: u64) {
     let line = prom
@@ -59,7 +59,6 @@ async fn does_not_exceed_max_evaluated_plans_legacy() {
     let mut router = IntegrationTest::builder()
         .config(
             r#"
-            experimental_query_planner_mode: legacy
             telemetry:
               exporters:
                 metrics:
@@ -103,7 +102,6 @@ async fn does_not_exceed_max_evaluated_plans() {
     let mut router = IntegrationTest::builder()
         .config(
             r#"
-            experimental_query_planner_mode: new
             telemetry:
               exporters:
                 metrics:

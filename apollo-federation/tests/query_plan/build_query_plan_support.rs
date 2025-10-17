@@ -3,13 +3,12 @@ use std::sync::Mutex;
 use std::sync::OnceLock;
 
 use apollo_compiler::collections::IndexSet;
-use apollo_federation::query_plan::query_planner::QueryPlanner;
-use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 use apollo_federation::query_plan::FetchNode;
 use apollo_federation::query_plan::PlanNode;
 use apollo_federation::query_plan::QueryPlan;
 use apollo_federation::query_plan::TopLevelPlanNode;
-use apollo_federation::schema::ValidFederationSchema;
+use apollo_federation::query_plan::query_planner::QueryPlanner;
+use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 use sha1::Digest;
 
 const ROVER_FEDERATION_VERSION: &str = "2.9.0";
@@ -32,7 +31,7 @@ macro_rules! planner {
         $( $subgraph_name: tt: $subgraph_schema: expr),+
         $(,)?
     ) => {{
-        $crate::query_plan::build_query_plan_support::api_schema_and_planner(
+        $crate::query_plan::build_query_plan_support::test_planner(
             insta::_function_name!(),
             $config,
             &[ $( (subgraph_name!($subgraph_name), $subgraph_schema) ),+ ],
@@ -59,47 +58,43 @@ macro_rules! subgraph_name {
 /// formatted query plan string.
 /// Run `cargo insta review` to diff and accept changes to the generated query plan.
 macro_rules! assert_plan {
-    ($api_schema_and_planner: expr, $operation: expr, $options: expr, @$expected: literal) => {{
-        let (api_schema, planner) = $api_schema_and_planner;
+    (validate_correctness = $validate_correctness: expr, $api_schema_and_planner: expr, $operation: expr, @$expected: literal) => {{
+        assert_plan!($api_schema_and_planner, $operation, Default::default(), $validate_correctness, @$expected)
+    }};
+    ($planner: expr, $operation: expr, $options: expr, $validate_correctness: expr, @$expected: literal) => {{
+        let api_schema = $planner.api_schema();
         let document = apollo_compiler::ExecutableDocument::parse_and_validate(
             api_schema.schema(),
             $operation,
             "operation.graphql",
         )
-        .unwrap();
-        let plan = planner.build_query_plan(&document, None, $options).unwrap();
+        .expect("valid graphql document");
+        let plan = $planner.build_query_plan(&document, None, $options).expect("query plan generated");
         insta::assert_snapshot!(plan, @$expected);
+        // temporary workaround for correctness errors such as FED-515
+        if $validate_correctness {
+            apollo_federation::correctness::check_plan($planner.api_schema(), $planner.supergraph_schema(), $planner.subgraph_schemas(), &document, &plan).expect("generated correct plan");
+        }
         plan
     }};
+    ($api_schema_and_planner: expr, $operation: expr, $options: expr, @$expected: literal) => {{
+        assert_plan!($api_schema_and_planner, $operation, $options, true, @$expected)
+    }};
     ($api_schema_and_planner: expr, $operation: expr, @$expected: literal) => {{
-        let (api_schema, planner) = $api_schema_and_planner;
-        let document = apollo_compiler::ExecutableDocument::parse_and_validate(
-            api_schema.schema(),
-            $operation,
-            "operation.graphql",
-        )
-        .unwrap();
-        let plan = planner.build_query_plan(&document, None, Default::default()).unwrap();
-        insta::assert_snapshot!(plan, @$expected);
-        plan
+        assert_plan!($api_schema_and_planner, $operation, Default::default(), true, @$expected)
     }};
 }
 
 #[track_caller]
-pub(crate) fn api_schema_and_planner(
+pub(crate) fn test_planner(
     function_path: &'static str,
     config: QueryPlannerConfig,
     subgraph_names_and_schemas: &[(&str, &str)],
-) -> (ValidFederationSchema, QueryPlanner) {
+) -> QueryPlanner {
     let supergraph = compose(function_path, subgraph_names_and_schemas);
-    let supergraph = apollo_federation::Supergraph::new(&supergraph).unwrap();
-    let planner = QueryPlanner::new(&supergraph, config).unwrap();
-    let api_schema_config = apollo_federation::ApiSchemaOptions {
-        include_defer: true,
-        include_stream: false,
-    };
-    let api_schema = supergraph.to_api_schema(api_schema_config).unwrap();
-    (api_schema, planner)
+    let supergraph = apollo_federation::Supergraph::new_with_router_specs(&supergraph)
+        .expect("valid supergraph");
+    QueryPlanner::new(&supergraph, config).expect("can create query planner")
 }
 
 #[track_caller]
@@ -121,7 +116,7 @@ pub(crate) fn compose(
         .map(|(name, schema)| {
             (
                 *name,
-                format!("extend schema {DEFAULT_LINK_DIRECTIVE}\n\n{}", schema,),
+                format!("extend schema {DEFAULT_LINK_DIRECTIVE}\n\n{schema}",),
             )
         })
         .collect();

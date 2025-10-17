@@ -6,10 +6,14 @@
             "f12bcddc663aa4c4d90218a1bb718fe74e0e7be3",
             "e1e6f93341aea383da2ec6b36a9bfcf7e63a111e",
             "e5590027506337381887dadef9baadd063e05830",
+            "b4fdf65c5eaca08057886e5b30553201302b9764",
+            "c8ae92e47de4e1bb3ae56e9beed27fbc2a1e136a",
 
             # https://github.com/apollographql/router/blob/d826844c8cf433f78938059f02feecc108468e49/licenses.html#L8558
             # https://github.com/apollographql/router-private/blob/d826844c8cf433f78938059f02feecc108468e49/licenses.html#L8558
             "d826844c8cf433f78938059f02feecc108468e49", 
+            # Not a key: https://github.com/apollographql/router/pull/8193#issuecomment-3249460075
+            "77700b93798ce98eaf75c3b02b70198e7b730ddb",
         ]
 
         paths = [
@@ -99,4 +103,16 @@
         paths = [
             '''^apollo-router\/src\/.+\/testdata\/.+''',
             '''^examples/telemetry/jaeger-collector.router.yaml$'''
+        ]
+
+[[ rules ]]
+    id = "apollo-graphos-api-key"
+    [ rules.allowlist ]
+        commits = [
+            "8cf818fce53083c14580f3c02581ccf9c9fb737d",
+            "16fdf3249dfe7e9d7841a78ca9e3fc333e70faaf",
+        ]
+
+        paths = [
+            '''^apollo-router/tests/integration/oci.rs$''',            
         ]

@@ -1,0 +1,25 @@
+---
+source: apollo-router/src/compute_job/mod.rs
+expression: yaml
+---
+- fields: {}
+  level: INFO
+  message: Outer
+  span:
+    name: test_observability
+  spans:
+    - name: test_observability
+- fields: {}
+  level: INFO
+  message: Inner
+  span:
+    job.age: P4
+    job.type: query_parsing
+    name: compute_job.execution
+  spans:
+    - name: test_observability
+    - job.type: query_parsing
+      name: compute_job
+    - job.age: P4
+      job.type: query_parsing
+      name: compute_job.execution

@@ -21,14 +21,15 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::error::RecvError;
-use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::IntervalStream;
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
-use crate::graphql;
-use crate::spec::Schema;
 use crate::Configuration;
+use crate::graphql;
+use crate::metrics::FutureMetricsExt;
+use crate::spec::Schema;
 
 static NOTIFY_CHANNEL_SIZE: usize = 1024;
 static DEFAULT_MSG_CHANNEL_SIZE: usize = 128;
@@ -52,11 +53,14 @@ pub(crate) enum NotifyError<K, V> {
 type ResponseSender<V> =
     oneshot::Sender<Option<(broadcast::Sender<Option<V>>, broadcast::Receiver<Option<V>>)>>;
 
-type ResponseSenderWithCreated<V> = oneshot::Sender<(
-    broadcast::Sender<Option<V>>,
-    broadcast::Receiver<Option<V>>,
-    bool,
-)>;
+pub(crate) struct CreatedTopicPayload<V> {
+    msg_sender: broadcast::Sender<Option<V>>,
+    msg_receiver: broadcast::Receiver<Option<V>>,
+    closing_signal: broadcast::Receiver<()>,
+    created: bool,
+}
+
+type ResponseSenderWithCreated<V> = oneshot::Sender<CreatedTopicPayload<V>>;
 
 pub(crate) enum Notification<K, V> {
     CreateOrSubscribe {
@@ -66,6 +70,8 @@ pub(crate) enum Notification<K, V> {
         // To know if it has been created or re-used
         response_sender: ResponseSenderWithCreated<V>,
         heartbeat_enabled: bool,
+        // Useful for the metric we create
+        operation_name: Option<String>,
     },
     Subscribe {
         topic: K,
@@ -153,7 +159,9 @@ where
     ) -> Notify<K, V> {
         let (sender, receiver) = mpsc::channel(NOTIFY_CHANNEL_SIZE);
         let receiver_stream: ReceiverStream<Notification<K, V>> = ReceiverStream::new(receiver);
-        tokio::task::spawn(task(receiver_stream, ttl, heartbeat_error_message));
+        tokio::task::spawn(
+            task(receiver_stream, ttl, heartbeat_error_message).with_current_meter_provider(),
+        );
         Notify {
             sender,
             queue_size,
@@ -179,7 +187,9 @@ impl<K, V> Notify<K, V> {
         self.router_broadcasts.configuration.0.send(configuration).expect("cannot send the configuration update to the static channel. Should not happen because the receiver will always live in this struct; qed");
     }
     /// Receive the new configuration everytime we have a new router configuration
-    pub(crate) fn subscribe_configuration(&self) -> impl Stream<Item = Weak<Configuration>> {
+    pub(crate) fn subscribe_configuration(
+        &self,
+    ) -> impl Stream<Item = Weak<Configuration>> + use<K, V> {
         self.router_broadcasts.subscribe_configuration()
     }
     /// Receive the new schema everytime we have a new schema
@@ -187,7 +197,7 @@ impl<K, V> Notify<K, V> {
         self.router_broadcasts.schema.0.send(schema).expect("cannot send the schema update to the static channel. Should not happen because the receiver will always live in this struct; qed");
     }
     /// Receive the new schema everytime we have a new schema
-    pub(crate) fn subscribe_schema(&self) -> impl Stream<Item = Arc<Schema>> {
+    pub(crate) fn subscribe_schema(&self) -> impl Stream<Item = Arc<Schema>> + use<K, V> {
         self.router_broadcasts.subscribe_schema()
     }
 }
@@ -205,12 +215,63 @@ where
         Ok(())
     }
 
-    // boolean in the tuple means `created`
+    /// Creates or subscribes to a topic, returning a handle and subscription state.
+    ///
+    /// The `Ok()` branch of the `Result` is a tuple, where:
+    ///     - .0: a `Handle` on the subscription event listener,
+    ///     - .1: a boolean, where
+    ///              - `true`: call to this fn `created` this subscription, and
+    ///              - `false`: call to this fn was for a deduplicated subscription
+    ///                         i.e. subscription already exists,
+    ///     - .2: a closing signal in a form of `broadcast::Receiver` that gets
+    ///            triggered once the subscription is closed.
+    ///
+    /// # Closing Signal Usage
+    ///
+    /// The closing signal's usage depends on how subscriptions are managed:
+    ///
+    /// ## Callback Mode (HTTP-based subscriptions)
+    /// - The closing signal is typically **unused** as there are no long-running
+    ///   forwarding tasks to clean up
+    /// - Subscriptions are managed via HTTP callbacks to a public URL
+    /// - Subscription lifecycle is controlled through HTTP responses (404 closes the subscription)
+    /// - Always called with `heartbeat_enabled = true` to enable TTL-based timeout checking
+    ///
+    /// ## Passthrough Mode (WebSocket-based subscriptions)  
+    /// - The closing signal **must be monitored** by the forwarding task using `tokio::select!`
+    /// - Maintains persistent WebSocket connections to subgraphs
+    /// - Needed for proper cleanup when subscriptions are terminated, especially important
+    ///   for deduplication (multiple clients may share one subgraph connection)
+    /// - Always called with `heartbeat_enabled = false` as WebSockets have their own
+    ///   connection management
+    ///
+    /// # Parameters
+    /// - `topic`: The subscription topic identifier
+    /// - `heartbeat_enabled`: Controls TTL-based timeout checking at the notification layer:
+    ///   - `true`: Enables TTL checking. For callback mode, subscriptions will timeout if
+    ///     no heartbeat is received within the TTL period. The actual heartbeat interval
+    ///     is configured separately and sent to subgraphs in the subscription extension.
+    ///     When subgraphs send heartbeat messages, they're processed via `invalid_ids()`
+    ///     which calls `touch()` to update the subscription's `updated_at` timestamp.
+    ///   - `false`: Disables TTL checking (used by passthrough/WebSocket mode)
+    /// - `operation_name`: Optional GraphQL operation name for metrics
+    ///
+    /// # Heartbeat Processing for Callback Mode
+    ///
+    /// When callback mode is configured with a heartbeat interval:
+    /// 1. The interval is converted to milliseconds and sent to the subgraph as
+    ///    `heartbeat_interval_ms` in the subscription extension
+    /// 2. Subgraphs send periodic heartbeat callbacks with subscription IDs
+    /// 3. The heartbeat handler validates IDs and calls `notify.invalid_ids()`
+    /// 4. This updates each valid subscription's timestamp via `touch()`
+    /// 5. The TTL checker uses these timestamps to determine if subscriptions are alive
+    ///    and closes those that haven't been touched within the TTL period
     pub(crate) async fn create_or_subscribe(
         &mut self,
         topic: K,
         heartbeat_enabled: bool,
-    ) -> Result<(Handle<K, V>, bool), NotifyError<K, V>> {
+        operation_name: Option<String>,
+    ) -> Result<(Handle<K, V>, bool, broadcast::Receiver<()>), NotifyError<K, V>> {
         let (sender, _receiver) =
             broadcast::channel(self.queue_size.unwrap_or(DEFAULT_MSG_CHANNEL_SIZE));
 
@@ -221,10 +282,16 @@ where
                 msg_sender: sender,
                 response_sender: tx,
                 heartbeat_enabled,
+                operation_name,
             })
             .await?;
 
-        let (msg_sender, msg_receiver, created) = rx.await?;
+        let CreatedTopicPayload {
+            msg_sender,
+            msg_receiver,
+            closing_signal,
+            created,
+        } = rx.await?;
         let handle = Handle::new(
             topic,
             self.sender.clone(),
@@ -232,7 +299,7 @@ where
             BroadcastStream::from(msg_receiver),
         );
 
-        Ok((handle, created))
+        Ok((handle, created, closing_signal))
     }
 
     pub(crate) async fn subscribe(&mut self, topic: K) -> Result<Handle<K, V>, NotifyError<K, V>> {
@@ -511,7 +578,7 @@ where
         match Pin::new(&mut this.msg_receiver).poll_next(cx) {
             Poll::Ready(Some(Err(BroadcastStreamRecvError::Lagged(_)))) => {
                 u64_counter!(
-                    "apollo_router_skipped_event_count",
+                    "apollo.router.skipped.event.count",
                     "Amount of events dropped from the internal message queue",
                     1u64
                 );
@@ -615,8 +682,8 @@ async fn task<K, V>(
                         match message {
                             Notification::Unsubscribe { topic } => pubsub.unsubscribe(topic),
                             Notification::ForceDelete { topic } => pubsub.force_delete(topic),
-                            Notification::CreateOrSubscribe { topic,  msg_sender, response_sender, heartbeat_enabled } => {
-                                pubsub.subscribe_or_create(topic, msg_sender, response_sender, heartbeat_enabled);
+                            Notification::CreateOrSubscribe { topic,  msg_sender, response_sender, heartbeat_enabled, operation_name } => {
+                                pubsub.subscribe_or_create(topic, msg_sender, response_sender, heartbeat_enabled, operation_name);
                             }
                             Notification::Subscribe {
                                 topic,
@@ -693,21 +760,34 @@ async fn task<K, V>(
 #[derive(Debug)]
 struct Subscription<V> {
     msg_sender: broadcast::Sender<Option<V>>,
+    closing_signal: broadcast::Sender<()>,
     heartbeat_enabled: bool,
     updated_at: Instant,
+    operation_name: Option<String>,
 }
 
 impl<V> Subscription<V> {
-    fn new(msg_sender: broadcast::Sender<Option<V>>, heartbeat_enabled: bool) -> Self {
+    fn new(
+        msg_sender: broadcast::Sender<Option<V>>,
+        closing_signal: broadcast::Sender<()>,
+        heartbeat_enabled: bool,
+        operation_name: Option<String>,
+    ) -> Self {
         Self {
             msg_sender,
+            closing_signal,
             heartbeat_enabled,
             updated_at: Instant::now(),
+            operation_name,
         }
     }
     // Update the updated_at value
     fn touch(&mut self) {
         self.updated_at = Instant::now();
+    }
+
+    fn closing_signal(&self) -> broadcast::Receiver<()> {
+        self.closing_signal.subscribe()
     }
 }
 
@@ -749,19 +829,31 @@ where
         topic: K,
         sender: broadcast::Sender<Option<V>>,
         heartbeat_enabled: bool,
-    ) {
+        operation_name: Option<String>,
+    ) -> broadcast::Receiver<()> {
+        let (closing_signal_tx, closing_signal_rx) = broadcast::channel(1);
         let existed = self
             .subscriptions
-            .insert(topic, Subscription::new(sender, heartbeat_enabled))
+            .insert(
+                topic,
+                Subscription::new(
+                    sender,
+                    closing_signal_tx,
+                    heartbeat_enabled,
+                    operation_name.clone(),
+                ),
+            )
             .is_some();
         if !existed {
-            // TODO: deprecated name, should use our new convention apollo.router. for router next
             i64_up_down_counter!(
-                "apollo_router_opened_subscriptions",
+                "apollo.router.opened.subscriptions",
                 "Number of opened subscriptions",
-                1
+                1,
+                graphql.operation.name = operation_name.unwrap_or_default()
             );
         }
+
+        closing_signal_rx
     }
 
     fn subscribe(&mut self, topic: K, sender: ResponseSender<V>) {
@@ -784,19 +876,27 @@ where
         msg_sender: broadcast::Sender<Option<V>>,
         sender: ResponseSenderWithCreated<V>,
         heartbeat_enabled: bool,
+        operation_name: Option<String>,
     ) {
         match self.subscriptions.get(&topic) {
             Some(subscription) => {
-                let _ = sender.send((
-                    subscription.msg_sender.clone(),
-                    subscription.msg_sender.subscribe(),
-                    false,
-                ));
+                let _ = sender.send(CreatedTopicPayload {
+                    msg_sender: subscription.msg_sender.clone(),
+                    msg_receiver: subscription.msg_sender.subscribe(),
+                    closing_signal: subscription.closing_signal(),
+                    created: false,
+                });
             }
             None => {
-                self.create_topic(topic, msg_sender.clone(), heartbeat_enabled);
+                let closing_signal =
+                    self.create_topic(topic, msg_sender.clone(), heartbeat_enabled, operation_name);
 
-                let _ = sender.send((msg_sender.clone(), msg_sender.subscribe(), true));
+                let _ = sender.send(CreatedTopicPayload {
+                    msg_sender: msg_sender.clone(),
+                    msg_receiver: msg_sender.subscribe(),
+                    closing_signal,
+                    created: true,
+                });
             }
         }
     }
@@ -809,16 +909,9 @@ where
             }
             None => tracing::trace!("Cannot find the subscription to unsubscribe"),
         }
-        #[allow(clippy::collapsible_if)]
         if topic_to_delete {
             tracing::trace!("deleting subscription from unsubscribe");
-            if self.subscriptions.remove(&topic).is_some() {
-                i64_up_down_counter!(
-                    "apollo_router_opened_subscriptions",
-                    "Number of opened subscriptions",
-                    -1
-                );
-            }
+            self.force_delete(topic);
         };
     }
 
@@ -884,29 +977,19 @@ where
             self.subscriptions = remaining_subs;
 
             // Send error message to all killed connections
-            for (_subscriber_id, subscription) in closed_subs {
+            for (_, subscription) in closed_subs {
                 tracing::trace!("deleting subscription from kill_dead_topics");
-                i64_up_down_counter!(
-                    "apollo_router_opened_subscriptions",
-                    "Number of opened subscriptions",
-                    -1
-                );
-                if let Some(heartbeat_error_message) = &heartbeat_error_message {
-                    let _ = subscription
-                        .msg_sender
-                        .send(heartbeat_error_message.clone().into());
-                    let _ = subscription.msg_sender.send(None);
-                }
+                self._force_delete(subscription, heartbeat_error_message.as_ref());
             }
         }
     }
 
     #[cfg(test)]
     fn try_delete(&mut self, topic: K) {
-        if let Some(sub) = self.subscriptions.get(&topic) {
-            if sub.msg_sender.receiver_count() > 1 {
-                return;
-            }
+        if let Some(sub) = self.subscriptions.get(&topic)
+            && sub.msg_sender.receiver_count() > 1
+        {
+            return;
         }
 
         self.force_delete(topic);
@@ -916,13 +999,23 @@ where
         tracing::trace!("deleting subscription from force_delete");
         let sub = self.subscriptions.remove(&topic);
         if let Some(sub) = sub {
-            i64_up_down_counter!(
-                "apollo_router_opened_subscriptions",
-                "Number of opened subscriptions",
-                -1
-            );
-            let _ = sub.msg_sender.send(None);
+            self._force_delete(sub, None);
         }
+    }
+
+    fn _force_delete(&mut self, sub: Subscription<V>, error_message: Option<&V>) {
+        tracing::trace!("deleting subscription from _force_delete");
+        i64_up_down_counter!(
+            "apollo.router.opened.subscriptions",
+            "Number of opened subscriptions",
+            -1,
+            graphql.operation.name = sub.operation_name.unwrap_or_default()
+        );
+        if let Some(error_message) = error_message {
+            let _ = sub.msg_sender.send(error_message.clone().into());
+        }
+        let _ = sub.msg_sender.send(None);
+        let _ = sub.closing_signal.send(());
     }
 
     #[cfg(test)]
@@ -964,17 +1057,20 @@ pub(crate) struct RouterBroadcasts {
 impl RouterBroadcasts {
     pub(crate) fn new() -> Self {
         Self {
-            configuration: broadcast::channel(1),
-            schema: broadcast::channel(1),
+            // Set to 2 to avoid potential deadlock when triggering a config/schema change mutiple times in a row
+            configuration: broadcast::channel(2),
+            schema: broadcast::channel(2),
         }
     }
 
-    pub(crate) fn subscribe_configuration(&self) -> impl Stream<Item = Weak<Configuration>> {
+    pub(crate) fn subscribe_configuration(
+        &self,
+    ) -> impl Stream<Item = Weak<Configuration>> + use<> {
         BroadcastStream::new(self.configuration.0.subscribe())
             .filter_map(|cfg| futures::future::ready(cfg.ok()))
     }
 
-    pub(crate) fn subscribe_schema(&self) -> impl Stream<Item = Arc<Schema>> {
+    pub(crate) fn subscribe_schema(&self) -> impl Stream<Item = Arc<Schema>> + use<> {
         BroadcastStream::new(self.schema.0.subscribe())
             .filter_map(|schema| futures::future::ready(schema.ok()))
     }
@@ -988,6 +1084,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
+    use crate::metrics::FutureMetricsExt;
 
     #[tokio::test]
     async fn subscribe() {
@@ -995,9 +1092,15 @@ mod tests {
         let topic_1 = Uuid::new_v4();
         let topic_2 = Uuid::new_v4();
 
-        let (handle1, created) = notify.create_or_subscribe(topic_1, false).await.unwrap();
+        let (handle1, created, mut subscription_closing_signal_1) = notify
+            .create_or_subscribe(topic_1, false, None)
+            .await
+            .unwrap();
         assert!(created);
-        let (_handle2, created) = notify.create_or_subscribe(topic_2, false).await.unwrap();
+        let (_handle2, created, mut subscription_closing_signal_2) = notify
+            .create_or_subscribe(topic_2, false, None)
+            .await
+            .unwrap();
         assert!(created);
 
         let handle_1_bis = notify.subscribe(topic_1).await.unwrap();
@@ -1026,6 +1129,9 @@ mod tests {
 
         let subscriptions_nb = notify.debug().await.unwrap();
         assert_eq!(subscriptions_nb, 0);
+
+        subscription_closing_signal_1.try_recv().unwrap();
+        subscription_closing_signal_2.try_recv().unwrap();
     }
 
     #[tokio::test]
@@ -1034,9 +1140,15 @@ mod tests {
         let topic_1 = Uuid::new_v4();
         let topic_2 = Uuid::new_v4();
 
-        let (handle1, created) = notify.create_or_subscribe(topic_1, true).await.unwrap();
+        let (handle1, created, mut subscription_closing_signal_1) = notify
+            .create_or_subscribe(topic_1, true, None)
+            .await
+            .unwrap();
         assert!(created);
-        let (_handle2, created) = notify.create_or_subscribe(topic_2, true).await.unwrap();
+        let (_handle2, created, mut subscription_closing_signal_2) = notify
+            .create_or_subscribe(topic_2, true, None)
+            .await
+            .unwrap();
         assert!(created);
 
         let mut _handle_1_bis = notify.subscribe(topic_1).await.unwrap();
@@ -1069,6 +1181,104 @@ mod tests {
 
         let subscriptions_nb = notify.debug().await.unwrap();
         assert_eq!(subscriptions_nb, 0);
+        drop(handle1);
+        subscription_closing_signal_1.try_recv().unwrap();
+        subscription_closing_signal_2.try_recv().unwrap();
+    }
+
+    #[tokio::test]
+    async fn it_subscribe_and_delete_metrics() {
+        async {
+            let mut notify = Notify::builder().build();
+            let topic_1 = Uuid::new_v4();
+            let topic_2 = Uuid::new_v4();
+
+            let (handle1, created, mut subscription_closing_signal_1) = notify
+                .create_or_subscribe(topic_1, true, Some("TestSubscription".to_string()))
+                .await
+                .unwrap();
+            assert!(created);
+            let (_handle2, created, mut subscription_closing_signal_2) = notify
+                .create_or_subscribe(topic_2, true, Some("TestSubscriptionBis".to_string()))
+                .await
+                .unwrap();
+            assert!(created);
+            assert_up_down_counter!(
+                "apollo.router.opened.subscriptions",
+                1i64,
+                "graphql.operation.name" = "TestSubscription"
+            );
+            assert_up_down_counter!(
+                "apollo.router.opened.subscriptions",
+                1i64,
+                "graphql.operation.name" = "TestSubscriptionBis"
+            );
+
+            let mut _handle_1_bis = notify.subscribe(topic_1).await.unwrap();
+            let mut _handle_1_other = notify.subscribe(topic_1).await.unwrap();
+            let mut cloned_notify = notify.clone();
+            let mut handle = cloned_notify.subscribe(topic_1).await.unwrap().into_sink();
+            handle
+                .send_sync(serde_json_bytes::json!({"test": "ok"}))
+                .unwrap();
+            drop(handle);
+            assert!(notify.exist(topic_1).await.unwrap());
+            drop(_handle_1_bis);
+            drop(_handle_1_other);
+
+            notify.try_delete(topic_1).unwrap();
+            assert_up_down_counter!(
+                "apollo.router.opened.subscriptions",
+                1i64,
+                "graphql.operation.name" = "TestSubscription"
+            );
+            assert_up_down_counter!(
+                "apollo.router.opened.subscriptions",
+                1i64,
+                "graphql.operation.name" = "TestSubscriptionBis"
+            );
+
+            let subscriptions_nb = notify.debug().await.unwrap();
+            assert_eq!(subscriptions_nb, 1);
+
+            assert!(!notify.exist(topic_1).await.unwrap());
+
+            notify.force_delete(topic_1).await.unwrap();
+            assert_up_down_counter!(
+                "apollo.router.opened.subscriptions",
+                0i64,
+                "graphql.operation.name" = "TestSubscription"
+            );
+            assert_up_down_counter!(
+                "apollo.router.opened.subscriptions",
+                1i64,
+                "graphql.operation.name" = "TestSubscriptionBis"
+            );
+
+            let mut handle1 = handle1.into_stream();
+            let new_msg = handle1.next().await.unwrap();
+            assert_eq!(new_msg, serde_json_bytes::json!({"test": "ok"}));
+            assert!(handle1.next().await.is_none());
+            assert!(notify.exist(topic_2).await.unwrap());
+            notify.try_delete(topic_2).unwrap();
+
+            let subscriptions_nb = notify.debug().await.unwrap();
+            assert_eq!(subscriptions_nb, 0);
+            assert_up_down_counter!(
+                "apollo.router.opened.subscriptions",
+                0i64,
+                "graphql.operation.name" = "TestSubscription"
+            );
+            assert_up_down_counter!(
+                "apollo.router.opened.subscriptions",
+                0i64,
+                "graphql.operation.name" = "TestSubscriptionBis"
+            );
+            subscription_closing_signal_1.try_recv().unwrap();
+            subscription_closing_signal_2.try_recv().unwrap();
+        }
+        .with_metrics()
+        .await;
     }
 
     #[tokio::test]
@@ -1080,9 +1290,15 @@ mod tests {
         let topic_1 = Uuid::new_v4();
         let topic_2 = Uuid::new_v4();
 
-        let (handle1, created) = notify.create_or_subscribe(topic_1, true).await.unwrap();
+        let (handle1, created, mut subscription_closing_signal_1) = notify
+            .create_or_subscribe(topic_1, true, None)
+            .await
+            .unwrap();
         assert!(created);
-        let (_handle2, created) = notify.create_or_subscribe(topic_2, true).await.unwrap();
+        let (_handle2, created, mut subscription_closing_signal_2) = notify
+            .create_or_subscribe(topic_2, true, None)
+            .await
+            .unwrap();
         assert!(created);
 
         let handle_1_bis = notify.subscribe(topic_1).await.unwrap();
@@ -1130,6 +1346,8 @@ mod tests {
 
         assert!(!notify.exist(topic_1).await.unwrap());
         assert!(!notify.exist(topic_2).await.unwrap());
+        subscription_closing_signal_1.try_recv().unwrap();
+        subscription_closing_signal_2.try_recv().unwrap();
 
         let subscriptions_nb = notify.debug().await.unwrap();
         assert_eq!(subscriptions_nb, 0);

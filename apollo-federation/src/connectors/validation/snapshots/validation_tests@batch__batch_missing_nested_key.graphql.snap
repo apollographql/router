@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/batch/batch_missing_nested_key.graphql
+---
+[
+    Message {
+        code: ConnectorsBatchKeyNotInSelection,
+        message: "The `@connect` directive on `User` specifies a `$batch` entity resolver, but the field `id` could not be found in `@connect(selection: ...)`",
+        locations: [
+            12:4..12:11,
+        ],
+    },
+]

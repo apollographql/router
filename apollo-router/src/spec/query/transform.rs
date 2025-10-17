@@ -108,10 +108,9 @@ pub(crate) fn document(
                 used_fragments.extend(local_used_fragments);
 
                 // remove unused variables
-                new_def.variables.retain(|var| {
-                    let res = visitor.state().used_variables.contains(var.name.as_str());
-                    res
-                });
+                new_def
+                    .variables
+                    .retain(|var| visitor.state().used_variables.contains(var.name.as_str()));
 
                 new.definitions
                     .push(ast::Definition::OperationDefinition(new_def.into()));
@@ -218,7 +217,7 @@ pub(crate) trait Visitor: Sized {
         def: &ast::FragmentSpread,
     ) -> Result<Option<ast::FragmentSpread>, BoxError> {
         let res = fragment_spread(self, def);
-        if let Ok(Some(ref fragment)) = res.as_ref() {
+        if let Ok(Some(fragment)) = res.as_ref() {
             self.state()
                 .used_fragments
                 .insert(fragment.fragment_name.as_str().to_string());
@@ -569,13 +568,10 @@ mod tests {
                 def: &ast::Field,
             ) -> Result<Option<ast::Field>, BoxError> {
                 Ok(field(self, field_def, def)?.map(|mut new| {
-                    new.directives.push(
-                        ast::Directive {
-                            name: apollo_compiler::name!("added"),
-                            arguments: Vec::new(),
-                        }
-                        .into(),
-                    );
+                    new.directives.push(ast::Directive {
+                        name: apollo_compiler::name!("added"),
+                        arguments: Vec::new(),
+                    });
                     new
                 }))
             }
@@ -707,7 +703,7 @@ fragment F on Query {
         result: ast::Document,
     }
 
-    impl<'a> std::fmt::Display for TestResult<'a> {
+    impl std::fmt::Display for TestResult<'_> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             write!(f, "query:\n{}\nfiltered:\n{}", self.query, self.result,)
         }

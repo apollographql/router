@@ -1,16 +1,12 @@
 //! Shared configuration for Otlp tracing and metrics.
 use std::collections::HashMap;
-use std::str::FromStr;
 
-use http::uri::Parts;
-use http::uri::PathAndQuery;
 use http::Uri;
-use lazy_static::lazy_static;
-use opentelemetry::sdk::metrics::reader::TemporalitySelector;
-use opentelemetry::sdk::metrics::InstrumentKind;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::TonicExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::metrics::InstrumentKind;
+use opentelemetry_sdk::metrics::reader::TemporalitySelector;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -22,26 +18,18 @@ use tonic::transport::Identity;
 use tower::BoxError;
 use url::Url;
 
-use crate::plugins::telemetry::config::GenericWith;
-use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
-
-lazy_static! {
-    static ref DEFAULT_GRPC_ENDPOINT: Uri = Uri::from_static("http://127.0.0.1:4317");
-    static ref DEFAULT_HTTP_ENDPOINT: Uri = Uri::from_static("http://127.0.0.1:4318");
-}
-
-const DEFAULT_HTTP_ENDPOINT_PATH: &str = "/v1/traces";
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
+#[schemars(rename = "OTLPConfig")]
 pub(crate) struct Config {
     /// Enable otlp
     pub(crate) enabled: bool,
 
     /// The endpoint to send data to
     #[serde(default)]
-    pub(crate) endpoint: UriEndpoint,
+    pub(crate) endpoint: Option<String>,
 
     /// The protocol to use when sending data
     #[serde(default)]
@@ -65,10 +53,104 @@ pub(crate) struct Config {
     pub(crate) temporality: Temporality,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub(crate) enum TelemetryDataKind {
     Traces,
     Metrics,
+}
+
+// In older versions of `opentelemetry_otlp` the crate would "helpfully" try to make sure that the
+// path for metrics or tracing was correct. This didn't always work consistently and so we added
+// some code to the router to try and make this work better. We also implemented configuration so
+// that:
+//  - "default" would result in the default from the specification
+//  - "<host>:<port>" would be an acceptable value even though no path was specified.
+//
+// The latter is particularly problematic, since this used to work in version 0.13, but had stopped
+// working by the time we updated to 0.17.
+//
+// Our previous implementation didn't perform endpoint manipulation for metrics, so this
+// implementation unifies the processing of endpoints.
+//
+// The processing does the following:
+//  - If an endpoint is not specified, this results in `None`
+//  - If an endpoint is specified as "default", this results in `""`
+//  - If an endpoint is `""` or ends with a protocol appropriate suffix, we stop processing
+//  - If we continue processing:
+//      - If an endpoint has no scheme, we prepend "http://"
+//      - If our endpoint has no path, we append a protocol specific suffix
+//      - If it has a path, we return it unmodified
+//
+// Note: "" is the empty string and is thus interpreted by any opentelemetry sdk as indicating that
+// the default endpoint should be used.
+//
+// If you are interested in learning more about opentelemetry endpoints:
+//  https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/protocol/exporter.md
+// contains the details.
+pub(super) fn process_endpoint(
+    endpoint: &Option<String>,
+    kind: &TelemetryDataKind,
+    protocol: &Protocol,
+) -> Result<Option<String>, BoxError> {
+    // If there is no endpoint, None, do no processing because the user must be relying on the
+    // router processing OTEL environment variables for endpoint.
+    // If there is an endpoint, Some(value), we must process that value. Most of this processing is
+    // performed to try and remain backwards compatible with previous versions of the router which
+    // depended on "non-standard" behaviour of the opentelemetry_otlp crate. I've tried documenting
+    // each of the outcomes clearly for the benefit of future maintainers.
+    endpoint
+        .as_ref()
+        .map(|v| {
+            let mut base = if v == "default" {
+                "".to_string()
+            } else {
+                v.to_string()
+            };
+            if base.is_empty() {
+                // We don't want to process empty strings
+                Ok(base)
+            } else {
+                // We require a scheme on our endpoint or we can't parse it as a Uri.
+                // If we don't have one, prepend with "http://"
+                if !base.starts_with("http") {
+                    base = format!("http://{base}");
+                }
+                // We expect different suffixes by protocol and signal type
+                let suffix = match protocol {
+                    Protocol::Grpc => "/",
+                    Protocol::Http => match kind {
+                        TelemetryDataKind::Metrics => "/v1/metrics",
+                        TelemetryDataKind::Traces => "/v1/traces",
+                    },
+                };
+                if base.ends_with(suffix) {
+                    // Our suffix is in place, all is good
+                    Ok(base)
+                } else {
+                    let uri = http::Uri::try_from(&base)?;
+                    // Note: If our endpoint is "<scheme>:://host:port", then the path will be "/".
+                    // We already ensured that our base does not end with <suffix>, so we must append
+                    // <suffix>
+                    if uri.path() == "/" {
+                        // Remove any trailing slash from the base so we don't end up with a
+                        // double slash when concatenating e.g. "http://my-base//v1/metrics"
+                        if base.ends_with("/") {
+                            base.pop();
+                        }
+                        // We don't have a path, we need to add one
+                        Ok(format!("{base}{suffix}"))
+                    } else {
+                        // We have a path, it doesn't end with <suffix>, let it pass...
+                        // We could try and enforce the standard here and only let through paths
+                        // which end with the expected suffix. However, I think that would reduce
+                        // backwards compatibility and we should just trust that the user knows
+                        // what they are doing.
+                        Ok(base)
+                    }
+                }
+            }
+        })
+        .transpose()
 }
 
 impl Config {
@@ -78,84 +160,47 @@ impl Config {
     ) -> Result<T, BoxError> {
         match self.protocol {
             Protocol::Grpc => {
-                let endpoint = self.endpoint.to_uri(&DEFAULT_GRPC_ENDPOINT);
-                let grpc = self.grpc.clone();
-                let exporter = opentelemetry_otlp::new_exporter()
+                let endpoint_opt = process_endpoint(&self.endpoint, &kind, &self.protocol)?;
+                // Figure out if we need to set tls config for our exporter
+                let tls_config_opt = if let Some(endpoint) = &endpoint_opt {
+                    if !endpoint.is_empty() {
+                        let tls_url = Uri::try_from(endpoint)?;
+                        Some(self.grpc.clone().to_tls_config(&tls_url)?)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                let mut exporter = opentelemetry_otlp::new_exporter()
                     .tonic()
+                    .with_protocol(opentelemetry_otlp::Protocol::Grpc)
                     .with_timeout(self.batch_processor.max_export_timeout)
-                    .with(&endpoint, |b, endpoint| {
-                        b.with_endpoint(endpoint.to_string())
-                    })
-                    .with(&grpc.try_from(&endpoint)?, |b, t| {
-                        b.with_tls_config(t.clone())
-                    })
-                    .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()))
-                    .into();
-                Ok(exporter)
+                    .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()));
+                if let Some(endpoint) = endpoint_opt {
+                    exporter = exporter.with_endpoint(endpoint);
+                }
+                if let Some(tls_config) = tls_config_opt {
+                    exporter = exporter.with_tls_config(tls_config);
+                }
+                Ok(exporter.into())
             }
             Protocol::Http => {
-                let endpoint = add_missing_path(
-                    kind,
-                    self.endpoint
-                        .to_uri(&DEFAULT_HTTP_ENDPOINT)
-                        .map(|e| e.into_parts()),
-                )?;
-                let http = self.http.clone();
-                let exporter = opentelemetry_otlp::new_exporter()
+                let endpoint_opt = process_endpoint(&self.endpoint, &kind, &self.protocol)?;
+                let headers = self.http.headers.clone();
+                let mut exporter: HttpExporterBuilder = opentelemetry_otlp::new_exporter()
                     .http()
+                    .with_protocol(opentelemetry_otlp::Protocol::Grpc)
                     .with_timeout(self.batch_processor.max_export_timeout)
-                    .with(&endpoint, |b, endpoint| {
-                        b.with_endpoint(endpoint.to_string())
-                    })
-                    .with_headers(http.headers)
-                    .into();
-
-                Ok(exporter)
+                    .with_headers(headers);
+                if let Some(endpoint) = endpoint_opt {
+                    exporter = exporter.with_endpoint(endpoint);
+                }
+                Ok(exporter.into())
             }
         }
     }
-}
-
-// Waiting for https://github.com/open-telemetry/opentelemetry-rust/issues/1618 to be fixed
-fn add_missing_path(
-    kind: TelemetryDataKind,
-    mut endpoint_parts: Option<Parts>,
-) -> Result<Option<Uri>, BoxError> {
-    if let Some(endpoint_parts) = &mut endpoint_parts {
-        if let TelemetryDataKind::Traces = kind {
-            match &mut endpoint_parts.path_and_query {
-                Some(path_and_query) => {
-                    if !path_and_query.path().ends_with(DEFAULT_HTTP_ENDPOINT_PATH) {
-                        match path_and_query.query() {
-                            Some(query) => {
-                                endpoint_parts.path_and_query =
-                                    Some(PathAndQuery::from_str(&format!(
-                                        "{}{DEFAULT_HTTP_ENDPOINT_PATH}?{query}",
-                                        path_and_query.path().trim_end_matches('/')
-                                    ))?);
-                            }
-                            None => {
-                                *path_and_query = PathAndQuery::from_str(&format!(
-                                    "{}{DEFAULT_HTTP_ENDPOINT_PATH}",
-                                    path_and_query.path().trim_end_matches('/')
-                                ))?;
-                            }
-                        }
-                    }
-                }
-                None => {
-                    endpoint_parts.path_and_query =
-                        Some(PathAndQuery::from_static(DEFAULT_HTTP_ENDPOINT_PATH));
-                }
-            }
-        }
-    }
-    let endpoint = match endpoint_parts {
-        Some(endpoint_parts) => Some(Uri::from_parts(endpoint_parts)?),
-        None => None,
-    };
-
-    Ok(endpoint)
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
@@ -184,57 +229,46 @@ pub(crate) struct GrpcExporter {
     pub(crate) metadata: http::HeaderMap,
 }
 
-fn header_map(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-    HashMap::<String, Value>::json_schema(gen)
+fn header_map(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    HashMap::<String, Value>::json_schema(generator)
 }
 
 impl GrpcExporter {
-    // Return a TlsConfig if it has something actually set.
-    pub(crate) fn try_from(
-        self,
-        endpoint: &Option<Uri>,
-    ) -> Result<Option<ClientTlsConfig>, BoxError> {
-        if let Some(endpoint) = endpoint {
-            let endpoint = endpoint.to_string().parse::<Url>().map_err(|e| {
-                BoxError::from(format!("invalid GRPC endpoint {}, {}", endpoint, e))
-            })?;
-            let domain_name = self.default_tls_domain(&endpoint);
+    pub(crate) fn to_tls_config(&self, endpoint: &Uri) -> Result<ClientTlsConfig, BoxError> {
+        let endpoint = endpoint
+            .to_string()
+            .parse::<Url>()
+            .map_err(|e| BoxError::from(format!("invalid GRPC endpoint {endpoint}, {e}")))?;
+        let domain_name = self.default_tls_domain(&endpoint);
 
-            if self.ca.is_some()
-                || self.key.is_some()
-                || self.cert.is_some()
-                || domain_name.is_some()
-            {
-                return Some(
-                    ClientTlsConfig::new()
-                        .with(&domain_name, |b, d| b.domain_name(*d))
-                        .try_with(&self.ca, |b, c| {
-                            Ok(b.ca_certificate(Certificate::from_pem(c)))
-                        })?
-                        .try_with(
-                            &self.cert.clone().zip(self.key.clone()),
-                            |b, (cert, key)| Ok(b.identity(Identity::from_pem(cert, key))),
-                        ),
-                )
-                .transpose();
-            }
+        if let (Some(ca), Some(key), Some(cert), Some(domain_name)) =
+            (&self.ca, &self.key, &self.cert, domain_name)
+        {
+            Ok(ClientTlsConfig::new()
+                .with_native_roots()
+                .domain_name(domain_name)
+                .ca_certificate(Certificate::from_pem(ca.clone()))
+                .identity(Identity::from_pem(cert.clone(), key.clone())))
+        } else {
+            // This was a breaking change in tonic where we now have to specify native roots.
+            Ok(ClientTlsConfig::new().with_native_roots())
         }
-        Ok(None)
     }
 
     fn default_tls_domain<'a>(&'a self, endpoint: &'a Url) -> Option<&'a str> {
-        let domain_name = match (&self.domain_name, endpoint) {
+        match (&self.domain_name, endpoint) {
             // If the URL contains the https scheme then default the tls config to use the domain from the URL. We know it's TLS.
             // If the URL contains no scheme and the port is 443 emit a warning suggesting that they may have forgotten to configure TLS domain.
             (Some(domain), _) => Some(domain.as_str()),
             (None, endpoint) if endpoint.scheme() == "https" => endpoint.host_str(),
             (None, endpoint) if endpoint.port() == Some(443) && endpoint.scheme() != "http" => {
-                tracing::warn!("telemetry otlp exporter has been configured with port 443 but TLS domain has not been set. This is likely a configuration error");
+                tracing::warn!(
+                    "telemetry otlp exporter has been configured with port 443 but TLS domain has not been set. This is likely a configuration error"
+                );
                 None
             }
             _ => None,
-        };
-        domain_name
+        }
     }
 }
 
@@ -257,23 +291,31 @@ pub(crate) enum Temporality {
 }
 
 pub(crate) struct CustomTemporalitySelector(
-    pub(crate) opentelemetry::sdk::metrics::data::Temporality,
+    pub(crate) opentelemetry_sdk::metrics::data::Temporality,
 );
 
 impl TemporalitySelector for CustomTemporalitySelector {
-    fn temporality(&self, _kind: InstrumentKind) -> opentelemetry::sdk::metrics::data::Temporality {
-        self.0
+    fn temporality(&self, kind: InstrumentKind) -> opentelemetry_sdk::metrics::data::Temporality {
+        // Up/down counters should always use cumulative temporality to ensure they are sent as aggregates
+        // rather than deltas, which prevents drift issues.
+        // See https://github.com/open-telemetry/opentelemetry-specification/blob/a1c13d59bb7d0fb086df2b3e1eaec9df9efef6cc/specification/metrics/sdk_exporters/otlp.md#additional-configuration for mor information
+        match kind {
+            InstrumentKind::UpDownCounter | InstrumentKind::ObservableUpDownCounter => {
+                opentelemetry_sdk::metrics::data::Temporality::Cumulative
+            }
+            _ => self.0,
+        }
     }
 }
 
 impl From<&Temporality> for Box<dyn TemporalitySelector> {
     fn from(value: &Temporality) -> Self {
         Box::new(match value {
-            Temporality::Cumulative => CustomTemporalitySelector(
-                opentelemetry::sdk::metrics::data::Temporality::Cumulative,
-            ),
+            Temporality::Cumulative => {
+                CustomTemporalitySelector(opentelemetry_sdk::metrics::data::Temporality::Cumulative)
+            }
             Temporality::Delta => {
-                CustomTemporalitySelector(opentelemetry::sdk::metrics::data::Temporality::Delta)
+                CustomTemporalitySelector(opentelemetry_sdk::metrics::data::Temporality::Delta)
             }
         })
     }
@@ -281,7 +323,121 @@ impl From<&Temporality> for Box<dyn TemporalitySelector> {
 
 #[cfg(test)]
 mod tests {
+    use opentelemetry_sdk::metrics::data::Temporality as SdkTemporality;
+
     use super::*;
+
+    #[test]
+    fn test_updown_counter_temporality_override() {
+        // Test that up/down counters always get cumulative temporality regardless of configuration
+        let delta_selector = CustomTemporalitySelector(SdkTemporality::Delta);
+        let cumulative_selector = CustomTemporalitySelector(SdkTemporality::Cumulative);
+
+        // UpDownCounter should always be cumulative
+        assert_eq!(
+            delta_selector.temporality(InstrumentKind::UpDownCounter),
+            SdkTemporality::Cumulative,
+            "UpDownCounter should always use cumulative temporality even with delta config"
+        );
+        assert_eq!(
+            cumulative_selector.temporality(InstrumentKind::UpDownCounter),
+            SdkTemporality::Cumulative,
+            "UpDownCounter should use cumulative temporality with cumulative config"
+        );
+
+        // ObservableUpDownCounter should always be cumulative
+        assert_eq!(
+            delta_selector.temporality(InstrumentKind::ObservableUpDownCounter),
+            SdkTemporality::Cumulative,
+            "ObservableUpDownCounter should always use cumulative temporality even with delta config"
+        );
+        assert_eq!(
+            cumulative_selector.temporality(InstrumentKind::ObservableUpDownCounter),
+            SdkTemporality::Cumulative,
+            "ObservableUpDownCounter should use cumulative temporality with cumulative config"
+        );
+    }
+
+    #[test]
+    fn test_counter_temporality_respects_config() {
+        // Test that regular counters respect the configured temporality
+        let delta_selector = CustomTemporalitySelector(SdkTemporality::Delta);
+        let cumulative_selector = CustomTemporalitySelector(SdkTemporality::Cumulative);
+
+        // Counter should respect configuration
+        assert_eq!(
+            delta_selector.temporality(InstrumentKind::Counter),
+            SdkTemporality::Delta,
+            "Counter should use delta temporality with delta config"
+        );
+        assert_eq!(
+            cumulative_selector.temporality(InstrumentKind::Counter),
+            SdkTemporality::Cumulative,
+            "Counter should use cumulative temporality with cumulative config"
+        );
+
+        // ObservableCounter should respect configuration
+        assert_eq!(
+            delta_selector.temporality(InstrumentKind::ObservableCounter),
+            SdkTemporality::Delta,
+            "ObservableCounter should use delta temporality with delta config"
+        );
+        assert_eq!(
+            cumulative_selector.temporality(InstrumentKind::ObservableCounter),
+            SdkTemporality::Cumulative,
+            "ObservableCounter should use cumulative temporality with cumulative config"
+        );
+    }
+
+    #[test]
+    fn test_gauge_temporality_respects_config() {
+        // Test that gauges respect the configured temporality (gauges are not forced to cumulative)
+        let delta_selector = CustomTemporalitySelector(SdkTemporality::Delta);
+        let cumulative_selector = CustomTemporalitySelector(SdkTemporality::Cumulative);
+
+        // Gauge should respect configuration
+        assert_eq!(
+            delta_selector.temporality(InstrumentKind::Gauge),
+            SdkTemporality::Delta,
+            "Gauge should use delta temporality with delta config"
+        );
+        assert_eq!(
+            cumulative_selector.temporality(InstrumentKind::Gauge),
+            SdkTemporality::Cumulative,
+            "Gauge should use cumulative temporality with cumulative config"
+        );
+
+        // ObservableGauge should respect configuration
+        assert_eq!(
+            delta_selector.temporality(InstrumentKind::ObservableGauge),
+            SdkTemporality::Delta,
+            "ObservableGauge should use delta temporality with delta config"
+        );
+        assert_eq!(
+            cumulative_selector.temporality(InstrumentKind::ObservableGauge),
+            SdkTemporality::Cumulative,
+            "ObservableGauge should use cumulative temporality with cumulative config"
+        );
+    }
+
+    #[test]
+    fn test_histogram_temporality_respects_config() {
+        // Test that histograms respect the configured temporality
+        let delta_selector = CustomTemporalitySelector(SdkTemporality::Delta);
+        let cumulative_selector = CustomTemporalitySelector(SdkTemporality::Cumulative);
+
+        // Histogram should respect configuration
+        assert_eq!(
+            delta_selector.temporality(InstrumentKind::Histogram),
+            SdkTemporality::Delta,
+            "Histogram should use delta temporality with delta config"
+        );
+        assert_eq!(
+            cumulative_selector.temporality(InstrumentKind::Histogram),
+            SdkTemporality::Cumulative,
+            "Histogram should use cumulative temporality with cumulative config"
+        );
+    }
 
     #[test]
     fn endpoint_grpc_defaulting_no_scheme() {
@@ -311,41 +467,137 @@ mod tests {
     }
 
     #[test]
-    fn test_add_missing_path() {
-        let url = Uri::from_str("https://api.apm.com:433/v1/traces").unwrap();
-        let url = add_missing_path(TelemetryDataKind::Traces, url.into_parts().into())
-            .unwrap()
-            .unwrap();
+    fn test_process_endpoint() {
+        // Traces
+        let endpoint = None;
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Traces, &Protocol::Grpc).unwrap();
+        assert_eq!(endpoint, processed_endpoint);
+
+        let endpoint = Some("default".to_string());
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Traces, &Protocol::Grpc).unwrap();
+        assert_eq!(Some("".to_string()), processed_endpoint);
+
+        let endpoint = Some("https://api.apm.com:433/v1/traces".to_string());
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Traces, &Protocol::Grpc).unwrap();
+        assert_eq!(endpoint, processed_endpoint);
+
+        let endpoint = Some("https://api.apm.com:433".to_string());
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Traces, &Protocol::Grpc).unwrap();
         assert_eq!(
-            url.to_string(),
-            String::from("https://api.apm.com:433/v1/traces")
+            Some("https://api.apm.com:433/".to_string()),
+            processed_endpoint
         );
 
-        let url = Uri::from_str("https://api.apm.com:433/").unwrap();
-        let url = add_missing_path(TelemetryDataKind::Traces, url.into_parts().into())
-            .unwrap()
-            .unwrap();
+        let endpoint = Some("https://api.apm.com:433".to_string());
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Traces, &Protocol::Http).unwrap();
         assert_eq!(
-            url.to_string(),
-            String::from("https://api.apm.com:433/v1/traces")
+            Some("https://api.apm.com:433/v1/traces".to_string()),
+            processed_endpoint
         );
 
-        let url = Uri::from_str("https://api.apm.com:433/?hi=hello").unwrap();
-        let url = add_missing_path(TelemetryDataKind::Traces, url.into_parts().into())
-            .unwrap()
-            .unwrap();
+        let endpoint = Some("https://api.apm.com:433/".to_string());
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Traces, &Protocol::Grpc).unwrap();
+        assert_eq!(endpoint, processed_endpoint);
+
+        let endpoint = Some("https://api.apm.com:433/traces".to_string());
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Traces, &Protocol::Grpc).unwrap();
+        assert_eq!(endpoint, processed_endpoint);
+
+        let endpoint = Some("localhost:4317".to_string());
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Traces, &Protocol::Grpc).unwrap();
         assert_eq!(
-            url.to_string(),
-            String::from("https://api.apm.com:433/v1/traces?hi=hello")
+            Some("http://localhost:4317/".to_string()),
+            processed_endpoint
         );
 
-        let url = Uri::from_str("https://api.apm.com:433/v1?hi=hello").unwrap();
-        let url = add_missing_path(TelemetryDataKind::Traces, url.into_parts().into())
-            .unwrap()
-            .unwrap();
+        let endpoint = Some("localhost:4317".to_string());
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Traces, &Protocol::Http).unwrap();
         assert_eq!(
-            url.to_string(),
-            String::from("https://api.apm.com:433/v1/v1/traces?hi=hello")
+            Some("http://localhost:4317/v1/traces".to_string()),
+            processed_endpoint
+        );
+
+        let endpoint = Some("https://otlp.nr-data.net".to_string());
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Traces, &Protocol::Http).unwrap();
+        assert_eq!(
+            Some("https://otlp.nr-data.net/v1/traces".to_string()),
+            processed_endpoint
+        );
+
+        // Metrics
+        let endpoint = None;
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Metrics, &Protocol::Grpc).unwrap();
+        assert_eq!(None, processed_endpoint);
+
+        let endpoint = Some("default".to_string());
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Metrics, &Protocol::Grpc).unwrap();
+        assert_eq!(Some("".to_string()), processed_endpoint);
+
+        let endpoint = Some("https://api.apm.com:433/v1/metrics".to_string());
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Metrics, &Protocol::Grpc).unwrap();
+        assert_eq!(endpoint, processed_endpoint);
+
+        let endpoint = Some("https://api.apm.com:433".to_string());
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Metrics, &Protocol::Grpc).unwrap();
+        assert_eq!(
+            Some("https://api.apm.com:433/".to_string()),
+            processed_endpoint
+        );
+
+        let endpoint = Some("https://api.apm.com:433".to_string());
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Metrics, &Protocol::Http).unwrap();
+        assert_eq!(
+            Some("https://api.apm.com:433/v1/metrics".to_string()),
+            processed_endpoint
+        );
+
+        let endpoint = Some("https://api.apm.com:433/".to_string());
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Metrics, &Protocol::Grpc).unwrap();
+        assert_eq!(endpoint, processed_endpoint);
+
+        let endpoint = Some("https://api.apm.com:433/metrics".to_string());
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Metrics, &Protocol::Grpc).unwrap();
+        assert_eq!(endpoint, processed_endpoint);
+
+        let endpoint = Some("localhost:4317".to_string());
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Metrics, &Protocol::Grpc).unwrap();
+        assert_eq!(
+            Some("http://localhost:4317/".to_string()),
+            processed_endpoint
+        );
+
+        let endpoint = Some("localhost:4317".to_string());
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Metrics, &Protocol::Http).unwrap();
+        assert_eq!(
+            Some("http://localhost:4317/v1/metrics".to_string()),
+            processed_endpoint
+        );
+
+        let endpoint = Some("https://otlp.nr-data.net".to_string());
+        let processed_endpoint =
+            process_endpoint(&endpoint, &TelemetryDataKind::Metrics, &Protocol::Http).unwrap();
+        assert_eq!(
+            Some("https://otlp.nr-data.net/v1/metrics".to_string()),
+            processed_endpoint
         );
     }
 }

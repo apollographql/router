@@ -2,11 +2,12 @@
 name = "supergraph_sdl"
 version = "0.1.0"
 edition = "2021"
+license-file = "../../../LICENSE"
 
 [dependencies]
 anyhow = "1"
-apollo-compiler = "=1.0.0-beta.24"
+apollo-compiler = "1.25.0"
 apollo-router = { path = "../../../apollo-router" }
 async-trait = "0.1"
-tower = { version = "0.4", features = ["full"] }
+tower = { version = "0.5", features = ["full"] }
 tracing = "0.1"

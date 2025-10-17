@@ -1,0 +1,133 @@
+---
+source: apollo-federation/src/connectors/expand/tests/mod.rs
+expression: raw_sdl
+input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realistic.graphql
+---
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) @link(url: "https://specs.apollo.dev/connect/v0.1", for: EXECUTION) @join__directive(graphs: [CONNECTORS_MUTATION_CREATEUSER_0, CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0, CONNECTORS_QUERY_USERSBYCOMPANY_0, CONNECTORS_QUERY_USER_0], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]}) {
+  query: Query
+  mutation: Mutation
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on ENUM | INPUT_OBJECT | INTERFACE | OBJECT | SCALAR | UNION
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, overrideLabel: String, usedOverridden: Boolean, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on INTERFACE | OBJECT
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments!) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+enum link__Purpose {
+  """
+  SECURITY features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """EXECUTION features provide metadata necessary for operation execution."""
+  EXECUTION
+}
+
+scalar link__Import
+
+scalar join__FieldSet
+
+scalar join__FieldValue
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+
+scalar join__DirectiveArguments
+
+enum join__Graph {
+  CONNECTORS_MUTATION_CREATEUSER_0 @join__graph(name: "connectors_Mutation_createUser_0", url: "none")
+  CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0 @join__graph(name: "connectors_Query_filterUsersByEmailDomain_0", url: "none")
+  CONNECTORS_QUERY_USER_0 @join__graph(name: "connectors_Query_user_0", url: "none")
+  CONNECTORS_QUERY_USERSBYCOMPANY_0 @join__graph(name: "connectors_Query_usersByCompany_0", url: "none")
+}
+
+scalar EmailAddress @join__type(graph: CONNECTORS_MUTATION_CREATEUSER_0) @join__type(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0) @join__type(graph: CONNECTORS_QUERY_USER_0)
+
+enum Status @join__type(graph: CONNECTORS_MUTATION_CREATEUSER_0) {
+  ACTIVE @join__enumValue(graph: CONNECTORS_MUTATION_CREATEUSER_0)
+  INACTIVE @join__enumValue(graph: CONNECTORS_MUTATION_CREATEUSER_0)
+}
+
+input AddressGeoInput @join__type(graph: CONNECTORS_MUTATION_CREATEUSER_0) {
+  lat: Float @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "Float")
+  lng: Float @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "Float")
+}
+
+input AddressInput @join__type(graph: CONNECTORS_MUTATION_CREATEUSER_0) {
+  street: String @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "String")
+  suite: String @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "String")
+  city: String @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "String")
+  zipcode: String @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "String")
+  geo: AddressGeoInput @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "AddressGeoInput")
+}
+
+input CreateUserInput @join__type(graph: CONNECTORS_MUTATION_CREATEUSER_0) {
+  name: String! @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "String!")
+  username: String! @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "String!")
+  email: EmailAddress! @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "EmailAddress!")
+  status: Status! @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "Status!")
+  address: AddressInput @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "AddressInput")
+}
+
+type User @join__type(graph: CONNECTORS_MUTATION_CREATEUSER_0) @join__type(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0) @join__type(graph: CONNECTORS_QUERY_USER_0, key: "id") @join__type(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0) {
+  id: ID! @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "ID!") @join__field(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0, type: "ID!") @join__field(graph: CONNECTORS_QUERY_USER_0, type: "ID!") @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0, type: "ID!")
+  name: String @join__field(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0, type: "String") @join__field(graph: CONNECTORS_QUERY_USER_0, type: "String") @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0, type: "String")
+  address: Address @join__field(graph: CONNECTORS_QUERY_USER_0, type: "Address")
+  company: CompanyInfo @join__field(graph: CONNECTORS_QUERY_USER_0, type: "CompanyInfo") @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0, type: "CompanyInfo")
+  email: EmailAddress @join__field(graph: CONNECTORS_QUERY_USER_0, type: "EmailAddress")
+  phone: String @join__field(graph: CONNECTORS_QUERY_USER_0, type: "String")
+  username: String @join__field(graph: CONNECTORS_QUERY_USER_0, type: "String")
+  website: String @join__field(graph: CONNECTORS_QUERY_USER_0, type: "String")
+}
+
+type Mutation @join__type(graph: CONNECTORS_MUTATION_CREATEUSER_0) {
+  createUser(input: CreateUserInput!): User @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "User")
+}
+
+type Query @join__type(graph: CONNECTORS_MUTATION_CREATEUSER_0) @join__type(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0) @join__type(graph: CONNECTORS_QUERY_USER_0) @join__type(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0) {
+  _: ID @inaccessible @join__field(graph: CONNECTORS_MUTATION_CREATEUSER_0, type: "ID")
+  filterUsersByEmailDomain(email: EmailAddress!): [User] @join__field(graph: CONNECTORS_QUERY_FILTERUSERSBYEMAILDOMAIN_0, type: "[User]")
+  user(id: ID!): User @join__field(graph: CONNECTORS_QUERY_USER_0, type: "User")
+  usersByCompany(company: CompanyInput!): [User] @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0, type: "[User]")
+}
+
+type AddressGeo @join__type(graph: CONNECTORS_QUERY_USER_0) {
+  lat: Float @join__field(graph: CONNECTORS_QUERY_USER_0, type: "Float")
+  lng: Float @join__field(graph: CONNECTORS_QUERY_USER_0, type: "Float")
+}
+
+type Address @join__type(graph: CONNECTORS_QUERY_USER_0) {
+  city: String @join__field(graph: CONNECTORS_QUERY_USER_0, type: "String")
+  geo: AddressGeo @join__field(graph: CONNECTORS_QUERY_USER_0, type: "AddressGeo")
+  street: String @join__field(graph: CONNECTORS_QUERY_USER_0, type: "String")
+  suite: String @join__field(graph: CONNECTORS_QUERY_USER_0, type: "String")
+  zipcode: String @join__field(graph: CONNECTORS_QUERY_USER_0, type: "String")
+}
+
+type CompanyInfo @join__type(graph: CONNECTORS_QUERY_USER_0) @join__type(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0) {
+  bs: String @join__field(graph: CONNECTORS_QUERY_USER_0, type: "String") @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0, type: "String")
+  catchPhrase: String @join__field(graph: CONNECTORS_QUERY_USER_0, type: "String") @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0, type: "String")
+  email: EmailAddress @join__field(graph: CONNECTORS_QUERY_USER_0, type: "EmailAddress")
+  name: String @join__field(graph: CONNECTORS_QUERY_USER_0, type: "String") @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0, type: "String")
+}
+
+input CompanyInput @join__type(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0) {
+  name: String! @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0, type: "String!")
+  catchPhrase: String @join__field(graph: CONNECTORS_QUERY_USERSBYCOMPANY_0, type: "String")
+}

@@ -1,13 +1,14 @@
-use std::sync::Mutex;
 use std::task::Context;
 use std::task::Poll;
 
 use futures::future::BoxFuture;
 use http::StatusCode;
 use once_cell::sync::Lazy;
-use opentelemetry::sdk::metrics::MeterProvider;
-use opentelemetry::sdk::metrics::View;
-use opentelemetry::sdk::Resource;
+use opentelemetry_prometheus::ResourceSelector;
+use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_sdk::metrics::View;
+use parking_lot::Mutex;
 use prometheus::Encoder;
 use prometheus::Registry;
 use prometheus::TextEncoder;
@@ -17,6 +18,7 @@ use tower::BoxError;
 use tower::ServiceExt;
 use tower_service::Service;
 
+use crate::ListenAddr;
 use crate::plugins::telemetry::config::MetricView;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::CustomAggregationSelector;
@@ -24,25 +26,46 @@ use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::router_factory::Endpoint;
 use crate::services::router;
-use crate::services::router::Body;
-use crate::ListenAddr;
 
 /// Prometheus configuration
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
+#[schemars(rename = "PrometheusMetricsConfig")]
 pub(crate) struct Config {
     /// Set to true to enable
     pub(crate) enabled: bool,
+    /// resource_selector is used to select which resource to export with every metrics.
+    pub(crate) resource_selector: ResourceSelectorConfig,
     /// The listen address
     pub(crate) listen: ListenAddr,
     /// The path where prometheus will be exposed
     pub(crate) path: String,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ResourceSelectorConfig {
+    /// Export all resource attributes with every metrics.
+    All,
+    #[default]
+    /// Do not export any resource attributes with every metrics.
+    None,
+}
+
+impl From<ResourceSelectorConfig> for ResourceSelector {
+    fn from(value: ResourceSelectorConfig) -> Self {
+        match value {
+            ResourceSelectorConfig::All => ResourceSelector::All,
+            ResourceSelectorConfig::None => ResourceSelector::None,
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
             enabled: false,
+            resource_selector: ResourceSelectorConfig::default(),
             listen: ListenAddr::SocketAddr("127.0.0.1:9090".parse().expect("valid listenAddr")),
             path: "/metrics".to_string(),
         }
@@ -65,12 +88,9 @@ struct PrometheusConfig {
 }
 
 pub(crate) fn commit_prometheus() {
-    if let Some(prometheus) = NEW_PROMETHEUS.lock().expect("lock poisoned").take() {
+    if let Some(prometheus) = NEW_PROMETHEUS.lock().take() {
         tracing::debug!("committing prometheus registry");
-        EXISTING_PROMETHEUS
-            .lock()
-            .expect("lock poisoned")
-            .replace(prometheus);
+        EXISTING_PROMETHEUS.lock().replace(prometheus);
     }
 }
 
@@ -98,9 +118,7 @@ impl MetricsConfigurator for Config {
         // Note that during tests the prom registry cannot be reused as we have a different meter provider for each test.
         // Prom reloading IS tested in an integration test.
         #[cfg(not(test))]
-        if let Some((last_config, last_registry)) =
-            EXISTING_PROMETHEUS.lock().expect("lock poisoned").clone()
-        {
+        if let Some((last_config, last_registry)) = EXISTING_PROMETHEUS.lock().clone() {
             if prometheus_config == last_config {
                 tracing::debug!("prometheus registry can be reused");
                 builder.custom_endpoints.insert(
@@ -133,10 +151,11 @@ impl MetricsConfigurator for Config {
                     .record_min_max(true)
                     .build(),
             )
+            .with_resource_selector(self.resource_selector)
             .with_registry(registry.clone())
             .build()?;
 
-        let mut meter_provider_builder = MeterProvider::builder()
+        let mut meter_provider_builder = SdkMeterProvider::builder()
             .with_reader(exporter)
             .with_resource(builder.resource.clone());
         for metric_view in metrics_config.views.clone() {
@@ -156,10 +175,7 @@ impl MetricsConfigurator for Config {
         );
         builder.prometheus_meter_provider = Some(meter_provider.clone());
 
-        NEW_PROMETHEUS
-            .lock()
-            .expect("lock poisoned")
-            .replace((prometheus_config, registry));
+        NEW_PROMETHEUS.lock().replace((prometheus_config, registry));
 
         tracing::info!(
             "Prometheus endpoint exposed at {}{}",
@@ -195,14 +211,17 @@ impl Service<router::Request> for PrometheusService {
             // Let's remove any problems they may have created for us.
             let stats = String::from_utf8_lossy(&result);
             let modified_stats = stats.replace("_total_total", "_total");
-            Ok(router::Response {
-                response: http::Response::builder()
-                    .status(StatusCode::OK)
-                    .header(http::header::CONTENT_TYPE, "text/plain; version=0.0.4")
-                    .body::<Body>(modified_stats.into())
-                    .map_err(BoxError::from)?,
-                context: req.context,
-            })
+
+            router::Response::http_response_builder()
+                .response(
+                    http::Response::builder()
+                        .status(StatusCode::OK)
+                        .header(http::header::CONTENT_TYPE, "text/plain; version=0.0.4")
+                        .body(router::body::from_bytes(modified_stats))
+                        .map_err(BoxError::from)?,
+                )
+                .context(req.context)
+                .build()
         })
     }
 }

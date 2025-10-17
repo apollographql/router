@@ -1,0 +1,98 @@
+### `coprocessor`
+
+<ExpansionPanel title="coprocessor YAML snippet">
+
+```yaml title="coprocessor"
+coprocessor:
+  client:
+    dns_resolution_strategy: ipv4_only
+    experimental_http2: enable
+  execution:
+    request:
+      body: false
+      context: false
+      headers: false
+      method: false
+      query_plan: false
+      sdl: false
+    response:
+      body: false
+      context: false
+      headers: false
+      sdl: false
+      status_code: false
+  router:
+    request:
+      body: false
+      condition:
+        eq:
+        - false
+        - false
+      context: false
+      headers: false
+      method: false
+      path: false
+      sdl: false
+    response:
+      body: false
+      condition:
+        eq:
+        - false
+        - false
+      context: false
+      headers: false
+      sdl: false
+      status_code: false
+  subgraph:
+    all:
+      request:
+        body: false
+        condition:
+          eq:
+          - false
+          - false
+        context: false
+        headers: false
+        method: false
+        service_name: false
+        subgraph_request_id: false
+        uri: false
+      response:
+        body: false
+        condition:
+          eq:
+          - false
+          - false
+        context: false
+        headers: false
+        service_name: false
+        status_code: false
+        subgraph_request_id: false
+  supergraph:
+    request:
+      body: false
+      condition:
+        eq:
+        - false
+        - false
+      context: false
+      headers: false
+      method: false
+      sdl: false
+    response:
+      body: false
+      condition:
+        eq:
+        - false
+        - false
+      context: false
+      headers: false
+      sdl: false
+      status_code: false
+  timeout:
+    nanos: 0
+    secs: 1
+  url: http://service.example.com/url
+```
+
+</ExpansionPanel>

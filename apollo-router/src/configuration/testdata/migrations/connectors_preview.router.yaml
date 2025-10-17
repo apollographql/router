@@ -1,0 +1,10 @@
+preview_connectors:
+  debug_extensions: true
+  expose_sources_in_context: true
+  max_requests_per_operation_per_source: 50
+  # If support for subgraphs is eventually removed, the following will need to be removed
+  subgraphs:
+    subgraph_name:
+      sources:
+        source_name:
+          override_url: http://localhost:5280

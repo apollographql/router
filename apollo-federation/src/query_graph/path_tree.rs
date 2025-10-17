@@ -13,11 +13,11 @@ use super::graph_path::ArgumentsToContextUsages;
 use super::graph_path::MatchingContextIds;
 use crate::error::FederationError;
 use crate::operation::SelectionSet;
-use crate::query_graph::graph_path::GraphPathItem;
-use crate::query_graph::graph_path::OpGraphPath;
-use crate::query_graph::graph_path::OpGraphPathTrigger;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphNode;
+use crate::query_graph::graph_path::GraphPathItem;
+use crate::query_graph::graph_path::operation::OpGraphPath;
+use crate::query_graph::graph_path::operation::OpGraphPathTrigger;
 use crate::utils::FallibleIterator;
 
 /// A "merged" tree representation for a vector of `GraphPath`s that start at a common query graph
@@ -183,12 +183,10 @@ impl OpPathTree {
         for child in self.childs.iter() {
             let index = child.edge.unwrap_or_else(EdgeIndex::end);
             write!(f, "\n{indent} -> [{}] ", index.index())?;
-            if include_conditions {
-                if let Some(ref child_cond) = child.conditions {
-                    write!(f, "!! {{\n{indent} ")?;
-                    child_cond.fmt_internal(f, &child_indent, /*include_conditions*/ true)?;
-                    write!(f, "\n{indent} }}")?;
-                }
+            if include_conditions && let Some(ref child_cond) = child.conditions {
+                write!(f, "!! {{\n{indent} ")?;
+                child_cond.fmt_internal(f, &child_indent, /*include_conditions*/ true)?;
+                write!(f, "\n{indent} }}")?;
             }
             write!(f, "{} = ", child.trigger)?;
             child
@@ -206,9 +204,18 @@ impl Display for OpPathTree {
     }
 }
 
+/// A partial ordering over type `T` in terms of preference.
+/// - Similar to PartialOrd, but equivalence is unnecessary.
+pub(crate) trait Preference {
+    /// - Returns None, if `self` and `other` are incomparable or equivalent.
+    /// - Returns Some(true), if `self` is preferred over `other`.
+    /// - Returns Some(false), if `other` is preferred over `self`.
+    fn preferred_over(&self, other: &Self) -> Option<bool>;
+}
+
 impl<TTrigger, TEdge> PathTree<TTrigger, TEdge>
 where
-    TTrigger: Eq + Hash,
+    TTrigger: Eq + Hash + Preference,
     TEdge: Copy + Hash + Eq + Into<Option<EdgeIndex>>,
 {
     /// Returns the `QueryGraphNode` represented by `self.node`.
@@ -243,12 +250,13 @@ where
         }
 
         struct PathTreeChildInputs<'inputs, TTrigger, GraphPathIter> {
-            /// trigger: the final trigger value
+            /// trigger: the final trigger value chosen amongst the candidate triggers
             ///   - Two equivalent triggers can have minor differences in the sibling_typename.
             ///     This field holds the final trigger value that will be used.
-            /// PORT_NOTE: The JS QP used the last trigger value. So, we are following that
-            ///            to avoid mismatches. But, it can be revisited.
-            ///            We may want to keep or merge the sibling_typename values.
+            ///
+            /// PORT_NOTE: The JS QP used the last trigger value, since the next trigger value
+            ///            overwrites the `trigger` field. Instead, Rust QP adopts the one with the
+            ///            sibling_typename set or the first one if none are set.
             trigger: &'inputs Arc<TTrigger>,
             conditions: Option<Arc<OpPathTree>>,
             sub_paths_and_selections: Vec<(GraphPathIter, Option<&'inputs Arc<SelectionSet>>)>,
@@ -291,7 +299,9 @@ where
             match for_edge.by_unique_trigger.entry(trigger) {
                 Entry::Occupied(entry) => {
                     let existing = entry.into_mut();
-                    existing.trigger = trigger;
+                    if trigger.preferred_over(existing.trigger) == Some(true) {
+                        existing.trigger = trigger;
+                    }
                     existing.conditions = merge_conditions(&existing.conditions, conditions);
                     if let Some(other) = matching_context_ids {
                         existing
@@ -563,30 +573,32 @@ mod tests {
     use std::sync::Arc;
 
     use apollo_compiler::ExecutableDocument;
+    use apollo_compiler::parser::Parser;
     use petgraph::stable_graph::NodeIndex;
     use petgraph::visit::EdgeRef;
 
     use crate::error::FederationError;
-    use crate::operation::normalize_operation;
     use crate::operation::Field;
-    use crate::query_graph::build_query_graph::build_query_graph;
-    use crate::query_graph::condition_resolver::ConditionResolution;
-    use crate::query_graph::graph_path::OpGraphPath;
-    use crate::query_graph::graph_path::OpGraphPathTrigger;
-    use crate::query_graph::graph_path::OpPathElement;
-    use crate::query_graph::path_tree::OpPathTree;
+    use crate::operation::never_cancel;
+    use crate::operation::normalize_operation;
     use crate::query_graph::QueryGraph;
     use crate::query_graph::QueryGraphEdgeTransition;
-    use crate::schema::position::SchemaRootDefinitionKind;
+    use crate::query_graph::build_query_graph::build_query_graph;
+    use crate::query_graph::condition_resolver::ConditionResolution;
+    use crate::query_graph::graph_path::operation::OpGraphPath;
+    use crate::query_graph::graph_path::operation::OpGraphPathTrigger;
+    use crate::query_graph::graph_path::operation::OpPathElement;
+    use crate::query_graph::path_tree::OpPathTree;
     use crate::schema::ValidFederationSchema;
+    use crate::schema::position::SchemaRootDefinitionKind;
 
     // NB: stole from operation.rs
     fn parse_schema_and_operation(
         schema_and_operation: &str,
     ) -> (ValidFederationSchema, ExecutableDocument) {
-        let (schema, executable_document) =
-            apollo_compiler::parse_mixed_validate(schema_and_operation, "document.graphql")
-                .unwrap();
+        let (schema, executable_document) = Parser::new()
+            .parse_mixed_validate(schema_and_operation, "document.graphql")
+            .unwrap();
         let executable_document = executable_document.into_inner();
         let schema = ValidFederationSchema::new(schema).unwrap();
         (schema, executable_document)
@@ -681,8 +693,14 @@ mod tests {
         let (schema, mut executable_document) = parse_schema_and_operation(src);
         let (op_name, operation) = executable_document.operations.named.first_mut().unwrap();
 
-        let query_graph =
-            Arc::new(build_query_graph(op_name.to_string().into(), schema.clone()).unwrap());
+        let query_graph = Arc::new(
+            build_query_graph(
+                op_name.to_string().into(),
+                schema.clone(),
+                Default::default(),
+            )
+            .unwrap(),
+        );
 
         let path1 =
             build_graph_path(&query_graph, SchemaRootDefinitionKind::Query, &["t", "id"]).unwrap();
@@ -702,17 +720,21 @@ mod tests {
             "Query(Test) --[t]--> T(Test) --[otherId]--> ID(Test)"
         );
 
-        let normalized_operation =
-            normalize_operation(operation, Default::default(), &schema, &Default::default())
-                .unwrap();
+        let normalized_operation = normalize_operation(
+            operation,
+            &Default::default(),
+            &schema,
+            &Default::default(),
+            &never_cancel,
+        )
+        .unwrap();
         let selection_set = Arc::new(normalized_operation.selection_set);
 
         let paths = vec![
             (&path1, Some(&selection_set)),
             (&path2, Some(&selection_set)),
         ];
-        let path_tree =
-            OpPathTree::from_op_paths(query_graph.to_owned(), NodeIndex::new(0), &paths).unwrap();
+        let path_tree = OpPathTree::from_op_paths(query_graph, NodeIndex::new(0), &paths).unwrap();
         let computed = path_tree.to_string();
         let expected = r#"Query(Test):
  -> [3] t = T(Test):

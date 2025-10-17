@@ -1,0 +1,28 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/uri_templates/invalid_source_url_template.graphql
+---
+[
+    Message {
+        code: InvalidUrl,
+        message: "Invalid @source `baseURL` template: $args is not valid here, must be one of $config, $env",
+        locations: [
+            6:50..6:59,
+        ],
+    },
+    Message {
+        code: InvalidUrl,
+        message: "Invalid @source `baseURL` template: $request is not valid here, must be one of $config, $env",
+        locations: [
+            6:62..6:75,
+        ],
+    },
+    Message {
+        code: InvalidUrl,
+        message: "Invalid @source `baseURL` template: object values aren't valid here",
+        locations: [
+            7:52..7:54,
+        ],
+    },
+]

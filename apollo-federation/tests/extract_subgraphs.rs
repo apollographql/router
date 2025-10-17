@@ -1,6 +1,6 @@
+use apollo_compiler::Node;
 use apollo_compiler::coord;
 use apollo_compiler::schema::Value;
-use apollo_compiler::Node;
 use apollo_federation::Supergraph;
 
 #[test]
@@ -786,6 +786,92 @@ fn extracts_set_context_directives() {
       {
         id: ID!
         field: Int! @join__field(graph: SUBGRAPH1, contextArguments: [{context: "Subgraph1__context", name: "a", type: "String", selection: "{ prop }"}])
+      }
+    "#)
+    .expect("is supergraph")
+    .extract_subgraphs()
+    .expect("extracts subgraphs");
+
+    let mut snapshot = String::new();
+    for (_name, subgraph) in subgraphs {
+        use std::fmt::Write;
+
+        _ = writeln!(
+            &mut snapshot,
+            "{}\n---\n{}",
+            subgraph.name,
+            subgraph.schema.schema()
+        );
+    }
+    insta::assert_snapshot!(snapshot);
+}
+
+#[test]
+fn extracts_string_enum_values() {
+    let subgraphs = Supergraph::new(r#"
+      schema
+        @link(url: "https://specs.apollo.dev/link/v1.0")
+        @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+      {
+        query: Query
+      }
+
+      directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+      directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+      directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+      directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+      directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+      directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+      directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+      type Entity
+        @join__type(graph: A, key: "id")
+        @join__type(graph: B, key: "id")
+      {
+        id: ID!
+        localField: String! @join__field(graph: A, requires: "requiredField(arg: \"ENUM_VALUE\")")
+        requiredField(arg: Enum): String! @join__field(graph: A, external: true) @join__field(graph: B)
+      }
+
+      enum Enum
+        @join__type(graph: A)
+        @join__type(graph: B)
+      {
+        ENUM_VALUE @join__enumValue(graph: A) @join__enumValue(graph: B)
+      }
+
+      scalar join__FieldSet
+
+      enum join__Graph {
+        A @join__graph(name: "A", url: "http://localhost:4002/")
+        B @join__graph(name: "B", url: "http://localhost:4003/")
+      }
+
+      scalar link__Import
+
+      enum link__Purpose {
+        """
+        `SECURITY` features provide metadata necessary to securely resolve fields.
+        """
+        SECURITY
+
+        """
+        `EXECUTION` features provide metadata necessary for operation execution.
+        """
+        EXECUTION
+      }
+
+      type Query
+        @join__type(graph: A)
+        @join__type(graph: B)
+      {
+        entity: Entity @join__field(graph: A)
       }
     "#)
     .expect("is supergraph")

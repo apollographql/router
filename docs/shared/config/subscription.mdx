@@ -1,0 +1,22 @@
+### `subscription`
+
+```yaml title="subscription"
+subscription:
+  enable_deduplication: true
+  enabled: true
+  max_opened_subscriptions: null
+  mode:
+    callback:
+      heartbeat_interval: disabled
+      listen: example_listen
+      path: example_path
+      public_url: http://service.example.com/public_url
+      subgraphs: []
+    passthrough:
+      all:
+        heartbeat_interval: disabled
+        path: null
+        protocol: graphql_ws
+      subgraphs: {}
+  queue_capacity: null
+```

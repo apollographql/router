@@ -1,10 +1,10 @@
 use std::fmt::Display;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast::Value;
 use apollo_compiler::executable::Directive;
 use apollo_compiler::name;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 use serde::Serialize;
 
 use crate::error::FederationError;

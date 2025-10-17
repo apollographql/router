@@ -9,7 +9,7 @@ events:
           hello
     - context:
         map:
-          "operation_name": "Test"
+          "apollo::supergraph::operation_name": "Test"
     - supergraph_request:
         uri: "/hello"
         method: GET
@@ -26,6 +26,13 @@ events:
     - context:
         map:
           "apollo::router::entity_cache_info_subgraph_products":
+            Product:
+              hit: 3
+              miss: 0
+            Review:
+              hit: 5
+              miss: 0
+          "apollo::router::response_cache::cache_info_subgraph_products":
             Product:
               hit: 3
               miss: 0

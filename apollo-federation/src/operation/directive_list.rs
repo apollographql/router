@@ -7,11 +7,14 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
-use apollo_compiler::executable;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::collections::IndexSet;
+use apollo_compiler::executable;
 use serde::Serialize;
 
+use super::DEFER_DIRECTIVE_NAME;
+use super::DEFER_LABEL_ARGUMENT_NAME;
 use super::sort_arguments;
 
 /// Compare sorted input values, which means specifically establishing an order between the variants
@@ -304,9 +307,7 @@ impl DirectiveList {
             // Nothing to do on an empty list
             return None;
         };
-        let Some(index) = inner.directives.iter().position(|dir| dir.name == name) else {
-            return None;
-        };
+        let index = inner.directives.iter().position(|dir| dir.name == name)?;
 
         // The directive exists and is the only directive: switch to the empty representation
         if inner.len() == 1 {
@@ -333,6 +334,18 @@ impl DirectiveList {
         }
         inner.rehash();
         Some(item)
+    }
+
+    /// Removes @defer directive from self if it has a matching label.
+    pub(crate) fn remove_defer(&mut self, defer_labels: &IndexSet<String>) {
+        let label = self
+            .get(&DEFER_DIRECTIVE_NAME)
+            .and_then(|directive| directive.specified_argument_by_name(&DEFER_LABEL_ARGUMENT_NAME))
+            .and_then(|arg| arg.as_str());
+
+        if label.is_some_and(|label| defer_labels.contains(label)) {
+            self.remove_one(&DEFER_DIRECTIVE_NAME);
+        }
     }
 }
 

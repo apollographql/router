@@ -1,0 +1,66 @@
+---
+source: apollo-federation/src/connectors/string_template.rs
+expression: "StringTemplate::from_str(\"text{$config.one}text\").unwrap()"
+---
+StringTemplate {
+    parts: [
+        Constant(
+            Constant {
+                value: "text",
+                location: 0..4,
+            },
+        ),
+        Expression(
+            Expression {
+                expression: JSONSelection {
+                    inner: Path(
+                        PathSelection {
+                            path: WithRange {
+                                node: Var(
+                                    WithRange {
+                                        node: $config,
+                                        range: Some(
+                                            0..7,
+                                        ),
+                                    },
+                                    WithRange {
+                                        node: Key(
+                                            WithRange {
+                                                node: Field(
+                                                    "one",
+                                                ),
+                                                range: Some(
+                                                    8..11,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Empty,
+                                                range: Some(
+                                                    11..11,
+                                                ),
+                                            },
+                                        ),
+                                        range: Some(
+                                            7..11,
+                                        ),
+                                    },
+                                ),
+                                range: Some(
+                                    0..11,
+                                ),
+                            },
+                        },
+                    ),
+                    spec: V0_2,
+                },
+                location: 5..16,
+            },
+        ),
+        Constant(
+            Constant {
+                value: "text",
+                location: 17..21,
+            },
+        ),
+    ],
+}

@@ -1,16 +1,16 @@
 #![allow(dead_code)]
 
 use crate::operation::Selection;
-use crate::query_graph::graph_path::ClosedBranch;
-use crate::query_graph::graph_path::SimultaneousPathsWithLazyIndirectPaths;
-use crate::query_plan::query_planning_traversal::OpenBranchAndSelections;
+use crate::query_graph::graph_path::operation::ClosedBranch;
+use crate::query_graph::graph_path::operation::OpenBranchAndSelections;
+use crate::query_graph::graph_path::operation::SimultaneousPathsWithLazyIndirectPaths;
 
 /// This macro is a wrapper around `tracing::trace!` and should not be confused with our snapshot
 /// testing. This primary goal of this macro is to add the necessary context to logging statements
 /// so that external tools (like the snapshot log visualizer) can show how various key data
 /// structures evolve over the course of planning a query.
 ///
-/// There are two ways of creating a snapshot. The easiest is by passing the macro a indentifier
+/// There are two ways of creating a snapshot. The easiest is by passing the macro a identifier
 /// for the value you'd like to take a snapshot of. This will tag the snapshot type with the type
 /// name of the value, create data that is JSON string using serde_json, and add the message
 /// literal that you pass in. EX:
@@ -57,7 +57,7 @@ pub(crate) fn make_string<T: ?Sized>(
         writer: fn(&mut std::fmt::Formatter<'_>, &T) -> std::fmt::Result,
     }
 
-    impl<'a, T: ?Sized> std::fmt::Display for Stringify<'a, T> {
+    impl<T: ?Sized> std::fmt::Display for Stringify<'_, T> {
         fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
             (self.writer)(f, self.data)
         }

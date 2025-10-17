@@ -1,0 +1,25 @@
+subgraphs:
+  one:
+    routing_url: http://none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.11")
+          @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@source", "@connect"])
+          @source(name: "json", http: { baseURL: "http://localhost:4001/api" })
+
+        type Query {
+          users: [User!]!
+            @connect(source: "json", http: { GET: "/users" }, selection: "id")
+        }
+
+        type User
+          @connect(source: "json"
+            http: { POST: "/users-batch", body: "ids: $$batch.id" }
+            selection: "id name username"
+          )
+        {
+          id: ID!
+          name: String
+          username: String
+        }

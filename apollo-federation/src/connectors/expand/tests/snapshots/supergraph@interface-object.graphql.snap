@@ -1,0 +1,86 @@
+---
+source: apollo-federation/src/connectors/expand/tests/mod.rs
+expression: raw_sdl
+input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interface-object.graphql
+---
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @join__directive(graphs: [], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1"}) @link(url: "https://specs.apollo.dev/connect/v0.1", for: EXECUTION) @join__directive(graphs: [CONNECTORS_ITF_E_0, CONNECTORS_QUERY_ITFS_0, CONNECTORS_QUERY_ITF_0], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]}) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on ENUM | INPUT_OBJECT | INTERFACE | OBJECT | SCALAR | UNION
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, overrideLabel: String, usedOverridden: Boolean, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on INTERFACE | OBJECT
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments!) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+enum link__Purpose {
+  """
+  SECURITY features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """EXECUTION features provide metadata necessary for operation execution."""
+  EXECUTION
+}
+
+scalar link__Import
+
+scalar join__FieldSet
+
+scalar join__FieldValue
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+
+scalar join__DirectiveArguments
+
+enum join__Graph {
+  CONNECTORS_ITF_E_0 @join__graph(name: "connectors_Itf_e_0", url: "none")
+  CONNECTORS_QUERY_ITF_0 @join__graph(name: "connectors_Query_itf_0", url: "none")
+  CONNECTORS_QUERY_ITFS_0 @join__graph(name: "connectors_Query_itfs_0", url: "none")
+  GRAPHQL @join__graph(name: "graphql", url: "none")
+}
+
+interface Itf @join__type(graph: CONNECTORS_ITF_E_0, isInterfaceObject: true, key: "id") @join__type(graph: CONNECTORS_QUERY_ITF_0, isInterfaceObject: true, key: "id") @join__type(graph: CONNECTORS_QUERY_ITFS_0, isInterfaceObject: true, key: "id", resolvable: false) @join__type(graph: GRAPHQL, key: "id") {
+  e: String @join__field(graph: CONNECTORS_ITF_E_0, type: "String")
+  id: ID! @join__field(graph: CONNECTORS_ITF_E_0, type: "ID!") @join__field(graph: CONNECTORS_QUERY_ITF_0, type: "ID!") @join__field(graph: CONNECTORS_QUERY_ITFS_0, type: "ID!") @join__field(graph: GRAPHQL, type: "ID!")
+  c: Int! @join__field(graph: CONNECTORS_QUERY_ITF_0, type: "Int!") @join__field(graph: CONNECTORS_QUERY_ITFS_0, type: "Int!")
+  d: Int! @join__field(graph: CONNECTORS_QUERY_ITF_0, type: "Int!")
+}
+
+type Query @join__type(graph: CONNECTORS_ITF_E_0) @join__type(graph: CONNECTORS_QUERY_ITF_0) @join__type(graph: CONNECTORS_QUERY_ITFS_0) @join__type(graph: GRAPHQL) {
+  _: ID @inaccessible @join__field(graph: CONNECTORS_ITF_E_0, type: "ID")
+  itf(id: ID!): Itf @join__field(graph: CONNECTORS_QUERY_ITF_0, type: "Itf")
+  itfs: [Itf] @join__field(graph: CONNECTORS_QUERY_ITFS_0, type: "[Itf]")
+}
+
+type T1 implements Itf @join__type(graph: GRAPHQL, key: "id") @join__implements(graph: GRAPHQL, interface: "Itf") {
+  id: ID! @join__field(graph: GRAPHQL, type: "ID!")
+  a: String @join__field(graph: GRAPHQL, type: "String")
+  e: String @join__field
+  c: Int! @join__field
+  d: Int! @join__field
+}
+
+type T2 implements Itf @join__type(graph: GRAPHQL, key: "id") @join__implements(graph: GRAPHQL, interface: "Itf") {
+  id: ID! @join__field(graph: GRAPHQL, type: "ID!")
+  b: String @join__field(graph: GRAPHQL, type: "String")
+  e: String @join__field
+  c: Int! @join__field
+  d: Int! @join__field
+}

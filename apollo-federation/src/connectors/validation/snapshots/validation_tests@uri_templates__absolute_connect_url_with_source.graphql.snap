@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/uri_templates/absolute_connect_url_with_source.graphql
+---
+[
+    Message {
+        code: AbsoluteConnectUrlWithSource,
+        message: "`GET` in `@connect(http:)` on `Query.resources` contains the absolute URL \"http://127.0.0.1/resources\" while also specifying a `source`. Either remove the `source` argument or change the URL to be relative.",
+        locations: [
+            12:20..12:48,
+        ],
+    },
+]

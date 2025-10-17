@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/connect_spec_version_error.graphql
+---
+[
+    Message {
+        code: UnknownConnectorsVersion,
+        message: "Unknown connect version: 0.99; should be one of 0.1, 0.2, 0.3.",
+        locations: [
+            2:3..5:4,
+        ],
+    },
+]

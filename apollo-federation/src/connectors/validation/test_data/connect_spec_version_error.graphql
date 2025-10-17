@@ -1,0 +1,5 @@
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.99"
+    import: ["@connect", "@source"]
+  )

@@ -1,0 +1,104 @@
+---
+source: apollo-federation/src/connectors/url_template.rs
+expression: "URLTemplate::from_str(\"/position/xz/{$this { x { y } } }\")"
+---
+Ok(
+    URLTemplate {
+        base: None,
+        path: [
+            StringTemplate {
+                parts: [
+                    Constant(
+                        Constant {
+                            value: "position",
+                            location: 1..9,
+                        },
+                    ),
+                ],
+            },
+            StringTemplate {
+                parts: [
+                    Constant(
+                        Constant {
+                            value: "xz",
+                            location: 10..12,
+                        },
+                    ),
+                ],
+            },
+            StringTemplate {
+                parts: [
+                    Expression(
+                        Expression {
+                            expression: Path(
+                                PathSelection {
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $this,
+                                                range: Some(
+                                                    0..5,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Selection(
+                                                    SubSelection {
+                                                        selections: [
+                                                            Field(
+                                                                None,
+                                                                WithRange {
+                                                                    node: Field(
+                                                                        "x",
+                                                                    ),
+                                                                    range: Some(
+                                                                        8..9,
+                                                                    ),
+                                                                },
+                                                                Some(
+                                                                    SubSelection {
+                                                                        selections: [
+                                                                            Field(
+                                                                                None,
+                                                                                WithRange {
+                                                                                    node: Field(
+                                                                                        "y",
+                                                                                    ),
+                                                                                    range: Some(
+                                                                                        12..13,
+                                                                                    ),
+                                                                                },
+                                                                                None,
+                                                                            ),
+                                                                        ],
+                                                                        range: Some(
+                                                                            10..15,
+                                                                        ),
+                                                                    },
+                                                                ),
+                                                            ),
+                                                        ],
+                                                        range: Some(
+                                                            6..17,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    6..17,
+                                                ),
+                                            },
+                                        ),
+                                        range: Some(
+                                            0..17,
+                                        ),
+                                    },
+                                },
+                            ),
+                            location: 14..32,
+                        },
+                    ),
+                ],
+            },
+        ],
+        query: [],
+    },
+)

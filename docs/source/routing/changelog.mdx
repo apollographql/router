@@ -1,0 +1,16 @@
+---
+title: Apollo Router Changelogs
+subtitle: ""
+description: Changelog of latest Apollo Router release
+---
+
+This page contains the changelog for the latest release of Apollo Router.
+
+> Go to [GitHub](https://github.com/apollographql/router/releases) to view changelogs for all router releases.
+
+<RouterReleaseNotes as="releases" >
+<For of={releases} as="release">
+## {release.version}
+  <Markdown content={release.changelog} />
+</For>
+</RouterReleaseNotes>

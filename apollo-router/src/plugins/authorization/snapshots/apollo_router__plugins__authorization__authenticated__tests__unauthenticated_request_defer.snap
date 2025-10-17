@@ -1,6 +1,7 @@
 ---
 source: apollo-router/src/plugins/authorization/authenticated.rs
 expression: first_response
+snapshot_kind: text
 ---
 {
   "data": {
@@ -10,5 +11,16 @@ expression: first_response
         "id": 0
       }
     }
-  }
+  },
+  "errors": [
+    {
+      "message": "Unauthorized field or type",
+      "path": [
+        "orga"
+      ],
+      "extensions": {
+        "code": "UNAUTHORIZED_FIELD_OR_TYPE"
+      }
+    }
+  ]
 }

@@ -1,0 +1,106 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/batch.graphql
+---
+[
+    Message {
+        code: ConnectOnRoot,
+        message: "Cannot use `@connect` on root types like `Query`",
+        locations: [
+            9:12..9:77,
+        ],
+    },
+    Message {
+        code: ConnectOnRoot,
+        message: "Cannot use `@connect` on root types like `Mutation`",
+        locations: [
+            25:3..25:71,
+        ],
+    },
+    Message {
+        code: SourceNameMismatch,
+        message: "`@connect(source: \"missing\")` on `T` does not match any defined sources. Did you mean \"json\"?",
+        locations: [
+            31:13..31:22,
+        ],
+    },
+    Message {
+        code: InvalidBody,
+        message: "In `@connect(http: {body:})` on `Query.ts`: `$batch` may only be used when `@connect` is applied to a type.",
+        locations: [
+            14:40..14:49,
+        ],
+    },
+    Message {
+        code: InvalidUrl,
+        message: "In `POST` in `@connect(http:)` on `Query.ts`: `$batch` may only be used when `@connect` is applied to a type.",
+        locations: [
+            19:31..19:40,
+        ],
+    },
+    Message {
+        code: InvalidUrl,
+        message: "In `GET` in `@connect(http:)` on `T`: $args is not valid here, must be one of $this, $batch, $config, $context, $request, $env",
+        locations: [
+            37:29..37:37,
+        ],
+    },
+    Message {
+        code: SelectedFieldNotFound,
+        message: "`@connect(selection:)` on `T` contains field `typo`, which does not exist on `T`.",
+        locations: [
+            43:25..43:29,
+        ],
+    },
+    Message {
+        code: CircularReference,
+        message: "Circular reference detected in `@connect(selection:)` on `T`: type `T` appears more than once in `T.friends`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references",
+        locations: [
+            48:20..48:48,
+            79:3..84:6,
+        ],
+    },
+    Message {
+        code: ConnectOnTypeMustBeEntity,
+        message: "`@connect(entity: false)` on `T` is invalid. `entity` can't be false for connectors on types.",
+        locations: [
+            54:5..54:18,
+        ],
+    },
+    Message {
+        code: InvalidSelection,
+        message: "In `@connect(selection:)` on `T`: variable `$batch` is not valid at this location, must be one of $args, $config, $context, $env, $request, $response, $status, $this",
+        locations: [
+            64:35..64:41,
+        ],
+    },
+    Message {
+        code: ConnectBatchAndThis,
+        message: "In `@connect` on `T`: connectors cannot use both $this and $batch",
+        locations: [
+            66:3..70:4,
+        ],
+    },
+    Message {
+        code: ConnectBatchAndThis,
+        message: "In `@connect` on `T`: connectors cannot use both $this and $batch",
+        locations: [
+            71:3..75:4,
+        ],
+    },
+    Message {
+        code: CircularReference,
+        message: "Direct circular reference detected in `T.friends: [T]`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references",
+        locations: [
+            79:3..84:6,
+        ],
+    },
+    Message {
+        code: InvalidUrl,
+        message: "In `GET` in `@connect(http:)` on `T.listRelationship`: `$batch` may only be used when `@connect` is applied to a type.",
+        locations: [
+            88:28..88:55,
+        ],
+    },
+]

@@ -1,29 +1,28 @@
-use std::any::type_name;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
 use opentelemetry::KeyValue;
-use schemars::gen::SchemaGenerator;
-use schemars::schema::Schema;
 use schemars::JsonSchema;
+use schemars::Schema;
+use schemars::SchemaGenerator;
+use serde::Deserialize;
+use serde::Deserializer;
 use serde::de::Error;
 use serde::de::MapAccess;
 use serde::de::Visitor;
-use serde::Deserialize;
-use serde::Deserializer;
 use serde_json::Map;
 use serde_json::Value;
 use tower::BoxError;
 
 use super::Stage;
-use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
+use crate::Context;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::Selectors;
+use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
-use crate::Context;
 
 /// This struct can be used as an attributes container, it has a custom JsonSchema implementation that will merge the schemas of the attributes and custom fields.
 #[derive(Clone, Debug)]
@@ -98,10 +97,7 @@ where
                             let mut temp_attributes: Map<String, Value> = Map::new();
                             temp_attributes.insert(key.clone(), value.clone());
                             Att::deserialize(Value::Object(temp_attributes)).map_err(|e| {
-                                A::Error::custom(format!(
-                                    "failed to parse attribute '{}': {}",
-                                    key, e
-                                ))
+                                A::Error::custom(format!("failed to parse attribute '{key}': {e}"))
                             })?;
                             attributes.insert(key, value);
                         }
@@ -126,44 +122,35 @@ where
     A: Default + JsonSchema,
     E: JsonSchema,
 {
-    fn schema_name() -> String {
-        format!(
-            "extendable_attribute_{}_{}",
-            type_name::<A>(),
-            type_name::<E>()
-        )
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        format!("Extended{}With{}", A::schema_name(), E::schema_name()).into()
     }
 
-    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         // Extendable json schema is composed of and anyOf of A and additional properties of E
         // To allow this to happen we need to generate a schema that contains all the properties of A
         // and a schema ref to A.
         // We can then add additional properties to the schema of type E.
 
-        let attributes = gen.subschema_for::<A>();
-        let custom = gen.subschema_for::<HashMap<String, E>>();
+        let custom = generator.subschema_for::<HashMap<String, E>>();
 
         // Get a list of properties from the attributes schema
-        let attribute_schema = gen
-            .dereference(&attributes)
-            .expect("failed to dereference attributes");
-        let mut properties = BTreeMap::new();
-        if let Schema::Object(schema_object) = attribute_schema {
-            if let Some(object_validation) = &schema_object.object {
-                for key in object_validation.properties.keys() {
-                    properties.insert(key.clone(), Schema::Bool(true));
-                }
+        let attribute_schema = A::json_schema(generator);
+        let mut properties = BTreeMap::<String, Schema>::new();
+        if let Some(attribute_properties) = attribute_schema
+            .as_object()
+            .and_then(|object| object.get("properties"))
+            .and_then(|properties| properties.as_object())
+        {
+            for key in attribute_properties.keys() {
+                properties.insert(key.clone(), true.into());
             }
         }
         let mut schema = attribute_schema.clone();
-        if let Schema::Object(schema_object) = &mut schema {
-            if let Some(object_validation) = &mut schema_object.object {
-                object_validation.additional_properties = custom
-                    .into_object()
-                    .object
-                    .expect("could not get obejct validation")
-                    .additional_properties;
-            }
+        if let Some(object) = schema.as_object_mut()
+            && let Some(additional_properties) = custom.get("additionalProperties")
+        {
+            object["additionalProperties"] = additional_properties.clone();
         }
         schema
     }
@@ -262,7 +249,9 @@ where
         if let Some(Stage::Request) = &restricted_stage {
             for (name, custom) in &self.custom {
                 if !custom.is_active(Stage::Request) {
-                    return Err(format!("cannot set the attribute {name:?} because it is using a selector computed in another stage than 'request' so it will not be computed"));
+                    return Err(format!(
+                        "cannot set the attribute {name:?} because it is using a selector computed in another stage than 'request' so it will not be computed"
+                    ));
                 }
             }
         }
@@ -277,19 +266,19 @@ mod test {
     use parking_lot::Mutex;
 
     use crate::plugins::telemetry::config::AttributeValue;
-    use crate::plugins::telemetry::config_new::attributes::HttpCommonAttributes;
-    use crate::plugins::telemetry::config_new::attributes::HttpServerAttributes;
-    use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
     use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
-    use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
     use crate::plugins::telemetry::config_new::conditional::Conditional;
     use crate::plugins::telemetry::config_new::conditions::Condition;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::plugins::telemetry::config_new::extendable::Extendable;
+    use crate::plugins::telemetry::config_new::http_common::attributes::HttpCommonAttributes;
+    use crate::plugins::telemetry::config_new::http_server::attributes::HttpServerAttributes;
+    use crate::plugins::telemetry::config_new::router::attributes::RouterAttributes;
+    use crate::plugins::telemetry::config_new::router::selectors::RouterSelector;
     use crate::plugins::telemetry::config_new::selectors::OperationName;
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
-    use crate::plugins::telemetry::config_new::selectors::RouterSelector;
-    use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
+    use crate::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes;
+    use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector;
 
     #[test]
     fn test_extendable_serde() {

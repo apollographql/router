@@ -3,26 +3,17 @@ use std::collections::HashSet;
 use std::io::IsTerminal;
 use std::time::Duration;
 
-use schemars::gen::SchemaGenerator;
-use schemars::schema::InstanceType;
-use schemars::schema::Metadata;
-use schemars::schema::ObjectValidation;
-use schemars::schema::Schema;
-use schemars::schema::SchemaObject;
-use schemars::schema::SingleOrVec;
-use schemars::schema::SubschemaValidation;
 use schemars::JsonSchema;
-use serde::de::MapAccess;
-use serde::de::Visitor;
+use schemars::Schema;
+use schemars::SchemaGenerator;
 use serde::Deserialize;
 use serde::Deserializer;
+use serde::de::MapAccess;
+use serde::de::Visitor;
 
-use crate::configuration::ConfigurationError;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::TraceIdFormat;
-use crate::plugins::telemetry::config_new::experimental_when_header::HeaderLoggingCondition;
 use crate::plugins::telemetry::resource::ConfigResource;
-use crate::services::SupergraphRequest;
 
 /// Logging configuration.
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
@@ -35,44 +26,6 @@ pub(crate) struct Logging {
     #[serde(skip)]
     /// Settings for logging to a file.
     pub(crate) file: File,
-
-    /// Log configuration to log request and response for subgraphs and supergraph
-    /// Note that this will be removed when events are implemented.
-    #[serde(rename = "experimental_when_header")]
-    pub(crate) when_header: Vec<HeaderLoggingCondition>,
-}
-
-impl Logging {
-    pub(crate) fn validate(&self) -> Result<(), ConfigurationError> {
-        let misconfiguration = self.when_header.iter().any(|cfg| match cfg {
-            HeaderLoggingCondition::Matching { headers, body, .. }
-            | HeaderLoggingCondition::Value { headers, body, .. } => !body && !headers,
-        });
-
-        if misconfiguration {
-            Err(ConfigurationError::InvalidConfiguration {
-                message: "'experimental_when_header' configuration for logging is invalid",
-                error: String::from(
-                    "body and headers must not be both false because it doesn't enable any logs",
-                ),
-            })
-        } else {
-            Ok(())
-        }
-    }
-
-    /// Returns if we should display the request/response headers and body given the `SupergraphRequest`
-    pub(crate) fn should_log(&self, req: &SupergraphRequest) -> (bool, bool) {
-        self.when_header
-            .iter()
-            .fold((false, false), |(log_headers, log_body), current| {
-                let (current_log_headers, current_log_body) = current.should_log(req);
-                (
-                    log_headers || current_log_headers,
-                    log_body || current_log_body,
-                )
-            })
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
@@ -190,68 +143,48 @@ pub(crate) enum Format {
 
 // This custom implementation JsonSchema allows the user to supply an enum or a struct in the same way that the custom deserializer does.
 impl JsonSchema for Format {
-    fn schema_name() -> String {
-        "logging_format".to_string()
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "logging_format".into()
     }
 
-    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
-        // Does nothing, but will compile error if the
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         let types = vec![
-            ("json", JsonFormat::json_schema(gen), "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Json.html"),
-            ("text", TextFormat::json_schema(gen), "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Full.html"),
+            (
+                "json",
+                JsonFormat::json_schema(generator),
+                "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Json.html",
+            ),
+            (
+                "text",
+                TextFormat::json_schema(generator),
+                "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Full.html",
+            ),
         ];
 
-        Schema::Object(SchemaObject {
-            subschemas: Some(Box::new(SubschemaValidation {
-                one_of: Some(
-                    types
-                        .into_iter()
-                        .map(|(name, schema, description)| {
-                            (
-                                name,
-                                ObjectValidation {
-                                    required: [name.to_string()].into(),
-                                    properties: [(name.to_string(), schema)].into(),
-                                    additional_properties: Some(Box::new(Schema::Bool(false))),
-                                    ..Default::default()
-                                },
-                                description,
-                            )
-                        })
-                        .flat_map(|(name, o, dec)| {
-                            vec![
-                                SchemaObject {
-                                    metadata: Some(Box::new(Metadata {
-                                        description: Some(dec.to_string()),
-                                        ..Default::default()
-                                    })),
-                                    instance_type: Some(SingleOrVec::Single(Box::new(
-                                        InstanceType::Object,
-                                    ))),
-                                    object: Some(Box::new(o)),
-                                    ..Default::default()
-                                },
-                                SchemaObject {
-                                    metadata: Some(Box::new(Metadata {
-                                        description: Some(dec.to_string()),
-                                        ..Default::default()
-                                    })),
-                                    instance_type: Some(SingleOrVec::Single(Box::new(
-                                        InstanceType::String,
-                                    ))),
-                                    enum_values: Some(vec![serde_json::Value::String(
-                                        name.to_string(),
-                                    )]),
-                                    ..Default::default()
-                                },
-                            ]
-                        })
-                        .map(Schema::Object)
-                        .collect::<Vec<_>>(),
-                ),
-                ..Default::default()
-            })),
-            ..Default::default()
+        let schemas = types
+            .into_iter()
+            .flat_map(|(name, schema, description)| {
+                [
+                    schemars::json_schema!({
+                        "type": "object",
+                        "description": description,
+                        "properties": {
+                            name.to_string(): schema,
+                        },
+                        "required": [name],
+                        "additionalProperties": false,
+                    }),
+                    schemars::json_schema!({
+                        "type": "string",
+                        "description": description,
+                        "enum": [name], // TODO(@goto-bus-stop): why not "const"?
+                    }),
+                ]
+            })
+            .collect::<Vec<_>>();
+
+        schemars::json_schema!({
+            "oneOf": schemas,
         })
     }
 }
@@ -277,7 +210,7 @@ impl<'de> Deserialize<'de> for Format {
                 match value {
                     "json" => Ok(Format::Json(JsonFormat::default())),
                     "text" => Ok(Format::Text(TextFormat::default())),
-                    _ => Err(E::custom(format!("unknown log format: {}", value))),
+                    _ => Err(E::custom(format!("unknown log format: {value}"))),
                 }
             }
 
@@ -291,8 +224,7 @@ impl<'de> Deserialize<'de> for Format {
                     Some("json") => Ok(Format::Json(map.next_value::<JsonFormat>()?)),
                     Some("text") => Ok(Format::Text(map.next_value::<TextFormat>()?)),
                     Some(value) => Err(serde::de::Error::custom(format!(
-                        "unknown log format: {}",
-                        value
+                        "unknown log format: {value}"
                     ))),
                     _ => Err(serde::de::Error::custom("unknown log format")),
                 }
@@ -470,13 +402,10 @@ pub(crate) enum Rollover {
 
 #[cfg(test)]
 mod test {
-    use regex::Regex;
     use serde_json::json;
 
-    use crate::plugins::telemetry::config_new::experimental_when_header::HeaderLoggingCondition;
     use crate::plugins::telemetry::config_new::logging::Format;
-    use crate::plugins::telemetry::config_new::logging::Logging;
-    use crate::services::SupergraphRequest;
+
     #[test]
     fn format_de() {
         let format = serde_json::from_value::<Format>(json!("text")).unwrap();
@@ -487,93 +416,5 @@ mod test {
         assert_eq!(format, Format::Text(Default::default()));
         let format = serde_json::from_value::<Format>(json!({"json":{}})).unwrap();
         assert_eq!(format, Format::Json(Default::default()));
-    }
-
-    #[test]
-    fn test_logging_conf_validation() {
-        let logging_conf = Logging {
-            when_header: vec![HeaderLoggingCondition::Value {
-                name: "test".to_string(),
-                value: String::new(),
-                headers: true,
-                body: false,
-            }],
-            ..Default::default()
-        };
-
-        logging_conf.validate().unwrap();
-
-        let logging_conf = Logging {
-            when_header: vec![HeaderLoggingCondition::Value {
-                name: "test".to_string(),
-                value: String::new(),
-                headers: false,
-                body: false,
-            }],
-            ..Default::default()
-        };
-
-        let validate_res = logging_conf.validate();
-        assert!(validate_res.is_err());
-        assert_eq!(validate_res.unwrap_err().to_string(), "'experimental_when_header' configuration for logging is invalid: body and headers must not be both false because it doesn't enable any logs");
-    }
-
-    #[test]
-    fn test_logging_conf_should_log() {
-        let logging_conf = Logging {
-            when_header: vec![HeaderLoggingCondition::Matching {
-                name: "test".to_string(),
-                matching: Regex::new("^foo*").unwrap(),
-                headers: true,
-                body: false,
-            }],
-            ..Default::default()
-        };
-        let req = SupergraphRequest::fake_builder()
-            .header("test", "foobar")
-            .build()
-            .unwrap();
-        assert_eq!(logging_conf.should_log(&req), (true, false));
-
-        let logging_conf = Logging {
-            when_header: vec![HeaderLoggingCondition::Value {
-                name: "test".to_string(),
-                value: String::from("foobar"),
-                headers: true,
-                body: false,
-            }],
-            ..Default::default()
-        };
-        assert_eq!(logging_conf.should_log(&req), (true, false));
-
-        let logging_conf = Logging {
-            when_header: vec![
-                HeaderLoggingCondition::Matching {
-                    name: "test".to_string(),
-                    matching: Regex::new("^foo*").unwrap(),
-                    headers: true,
-                    body: false,
-                },
-                HeaderLoggingCondition::Matching {
-                    name: "test".to_string(),
-                    matching: Regex::new("^*bar$").unwrap(),
-                    headers: false,
-                    body: true,
-                },
-            ],
-            ..Default::default()
-        };
-        assert_eq!(logging_conf.should_log(&req), (true, true));
-
-        let logging_conf = Logging {
-            when_header: vec![HeaderLoggingCondition::Matching {
-                name: "testtest".to_string(),
-                matching: Regex::new("^foo*").unwrap(),
-                headers: true,
-                body: false,
-            }],
-            ..Default::default()
-        };
-        assert_eq!(logging_conf.should_log(&req), (false, false));
     }
 }

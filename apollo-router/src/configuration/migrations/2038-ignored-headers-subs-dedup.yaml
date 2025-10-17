@@ -1,0 +1,5 @@
+description: "`subscription.enable_deduplication` was a true/false before but now has child properties `enabled` and `ignored_headers`"
+actions:
+  - type: move
+    from: subscription.enable_deduplication
+    to: subscription.deduplication.enabled

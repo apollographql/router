@@ -1,6 +1,6 @@
+use apollo_compiler::ExecutableDocument;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::executable::Field;
-use apollo_compiler::ExecutableDocument;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json_bytes::Value;
@@ -8,8 +8,10 @@ use tower::BoxError;
 
 use super::instruments::CustomCounter;
 use super::instruments::CustomInstruments;
+use crate::Context;
 use crate::graphql::ResponseVisitor;
 use crate::json_ext::Object;
+use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes;
@@ -18,10 +20,8 @@ use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLValue;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
-use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::supergraph;
-use crate::Context;
 
 pub(crate) mod attributes;
 pub(crate) mod selectors;
@@ -134,20 +134,20 @@ impl Instrumented for GraphQLInstruments {
         }
         self.custom.on_response_event(response, ctx);
 
-        if !self.custom.is_empty() || self.list_length.is_some() || self.field_execution.is_some() {
-            if let Some(executable_document) = ctx.unsupported_executable_document() {
-                GraphQLInstrumentsVisitor {
-                    ctx,
-                    instruments: self,
-                }
-                .visit(
-                    &executable_document,
-                    response,
-                    &ctx.get_demand_control_context()
-                        .map(|c| c.variables)
-                        .unwrap_or_default(),
-                );
+        if (!self.custom.is_empty() || self.list_length.is_some() || self.field_execution.is_some())
+            && let Some(executable_document) = ctx.executable_document()
+        {
+            GraphQLInstrumentsVisitor {
+                ctx,
+                instruments: self,
             }
+            .visit(
+                &executable_document,
+                response,
+                &ctx.get_demand_control_context()
+                    .map(|c| c.variables)
+                    .unwrap_or_default(),
+            );
         }
     }
 
@@ -167,7 +167,7 @@ struct GraphQLInstrumentsVisitor<'a> {
     instruments: &'a GraphQLInstruments,
 }
 
-impl<'a> ResponseVisitor for GraphQLInstrumentsVisitor<'a> {
+impl ResponseVisitor for GraphQLInstrumentsVisitor<'_> {
     fn visit_field(
         &mut self,
         request: &ExecutableDocument,
@@ -203,10 +203,10 @@ impl<'a> ResponseVisitor for GraphQLInstrumentsVisitor<'a> {
 pub(crate) mod test {
 
     use super::*;
+    use crate::Configuration;
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::test::PluginTestHarness;
-    use crate::Configuration;
 
     #[test_log::test(tokio::test)]
     async fn basic_metric_publishing() {
@@ -227,10 +227,10 @@ pub(crate) mod test {
                 .config(include_str!("fixtures/field_length_enabled.router.yaml"))
                 .schema(schema_str)
                 .build()
-                .await;
+                .await.expect("test harness");
 
             harness
-                .call_supergraph(request, |req| {
+                .supergraph_service(|req| async {
                     let response: serde_json::Value = serde_json::from_str(include_str!(
                         "../../../demand_control/cost_calculator/fixtures/federated_ships_named_response.json"
                     ))
@@ -239,8 +239,8 @@ pub(crate) mod test {
                         .data(response["data"].clone())
                         .context(req.context)
                         .build()
-                        .unwrap()
                 })
+                .call(request)
                 .await
                 .unwrap();
 
@@ -275,9 +275,9 @@ pub(crate) mod test {
                 .config(include_str!("fixtures/field_length_enabled.router.yaml"))
                 .schema(schema_str)
                 .build()
-                .await;
+                .await.expect("test harness");
             harness
-                .call_supergraph(request, |req| {
+                .supergraph_service(|req| async {
                     let response: serde_json::Value = serde_json::from_str(include_str!(
                         "../../../demand_control/cost_calculator/fixtures/federated_ships_fragment_response.json"
                     ))
@@ -286,8 +286,9 @@ pub(crate) mod test {
                         .data(response["data"].clone())
                         .context(req.context)
                         .build()
-                        .unwrap()
+
                 })
+                .call(request)
                 .await
                 .unwrap();
 
@@ -329,10 +330,10 @@ pub(crate) mod test {
                 .config(include_str!("fixtures/field_length_disabled.router.yaml"))
                 .schema(schema_str)
                 .build()
-                .await;
+                .await.expect("test harness");
 
             harness
-                .call_supergraph(request, |req| {
+                .supergraph_service(|req| async {
                     let response: serde_json::Value = serde_json::from_str(include_str!(
                         "../../../demand_control/cost_calculator/fixtures/federated_ships_named_response.json"
                     ))
@@ -341,8 +342,8 @@ pub(crate) mod test {
                         .data(response["data"].clone())
                         .context(req.context)
                         .build()
-                        .unwrap()
                 })
+                .call(request)
                 .await
                 .unwrap();
 
@@ -371,10 +372,10 @@ pub(crate) mod test {
                 .config(include_str!("fixtures/filtered_field_length.router.yaml"))
                 .schema(schema_str)
                 .build()
-                .await;
+                .await.expect("test harness");
 
             harness
-                .call_supergraph(request, |req| {
+                .supergraph_service(|req| async {
                     let response: serde_json::Value = serde_json::from_str(include_str!(
                         "../../../demand_control/cost_calculator/fixtures/federated_ships_fragment_response.json"
                     ))
@@ -383,8 +384,8 @@ pub(crate) mod test {
                         .data(response["data"].clone())
                         .context(req.context)
                         .build()
-                        .unwrap()
                 })
+                .call(request)
                 .await
                 .unwrap();
 
@@ -400,9 +401,7 @@ pub(crate) mod test {
             crate::spec::Query::parse_document(query_str, None, &schema, &Configuration::default())
                 .unwrap();
         let context = Context::new();
-        context
-            .extensions()
-            .with_lock(|mut lock| lock.insert(query));
+        context.extensions().with_lock(|lock| lock.insert(query));
 
         context
     }

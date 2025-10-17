@@ -1,35 +1,30 @@
 ```yaml
-Pulled: ghcr.io/apollographql/helm-charts/router:1.31.0
-Digest: sha256:26fbe98268456935cac5b51d44257bf96c02ee919fde8d47a06602ce2cda66a3
 # Default values for router.
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
 replicaCount: 1
 
-# -- See https://www.apollographql.com/docs/router/configuration/overview/#yaml-config-file for yaml structure
+# -- See https://www.apollographql.com/docs/graphos/reference/router/configuration#yaml-config-file for yaml structure
 router:
   configuration:
-    supergraph: # HTTP server
-      listen: 0.0.0.0:80
+    supergraph:
+      listen: 0.0.0.0:4000
     health_check:
       listen: 0.0.0.0:8088
-    telemetry:
-      metrics:
-        prometheus:
-          enabled: false
-          listen: 0.0.0.0:9090
-          path: "/metrics"
 
   args:
-  - --hot-reload
+    - --hot-reload
 
 managedFederation:
   # -- If using managed federation, the graph API key to identify router to Studio
   apiKey:
-  # -- If using managed federation, use an existing secret which stores the graph API key instead of creating a new one.
+  # -- If using managed federation, use existing Secret which stores the graph API key instead of creating a new one.
   # If set along `managedFederation.apiKey`, a secret with the graph API key will be created using this parameter as name
   existingSecret:
+  # -- If using managed federation, the name of the key within the existing Secret which stores the graph API key.
+  # If set along `managedFederation.apiKey`, a secret with the graph API key will be created using this parameter as key, defaults to using a key of `managedFederationApiKey`
+  existingSecretKeyRefKey:
   # -- If using managed federation, the variant of which graph to use
   graphRef: ""
 
@@ -46,8 +41,8 @@ supergraphFile:
 #     value: debug
 #
 extraEnvVars: []
-extraEnvVarsCM: ''
-extraEnvVarsSecret: ''
+extraEnvVarsCM: ""
+extraEnvVarsSecret: ""
 
 # An array of extra VolumeMounts
 # Example:
@@ -74,7 +69,7 @@ image:
 
 containerPorts:
   # -- If you override the port in `router.configuration.server.listen` then make sure to match the listen port here
-  http: 80
+  http: 4000
   # -- For exposing the metrics port when running a serviceMonitor for example
   metrics: 9090
   # -- For exposing the health check endpoint
@@ -126,11 +121,14 @@ serviceAccount:
   name: ""
 
 podAnnotations: {}
+deploymentAnnotations: {}
 
-podSecurityContext: {}
+podSecurityContext:
+  {}
   # fsGroup: 2000
 
-securityContext: {}
+securityContext:
+  {}
   # capabilities:
   #   drop:
   #   - ALL
@@ -142,6 +140,7 @@ service:
   type: ClusterIP
   port: 80
   annotations: {}
+  targetport: http
 
 serviceMonitor:
   enabled: false
@@ -166,7 +165,12 @@ ingress:
 virtualservice:
   enabled: false
   # namespace: ""
-  # gatewayName: ""
+  # gatewayName: "" # Deprecated in favor of gatewayNames
+  # gatewayNames: []
+  #  - "gateway-1"
+  #  - "gateway-2"
+  # Hosts: "" # configurable but will default to '*'
+  #  - somehost.domain.com
   # http:
   #   main:
   #     # set enabled to true to add
@@ -194,7 +198,8 @@ serviceentry:
   # a list of external hosts you want to be able to make https calls to
   #   - api.example.com
 
-resources: {}
+resources:
+  {}
   # We usually recommend not to specify default resources and to leave this as a conscious
   # choice for the user. This also increases chances charts run on environments with little
   # resources, such as Minikube. If you do want to specify resources, uncomment the following
@@ -212,6 +217,20 @@ autoscaling:
   maxReplicas: 100
   targetCPUUtilizationPercentage: 80
   # targetMemoryUtilizationPercentage: 80
+  #
+  # Specify container-specific HPA scaling targets
+  # Only available in 1.27+ (https://kubernetes.io/blog/2023/05/02/hpa-container-resource-metric/)
+  # containerBased:
+  #   - name: <container name>
+  #     type: cpu
+  #     targetUtilizationPercentage: 75
+
+# -- Sets the [rolling update strategy parameters](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-update-deployment).  Can take absolute values or % values.
+rollingUpdate:
+  {}
+# Defaults if not set are:
+#  maxUnavailable: 25%
+#  maxSurge: 25%
 
 nodeSelector: {}
 
@@ -235,4 +254,10 @@ probes:
   # -- Configure liveness probe
   liveness:
     initialDelaySeconds: 0
+
+# -- Sets the [topology spread constraints](https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/) for Deployment pods
+topologySpreadConstraints: []
+
+# -- Sets the restart policy of pods
+restartPolicy: Always
 ```

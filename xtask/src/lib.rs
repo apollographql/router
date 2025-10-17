@@ -1,6 +1,5 @@
 mod federation_demo;
 
-use std::convert::TryFrom;
 use std::env;
 use std::process::Child;
 use std::process::Command;
@@ -30,15 +29,14 @@ pub static PKG_VERSION: Lazy<String> = Lazy::new(|| {
     let router = metadata
         .packages
         .iter()
-        .find(|x| x.name == "apollo-router")
+        .find(|x| x.name.as_str() == "apollo-router")
         .expect("could not find crate apollo-router");
 
     router.version.to_string()
 });
 
 pub static PKG_PROJECT_ROOT: Lazy<Utf8PathBuf> = Lazy::new(|| {
-    let manifest_dir =
-        Utf8PathBuf::try_from(MANIFEST_DIR).expect("could not get the root directory.");
+    let manifest_dir = Utf8PathBuf::from(MANIFEST_DIR);
     let root_dir = manifest_dir
         .ancestors()
         .nth(1)

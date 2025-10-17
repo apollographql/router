@@ -1,0 +1,18 @@
+pull_request_rules:
+  - name: backport 1.x
+    description: Add a label to backport to 1.x
+    conditions:
+      - label = backport-1.x
+    actions:
+      backport:
+        branches:
+          - 1.x
+        assignees:
+          - "{{ author }}"
+        bot_account: "{{ author }}"
+defaults:
+  actions:
+    backport:
+      assignees:
+        - "{{ author }}"
+      bot_account: "{{ author }}"

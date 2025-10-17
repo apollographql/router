@@ -1,6 +1,7 @@
-use opentelemetry_api::trace::SpanContext;
-use opentelemetry_api::trace::TraceResult;
-use opentelemetry_api::Context;
+use opentelemetry::Context;
+use opentelemetry::trace::SpanContext;
+use opentelemetry::trace::TraceResult;
+use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::trace::Span;
 use opentelemetry_sdk::trace::SpanProcessor;
@@ -42,25 +43,29 @@ impl<T: SpanProcessor> SpanProcessor for DatadogSpanProcessor<T> {
         self.delegate.force_flush()
     }
 
-    fn shutdown(&mut self) -> TraceResult<()> {
+    fn shutdown(&self) -> TraceResult<()> {
         self.delegate.shutdown()
+    }
+
+    fn set_resource(&mut self, resource: &Resource) {
+        self.delegate.set_resource(resource)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-    use std::sync::Mutex;
     use std::time::SystemTime;
 
-    use opentelemetry_api::trace::SpanId;
-    use opentelemetry_api::trace::SpanKind;
-    use opentelemetry_api::trace::TraceFlags;
-    use opentelemetry_api::trace::TraceId;
-    use opentelemetry_api::Context;
-    use opentelemetry_sdk::trace::EvictedHashMap;
-    use opentelemetry_sdk::trace::EvictedQueue;
+    use opentelemetry::Context;
+    use opentelemetry::trace::SpanId;
+    use opentelemetry::trace::SpanKind;
+    use opentelemetry::trace::TraceFlags;
+    use opentelemetry::trace::TraceId;
+    use opentelemetry_sdk::trace::SpanEvents;
+    use opentelemetry_sdk::trace::SpanLinks;
     use opentelemetry_sdk::trace::SpanProcessor;
+    use parking_lot::Mutex;
 
     use super::*;
 
@@ -81,14 +86,14 @@ mod tests {
         fn on_start(&self, _span: &mut Span, _cx: &Context) {}
 
         fn on_end(&self, span: SpanData) {
-            self.spans.lock().unwrap().push(span);
+            self.spans.lock().push(span);
         }
 
         fn force_flush(&self) -> TraceResult<()> {
             Ok(())
         }
 
-        fn shutdown(&mut self) -> TraceResult<()> {
+        fn shutdown(&self) -> TraceResult<()> {
             Ok(())
         }
     }
@@ -111,19 +116,19 @@ mod tests {
             name: Default::default(),
             start_time: SystemTime::now(),
             end_time: SystemTime::now(),
-            attributes: EvictedHashMap::new(32, 32),
-            events: EvictedQueue::new(32),
-            links: EvictedQueue::new(32),
+            attributes: Vec::with_capacity(32),
+            events: SpanEvents::default(),
+            links: SpanLinks::default(),
             status: Default::default(),
-            resource: Default::default(),
             instrumentation_lib: Default::default(),
+            dropped_attributes_count: 0,
         };
 
         processor.on_end(span_data.clone());
 
         // Verify that the trace flags are updated to sampled
         let updated_trace_flags = span_data.span_context.trace_flags().with_sampled(true);
-        let stored_spans = mock_processor.spans.lock().unwrap();
+        let stored_spans = mock_processor.spans.lock();
         assert_eq!(stored_spans.len(), 1);
         assert_eq!(
             stored_spans[0].span_context.trace_flags(),

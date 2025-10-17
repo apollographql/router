@@ -1,0 +1,182 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/headers/disallowed_header_names.graphql
+---
+[
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` header 'connection' is reserved and cannot be set by a connector",
+        locations: [
+            11:17..11:29,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` header 'proxy-authenticate' is reserved and cannot be set by a connector",
+        locations: [
+            12:17..12:37,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` header 'proxy-authorization' is reserved and cannot be set by a connector",
+        locations: [
+            13:17..13:38,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` header 'te' is reserved and cannot be set by a connector",
+        locations: [
+            14:17..14:21,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` header 'trailer' is reserved and cannot be set by a connector",
+        locations: [
+            15:17..15:26,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` header 'transfer-encoding' is reserved and cannot be set by a connector",
+        locations: [
+            16:17..16:36,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` header 'upgrade' is reserved and cannot be set by a connector",
+        locations: [
+            17:17..17:26,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` header 'content-length' is reserved and cannot be set by a connector",
+        locations: [
+            18:17..18:33,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` header 'content-encoding' is reserved and cannot be set by a connector",
+        locations: [
+            19:17..19:35,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` header 'host' can't be set with `from`, only with `value`",
+        locations: [
+            20:17..20:23,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` header 'accept-encoding' is reserved and cannot be set by a connector",
+        locations: [
+            21:17..21:34,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` header 'content-length' is reserved and cannot be set by a connector",
+        locations: [
+            22:17..22:33,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` header 'content-type' can't be set with `from`, only with `value`",
+        locations: [
+            23:17..23:31,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` header 'accept' can't be set with `from`, only with `value`",
+        locations: [
+            24:17..24:25,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` header 'connection' is reserved and cannot be set by a connector",
+        locations: [
+            33:17..33:29,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` header 'proxy-authenticate' is reserved and cannot be set by a connector",
+        locations: [
+            34:17..34:37,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` header 'proxy-authorization' is reserved and cannot be set by a connector",
+        locations: [
+            35:17..35:38,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` header 'te' is reserved and cannot be set by a connector",
+        locations: [
+            36:17..36:21,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` header 'trailer' is reserved and cannot be set by a connector",
+        locations: [
+            37:17..37:26,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` header 'transfer-encoding' is reserved and cannot be set by a connector",
+        locations: [
+            38:17..38:36,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` header 'upgrade' is reserved and cannot be set by a connector",
+        locations: [
+            39:17..39:26,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` header 'content-length' is reserved and cannot be set by a connector",
+        locations: [
+            40:17..40:33,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` header 'content-encoding' is reserved and cannot be set by a connector",
+        locations: [
+            41:17..41:35,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` header 'accept-encoding' is reserved and cannot be set by a connector",
+        locations: [
+            43:17..43:34,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)` header 'content-length' is reserved and cannot be set by a connector",
+        locations: [
+            44:17..44:33,
+        ],
+    },
+]

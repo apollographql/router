@@ -1,16 +1,18 @@
 //! Tracing configuration for apollo telemetry.
-use opentelemetry::sdk::trace::BatchSpanProcessor;
-use opentelemetry::sdk::trace::Builder;
+use opentelemetry_sdk::trace::BatchSpanProcessor;
+use opentelemetry_sdk::trace::Builder;
 use serde::Serialize;
 use tower::BoxError;
 
 use crate::plugins::telemetry::apollo::Config;
+use crate::plugins::telemetry::apollo::router_id;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::config_new::spans::Spans;
+use crate::plugins::telemetry::otel::named_runtime_channel::NamedTokioRuntime;
 use crate::plugins::telemetry::span_factory::SpanMode;
-use crate::plugins::telemetry::tracing::apollo_telemetry;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
+use crate::plugins::telemetry::tracing::apollo_telemetry;
 
 impl TracingConfigurator for Config {
     fn enabled(&self) -> bool {
@@ -28,7 +30,7 @@ impl TracingConfigurator for Config {
             .endpoint(&self.endpoint)
             .otlp_endpoint(&self.experimental_otlp_endpoint)
             .otlp_tracing_protocol(&self.experimental_otlp_tracing_protocol)
-            .otlp_tracing_sampler(&self.experimental_otlp_tracing_sampler)
+            .otlp_tracing_sampler(&self.otlp_tracing_sampler)
             .apollo_key(
                 self.apollo_key
                     .as_ref()
@@ -40,16 +42,17 @@ impl TracingConfigurator for Config {
                     .expect("apollo_graph_ref is checked in the enabled function, qed"),
             )
             .schema_id(&self.schema_id)
+            .router_id(router_id())
             .buffer_size(self.buffer_size)
             .field_execution_sampler(&self.field_level_instrumentation_sampler)
-            .batch_config(&self.batch_processor)
+            .batch_processor_config(&self.tracing.batch_processor)
             .errors_configuration(&self.errors)
             .use_legacy_request_span(matches!(spans_config.mode, SpanMode::Deprecated))
             .metrics_reference_mode(self.metrics_reference_mode)
             .build()?;
         Ok(builder.with_span_processor(
-            BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
-                .with_batch_config(self.batch_processor.clone().into())
+            BatchSpanProcessor::builder(exporter, NamedTokioRuntime::new("apollo-tracing"))
+                .with_batch_config(self.tracing.batch_processor.clone().into())
                 .build(),
         ))
     }

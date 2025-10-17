@@ -1,0 +1,7 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "&diff::lines(&schema,\n&result.transformed).into_iter().filter_map(|res| match res\n{\n    diff::Result::Left(line) => Some(format!(\"- {line}\")),\n    diff::Result::Right(line) => Some(format!(\"+ {line}\")),\n    diff::Result::Both(_, _) => None,\n}).join(\"\\n\")"
+input_file: apollo-federation/src/connectors/validation/test_data/transformed/upgrade_0.1.graphql
+---
+-     url: "https://specs.apollo.dev/connect/v0.1", 
++     url: "https://specs.apollo.dev/connect/v0.2",

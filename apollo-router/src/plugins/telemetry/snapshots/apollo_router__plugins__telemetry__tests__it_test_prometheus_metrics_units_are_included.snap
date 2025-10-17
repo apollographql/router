@@ -1,0 +1,30 @@
+---
+source: apollo-router/src/plugins/telemetry/mod.rs
+expression: "prometheus_metrics.replace(& format!\n(r#\"service_version=\"{}\"\"#, std :: env! (\"CARGO_PKG_VERSION\")),\nr#\"service_version=\"X\"\"#)"
+---
+apollo_test_histo1_bucket{otel_scope_name="apollo/router",service_version="X",test_resource="test",le="+Inf"} 1
+apollo_test_histo1_bucket{otel_scope_name="apollo/router",service_version="X",test_resource="test",le="0.001"} 0
+apollo_test_histo1_bucket{otel_scope_name="apollo/router",service_version="X",test_resource="test",le="0.005"} 0
+apollo_test_histo1_bucket{otel_scope_name="apollo/router",service_version="X",test_resource="test",le="0.015"} 0
+apollo_test_histo1_bucket{otel_scope_name="apollo/router",service_version="X",test_resource="test",le="0.05"} 0
+apollo_test_histo1_bucket{otel_scope_name="apollo/router",service_version="X",test_resource="test",le="0.1"} 0
+apollo_test_histo1_bucket{otel_scope_name="apollo/router",service_version="X",test_resource="test",le="0.2"} 0
+apollo_test_histo1_bucket{otel_scope_name="apollo/router",service_version="X",test_resource="test",le="0.3"} 0
+apollo_test_histo1_bucket{otel_scope_name="apollo/router",service_version="X",test_resource="test",le="0.4"} 0
+apollo_test_histo1_bucket{otel_scope_name="apollo/router",service_version="X",test_resource="test",le="0.5"} 0
+apollo_test_histo1_bucket{otel_scope_name="apollo/router",service_version="X",test_resource="test",le="1"} 1
+apollo_test_histo1_bucket{otel_scope_name="apollo/router",service_version="X",test_resource="test",le="10"} 1
+apollo_test_histo1_bucket{otel_scope_name="apollo/router",service_version="X",test_resource="test",le="5"} 1
+apollo_test_histo2_seconds_bucket{otel_scope_name="apollo/router",service_version="X",test_resource="test",le="+Inf"} 1
+apollo_test_histo2_seconds_bucket{otel_scope_name="apollo/router",service_version="X",test_resource="test",le="0.001"} 0
+apollo_test_histo2_seconds_bucket{otel_scope_name="apollo/router",service_version="X",test_resource="test",le="0.005"} 0
+apollo_test_histo2_seconds_bucket{otel_scope_name="apollo/router",service_version="X",test_resource="test",le="0.015"} 0
+apollo_test_histo2_seconds_bucket{otel_scope_name="apollo/router",service_version="X",test_resource="test",le="0.05"} 0
+apollo_test_histo2_seconds_bucket{otel_scope_name="apollo/router",service_version="X",test_resource="test",le="0.1"} 0
+apollo_test_histo2_seconds_bucket{otel_scope_name="apollo/router",service_version="X",test_resource="test",le="0.2"} 0
+apollo_test_histo2_seconds_bucket{otel_scope_name="apollo/router",service_version="X",test_resource="test",le="0.3"} 0
+apollo_test_histo2_seconds_bucket{otel_scope_name="apollo/router",service_version="X",test_resource="test",le="0.4"} 0
+apollo_test_histo2_seconds_bucket{otel_scope_name="apollo/router",service_version="X",test_resource="test",le="0.5"} 0
+apollo_test_histo2_seconds_bucket{otel_scope_name="apollo/router",service_version="X",test_resource="test",le="1"} 1
+apollo_test_histo2_seconds_bucket{otel_scope_name="apollo/router",service_version="X",test_resource="test",le="10"} 1
+apollo_test_histo2_seconds_bucket{otel_scope_name="apollo/router",service_version="X",test_resource="test",le="5"} 1

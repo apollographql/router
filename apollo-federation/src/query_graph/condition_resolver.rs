@@ -1,19 +1,17 @@
-// PORT_NOTE: Unlike in JS version, `QueryPlanningTraversal` does not have a
-//            `CachingConditionResolver` as a field, but instead implements the `ConditionResolver`
-//            trait directly using `ConditionResolverCache`.
 use std::sync::Arc;
 
-use apollo_compiler::ast::Type;
-use apollo_compiler::collections::IndexMap;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::ast::Type;
+use apollo_compiler::collections::IndexMap;
 use petgraph::graph::EdgeIndex;
 
 use crate::error::FederationError;
 use crate::operation::SelectionSet;
+use crate::query_graph::QueryGraph;
 use crate::query_graph::graph_path::ExcludedConditions;
 use crate::query_graph::graph_path::ExcludedDestinations;
-use crate::query_graph::graph_path::OpGraphPathContext;
+use crate::query_graph::graph_path::operation::OpGraphPathContext;
 use crate::query_graph::path_tree::OpPathTree;
 use crate::query_plan::QueryPlanCost;
 
@@ -52,10 +50,32 @@ pub(crate) enum ConditionResolution {
         context_map: Option<IndexMap<Name, ContextMapEntry>>,
     },
     Unsatisfied {
-        // NOTE: This seems to be a false positive...
-        #[allow(dead_code)]
         reason: Option<UnsatisfiedConditionReason>,
     },
+}
+
+impl std::fmt::Display for ConditionResolution {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConditionResolution::Satisfied {
+                cost,
+                path_tree,
+                context_map,
+            } => {
+                writeln!(f, "Satisfied: cost={cost}")?;
+                if let Some(path_tree) = path_tree {
+                    writeln!(f, "path_tree:\n{path_tree}")?;
+                }
+                if let Some(context_map) = context_map {
+                    writeln!(f, ", context_map:\n{context_map:?}")?;
+                }
+                Ok(())
+            }
+            ConditionResolution::Unsatisfied { reason } => {
+                writeln!(f, "Unsatisfied: reason={reason:?}")
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -157,10 +177,96 @@ impl ConditionResolverCache {
     }
 }
 
+/// A query plan resolver for edge conditions that caches the outcome per edge.
+// PORT_NOTE: This ports the `cachingConditionResolver` function from JS. In JS version, the
+//            function creates a closure capturing the QueryPlanningTraversal/ValidationTraversal
+//            instance itself The same would be infeasible to implement in Rust due to the cyclic
+//            references. Instead, in Rust, it is implemented as `CachingConditionResolver` and
+//            `ConditionResolver` traits that will be implemented by `QueryPlanningTraversal` and
+//            `ValidationTraversal` structs.
+pub(crate) trait CachingConditionResolver {
+    fn query_graph(&self) -> &QueryGraph;
+
+    fn resolve_without_cache(
+        &self,
+        edge: EdgeIndex,
+        context: &OpGraphPathContext,
+        excluded_destinations: &ExcludedDestinations,
+        excluded_conditions: &ExcludedConditions,
+        extra_conditions: Option<&SelectionSet>,
+    ) -> Result<ConditionResolution, FederationError>;
+
+    fn resolver_cache(&mut self) -> &mut ConditionResolverCache;
+
+    fn resolve_with_cache(
+        &mut self,
+        edge: EdgeIndex,
+        context: &OpGraphPathContext,
+        excluded_destinations: &ExcludedDestinations,
+        excluded_conditions: &ExcludedConditions,
+        extra_conditions: Option<&SelectionSet>,
+    ) -> Result<ConditionResolution, FederationError> {
+        let cache_result = self.resolver_cache().contains(
+            edge,
+            context,
+            excluded_destinations,
+            excluded_conditions,
+            extra_conditions,
+        );
+
+        if let ConditionResolutionCacheResult::Hit(cached_resolution) = cache_result {
+            return Ok(cached_resolution);
+        }
+
+        let resolution = self.resolve_without_cache(
+            edge,
+            context,
+            excluded_destinations,
+            excluded_conditions,
+            extra_conditions,
+        )?;
+        // See if this resolution is eligible to be inserted into the cache.
+        if cache_result.is_miss() {
+            self.resolver_cache()
+                .insert(edge, resolution.clone(), excluded_destinations.clone());
+        }
+        Ok(resolution)
+    }
+}
+
+/// Blanket implementation of `ConditionResolver` for any type that implements
+/// `CachingConditionResolver`.
+impl<T: CachingConditionResolver> ConditionResolver for T {
+    fn resolve(
+        &mut self,
+        edge: EdgeIndex,
+        context: &OpGraphPathContext,
+        excluded_destinations: &ExcludedDestinations,
+        excluded_conditions: &ExcludedConditions,
+        extra_conditions: Option<&SelectionSet>,
+    ) -> Result<ConditionResolution, FederationError> {
+        // Invariant check: The edge must have conditions.
+        let graph = &self.query_graph();
+        let edge_data = graph.edge_weight(edge)?;
+        assert!(
+            edge_data.conditions.is_some() || extra_conditions.is_some(),
+            "Should not have been called for edge without conditions"
+        );
+
+        self.resolve_with_cache(
+            edge,
+            context,
+            excluded_destinations,
+            excluded_conditions,
+            extra_conditions,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::query_graph::graph_path::OpGraphPathContext;
+    use crate::query_graph::graph_path::operation::OpGraphPathContext;
     //use crate::link::graphql_definition::{OperationConditional, OperationConditionalKind, BooleanOrVariable};
 
     #[test]
@@ -172,15 +278,17 @@ mod tests {
         let empty_destinations = ExcludedDestinations::default();
         let empty_conditions = ExcludedConditions::default();
 
-        assert!(cache
-            .contains(
-                edge1,
-                &empty_context,
-                &empty_destinations,
-                &empty_conditions,
-                None
-            )
-            .is_miss());
+        assert!(
+            cache
+                .contains(
+                    edge1,
+                    &empty_context,
+                    &empty_destinations,
+                    &empty_conditions,
+                    None
+                )
+                .is_miss()
+        );
 
         cache.insert(
             edge1,
@@ -188,26 +296,30 @@ mod tests {
             empty_destinations.clone(),
         );
 
-        assert!(cache
-            .contains(
-                edge1,
-                &empty_context,
-                &empty_destinations,
-                &empty_conditions,
-                None
-            )
-            .is_hit(),);
+        assert!(
+            cache
+                .contains(
+                    edge1,
+                    &empty_context,
+                    &empty_destinations,
+                    &empty_conditions,
+                    None
+                )
+                .is_hit(),
+        );
 
         let edge2 = EdgeIndex::new(2);
 
-        assert!(cache
-            .contains(
-                edge2,
-                &empty_context,
-                &empty_destinations,
-                &empty_conditions,
-                None
-            )
-            .is_miss());
+        assert!(
+            cache
+                .contains(
+                    edge2,
+                    &empty_context,
+                    &empty_destinations,
+                    &empty_conditions,
+                    None
+                )
+                .is_miss()
+        );
     }
 }

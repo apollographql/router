@@ -1,0 +1,21 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/batch/batch_incorrect_field.graphql
+---
+[
+    Message {
+        code: ConnectorsBatchKeyNotInSelection,
+        message: "The `@connect` directive on `User` specifies a `$batch` entity resolver, but the field `foo` could not be found in `@connect(selection: ...)`",
+        locations: [
+            12:4..12:11,
+        ],
+    },
+    Message {
+        code: ConnectorsCannotResolveKey,
+        message: "Variables used in connector (`$batch { foo }`) on type `User` cannot be used to create a valid `@key` directive.",
+        locations: [
+            12:4..12:11,
+        ],
+    },
+]

@@ -1,0 +1,78 @@
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.2"
+    import: ["@connect", "@source"]
+  )
+  @source(
+    name: "reserved-propagate"
+    http: {
+      baseURL: "http://127.0.0.1"
+      headers: [
+        { name: "connection", from: "connection" }
+        { name: "proxy-authenticate", from: "proxy-authenticate" }
+        { name: "proxy-authorization", from: "proxy-authorization" }
+        { name: "te", from: "te" }
+        { name: "trailer", from: "trailer" }
+        { name: "transfer-encoding", from: "transfer-encoding" }
+        { name: "upgrade", from: "upgrade" }
+        { name: "content-length", from: "content-length" }
+        { name: "content-encoding", from: "content-encoding" }
+        { name: "host", from: "host" }
+        { name: "accept-encoding", from: "accept-encoding" }
+        { name: "Content-Length", from: "Content-Length" }
+        { name: "Content-Type", from: "Content-Type" }
+        { name: "accept", from: "accept" }
+      ]
+    }
+  )
+  @source(
+    name: "reserved-static"
+    http: {
+      baseURL: "http://127.0.0.1"
+      headers: [
+        { name: "connection", value: "connection" }
+        { name: "proxy-authenticate", value: "proxy-authenticate" }
+        { name: "proxy-authorization", value: "proxy-authorization" }
+        { name: "te", value: "te" }
+        { name: "trailer", value: "trailer" }
+        { name: "transfer-encoding", value: "transfer-encoding" }
+        { name: "upgrade", value: "upgrade" }
+        { name: "content-length", value: "content-length" }
+        { name: "content-encoding", value: "content-encoding" }
+        { name: "host", value: "host" }
+        { name: "accept-encoding", value: "accept-encoding" }
+        { name: "Content-Length", value: "Content-Length" }
+        { name: "Content-Type", value: "Content-Type" }
+        { name: "accept", value: "accept" }
+      ]
+    }
+  )
+  @source(
+    name: "allowed-static"
+    http: {
+      baseURL: "http://127.0.0.1"
+      headers: [
+        { name: "Content-Type", value: "allows static" }
+        { name: "accept", value: "allows static" }
+      ]
+    }
+  )
+
+type Query {
+  resources: [String!]!
+    @connect(
+      source: "reserved-propagate"
+      http: { GET: "/resources" }
+      selection: "$"
+    )
+    @connect(
+      source: "reserved-static"
+      http: { GET: "/resources" }
+      selection: "$"
+    )
+    @connect(
+      source: "allowed-static"
+      http: { GET: "/resources" }
+      selection: "$"
+    )
+}

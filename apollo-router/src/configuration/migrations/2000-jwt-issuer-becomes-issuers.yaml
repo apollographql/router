@@ -1,0 +1,68 @@
+description: JWK issuer becomes array of issuers in authentication
+# I can't figure out how to do this for all elements of an array, so did
+# it for 20 instead.
+actions:
+  - type: log
+    level: info
+    path: authentication.router.jwt.jwks[].issuer
+    log: "JWK `issuer` is now an array (`issuers`). The first 20 JWKs in your configuration will be migrated automatically."
+  - type: move
+    from: authentication.router.jwt.jwks[0].issuer
+    to: authentication.router.jwt.jwks[0].issuers[]
+  - type: move
+    from: authentication.router.jwt.jwks[1].issuer
+    to: authentication.router.jwt.jwks[1].issuers[]
+  - type: move
+    from: authentication.router.jwt.jwks[2].issuer
+    to: authentication.router.jwt.jwks[2].issuers[]
+  - type: move
+    from: authentication.router.jwt.jwks[3].issuer
+    to: authentication.router.jwt.jwks[3].issuers[]
+  - type: move
+    from: authentication.router.jwt.jwks[4].issuer
+    to: authentication.router.jwt.jwks[4].issuers[]
+  - type: move
+    from: authentication.router.jwt.jwks[5].issuer
+    to: authentication.router.jwt.jwks[5].issuers[]
+  - type: move
+    from: authentication.router.jwt.jwks[6].issuer
+    to: authentication.router.jwt.jwks[6].issuers[]
+  - type: move
+    from: authentication.router.jwt.jwks[7].issuer
+    to: authentication.router.jwt.jwks[7].issuers[]
+  - type: move
+    from: authentication.router.jwt.jwks[8].issuer
+    to: authentication.router.jwt.jwks[8].issuers[]
+  - type: move
+    from: authentication.router.jwt.jwks[9].issuer
+    to: authentication.router.jwt.jwks[9].issuers[]
+  - type: move
+    from: authentication.router.jwt.jwks[10].issuer
+    to: authentication.router.jwt.jwks[10].issuers[]
+  - type: move
+    from: authentication.router.jwt.jwks[11].issuer
+    to: authentication.router.jwt.jwks[11].issuers[]
+  - type: move
+    from: authentication.router.jwt.jwks[12].issuer
+    to: authentication.router.jwt.jwks[12].issuers[]
+  - type: move
+    from: authentication.router.jwt.jwks[13].issuer
+    to: authentication.router.jwt.jwks[13].issuers[]
+  - type: move
+    from: authentication.router.jwt.jwks[14].issuer
+    to: authentication.router.jwt.jwks[14].issuers[]
+  - type: move
+    from: authentication.router.jwt.jwks[15].issuer
+    to: authentication.router.jwt.jwks[15].issuers[]
+  - type: move
+    from: authentication.router.jwt.jwks[16].issuer
+    to: authentication.router.jwt.jwks[16].issuers[]
+  - type: move
+    from: authentication.router.jwt.jwks[17].issuer
+    to: authentication.router.jwt.jwks[17].issuers[]
+  - type: move
+    from: authentication.router.jwt.jwks[18].issuer
+    to: authentication.router.jwt.jwks[18].issuers[]
+  - type: move
+    from: authentication.router.jwt.jwks[19].issuer
+    to: authentication.router.jwt.jwks[19].issuers[]

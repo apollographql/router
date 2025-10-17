@@ -7,6 +7,10 @@
 //! This module contains functions that modify an apollo-rs schema to produce the same output as a
 //! graphql-js schema would.
 
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Name;
+use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable;
@@ -15,10 +19,6 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::InputValueDefinition;
 use apollo_compiler::schema::Type;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::ExecutableDocument;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
-use apollo_compiler::Schema;
 
 /// Return true if a directive application is "semantic", meaning it's observable in introspection.
 fn is_semantic_directive_application(directive: &Directive) -> bool {
@@ -382,9 +382,9 @@ pub(crate) fn make_print_schema_compatible(schema: &mut Schema) {
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::validation::Valid;
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
+    use apollo_compiler::validation::Valid;
 
     use super::coerce_executable_values;
 

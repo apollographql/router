@@ -1,0 +1,113 @@
+---
+title: Overview of Authorization in the GraphOS Router
+subtitle: Strengthen subgraph security with a centralized governance layer
+description: Enforce authorization in the GraphOS Router with the @requireScopes, @authenticated, and @policy directives.
+---
+
+<PlanRequired plans={["Free", "Developer", "Standard", "Enterprise"]}>
+
+Rate limits apply on the Free plan.
+Developer and Standard plans require Router v2.6.0 or later.
+
+</PlanRequired>
+
+APIs provide access to business-critical data. Unrestricted access can result in data breaches, monetary losses, or potential denial of service. Even for internal services, checks can be essential to limit data to authorized parties.
+
+Services may have their own access controls, but enforcing authorization _in the Apollo Router_ is valuable for a few reasons:
+
+- **Optimal query execution**: Validating authorization _before_ processing requests enables the early termination of unauthorized requests. Stopping unauthorized requests at the edge of your graph reduces the load on your services and enhances performance.
+
+  ```mermaid
+  flowchart LR;
+    clients(Client);
+    subgraph Router[" "]
+      router(["<b>GraphOS Router</b>"]);
+      serviceB[Users<br/>API];
+      serviceC[Posts<br/>API];
+    end
+    router -.->|"❌ Subquery"| serviceB & serviceC;
+    clients -->|"⚠️Unauthorized <br/>request"| router;
+  ```
+
+  - If every field in a particular subquery requires authorization, the router's [query planner](/router/customizations/overview#request-path) can _eliminate entire subgraph requests_ for unauthorized requests. For example, a request may have permission to view a particular user's posts on a social media platform but not have permission to view any of that user's personally identifiable information (PII). Check out [How it works](/graphos/routing/security/authorization#how-it-works) to learn more.
+
+  ```mermaid
+  flowchart LR;
+    clients(Client);
+    subgraph Router[" "]
+      router(["<b>GraphOS Router</b>"]);
+      serviceB[Users<br/>API];
+      serviceC[Posts<br/>API];
+    end
+    router -->|"✅ Authorized <br/> subquery"| serviceC;
+      router -.->|"❌ Unauthorized <br/> subquery"| serviceB;
+    clients -->|"⚠️ Partially authorized <br/>request"| router;
+  ```
+
+  - Also, [query deduplication](/router/configuration/traffic-shaping/#query-deduplication) groups requested fields based on their required authorization. Entire groups can be eliminated from the query plan if they don't have the correct authorization.
+
+- **Declarative access rules**: You define access controls at the field level, and GraphOS [composes](/graphos/routing/security/authorization#composition-and-federation) them across your services. These rules create graph-native governance without the need for an extra orchestration layer.
+
+- **Principled architecture**: Through composition, the router centralizes authorization logic while allowing for auditing at the service level. This centralized authorization is an initial checkpoint that other service layers can reinforce.
+
+  ```mermaid
+  flowchart LR;
+    clients(Client);
+    Level2:::padding
+    subgraph Level1["<br>🔐 Router layer&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp"]
+      router(["<b>GraphOS Router</b>"]);
+        subgraph Level2["🔐 Service layer"]
+          serviceB[Users<br/>API];
+          serviceC[Posts<br/>API];
+          end
+    end
+
+    router -->|"Subquery"| serviceB & serviceC;
+    clients -->|"Request"| router;
+
+  classDef padding padding-left:1em, padding-right:1em
+  ```
+
+<Tip>
+
+To learn more about why authorization is ideal at the router layer, watch Andrew Carlson's talk at Austin API Summit 2024: [Centralize Data Access Control with GraphQL](https://www.youtube.com/watch?v=ETyAPY4bsYY).
+
+<ExpansionPanel title="Watch the video below">
+
+<YouTube youTubeId="ETyAPY4bsYY" />
+
+</ExpansionPanel>
+
+</Tip>
+
+## How access control works
+
+The GraphOS Router provides access controls via **authorization directives** that define access to specific fields and types across your supergraph:
+
+- The [`@requiresScopes`](/graphos/routing/security/authorization#requiresscopes) directive allows granular access control through the scopes you define.
+- The [`@authenticated`](/graphos/routing/security/authorization#authenticated) directive allows access to the annotated field or type for _authenticated requests only_.
+- The [`@policy`](/graphos/routing/security/authorization#policy) directive offloads authorization validation to a [Rhai script](/graphos/routing/customization/rhai/) or a [coprocessor](/router/customizations/coprocessor) and integrates the result in the router. It's useful when your authorization policies go beyond simple authentication and scopes.
+
+For example, imagine you're building a social media platform that includes a `Users` subgraph. You can use the [`@requiresScopes`](/graphos/routing/security/authorization#requiresscopes) directive to declare that viewing other users' information requires the `read:user` scope:
+
+```graphql
+type Query {
+  users: [User!]! @requiresScopes(scopes: [["read:users"]])
+}
+```
+
+You can use the [`@authenticated`](/graphos/routing/security/authorization#authenticated) directive to declare that users must be logged in to update their own information:
+
+```graphql
+type Mutation {
+  updateUser(input: UpdateUserInput!): User! @authenticated
+}
+```
+
+You can define both directives&mdash;together or separately&mdash;at the field level to fine-tune your access controls. When directives are declared both on a field and the field's type, they will all be tried, and the field will be removed if any of them does not authorize it.
+GraphOS [composes](/graphos/routing/security/authorization#composition-and-federation) restrictions into the supergraph schema so that each subgraph's restrictions are respected.
+The router then enforces these directives on all incoming requests.
+
+## Next steps
+
+- Learn how to use [authorization directives](/graphos/routing/security/authorization) in your GraphQL schemas to secure access to your graphs.

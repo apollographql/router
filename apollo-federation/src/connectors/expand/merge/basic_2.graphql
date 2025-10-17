@@ -1,0 +1,52 @@
+type Query {
+  i: I
+  u: U
+  f(x: ID, y: YInput): T
+}
+
+interface I {
+  id: ID!
+  f(x: ID, y: YInput): T
+}
+
+type A implements I {
+  id: ID!
+  f(x: ID, y: YInput): T
+  a: S
+}
+
+type B implements I {
+  id: ID!
+  f(x: ID, y: YInput): T
+  b: E
+}
+
+union U = A | B
+
+scalar S
+
+enum E {
+  A
+  B
+}
+
+type T {
+  x: ID
+  y: Y
+}
+
+type Y {
+  z: ID
+}
+
+input YInput {
+  z: ID
+}
+
+type Mutation {
+  m2(x: ID, y: YInput): M
+}
+
+type M {
+  n: String
+}

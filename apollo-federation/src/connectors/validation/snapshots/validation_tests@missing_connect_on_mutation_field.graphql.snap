@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/missing_connect_on_mutation_field.graphql
+---
+[
+    Message {
+        code: ConnectorsUnresolvedField,
+        message: "No connector resolves field `Mutation.setMessage`. It must have a `@connect` directive or appear in `@connect(selection:)`.",
+        locations: [
+            9:3..9:38,
+        ],
+    },
+]

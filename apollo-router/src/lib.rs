@@ -19,8 +19,6 @@
 #![cfg_attr(feature = "failfast", allow(unreachable_code))]
 #![warn(unreachable_pub)]
 #![warn(missing_docs)]
-// TODO: silence false positives (apollo_compiler::Name) and investigate the rest
-#![allow(clippy::mutable_key_type)]
 
 macro_rules! failfast_debug {
     ($($tokens:tt)+) => {{
@@ -50,7 +48,7 @@ mod json_ext;
 pub mod plugin;
 
 #[macro_use]
-pub(crate) mod metrics;
+pub mod metrics;
 
 mod ageing_priority_queue;
 mod apollo_studio_interop;
@@ -83,14 +81,17 @@ pub mod test_harness;
 pub mod tracer;
 mod uplink;
 
-pub use crate::axum_factory::unsupported_set_axum_router_callback;
+#[doc(hidden)]
+pub mod otel_compat;
+mod registry;
+
 pub use crate::configuration::Configuration;
 pub use crate::configuration::ListenAddr;
-pub use crate::context::extensions::sync::ExtensionsMutex;
-pub use crate::context::extensions::Extensions;
 pub use crate::context::Context;
-pub use crate::executable::main;
+pub use crate::context::extensions::Extensions;
+pub use crate::context::extensions::sync::ExtensionsMutex;
 pub use crate::executable::Executable;
+pub use crate::executable::main;
 pub use crate::notification::Notify;
 pub use crate::router::ApolloRouterError;
 pub use crate::router::ConfigurationSource;
@@ -99,10 +100,15 @@ pub use crate::router::RouterHttpServer;
 pub use crate::router::SchemaSource;
 pub use crate::router::ShutdownSource;
 pub use crate::router_factory::Endpoint;
-pub use crate::test_harness::make_fake_batch;
 pub use crate::test_harness::MockedSubgraphs;
 pub use crate::test_harness::TestHarness;
+#[cfg(any(test, feature = "snapshot"))]
+pub use crate::test_harness::http_snapshot::SnapshotServer;
+#[cfg(any(test, feature = "snapshot"))]
+pub use crate::test_harness::http_snapshot::standalone::main as snapshot_server;
+pub use crate::test_harness::make_fake_batch;
 pub use crate::uplink::UplinkConfig;
+pub use crate::uplink::license_enforcement::AllowedFeature;
 
 /// Not part of the public API
 #[doc(hidden)]
@@ -110,16 +116,21 @@ pub mod _private {
     // Reexports for macros
     pub use linkme;
     pub use once_cell;
-    pub use router_bridge;
     pub use serde_json;
 
-    pub use crate::plugin::PluginFactory;
     pub use crate::plugin::PLUGINS;
-    // For comparison/fuzzing
-    pub use crate::query_planner::bridge_query_planner::QueryPlanResult;
-    pub use crate::query_planner::plan_compare::diff_plan;
-    pub use crate::query_planner::plan_compare::plan_matches;
-    pub use crate::query_planner::plan_compare::render_diff;
+    pub use crate::plugin::PluginFactory;
     // For tests
+    pub use crate::plugins::mock_subgraphs::testing_subgraph_call as mock_subgraphs_subgraph_call;
     pub use crate::router_factory::create_test_service_factory_from_yaml;
+    pub use crate::services::APOLLO_GRAPH_REF;
+    pub use crate::services::APOLLO_KEY;
+
+    pub fn compute_job_queued_count() -> &'static std::sync::atomic::AtomicUsize {
+        &crate::compute_job::queue().queued_count
+    }
+    pub mod telemetry {
+        pub use crate::plugins::telemetry::config::AttributeValue;
+        pub use crate::plugins::telemetry::resource::ConfigResource;
+    }
 }

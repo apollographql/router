@@ -23,17 +23,18 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use apollo_router::TestHarness;
 use apollo_router::make_fake_batch;
 use apollo_router::services::router;
 use apollo_router::services::router::BoxCloneService;
 use apollo_router::services::supergraph;
-use apollo_router::TestHarness;
-use axum::body::Bytes;
-use axum::routing::post;
 use axum::Extension;
 use axum::Json;
+use axum::body::Bytes;
+use axum::routing::post;
 use flate2::read::GzDecoder;
 use http::header::ACCEPT;
+use http_body_util::BodyExt as _;
 use once_cell::sync::Lazy;
 use prost::Message;
 use proto::reports::Report;
@@ -53,15 +54,15 @@ static TEST: Lazy<Arc<Mutex<()>>> = Lazy::new(Default::default);
 
 async fn config(
     use_legacy_request_span: bool,
-    batch: bool,
     reports: Arc<Mutex<Vec<Report>>>,
     demand_control: bool,
     experimental_field_stats: bool,
+    config_str: &str,
 ) -> (JoinHandle<()>, serde_json::Value) {
-    std::env::set_var("APOLLO_KEY", "test");
-    std::env::set_var("APOLLO_GRAPH_REF", "test");
+    *apollo_router::_private::APOLLO_KEY.lock() = Some("test".to_string());
+    *apollo_router::_private::APOLLO_GRAPH_REF.lock() = Some("test".to_string());
 
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let app = axum::Router::new()
         .route("/", post(report))
@@ -69,20 +70,13 @@ async fn config(
         .layer(tower_http::add_extension::AddExtensionLayer::new(reports));
 
     let task = ROUTER_SERVICE_RUNTIME.spawn(async move {
-        axum::Server::from_tcp(listener)
-            .expect("mut be able to create report receiver")
-            .serve(app.into_make_service())
+        axum::serve(listener, app.into_make_service())
             .await
             .expect("could not start axum server")
     });
 
-    let mut config: serde_json::Value = if batch {
-        serde_yaml::from_str(include_str!("fixtures/apollo_reports_batch.router.yaml"))
-            .expect("apollo_reports.router.yaml was invalid")
-    } else {
-        serde_yaml::from_str(include_str!("fixtures/apollo_reports.router.yaml"))
-            .expect("apollo_reports.router.yaml was invalid")
-    };
+    let mut config = serde_yaml::from_str(config_str).expect("config yaml was invalid");
+
     config = jsonpath_lib::replace_with(config, "$.telemetry.apollo.endpoint", &mut |_| {
         Some(serde_json::Value::String(format!("http://{addr}")))
     })
@@ -112,13 +106,14 @@ async fn get_router_service(
     mocked: bool,
     demand_control: bool,
     experimental_local_field_metrics: bool,
+    config_str: Option<&str>,
 ) -> (JoinHandle<()>, BoxCloneService) {
     let (task, config) = config(
         use_legacy_request_span,
-        false,
         reports,
         demand_control,
         experimental_local_field_metrics,
+        config_str.unwrap_or(include_str!("fixtures/reports/apollo_reports.router.yaml")),
     )
     .await;
     let builder = TestHarness::builder()
@@ -146,13 +141,16 @@ async fn get_batch_router_service(
     mocked: bool,
     demand_control: bool,
     experimental_local_field_metrics: bool,
+    config_str: Option<&str>,
 ) -> (JoinHandle<()>, BoxCloneService) {
     let (task, config) = config(
         use_legacy_request_span,
-        true,
         reports,
         demand_control,
         experimental_local_field_metrics,
+        config_str.unwrap_or(include_str!(
+            "fixtures/reports/apollo_reports_batch.router.yaml"
+        )),
     )
     .await;
     let builder = TestHarness::builder()
@@ -180,6 +178,7 @@ macro_rules! assert_report {
                     insta::assert_yaml_snapshot!($report, {
                         ".**.agent_version" => "[agent_version]",
                         ".**.executable_schema_id" => "[executable_schema_id]",
+                        ".**.agent_id" => "[agent_id]",
                         ".header.hostname" => "[hostname]",
                         ".header.uname" => "[uname]",
                         ".**.seconds" => "[seconds]",
@@ -245,6 +244,7 @@ async fn get_trace_report(
     use_legacy_request_span: bool,
     demand_control: bool,
     experimental_local_field_metrics: bool,
+    config_str: Option<&'static str>,
 ) -> Report {
     get_report(
         get_router_service,
@@ -262,6 +262,7 @@ async fn get_trace_report(
                 .trace
                 .is_empty()
         },
+        config_str,
     )
     .await
 }
@@ -272,6 +273,7 @@ async fn get_batch_trace_report(
     use_legacy_request_span: bool,
     demand_control: bool,
     experimental_local_field_metrics: bool,
+    config_str: Option<&'static str>,
 ) -> Report {
     get_report(
         get_batch_router_service,
@@ -289,6 +291,7 @@ async fn get_batch_trace_report(
                 .trace
                 .is_empty()
         },
+        config_str,
     )
     .await
 }
@@ -307,6 +310,7 @@ async fn get_metrics_report(
     request: router::Request,
     demand_control: bool,
     experimental_local_field_metrics: bool,
+    config_str: Option<&'static str>,
 ) -> Report {
     get_report(
         get_router_service,
@@ -317,6 +321,7 @@ async fn get_metrics_report(
         demand_control,
         experimental_local_field_metrics,
         has_metrics,
+        config_str,
     )
     .await
 }
@@ -331,6 +336,7 @@ async fn get_batch_metrics_report(
 async fn get_metrics_report_mocked(
     reports: Arc<Mutex<Vec<Report>>>,
     request: router::Request,
+    config_str: Option<&'static str>,
 ) -> Report {
     get_report(
         get_router_service,
@@ -341,13 +347,21 @@ async fn get_metrics_report_mocked(
         false,
         false,
         has_metrics,
+        config_str,
     )
     .await
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn get_report<Fut, T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>(
-    service_fn: impl FnOnce(Arc<Mutex<Vec<Report>>>, bool, bool, bool, bool) -> Fut,
+    service_fn: impl FnOnce(
+        Arc<Mutex<Vec<Report>>>,
+        bool,
+        bool,
+        bool,
+        bool,
+        Option<&'static str>,
+    ) -> Fut,
     reports: Arc<Mutex<Vec<Report>>>,
     use_legacy_request_span: bool,
     mocked: bool,
@@ -355,6 +369,7 @@ async fn get_report<Fut, T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>
     demand_control: bool,
     experimental_local_field_metrics: bool,
     filter: T,
+    config_str: Option<&'static str>,
 ) -> Report
 where
     Fut: Future<Output = (JoinHandle<()>, BoxCloneService)>,
@@ -367,6 +382,7 @@ where
         mocked,
         demand_control,
         experimental_local_field_metrics,
+        config_str,
     )
     .await;
     let response = service
@@ -378,9 +394,12 @@ where
         .expect("router service call failed");
 
     // Drain the response
-    let mut found_report = match hyper::body::to_bytes(response.response.into_body())
+    let mut found_report = match response
+        .response
+        .into_body()
+        .collect()
         .await
-        .map(|b| String::from_utf8(b.to_vec()))
+        .map(|b| String::from_utf8(b.to_bytes().to_vec()))
     {
         Ok(Ok(response)) => {
             if response.contains("errors") {
@@ -418,7 +437,7 @@ async fn get_batch_stats_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + '
     let _guard = TEST.lock().await;
     reports.lock().await.clear();
     let (task, mut service) =
-        get_batch_router_service(reports.clone(), mocked, false, false, false).await;
+        get_batch_router_service(reports.clone(), mocked, false, false, false, None).await;
     let response = service
         .ready()
         .await
@@ -428,7 +447,7 @@ async fn get_batch_stats_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + '
         .expect("router service call failed");
 
     // Drain the response (and throw it away)
-    let _found_report = hyper::body::to_bytes(response.response.into_body()).await;
+    let _found_report = response.response.into_body().collect().await;
 
     // Give the server a little time to export something
     // If this test fails, consider increasing this time.
@@ -462,7 +481,8 @@ async fn non_defer() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span, false, false).await;
+        let report =
+            get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
         assert_report!(report);
     }
 }
@@ -478,7 +498,8 @@ async fn test_condition_if() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span, false, false).await;
+        let report =
+            get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
         assert_report!(report);
     }
 }
@@ -494,7 +515,8 @@ async fn test_condition_else() {
         .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span, false, false).await;
+        let report =
+            get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
         assert_report!(report);
     }
 }
@@ -508,7 +530,8 @@ async fn test_trace_id() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span, false, false).await;
+        let report =
+            get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
         assert_report!(report);
     }
 }
@@ -532,6 +555,7 @@ async fn test_batch_trace_id() {
             use_legacy_request_span,
             false,
             false,
+            None,
         )
         .await;
         assert_report!(report);
@@ -548,7 +572,8 @@ async fn test_client_name() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span, false, false).await;
+        let report =
+            get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
         assert_report!(report);
     }
 }
@@ -563,7 +588,8 @@ async fn test_client_version() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span, false, false).await;
+        let report =
+            get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
         assert_report!(report);
     }
 }
@@ -579,7 +605,8 @@ async fn test_send_header() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span, false, false).await;
+        let report =
+            get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
         assert_report!(report);
     }
 }
@@ -605,6 +632,7 @@ async fn test_batch_send_header() {
             use_legacy_request_span,
             false,
             false,
+            None,
         )
         .await;
         assert_report!(report);
@@ -622,7 +650,8 @@ async fn test_send_variable_value() {
         .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span, false, false).await;
+        let report =
+            get_trace_report(reports, req, use_legacy_request_span, false, false, None).await;
         assert_report!(report);
     }
 }
@@ -635,7 +664,7 @@ async fn test_stats() {
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
     let reports = Arc::new(Mutex::new(vec![]));
-    let report = get_metrics_report(reports, req, false, false).await;
+    let report = get_metrics_report(reports, req, false, false, None).await;
     assert_report!(report);
 }
 
@@ -667,7 +696,7 @@ async fn test_stats_mocked() {
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
     let reports = Arc::new(Mutex::new(vec![]));
-    let report = get_metrics_report_mocked(reports, req).await;
+    let report = get_metrics_report_mocked(reports, req, None).await;
     let per_query = report.traces_per_query.values().next().unwrap();
     let stats = per_query.stats_with_context.first().unwrap();
     insta::with_settings!({sort_maps => true}, {
@@ -685,7 +714,7 @@ async fn test_new_field_stats() {
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
     let reports = Arc::new(Mutex::new(vec![]));
-    let report = get_metrics_report(reports, req, true, true).await;
+    let report = get_metrics_report(reports, req, true, true, None).await;
     assert_report!(report);
 }
 
@@ -697,7 +726,7 @@ async fn test_demand_control_stats() {
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
     let reports = Arc::new(Mutex::new(vec![]));
-    let report = get_metrics_report(reports, req, true, false).await;
+    let report = get_metrics_report(reports, req, true, false, None).await;
     assert_report!(report);
 }
 
@@ -710,7 +739,8 @@ async fn test_demand_control_trace() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span, true, false).await;
+        let report =
+            get_trace_report(reports, req, use_legacy_request_span, true, false, None).await;
         assert_report!(report);
     }
 }
@@ -730,7 +760,141 @@ async fn test_demand_control_trace_batched() {
         let req: router::Request = request.into();
         let reports = Arc::new(Mutex::new(vec![]));
         let report =
-            get_batch_trace_report(reports, req, use_legacy_request_span, true, false).await;
+            get_batch_trace_report(reports, req, use_legacy_request_span, true, false, None).await;
         assert_report!(report);
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_features_enabled() {
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_metrics_report(
+        reports,
+        req,
+        false,
+        false,
+        Some(include_str!(
+            "fixtures/reports/all_features_enabled.router.yaml"
+        )),
+    )
+    .await;
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_features_disabled() {
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_metrics_report(
+        reports,
+        req,
+        false,
+        false,
+        Some(include_str!(
+            "fixtures/reports/all_features_disabled.router.yaml"
+        )),
+    )
+    .await;
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_persisted_query_by_id_stats() {
+    let request = supergraph::Request::fake_builder()
+        .extension(
+            "persistedQuery",
+            serde_json::json!({
+                "version": 1,
+                "sha256Hash": "test_pq_id"
+            }),
+        )
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_metrics_report(
+        reports,
+        req,
+        false,
+        false,
+        Some(include_str!("fixtures/reports/pq_enabled.router.yaml")),
+    )
+    .await;
+
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_persisted_query_by_safelist_body_stats() {
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name}}")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_metrics_report(
+        reports,
+        req,
+        false,
+        false,
+        Some(include_str!("fixtures/reports/pq_enabled.router.yaml")),
+    )
+    .await;
+
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_persisted_query_by_id_logging_only_stats() {
+    let request = supergraph::Request::fake_builder()
+        .extension(
+            "persistedQuery",
+            serde_json::json!({
+                "version": 1,
+                "sha256Hash": "test_pq_id"
+            }),
+        )
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_metrics_report(
+        reports,
+        req,
+        false,
+        false,
+        Some(include_str!("fixtures/reports/pq_logging.router.yaml")),
+    )
+    .await;
+
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_persisted_query_by_safelist_body_logging_pq_only_stats() {
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name}}")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_metrics_report(
+        reports,
+        req,
+        false,
+        false,
+        Some(include_str!("fixtures/reports/pq_logging.router.yaml")),
+    )
+    .await;
+
+    assert_report!(report);
 }

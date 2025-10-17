@@ -1,23 +1,22 @@
 use std::fmt::Display;
 use std::sync::Arc;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable::Value;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 use indexmap::map::Entry;
 use serde::Serialize;
 
 use crate::bail;
 use crate::error::FederationError;
 use crate::operation::DirectiveList;
-use crate::operation::NamedFragments;
 use crate::operation::Selection;
 use crate::operation::SelectionMap;
 use crate::operation::SelectionMapperReturn;
 use crate::operation::SelectionSet;
-use crate::query_graph::graph_path::OpPathElement;
+use crate::query_graph::graph_path::operation::OpPathElement;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub(crate) enum ConditionKind {
@@ -291,8 +290,8 @@ pub(crate) fn remove_conditions_from_selection_set(
             Ok(selection_set.clone())
         }
         Conditions::Variables(variable_conditions) => {
-            selection_set.lazy_map(&NamedFragments::default(), |selection| {
-                let element = selection.element()?;
+            selection_set.lazy_map(|selection| {
+                let element = selection.element();
                 // We remove any of the conditions on the element and recurse.
                 let updated_element =
                     remove_conditions_of_element(element.clone(), variable_conditions);
@@ -375,10 +374,6 @@ pub(crate) fn remove_unneeded_top_level_fragment_directives(
                         selection_map.insert(Selection::InlineFragment(Arc::new(final_selection)));
                     }
                 }
-            }
-            _ => {
-                // TODO should we apply same logic as for inline_fragment "just in case"?
-                return Err(FederationError::internal("unexpected fragment spread"));
             }
         }
     }

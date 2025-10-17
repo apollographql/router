@@ -1,0 +1,25 @@
+subgraphs:
+  connectors:
+    routing_url: http://none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.11")
+          @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@source", "@connect"])
+          @source(name: "json", http: { baseURL: "http://localhost:4001/api" })
+
+        type Query {
+          literal: String
+            @connect(source: "json", http: { GET: "/literal" }, selection: """$("literal test")""")
+          raw: String
+            @connect(source: "json", http: { GET: "/raw" }, selection: """$""")
+          users: [User!]!
+            @connect(source: "json", http: { GET: "/users" }, selection: "id name username")
+        }
+
+        type User
+        {
+          id: ID!
+          name: String
+          username: String
+        }

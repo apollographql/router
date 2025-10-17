@@ -1,7 +1,10 @@
+use std::sync::LazyLock;
+
 use apollo_compiler::ast::Value;
-use apollo_compiler::name;
+use apollo_compiler::collections::HashSet;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::Type;
-use lazy_static::lazy_static;
+use apollo_compiler::ty;
 
 use crate::schema::FederationSchema;
 
@@ -10,33 +13,47 @@ use crate::schema::FederationSchema;
 pub(crate) enum ArgumentCompositionStrategy {
     Max,
     Min,
-    Sum,
+    // Sum,
     Intersection,
     Union,
+    NullableAnd,
+    NullableMax,
+    NullableUnion,
 }
 
-lazy_static! {
-    pub(crate) static ref MAX_STRATEGY: MaxArgumentCompositionStrategy =
-        MaxArgumentCompositionStrategy::new();
-    pub(crate) static ref MIN_STRATEGY: MinArgumentCompositionStrategy =
-        MinArgumentCompositionStrategy::new();
-    pub(crate) static ref SUM_STRATEGY: SumArgumentCompositionStrategy =
-        SumArgumentCompositionStrategy::new();
-    pub(crate) static ref INTERSECTION_STRATEGY: IntersectionArgumentCompositionStrategy =
-        IntersectionArgumentCompositionStrategy {};
-    pub(crate) static ref UNION_STRATEGY: UnionArgumentCompositionStrategy =
-        UnionArgumentCompositionStrategy {};
-}
+pub(crate) static MAX_STRATEGY: LazyLock<MaxArgumentCompositionStrategy> =
+    LazyLock::new(MaxArgumentCompositionStrategy::new);
+pub(crate) static MIN_STRATEGY: LazyLock<MinArgumentCompositionStrategy> =
+    LazyLock::new(MinArgumentCompositionStrategy::new);
+// pub(crate) static SUM_STRATEGY: LazyLock<SumArgumentCompositionStrategy> =
+//     LazyLock::new(SumArgumentCompositionStrategy::new);
+pub(crate) static INTERSECTION_STRATEGY: LazyLock<IntersectionArgumentCompositionStrategy> =
+    LazyLock::new(|| IntersectionArgumentCompositionStrategy {});
+pub(crate) static UNION_STRATEGY: LazyLock<UnionArgumentCompositionStrategy> =
+    LazyLock::new(|| UnionArgumentCompositionStrategy {});
+pub(crate) static NULLABLE_AND_STRATEGY: LazyLock<NullableAndArgumentCompositionStrategy> =
+    LazyLock::new(NullableAndArgumentCompositionStrategy::new);
+pub(crate) static NULLABLE_MAX_STRATEGY: LazyLock<NullableMaxArgumentCompositionStrategy> =
+    LazyLock::new(NullableMaxArgumentCompositionStrategy::new);
+pub(crate) static NULLABLE_UNION_STRATEGY: LazyLock<NullableUnionArgumentCompositionStrategy> =
+    LazyLock::new(|| NullableUnionArgumentCompositionStrategy {});
 
 impl ArgumentCompositionStrategy {
-    pub(crate) fn name(&self) -> &str {
+    fn get_impl(&self) -> &dyn ArgumentComposition {
         match self {
-            Self::Max => MAX_STRATEGY.name(),
-            Self::Min => MIN_STRATEGY.name(),
-            Self::Sum => SUM_STRATEGY.name(),
-            Self::Intersection => INTERSECTION_STRATEGY.name(),
-            Self::Union => UNION_STRATEGY.name(),
+            Self::Max => &*MAX_STRATEGY,
+            Self::Min => &*MIN_STRATEGY,
+            // Self::Sum => &*SUM_STRATEGY,
+            Self::Intersection => &*INTERSECTION_STRATEGY,
+            Self::Union => &*UNION_STRATEGY,
+            Self::NullableAnd => &*NULLABLE_AND_STRATEGY,
+            Self::NullableMax => &*NULLABLE_MAX_STRATEGY,
+            Self::NullableUnion => &*NULLABLE_UNION_STRATEGY,
         }
+    }
+
+    pub(crate) fn name(&self) -> &str {
+        self.get_impl().name()
     }
 
     pub(crate) fn is_type_supported(
@@ -44,23 +61,16 @@ impl ArgumentCompositionStrategy {
         schema: &FederationSchema,
         ty: &Type,
     ) -> Result<(), String> {
-        match self {
-            Self::Max => MAX_STRATEGY.is_type_supported(schema, ty),
-            Self::Min => MIN_STRATEGY.is_type_supported(schema, ty),
-            Self::Sum => SUM_STRATEGY.is_type_supported(schema, ty),
-            Self::Intersection => INTERSECTION_STRATEGY.is_type_supported(schema, ty),
-            Self::Union => UNION_STRATEGY.is_type_supported(schema, ty),
-        }
+        self.get_impl().is_type_supported(schema, ty)
     }
 
-    pub(crate) fn merge_values(&self, values: &[Value]) -> Value {
-        match self {
-            Self::Max => MAX_STRATEGY.merge_values(values),
-            Self::Min => MIN_STRATEGY.merge_values(values),
-            Self::Sum => SUM_STRATEGY.merge_values(values),
-            Self::Intersection => INTERSECTION_STRATEGY.merge_values(values),
-            Self::Union => UNION_STRATEGY.merge_values(values),
-        }
+    /// Merges the argument values by the specified strategy.
+    /// - `None` return value indicates that the merged value is undefined (meaning the argument
+    ///   should be omitted).
+    /// - PORT_NOTE: The JS implementation could handle `undefined` input values. However, in Rust,
+    ///   undefined values should be omitted in `values`, instead.
+    pub(crate) fn merge_values(&self, values: &[Value]) -> Option<Value> {
+        self.get_impl().merge_values(values)
     }
 }
 
@@ -76,8 +86,13 @@ pub(crate) trait ArgumentComposition {
     fn name(&self) -> &str;
     /// Is the type `ty`  supported by this validator?
     fn is_type_supported(&self, schema: &FederationSchema, ty: &Type) -> Result<(), String>;
-    /// Assumes that schemas are validated by `is_type_supported`.
-    fn merge_values(&self, values: &[Value]) -> Value;
+    /// Merges the argument values.
+    /// - Assumes that schemas are validated by `is_type_supported`.
+    /// - `None` return value indicates that the merged value is undefined (meaning the argument
+    ///   should be omitted).
+    /// - PORT_NOTE: The JS implementation could handle `undefined` input values. However, in Rust,
+    ///   undefined values should be omitted in `values`, instead.
+    fn merge_values(&self, values: &[Value]) -> Option<Value>;
 }
 
 #[derive(Clone)]
@@ -87,11 +102,7 @@ pub(crate) struct FixedTypeSupportValidator {
 
 impl FixedTypeSupportValidator {
     fn is_type_supported(&self, _schema: &FederationSchema, ty: &Type) -> Result<(), String> {
-        let is_supported = self
-            .supported_types
-            .iter()
-            .any(|supported_ty| *supported_ty == *ty);
-        if is_supported {
+        if self.supported_types.contains(ty) {
             return Ok(());
         }
 
@@ -104,16 +115,82 @@ impl FixedTypeSupportValidator {
     }
 }
 
-fn int_type() -> Type {
-    Type::Named(name!("Int"))
-}
-
 fn support_any_non_null_array(ty: &Type) -> Result<(), String> {
     if !ty.is_non_null() || !ty.is_list() {
         Err("non-nullable list types of any type".to_string())
     } else {
         Ok(())
     }
+}
+
+/// Support for nullable or non-nullable list types of any type.
+fn support_any_array(ty: &Type) -> Result<(), String> {
+    if ty.is_list() {
+        Ok(())
+    } else {
+        Err("list types of any type".to_string())
+    }
+}
+
+fn max_int_value<'a>(values: impl Iterator<Item = &'a Value>) -> Value {
+    values
+        .filter_map(|val| match val {
+            // project the value to i32 (GraphQL `Int` scalar type is a signed 32-bit integer)
+            Value::Int(i) => i.try_to_i32().ok().map(|i| (val, i)),
+            _ => None, // Shouldn't happen
+        })
+        .max_by(|x, y| x.1.cmp(&y.1))
+        .map(|(val, _)| val)
+        .cloned()
+        // PORT_NOTE: JS uses `Math.max` which returns `-Infinity` for empty values.
+        //            Here, we use `i32::MIN`.
+        .unwrap_or_else(|| Value::Int(i32::MIN.into()))
+}
+
+fn min_int_value<'a>(values: impl Iterator<Item = &'a Value>) -> Value {
+    values
+        .filter_map(|val| match val {
+            // project the value to i32 (GraphQL `Int` scalar type is a signed 32-bit integer)
+            Value::Int(i) => i.try_to_i32().ok().map(|i| (val, i)),
+            _ => None, // Shouldn't happen
+        })
+        .min_by(|x, y| x.1.cmp(&y.1))
+        .map(|(val, _)| val)
+        .cloned()
+        // PORT_NOTE: JS uses `Math.min` which returns `+Infinity` for empty values.
+        //            Here, we use `i32::MAX` as default value.
+        .unwrap_or_else(|| Value::Int(i32::MAX.into()))
+}
+
+fn union_list_values<'a>(values: impl Iterator<Item = &'a Value>) -> Value {
+    // Each item in `values` must be a Value::List(...).
+    // Using `IndexSet` to maintain order and uniqueness.
+    // TODO: port `valueEquals` from JS to Rust
+    let mut result = IndexSet::default();
+    for val in values {
+        result.extend(val.as_list().unwrap_or_default().iter().cloned());
+    }
+    Value::List(result.into_iter().collect())
+}
+
+/// Merge nullable values.
+/// - Returns `None` if all values are `null` or values are empty.
+/// - Otherwise, calls `merge_values` argument with all the non-null values and returns the result.
+// NOTE: This function makes the assumption that for the directive argument
+// being merged, it is not "nullable with non-null default" in the supergraph
+// schema (this kind of type/default combo is confusing and should be avoided,
+// if possible). This assumption allows this function to replace null with
+// None, which makes for a cleaner supergraph schema.
+fn merge_nullable_values(
+    values: &[Value],
+    merge_values: impl Fn(&[&Value]) -> Value,
+) -> Option<Value> {
+    // Filter out `null` values.
+    let values = values.iter().filter(|v| !v.is_null()).collect::<Vec<_>>();
+    if values.is_empty() {
+        return None; // No values to merge, return None (instead of null)
+    }
+    merge_values(&values).into()
 }
 
 // MAX
@@ -126,7 +203,7 @@ impl MaxArgumentCompositionStrategy {
     fn new() -> Self {
         Self {
             validator: FixedTypeSupportValidator {
-                supported_types: vec![int_type().non_null()],
+                supported_types: vec![ty!(Int!)],
             },
         }
     }
@@ -141,18 +218,8 @@ impl ArgumentComposition for MaxArgumentCompositionStrategy {
         self.validator.is_type_supported(schema, ty)
     }
 
-    // TODO: check if this neeeds to be an Result<Value> to avoid the panic!()
-    // https://apollographql.atlassian.net/browse/FED-170
-    fn merge_values(&self, values: &[Value]) -> Value {
-        values
-            .iter()
-            .map(|val| match val {
-                Value::Int(i) => i.try_to_i32().unwrap(),
-                _ => panic!("Unexpected value type"),
-            })
-            .max()
-            .unwrap_or_default()
-            .into()
+    fn merge_values(&self, values: &[Value]) -> Option<Value> {
+        max_int_value(values.iter()).into()
     }
 }
 
@@ -166,7 +233,7 @@ impl MinArgumentCompositionStrategy {
     fn new() -> Self {
         Self {
             validator: FixedTypeSupportValidator {
-                supported_types: vec![int_type().non_null()],
+                supported_types: vec![ty!(Int!)],
             },
         }
     }
@@ -181,59 +248,52 @@ impl ArgumentComposition for MinArgumentCompositionStrategy {
         self.validator.is_type_supported(schema, ty)
     }
 
-    // TODO: check if this neeeds to be an Result<Value> to avoid the panic!()
-    // https://apollographql.atlassian.net/browse/FED-170
-    fn merge_values(&self, values: &[Value]) -> Value {
-        values
-            .iter()
-            .map(|val| match val {
-                Value::Int(i) => i.try_to_i32().unwrap(),
-                _ => panic!("Unexpected value type"),
-            })
-            .min()
-            .unwrap_or_default()
-            .into()
+    fn merge_values(&self, values: &[Value]) -> Option<Value> {
+        min_int_value(values.iter()).into()
     }
 }
 
+// NOTE: This doesn't work today because directive applications are de-duped
+// before being merged, we'd need to modify merge logic if we need this kind
+// of behavior.
 // SUM
-#[derive(Clone)]
-pub(crate) struct SumArgumentCompositionStrategy {
-    validator: FixedTypeSupportValidator,
-}
+// #[derive(Clone)]
+// pub(crate) struct SumArgumentCompositionStrategy {
+//     validator: FixedTypeSupportValidator,
+// }
 
-impl SumArgumentCompositionStrategy {
-    fn new() -> Self {
-        Self {
-            validator: FixedTypeSupportValidator {
-                supported_types: vec![int_type().non_null()],
-            },
-        }
-    }
-}
+// impl SumArgumentCompositionStrategy {
+//     fn new() -> Self {
+//         Self {
+//             validator: FixedTypeSupportValidator {
+//                 supported_types: vec![ty!(Int!)],
+//             },
+//         }
+//     }
+// }
 
-impl ArgumentComposition for SumArgumentCompositionStrategy {
-    fn name(&self) -> &str {
-        "SUM"
-    }
+// impl ArgumentComposition for SumArgumentCompositionStrategy {
+//     fn name(&self) -> &str {
+//         "SUM"
+//     }
 
-    fn is_type_supported(&self, schema: &FederationSchema, ty: &Type) -> Result<(), String> {
-        self.validator.is_type_supported(schema, ty)
-    }
+//     fn is_type_supported(&self, schema: &FederationSchema, ty: &Type) -> Result<(), String> {
+//         self.validator.is_type_supported(schema, ty)
+//     }
 
-    // TODO: check if this neeeds to be an Result<Value> to avoid the panic!()
-    // https://apollographql.atlassian.net/browse/FED-170
-    fn merge_values(&self, values: &[Value]) -> Value {
-        values
-            .iter()
-            .map(|val| match val {
-                Value::Int(i) => i.try_to_i32().unwrap(),
-                _ => panic!("Unexpected value type"),
-            })
-            .sum::<i32>()
-            .into()
-    }
-}
+//     fn merge_values(&self, values: &[Value]) -> Value {
+//         values
+//             .iter()
+//             .map(|val| match val {
+//                 // project the value to i32 (GraphQL `Int` scalar type is a signed 32-bit integer)
+//                 Value::Int(i) => i.try_to_i32().unwrap_or(0),
+//                 _ => 0, // Shouldn't happen
+//             })
+//             // Note: `.sum()` would panic if the sum overflows.
+//             .fold(0_i32, |acc, i| acc.saturating_add(i))
+//             .into()
+//     }
+// }
 
 // INTERSECTION
 #[derive(Clone)]
@@ -248,23 +308,24 @@ impl ArgumentComposition for IntersectionArgumentCompositionStrategy {
         support_any_non_null_array(ty)
     }
 
-    // TODO: check if this neeeds to be an Result<Value> to avoid the panic!()
-    // https://apollographql.atlassian.net/browse/FED-170
-    fn merge_values(&self, values: &[Value]) -> Value {
+    fn merge_values(&self, values: &[Value]) -> Option<Value> {
         // Each item in `values` must be a Value::List(...).
-        values
-            .split_first()
-            .map(|(first, rest)| {
-                let first_ls = first.as_list().unwrap();
-                // Not a super efficient implementation, but we don't expect large problem sizes.
-                let mut result = first_ls.to_vec();
-                for val in rest {
-                    let val_ls = val.as_list().unwrap();
-                    result.retain(|result_item| val_ls.iter().any(|n| *n == *result_item));
-                }
-                Value::List(result)
-            })
-            .unwrap()
+        let Some((first, rest)) = values.split_first() else {
+            return Value::List(Vec::new()).into(); // Fallback for empty list
+        };
+
+        let mut result = first.as_list().unwrap_or_default().to_owned();
+        for val in rest {
+            // TODO: port `valueEquals` from JS to Rust
+            let val_set: HashSet<&Value> = val
+                .as_list()
+                .unwrap_or_default()
+                .iter()
+                .map(|v| v.as_ref())
+                .collect();
+            result.retain(|result_item| val_set.contains(result_item.as_ref()));
+        }
+        Value::List(result).into()
     }
 }
 
@@ -281,20 +342,96 @@ impl ArgumentComposition for UnionArgumentCompositionStrategy {
         support_any_non_null_array(ty)
     }
 
-    // TODO: check if this neeeds to be an Result<Value> to avoid the panic!()
-    // https://apollographql.atlassian.net/browse/FED-170
-    fn merge_values(&self, values: &[Value]) -> Value {
-        // Each item in `values` must be a Value::List(...).
-        // Not a super efficient implementation, but we don't expect large problem sizes.
-        let mut result = Vec::new();
-        for val in values {
-            let val_ls = val.as_list().unwrap();
-            for x in val_ls.iter() {
-                if !result.contains(x) {
-                    result.push(x.clone());
-                }
-            }
+    fn merge_values(&self, values: &[Value]) -> Option<Value> {
+        union_list_values(values.iter()).into()
+    }
+}
+
+// NULLABLE_AND
+#[derive(Clone)]
+pub(crate) struct NullableAndArgumentCompositionStrategy {
+    type_validator: FixedTypeSupportValidator,
+}
+
+impl NullableAndArgumentCompositionStrategy {
+    fn new() -> Self {
+        Self {
+            type_validator: FixedTypeSupportValidator {
+                supported_types: vec![ty!(Boolean), ty!(Boolean!)],
+            },
         }
-        Value::List(result)
+    }
+}
+
+impl ArgumentComposition for NullableAndArgumentCompositionStrategy {
+    fn name(&self) -> &str {
+        "NULLABLE_AND"
+    }
+
+    fn is_type_supported(&self, schema: &FederationSchema, ty: &Type) -> Result<(), String> {
+        self.type_validator.is_type_supported(schema, ty)
+    }
+
+    fn merge_values(&self, values: &[Value]) -> Option<Value> {
+        merge_nullable_values(values, |values| {
+            values
+                .iter()
+                .all(|v| {
+                    if let Value::Boolean(b) = v {
+                        *b
+                    } else {
+                        false // shouldn't happen
+                    }
+                })
+                .into()
+        })
+    }
+}
+
+// NULLABLE_MAX
+#[derive(Clone)]
+pub(crate) struct NullableMaxArgumentCompositionStrategy {
+    type_validator: FixedTypeSupportValidator,
+}
+
+impl NullableMaxArgumentCompositionStrategy {
+    fn new() -> Self {
+        Self {
+            type_validator: FixedTypeSupportValidator {
+                supported_types: vec![ty!(Int), ty!(Int!)],
+            },
+        }
+    }
+}
+
+impl ArgumentComposition for NullableMaxArgumentCompositionStrategy {
+    fn name(&self) -> &str {
+        "NULLABLE_MAX"
+    }
+
+    fn is_type_supported(&self, schema: &FederationSchema, ty: &Type) -> Result<(), String> {
+        self.type_validator.is_type_supported(schema, ty)
+    }
+
+    fn merge_values(&self, values: &[Value]) -> Option<Value> {
+        merge_nullable_values(values, |values| max_int_value(values.iter().copied()))
+    }
+}
+
+// NULLABLE_UNION
+#[derive(Clone)]
+pub(crate) struct NullableUnionArgumentCompositionStrategy {}
+
+impl ArgumentComposition for NullableUnionArgumentCompositionStrategy {
+    fn name(&self) -> &str {
+        "NULLABLE_UNION"
+    }
+
+    fn is_type_supported(&self, _schema: &FederationSchema, ty: &Type) -> Result<(), String> {
+        support_any_array(ty)
+    }
+
+    fn merge_values(&self, values: &[Value]) -> Option<Value> {
+        merge_nullable_values(values, |values| union_list_values(values.iter().copied()))
     }
 }

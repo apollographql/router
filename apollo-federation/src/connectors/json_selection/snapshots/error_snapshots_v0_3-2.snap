@@ -1,0 +1,12 @@
+---
+source: apollo-federation/src/connectors/json_selection/parser.rs
+expression: "JSONSelection::parse_with_spec(\"id $.object\", spec)"
+---
+Err(
+    JSONSelectionParseError {
+        message: "SubSelection cannot contain multiple elements if it contains an anonymous NamedSelection",
+        fragment: "id $.object",
+        offset: 0,
+        spec: V0_3,
+    },
+)

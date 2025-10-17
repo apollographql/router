@@ -4,6 +4,12 @@
 // Rather than littering this module with `#[allow(dead_code)]`s or adding a config_atr to the
 // crate wide directive, allowing dead code here seems like the best options
 
+use std::any::Any;
+use std::rc::Rc;
+use std::sync::Arc;
+
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::Value;
@@ -15,25 +21,32 @@ use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::EnumType;
 use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::InputObjectType;
 use apollo_compiler::schema::InputValueDefinition;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::schema::ScalarType;
 use apollo_compiler::schema::Type;
 use apollo_compiler::schema::UnionType;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
+use itertools::Itertools;
 
+use crate::bail;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
+use crate::link::Link;
+use crate::link::spec::Version;
+use crate::link::spec_definition::SpecDefinition;
+use crate::schema::FederationSchema;
 use crate::schema::argument_composition_strategies::ArgumentCompositionStrategy;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
+use crate::schema::position::InputObjectTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
-use crate::schema::FederationSchema;
+use crate::subgraph::typestate::Subgraph;
+use crate::subgraph::typestate::Validated;
 
 //////////////////////////////////////////////////////////////////////////////
 // Field and Argument Specifications
@@ -43,27 +56,40 @@ use crate::schema::FederationSchema;
 pub(crate) struct ArgumentSpecification {
     pub(crate) name: Name,
     // PORT_NOTE: In TS, get_type returns `InputType`.
-    pub(crate) get_type: fn(schema: &FederationSchema) -> Result<Type, SingleFederationError>,
+    pub(crate) get_type:
+        fn(schema: &FederationSchema, link: Option<&Arc<Link>>) -> Result<Type, FederationError>,
     pub(crate) default_value: Option<Value>,
+}
+
+impl ArgumentSpecification {
+    pub(crate) fn resolve(
+        &self,
+        schema: &FederationSchema,
+        link: Option<&Arc<Link>>,
+    ) -> Result<ResolvedArgumentSpecification, FederationError> {
+        let ty = (self.get_type)(schema, link)?;
+        Ok(ResolvedArgumentSpecification {
+            name: self.name.clone(),
+            ty,
+            default_value: self.default_value.clone(),
+        })
+    }
 }
 
 /// The resolved version of `ArgumentSpecification`
 pub(crate) struct ResolvedArgumentSpecification {
     pub(crate) name: Name,
     pub(crate) ty: Type,
-    default_value: Option<Value>,
+    pub(crate) default_value: Option<Value>,
 }
 
-impl From<&ResolvedArgumentSpecification> for InputValueDefinition {
-    fn from(arg_spec: &ResolvedArgumentSpecification) -> Self {
+impl From<ResolvedArgumentSpecification> for InputValueDefinition {
+    fn from(arg_spec: ResolvedArgumentSpecification) -> Self {
         InputValueDefinition {
             description: None,
-            name: arg_spec.name.clone(),
-            ty: Node::new(arg_spec.ty.clone()),
-            default_value: arg_spec
-                .default_value
-                .as_ref()
-                .map(|v| Node::new(v.clone())),
+            name: arg_spec.name,
+            ty: Node::new(arg_spec.ty),
+            default_value: arg_spec.default_value.map(Node::new),
             directives: Default::default(),
         }
     }
@@ -75,14 +101,14 @@ pub(crate) struct FieldSpecification {
     pub(crate) arguments: Vec<ResolvedArgumentSpecification>,
 }
 
-impl From<&FieldSpecification> for FieldDefinition {
-    fn from(field_spec: &FieldSpecification) -> Self {
+impl From<FieldSpecification> for FieldDefinition {
+    fn from(field_spec: FieldSpecification) -> Self {
         FieldDefinition {
             description: None,
             name: field_spec.name.clone(),
             arguments: field_spec
                 .arguments
-                .iter()
+                .into_iter()
                 .map(|arg| Node::new(arg.into()))
                 .collect(),
             ty: field_spec.ty.clone(),
@@ -95,8 +121,33 @@ impl From<&FieldSpecification> for FieldDefinition {
 // Type Specifications
 
 pub(crate) trait TypeAndDirectiveSpecification {
-    // PORT_NOTE: The JS version takes additional optional arguments `feature` and `asBuiltIn`.
-    fn check_or_add(&self, schema: &mut FederationSchema) -> Result<(), FederationError>;
+    /// Returns the spec name (not the name in the schema).
+    fn name(&self) -> &Name;
+
+    // PORT_NOTE: The JS version takes additional optional argument `asBuiltIn`.
+    // - The JS version only sets it `true` for GraphQL built-in types and directives.
+    // - In Rust, GraphQL built-in definitions are added by `collect_shallow_references`, which
+    //   copies `apollo-compiler`'s Schema definitions. So, `asBuiltIn` is not needed.
+    fn check_or_add(
+        &self,
+        schema: &mut FederationSchema,
+        link: Option<&Arc<Link>>,
+    ) -> Result<(), FederationError>;
+
+    /// Cast to `Any` to allow downcasting refs to concrete implementations
+    fn as_any(&self) -> &dyn Any;
+}
+
+/// Retrieves the actual type name in the importing schema via `@link`; Otherwise, returns `name`.
+fn actual_type_name(name: &Name, link: Option<&Arc<Link>>) -> Name {
+    link.map(|link| link.type_name_in_schema(name))
+        .unwrap_or_else(|| name.clone())
+}
+
+/// Retrieves the actual directive name in the importing schema via `@link`; Otherwise, returns `name`.
+fn actual_directive_name(name: &Name, link: Option<&Arc<Link>>) -> Name {
+    link.map(|link| link.directive_name_in_schema(name))
+        .unwrap_or_else(|| name.clone())
 }
 
 pub(crate) struct ScalarTypeSpecification {
@@ -104,15 +155,24 @@ pub(crate) struct ScalarTypeSpecification {
 }
 
 impl TypeAndDirectiveSpecification for ScalarTypeSpecification {
-    fn check_or_add(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
-        let existing = schema.try_get_type(self.name.clone());
+    fn name(&self) -> &Name {
+        &self.name
+    }
+
+    fn check_or_add(
+        &self,
+        schema: &mut FederationSchema,
+        link: Option<&Arc<Link>>,
+    ) -> Result<(), FederationError> {
+        let actual_name = actual_type_name(&self.name, link);
+        let existing = schema.try_get_type(actual_name.clone());
         if let Some(existing) = existing {
             // Ignore redundant type specifications if they are are both scalar types.
             return ensure_expected_type_kind(TypeKind::Scalar, &existing);
         }
 
         let type_pos = ScalarTypeDefinitionPosition {
-            type_name: self.name.clone(),
+            type_name: actual_name,
         };
         type_pos.pre_insert(schema)?;
         type_pos.insert(
@@ -124,6 +184,10 @@ impl TypeAndDirectiveSpecification for ScalarTypeSpecification {
             }),
         )
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
 pub(crate) struct ObjectTypeSpecification {
@@ -132,9 +196,18 @@ pub(crate) struct ObjectTypeSpecification {
 }
 
 impl TypeAndDirectiveSpecification for ObjectTypeSpecification {
-    fn check_or_add(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+    fn name(&self) -> &Name {
+        &self.name
+    }
+
+    fn check_or_add(
+        &self,
+        schema: &mut FederationSchema,
+        link: Option<&Arc<Link>>,
+    ) -> Result<(), FederationError> {
+        let actual_name = actual_type_name(&self.name, link);
         let field_specs = (self.fields)(schema);
-        let existing = schema.try_get_type(self.name.clone());
+        let existing = schema.try_get_type(actual_name.clone());
         if let Some(existing) = existing {
             // ensure existing definition is an object type
             ensure_expected_type_kind(TypeKind::Object, &existing)?;
@@ -152,13 +225,13 @@ impl TypeAndDirectiveSpecification for ObjectTypeSpecification {
         }
 
         let mut field_map = IndexMap::default();
-        for ref field_spec in field_specs {
+        for field_spec in field_specs {
             let field_def: FieldDefinition = field_spec.into();
-            field_map.insert(field_spec.name.clone(), Component::new(field_def));
+            field_map.insert(field_def.name.clone(), Component::new(field_def));
         }
 
         let type_pos = ObjectTypeDefinitionPosition {
-            type_name: self.name.clone(),
+            type_name: actual_name,
         };
         type_pos.pre_insert(schema)?;
         type_pos.insert(
@@ -172,23 +245,34 @@ impl TypeAndDirectiveSpecification for ObjectTypeSpecification {
             }),
         )
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
-pub(crate) struct UnionTypeSpecification<F>
-where
-    F: Fn(&FederationSchema) -> IndexSet<ComponentName>,
-{
+type UnionTypeMembersFn = dyn Fn(&FederationSchema) -> IndexSet<ComponentName>;
+
+pub(crate) struct UnionTypeSpecification {
     pub(crate) name: Name,
-    pub(crate) members: F,
+    pub(crate) members: Box<UnionTypeMembersFn>,
 }
 
-impl<F> TypeAndDirectiveSpecification for UnionTypeSpecification<F>
-where
-    F: Fn(&FederationSchema) -> IndexSet<ComponentName>,
-{
-    fn check_or_add(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+impl TypeAndDirectiveSpecification for UnionTypeSpecification {
+    fn name(&self) -> &Name {
+        &self.name
+    }
+
+    fn check_or_add(
+        &self,
+        schema: &mut FederationSchema,
+        link: Option<&Arc<Link>>,
+    ) -> Result<(), FederationError> {
+        let actual_name = actual_type_name(&self.name, link);
         let members = (self.members)(schema);
-        let existing = schema.try_get_type(self.name.clone());
+        // PORT_NOTE: The JS version sorts the members by name.
+        // TODO(ROUTER-1223): Sort members here. Currently, doing it breaks `plugins::cache` tests.
+        let existing = schema.try_get_type(actual_name.clone());
 
         // ensure new union has at least one member
         if members.is_empty() {
@@ -207,10 +291,13 @@ where
             let existing_type = existing.get(schema.schema())?;
             let ExtendedType::Union(existing_union_type) = existing_type else {
                 return Err(FederationError::internal(format!(
-                    "Expected ExtendedType::Object but got {}",
+                    "Expected ExtendedType::Union but got {}",
                     TypeKind::from(existing_type)
                 )));
             };
+            // This is kind of fragile in a core schema world where members may have been renamed,
+            // but we currently only use this one for the _Entity type where that shouldn't be an
+            // issue.
             if existing_union_type.members != members {
                 let union_type_name = &self.name;
                 let expected_member_names: Vec<String> = existing_union_type
@@ -229,7 +316,7 @@ where
         }
 
         let type_pos = UnionTypeDefinitionPosition {
-            type_name: self.name.clone(),
+            type_name: actual_name,
         };
         type_pos.pre_insert(schema)?;
         type_pos.insert(
@@ -241,6 +328,10 @@ where
                 members,
             }),
         )
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 
@@ -255,8 +346,17 @@ pub(crate) struct EnumTypeSpecification {
 }
 
 impl TypeAndDirectiveSpecification for EnumTypeSpecification {
-    fn check_or_add(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
-        let existing = schema.try_get_type(self.name.clone());
+    fn name(&self) -> &Name {
+        &self.name
+    }
+
+    fn check_or_add(
+        &self,
+        schema: &mut FederationSchema,
+        link: Option<&Arc<Link>>,
+    ) -> Result<(), FederationError> {
+        let actual_name = actual_type_name(&self.name, link);
+        let existing = schema.try_get_type(actual_name.clone());
         if let Some(existing) = existing {
             ensure_expected_type_kind(TypeKind::Enum, &existing)?;
             let existing_type = existing.get(schema.schema())?;
@@ -272,20 +372,22 @@ impl TypeAndDirectiveSpecification for EnumTypeSpecification {
                 .iter()
                 .map(|val| val.0.clone())
                 .collect();
-            let actual_value_set: IndexSet<Name> =
+            let expected_value_set: IndexSet<Name> =
                 self.values.iter().map(|val| val.name.clone()).collect();
-            if existing_value_set != actual_value_set {
+            if existing_value_set != expected_value_set {
                 let enum_type_name = &self.name;
-                let expected_value_names: Vec<String> = existing_value_set
+                let expected_value_names: Vec<String> = expected_value_set
                     .iter()
+                    .sorted_by(|a, b| a.cmp(b))
                     .map(|name| name.to_string())
                     .collect();
-                let actual_value_names: Vec<String> = actual_value_set
+                let actual_value_names: Vec<String> = existing_value_set
                     .iter()
+                    .sorted_by(|a, b| a.cmp(b))
                     .map(|name| name.to_string())
                     .collect();
                 return Err(SingleFederationError::TypeDefinitionInvalid {
-                    message: format!("Invalid definition of type {enum_type_name}: expected values [{}] but found [{}].",
+                    message: format!(r#"Invalid definition for type "{enum_type_name}": expected values [{}] but found [{}]."#,
                     expected_value_names.join(", "), actual_value_names.join(", "))
                 }.into());
             }
@@ -293,7 +395,7 @@ impl TypeAndDirectiveSpecification for EnumTypeSpecification {
         }
 
         let type_pos = EnumTypeDefinitionPosition {
-            type_name: self.name.clone(),
+            type_name: actual_name,
         };
         type_pos.pre_insert(schema)?;
         type_pos.insert(
@@ -305,6 +407,8 @@ impl TypeAndDirectiveSpecification for EnumTypeSpecification {
                 values: self
                     .values
                     .iter()
+                    // PORT_NOTE: The JS version sorts the enum values by name.
+                    // TODO(ROUTER-1223): Sort enum values here. (Also, see the union type above.)
                     .map(|val| {
                         (
                             val.name.clone(),
@@ -319,6 +423,88 @@ impl TypeAndDirectiveSpecification for EnumTypeSpecification {
             }),
         )
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+pub(crate) struct InputObjectTypeSpecification {
+    pub(crate) name: Name,
+    pub(crate) fields: fn(&FederationSchema) -> Vec<ArgumentSpecification>,
+}
+
+impl TypeAndDirectiveSpecification for InputObjectTypeSpecification {
+    fn name(&self) -> &Name {
+        &self.name
+    }
+
+    fn check_or_add(
+        &self,
+        schema: &mut FederationSchema,
+        link: Option<&Arc<Link>>,
+    ) -> Result<(), FederationError> {
+        let actual_name = actual_type_name(&self.name, link);
+        let field_specs = (self.fields)(schema);
+        let existing = schema.try_get_type(actual_name.clone());
+        if let Some(existing) = existing {
+            // ensure existing definition is InputObject
+            ensure_expected_type_kind(TypeKind::InputObject, &existing)?;
+            let existing_type = existing.get(schema.schema())?;
+            let ExtendedType::InputObject(existing_obj_type) = existing_type else {
+                return Err(FederationError::internal(format!(
+                    "Expected ExtendedType::InputObject but got {}",
+                    TypeKind::from(existing_type)
+                )));
+            };
+
+            // ensure all expected fields are present in the existing object type
+            let mut new_definition_fields = Vec::with_capacity(field_specs.len());
+            for field_spec in field_specs {
+                let field_def = field_spec.resolve(schema, link)?;
+                new_definition_fields.push(field_def);
+            }
+            let existing_definition_fields: Vec<_> = existing_obj_type
+                .fields
+                .values()
+                .map(|v| v.node.clone())
+                .collect();
+            let errors = ensure_same_arguments(
+                new_definition_fields.as_slice(),
+                existing_definition_fields.as_slice(),
+                schema,
+                format!("input object type {actual_name}").as_str(),
+                |s| SingleFederationError::TypeDefinitionInvalid {
+                    message: s.to_string(),
+                },
+            );
+            return MultipleFederationErrors::from_iter(errors).into_result();
+        }
+
+        let mut field_map = IndexMap::default();
+        for field_spec in field_specs {
+            let field_def: InputValueDefinition = field_spec.resolve(schema, link)?.into();
+            field_map.insert(field_def.name.clone(), Component::new(field_def));
+        }
+
+        let type_pos = InputObjectTypeDefinitionPosition {
+            type_name: actual_name,
+        };
+        type_pos.pre_insert(schema)?;
+        type_pos.insert(
+            schema,
+            Node::new(InputObjectType {
+                description: None,
+                name: type_pos.type_name.clone(),
+                directives: Default::default(),
+                fields: field_map,
+            }),
+        )
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -330,25 +516,37 @@ pub(crate) struct DirectiveArgumentSpecification {
     pub(crate) composition_strategy: Option<ArgumentCompositionStrategy>,
 }
 
-type ArgumentMergerFn = dyn Fn(&str, &[Value]) -> Value;
+/// Merges the argument values by the specified strategy.
+/// - `None` return value indicates that the merged value is undefined (meaning the argument
+///   should be omitted).
+/// - PORT_NOTE: The JS implementation could handle `undefined` input values. However, in Rust,
+///   undefined values should be omitted in `values`, instead.
+type ArgumentMergerFn = dyn Fn(&str, &[Value]) -> Result<Option<Value>, FederationError>;
 
 pub(crate) struct ArgumentMerger {
     pub(crate) merge: Box<ArgumentMergerFn>,
     pub(crate) to_string: Box<dyn Fn() -> String>,
 }
 
-type ArgumentMergerFactory =
-    dyn Fn(&FederationSchema) -> Result<ArgumentMerger, SingleFederationError>;
+/// Returns the version of directive spec definition required for the given Federation version to
+/// be used in the supergraph.
+type SupergraphSpecification = dyn Fn(&Version) -> Option<&'static dyn SpecDefinition>;
 
+type ArgumentMergerFactory =
+    dyn Fn(&FederationSchema, Option<&Arc<Link>>) -> Result<ArgumentMerger, FederationError>;
+
+pub(crate) type StaticArgumentsTransform =
+    dyn Fn(&Subgraph<Validated>, IndexMap<Name, Value>) -> IndexMap<Name, Value>;
+
+#[derive(Clone)]
 pub(crate) struct DirectiveCompositionSpecification {
-    pub(crate) supergraph_specification:
-        fn(
-            federation_version: crate::link::spec::Version,
-        ) -> Box<dyn crate::link::spec_definition::SpecDefinition>,
+    pub(crate) supergraph_specification: &'static SupergraphSpecification,
     /// Factory function returning an actual argument merger for given federation schema.
-    pub(crate) argument_merger: Option<Box<ArgumentMergerFactory>>,
+    pub(crate) argument_merger: Option<Rc<ArgumentMergerFactory>>,
+    pub(crate) static_argument_transform: Option<Rc<StaticArgumentsTransform>>,
 }
 
+#[derive(Clone)]
 pub(crate) struct DirectiveSpecification {
     pub(crate) name: Name,
     pub(crate) composition: Option<DirectiveCompositionSpecification>,
@@ -357,9 +555,6 @@ pub(crate) struct DirectiveSpecification {
     locations: Vec<DirectiveLocation>,
 }
 
-// TODO: revisit DirectiveSpecification::new() API once we start porting
-// composition.
-// https://apollographql.atlassian.net/browse/FED-172
 impl DirectiveSpecification {
     pub(crate) fn new(
         name: Name,
@@ -367,73 +562,41 @@ impl DirectiveSpecification {
         repeatable: bool,
         locations: &[DirectiveLocation],
         composes: bool,
-        supergraph_specification: Option<
-            fn(
-                federation_version: crate::link::spec::Version,
-            ) -> Box<dyn crate::link::spec_definition::SpecDefinition>,
-        >,
+        supergraph_specification: Option<&'static SupergraphSpecification>,
+        static_argument_transform: Option<Rc<StaticArgumentsTransform>>,
     ) -> Self {
         let mut composition: Option<DirectiveCompositionSpecification> = None;
         if composes {
-            assert!( supergraph_specification.is_some(),
-                "Should provide a @link specification to use in supergraph for directive @{name} if it composes");
-            let mut argument_merger: Option<Box<ArgumentMergerFactory>> = None;
-            let arg_strategies_iter = args
-                .iter()
-                .filter(|arg| arg.composition_strategy.is_some())
-                .map(|arg| {
-                    (
-                        arg.base_spec.name.to_string(),
-                        arg.composition_strategy.unwrap(),
-                    )
-                });
+            let Some(supergraph_specification) = supergraph_specification else {
+                panic!(
+                    "Should provide a @link specification to use in supergraph for directive @{name} if it composes"
+                );
+            };
+            let mut argument_merger: Option<Rc<ArgumentMergerFactory>> = None;
+            let arg_strategies_iter = args.iter().filter_map(|arg| {
+                Some((arg.base_spec.name.to_string(), arg.composition_strategy?))
+            });
             let arg_strategies: IndexMap<String, ArgumentCompositionStrategy> =
                 IndexMap::from_iter(arg_strategies_iter);
             if !arg_strategies.is_empty() {
-                assert!(!repeatable, "Invalid directive specification for @{name}: @{name} is repeatable and should not define composition strategy for its arguments");
-                assert!(arg_strategies.len() == args.len(), "Invalid directive specification for @{name}: not all arguments define a composition strategy");
-                let name_capture = name.clone();
-                let args_capture = args.to_vec();
-                argument_merger = Some(Box::new(move |schema: &FederationSchema| -> Result<ArgumentMerger, SingleFederationError> {
-                    for arg in args_capture.iter() {
-                        let strategy = arg.composition_strategy.as_ref().unwrap();
-                        let arg_name = &arg.base_spec.name;
-                        let arg_type = (arg.base_spec.get_type)(schema)?;
-                        assert!(!arg_type.is_list(), "Should have gotten error getting type for @{name_capture}({arg_name}:), but got {arg_type}");
-                        strategy.is_type_supported(schema, &arg_type).map_err(|support_msg| {
-                            let strategy_name = strategy.name();
-                            SingleFederationError::DirectiveDefinitionInvalid {
-                                message: format!("Invalid composition strategy {strategy_name} for argument @{name_capture}({arg_name}:) of type {arg_type}; {strategy_name} only supports ${support_msg}")
-                            }
-                        })?;
-                    }
-                    let arg_strategies_capture = arg_strategies.clone();
-                    let arg_strategies_capture2 = arg_strategies.clone();
-                    Ok(ArgumentMerger {
-                        merge: Box::new(move |arg_name: &str, values: &[Value]| {
-                            let Some(strategy) = arg_strategies_capture.get(arg_name) else {
-                                panic!("`Should have a strategy for {arg_name}")
-                            };
-                            strategy.merge_values(values)
-                        }),
-                        to_string: Box::new(move || {
-                            if arg_strategies_capture2.is_empty() {
-                                "<none>".to_string()
-                            }
-                            else {
-                                let arg_strategy_strings: Vec<String> = arg_strategies_capture2
-                                    .iter()
-                                    .map(|(arg_name, strategy)| format!("{arg_name}: {}", strategy.name()))
-                                    .collect();
-                                format!("{{ {} }}", arg_strategy_strings.join(", "))
-                            }
-                        }),
-                    })
-                }));
+                assert!(
+                    !repeatable,
+                    "Invalid directive specification for @{name}: @{name} is repeatable and should not define composition strategy for its arguments"
+                );
+                assert!(
+                    arg_strategies.len() == args.len(),
+                    "Invalid directive specification for @{name}: not all arguments define a composition strategy"
+                );
+                argument_merger = Some(directive_argument_merger(
+                    name.clone(),
+                    args.to_vec(),
+                    arg_strategies,
+                ));
             }
             composition = Some(DirectiveCompositionSpecification {
-                supergraph_specification: supergraph_specification.unwrap(),
+                supergraph_specification,
                 argument_merger,
+                static_argument_transform,
             })
         }
         Self {
@@ -446,12 +609,66 @@ impl DirectiveSpecification {
     }
 }
 
+fn directive_argument_merger(
+    directive_name: Name,
+    arg_specs: Vec<DirectiveArgumentSpecification>,
+    arg_strategies: IndexMap<String, ArgumentCompositionStrategy>,
+) -> Rc<ArgumentMergerFactory> {
+    Rc::new(move |schema, link| {
+        for arg in arg_specs.iter() {
+            let strategy = arg.composition_strategy.as_ref().unwrap();
+            let arg_name = &arg.base_spec.name;
+            let arg_type = (arg.base_spec.get_type)(schema, link)?;
+            assert!(
+                !arg_type.is_list(),
+                "Should have gotten error getting type for @{directive_name}({arg_name}:), but got {arg_type}"
+            );
+            strategy.is_type_supported(schema, &arg_type).map_err(|support_msg| {
+                let strategy_name = strategy.name();
+                SingleFederationError::DirectiveDefinitionInvalid {
+                    message: format!("Invalid composition strategy {strategy_name} for argument @{directive_name}({arg_name}:) of type {arg_type}; {strategy_name} only supports ${support_msg}")
+                }
+            })?;
+        }
+        let arg_strategies_capture = arg_strategies.clone();
+        let arg_strategies_capture2 = arg_strategies.clone();
+        Ok(ArgumentMerger {
+            merge: Box::new(move |arg_name: &str, values: &[Value]| {
+                let Some(strategy) = arg_strategies_capture.get(arg_name) else {
+                    bail!("`Should have a strategy for {arg_name}")
+                };
+                Ok(strategy.merge_values(values))
+            }),
+            to_string: Box::new(move || {
+                if arg_strategies_capture2.is_empty() {
+                    "<none>".to_string()
+                } else {
+                    let arg_strategy_strings: Vec<String> = arg_strategies_capture2
+                        .iter()
+                        .map(|(arg_name, strategy)| format!("{arg_name}: {}", strategy.name()))
+                        .collect();
+                    format!("{{ {} }}", arg_strategy_strings.join(", "))
+                }
+            }),
+        })
+    })
+}
+
 impl TypeAndDirectiveSpecification for DirectiveSpecification {
-    fn check_or_add(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+    fn name(&self) -> &Name {
+        &self.name
+    }
+
+    fn check_or_add(
+        &self,
+        schema: &mut FederationSchema,
+        link: Option<&Arc<Link>>,
+    ) -> Result<(), FederationError> {
+        let actual_name = actual_directive_name(&self.name, link);
         let mut resolved_args = Vec::new();
         let mut errors = MultipleFederationErrors { errors: vec![] };
         for arg in self.args.iter() {
-            match (arg.base_spec.get_type)(schema) {
+            match (arg.base_spec.get_type)(schema, link) {
                 Ok(arg_type) => {
                     resolved_args.push(ResolvedArgumentSpecification {
                         name: arg.base_spec.name.clone(),
@@ -460,17 +677,17 @@ impl TypeAndDirectiveSpecification for DirectiveSpecification {
                     });
                 }
                 Err(err) => {
-                    errors.errors.push(err);
+                    errors.push(err);
                 }
             };
         }
         errors.into_result()?;
-        let existing = schema.get_directive_definition(&self.name);
+        let existing = schema.get_directive_definition(&actual_name);
         if let Some(existing) = existing {
             let existing_directive = existing.get(schema.schema())?;
             return ensure_same_directive_structure(
                 existing_directive,
-                &self.name,
+                &actual_name,
                 &resolved_args,
                 self.repeatable,
                 &self.locations,
@@ -479,16 +696,16 @@ impl TypeAndDirectiveSpecification for DirectiveSpecification {
         }
 
         let directive_pos = DirectiveDefinitionPosition {
-            directive_name: self.name.clone(),
+            directive_name: actual_name.clone(),
         };
         directive_pos.pre_insert(schema)?;
         directive_pos.insert(
             schema,
             Node::new(DirectiveDefinition {
                 description: None,
-                name: self.name.clone(),
+                name: actual_name,
                 arguments: resolved_args
-                    .iter()
+                    .into_iter()
                     .map(|arg| Node::new(arg.into()))
                     .collect(),
                 repeatable: self.repeatable,
@@ -496,10 +713,18 @@ impl TypeAndDirectiveSpecification for DirectiveSpecification {
             }),
         )
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
 //////////////////////////////////////////////////////////////////////////////
 // Helper functions for TypeSpecification implementations
+// Argument naming conventions:
+// - `existing` or `actual`: the existing definition as defined in the schema.
+// - `expected`: the expected definition either by the Federation assumption or from the
+//               TypeAndDirectiveSpecification.
 
 // TODO: Consider moving this to the schema module.
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::Display)]
@@ -596,13 +821,13 @@ fn is_valid_input_type_redefinition(
 fn default_value_message(value: Option<&Value>) -> String {
     match value {
         None => "no default value".to_string(),
-        Some(value) => format!("default value {}", value),
+        Some(value) => format!("default value {value}"),
     }
 }
 
 fn ensure_same_arguments(
-    expected: &[Node<InputValueDefinition>],
-    actual: &[ResolvedArgumentSpecification],
+    expected: &[ResolvedArgumentSpecification],
+    actual: &[Node<InputValueDefinition>],
     schema: &FederationSchema,
     what: &str,
     generate_error: fn(&str) -> SingleFederationError,
@@ -612,7 +837,7 @@ fn ensure_same_arguments(
     // ensure expected arguments are a subset of actual arguments.
     for expected_arg in expected {
         let actual_arg = actual.iter().find(|x| x.name == expected_arg.name);
-        if actual_arg.is_none() {
+        let Some(actual_arg) = actual_arg else {
             // Not declaring an optional argument is ok: that means you won't be able to pass a non-default value in your schema, but we allow you that.
             // But missing a required argument it not ok.
             if expected_arg.ty.is_non_null() && expected_arg.default_value.is_none() {
@@ -622,12 +847,11 @@ fn ensure_same_arguments(
                     )));
             }
             continue;
-        }
+        };
 
         // ensure expected argument and actual argument have the same type.
-        let actual_arg = actual_arg.unwrap();
         // TODO: Make it easy to get a cloned (inner) type from a Node<Type>.
-        let mut actual_type = actual_arg.ty.clone();
+        let mut actual_type = actual_arg.ty.as_ref().clone();
         if actual_type.is_non_null() && !expected_arg.ty.is_non_null() {
             // It's ok to redefine an optional argument as mandatory. For instance, if you want to force people on your team to provide a "deprecation reason", you can
             // redefine @deprecated as `directive @deprecated(reason: String!)...` to get validation. In other words, you are allowed to always pass an argument that
@@ -636,22 +860,22 @@ fn ensure_same_arguments(
         }
         // ensure argument type is compatible with the expected one and
         // argument's default value (if any) is compatible with the expected one
-        if *expected_arg.ty != actual_type
-            && is_valid_input_type_redefinition(&expected_arg.ty, &actual_type, schema)
+        if expected_arg.ty != actual_type
+            && !is_valid_input_type_redefinition(&expected_arg.ty, &actual_type, schema)
         {
             let arg_name = &expected_arg.name;
             let expected_type = &expected_arg.ty;
             errors.push(generate_error(&format!(
-                    r#"Invalid definition for {what}: Argument "{arg_name}" should have type {expected_type} but found type {actual_type}"#
+                    r#"Invalid definition for {what}: argument "{arg_name}" should have type "{expected_type}" but found type "{actual_type}""#
                 )));
-        } else if !actual_type.is_non_null()
-            && expected_arg.default_value.as_deref() != actual_arg.default_value.as_ref()
+        } else if !actual_arg.ty.is_non_null() // we mutate actual_type above, so we need to check against the original
+            && expected_arg.default_value.as_ref() != actual_arg.default_value.as_deref()
         {
             let arg_name = &expected_arg.name;
-            let expected_value = default_value_message(expected_arg.default_value.as_deref());
-            let actual_value = default_value_message(actual_arg.default_value.as_ref());
+            let expected_value = default_value_message(expected_arg.default_value.as_ref());
+            let actual_value = default_value_message(actual_arg.default_value.as_deref());
             errors.push(generate_error(&format!(
-                    r#"Invalid definition for {what}: Argument "{arg_name}" should have {expected_value} but found {actual_value}"#
+                    r#"Invalid definition for {what}: argument "{arg_name}" should have {expected_value} but found {actual_value}"#
                 )));
         }
     }
@@ -671,44 +895,51 @@ fn ensure_same_arguments(
     errors
 }
 
+// The `existing_obj_type` is the definition that is defined in the schema.
+// And the `expected_fields` are the expected fields from the specification.
+// The existing (= actual) field definitions must be compatible with the expected ones.
 fn ensure_same_fields(
     existing_obj_type: &ObjectType,
-    actual_fields: &[FieldSpecification],
+    expected_fields: &[FieldSpecification],
     schema: &FederationSchema,
 ) -> Vec<SingleFederationError> {
     let obj_type_name = existing_obj_type.name.clone();
     let mut errors = vec![];
 
-    // ensure all actual fields are a subset of the existing object type's fields.
-    for actual_field_def in actual_fields {
-        let actual_field_name = &actual_field_def.name;
-        let expected_field = existing_obj_type.fields.get(actual_field_name);
-        if expected_field.is_none() {
+    // ensure all expected fields are a subset of the existing object type's fields.
+    for expected_field_def in expected_fields {
+        let field_name = &expected_field_def.name;
+        let existing_field = existing_obj_type.fields.get(field_name);
+        let Some(existing_field) = existing_field else {
             errors.push(SingleFederationError::TypeDefinitionInvalid {
                 message: format!(
-                    "Invalid definition of type {}: missing field {}",
-                    obj_type_name, actual_field_name
+                    "Invalid definition of type {obj_type_name}: missing field {field_name}"
                 ),
             });
             continue;
-        }
+        };
 
         // ensure field types are as expected
-        let expected_field = expected_field.unwrap();
-        if actual_field_def.ty != expected_field.ty {
-            let expected_field_type = &expected_field.ty;
-            let actual_field_type = &actual_field_def.ty;
+        // We allow adding non-nullability because we've seen redefinition of the federation
+        // _Service type with type String! for the `sdl` field and we don't want to break backward
+        // compatibility as this doesn't feel too harmful.
+        let mut existing_field_type = existing_field.ty.clone();
+        if !expected_field_def.ty.is_non_null() && existing_field_type.is_non_null() {
+            existing_field_type = existing_field_type.nullable();
+        }
+        if expected_field_def.ty != existing_field_type {
+            let expected_field_type = &expected_field_def.ty;
             errors.push(SingleFederationError::TypeDefinitionInvalid {
-                message: format!("Invalid definition for field {actual_field_name} of type {obj_type_name}: should have type {expected_field_type} but found type {actual_field_type}")
+                message: format!("Invalid definition for field {field_name} of type {obj_type_name}: should have type {expected_field_type} but found type {existing_field_type}")
             });
         }
 
         // ensure field arguments are as expected
         let mut arg_errors = ensure_same_arguments(
-            &expected_field.arguments,
-            &actual_field_def.arguments,
+            &expected_field_def.arguments,
+            &existing_field.arguments,
             schema,
-            &format!(r#"field "{}.{}""#, obj_type_name, expected_field.name),
+            &format!(r#"field "{}.{}""#, obj_type_name, existing_field.name),
             |s| SingleFederationError::TypeDefinitionInvalid {
                 message: s.to_string(),
             },
@@ -719,6 +950,9 @@ fn ensure_same_fields(
     errors
 }
 
+// The `existing_directive` is the definition that is defined in the schema.
+// And the rest of arguments are the expected directive definition from the specification.
+// The existing (= actual) definition must be compatible with the expected one.
 fn ensure_same_directive_structure(
     existing_directive: &DirectiveDefinition,
     name: &Name,
@@ -729,20 +963,20 @@ fn ensure_same_directive_structure(
 ) -> Result<(), FederationError> {
     let directive_name = format!("@{name}");
     let mut arg_errors = ensure_same_arguments(
-        &existing_directive.arguments,
         args,
+        &existing_directive.arguments,
         schema,
-        &format!(r#"directive {directive_name}"#),
+        &format!(r#"directive "{directive_name}""#),
         |s| SingleFederationError::DirectiveDefinitionInvalid {
             message: s.to_string(),
         },
     );
 
     // It's ok to say you'll never repeat a repeatable directive. It's not ok to repeat one that isn't.
-    if !existing_directive.repeatable && repeatable {
+    if existing_directive.repeatable && !repeatable {
         arg_errors.push(SingleFederationError::DirectiveDefinitionInvalid {
             message: format!(
-                "Invalid definition for directive {directive_name}: {directive_name} should not be repeatable"
+                r#"Invalid definition for directive "{directive_name}": "{directive_name}" should not be repeatable"#
             ),
         });
     }
@@ -750,11 +984,12 @@ fn ensure_same_directive_structure(
     // Similarly, it's ok to say that you will never use a directive in some locations, but not that
     // you will use it in places not allowed by what is expected.
     // Ensure `locations` is a subset of `existing_directive.locations`.
-    if !locations
+    if !existing_directive
+        .locations
         .iter()
-        .all(|loc| existing_directive.locations.contains(loc))
+        .all(|loc| locations.contains(loc))
     {
-        let actual_locations: Vec<String> = locations.iter().map(|loc| loc.to_string()).collect();
+        let expected_locations: Vec<String> = locations.iter().map(|loc| loc.to_string()).collect();
         let existing_locations: Vec<String> = existing_directive
             .locations
             .iter()
@@ -762,8 +997,8 @@ fn ensure_same_directive_structure(
             .collect();
         arg_errors.push(SingleFederationError::DirectiveDefinitionInvalid {
             message: format!(
-                "Invalid definition for directive {directive_name}: {directive_name} should have locations [{}] but found [{}]",
-                existing_locations.join(", "), actual_locations.join(", ")
+                r#"Invalid definition for directive "{directive_name}": "{directive_name}" should have locations {}, but found (non-subset) {}"#,
+                expected_locations.join(", "), existing_locations.join(", ")
             ),
         });
     }
@@ -778,14 +1013,12 @@ mod tests {
 
     use super::ArgumentSpecification;
     use super::DirectiveArgumentSpecification;
-    use crate::error::SingleFederationError;
-    use crate::link::link_spec_definition::LinkSpecDefinition;
-    use crate::link::spec::Identity;
+    use crate::link::link_spec_definition::LINK_VERSIONS;
     use crate::link::spec::Version;
     use crate::link::spec_definition::SpecDefinition;
+    use crate::schema::FederationSchema;
     use crate::schema::argument_composition_strategies::ArgumentCompositionStrategy;
     use crate::schema::type_and_directive_specification::DirectiveSpecification;
-    use crate::schema::FederationSchema;
 
     #[test]
     #[should_panic(
@@ -799,6 +1032,7 @@ mod tests {
             &[DirectiveLocation::Object],
             true,
             None,
+            None,
         );
     }
 
@@ -807,27 +1041,15 @@ mod tests {
         expected = "Invalid directive specification for @foo: not all arguments define a composition strategy"
     )]
     fn must_have_a_merge_strategy_on_all_arguments_if_any() {
-        fn link_spec(_version: Version) -> Box<dyn SpecDefinition> {
-            Box::new(LinkSpecDefinition::new(
-                Version { major: 1, minor: 0 },
-                None,
-                Identity {
-                    domain: String::from("https://specs.apollo.dev/link/v1.0"),
-                    name: name!("link"),
-                },
-            ))
-        }
-
         DirectiveSpecification::new(
             name!("foo"),
             &[
                 DirectiveArgumentSpecification {
                     base_spec: ArgumentSpecification {
                         name: name!("v1"),
-                        get_type:
-                            move |_schema: &FederationSchema| -> Result<Type, SingleFederationError> {
-                                Ok(Type::Named(name!("Int")))
-                            },
+                        get_type: move |_schema: &FederationSchema, _link| {
+                            Ok(Type::Named(name!("Int")))
+                        },
                         default_value: None,
                     },
                     composition_strategy: Some(ArgumentCompositionStrategy::Max),
@@ -835,10 +1057,9 @@ mod tests {
                 DirectiveArgumentSpecification {
                     base_spec: ArgumentSpecification {
                         name: name!("v2"),
-                        get_type:
-                            move |_schema: &FederationSchema| -> Result<Type, SingleFederationError> {
-                                Ok(Type::Named(name!("Int")))
-                            },
+                        get_type: move |_schema: &FederationSchema, _link| {
+                            Ok(Type::Named(name!("Int")))
+                        },
                         default_value: None,
                     },
                     composition_strategy: None,
@@ -847,7 +1068,12 @@ mod tests {
             false,
             &[DirectiveLocation::Object],
             true,
-            Some(link_spec)
+            Some(&|_| {
+                LINK_VERSIONS
+                    .find(&Version { major: 1, minor: 0 })
+                    .map(|v| v as &dyn SpecDefinition)
+            }),
+            None,
         );
     }
 
@@ -856,26 +1082,12 @@ mod tests {
         expected = "Invalid directive specification for @foo: @foo is repeatable and should not define composition strategy for its arguments"
     )]
     fn must_be_not_be_repeatable_if_it_has_a_merge_strategy() {
-        fn link_spec(_version: Version) -> Box<dyn SpecDefinition> {
-            Box::new(LinkSpecDefinition::new(
-                Version { major: 1, minor: 0 },
-                None,
-                Identity {
-                    domain: String::from("https://specs.apollo.dev/link/v1.0"),
-                    name: name!("link"),
-                },
-            ))
-        }
-
         DirectiveSpecification::new(
             name!("foo"),
             &[DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: name!("v"),
-                    get_type:
-                        move |_schema: &FederationSchema| -> Result<Type, SingleFederationError> {
-                            Ok(Type::Named(name!("Int")))
-                        },
+                    get_type: move |_schema, _link| Ok(Type::Named(name!("Int"))),
                     default_value: None,
                 },
                 composition_strategy: Some(ArgumentCompositionStrategy::Max),
@@ -883,7 +1095,12 @@ mod tests {
             true,
             &[DirectiveLocation::Object],
             true,
-            Some(link_spec),
+            Some(&|_| {
+                LINK_VERSIONS
+                    .find(&Version { major: 1, minor: 0 })
+                    .map(|v| v as &dyn SpecDefinition)
+            }),
+            None,
         );
     }
 }

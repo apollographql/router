@@ -1,0 +1,29 @@
+subgraphs:
+  connectors:
+    routing_url: http://none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.11")
+          @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@source", "@connect"])
+          @source(name: "withconfig", http: { baseURL: "http://localhost:4001/api" }, errors: { message: "error.message", extensions: "code: error.code status: $status fromSource: $('a')" } )
+          @source(name: "withoutconfig", http: { baseURL: "http://localhost:4001/api" })
+          @source(name: "withpartialconfig", http: { baseURL: "http://localhost:4001/api" }, errors: { extensions: "code: error.code status: $status fromSource: $('a')" } )
+
+        type Query {
+          only_source: [User!]!
+            @connect(source: "withconfig", http: { GET: "/users" }, selection: "id name username")
+          only_connect: [User!]!
+            @connect(source: "withoutconfig", http: { GET: "/users" }, errors: { message: "error.message", extensions: "code: error.code status: $status" }, selection: "id name username")
+          both_source_and_connect: [User!]!
+            @connect(source: "withconfig", http: { GET: "/users" }, errors: { message: "error.message", extensions: "code: error.code fromConnect: $('b')" }, selection: "id name username")
+          partial_source_and_partial_connect: [User!]!
+            @connect(source: "withpartialconfig", http: { GET: "/users" }, errors: { message: "error.message" }, selection: "id name username")
+        }
+
+        type User
+        {
+          id: ID!
+          name: String
+          username: String
+        }

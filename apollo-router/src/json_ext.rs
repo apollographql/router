@@ -168,9 +168,6 @@ pub(crate) trait ValueExt {
     #[track_caller]
     fn is_object_of_type(&self, schema: &Schema, maybe_type: &str) -> bool;
 
-    /// value type
-    fn json_type_name(&self) -> &'static str;
-
     fn as_i32(&self) -> Option<i32>;
 }
 
@@ -272,7 +269,7 @@ impl ValueExt for Value {
                         (Some((field_a, value_a)), Some((field_b, value_b)))
                             if field_a == field_b && ValueExt::eq_and_ordered(value_a, value_b) =>
                         {
-                            continue
+                            continue;
                         }
                         (Some(_), Some(_)) => break false,
                     }
@@ -289,7 +286,7 @@ impl ValueExt for Value {
                         (Some(value_a), Some(value_b))
                             if ValueExt::eq_and_ordered(value_a, value_b) =>
                         {
-                            continue
+                            continue;
                         }
                         (Some(_), Some(_)) => break false,
                     }
@@ -428,7 +425,7 @@ impl ValueExt for Value {
                     _other => {
                         return Err(FetchError::ExecutionPathNotFound {
                             reason: "expected an array".to_string(),
-                        })
+                        });
                     }
                 },
                 PathElement::Key(k, type_conditions) => {
@@ -453,7 +450,7 @@ impl ValueExt for Value {
                         _other => {
                             return Err(FetchError::ExecutionPathNotFound {
                                 reason: "expected an object".to_string(),
-                            })
+                            });
                         }
                     }
                 }
@@ -539,20 +536,9 @@ impl ValueExt for Value {
             && self
                 .get(TYPENAME)
                 .and_then(|v| v.as_str())
-                .map_or(true, |typename| {
+                .is_none_or(|typename| {
                     typename == maybe_type || schema.is_subtype(maybe_type, typename)
                 })
-    }
-
-    fn json_type_name(&self) -> &'static str {
-        match self {
-            Value::Array(_) => "array",
-            Value::Null => "null",
-            Value::Bool(_) => "boolean",
-            Value::Number(_) => "number",
-            Value::String(_) => "string",
-            Value::Object(_) => "object",
-        }
     }
 
     fn as_i32(&self) -> Option<i32> {
@@ -564,10 +550,10 @@ fn filter_type_conditions(value: Value, type_conditions: &Option<TypeConditions>
     if let Some(tc) = type_conditions {
         match value {
             Value::Object(ref o) => {
-                if let Some(Value::String(type_name)) = &o.get("__typename") {
-                    if !tc.iter().any(|tc| tc.as_str() == type_name.as_str()) {
-                        return Value::Null;
-                    }
+                if let Some(Value::String(type_name)) = &o.get("__typename")
+                    && !tc.iter().any(|tc| tc.as_str() == type_name.as_str())
+                {
+                    return Value::Null;
                 }
             }
             Value::Array(v) => {
@@ -599,28 +585,24 @@ fn iterate_path<'a, F>(
                 for (i, value) in array.iter().enumerate() {
                     if let Some(tc) = type_conditions {
                         if !tc.is_empty() {
-                            if let Value::Object(o) = value {
-                                if let Some(Value::String(type_name)) = o.get("__typename") {
-                                    if tc.iter().any(|tc| tc.as_str() == type_name.as_str()) {
-                                        parent.push(PathElement::Index(i));
-                                        iterate_path(schema, parent, &path[1..], value, f);
-                                        parent.pop();
-                                    }
-                                }
+                            if let Value::Object(o) = value
+                                && let Some(Value::String(type_name)) = o.get("__typename")
+                                && tc.iter().any(|tc| tc.as_str() == type_name.as_str())
+                            {
+                                parent.push(PathElement::Index(i));
+                                iterate_path(schema, parent, &path[1..], value, f);
+                                parent.pop();
                             }
 
                             if let Value::Array(array) = value {
                                 for (i, value) in array.iter().enumerate() {
-                                    if let Value::Object(o) = value {
-                                        if let Some(Value::String(type_name)) = o.get("__typename")
-                                        {
-                                            if tc.iter().any(|tc| tc.as_str() == type_name.as_str())
-                                            {
-                                                parent.push(PathElement::Index(i));
-                                                iterate_path(schema, parent, &path[1..], value, f);
-                                                parent.pop();
-                                            }
-                                        }
+                                    if let Value::Object(o) = value
+                                        && let Some(Value::String(type_name)) = o.get("__typename")
+                                        && tc.iter().any(|tc| tc.as_str() == type_name.as_str())
+                                    {
+                                        parent.push(PathElement::Index(i));
+                                        iterate_path(schema, parent, &path[1..], value, f);
+                                        parent.pop();
                                     }
                                 }
                             }
@@ -634,37 +616,35 @@ fn iterate_path<'a, F>(
             }
         }
         Some(PathElement::Index(i)) => {
-            if let Value::Array(a) = data {
-                if let Some(value) = a.get(*i) {
-                    parent.push(PathElement::Index(*i));
-                    iterate_path(schema, parent, &path[1..], value, f);
-                    parent.pop();
-                }
+            if let Value::Array(a) = data
+                && let Some(value) = a.get(*i)
+            {
+                parent.push(PathElement::Index(*i));
+                iterate_path(schema, parent, &path[1..], value, f);
+                parent.pop();
             }
         }
         Some(PathElement::Key(k, type_conditions)) => {
             if let Some(tc) = type_conditions {
                 if !tc.is_empty() {
                     if let Value::Object(o) = data {
-                        if let Some(value) = o.get(k.as_str()) {
-                            if let Some(Value::String(type_name)) = value.get("__typename") {
-                                if tc.iter().any(|tc| tc.as_str() == type_name.as_str()) {
-                                    parent.push(PathElement::Key(k.to_string(), None));
-                                    iterate_path(schema, parent, &path[1..], value, f);
-                                    parent.pop();
-                                }
-                            }
+                        if let Some(value) = o.get(k.as_str())
+                            && let Some(Value::String(type_name)) = value.get("__typename")
+                            && tc.iter().any(|tc| tc.as_str() == type_name.as_str())
+                        {
+                            parent.push(PathElement::Key(k.to_string(), None));
+                            iterate_path(schema, parent, &path[1..], value, f);
+                            parent.pop();
                         }
                     } else if let Value::Array(array) = data {
                         for (i, value) in array.iter().enumerate() {
-                            if let Value::Object(o) = value {
-                                if let Some(Value::String(type_name)) = o.get("__typename") {
-                                    if tc.iter().any(|tc| tc.as_str() == type_name.as_str()) {
-                                        parent.push(PathElement::Index(i));
-                                        iterate_path(schema, parent, path, value, f);
-                                        parent.pop();
-                                    }
-                                }
+                            if let Value::Object(o) = value
+                                && let Some(Value::String(type_name)) = o.get("__typename")
+                                && tc.iter().any(|tc| tc.as_str() == type_name.as_str())
+                            {
+                                parent.push(PathElement::Index(i));
+                                iterate_path(schema, parent, path, value, f);
+                                parent.pop();
                             }
                         }
                     }
@@ -717,16 +697,14 @@ fn iterate_path_mut<'a, F>(
             if let Some(array) = data.as_array_mut() {
                 for (i, value) in array.iter_mut().enumerate() {
                     if let Some(tc) = type_conditions {
-                        if !tc.is_empty() {
-                            if let Value::Object(o) = value {
-                                if let Some(Value::String(type_name)) = o.get("__typename") {
-                                    if tc.iter().any(|tc| tc.as_str() == type_name.as_str()) {
-                                        parent.push(PathElement::Index(i));
-                                        iterate_path_mut(schema, parent, &path[1..], value, f);
-                                        parent.pop();
-                                    }
-                                }
-                            }
+                        if !tc.is_empty()
+                            && let Value::Object(o) = value
+                            && let Some(Value::String(type_name)) = o.get("__typename")
+                            && tc.iter().any(|tc| tc.as_str() == type_name.as_str())
+                        {
+                            parent.push(PathElement::Index(i));
+                            iterate_path_mut(schema, parent, &path[1..], value, f);
+                            parent.pop();
                         }
                     } else {
                         parent.push(PathElement::Index(i));
@@ -737,37 +715,35 @@ fn iterate_path_mut<'a, F>(
             }
         }
         Some(PathElement::Index(i)) => {
-            if let Value::Array(a) = data {
-                if let Some(value) = a.get_mut(*i) {
-                    parent.push(PathElement::Index(*i));
-                    iterate_path_mut(schema, parent, &path[1..], value, f);
-                    parent.pop();
-                }
+            if let Value::Array(a) = data
+                && let Some(value) = a.get_mut(*i)
+            {
+                parent.push(PathElement::Index(*i));
+                iterate_path_mut(schema, parent, &path[1..], value, f);
+                parent.pop();
             }
         }
         Some(PathElement::Key(k, type_conditions)) => {
             if let Some(tc) = type_conditions {
                 if !tc.is_empty() {
                     if let Value::Object(o) = data {
-                        if let Some(value) = o.get_mut(k.as_str()) {
-                            if let Some(Value::String(type_name)) = value.get("__typename") {
-                                if tc.iter().any(|tc| tc.as_str() == type_name.as_str()) {
-                                    parent.push(PathElement::Key(k.to_string(), None));
-                                    iterate_path_mut(schema, parent, &path[1..], value, f);
-                                    parent.pop();
-                                }
-                            }
+                        if let Some(value) = o.get_mut(k.as_str())
+                            && let Some(Value::String(type_name)) = value.get("__typename")
+                            && tc.iter().any(|tc| tc.as_str() == type_name.as_str())
+                        {
+                            parent.push(PathElement::Key(k.to_string(), None));
+                            iterate_path_mut(schema, parent, &path[1..], value, f);
+                            parent.pop();
                         }
                     } else if let Value::Array(array) = data {
                         for (i, value) in array.iter_mut().enumerate() {
-                            if let Value::Object(o) = value {
-                                if let Some(Value::String(type_name)) = o.get("__typename") {
-                                    if tc.iter().any(|tc| tc.as_str() == type_name.as_str()) {
-                                        parent.push(PathElement::Index(i));
-                                        iterate_path_mut(schema, parent, path, value, f);
-                                        parent.pop();
-                                    }
-                                }
+                            if let Value::Object(o) = value
+                                && let Some(Value::String(type_name)) = o.get("__typename")
+                                && tc.iter().any(|tc| tc.as_str() == type_name.as_str())
+                            {
+                                parent.push(PathElement::Index(i));
+                                iterate_path_mut(schema, parent, path, value, f);
+                                parent.pop();
                             }
                         }
                     }
@@ -852,7 +828,7 @@ where
 
 struct FlattenVisitor;
 
-impl<'de> serde::de::Visitor<'de> for FlattenVisitor {
+impl serde::de::Visitor<'_> for FlattenVisitor {
     type Value = Option<TypeConditions>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -890,7 +866,7 @@ where
     } else {
         "".to_string()
     };
-    let res = format!("@{}", tc_string);
+    let res = format!("@{tc_string}");
     serializer.serialize_str(res.as_str())
 }
 
@@ -903,7 +879,7 @@ where
 
 struct KeyVisitor;
 
-impl<'de> serde::de::Visitor<'de> for KeyVisitor {
+impl serde::de::Visitor<'_> for KeyVisitor {
     type Value = (String, Option<TypeConditions>);
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -934,7 +910,7 @@ where
     } else {
         "".to_string()
     };
-    let res = format!("{}{}", key, tc_string);
+    let res = format!("{key}{tc_string}");
     serializer.serialize_str(res.as_str())
 }
 
@@ -947,7 +923,7 @@ where
 
 struct FragmentVisitor;
 
-impl<'de> serde::de::Visitor<'de> for FragmentVisitor {
+impl serde::de::Visitor<'_> for FragmentVisitor {
     type Value = String;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -1074,7 +1050,7 @@ impl Path {
                 if let Some(c) = type_conditions {
                     tc = format!("|[{}]", c.join(","));
                 };
-                Some(format!("{}{}", key, tc))
+                Some(format!("{key}{tc}"))
             }
             _ => None,
         })
@@ -1086,13 +1062,35 @@ impl Path {
 
     // Removes the empty key if at root (used for TypedConditions)
     pub fn remove_empty_key_root(&self) -> Self {
-        if let Some(PathElement::Key(k, type_conditions)) = self.0.first() {
-            if k.is_empty() && type_conditions.is_none() {
-                return Path(self.iter().skip(1).cloned().collect());
-            }
+        if let Some(PathElement::Key(k, type_conditions)) = self.0.first()
+            && k.is_empty()
+            && type_conditions.is_none()
+        {
+            return Path(self.iter().skip(1).cloned().collect());
         }
 
         self.clone()
+    }
+
+    // Checks whether self and other are equal if PathElement::Flatten and PathElement::Index are
+    // treated as equal
+    pub fn equal_if_flattened(&self, other: &Path) -> bool {
+        if self.len() != other.len() {
+            return false;
+        }
+
+        for (elem1, elem2) in self.iter().zip(other.iter()) {
+            let equal_elements = match (elem1, elem2) {
+                (PathElement::Index(_), PathElement::Flatten(_)) => true,
+                (PathElement::Flatten(_), PathElement::Index(_)) => true,
+                (elem1, elem2) => elem1 == elem2,
+            };
+            if !equal_elements {
+                return false;
+            }
+        }
+
+        true
     }
 }
 
@@ -1406,7 +1404,9 @@ mod tests {
 
         // test objects nested
         assert!(json!({"baz":{"foo":1,"bar":2}}).eq_and_ordered(&json!({"baz":{"foo":1,"bar":2}})));
-        assert!(!json!({"baz":{"bar":2,"foo":1}}).eq_and_ordered(&json!({"baz":{"foo":1,"bar":2}})));
+        assert!(
+            !json!({"baz":{"bar":2,"foo":1}}).eq_and_ordered(&json!({"baz":{"foo":1,"bar":2}}))
+        );
         assert!(!json!([1,{"bar":2,"foo":1},2]).eq_and_ordered(&json!([1,{"foo":1,"bar":2},2])));
     }
 

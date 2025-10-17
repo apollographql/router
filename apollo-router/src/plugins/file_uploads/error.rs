@@ -16,7 +16,7 @@ pub(super) enum FileUploadError {
     #[error("Missing multipart field 'map', it should be a second field in request body.")]
     MissingMapField,
 
-    #[error("Invalid JSON in the ‘map’ multipart field: {0}")]
+    #[error("Invalid JSON in the 'map' multipart field: {0}")]
     InvalidJsonInMapField(serde_json::Error),
 
     #[error("Batched requests are not supported for file uploads.")]
@@ -28,7 +28,9 @@ pub(super) enum FileUploadError {
     #[error("Invalid path '{0}' found inside 'map' field, missing name of variable.")]
     MissingVariableNameInsideMapField(String),
 
-    #[error("Invalid path '{0}' found inside 'map' field, it does not point to a valid value inside 'operations' field.")]
+    #[error(
+        "Invalid path '{0}' found inside 'map' field, it does not point to a valid value inside 'operations' field."
+    )]
     InputValueNotFound(String),
 
     #[error("Missing files in the request: {0}.")]
@@ -40,7 +42,9 @@ pub(super) enum FileUploadError {
     #[error("Variables containing files are forbidden inside subscription: {0}.")]
     VariablesForbiddenInsideSubscription(String),
 
-    #[error("References to variables containing files are ordered in the way that prevent streaming of files.")]
+    #[error(
+        "References to variables containing files are ordered in the way that prevent streaming of files."
+    )]
     MisorderedVariables,
 
     #[error("Variables use mutiple time in the way that prevent streaming of files: {0}.")]
@@ -54,6 +58,9 @@ pub(super) enum FileUploadError {
 
     #[error("{0}")]
     HyperBodyErrorWrapper(#[from] hyper::Error),
+
+    #[error("{0}")]
+    AxumError(#[from] axum::Error),
 }
 
 impl From<FileUploadError> for graphql::Error {

@@ -1,8 +1,0 @@
-#!/bin/sh
-
-firstLine=$(head -n1 $1)
-
-if [ -z "$firstLine"  ] ;then
-    commitTemplate=$(cat `git rev-parse --git-dir`/../.gitmessage)
-    echo -e "$commitTemplate\n $(cat $1)" > $1
-fi

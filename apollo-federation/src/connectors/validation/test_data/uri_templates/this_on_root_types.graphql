@@ -1,0 +1,23 @@
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.2"
+    import: ["@connect", "@source"]
+  )
+
+type Query {
+  static: String @connect(http: { GET: "http://127.0.0.1/static" }, selection: "$")
+  requiresThis: String
+    @connect(
+      http: { GET: "http://127.0.0.1/{$this.static}"}
+      selection: "$"
+    )
+}
+
+type Mutation {
+  static: String @connect(http: { GET: "http://127.0.0.1/static" }, selection: "$")
+  requiresThis: String
+  @connect(
+    http: { GET: "http://127.0.0.1/{$this.static}"}
+    selection: "$"
+  )
+}

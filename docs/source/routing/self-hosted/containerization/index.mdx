@@ -1,7 +1,7 @@
 ---
-title: Containerizing the GraphOS Router
-subtitle: Run router images in containers
-description: Containerize the Apollo GraphOS Router for portability and scalability. Choose from default or debug images. Deploy in Kubernetes or run in Docker.
+title: Using Docker to deploy the Apollo Runtime Container
+subtitle: Run Apollo Runtime services in containers
+description: Learn how to deploy self-hosted Apollo Runtime services like the router and MCP server using container technologies like Docker, Kubernetes, AWS, Azure, and GCP.
 ---
 
 import ElasticNotice from '../../../../shared/elastic-notice.mdx';
@@ -10,26 +10,22 @@ Apollo provides container images of the Apollo Router Core that you can self-hos
 
 <ElasticNotice />
 
-## About router container images
+## Docker
 
-Apollo provides container images of the router [on GitHub](https://github.com/apollographql/router/pkgs/container/router) in its container repository. The router images are based on [debian:bullseye-slim](https://hub.docker.com/_/debian/), which is designed to provide constrained, secure, and small images.
+### Apollo Runtime container (Recommended)
 
-Each release of the router includes both default (production) and debug images. While each image for a release contains the same build, the debug images have helpful debugging utilities installed and run the router under the control of [heaptrack](https://github.com/KDE/heaptrack).
+Apollo provides combined Docker images containing the Apollo Router and MCP Server for easy deployment. The images are available via GitHub, downloadable from the [registry](https://github.com/apollographql/apollo-runtime/pkgs/container/apollo-runtime) and the [repository](https://github.com/apollographql/apollo-runtime).
 
-A router image has the following layout:
+For more information on deploying using your container environment:
 
-* A `/dist` directory containing the router executable and licensing details
-* A `dist/config` directory containing a default configuration file, `router.yaml`
-* A `/dist/schema` directory for conveniently mounting a locally defined supergraph schema
+- [Docker](/graphos/routing/self-hosted/containerization/docker)
 
-## Next steps
+### Router only container
 
-The default behavior of a router image is suitable for a basic deployment or development scenario.
+This image is recommended only for Kubernetes-based deployments, and is used by the [Helm chart](/router/containerization/kubernetes/). For more information on deploying using your container environment:
 
-For examples of customizing and deploying router images in specific environments, see the guides for: 
-* [Deploying in Kubernetes](/router/containerization/kubernetes/).
-* [Running in Docker](/router/containerization/docker/)
-
-See the Apollo Solutions [example Cloud Foundry deployment](https://github.com/apollosolutions/example-pcf-deployment) for a minimal router configuration and Cloud Foundry manifest file.
-
-<SolutionsNote />
+- [Docker](/graphos/routing/self-hosted/containerization/docker-router-only)
+- [AWS using Elastic Container Service (ECS)](/graphos/routing/self-hosted/containerization/aws)
+- [Azure using Azure Container Apps](/graphos/routing/self-hosted/containerization/azure)
+- [GCP using Google Cloud Run](/graphos/routing/self-hosted/containerization/gcp)
+- [Kubernetes](/router/containerization/kubernetes/)

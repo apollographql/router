@@ -6,12 +6,12 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 
 use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
 use serde::de;
 use serde::de::DeserializeOwned;
 use serde::de::MapAccess;
 use serde::de::Visitor;
-use serde::Deserialize;
-use serde::Serialize;
 
 // In various parts of the configuration, we need to provide a global configuration for subgraphs,
 // with a per subgraph override. This cannot be handled easily with `Default` implementations,
@@ -70,11 +70,12 @@ use serde::Serialize;
 // This `SubgraphConfiguration` type handles overrides through a custom deserializer that works in three steps:
 // - deserialize `all` and `subgraphs` fields to `serde_yaml::Mapping`
 // - for each specific subgraph configuration, start from the `all` configuration (or default implementation),
-// and replace the overriden fields
+// and replace the overridden fields
 // - deserialize to the plugin configuration
 
 /// Configuration options pertaining to the subgraph server component.
 #[derive(Default, Serialize, JsonSchema)]
+#[schemars(rename = "Subgraph{T}Configuration")]
 pub(crate) struct SubgraphConfiguration<T>
 where
     T: Default + Serialize + JsonSchema,
@@ -225,7 +226,7 @@ impl<'de> Deserialize<'de> for Field {
 
 struct FieldVisitor;
 
-impl<'de> Visitor<'de> for FieldVisitor {
+impl Visitor<'_> for FieldVisitor {
     type Value = Field;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {

@@ -1,30 +1,59 @@
 extern crate core;
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ops::Deref;
+use std::time::Duration;
 
 use anyhow::anyhow;
-use opentelemetry_api::trace::TraceId;
+use opentelemetry::trace::TraceId;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceResponse;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceResponse;
 use prost::Message;
 use serde_json::Value;
 use tower::BoxError;
-use wiremock::matchers::method;
-use wiremock::matchers::path;
 use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
 use wiremock::Times;
+use wiremock::matchers::method;
+use wiremock::matchers::path;
 
-use crate::integration::common::graph_os_enabled;
-use crate::integration::common::Query;
-use crate::integration::common::Telemetry;
-use crate::integration::telemetry::verifier::Verifier;
-use crate::integration::telemetry::DatadogId;
-use crate::integration::telemetry::TraceSpec;
 use crate::integration::IntegrationTest;
 use crate::integration::ValueExt;
+use crate::integration::common::Query;
+use crate::integration::common::Telemetry;
+use crate::integration::common::graph_os_enabled;
+use crate::integration::telemetry::DatadogId;
+use crate::integration::telemetry::TraceSpec;
+use crate::integration::telemetry::verifier::Verifier;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_trace_error() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mock_server = mock_otlp_server_delayed().await;
+    let config = include_str!("fixtures/otlp_invalid_endpoint.router.yaml")
+        .replace("<otel-collector-endpoint>", &mock_server.uri());
+
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp {
+            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+        })
+        .config(config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    router.assert_log_contained("OpenTelemetry trace error occurred: cannot send message to batch processor 'otlp-tracing' as the channel is full");
+    router.assert_metrics_contains(r#"apollo_router_telemetry_batch_processor_errors_total{error="channel full",name="otlp-tracing",otel_scope_name="apollo/router"}"#, None).await;
+    router.graceful_shutdown().await;
+
+    drop(mock_server);
+    Ok(())
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_basic() -> Result<(), BoxError> {
@@ -74,7 +103,39 @@ async fn test_basic() -> Result<(), BoxError> {
             .await?;
         router.touch_config().await;
         router.assert_reloaded().await;
+        router.assert_log_not_contained("OpenTelemetry metric error occurred: Metrics error: metrics provider already shut down");
     }
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_resources() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        panic!("Error: test skipped because GraphOS is not enabled");
+    }
+    let mock_server = mock_otlp_server(1..).await;
+    let config = include_str!("fixtures/otlp.router.yaml")
+        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp {
+            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+        })
+        .config(&config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .resource("env", "local1")
+        .resource("service.version", "router_version_override")
+        .resource("service.name", "router")
+        .build()
+        .validate_otlp_trace(&mut router, &mock_server, Query::default())
+        .await?;
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -144,8 +205,8 @@ async fn test_otlp_request_with_datadog_propagator_no_agent() -> Result<(), BoxE
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog(
-) -> Result<(), BoxError> {
+async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog()
+-> Result<(), BoxError> {
     if !graph_os_enabled() {
         panic!("Error: test skipped because GraphOS is not enabled");
     }
@@ -455,8 +516,8 @@ async fn test_priority_sampling_propagated() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_priority_sampling_parent_sampler_very_small_no_parent_no_agent_sampling(
-) -> Result<(), BoxError> {
+async fn test_priority_sampling_parent_sampler_very_small_no_parent_no_agent_sampling()
+-> Result<(), BoxError> {
     // Note that there is a very small chance this test will fail. We are trying to test a non-zero sampler.
     let mock_server = mock_otlp_server(0..).await;
 
@@ -634,6 +695,83 @@ async fn test_priority_sampling_no_parent_propagated() -> Result<(), BoxError> {
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_attributes() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mock_server = mock_otlp_server(1..).await;
+    let config = include_str!("fixtures/otlp.router.yaml")
+        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp {
+            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+        })
+        .config(config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .attribute("client.name", "foobar")
+        .build()
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder()
+                .traced(true)
+                .header("apollographql-client-name", "foobar")
+                .build(),
+        )
+        .await?;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_plugin_overridden_client_name_is_included_in_telemetry() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mock_server = mock_otlp_server(1..).await;
+    let config = include_str!("fixtures/otlp_override_client_name.router.yaml")
+        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp {
+            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+        })
+        .config(config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // rhai script overrides client.name - no matter what client name we pass via headers, it should
+    // end up equalling the value set in the script (`foo`)
+    for header_value in [None, Some(""), Some("foo"), Some("bar")] {
+        let mut headers = HashMap::default();
+        if let Some(value) = header_value {
+            headers.insert("apollographql-client-name".to_string(), value.to_string());
+        }
+
+        let query = Query::builder().traced(true).headers(headers).build();
+        TraceSpec::builder()
+            .services(["client", "router", "subgraph"].into())
+            .attribute("client.name", "foo")
+            .build()
+            .validate_otlp_trace(&mut router, &mock_server, query)
+            .await
+            .unwrap_or_else(|_| panic!("Failed with header value {header_value:?}"));
+    }
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
 struct OtlpTraceSpec<'a> {
     trace_spec: TraceSpec,
     mock_server: &'a MockServer,
@@ -647,22 +785,16 @@ impl Deref for OtlpTraceSpec<'_> {
 }
 
 impl Verifier for OtlpTraceSpec<'_> {
-    fn verify_span_attributes(&self, _span: &Value) -> Result<(), BoxError> {
-        // TODO
-        Ok(())
-    }
     fn spec(&self) -> &TraceSpec {
         &self.trace_spec
     }
 
     fn measured_span(&self, trace: &Value, name: &str) -> Result<bool, BoxError> {
         let binding1 = trace.select_path(&format!(
-            "$..[?(@.meta.['otel.original_name'] == '{}')].metrics.['_dd.measured']",
-            name
+            "$..[?(@.meta.['otel.original_name'] == '{name}')].metrics.['_dd.measured']"
         ))?;
         let binding2 = trace.select_path(&format!(
-            "$..[?(@.name == '{}')].metrics.['_dd.measured']",
-            name
+            "$..[?(@.name == '{name}')].metrics.['_dd.measured']"
         ))?;
         Ok(binding1
             .first()
@@ -698,14 +830,7 @@ impl Verifier for OtlpTraceSpec<'_> {
                     bytes::Bytes::copy_from_slice(&r.body),
                 ) {
                     Ok(trace) => {
-                        match serde_json::to_value(trace) {
-                            Ok(trace) => {
-                                Some(trace)
-                            }
-                            Err(_) => {
-                                None
-                            }
-                        }
+                        serde_json::to_value(trace).ok()
                     }
                     Err(_) => {
                         None
@@ -713,8 +838,8 @@ impl Verifier for OtlpTraceSpec<'_> {
                 }
             }).filter(|t| {
             let datadog_trace_id = TraceId::from_u128(trace_id.to_datadog() as u128);
-            let trace_found1 = !t.select_path(&format!("$..[?(@.traceId == '{}')]", trace_id)).unwrap_or_default().is_empty();
-            let trace_found2 = !t.select_path(&format!("$..[?(@.traceId == '{}')]", datadog_trace_id)).unwrap_or_default().is_empty();
+            let trace_found1 = !t.select_path(&format!("$..[?(@.traceId == '{trace_id}')]")).unwrap_or_default().is_empty();
+            let trace_found2 = !t.select_path(&format!("$..[?(@.traceId == '{datadog_trace_id}')]")).unwrap_or_default().is_empty();
             trace_found1 | trace_found2
         }).collect());
         Ok(trace)
@@ -786,19 +911,16 @@ impl Verifier for OtlpTraceSpec<'_> {
             _ => panic!("unknown kind"),
         };
         let binding1 = trace.select_path(&format!(
-            "$..spans..[?(@.kind == {})]..[?(@.key == 'otel.original_name')].value..[?(@ == '{}')]",
-            kind, name
+            "$..spans..[?(@.kind == {kind})]..[?(@.key == 'otel.original_name')].value..[?(@ == '{name}')]"
         ))?;
         let binding2 = trace.select_path(&format!(
-            "$..spans..[?(@.kind == {} && @.name == '{}')]",
-            kind, name
+            "$..spans..[?(@.kind == {kind} && @.name == '{name}')]"
         ))?;
         let binding = binding1.first().or(binding2.first());
 
         if binding.is_none() {
             return Err(BoxError::from(format!(
-                "span.kind missing or incorrect {}, {}",
-                name, kind
+                "span.kind missing or incorrect {name}, {kind}"
             )));
         }
         Ok(())
@@ -829,19 +951,100 @@ impl Verifier for OtlpTraceSpec<'_> {
                 return Err(BoxError::from("missing sampling priority"));
             }
             for sampling_priority in binding {
-                assert_eq!(
-                    sampling_priority
-                        .as_i64()
-                        .expect("psr not an integer")
-                        .to_string(),
-                    psr
-                );
+                assert_eq!(sampling_priority.as_str().expect("psr not a string"), psr);
             }
         } else {
             assert!(trace.select_path("$..[?(@.name == 'execution')]..[?(@.key == 'sampling.priority')].value.intValue")?.is_empty())
         }
         Ok(())
     }
+
+    fn verify_resources(&self, trace: &Value) -> Result<(), BoxError> {
+        if !self.resources.is_empty() {
+            let resources = trace.select_path("$..resource.attributes")?;
+            // Find the attributes for the router service
+            let router_resources = resources
+                .iter()
+                .filter(|r| {
+                    !r.select_path("$..[?(@.stringValue == 'router')]")
+                        .unwrap()
+                        .is_empty()
+                })
+                .collect::<Vec<_>>();
+            // Let's map this to a map of key value pairs
+            let router_resources = router_resources
+                .iter()
+                .flat_map(|v| v.as_array().expect("array required"))
+                .map(|v| {
+                    let entry = v.as_object().expect("must be an object");
+                    (
+                        entry
+                            .get("key")
+                            .expect("must have key")
+                            .as_string()
+                            .expect("key must be a string"),
+                        entry
+                            .get("value")
+                            .expect("must have value")
+                            .as_object()
+                            .expect("value must be an object")
+                            .get("stringValue")
+                            .expect("value must be a string")
+                            .as_string()
+                            .expect("value must be a string"),
+                    )
+                })
+                .collect::<HashMap<_, _>>();
+
+            for (key, value) in &self.resources {
+                if let Some(actual_value) = router_resources.get(*key) {
+                    assert_eq!(actual_value, value);
+                } else {
+                    return Err(BoxError::from(format!("missing resource key: {}", *key)));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn verify_span_attributes(&self, trace: &Value) -> Result<(), BoxError> {
+        for (key, value) in self.attributes.iter() {
+            // extracts a list of span attribute values with the provided key
+            let binding = trace.select_path(&format!(
+                "$..spans..attributes..[?(@.key == '{key}')].value.*"
+            ))?;
+            let matches_value = binding.iter().any(|v| match v {
+                Value::Bool(v) => (*v).to_string() == *value,
+                Value::Number(n) => (*n).to_string() == *value,
+                Value::String(s) => s == value,
+                _ => false,
+            });
+            if !matches_value {
+                return Err(BoxError::from(format!(
+                    "unexpected attribute values for key `{key}`, expected value `{value}` but got {binding:?}"
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
+async fn mock_otlp_server_delayed() -> MockServer {
+    let mock_server = wiremock::MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/traces"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(Duration::from_secs(1))
+                .set_body_raw(
+                    ExportTraceServiceResponse::default().encode_to_vec(),
+                    "application/x-protobuf",
+                ),
+        )
+        .mount(&mock_server)
+        .await;
+
+    mock_server
 }
 
 async fn mock_otlp_server<T: Into<Times> + Clone>(expected_requests: T) -> MockServer {

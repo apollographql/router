@@ -1,15 +1,15 @@
 use bytes::Bytes;
 use derivative::Derivative;
-use serde::de::DeserializeSeed;
-use serde::de::Error;
 use serde::Deserialize;
 use serde::Serialize;
+use serde::de::DeserializeSeed;
+use serde::de::Error;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
-use serde_json_bytes::Value;
 
 use crate::configuration::BatchingMode;
 use crate::json_ext::Object;
+use crate::json_ext::Value;
 
 /// A GraphQL `Request` used to represent both supergraph and subgraph requests.
 #[derive(Clone, Derivative, Serialize, Deserialize, Default)]
@@ -137,7 +137,7 @@ impl Request {
     /// of some parameters to be specified that would be otherwise required
     /// for a real request.  It's usually enough for most testing purposes,
     /// especially when a fully constructed `Request` is difficult to construct.
-    /// While today, its paramters have the same optionality as its `new`
+    /// While today, its parameters have the same optionality as its `new`
     /// counterpart, that may change in future versions.
     fn fake_new(
         query: Option<String>,
@@ -161,45 +161,32 @@ impl Request {
         seed.deserialize(&mut de)
     }
 
-    /// Convert encoded URL query string parameters (also known as "search
-    /// params") into a GraphQL [`Request`].
-    ///
-    /// An error will be produced in the event that the query string parameters
-    /// cannot be turned into a valid GraphQL `Request`.
-    pub(crate) fn batch_from_urlencoded_query(
-        url_encoded_query: String,
-    ) -> Result<Vec<Request>, serde_json::Error> {
-        let value: serde_json::Value = serde_urlencoded::from_bytes(url_encoded_query.as_bytes())
-            .map_err(serde_json::Error::custom)?;
-
-        Request::process_query_values(&value)
-    }
-
     /// Convert Bytes into a GraphQL [`Request`].
     ///
     /// An error will be produced in the event that the bytes array cannot be
     /// turned into a valid GraphQL `Request`.
     pub(crate) fn batch_from_bytes(bytes: &[u8]) -> Result<Vec<Request>, serde_json::Error> {
-        let value: serde_json::Value =
-            serde_json::from_slice(bytes).map_err(serde_json::Error::custom)?;
+        let value: Value = serde_json::from_slice(bytes).map_err(serde_json::Error::custom)?;
 
-        Request::process_batch_values(&value)
+        Request::process_batch_values(value)
     }
 
-    fn allocate_result_array(value: &serde_json::Value) -> Vec<Request> {
+    fn allocate_result_array(value: &Value) -> Vec<Request> {
         match value.as_array() {
             Some(array) => Vec::with_capacity(array.len()),
             None => Vec::with_capacity(1),
         }
     }
 
-    fn process_batch_values(value: &serde_json::Value) -> Result<Vec<Request>, serde_json::Error> {
-        let mut result = Request::allocate_result_array(value);
+    fn process_batch_values(value: Value) -> Result<Vec<Request>, serde_json::Error> {
+        let mut result = Request::allocate_result_array(&value);
 
-        if value.is_array() {
-            tracing::info!(
-                histogram.apollo.router.operations.batching.size = result.len() as f64,
-                mode = %BatchingMode::BatchHttpLink // Only supported mode right now
+        if let Value::Array(entries) = value {
+            u64_histogram!(
+                "apollo.router.operations.batching.size",
+                "Number of queries contained within each query batch",
+                entries.len() as u64,
+                mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
             );
 
             u64_counter!(
@@ -208,75 +195,39 @@ impl Request {
                 1,
                 mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
             );
-            for entry in value
-                .as_array()
-                .expect("We already checked that it was an array")
-            {
-                let bytes = serde_json::to_vec(entry)?;
+            for entry in entries {
+                let bytes = serde_json::to_vec(&entry)?;
                 result.push(Request::deserialize_from_bytes(&bytes.into())?);
             }
         } else {
-            let bytes = serde_json::to_vec(value)?;
+            let bytes = serde_json::to_vec(&value)?;
             result.push(Request::deserialize_from_bytes(&bytes.into())?);
         }
         Ok(result)
     }
 
-    fn process_query_values(value: &serde_json::Value) -> Result<Vec<Request>, serde_json::Error> {
-        let mut result = Request::allocate_result_array(value);
+    fn process_value(value: &Value) -> Result<Request, serde_json::Error> {
+        let operation_name = value.get("operationName").and_then(Value::as_str);
+        let query = value.get("query").and_then(Value::as_str).map(String::from);
+        let variables: Object = value
+            .get("variables")
+            .and_then(Value::as_str)
+            .map(serde_json::from_str)
+            .transpose()?
+            .unwrap_or_default();
+        let extensions: Object = value
+            .get("extensions")
+            .and_then(Value::as_str)
+            .map(serde_json::from_str)
+            .transpose()?
+            .unwrap_or_default();
 
-        if value.is_array() {
-            tracing::info!(
-                histogram.apollo.router.operations.batching.size = result.len() as f64,
-                mode = "batch_http_link" // Only supported mode right now
-            );
-
-            u64_counter!(
-                "apollo.router.operations.batching",
-                "Total requests with batched operations",
-                1,
-                mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
-            );
-            for entry in value
-                .as_array()
-                .expect("We already checked that it was an array")
-            {
-                result.push(Request::process_value(entry)?);
-            }
-        } else {
-            result.push(Request::process_value(value)?)
-        }
-        Ok(result)
-    }
-
-    fn process_value(value: &serde_json::Value) -> Result<Request, serde_json::Error> {
-        let operation_name =
-            if let Some(serde_json::Value::String(operation_name)) = value.get("operationName") {
-                Some(operation_name.clone())
-            } else {
-                None
-            };
-
-        let query = if let Some(serde_json::Value::String(query)) = value.get("query") {
-            Some(query.as_str())
-        } else {
-            None
-        };
-        let variables: Object = get_from_urlencoded_value(value, "variables")?.unwrap_or_default();
-        let extensions: Object =
-            get_from_urlencoded_value(value, "extensions")?.unwrap_or_default();
-
-        let request_builder = Self::builder()
+        let request = Self::builder()
+            .and_query(query)
             .variables(variables)
             .and_operation_name(operation_name)
-            .extensions(extensions);
-
-        let request = if let Some(query_str) = query {
-            request_builder.query(query_str).build()
-        } else {
-            request_builder.build()
-        };
-
+            .extensions(extensions)
+            .build();
         Ok(request)
     }
 
@@ -286,28 +237,16 @@ impl Request {
     /// An error will be produced in the event that the query string parameters
     /// cannot be turned into a valid GraphQL `Request`.
     pub fn from_urlencoded_query(url_encoded_query: String) -> Result<Request, serde_json::Error> {
-        let urldecoded: serde_json::Value =
-            serde_urlencoded::from_bytes(url_encoded_query.as_bytes())
-                .map_err(serde_json::Error::custom)?;
+        let urldecoded: Value = serde_urlencoded::from_bytes(url_encoded_query.as_bytes())
+            .map_err(serde_json::Error::custom)?;
 
         Request::process_value(&urldecoded)
     }
 }
 
-fn get_from_urlencoded_value<'a, T: Deserialize<'a>>(
-    object: &'a serde_json::Value,
-    key: &str,
-) -> Result<Option<T>, serde_json::Error> {
-    if let Some(serde_json::Value::String(byte_string)) = object.get(key) {
-        Some(serde_json::from_str(byte_string.as_str())).transpose()
-    } else {
-        Ok(None)
-    }
-}
-
 struct RequestFromBytesSeed<'data>(&'data Bytes);
 
-impl<'data, 'de> DeserializeSeed<'de> for RequestFromBytesSeed<'data> {
+impl<'de> DeserializeSeed<'de> for RequestFromBytesSeed<'_> {
     type Value = Request;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
@@ -329,7 +268,7 @@ impl<'data, 'de> DeserializeSeed<'de> for RequestFromBytesSeed<'data> {
 
         struct RequestVisitor<'data>(&'data Bytes);
 
-        impl<'data, 'de> serde::de::Visitor<'de> for RequestVisitor<'data> {
+        impl<'de> serde::de::Visitor<'de> for RequestVisitor<'_> {
             type Value = Request;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {

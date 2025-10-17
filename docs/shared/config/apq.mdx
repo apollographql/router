@@ -1,0 +1,30 @@
+### `apq`
+
+```yaml title="apq"
+apq:
+  enabled: true
+  router:
+    cache:
+      in_memory:
+        limit: 1
+      redis:
+        namespace: example_namespace
+        password: example_password
+        pool_size: 1
+        required_to_start: false
+        reset_ttl: true
+        timeout: null
+        tls:
+          certificate_authorities: null
+          client_authentication:
+            certificate_chain: example_certificate_chain
+            key: example_key
+        ttl: null
+        urls:
+        - http://example.com/urls_item
+        username: example_username
+  subgraph:
+    all:
+      enabled: false
+    subgraphs: {}
+```

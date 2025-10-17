@@ -8,10 +8,14 @@ accepted = [
     "Elastic-2.0",
     "LicenseRef-ring",
     "MIT",
+    "MIT-0", # borrow-or-share
     "MPL-2.0",
     "Unicode-3.0",
+    "OpenSSL", # required by aws-lc-sys
     "Unicode-DFS-2016",
-    "Zlib"
+    "Zlib",
+    "NCSA", # similar to MIT/BSD-3-Clause, used by libfuzzer
+    "CDLA-Permissive-2.0", # webpki-roots
 ]
 
 # See https://github.com/EmbarkStudios/cargo-about/pull/216
@@ -28,6 +32,9 @@ workarounds = [
 ]
 
 [ring]
+accepted = ["OpenSSL"]
+
+[aws-lc-sys]
 accepted = ["OpenSSL"]
 
 [webpki.clarify]

@@ -3,17 +3,17 @@ use std::sync::Arc;
 use ahash::HashMap;
 use apollo_compiler::ExecutableDocument;
 
+use crate::Context;
 use crate::graphql;
-use crate::plugins::demand_control::cost_calculator::schema::DemandControlledSchema;
-use crate::plugins::demand_control::cost_calculator::static_cost::StaticCostCalculator;
-use crate::plugins::demand_control::strategy::static_estimated::StaticEstimated;
 use crate::plugins::demand_control::DemandControlConfig;
 use crate::plugins::demand_control::DemandControlError;
 use crate::plugins::demand_control::Mode;
 use crate::plugins::demand_control::StrategyConfig;
+use crate::plugins::demand_control::cost_calculator::schema::DemandControlledSchema;
+use crate::plugins::demand_control::cost_calculator::static_cost::StaticCostCalculator;
+use crate::plugins::demand_control::strategy::static_estimated::StaticEstimated;
 use crate::services::execution;
 use crate::services::subgraph;
-use crate::Context;
 
 mod static_estimated;
 #[cfg(test)]

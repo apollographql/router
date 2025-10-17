@@ -13,9 +13,9 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
-use crate::services::execution;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
+use crate::services::execution;
 
 #[derive(Debug, Clone)]
 struct ForbidMutations {
@@ -75,14 +75,14 @@ mod forbid_http_get_mutations_tests {
     use tower::ServiceExt;
 
     use super::*;
+    use crate::assert_error_eq_ignoring_id;
     use crate::graphql;
-    use crate::graphql::Response;
     use crate::http_ext::Request;
-    use crate::plugin::test::MockExecutionService;
     use crate::plugin::PluginInit;
-    use crate::query_planner::fetch::OperationKind;
+    use crate::plugin::test::MockExecutionService;
     use crate::query_planner::PlanNode;
     use crate::query_planner::QueryPlan;
+    use crate::query_planner::fetch::OperationKind;
 
     #[tokio::test]
     async fn it_lets_queries_pass_through() {
@@ -129,10 +129,11 @@ mod forbid_http_get_mutations_tests {
         .execution_service(MockExecutionService::new().boxed());
         let request = create_request(Method::GET, OperationKind::Mutation);
 
-        let mut actual_error = service_stack.oneshot(request).await.unwrap();
+        let mut response = service_stack.oneshot(request).await.unwrap();
+        let actual_error = &response.next_response().await.unwrap().errors[0];
 
-        assert_eq!(expected_status, actual_error.response.status());
-        assert_error_matches(&expected_error, actual_error.next_response().await.unwrap());
+        assert_eq!(expected_status, response.response.status());
+        assert_error_eq_ignoring_id!(actual_error, expected_error);
     }
 
     #[tokio::test]
@@ -161,10 +162,6 @@ mod forbid_http_get_mutations_tests {
             .next_response()
             .await
             .unwrap();
-    }
-
-    fn assert_error_matches(expected_error: &Error, response: Response) {
-        assert_eq!(&response.errors[0], expected_error);
     }
 
     fn create_request(method: Method, operation_kind: OperationKind) -> ExecutionRequest {

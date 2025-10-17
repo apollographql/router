@@ -1,0 +1,47 @@
+---
+title: Overview of GraphQL Subscription Support
+subtitle: Enable clients to receive real-time updates
+description: Configure your router to support GraphQL subscriptions, enabling clients to receive real-time updates via WebSocket or HTTP callbacks.
+minVersion: Router v1.22.0
+---
+
+<PlanRequired plans={["Free", "Developer", "Standard", "Enterprise"]}>
+
+Rate limits apply on the Free plan.
+Subscription pricing applies on Developer and Standard plans.
+Developer and Standard plans require Router v2.6.0 or later.
+
+</PlanRequired>
+
+GraphQL subscriptions enable clients to manage real-time data updates effectively, without the need for constant polling.  This is particularly crucial in applications that need live updates, such as notifications, stock tickers, or chat applications. Using subscriptions improves performance and user experience by ensuring that clients receive the latest information as soon as changes occur on the backend. 
+
+```graphql title="Example GraphQL subscription" showLineNumbers=false 
+subscription OnStockPricesChanged {
+  stockPricesChanged {
+    symbol
+    price
+  }
+}
+```
+
+The router supports both the callback and multipart protocols for handling subscriptions. With subscription support enabled, you can add `Subscription` fields to the schema of any subgraph that supports common WebSocket protocols for subscription communication:
+
+```graphql title="stocks.graphql" showLineNumbers=false
+type Subscription {
+  stockPricesChanged: [Stock!]!
+}
+```
+
+## What are subscriptions for?
+
+<WhatSubscriptionsAreFor />
+
+## How subscriptions work
+
+<HowSubscriptionsWork />
+
+## Next steps
+
+- [Configure](/graphos/routing/operations/subscriptions/configuration) the router and update your subgraph schemas to enable and handle subscriptions.
+
+- Learn about the [callback](/graphos/routing/operations/subscriptions/callback-protocol) and [multipart](/graphos/routing/operations/subscriptions/multipart-protocol) protocols.

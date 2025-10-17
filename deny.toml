@@ -6,16 +6,10 @@
 db-path = "~/.cargo/advisory-db"
 # The url(s) of the advisory databases to use
 db-urls = ["https://github.com/rustsec/advisory-db"]
-# The lint level for security vulnerabilities
-vulnerability = "deny"
 # The lint level for unmaintained crates
-unmaintained = "warn"
+unmaintained = "workspace"
 # The lint level for crates that have been yanked from their source registry
 yanked = "warn"
-# The lint level for crates with security notices. Note that as of
-# 2019-12-17 there are no security notice advisories in
-# https://github.com/rustsec/advisory-db
-notice = "warn"
 
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.
@@ -30,16 +24,23 @@ git-fetch-with-cli = true
 ignore = [
     "RUSTSEC-2023-0071",
     "RUSTSEC-2024-0376", # we do not use tonic::transport::Server
-    "RUSTSEC-2024-0421" # we only resolve trusted subgraphs
+    "RUSTSEC-2024-0421", # we only resolve trusted subgraphs
+
+    # protobuf is used only through prometheus crates, enforced by
+    # a `[bans]` entry below. in the prometheus crates, only the protobuf
+    # encoder is used, while only the decoder is affected by this advisory.
+    "RUSTSEC-2024-0437",
+
+    # The following crates are unmaintained
+    "RUSTSEC-2024-0320", # TODO replace the `yaml-rust` crate with a maintained equivalent
+    "RUSTSEC-2024-0436", # TODO replace the `paste` crate with a maintained equivalent
+    "RUSTSEC-2024-0388", # TODO replace the `derivative` crate with a maintained equivalent
 ]
 
 # This section is considered when running `cargo deny check licenses`
 # More documentation for the licenses section can be found here:
 # https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html
 [licenses]
-# The lint level for crates which do not have a detectable license
-# TODO[igni]: remove this once the span / macro are fleshed out
-unlicensed = "warn"
 # List of explictly allowed licenses
 # See https://spdx.org/licenses/ for list of possible licenses
 # [possible values: any SPDX 3.11 short identifier (+ optional exception)].
@@ -52,15 +53,16 @@ allow = [
     "ISC",
     "LicenseRef-ring",
     "MIT",
+    "MIT-0", # borrow-or-share
     "MPL-2.0",
     "Elastic-2.0",
+    "OpenSSL", # required by aws-lc-sys
     "Unicode-DFS-2016",
     "Unicode-3.0",
-    "Zlib"
+    "Zlib",
+    "NCSA", # similar to MIT/BSD-3-Clause, used by libfuzzer
+    "CDLA-Permissive-2.0", # webpki-roots
 ]
-copyleft = "warn"
-allow-osi-fsf-free = "neither"
-default = "deny"
 confidence-threshold = 0.8
 
 # ring has a rather complicated LICENSE file due to reasons spelled out
@@ -95,25 +97,12 @@ highlight = "all"
 
 # List of crates to deny
 deny = [
-  # `cargo-scaffold` uses `git2` which uses `libssh2-sys` and `libgit2-sys`.
-  # Both require `openssl-sys`. Adding this rule in this way is sufficient to
-  # allow those to use `openssl-sys` (not a runtime dependency), leveraging the
-  # capabilities of `cargo-deny` to "block" `openssl-sys`.  However, this isn't
-  # defensive enough on its own since we could introduce `git2` in
-  # `apollo-router` and we would inadvertently get `openssl-sys` and it would
-  # _not_ be blocked.  That's bad!  Unfortunately, the `wrappers` technique of
-  # `cargo-deny` only enables exceptions for _direct_ dependencies.  To defend
-  # against the above risk, we add additional rules here (below) which _only_
-  # allows `git2` in `cargo-scaffold`.  This is a bit wonky, since we may at
-  # some point want `git2` but does accomplish what we want with the desired
-  # exception.
-  { name = "openssl-sys", wrappers = ["git2", "libssh2-sys", "libgit2-sys"] },
-  # Note! This line is required to support the above exception.
-  { name = "git2", wrappers = ["auth-git2", "cargo-scaffold"] },
-  # Note! This line is required to support the above exception.
-  { name = "libgit2-sys", wrappers = ["git2"] },
-  # Note! This line is required to support the above exception.
-  { name = "libssh2-sys", wrappers = ["libgit2-sys"] },
+  { crate = "openssl-sys" },
+  # Prevent adding new dependencies on protobuf that may use code with
+  # a security advisory in it (see `[advisories]`).
+  # If you *must* add a new crate to the "wrappers" here, carefully audit
+  # that it is *not* affected by any of the advisories above.
+  { crate = "protobuf:<3.7.2", wrappers = ["prometheus", "opentelemetry-prometheus"] },
 ]
 
 # This section is considered when running `cargo deny check sources`.

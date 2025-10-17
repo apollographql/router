@@ -5,11 +5,10 @@ use tower::BoxError;
 use tower::ServiceExt;
 use tower_service::Service;
 
-use super::router::body::RouterBody;
 use super::Plugins;
+use super::router::body::RouterBody;
 use crate::Context;
 
-pub(crate) mod body_stream;
 pub(crate) mod service;
 #[cfg(test)]
 mod tests;
@@ -51,7 +50,7 @@ impl HttpClientServiceFactory {
     ) -> Self {
         use indexmap::IndexMap;
 
-        let service = HttpClientService::from_config(
+        let service = HttpClientService::from_config_for_subgraph(
             service,
             configuration,
             &rustls::RootCertStore::empty(),

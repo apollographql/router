@@ -1,0 +1,11 @@
+{
+  "errors": [
+    {
+      "message": "Invalid GraphQL request",
+      "extensions": {
+        "details": "Batch limits exceeded: you provided a batch with 2 entries, but the configured maximum router batch size is 1",
+        "code": "BATCH_LIMIT_EXCEEDED"
+      }
+    }
+  ]
+}

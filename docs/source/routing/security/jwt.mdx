@@ -1,10 +1,15 @@
 ---
 title: JWT Authentication in the GraphOS Router
 subtitle: Restrict access to credentialed users and systems
-description:  Protect sensitive data by enabling JWT authentication in the Apollo GraphOS Router. Restrict access to credentialed users and systems.
+description: Protect sensitive data by enabling JWT authentication in the Apollo GraphOS Router. Restrict access to credentialed users and systems.
 ---
 
-<PremiumFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
+<PlanRequired plans={["Free", "Developer", "Standard", "Enterprise"]}>
+
+Rate limits apply on the Free plan.
+Developer and Standard plans require Router v2.6.0 or later.
+
+</PlanRequired>
 
 Authentication is crucial to prevent illegitimate access and protect sensitive data in your graph. The GraphOS Router supports request authentication and key rotation via the [JSON Web Token](https://www.rfc-editor.org/rfc/rfc7519) (**JWT**) and [JSON Web Key](https://www.rfc-editor.org/rfc/rfc7517) (**JWK**) standards. This support is compatible with popular identity providers (**IdPs**) like Okta and Auth0.
 
@@ -29,8 +34,9 @@ These are the high-level steps of JWT-based authentication with the GraphOS Rout
    - Your router obtains all of its known JWKs from URLs that you specify in its configuration file. Each URL provides its keys within a single JSON object called a [JWK Set](https://www.rfc-editor.org/rfc/rfc7517#section-5) (or a **JWKS**).
    - **If validation fails, the router rejects the request.** This can occur if the JWT is malformed, or if it's been expired for more than 60 seconds (this window accounts for synchronization issues).
 
-5. The router extracts all **claims** from the validated JWT and includes them in the request's context, making them available to your [router customizations](/router/customizations/overview/), such as Rhai scripts.
-6. Your customizations can handle the request differently depending on the details of the extracted claims, and/or you can propagate the claims to subgraphs to enable more granular access control.
+5. The router extracts all **claims** from the validated JWT and includes them in the request's context (`apollo::authentication::jwt_claims`), making them available to your [router customizations](/router/customizations/overview/), such as Rhai scripts.
+6. The router will insert the status of JWT processing into the request context (`apollo::authentication::jwt_status`). This status is informational and may be used for logging or debugging purposes.
+7. Your customizations can handle the request differently depending on the details of the extracted claims, and/or you can propagate the claims to subgraphs to enable more granular access control.
    - For examples, [see below](#working-with-jwt-claims).
 
 ## Turning it on
@@ -47,7 +53,9 @@ Otherwise, if you issue JWTs via a popular third-party IdP (Auth0, Okta, PingOne
        jwt:
          jwks: # This key is required.
            - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
-             issuer: <optional name of issuer>
+             issuers: # optional list of issuers
+               - https://issuer.one
+               - https://issuer.two
              poll_interval: <optional poll interval>
              headers: # optional list of static headers added to the HTTP request to the JWKS URL
                - name: User-Agent
@@ -55,6 +63,7 @@ Otherwise, if you issue JWTs via a popular third-party IdP (Auth0, Okta, PingOne
          # These keys are optional. Default values are shown.
          header_name: Authorization
          header_value_prefix: Bearer
+         on_error: Error
          # array of alternative token sources
          sources:
            - type: header
@@ -108,7 +117,7 @@ The following configuration options are supported:
 - `url`: **required** URL from which the JWKS file will be read. Must be a valid URL.
   - **If you use a third-party IdP,** consult its documentation to determine its JWKS URL.
   - **If you use your own custom IdP,** you need to make its JWKS available at a router-accessible URL if you haven't already. For more information, see [Creating your own JWKS](#creating-your-own-jwks-advanced).
-- `issuer`: **optional** name of the issuer, that will be compared to the `iss` claim in the JWT if present. If it does not match, the request will be rejected.
+- `issuers`: **optional** list of issuers accepted, that will be compared to the `iss` claim in the JWT if present. If none match, the request will be rejected.
 - `algorithms`: **optional** list of accepted algorithms. Possible values are `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`
 - `poll_interval`: **optional** interval in human-readable format (e.g. `60s` or `1hour 30s`) at which the JWKS will be polled for changes. If not specified, the JWKS endpoint will be polled every 60 seconds.
 - `headers`: **optional** a list of headers sent when downloading from the JWKS URL
@@ -142,6 +151,51 @@ The default value is `Authorization`.
 The string that will always precede the JWT in the header value corresponding to [`header_name`](#header_name). This value must not include whitespace.
 
 The default value is `Bearer`.
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `on_error`
+
+</td>
+<td>
+
+This setting controls the behavior of the router when an error occurs during JWT validation. Possible values are `Error` (default) and `Continue`.
+
+- `Error`: The router responds with an error when an error occurs during JWT validation.
+- `Continue`: The router continues processing the request when an error occurs during JWT validation. Requests with invalid JWTs will be treated as unauthenticated.
+
+Regardless of whether JWT authentication succeeds, the status of JWT processing is inserted into the request context (`apollo::authentication::jwt_status`). This status is informational and may be used for logging or debugging purposes.
+
+```js
+// On failure
+{
+    // Whether the JWT came from a header or cookie source
+    type: string,
+    // The name of the source's field
+    name: string,
+    // Error details
+    error: {
+        // A user-friendly error message
+        message: string,
+        // A machine-readable error code
+        code: string,
+        // The underlying reason for the error, if any
+        reason: string?
+    }
+}
+
+// On success
+{
+    // Whether the JWT came from a header or cookie source
+    type: string,
+    // The name of the source's field
+    name: string
+}
+```
 
 </td>
 </tr>
@@ -201,10 +255,12 @@ The default value is `false`.
 
 ## Working with JWT claims
 
-After the GraphOS Router validates a client request's JWT, it adds that token's **claims** to the request's context at this key: `apollo_authentication::JWT::claims`
+After the GraphOS Router validates a client request's JWT, it adds that token's **claims** to the request's context at this key: `apollo::authentication::jwt_claims`
 
 > - If no JWT is present for a client request, this context value is the empty tuple, `()`.
-> - If a JWT _is_ present but validation of the JWT fails, the router _rejects_ the request.
+> - If a JWT _is_ present but validation of the JWT fails,
+>     - When `on_error` is set to `Error`, the router _rejects_ the request.
+>     - When `on_error` is set to `Continue`, the router _continues_ processing the request, and the context value is the empty tuple, `()`.
 
 If unauthenticated requests should be rejected, the router can be configured like this:
 
@@ -299,7 +355,7 @@ This script should be run in the router's `SupergraphService`, which executes be
 ```rhai title="claims_validation.rhai"
 fn process_request(request) {
     // Router.APOLLO_AUTHENTICATION_JWT_CLAIMS is a Rhai-scope
-    // constant with value `apollo_authentication::JWT::claims`
+    // constant with value `apollo::authentication::jwt_claims`
     let claims = request.context[Router.APOLLO_AUTHENTICATION_JWT_CLAIMS];
     if claims == () || !claims.contains("iss") || claims["iss"] != "https://idp.local" {
         throw #{
@@ -368,7 +424,7 @@ coprocessor:
   url: http://127.0.0.1:8081
   router:
     request:
-      context: true
+      context: all
 ```
 
 The router sends requests to the coprocessor with this format:
@@ -381,7 +437,7 @@ The router sends requests to the coprocessor with this format:
   "id": "d0a8245df0efe8aa38a80dba1147fb2e",
   "context": {
     "entries": {
-      "apollo_authentication::JWT::claims": {
+      "apollo::authentication::jwt_claims": {
         "exp": 10000000000,
         "sub": "457f6bb6-789c-4e8b-8560-f3943a09e72a"
       }
@@ -401,7 +457,7 @@ The coprocessor can then look up the user with the identifier specified in the `
   "id": "d0a8245df0efe8aa38a80dba1147fb2e",
   "context": {
     "entries": {
-      "apollo_authentication::JWT::claims": {
+      "apollo::authentication::jwt_claims": {
         "exp": 10000000000,
         "sub": "457f6bb6-789c-4e8b-8560-f3943a09e72a",
         "scope": "profile:read profile:write"
@@ -745,30 +801,7 @@ If you _do_ need to pass entire JWTs to subgraphs, you can do so via the GraphOS
 
 If your router enables [tracing](/router/configuration/telemetry/exporters/tracing/overview), the JWT authentication plugin has its own tracing span: `authentication_plugin`
 
-If your router [exports metrics](/router/configuration/telemetry/exporters/metrics), the JWT authentication plugin exports the `apollo.router.operations.authentication.jwt` metric. You can use the metric's `authentication.jwt.failed` attribute to count failed authentications. If the `authentication.jwt.failed` attribute is absent or `false`, the authentication succeeded.
-
-<Note>
-
-Before [v1.59.0](https://github.com/apollographql/router/releases/tag/v1.59.0), the JWT authentication exported the following metrics:
-
-- `apollo_authentication_failure_count`
-- `apollo_authentication_success_count`
-
-These metrics have the following shapes:
-
-```
-# HELP apollo_authentication_failure_count apollo_authentication_failure_count
-# TYPE apollo_authentication_failure_count counter
-apollo_authentication_failure_count{kind="JWT",service_name="apollo-router"} 1
-
-# HELP apollo_authentication_success_count apollo_authentication_success_count
-# TYPE apollo_authentication_success_count counter
-apollo_authentication_success_count{kind="JWT",service_name="apollo-router"} 11
-```
-
-These metrics are [deprecated](graphos/reference/router/telemetry/instrumentation/standard-instruments#deprecated). Please update to the most recent router version to use the updated `apollo.router.operations.authentication.jwt` metric.
-
-</Note>
+If your router [exports metrics](/graphos/routing/observability/telemetry/metrics-exporters/overview), the JWT authentication plugin exports the `apollo.router.operations.authentication.jwt` metric. You can use the metric's `authentication.jwt.failed` attribute to count failed authentications. If the `authentication.jwt.failed` attribute is absent or `false`, the authentication succeeded.
 
 ## Additional resources
 

@@ -1,0 +1,2 @@
+health_check:
+  listen: 127.0.0.1:4012

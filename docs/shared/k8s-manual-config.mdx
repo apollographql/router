@@ -6,10 +6,10 @@ kind: ServiceAccount
 metadata:
   name: release-name-router
   labels:
-    helm.sh/chart: router-1.30.1
+    helm.sh/chart: router-2.7.0
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.30.1"
+    app.kubernetes.io/version: "v2.7.0"
     app.kubernetes.io/managed-by: Helm
 ---
 # Source: router/templates/secret.yaml
@@ -18,10 +18,10 @@ kind: Secret
 metadata:
   name: "release-name-router"
   labels:
-    helm.sh/chart: router-1.30.1
+    helm.sh/chart: router-2.7.0
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.30.1"
+    app.kubernetes.io/version: "v2.7.0"
     app.kubernetes.io/managed-by: Helm
 data:
   managedFederationApiKey: "UkVEQUNURUQ="
@@ -32,26 +32,22 @@ kind: ConfigMap
 metadata:
   name: release-name-router
   labels:
-    helm.sh/chart: router-1.30.1
+    helm.sh/chart: router-2.7.0
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.30.1"
+    app.kubernetes.io/version: "v2.7.0"
     app.kubernetes.io/managed-by: Helm
 data:
   configuration.yaml: |
     health_check:
       listen: 0.0.0.0:8088
     supergraph:
-      listen: 0.0.0.0:80
+      listen: 0.0.0.0:4000
     telemetry:
       metrics:
-        common:
-          resources:
-            service.name: release-name-router
         prometheus:
           enabled: true
-          listen: 0.0.0.0:9090
-          path: /metrics
+          listen: 127.0.0.1:9090
 ---
 # Source: router/templates/service.yaml
 apiVersion: v1
@@ -59,10 +55,10 @@ kind: Service
 metadata:
   name: release-name-router
   labels:
-    helm.sh/chart: router-1.30.1
+    helm.sh/chart: router-2.7.0
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.30.1"
+    app.kubernetes.io/version: "v2.7.0"
     app.kubernetes.io/managed-by: Helm
 spec:
   type: ClusterIP
@@ -85,13 +81,14 @@ kind: Deployment
 metadata:
   name: release-name-router
   labels:
-    helm.sh/chart: router-1.30.1
+    helm.sh/chart: router-2.7.0
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.30.1"
+    app.kubernetes.io/version: "v2.7.0"
     app.kubernetes.io/managed-by: Helm
-  
   annotations:
+  
+  
     prometheus.io/path: /metrics
     prometheus.io/port: "9090"
     prometheus.io/scrape: "true"
@@ -106,23 +103,29 @@ spec:
       annotations:
         kubectl.kubernetes.io/default-container: router
       labels:
+        helm.sh/chart: router-2.7.0
         app.kubernetes.io/name: router
         app.kubernetes.io/instance: release-name
+        app.kubernetes.io/version: "v2.7.0"
+        app.kubernetes.io/managed-by: Helm
     spec:
       serviceAccountName: release-name-router
+      restartPolicy: Always
       securityContext:
         {}
       containers:
         - name: router
           securityContext:
             {}
-          image: "ghcr.io/apollographql/router:v1.30.1"
+          image: "ghcr.io/apollographql/router:v2.7.0"
           imagePullPolicy: IfNotPresent
           args:
             - --hot-reload
             - --config
             - /app/configuration.yaml
           env:
+            - name: APOLLO_ROUTER_OFFICIAL_HELM_CHART
+              value: "true"
             - name: APOLLO_KEY
               valueFrom:
                 secretKeyRef:
@@ -133,7 +136,7 @@ spec:
               value: REDACTED
           ports:
             - name: http
-              containerPort: 80
+              containerPort: 4000
               protocol: TCP
             - name: health
               containerPort: 8088
@@ -142,12 +145,12 @@ spec:
             {}
           livenessProbe:
             httpGet:
-              path: "/health?live"
+              path: /health?live
               port: 8088
             initialDelaySeconds: 0
           readinessProbe:
             httpGet:
-              path: "/health?ready"
+              path:  /health?ready
               port: 8088
             initialDelaySeconds: 0
           resources:
@@ -168,10 +171,10 @@ kind: Pod
 metadata:
   name: "release-name-router-test-connection"
   labels:
-    helm.sh/chart: router-1.30.1
+    helm.sh/chart: router-2.7.0
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.30.1"
+    app.kubernetes.io/version: "v2.7.0"
     app.kubernetes.io/managed-by: Helm
   annotations:
     "helm.sh/hook": test

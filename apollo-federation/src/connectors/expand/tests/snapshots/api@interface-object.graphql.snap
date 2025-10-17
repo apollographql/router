@@ -1,0 +1,34 @@
+---
+source: apollo-federation/src/connectors/expand/tests/mod.rs
+expression: api_schema
+input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/interface-object.graphql
+---
+directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+interface Itf {
+  id: ID!
+  c: Int!
+  d: Int!
+  e: String
+}
+
+type Query {
+  itfs: [Itf]
+  itf(id: ID!): Itf
+}
+
+type T1 implements Itf {
+  id: ID!
+  a: String
+  c: Int!
+  d: Int!
+  e: String
+}
+
+type T2 implements Itf {
+  id: ID!
+  b: String
+  c: Int!
+  d: Int!
+  e: String
+}

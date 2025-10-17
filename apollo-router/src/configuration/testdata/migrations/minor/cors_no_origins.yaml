@@ -1,0 +1,5 @@
+cors:
+  allow_credentials: true
+  methods:
+    - "GET"
+    - "POST"

@@ -1,0 +1,7 @@
+---
+source: apollo-router/tests/integration/redis.rs
+expression: "v.as_object().unwrap().get(\"data\").unwrap()"
+---
+{
+  "name": "test"
+}

@@ -6,6 +6,16 @@ expression: query_plan
   "data": {
     "percent100": null
   },
+  "errors": [
+    {
+      "message": "subgraph mock not configured",
+      "path": [],
+      "extensions": {
+        "code": "SUBGRAPH_MOCK_NOT_CONFIGURED",
+        "service": "Subgraph1"
+      }
+    }
+  ],
   "extensions": {
     "apolloQueryPlan": {
       "object": {
@@ -24,7 +34,7 @@ expression: query_plan
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-              "schemaAwareHash": "df2a0633d70ab97805722bae920647da51b7eb821b06d8a2499683c5c7024316",
+              "schemaAwareHash": "5ccd469f4d6e284c89147dabcb126f77a4df3d1564022d4e656ab5259afe4d4b",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -63,7 +73,7 @@ expression: query_plan
                 "inputRewrites": null,
                 "outputRewrites": null,
                 "contextRewrites": null,
-                "schemaAwareHash": "56ac7a7cc11b7f293acbdaf0327cb2b676415eab8343e9259322a1609c90455e",
+                "schemaAwareHash": "06c92f85953526b52325aa2553d5a1eb10263d393ed30316da637b20bd379f7e",
                 "authorization": {
                   "is_authenticated": false,
                   "scopes": [],

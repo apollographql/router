@@ -1,0 +1,21 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/uri_templates/relative_connect_url_without_source.graphql
+---
+[
+    Message {
+        code: RelativeConnectUrlWithoutSource,
+        message: "`GET` in `@connect(http:)` on `Query.resources` specifies the relative URL \"/resources\", but no `source` is defined. Either use an absolute URL including scheme (e.g. https://), or add a `@connect__source`.",
+        locations: [
+            5:47..5:59,
+        ],
+    },
+    Message {
+        code: RelativeConnectUrlWithoutSource,
+        message: "`GET` in `@connect(http:)` on `Query.dynamic` specifies the relative URL \"{$dynamic}\", but no `source` is defined. Either use an absolute URL including scheme (e.g. https://), or add a `@connect__source`.",
+        locations: [
+            6:57..6:69,
+        ],
+    },
+]

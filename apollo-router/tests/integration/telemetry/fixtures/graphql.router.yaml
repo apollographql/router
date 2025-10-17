@@ -9,6 +9,15 @@ telemetry:
 
   instrumentation:
     instruments:
+      router:
+        my_custom_router_instrument:
+          type: counter
+          value: unit
+          unit: reqs
+          description: "my test instrument"
+          attributes:
+            my_response_body:
+              response_body: true
       supergraph:
         oplimits.aliases:
           value:

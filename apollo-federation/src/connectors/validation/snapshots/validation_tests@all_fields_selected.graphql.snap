@@ -1,0 +1,42 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/all_fields_selected.graphql
+---
+[
+    Message {
+        code: ConnectorsUnresolvedField,
+        message: "No connector resolves field `T.unselected`. It must have a `@connect` directive or appear in `@connect(selection:)`.",
+        locations: [
+            34:3..34:22,
+        ],
+    },
+    Message {
+        code: ConnectorsUnresolvedField,
+        message: "No connector resolves field `T.secondUnused`. It must have a `@connect` directive or appear in `@connect(selection:)`.",
+        locations: [
+            49:3..49:23,
+        ],
+    },
+    Message {
+        code: ConnectorsUnresolvedField,
+        message: "No connector resolves field `C.unselected`. It must have a `@connect` directive or appear in `@connect(selection:)`.",
+        locations: [
+            55:3..55:21,
+        ],
+    },
+    Message {
+        code: ConnectorsUnresolvedField,
+        message: "No connector resolves field `D.unselected`. It must have a `@connect` directive or appear in `@connect(selection:)`.",
+        locations: [
+            60:3..60:21,
+        ],
+    },
+    Message {
+        code: ConnectorsUnresolvedField,
+        message: "No connector resolves field `Unused.unselected`. It must have a `@connect` directive or appear in `@connect(selection:)`.",
+        locations: [
+            64:3..64:18,
+        ],
+    },
+]

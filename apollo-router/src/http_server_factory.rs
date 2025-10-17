@@ -31,13 +31,11 @@ pub(crate) trait HttpServerFactory {
         main_listener: Option<Listener>,
         previous_listeners: ExtraListeners,
         extra_endpoints: MultiMap<ListenAddr, Endpoint>,
-        license: LicenseState,
+        license: Arc<LicenseState>,
         all_connections_stopped_sender: mpsc::Sender<()>,
     ) -> Self::Future
     where
         RF: RouterFactory;
-    fn live(&self, live: bool);
-    fn ready(&self, ready: bool);
 }
 
 type ExtraListeners = Vec<(ListenAddr, Listener)>;
@@ -101,13 +99,12 @@ impl HttpServerHandle {
         }
     }
 
+    #[cfg(unix)]
     pub(crate) async fn shutdown(mut self) -> Result<(), ApolloRouterError> {
-        #[cfg(unix)]
         let listen_addresses = std::mem::take(&mut self.listen_addresses);
 
         let (_main_listener, _extra_listener) = self.wait_for_servers().await?;
 
-        #[cfg(unix)]
         // listen_addresses includes the main graphql_address
         for listen_address in listen_addresses {
             if let ListenAddr::UnixSocket(path) = listen_address {
@@ -117,13 +114,20 @@ impl HttpServerHandle {
         Ok(())
     }
 
+    #[cfg(not(unix))]
+    pub(crate) async fn shutdown(self) -> Result<(), ApolloRouterError> {
+        let (_main_listener, _extra_listener) = self.wait_for_servers().await?;
+
+        Ok(())
+    }
+
     pub(crate) async fn restart<RF, SF>(
         self,
         factory: &SF,
         router: RF,
         configuration: Arc<Configuration>,
         web_endpoints: MultiMap<ListenAddr, Endpoint>,
-        license: LicenseState,
+        license: Arc<LicenseState>,
     ) -> Result<Self, ApolloRouterError>
     where
         SF: HttpServerFactory,
@@ -195,6 +199,9 @@ pub(crate) enum Listener {
     },
 }
 
+// Though there is a large difference in variant sizes, only a few instances of this type will
+// exist ever, so it's not a big deal.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum NetworkStream {
     Tcp(tokio::net::TcpStream),
     #[cfg(unix)]

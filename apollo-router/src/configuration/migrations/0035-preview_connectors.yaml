@@ -1,0 +1,5 @@
+description: Apollo Connectors is no longer in preview
+actions:
+  - type: move
+    from: preview_connectors
+    to: connectors

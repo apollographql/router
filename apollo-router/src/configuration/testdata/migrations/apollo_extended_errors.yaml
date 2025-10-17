@@ -1,0 +1,4 @@
+telemetry:
+  apollo:
+    errors:
+      experimental_otlp_error_metrics: enabled

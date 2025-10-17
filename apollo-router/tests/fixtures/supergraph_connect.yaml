@@ -1,0 +1,38 @@
+# rover supergraph compose --config apollo-router/tests/fixtures/supergraph_connect.yaml > apollo-router/tests/fixtures/supergraph_connect.graphql
+federation_version: =2.10.0
+subgraphs:
+  posts: # required for snapshot overrides
+    routing_url: http://localhost
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.10", import: ["@key"])
+          @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"])
+          @source(
+            name: "jsonPlaceholder"
+            http: {
+              baseURL: "https://jsonplaceholder.typicode.com/"
+            }
+          )
+          @source(
+            name: "routerHealth"
+            http: {
+              baseURL: "http://localhost:4000/"
+            }
+          )
+
+        type Post {
+          id: ID!
+          body: String
+          title: String
+          status: String
+          forceError: String
+        }
+
+        type Query {
+          posts: [Post] @connect(source: "jsonPlaceholder", http: {GET: "/posts"}, selection: "id\ntitle\nbody")
+          post(id: ID!): Post 
+            @connect(source: "jsonPlaceholder", http: {GET: "/posts/{$$args.id}"}, selection: "id\ntitle\nbody")
+            @connect(source: "routerHealth", http: {GET: "/health?_={$$args.id}"}, selection: "id: $$args.id\nstatus", entity: true)
+            @connect(source: "jsonPlaceholder", http: {GET: "/missing?_={$$args.id}"}, selection: "forceError", entity: true)
+        }

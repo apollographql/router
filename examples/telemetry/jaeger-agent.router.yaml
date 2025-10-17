@@ -1,9 +1,0 @@
-telemetry:
-  exporters:
-    tracing:
-      common:
-        service_name: router
-      jaeger:
-        enabled: true
-        agent:
-          endpoint: default

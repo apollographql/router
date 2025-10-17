@@ -14,7 +14,9 @@ pub(crate) use field_type::*;
 pub(crate) use fragments::*;
 pub(crate) use query::Query;
 pub(crate) use query::TYPENAME;
+pub(crate) use schema::QueryHash;
 pub(crate) use schema::Schema;
+pub(crate) use schema::SchemaHash;
 pub(crate) use selection::*;
 use serde::Deserialize;
 use serde::Serialize;
@@ -62,13 +64,17 @@ pub(crate) enum SpecError {
     QueryHashing(String),
 }
 
-pub(crate) const GRAPHQL_VALIDATION_FAILURE_ERROR_KEY: &str = "## GraphQLValidationFailure\n";
+const GRAPHQL_PARSE_FAILURE_ERROR_KEY: &str = "GraphQLParseFailure";
+const GRAPHQL_UNKNOWN_OPERATION_NAME_ERROR_KEY: &str = "GraphQLUnknownOperationName";
+const GRAPHQL_VALIDATION_FAILURE_ERROR_KEY: &str = "GraphQLValidationFailure";
 
 impl SpecError {
     pub(crate) const fn get_error_key(&self) -> &'static str {
         match self {
-            SpecError::TransformError(_) | SpecError::ParseError(_) => "## GraphQLParseFailure\n",
-            SpecError::UnknownOperation(_) => "## GraphQLUnknownOperationName\n",
+            SpecError::TransformError(_) | SpecError::ParseError(_) => {
+                GRAPHQL_PARSE_FAILURE_ERROR_KEY
+            }
+            SpecError::UnknownOperation(_) => GRAPHQL_UNKNOWN_OPERATION_NAME_ERROR_KEY,
             _ => GRAPHQL_VALIDATION_FAILURE_ERROR_KEY,
         }
     }
@@ -87,7 +93,7 @@ impl ErrorExtension for SpecError {
             SpecError::TransformError(_) => "PARSING_ERROR",
             SpecError::ParseError(_) => "PARSING_ERROR",
             SpecError::ValidationError(_) => "GRAPHQL_VALIDATION_FAILED",
-            SpecError::UnknownOperation(_) => "GRAPHQL_VALIDATION_FAILED",
+            SpecError::UnknownOperation(_) => "GRAPHQL_UNKNOWN_OPERATION_NAME",
             SpecError::MultipleOperationWithoutOperationName => "GRAPHQL_VALIDATION_FAILED",
             SpecError::NoOperation => "GRAPHQL_VALIDATION_FAILED",
             SpecError::SubscriptionNotSupported => "SUBSCRIPTION_NOT_SUPPORTED",
@@ -158,5 +164,11 @@ impl IntoGraphQLErrors for SpecError {
                 Ok(vec![gql_err])
             }
         }
+    }
+}
+
+impl From<std::convert::Infallible> for SpecError {
+    fn from(value: std::convert::Infallible) -> Self {
+        match value {}
     }
 }

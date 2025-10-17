@@ -17,6 +17,7 @@ traffic_shaping:
       capacity: 10
       interval: 5s # Must not be greater than 18_446_744_073_709_551_615 milliseconds and not less than 0 milliseconds
     timeout: 50s # If a request to the router takes more than 50secs then cancel the request (30 sec by default)
+    concurrency_limit: 100 # The router is limited to processing 100 concurrent requests. Excess requests must be rejected.
   all:
     deduplicate_query: true # Enable query deduplication for all subgraphs.
     compression: br # Enable brotli compression for all subgraphs.
@@ -28,11 +29,6 @@ traffic_shaping:
         capacity: 10
         interval: 5s # Must not be greater than 18_446_744_073_709_551_615 milliseconds and not less than 0 milliseconds
       timeout: 50s # If a request to the subgraph 'products' takes more than 50secs then cancel the request (30 sec by default)
-      experimental_retry:
-        min_per_sec: 10 # minimal number of retries per second (`min_per_sec`, default is 10 retries per second)
-        ttl: 10s # for each successful request, we register a token, that expires according to this option (default: 10s)
-        retry_percent: 0.2 # defines the proportion of available retries to the current number of tokens
-        retry_mutations: false # allows retries on mutations. This should only be enabled if mutations are idempotent
       experimental_http2: enable # Configures HTTP/2 usage. Can be 'enable' (default), 'disable' or 'http2only'
 ```
 
@@ -87,6 +83,22 @@ traffic_shaping:
 <Note>
 
 Since [deferred](/router/executing-operations/defer-support/#what-is-defer) fragments are separate requests, each fragment's request is individually subject to timeouts.
+
+</Note>
+
+### Concurrency
+
+By default, the router does not enforce a concurrency limit. To enforce a limit, change your config to include:
+
+```yaml title="router.yaml"
+traffic_shaping:
+  router:
+    concurrency_limit: 100 # The router is limited to processing 100 concurrent requests. Excess requests must be rejected.
+```
+
+<Note>
+
+This is not a concurrency limit on connections, but a limit on the number of active requests being processed by the router at any one time.
 
 </Note>
 
@@ -150,22 +162,6 @@ traffic_shaping:
       interval: 5s # Must not be greater than 18_446_744_073_709_551_615 milliseconds and not less than 0 milliseconds
 ```
 
-### Experimental request retry
-
-On failure, subgraph requests can be retried automatically. This is deactivated by default for mutations. This uses [Finagle's *RetryBudget* algorithm](https://finagle.github.io/blog/2016/02/08/retry-budgets/), in which every successful request adds an expirable token to a bucket, and every retry consumes a number of those tokens. On top of that, a minimal number of retries per second is available, to test regularly when the retry budget was entirely consumed or on startup when very few requests have been sent. The tokens expire so the budget has a large number of available retries if a lot of recent requests were successful but reduces quickly on frequent failures to avoid sending too much traffic to the subgraph.
-
-It is configurable as follows:
-
-```yaml title="router.yaml"
-traffic_shaping:
-  all:
-    experimental_retry:
-      min_per_sec: 10 # minimal number of retries per second (`min_per_sec`, default is 10 retries per second)
-      ttl: 10s # for each successful request, we register a token, that expires according to this option (default: 10s)
-      retry_percent: 0.2 # defines the proportion of available retries to the current number of tokens
-      retry_mutations: false # allows retries on mutations. This should only be enabled if mutations are idempotent
-```
-
 ### Variable deduplication
 
 When subgraphs are sent entity requests by the router using the `_entities` field, it is often the case that the same entity (identified by a unique `@key` constraint) is requested multiple times within the execution of a single federated query.  For example, an author's name might need to be fetched multiple times when accessing a list of a reviews for a product for which the author has written multiple reviews.
@@ -188,13 +184,12 @@ traffic_shaping:
 
 ### Ordering
 
-Traffic shaping always executes these steps in the same order, to ensure a consistent behaviour. Declaration order in the configuration will not affect the runtime order:
+Traffic shaping always executes these steps in the same order, to ensure a consistent behavior. Declaration order in the configuration will not affect the runtime order:
 
 - preparing the subgraph request
 - variable deduplication
 - query deduplication
 - timeout
-- request retry
 - rate limiting
 - compression
 - sending the request to the subgraph

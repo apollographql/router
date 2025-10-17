@@ -1,14 +1,15 @@
 use std::collections::BTreeMap;
 
 use bytes::Bytes;
+use http::HeaderValue;
 use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
-use http::HeaderValue;
 use tower::BoxError;
 
 const FILE_CONFIG: &str = include_str!("../fixtures/file_upload/default.router.yaml");
 const FILE_CONFIG_LARGE_LIMITS: &str = include_str!("../fixtures/file_upload/large.router.yaml");
+const FILE_CONFIG_WITH_RHAI: &str = include_str!("../fixtures/file_upload/rhai.router.yaml");
 
 /// Create a valid handler for the [helper::FileUploadTestServer].
 macro_rules! make_handler {
@@ -50,14 +51,15 @@ async fn it_uploads_file_to_subgraph() -> Result<(), BoxError> {
         .part("0", Part::text(FILE).file_name(FILE_NAME));
 
     async fn subgraph_handler(
-        mut request: http::Request<hyper::Body>,
+        request: http::Request<axum::body::Body>,
     ) -> impl axum::response::IntoResponse {
         let boundary = request
             .headers()
             .get(CONTENT_TYPE)
             .and_then(|v| multer::parse_boundary(v.to_str().ok()?).ok())
             .expect("subgraph request should have valid Content-Type header");
-        let mut multipart = multer::Multipart::new(request.body_mut(), boundary);
+        let mut multipart =
+            multer::Multipart::new(request.into_body().into_data_stream(), boundary);
 
         let operations_field = multipart
             .next_field()
@@ -174,6 +176,39 @@ async fn it_uploads_a_single_file() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn it_uploads_a_single_file_while_adding_a_header_from_rhai_script() -> Result<(), BoxError> {
+    const FILE: &str = "Hello, world!";
+    const FILE_NAME: &str = "example.txt";
+
+    // Construct the parts of the multipart request as defined by the schema
+    let request = helper::create_request(
+        vec![FILE_NAME],
+        vec![tokio_stream::once(Ok(Bytes::from_static(FILE.as_bytes())))],
+    );
+
+    // Run the test
+    helper::FileUploadTestServer::builder()
+        .config(FILE_CONFIG_WITH_RHAI)
+        .handler(make_handler!(helper::echo_single_file))
+        .request(request)
+        .subgraph_mapping("uploads", "/")
+        .build()
+        .run_test(|response| {
+            insta::assert_json_snapshot!(response, @r###"
+            {
+              "data": {
+                "file0": {
+                  "filename": "example.txt",
+                  "body": "Hello, world!"
+                }
+              }
+            }
+            "###);
+        })
+        .await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn it_uploads_multiple_files() -> Result<(), BoxError> {
     let files = BTreeMap::from([
         ("example.txt", "Hello, world!"),
@@ -249,7 +284,7 @@ async fn it_uploads_a_massive_file() -> Result<(), BoxError> {
     // Upload a stream of 10GB
     const ONE_MB: usize = 1024 * 1024;
     const TEN_GB: usize = 10 * 1024 * ONE_MB;
-    const FILE_CHUNK: [u8; ONE_MB] = [0xAA; ONE_MB];
+    static FILE_CHUNK: [u8; ONE_MB] = [0xAA; ONE_MB];
     const CHUNK_COUNT: usize = TEN_GB / ONE_MB;
 
     // Upload a file that is 1GB in size of 0xAA
@@ -683,21 +718,21 @@ async fn it_fails_upload_without_file() -> Result<(), BoxError> {
         .subgraph_mapping("uploads", "/")
         .build()
         .run_test(|response| {
-            insta::assert_json_snapshot!(response, @r###"
+            insta::assert_json_snapshot!(response, @r#"
             {
               "errors": [
                 {
-                  "message": "HTTP fetch failed from 'uploads': HTTP fetch failed from 'uploads': error from user's HttpBody stream: error reading a body from connection: Missing files in the request: '0'.",
+                  "message": "HTTP fetch failed from 'uploads': HTTP fetch failed from 'uploads': error from user's Body stream: Missing files in the request: '0'.",
                   "path": [],
                   "extensions": {
                     "code": "SUBREQUEST_HTTP_ERROR",
                     "service": "uploads",
-                    "reason": "HTTP fetch failed from 'uploads': error from user's HttpBody stream: error reading a body from connection: Missing files in the request: '0'."
+                    "reason": "HTTP fetch failed from 'uploads': error from user's Body stream: Missing files in the request: '0'."
                   }
                 }
               ]
             }
-            "###);
+            "#);
         })
         .await
 }
@@ -743,7 +778,7 @@ async fn it_fails_with_file_count_limits() -> Result<(), BoxError> {
 async fn it_fails_with_file_size_limit() -> Result<(), BoxError> {
     // Create a file that passes the limit set in the config (512KB)
     const ONE_MB: usize = 1024 * 1024;
-    const FILE_CHUNK: [u8; ONE_MB] = [0xAA; ONE_MB];
+    static FILE_CHUNK: [u8; ONE_MB] = [0xAA; ONE_MB];
 
     // Construct the parts of the multipart request as defined by the schema for multiple files
     let request = helper::create_request(
@@ -761,21 +796,21 @@ async fn it_fails_with_file_size_limit() -> Result<(), BoxError> {
         .subgraph_mapping("uploads", "/")
         .build()
         .run_test(|response| {
-            insta::assert_json_snapshot!(response, @r###"
+            insta::assert_json_snapshot!(response, @r#"
             {
               "errors": [
                 {
-                  "message": "HTTP fetch failed from 'uploads': HTTP fetch failed from 'uploads': error from user's HttpBody stream: error reading a body from connection: Exceeded the limit of 512.0 KB on 'fat.payload.bin' file.",
+                  "message": "HTTP fetch failed from 'uploads': HTTP fetch failed from 'uploads': error from user's Body stream: Exceeded the limit of 512.0 KB on 'fat.payload.bin' file.",
                   "path": [],
                   "extensions": {
                     "code": "SUBREQUEST_HTTP_ERROR",
                     "service": "uploads",
-                    "reason": "HTTP fetch failed from 'uploads': error from user's HttpBody stream: error reading a body from connection: Exceeded the limit of 512.0 KB on 'fat.payload.bin' file."
+                    "reason": "HTTP fetch failed from 'uploads': error from user's Body stream: Exceeded the limit of 512.0 KB on 'fat.payload.bin' file."
                   }
                 }
               ]
             }
-            "###);
+            "#);
         })
         .await
 }
@@ -875,7 +910,7 @@ async fn it_fails_invalid_file_order() -> Result<(), BoxError> {
         .subgraph_mapping("uploads_clone", "/s2")
         .build()
         .run_test(|response| {
-            insta::assert_json_snapshot!(response, @r###"
+            insta::assert_json_snapshot!(response, @r#"
             {
               "data": {
                 "file0": {
@@ -886,17 +921,17 @@ async fn it_fails_invalid_file_order() -> Result<(), BoxError> {
               },
               "errors": [
                 {
-                  "message": "HTTP fetch failed from 'uploads_clone': HTTP fetch failed from 'uploads_clone': error from user's HttpBody stream: error reading a body from connection: Missing files in the request: '1'.",
+                  "message": "HTTP fetch failed from 'uploads_clone': HTTP fetch failed from 'uploads_clone': error from user's Body stream: Missing files in the request: '1'.",
                   "path": [],
                   "extensions": {
                     "code": "SUBREQUEST_HTTP_ERROR",
                     "service": "uploads_clone",
-                    "reason": "HTTP fetch failed from 'uploads_clone': error from user's HttpBody stream: error reading a body from connection: Missing files in the request: '1'."
+                    "reason": "HTTP fetch failed from 'uploads_clone': error from user's Body stream: Missing files in the request: '1'."
                   }
                 }
               ]
             }
-            "###);
+            "#);
         })
         .await
 }
@@ -1018,31 +1053,32 @@ mod helper {
     use std::net::SocketAddr;
     use std::path::PathBuf;
 
-    use axum::extract::State;
-    use axum::response::IntoResponse;
     use axum::BoxError;
     use axum::Json;
     use axum::Router;
+    use axum::body::Body;
+    use axum::extract::State;
+    use axum::response::IntoResponse;
     use buildstructor::buildstructor;
     use futures::StreamExt;
-    use http::header::CONTENT_TYPE;
     use http::Request;
     use http::StatusCode;
-    use hyper::Body;
+    use http::header::CONTENT_TYPE;
     use itertools::Itertools;
     use multer::Multipart;
     use reqwest::multipart::Form;
     use reqwest::multipart::Part;
-    use serde::de::DeserializeOwned;
     use serde::Deserialize;
     use serde::Serialize;
-    use serde_json::json;
+    use serde::de::DeserializeOwned;
     use serde_json::Value;
+    use serde_json::json;
     use thiserror::Error;
     use tokio::net::TcpListener;
     use tokio_stream::Stream;
 
-    use super::super::common::IntegrationTest;
+    use crate::integration::IntegrationTest;
+    use crate::integration::common::graph_os_enabled;
 
     /// A helper server for testing multipart uploads.
     ///
@@ -1094,9 +1130,7 @@ mod helper {
             // Ensure that we have the test keys before running
             // Note: The [IntegrationTest] ensures that these test credentials get
             // set before running the router.
-            if std::env::var("TEST_APOLLO_KEY").is_err()
-                || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-            {
+            if !graph_os_enabled() {
                 return Ok(());
             };
 
@@ -1131,15 +1165,13 @@ mod helper {
             let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
             // Start the server using the tcp listener randomly assigned above
-            let server = axum::Server::from_tcp(bound.into_std().unwrap())
-                .unwrap()
-                .serve(self.handler.into_make_service())
+            let server = axum::serve(bound, self.handler.into_make_service())
                 .with_graceful_shutdown(async {
                     shutdown_rx.await.ok();
                 });
 
             // Spawn the server in the background, controlled by the shutdown signal
-            tokio::spawn(server);
+            tokio::spawn(async { server.await.unwrap() });
 
             // Make the request and pass it into the validator callback
             let (_span, response) = router
@@ -1250,11 +1282,13 @@ mod helper {
 
         // The mappings match the field names of the multipart stream to the graphql variables of the query
         let mappings = Part::text(
-            serde_json::json!(names
-                .iter()
-                .enumerate()
-                .map(|(index, _)| (index.to_string(), vec![format!("variables.file{index}")]))
-                .collect::<BTreeMap<String, Vec<String>>>())
+            serde_json::json!(
+                names
+                    .iter()
+                    .enumerate()
+                    .map(|(index, _)| (index.to_string(), vec![format!("variables.file{index}")]))
+                    .collect::<BTreeMap<String, Vec<String>>>()
+            )
             .to_string(),
         )
         .file_name("mappings.json");
@@ -1265,7 +1299,8 @@ mod helper {
             .part("map", mappings);
         for (index, (file_name, file)) in names.into_iter().zip(files).enumerate() {
             let file_name: String = file_name.into();
-            let part = Part::stream(hyper::Body::wrap_stream(file)).file_name(file_name);
+
+            let part = Part::stream(reqwest::Body::wrap_stream(file)).file_name(file_name);
 
             request = request.part(index.to_string(), part);
         }
@@ -1276,10 +1311,8 @@ mod helper {
     /// Handler that echos back the contents of the file that it receives
     ///
     /// Note: This will error if more than one file is received
-    pub async fn echo_single_file(
-        mut request: Request<Body>,
-    ) -> Result<Json<Value>, FileUploadError> {
-        let (_, map, mut multipart) = decode_request(&mut request).await?;
+    pub async fn echo_single_file(request: Request<Body>) -> Result<Json<Value>, FileUploadError> {
+        let (_, map, mut multipart) = decode_request(request).await?;
 
         // Assert that we only have 1 file
         if map.len() > 1 {
@@ -1315,8 +1348,8 @@ mod helper {
     }
 
     /// Handler that echos back the contents of the files that it receives
-    pub async fn echo_files(mut request: Request<Body>) -> Result<Json<Value>, FileUploadError> {
-        let (operation, map, mut multipart) = decode_request(&mut request).await?;
+    pub async fn echo_files(request: Request<Body>) -> Result<Json<Value>, FileUploadError> {
+        let (operation, map, mut multipart) = decode_request(request).await?;
 
         // Make sure that we have some mappings
         if map.is_empty() {
@@ -1369,10 +1402,8 @@ mod helper {
     }
 
     /// Handler that echos back the contents of the list of files that it receives
-    pub async fn echo_file_list(
-        mut request: Request<Body>,
-    ) -> Result<Json<Value>, FileUploadError> {
-        let (operation, map, mut multipart) = decode_request(&mut request).await?;
+    pub async fn echo_file_list(request: Request<Body>) -> Result<Json<Value>, FileUploadError> {
+        let (operation, map, mut multipart) = decode_request(request).await?;
 
         // Make sure that we have some mappings
         if map.is_empty() {
@@ -1432,9 +1463,10 @@ mod helper {
     }
 
     /// A handler that always fails. Useful for tests that should not reach the subgraph at all.
-    pub async fn always_fail(mut request: Request<Body>) -> Result<Json<Value>, FileUploadError> {
+    pub async fn always_fail(request: Request<Body>) -> Result<Json<Value>, FileUploadError> {
         // Consume the stream
-        while request.body_mut().next().await.is_some() {}
+        let mut body = request.into_body().into_data_stream();
+        while body.next().await.is_some() {}
 
         // Signal a failure
         Err(FileUploadError::ShouldHaveFailed)
@@ -1445,9 +1477,9 @@ mod helper {
     /// Note: Make sure to use a router with state (Expected stream length, expected value).
     pub async fn verify_stream(
         State((expected_length, byte_value)): State<(usize, u8)>,
-        mut request: Request<Body>,
+        request: Request<Body>,
     ) -> Result<Json<Value>, FileUploadError> {
-        let (_, _, mut multipart) = decode_request(&mut request).await?;
+        let (_, _, mut multipart) = decode_request(request).await?;
 
         let mut file = multipart
             .next_field()
@@ -1524,8 +1556,9 @@ mod helper {
     /// Note: The order of the mapping must correspond with the order in the request, so
     /// we use a [BTreeMap] here to keep the order when traversing the list of files.
     async fn decode_request(
-        request: &mut Request<Body>,
-    ) -> Result<(Operation, BTreeMap<String, Vec<String>>, Multipart), FileUploadError> {
+        request: Request<Body>,
+    ) -> Result<(Operation, BTreeMap<String, Vec<String>>, Multipart<'static>), FileUploadError>
+    {
         let content_type = request
             .headers()
             .get(CONTENT_TYPE)
@@ -1535,7 +1568,7 @@ mod helper {
             FileUploadError::BadHeaders(format!("could not parse multipart boundary: {e}"))
         })?)?;
 
-        let mut multipart = Multipart::new(request.body_mut(), boundary);
+        let mut multipart = Multipart::new(request.into_body().into_data_stream(), boundary);
 
         // Extract the operations
         // TODO: Should we be streaming here?

@@ -1,0 +1,100 @@
+---
+source: apollo-federation/src/connectors/json_selection/parser.rs
+expression: selection_array_path_v0_2
+---
+JSONSelection {
+    inner: Path(
+        PathSelection {
+            path: WithRange {
+                node: Expr(
+                    WithRange {
+                        node: LitPath(
+                            WithRange {
+                                node: Array(
+                                    [
+                                        WithRange {
+                                            node: Number(
+                                                Number(1),
+                                            ),
+                                            range: Some(
+                                                3..4,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Number(
+                                                Number(2),
+                                            ),
+                                            range: Some(
+                                                6..7,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Number(
+                                                Number(3),
+                                            ),
+                                            range: Some(
+                                                9..10,
+                                            ),
+                                        },
+                                    ],
+                                ),
+                                range: Some(
+                                    2..11,
+                                ),
+                            },
+                            WithRange {
+                                node: Method(
+                                    WithRange {
+                                        node: "get",
+                                        range: Some(
+                                            13..16,
+                                        ),
+                                    },
+                                    Some(
+                                        MethodArgs {
+                                            args: [
+                                                WithRange {
+                                                    node: Number(
+                                                        Number(1),
+                                                    ),
+                                                    range: Some(
+                                                        17..18,
+                                                    ),
+                                                },
+                                            ],
+                                            range: Some(
+                                                16..19,
+                                            ),
+                                        },
+                                    ),
+                                    WithRange {
+                                        node: Empty,
+                                        range: Some(
+                                            19..19,
+                                        ),
+                                    },
+                                ),
+                                range: Some(
+                                    11..19,
+                                ),
+                            },
+                        ),
+                        range: Some(
+                            2..19,
+                        ),
+                    },
+                    WithRange {
+                        node: Empty,
+                        range: Some(
+                            20..20,
+                        ),
+                    },
+                ),
+                range: Some(
+                    0..20,
+                ),
+            },
+        },
+    ),
+    spec: V0_2,
+}

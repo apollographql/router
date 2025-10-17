@@ -1,16 +1,14 @@
-use opentelemetry_api::trace::Link;
-use opentelemetry_api::trace::SamplingDecision;
-use opentelemetry_api::trace::SamplingResult;
-use opentelemetry_api::trace::SpanKind;
-use opentelemetry_api::trace::TraceId;
-use opentelemetry_api::Key;
-use opentelemetry_api::KeyValue;
-use opentelemetry_api::OrderMap;
-use opentelemetry_api::Value;
+use opentelemetry::KeyValue;
+use opentelemetry::Value;
+use opentelemetry::trace::Link;
+use opentelemetry::trace::SamplingDecision;
+use opentelemetry::trace::SamplingResult;
+use opentelemetry::trace::SpanKind;
+use opentelemetry::trace::TraceId;
 use opentelemetry_sdk::trace::ShouldSample;
 
-use crate::plugins::telemetry::tracing::datadog_exporter::propagator::SamplingPriority;
 use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
+use crate::plugins::telemetry::tracing::datadog_exporter::propagator::SamplingPriority;
 
 /// The Datadog Agent Sampler
 ///
@@ -24,7 +22,7 @@ use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
 #[derive(Debug, Clone)]
 pub(crate) struct DatadogAgentSampling {
     /// The underlying sampler used for initial sampling decisions
-    pub(crate) sampler: opentelemetry::sdk::trace::Sampler,
+    pub(crate) sampler: opentelemetry_sdk::trace::Sampler,
     /// Flag to enable parent-based sampling for consistent trace sampling
     pub(crate) parent_based_sampler: bool,
 }
@@ -35,7 +33,7 @@ impl DatadogAgentSampling {
     /// * `sampler` - The underlying sampler to use for initial sampling decisions
     /// * `parent_based_sampler` - Whether to use parent-based sampling for consistent trace sampling
     pub(crate) fn new(
-        sampler: opentelemetry::sdk::trace::Sampler,
+        sampler: opentelemetry_sdk::trace::Sampler,
         parent_based_sampler: bool,
     ) -> Self {
         Self {
@@ -48,11 +46,11 @@ impl DatadogAgentSampling {
 impl ShouldSample for DatadogAgentSampling {
     fn should_sample(
         &self,
-        parent_context: Option<&opentelemetry_api::Context>,
+        parent_context: Option<&opentelemetry::Context>,
         trace_id: TraceId,
         name: &str,
         span_kind: &SpanKind,
-        attributes: &OrderMap<Key, Value>,
+        attributes: &[KeyValue],
         links: &[Link],
     ) -> SamplingResult {
         let mut result = self.sampler.should_sample(
@@ -88,42 +86,39 @@ impl ShouldSample for DatadogAgentSampling {
         result.trace_state = result.trace_state.with_measuring(true);
         // We always want to set the sampling.priority attribute in case we are communicating with the agent via otlp.
         // Reverse engineered from https://github.com/DataDog/datadog-agent/blob/c692f62423f93988b008b669008f9199a5ad196b/pkg/trace/api/otlp.go#L502
-        result.attributes.push(KeyValue::new(
-            "sampling.priority",
-            Value::I64(
-                result
-                    .trace_state
-                    .sampling_priority()
-                    .expect("sampling priority")
-                    .as_i64(),
-            ),
-        ));
+        if let Some(priority) = result.trace_state.sampling_priority() {
+            result.attributes.push(KeyValue::new(
+                "sampling.priority",
+                Value::I64(priority.as_i64()),
+            ));
+        } else {
+            tracing::error!("Failed to set trace sampling priority.");
+        }
         result
     }
 }
 #[cfg(test)]
 mod tests {
     use buildstructor::Builder;
-    use opentelemetry::sdk::trace::Sampler;
+    use opentelemetry::Context;
+    use opentelemetry::KeyValue;
+    use opentelemetry::Value;
+    use opentelemetry::trace::Link;
+    use opentelemetry::trace::SamplingDecision;
+    use opentelemetry::trace::SamplingResult;
+    use opentelemetry::trace::SpanContext;
+    use opentelemetry::trace::SpanId;
+    use opentelemetry::trace::SpanKind;
+    use opentelemetry::trace::TraceContextExt;
+    use opentelemetry::trace::TraceFlags;
+    use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
-    use opentelemetry_api::trace::Link;
-    use opentelemetry_api::trace::SamplingDecision;
-    use opentelemetry_api::trace::SamplingResult;
-    use opentelemetry_api::trace::SpanContext;
-    use opentelemetry_api::trace::SpanId;
-    use opentelemetry_api::trace::SpanKind;
-    use opentelemetry_api::trace::TraceContextExt;
-    use opentelemetry_api::trace::TraceFlags;
-    use opentelemetry_api::trace::TraceId;
-    use opentelemetry_api::Context;
-    use opentelemetry_api::Key;
-    use opentelemetry_api::OrderMap;
-    use opentelemetry_api::Value;
+    use opentelemetry_sdk::trace::Sampler;
     use opentelemetry_sdk::trace::ShouldSample;
 
     use crate::plugins::telemetry::tracing::datadog::DatadogAgentSampling;
-    use crate::plugins::telemetry::tracing::datadog_exporter::propagator::SamplingPriority;
     use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
+    use crate::plugins::telemetry::tracing::datadog_exporter::propagator::SamplingPriority;
 
     #[derive(Debug, Clone, Builder)]
     struct StubSampler {
@@ -137,7 +132,7 @@ mod tests {
             _trace_id: TraceId,
             _name: &str,
             _span_kind: &SpanKind,
-            _attributes: &OrderMap<Key, Value>,
+            _attributes: &[KeyValue],
             _links: &[Link],
         ) -> SamplingResult {
             SamplingResult {
@@ -162,7 +157,7 @@ mod tests {
             TraceId::from_u128(1),
             "test_span",
             &SpanKind::Internal,
-            &OrderMap::new(),
+            &[],
             &[],
         );
 
@@ -174,11 +169,13 @@ mod tests {
             Some(SamplingPriority::AutoReject)
         );
         // Verify that the sampling.priority attribute is set correctly
-        assert!(result
-            .attributes
-            .iter()
-            .any(|kv| kv.key.as_str() == "sampling.priority"
-                && kv.value == Value::I64(SamplingPriority::AutoReject.as_i64())));
+        assert!(
+            result
+                .attributes
+                .iter()
+                .any(|kv| kv.key.as_str() == "sampling.priority"
+                    && kv.value == Value::I64(SamplingPriority::AutoReject.as_i64()))
+        );
 
         // Verify that measuring is enabled
         assert!(result.trace_state.measuring_enabled());
@@ -197,7 +194,7 @@ mod tests {
             TraceId::from_u128(1),
             "test_span",
             &SpanKind::Internal,
-            &OrderMap::new(),
+            &[],
             &[],
         );
 
@@ -209,11 +206,13 @@ mod tests {
             result.trace_state.sampling_priority(),
             Some(SamplingPriority::AutoReject)
         );
-        assert!(result
-            .attributes
-            .iter()
-            .any(|kv| kv.key.as_str() == "sampling.priority"
-                && kv.value == Value::I64(SamplingPriority::AutoReject.as_i64())));
+        assert!(
+            result
+                .attributes
+                .iter()
+                .any(|kv| kv.key.as_str() == "sampling.priority"
+                    && kv.value == Value::I64(SamplingPriority::AutoReject.as_i64()))
+        );
 
         // Verify that measuring is enabled
         assert!(result.trace_state.measuring_enabled());
@@ -232,7 +231,7 @@ mod tests {
             TraceId::from_u128(1),
             "test_span",
             &SpanKind::Internal,
-            &OrderMap::new(),
+            &[],
             &[],
         );
 
@@ -244,11 +243,13 @@ mod tests {
             result.trace_state.sampling_priority(),
             Some(SamplingPriority::AutoKeep)
         );
-        assert!(result
-            .attributes
-            .iter()
-            .any(|kv| kv.key.as_str() == "sampling.priority"
-                && kv.value == Value::I64(SamplingPriority::AutoKeep.as_i64())));
+        assert!(
+            result
+                .attributes
+                .iter()
+                .any(|kv| kv.key.as_str() == "sampling.priority"
+                    && kv.value == Value::I64(SamplingPriority::AutoKeep.as_i64()))
+        );
 
         // Verify that measuring is enabled
         assert!(result.trace_state.measuring_enabled());
@@ -268,7 +269,7 @@ mod tests {
             TraceId::from_u128(1),
             "test_span",
             &SpanKind::Internal,
-            &OrderMap::new(),
+            &[],
             &[],
         );
 
@@ -280,11 +281,13 @@ mod tests {
             result.trace_state.sampling_priority(),
             Some(SamplingPriority::AutoKeep)
         );
-        assert!(result
-            .attributes
-            .iter()
-            .any(|kv| kv.key.as_str() == "sampling.priority"
-                && kv.value == Value::I64(SamplingPriority::AutoKeep.as_i64())));
+        assert!(
+            result
+                .attributes
+                .iter()
+                .any(|kv| kv.key.as_str() == "sampling.priority"
+                    && kv.value == Value::I64(SamplingPriority::AutoKeep.as_i64()))
+        );
 
         // Verify that measuring is enabled
         assert!(result.trace_state.measuring_enabled());
@@ -310,7 +313,7 @@ mod tests {
             TraceId::from_u128(1),
             "test_span",
             &SpanKind::Internal,
-            &OrderMap::new(),
+            &[],
             &[],
         );
 
@@ -322,11 +325,13 @@ mod tests {
             result.trace_state.sampling_priority(),
             Some(SamplingPriority::UserReject)
         );
-        assert!(result
-            .attributes
-            .iter()
-            .any(|kv| kv.key.as_str() == "sampling.priority"
-                && kv.value == Value::I64(SamplingPriority::UserReject.as_i64())));
+        assert!(
+            result
+                .attributes
+                .iter()
+                .any(|kv| kv.key.as_str() == "sampling.priority"
+                    && kv.value == Value::I64(SamplingPriority::UserReject.as_i64()))
+        );
 
         // Verify that measuring is enabled
         assert!(result.trace_state.measuring_enabled());
@@ -352,7 +357,7 @@ mod tests {
             TraceId::from_u128(1),
             "test_span",
             &SpanKind::Internal,
-            &OrderMap::new(),
+            &[],
             &[],
         );
 
@@ -364,11 +369,13 @@ mod tests {
             result.trace_state.sampling_priority(),
             Some(SamplingPriority::UserReject)
         );
-        assert!(result
-            .attributes
-            .iter()
-            .any(|kv| kv.key.as_str() == "sampling.priority"
-                && kv.value == Value::I64(SamplingPriority::UserReject.as_i64())));
+        assert!(
+            result
+                .attributes
+                .iter()
+                .any(|kv| kv.key.as_str() == "sampling.priority"
+                    && kv.value == Value::I64(SamplingPriority::UserReject.as_i64()))
+        );
 
         // Verify that measuring is enabled
         assert!(result.trace_state.measuring_enabled());

@@ -1,6 +1,7 @@
 ---
 source: apollo-router/src/plugins/telemetry/metrics/apollo/mod.rs
 expression: results
+snapshot_kind: text
 ---
 [
   {
@@ -13,7 +14,9 @@ expression: results
             "client_version": "1.0-test",
             "operation_type": "query",
             "operation_subtype": "",
-            "result": ""
+            "result": "",
+            "client_library_name": "",
+            "client_library_version": ""
           },
           "query_latency_stats": {
             "latency": {
@@ -28,7 +31,7 @@ expression: results
               "errors_count": 0,
               "requests_with_errors_count": 0
             },
-            "has_errors": true,
+            "has_errors": false,
             "public_cache_ttl_latency": null,
             "private_cache_ttl_latency": null,
             "registered_operation": false,
@@ -65,13 +68,15 @@ expression: results
             ],
             "is_interface": false
           }
-        }
+        },
+        "query_metadata": null
       }
     },
     "licensed_operation_count_by_type": {
       "type": "query",
       "subtype": null,
       "licensed_operation_count": 1
-    }
+    },
+    "router_features_enabled": []
   }
 ]

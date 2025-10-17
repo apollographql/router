@@ -2,17 +2,16 @@ use std::fmt::Display;
 use std::fmt::{self};
 use std::hash::Hash;
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 
 use lru::LruCache;
+use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider;
-use opentelemetry_api::metrics::ObservableGauge;
-use opentelemetry_api::metrics::Unit;
-use opentelemetry_api::KeyValue;
-use serde::de::DeserializeOwned;
+use opentelemetry::metrics::ObservableGauge;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 use tower::BoxError;
@@ -58,8 +57,8 @@ pub(crate) struct CacheStorage<K: KeyType, V: ValueType> {
     cache_size: Arc<AtomicI64>,
     cache_estimated_storage: Arc<AtomicI64>,
     // It's OK for these to be mutexes as they are only initialized once
-    cache_size_gauge: Arc<std::sync::Mutex<Option<ObservableGauge<i64>>>>,
-    cache_estimated_storage_gauge: Arc<std::sync::Mutex<Option<ObservableGauge<i64>>>>,
+    cache_size_gauge: Arc<parking_lot::Mutex<Option<ObservableGauge<i64>>>>,
+    cache_estimated_storage_gauge: Arc<parking_lot::Mutex<Option<ObservableGauge<i64>>>>,
 }
 
 impl<K, V> CacheStorage<K, V>
@@ -81,7 +80,7 @@ where
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
             redis: if let Some(config) = config {
                 let required_to_start = config.required_to_start;
-                match RedisCacheStorage::new(config).await {
+                match RedisCacheStorage::new(config, caller).await {
                     Err(e) => {
                         tracing::error!(
                             cache = caller,
@@ -118,8 +117,7 @@ where
         let current_cache_size_for_gauge = self.cache_size.clone();
         let caller = self.caller;
         meter
-            // TODO move to dot naming convention
-            .i64_observable_gauge("apollo_router_cache_size")
+            .i64_observable_gauge("apollo.router.cache.size")
             .with_description("Cache size")
             .with_callback(move |i| {
                 i.observe(
@@ -137,10 +135,11 @@ where
         let meter: opentelemetry::metrics::Meter = metrics::meter_provider().meter(METER_NAME);
         let cache_estimated_storage_for_gauge = self.cache_estimated_storage.clone();
         let caller = self.caller;
-        let cache_estimated_storage_gauge = meter
+
+        meter
             .i64_observable_gauge("apollo.router.cache.storage.estimated_size")
             .with_description("Estimated cache storage")
-            .with_unit(Unit::new("bytes"))
+            .with_unit("bytes")
             .with_callback(move |i| {
                 // If there's no storage then don't bother updating the gauge
                 let value = cache_estimated_storage_for_gauge.load(Ordering::SeqCst);
@@ -154,8 +153,7 @@ where
                     )
                 }
             })
-            .init();
-        cache_estimated_storage_gauge
+            .init()
     }
 
     /// `init_from_redis` is called with values newly deserialized from Redis cache
@@ -170,32 +168,22 @@ where
 
         match res {
             Some(v) => {
-                u64_counter!(
-                    "apollo_router_cache_hit_count",
-                    "Number of cache hits",
-                    1,
+                let duration = instant_memory.elapsed();
+                f64_histogram!(
+                    "apollo.router.cache.hit.time",
+                    "Time to get a value from the cache in seconds",
+                    duration.as_secs_f64(),
                     kind = self.caller,
                     storage = CacheStorageName::Memory.to_string()
-                );
-                let duration = instant_memory.elapsed().as_secs_f64();
-                tracing::info!(
-                    histogram.apollo_router_cache_hit_time = duration,
-                    kind = %self.caller,
-                    storage = &tracing::field::display(CacheStorageName::Memory),
                 );
                 Some(v)
             }
             None => {
-                let duration = instant_memory.elapsed().as_secs_f64();
-                tracing::info!(
-                    histogram.apollo_router_cache_miss_time = duration,
-                    kind = %self.caller,
-                    storage = &tracing::field::display(CacheStorageName::Memory),
-                );
-                u64_counter!(
-                    "apollo_router_cache_miss_count",
-                    "Number of cache misses",
-                    1,
+                let duration = instant_memory.elapsed();
+                f64_histogram!(
+                    "apollo.router.cache.miss.time",
+                    "Time to check the cache for an uncached value in seconds",
+                    duration.as_secs_f64(),
                     kind = self.caller,
                     storage = CacheStorageName::Memory.to_string()
                 );
@@ -218,34 +206,24 @@ where
                         Some(v) => {
                             self.insert_in_memory(key.clone(), v.0.clone()).await;
 
-                            u64_counter!(
-                                "apollo_router_cache_hit_count",
-                                "Number of cache hits",
-                                1,
+                            let duration = instant_redis.elapsed();
+                            f64_histogram!(
+                                "apollo.router.cache.hit.time",
+                                "Time to get a value from the cache in seconds",
+                                duration.as_secs_f64(),
                                 kind = self.caller,
                                 storage = CacheStorageName::Redis.to_string()
-                            );
-                            let duration = instant_redis.elapsed().as_secs_f64();
-                            tracing::info!(
-                                histogram.apollo_router_cache_hit_time = duration,
-                                kind = %self.caller,
-                                storage = &tracing::field::display(CacheStorageName::Redis),
                             );
                             Some(v.0)
                         }
                         None => {
-                            u64_counter!(
-                                "apollo_router_cache_miss_count",
-                                "Number of cache misses",
-                                1,
+                            let duration = instant_redis.elapsed();
+                            f64_histogram!(
+                                "apollo.router.cache.miss.time",
+                                "Time to check the cache for an uncached value in seconds",
+                                duration.as_secs_f64(),
                                 kind = self.caller,
                                 storage = CacheStorageName::Redis.to_string()
-                            );
-                            let duration = instant_redis.elapsed().as_secs_f64();
-                            tracing::info!(
-                                histogram.apollo_router_cache_miss_time = duration,
-                                kind = %self.caller,
-                                storage = &tracing::field::display(CacheStorageName::Redis),
                             );
                             None
                         }
@@ -305,12 +283,9 @@ where
     pub(crate) fn activate(&self) {
         // Gauges MUST be created after the meter provider is initialized
         // This means that on reload we need a non-fallible way to recreate the gauges, hence this function.
-        *self.cache_size_gauge.lock().expect("lock poisoned") =
-            Some(self.create_cache_size_gauge());
-        *self
-            .cache_estimated_storage_gauge
-            .lock()
-            .expect("lock poisoned") = Some(self.create_cache_estimated_storage_size_gauge());
+        *self.cache_size_gauge.lock() = Some(self.create_cache_size_gauge());
+        *self.cache_estimated_storage_gauge.lock() =
+            Some(self.create_cache_estimated_storage_size_gauge());
     }
 }
 
@@ -380,7 +355,7 @@ mod test {
                 "type" = "memory"
             );
             assert_gauge!(
-                "apollo_router_cache_size",
+                "apollo.router.cache.size",
                 1,
                 "kind" = "test",
                 "type" = "memory"
@@ -411,7 +386,7 @@ mod test {
             cache.insert("test".to_string(), Stuff {}).await;
             // This metric won't exist
             assert_gauge!(
-                "apollo_router_cache_size",
+                "apollo.router.cache.size",
                 0,
                 "kind" = "test",
                 "type" = "memory"
@@ -457,7 +432,7 @@ mod test {
                 "type" = "memory"
             );
             assert_gauge!(
-                "apollo_router_cache_size",
+                "apollo.router.cache.size",
                 1,
                 "kind" = "test",
                 "type" = "memory"
@@ -479,7 +454,7 @@ mod test {
                 "type" = "memory"
             );
             assert_gauge!(
-                "apollo_router_cache_size",
+                "apollo.router.cache.size",
                 1,
                 "kind" = "test",
                 "type" = "memory"
@@ -501,7 +476,7 @@ mod test {
                 "type" = "memory"
             );
             assert_gauge!(
-                "apollo_router_cache_size",
+                "apollo.router.cache.size",
                 1,
                 "kind" = "test",
                 "type" = "memory"

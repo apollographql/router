@@ -2,34 +2,36 @@
 //! Please ensure that any tests added to this file use the tokio multi-threaded test executor.
 //!
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::ffi::OsStr;
 use std::sync::Arc;
-use std::sync::Mutex;
 
 use apollo_router::_private::create_test_service_factory_from_yaml;
+use apollo_router::Configuration;
+use apollo_router::Context;
 use apollo_router::graphql;
+use apollo_router::graphql::Error;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::services::router;
 use apollo_router::services::subgraph;
 use apollo_router::services::supergraph;
 use apollo_router::test_harness::mocks::persisted_queries::*;
-use apollo_router::Configuration;
-use apollo_router::Context;
 use futures::StreamExt;
-use http::header::ACCEPT;
-use http::header::CONTENT_TYPE;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use http::Uri;
+use http::header::ACCEPT;
+use http::header::CONTENT_TYPE;
 use maplit::hashmap;
 use mime::APPLICATION_JSON;
+use parking_lot::Mutex;
 use serde_json_bytes::json;
 use tower::BoxError;
 use tower::ServiceExt;
+use uuid::Uuid;
 use walkdir::DirEntry;
 use walkdir::WalkDir;
 
@@ -118,10 +120,6 @@ async fn simple_queries_should_not_work() {
     Please either specify a 'content-type' header \
     (with a mime-type that is not one of application/x-www-form-urlencoded, multipart/form-data, text/plain) \
     or provide one of the following headers: x-apollo-operation-name, apollo-require-preflight";
-    let expected_error = graphql::Error::builder()
-        .message(message)
-        .extension_code("CSRF_ERROR")
-        .build();
 
     let mut get_request: router::Request = supergraph::Request::builder()
         .query("{ topProducts { upc name reviews {id product { name } author { id name } } } }")
@@ -145,6 +143,13 @@ async fn simple_queries_should_not_work() {
 
     let actual = query_with_router(router, get_request).await;
 
+    let expected_error = graphql::Error::builder()
+        .message(message)
+        .extension_code("CSRF_ERROR")
+        // Overwrite error ID to avoid comparing random Uuids
+        .apollo_id(actual.errors[0].apollo_id())
+        .build();
+
     assert_eq!(
         1,
         actual.errors.len(),
@@ -162,7 +167,7 @@ async fn empty_posts_should_not_work() {
             HeaderValue::from_static(APPLICATION_JSON.essence_str()),
         )
         .method(Method::POST)
-        .body(hyper::Body::empty())
+        .body(axum::body::Body::empty())
         .unwrap();
 
     let (router, registry) = setup_router_and_registry(serde_json::json!({})).await;
@@ -179,6 +184,7 @@ async fn empty_posts_should_not_work() {
         .message(message)
         .extension_code("INVALID_GRAPHQL_REQUEST")
         .extensions(extensions_map)
+        .apollo_id(actual.errors[0].apollo_id())
         .build();
     assert_eq!(expected_error, actual.errors[0]);
     assert_eq!(registry.totals(), hashmap! {});
@@ -234,12 +240,7 @@ async fn queries_should_work_over_post() {
 async fn service_errors_should_be_propagated() {
     let message = "Unknown operation named \"invalidOperationName\"";
     let mut extensions_map = serde_json_bytes::map::Map::new();
-    extensions_map.insert("code", "GRAPHQL_VALIDATION_FAILED".into());
-    let expected_error = apollo_router::graphql::Error::builder()
-        .message(message)
-        .extensions(extensions_map)
-        .extension_code("VALIDATION_ERROR")
-        .build();
+    extensions_map.insert("code", "GRAPHQL_UNKNOWN_OPERATION_NAME".into());
 
     let request = supergraph::Request::fake_builder()
         .query(r#"{ topProducts { name } }"#)
@@ -250,6 +251,14 @@ async fn service_errors_should_be_propagated() {
     let expected_service_hits = hashmap! {};
 
     let (actual, registry) = query_rust(request).await;
+
+    let expected_error = apollo_router::graphql::Error::builder()
+        .message(message)
+        .extensions(extensions_map)
+        .extension_code("VALIDATION_ERROR")
+        // Overwrite error ID to avoid comparing random Uuids
+        .apollo_id(actual.errors[0].apollo_id())
+        .build();
 
     assert_eq!(expected_error, actual.errors[0]);
     assert_eq!(registry.totals(), expected_service_hits);
@@ -339,11 +348,6 @@ async fn mutation_should_work_over_post() {
 async fn automated_persisted_queries() {
     let (router, registry) = setup_router_and_registry(serde_json::json!({})).await;
 
-    let expected_apq_miss_error = apollo_router::graphql::Error::builder()
-        .message("PersistedQueryNotFound")
-        .extension_code("PERSISTED_QUERY_NOT_FOUND")
-        .build();
-
     let persisted = json!({
         "version" : 1u8,
         "sha256Hash" : "9d1474aa069127ff795d3412b11dfc1f1be0853aed7a54c4a619ee0b1725382e"
@@ -360,6 +364,12 @@ async fn automated_persisted_queries() {
     let expected_service_hits = hashmap! {};
 
     let actual = query_with_router(router.clone(), apq_only_request.try_into().unwrap()).await;
+
+    let expected_apq_miss_error = apollo_router::graphql::Error::builder()
+        .message("PersistedQueryNotFound")
+        .extension_code("PERSISTED_QUERY_NOT_FOUND")
+        .apollo_id(actual.errors[0].apollo_id())
+        .build();
 
     assert_eq!(expected_apq_miss_error, actual.errors[0]);
     assert_eq!(1, actual.errors.len());
@@ -402,6 +412,142 @@ async fn automated_persisted_queries() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn persisted_queries() {
+    use hyper::header::HeaderValue;
+    use serde_json::json;
+
+    /// Construct a persisted query request from an ID.
+    fn pq_request(persisted_query_id: &str) -> router::Request {
+        supergraph::Request::fake_builder()
+            .extension(
+                "persistedQuery",
+                json!({
+                    "version": 1,
+                    "sha256Hash": persisted_query_id
+                }),
+            )
+            .build()
+            .expect("expecting valid request")
+            .try_into()
+            .expect("could not convert supergraph::Request to router::Request")
+    }
+
+    // set up a PQM with one query
+    const PERSISTED_QUERY_ID: &str = "GetMyNameID";
+    const PERSISTED_QUERY_BODY: &str = "query GetMyName { me { name } }";
+    let expected_data = serde_json_bytes::json!({
+      "me": {
+        "name": "Ada Lovelace"
+      }
+    });
+    let manifest = PersistedQueryManifest::from(vec![ManifestOperation {
+        id: PERSISTED_QUERY_ID.to_string(),
+        body: PERSISTED_QUERY_BODY.to_string(),
+        client_name: None,
+    }]);
+    let (_mock_guard, uplink_config) = mock_pq_uplink(&manifest).await;
+
+    let config = serde_json::json!({
+        "persisted_queries": {
+            "enabled": true
+        },
+        "apq": {
+            "enabled": false
+        }
+    });
+
+    let mut config: Configuration = serde_json::from_value(config).unwrap();
+    config.uplink = Some(uplink_config);
+    let (router, registry) = setup_router_and_registry_with_config(config).await.unwrap();
+
+    // Successfully run a persisted query.
+    let actual = query_with_router(router.clone(), pq_request(PERSISTED_QUERY_ID)).await;
+    assert!(actual.errors.is_empty());
+    assert_eq!(actual.data.as_ref(), Some(&expected_data));
+    assert_eq!(registry.totals(), hashmap! {"accounts".to_string() => 1});
+
+    // Error on unpersisted query.
+    const UNKNOWN_QUERY_ID: &str = "unknown_query";
+    const UNPERSISTED_QUERY_BODY: &str = "query GetYourName { you: me { name } }";
+    let expected_data = serde_json_bytes::json!({
+      "you": {
+        "name": "Ada Lovelace"
+      }
+    });
+    let actual = query_with_router(router.clone(), pq_request(UNKNOWN_QUERY_ID)).await;
+    assert_eq!(
+        actual.errors,
+        vec![
+            apollo_router::graphql::Error::builder()
+                .message(format!(
+                    "Persisted query '{UNKNOWN_QUERY_ID}' not found in the persisted query list"
+                ))
+                .extension_code("PERSISTED_QUERY_NOT_IN_LIST")
+                // Overwrite error ID to avoid comparing random Uuids
+                .apollo_id(actual.errors[0].apollo_id())
+                .build()
+        ]
+    );
+    assert_eq!(actual.data, None);
+    assert_eq!(registry.totals(), hashmap! {"accounts".to_string() => 1});
+
+    // We didn't break normal GETs.
+    let actual = query_with_router(
+        router.clone(),
+        supergraph::Request::fake_builder()
+            .query(UNPERSISTED_QUERY_BODY)
+            .method(Method::GET)
+            .build()
+            .unwrap()
+            .try_into()
+            .unwrap(),
+    )
+    .await;
+    assert!(actual.errors.is_empty());
+    assert_eq!(actual.data.as_ref(), Some(&expected_data));
+    assert_eq!(registry.totals(), hashmap! {"accounts".to_string() => 2});
+
+    // We didn't break normal POSTs.
+    let actual = query_with_router(
+        router.clone(),
+        supergraph::Request::fake_builder()
+            .query(UNPERSISTED_QUERY_BODY)
+            .method(Method::POST)
+            .build()
+            .unwrap()
+            .try_into()
+            .unwrap(),
+    )
+    .await;
+    assert!(actual.errors.is_empty());
+    assert_eq!(actual.data, Some(expected_data));
+    assert_eq!(registry.totals(), hashmap! {"accounts".to_string() => 3});
+
+    // Proper error when sending malformed request body
+    let actual = query_with_router(
+        router.clone(),
+        http::Request::builder()
+            .uri("http://default")
+            .method(Method::POST)
+            .header(
+                CONTENT_TYPE,
+                HeaderValue::from_static(APPLICATION_JSON.essence_str()),
+            )
+            .body(axum::body::Body::empty())
+            .unwrap()
+            .into(),
+    )
+    .await;
+    assert_eq!(actual.errors.len(), 1);
+
+    assert_eq!(actual.errors[0].message, "Invalid GraphQL request");
+    assert_eq!(
+        actual.errors[0].extensions["code"],
+        "INVALID_GRAPHQL_REQUEST"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn missing_variables() {
     let request = supergraph::Request::fake_builder()
         .query(
@@ -427,7 +573,7 @@ async fn missing_variables() {
 
     assert_eq!(StatusCode::BAD_REQUEST, http_response.response.status());
 
-    let mut response = serde_json::from_slice::<graphql::Response>(
+    let response = serde_json::from_slice::<graphql::Response>(
         http_response
             .next_response()
             .await
@@ -438,28 +584,138 @@ async fn missing_variables() {
     )
     .unwrap();
 
-    let mut expected = vec![
+    let mut normalized_actual_errors = normalize_errors(response.errors);
+    normalized_actual_errors.sort_by_key(|e| e.message.clone());
+
+    let mut expected_errors = vec![
         graphql::Error::builder()
-            .message("invalid type for variable: 'missingVariable'")
+            .message("missing variable `$missingVariable`: for required GraphQL type `Int!`")
             .extension_code("VALIDATION_INVALID_TYPE_VARIABLE")
             .extension("name", "missingVariable")
+            .apollo_id(Uuid::nil())
             .build(),
         graphql::Error::builder()
-            .message("invalid type for variable: 'yetAnotherMissingVariable'")
+            .message(
+                "missing variable `$yetAnotherMissingVariable`: for required GraphQL type `ID!`",
+            )
             .extension_code("VALIDATION_INVALID_TYPE_VARIABLE")
             .extension("name", "yetAnotherMissingVariable")
+            .apollo_id(Uuid::nil())
             .build(),
     ];
-    response.errors.sort_by_key(|e| e.message.clone());
-    expected.sort_by_key(|e| e.message.clone());
-    assert_eq!(response.errors, expected);
+
+    expected_errors.sort_by_key(|e| e.message.clone());
+    assert_eq!(normalized_actual_errors, expected_errors);
+}
+
+/// <https://github.com/apollographql/router/issues/2984>
+#[tokio::test(flavor = "multi_thread")]
+async fn input_object_variable_validation() {
+    let schema = r#"
+        schema
+          @link(url: "https://specs.apollo.dev/link/v1.0")
+          @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+        {
+          query: Query
+        }
+
+        directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+        directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+        directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+        directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+        directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+        input CoordinatesInput
+          @join__type(graph: SUBGRAPH1)
+        {
+          latitude: Float!
+          longitude: Float!
+        }
+
+        scalar join__FieldSet
+
+        enum join__Graph {
+          SUBGRAPH1 @join__graph(name: "subgraph1", url: "http://localhost:4001")
+        }
+
+        scalar link__Import
+
+        enum link__Purpose {
+          """
+          `SECURITY` features provide metadata necessary to securely resolve fields.
+          """
+          SECURITY
+
+          """
+          `EXECUTION` features provide metadata necessary for operation execution.
+          """
+          EXECUTION
+        }
+
+        input MyInput
+          @join__type(graph: SUBGRAPH1)
+        {
+          coordinates: [CoordinatesInput]
+        }
+
+        type Query
+          @join__type(graph: SUBGRAPH1)
+        {
+          getData(params: MyInput): Int
+        }
+    "#;
+    let request = apollo_router::services::supergraph::Request::fake_builder()
+        .query("query($x: MyInput) { getData(params: $x) }")
+        .variable(
+            "x",
+            json!({"coordinates": [{"latitude": 45.5, "longitude": null}]}),
+        )
+        .build()
+        .unwrap();
+    let response = apollo_router::TestHarness::builder()
+        .schema(schema)
+        .build_supergraph()
+        .await
+        .unwrap()
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+    let normalized_errors = normalize_errors(response.errors);
+    insta::assert_debug_snapshot!(normalized_errors, @r###"
+    [
+        Error {
+            message: "missing input value at `$x.coordinates[0].longitude`: for required GraphQL type `Float!`",
+            locations: [],
+            path: None,
+            extensions: {
+                "name": String(
+                    "x",
+                ),
+                "code": String(
+                    "VALIDATION_INVALID_TYPE_VARIABLE",
+                ),
+            },
+            apollo_id: 00000000-0000-0000-0000-000000000000,
+        },
+    ]
+    "###);
 }
 
 const PARSER_LIMITS_TEST_QUERY: &str =
     r#"{ me { reviews { author { reviews { author { name } } } } } }"#;
 const PARSER_LIMITS_TEST_QUERY_TOKEN_COUNT: usize = 36;
 const PARSER_LIMITS_TEST_QUERY_RECURSION: usize = 6;
-
 #[tokio::test(flavor = "multi_thread")]
 async fn query_just_under_recursion_limit() {
     let config = serde_json::json!({
@@ -601,10 +857,8 @@ async fn defer_path_with_disabled_config() {
         "supergraph": {
             "defer_support": false,
         },
-        "plugins": {
-            "apollo.include_subgraph_errors": {
-                "all": true
-            }
+        "include_subgraph_errors": {
+            "all": true
         }
     });
     let request = supergraph::Request::fake_builder()
@@ -638,10 +892,8 @@ async fn defer_path_with_disabled_config() {
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_path() {
     let config = serde_json::json!({
-        "plugins": {
-            "apollo.include_subgraph_errors": {
-                "all": true
-            }
+        "include_subgraph_errors": {
+            "all": true
         }
     });
     let request = supergraph::Request::fake_builder()
@@ -676,10 +928,8 @@ async fn defer_path() {
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_path_in_array() {
     let config = serde_json::json!({
-        "plugins": {
-            "apollo.include_subgraph_errors": {
-                "all": true
-            }
+        "include_subgraph_errors": {
+            "all": true
         }
     });
     let request = supergraph::Request::fake_builder()
@@ -719,10 +969,8 @@ async fn defer_path_in_array() {
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_query_without_accept() {
     let config = serde_json::json!({
-        "plugins": {
-            "apollo.include_subgraph_errors": {
-                "all": true
-            }
+        "include_subgraph_errors": {
+            "all": true
         }
     });
     let request = supergraph::Request::fake_builder()
@@ -755,10 +1003,8 @@ async fn defer_query_without_accept() {
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_empty_primary_response() {
     let config = serde_json::json!({
-        "plugins": {
-            "apollo.include_subgraph_errors": {
-                "all": true
-            }
+        "include_subgraph_errors": {
+            "all": true
         }
     });
     let request = supergraph::Request::fake_builder()
@@ -903,7 +1149,7 @@ async fn query_operation_id() {
         expected_apollo_operation_id,
         response
             .context
-            .get::<_, String>("apollo_operation_id".to_string())
+            .get::<_, String>("apollo::supergraph::operation_id")
             .unwrap()
             .unwrap()
             .as_str()
@@ -929,7 +1175,7 @@ async fn query_operation_id() {
         expected_apollo_operation_id,
         response
             .context
-            .get::<_, String>("apollo_operation_id".to_string())
+            .get::<_, String>("apollo::supergraph::operation_id")
             .unwrap()
             .unwrap()
             .as_str()
@@ -949,7 +1195,7 @@ async fn query_operation_id() {
         // "## GraphQLParseFailure\n"
         response
             .context
-            .get::<_, String>("apollo_operation_id".to_string())
+            .get::<_, String>("apollo::supergraph::operation_id")
             .unwrap()
             .is_none()
     );
@@ -971,11 +1217,13 @@ async fn query_operation_id() {
 
     let response = http_query_with_router(router.clone(), unknown_operation_name).await;
     // "## GraphQLUnknownOperationName\n"
-    assert!(response
-        .context
-        .get::<_, String>("apollo_operation_id".to_string())
-        .unwrap()
-        .is_none());
+    assert!(
+        response
+            .context
+            .get::<_, String>("apollo::supergraph::operation_id")
+            .unwrap()
+            .is_none()
+    );
 
     let validation_error: router::Request = supergraph::Request::fake_builder()
         .query(
@@ -994,11 +1242,13 @@ async fn query_operation_id() {
 
     let response = http_query_with_router(router, validation_error).await;
     // "## GraphQLValidationFailure\n"
-    assert!(response
-        .context
-        .get::<_, String>("apollo_operation_id".to_string())
-        .unwrap()
-        .is_none());
+    assert!(
+        response
+            .context
+            .get::<_, String>("apollo::supergraph::operation_id")
+            .unwrap()
+            .is_none()
+    );
 }
 
 async fn http_query_rust(
@@ -1119,7 +1369,7 @@ impl CountingServiceRegistry {
     }
 
     fn increment(&self, service: &str) {
-        let mut counts = self.counts.lock().unwrap();
+        let mut counts = self.counts.lock();
         match counts.entry(service.to_owned()) {
             Entry::Occupied(mut e) => {
                 *e.get_mut() += 1;
@@ -1131,7 +1381,7 @@ impl CountingServiceRegistry {
     }
 
     fn totals(&self) -> HashMap<String, usize> {
-        self.counts.lock().unwrap().clone()
+        self.counts.lock().clone()
     }
 }
 
@@ -1191,27 +1441,26 @@ async fn all_stock_router_example_yamls_are_valid() {
             if !cfg!(target_family = "unix") && entry_parent.join(".unixonly").exists() {
                 break;
             }
-            if let Some(name) = example_directory_entry.file_name().to_str() {
-                if name.ends_with("yaml") || name.ends_with("yml") {
-                    let raw_yaml = std::fs::read_to_string(entry_path)
-                        .unwrap_or_else(|e| panic!("unable to read {display_path}: {e}"));
-                    {
-                        let mut configuration: Configuration = serde_yaml::from_str(&raw_yaml)
-                            .unwrap_or_else(|e| panic!("unable to parse YAML {display_path}: {e}"));
-                        let (_mock_guard, configuration) =
-                            if configuration.persisted_queries.enabled {
-                                let (_mock_guard, uplink_config) = mock_empty_pq_uplink().await;
-                                configuration.uplink = Some(uplink_config);
-                                (Some(_mock_guard), configuration)
-                            } else {
-                                (None, configuration)
-                            };
-                        setup_router_and_registry_with_config(configuration)
-                            .await
-                            .unwrap_or_else(|e| {
-                                panic!("unable to start up router for {display_path}: {e}");
-                            });
-                    }
+            if let Some(name) = example_directory_entry.file_name().to_str()
+                && (name.ends_with("yaml") || name.ends_with("yml"))
+            {
+                let raw_yaml = std::fs::read_to_string(entry_path)
+                    .unwrap_or_else(|e| panic!("unable to read {display_path}: {e}"));
+                {
+                    let mut configuration: Configuration = serde_yaml::from_str(&raw_yaml)
+                        .unwrap_or_else(|e| panic!("unable to parse YAML {display_path}: {e}"));
+                    let (_mock_guard, configuration) = if configuration.persisted_queries.enabled {
+                        let (_mock_guard, uplink_config) = mock_empty_pq_uplink().await;
+                        configuration.uplink = Some(uplink_config);
+                        (Some(_mock_guard), configuration)
+                    } else {
+                        (None, configuration)
+                    };
+                    setup_router_and_registry_with_config(configuration)
+                        .await
+                        .unwrap_or_else(|e| {
+                            panic!("unable to start up router for {display_path}: {e}");
+                        });
                 }
             }
         }
@@ -1219,7 +1468,6 @@ async fn all_stock_router_example_yamls_are_valid() {
 }
 
 #[tokio::test]
-#[tracing_test::traced_test]
 async fn test_starstuff_supergraph_is_valid() {
     let schema = include_str!("../../examples/graphql/supergraph.graphql");
     apollo_router::TestHarness::builder()
@@ -1238,7 +1486,6 @@ Make sure it is accessible, and the configuration is working with the router."#,
 // This test must use the multi_thread tokio executor or the opentelemetry hang bug will
 // be encountered. (See https://github.com/open-telemetry/opentelemetry-rust/issues/536)
 #[tokio::test(flavor = "multi_thread")]
-#[tracing_test::traced_test]
 async fn test_telemetry_doesnt_hang_with_invalid_schema() {
     create_test_service_factory_from_yaml(
         include_str!("../src/testdata/invalid_supergraph.graphql"),
@@ -1288,4 +1535,20 @@ fn it_will_not_start_with_loose_file_permissions() {
         std::str::from_utf8(&output.stderr).expect("output is a string"),
         "Apollo key file permissions (0o777) are too permissive\n"
     )
+}
+
+fn normalize_errors(errors: Vec<Error>) -> Vec<Error> {
+    errors
+        .into_iter()
+        .map(|e| {
+            Error::builder()
+                // Overwrite error ID to avoid comparing random Uuids
+                .apollo_id(Uuid::nil())
+                .message(e.message)
+                .locations(e.locations)
+                .and_path(e.path)
+                .extensions(e.extensions)
+                .build()
+        })
+        .collect()
 }

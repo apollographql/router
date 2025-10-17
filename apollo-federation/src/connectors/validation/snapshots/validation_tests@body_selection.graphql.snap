@@ -1,0 +1,35 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/body_selection.graphql
+---
+[
+    Message {
+        code: InvalidBody,
+        message: "In `@connect(http: {body:})` on `Query.dollar`: must start with one of $args, $config, $context, $request, $env",
+        locations: [
+            12:20..12:21,
+        ],
+    },
+    Message {
+        code: InvalidBody,
+        message: "In `@connect(http: {body:})` on `Query.dollarField`: `foo` must start with one of $args, $config, $context, $request, $env",
+        locations: [
+            20:22..20:25,
+        ],
+    },
+    Message {
+        code: InvalidBody,
+        message: "In `@connect(http: {body:})` on `Query.invalidArrowMethod`: Method ->no_such_method not found",
+        locations: [
+            44:49..44:63,
+        ],
+    },
+    Message {
+        code: InvalidBody,
+        message: "In `@connect(http: {body:})` on `Query.invalidVariable`: unknown variable `$nosuchvariable`, must be one of $args, $config, $context, $request, $env",
+        locations: [
+            52:32..52:47,
+        ],
+    },
+]

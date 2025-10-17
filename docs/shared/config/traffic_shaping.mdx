@@ -1,0 +1,32 @@
+### `traffic_shaping`
+
+```yaml title="traffic_shaping"
+traffic_shaping:
+  all:
+    compression: gzip
+    deduplicate_query: false
+    dns_resolution_strategy: ipv4_only
+    experimental_http2: enable
+    global_rate_limit:
+      capacity: 1
+      interval: 30s
+    timeout: null
+  connector:
+    all:
+      compression: gzip
+      dns_resolution_strategy: ipv4_only
+      experimental_http2: enable
+      global_rate_limit:
+        capacity: 1
+        interval: 30s
+      timeout: null
+    sources: {}
+  deduplicate_variables: null
+  router:
+    concurrency_limit: 0
+    global_rate_limit:
+      capacity: 1
+      interval: 30s
+    timeout: null
+  subgraphs: {}
+```

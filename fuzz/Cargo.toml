@@ -1,20 +1,24 @@
-
 [package]
 name = "router-fuzz"
 version = "0.0.0"
 authors = ["Automatically generated"]
 publish = false
 edition = "2018"
+license-file = "../LICENSE"
 
 [package.metadata]
 cargo-fuzz = true
 
 [dependencies]
-libfuzzer-sys = "0.4"
+libfuzzer-sys = "=0.4.10"
+apollo-federation = { path = "../apollo-federation" }
 apollo-parser.workspace = true
 apollo-smith.workspace = true
+bnf = "0.5.0"
 env_logger = "0.11.0"
 log = "0.4"
+# Required until https://github.com/shnewto/bnf/pull/175, remove when bnf 0.6 is out
+rand = "=0.8.5"
 reqwest = { workspace = true, features = ["json", "blocking"] }
 serde_json.workspace = true
 
@@ -50,7 +54,8 @@ test = false
 doc = false
 
 [[bin]]
-name = "federation"
-path = "fuzz_targets/federation.rs"
+name = "connector_selection_parse"
+path = "fuzz_targets/connector_selection_parse.rs"
 test = false
 doc = false
+bench = false

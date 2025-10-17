@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/invalid_namespace_in_body_selection.graphql
+---
+[
+    Message {
+        code: InvalidBody,
+        message: "In `@connect(http: {body:})` on `Mutation.createUser`: $status is not valid here, must be one of $args, $config, $context, $request, $env",
+        locations: [
+            21:17..21:24,
+        ],
+    },
+]

@@ -8,6 +8,7 @@ use std::task::Poll;
 use bytes::Bytes;
 use futures::Stream;
 use http::HeaderMap;
+use http_body_util::BodyExt;
 use itertools::Itertools;
 use multer::Constraints;
 use multer::Multipart;
@@ -16,11 +17,11 @@ use pin_project_lite::pin_project;
 use tokio::sync::Mutex;
 use tokio::sync::OwnedMutexGuard;
 
+use super::Result as UploadResult;
 use super::config::MultipartRequestLimits;
 use super::error::FileUploadError;
 use super::map_field::MapField;
 use super::map_field::MapFieldRaw;
-use super::Result as UploadResult;
 use crate::services::router::body::RouterBody;
 
 // The limit to set for the map field in the multipart request.
@@ -74,7 +75,7 @@ impl MultipartRequest {
         limits: MultipartRequestLimits,
     ) -> Self {
         let multer = Multipart::with_constraints(
-            request_body,
+            request_body.into_data_stream(),
             boundary,
             Constraints::new().size_limit(SizeLimit::new().for_field("map", MAP_SIZE_LIMIT)),
         );
@@ -173,7 +174,7 @@ where
             let filename = field
                 .file_name()
                 .or_else(|| field.name())
-                .map(|name| format!("'{}'", name))
+                .map(|name| format!("'{name}'"))
                 .unwrap_or_else(|| "unknown".to_owned());
 
             let field = Pin::new(field);
@@ -225,10 +226,7 @@ where
 
                     let files = mem::take(&mut self.file_names);
                     return Poll::Ready(Some(Err(FileUploadError::MissingFiles(
-                        files
-                            .into_iter()
-                            .map(|file| format!("'{}'", file))
-                            .join(", "),
+                        files.into_iter().map(|file| format!("'{file}'")).join(", "),
                     ))));
                 }
                 Poll::Ready(Ok(Some(field))) => {
@@ -241,12 +239,12 @@ where
                     } else {
                         self.state.read_files_counter += 1;
 
-                        if let Some(name) = field.name() {
-                            if self.file_names.remove(name) {
-                                let prefix = (self.file_prefix_fn)(field.headers());
-                                self.current_field = Some(field);
-                                return Poll::Ready(Some(Ok(prefix)));
-                            }
+                        if let Some(name) = field.name()
+                            && self.file_names.remove(name)
+                        {
+                            let prefix = (self.file_prefix_fn)(field.headers());
+                            self.current_field = Some(field);
+                            return Poll::Ready(Some(Ok(prefix)));
                         }
 
                         // The file is extraneous, but the rest can still be processed.

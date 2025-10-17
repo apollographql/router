@@ -189,7 +189,7 @@ impl PackageMacos {
         let mut zip = zip::ZipWriter::new(std::io::BufWriter::new(
             std::fs::File::create(&dist_zip).context("could not create file")?,
         ));
-        let options = zip::write::FileOptions::default()
+        let options = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Stored)
             .unix_permissions(0o755);
         let path = Path::new("dist").join(RELEASE_BIN);

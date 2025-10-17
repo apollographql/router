@@ -1,0 +1,35 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/uri_templates/expressions-in-domain.graphql
+---
+[
+    Message {
+        code: InvalidUrl,
+        message: "`GET` in `@connect(http:)` on `Query.entireDomain` must not contain dynamic pieces in the domain section (before the first `/` or `?`).",
+        locations: [
+            10:29..10:47,
+        ],
+    },
+    Message {
+        code: InvalidUrl,
+        message: "`GET` in `@connect(http:)` on `Query.endOfDomain` must not contain dynamic pieces in the domain section (before the first `/` or `?`).",
+        locations: [
+            15:40..15:58,
+        ],
+    },
+    Message {
+        code: InvalidUrl,
+        message: "`GET` in `@connect(http:)` on `Query.startOfDomain` must not contain dynamic pieces in the domain section (before the first `/` or `?`).",
+        locations: [
+            20:29..20:47,
+        ],
+    },
+    Message {
+        code: InvalidUrl,
+        message: "`GET` in `@connect(http:)` on `Query.middleOfDomain` must not contain dynamic pieces in the domain section (before the first `/` or `?`).",
+        locations: [
+            25:36..25:54,
+        ],
+    },
+]

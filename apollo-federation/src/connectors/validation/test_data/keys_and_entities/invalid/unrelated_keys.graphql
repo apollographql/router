@@ -1,0 +1,28 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.10", import: ["@key"])
+  @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect"])
+
+type Query {
+  products: [Product]
+    @connect(
+      http: { GET: "http://myapi/products" }
+      selection: "id name store { id } seller { id }"
+    )
+}
+
+type Product {
+  id: ID!
+  name: String
+  store: Store
+  seller: Seller
+}
+
+# error
+type Store @key(fields: "id") {
+  id: ID!
+}
+
+# no error
+type Seller @key(fields: "id", resolvable: false) {
+  id: ID!
+}

@@ -1,0 +1,23 @@
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.2"
+    import: ["@connect", "@source"]
+  )
+
+type Query {
+  path: String
+    @connect(
+      http: { GET: "http://example.com/{$config.path}" }
+      selection: "$"
+    )
+  inQuery: String
+    @connect(
+      http: { GET: "http://example.com?{$config.query}" }
+      selection: "$"
+    )
+  inFragment: String
+    @connect(
+      http: { GET: "http://example.com#{$config.fragment}" }
+      selection: "$"
+    )
+}

@@ -2,10 +2,15 @@
 title: Demand Control
 subtitle: Protect your graph from high-cost GraphQL operations
 description: Protect your graph from malicious or demanding clients with Apollo GraphOS Router's demand control features. Estimate, calculate, observe, and reject high-cost GraphQL operations.
-minVersion: 1.48.0
+minVersion: Router v1.48.0
 ---
 
-<EnterpriseFeature />
+<PlanRequired plans={["Free", "Developer", "Standard", "Enterprise"]}>
+
+Rate limits apply on the Free plan.
+Developer and Standard plans require Router v2.6.0 or later.
+
+</PlanRequired>
 
 ## What is demand control?
 
@@ -433,3 +438,46 @@ You can also chart the percentage of operations that would be allowed or rejecte
   src="../../images/demand-control-example-cost-result.png"
   width="600"
 />
+
+## Accessing programmatically
+
+You can programmatically access demand control cost data using [Rhai scripts](/routing/customization/rhai) or Coprocessors. This can be useful for custom logging, decision making, or exposing cost data to clients.
+
+### Exposing cost in response headers
+
+It's possible to expose cost information in the HTTP response payload returned to clients, which can be useful for debugging. This can be accomplished via a Rhai script on the `supergraph_service` hook:
+
+```rust
+fn supergraph_service(service) {
+  service.map_response(|response| {
+    if response.is_primary() {
+      try {
+        // Get cost estimation values from context
+        let estimated_cost = response.context[Router.APOLLO_COST_ESTIMATED_KEY];
+        let actual_cost = response.context[Router.APOLLO_COST_ACTUAL_KEY];
+        let strategy = response.context[Router.APOLLO_COST_STRATEGY_KEY];
+        let result = response.context[Router.APOLLO_COST_RESULT_KEY];
+
+        // Add them as response headers
+        if estimated_cost != () {
+          response.headers["apollo-cost-estimate"] = estimated_cost.to_string();
+        }
+
+        if actual_cost != () {
+          response.headers["apollo-cost-actual"] = actual_cost.to_string();
+        }
+
+        if strategy != () {
+          response.headers["apollo-cost-strategy"] = strategy.to_string();
+        }
+
+        if result != () {
+          response.headers["apollo-cost-result"] = result.to_string();
+        }
+      } catch(err) {
+        log_debug(`Could not add cost headers: ${err}`);
+      }
+    }
+  });
+}
+```

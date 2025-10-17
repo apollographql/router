@@ -31,9 +31,11 @@ fn some_name() {
 }
 */
 
+mod cancel;
 mod context;
 mod debug_max_evaluated_plans_configuration;
 mod defer;
+mod disable_subgraphs;
 mod entities;
 mod fetch_operation_names;
 mod field_merging_with_skip_and_include;
@@ -612,113 +614,6 @@ fn key_where_at_external_is_not_at_top_level_of_selection_of_requires() {
         }
       "###
     );
-}
-
-// TODO(@TylerBloom): As part of the private preview, we strip out all uses of the @defer
-// directive. Once handling that feature is implemented, this test will start failing and should be
-// updated to use a config for the planner to strip out the defer directive.
-#[test]
-fn defer_gets_stripped_out() {
-    let planner = planner!(
-        Subgraph1: r#"
-          type Query {
-            t: T
-          }
-
-          type T @key(fields: "id") {
-            id: ID!
-          }
-          "#,
-        Subgraph2: r#"
-          type T @key(fields: "id") {
-            id: ID!
-            data: String
-          }
-          "#,
-    );
-    let plan_one = assert_plan!(
-        &planner,
-        r#"
-          {
-              t {
-                  id
-                  data
-              }
-          }
-        "#,
-        @r###"
-          QueryPlan {
-            Sequence {
-              Fetch(service: "Subgraph1") {
-                {
-                  t {
-                    __typename
-                    id
-                  }
-                }
-              },
-              Flatten(path: "t") {
-                Fetch(service: "Subgraph2") {
-                  {
-                    ... on T {
-                      __typename
-                      id
-                    }
-                  } =>
-                  {
-                    ... on T {
-                      data
-                    }
-                  }
-                },
-              },
-            },
-          }
-        "###
-    );
-    let plan_two = assert_plan!(
-        &planner,
-        r#"
-          {
-              t {
-                  id
-                  ... @defer {
-                    data
-                  }
-              }
-          }
-        "#,
-        @r###"
-          QueryPlan {
-            Sequence {
-              Fetch(service: "Subgraph1") {
-                {
-                  t {
-                    __typename
-                    id
-                  }
-                }
-              },
-              Flatten(path: "t") {
-                Fetch(service: "Subgraph2") {
-                  {
-                    ... on T {
-                      __typename
-                      id
-                    }
-                  } =>
-                  {
-                    ... on T {
-                      data
-                    }
-                  }
-                },
-              },
-            },
-          }
-        "###
-    );
-    assert_eq!(plan_one, plan_two)
 }
 
 #[test]
@@ -1318,13 +1213,15 @@ fn condition_order_router799() {
             }
           }
         "#,
+        // Note: `on Mutation` is suppressed in the query plan. But, the operation is still a
+        //       mutation.
         @r###"
     QueryPlan {
       Include(if: $var1) {
         Skip(if: $var0) {
           Fetch(service: "books") {
             {
-              ... on Mutation {
+              ... {
                 field0: __typename
               }
             }
@@ -1345,13 +1242,15 @@ fn condition_order_router799() {
             }
           }
         "#,
+        // Note: `on Mutation` is suppressed in the query plan. But, the operation is still a
+        //       mutation.
         @r###"
     QueryPlan {
       Include(if: $var1) {
         Skip(if: $var0) {
           Fetch(service: "books") {
             {
-              ... on Mutation {
+              ... {
                 field0: __typename
               }
             }

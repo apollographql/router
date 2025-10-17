@@ -1,0 +1,48 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect", "@source"])
+  @source(
+    name: "invalid_api"
+    http: { baseURL: "http://127.0.0.1", headers: [{ name: "x-my-header", value: "{$request.headers.someheader}" }] }
+  )
+  @source(
+    name: "awesome_api"
+    http: {
+      baseURL: "http://127.0.0.1"
+      headers: [{ name: "x-my-header", value: "{$request.headers.someheader->first}" }]
+    }
+  )
+
+type Query {
+  pass: [String!]!
+    @connect(
+      http: {
+        GET: "http://127.0.0.1/?something={$request.headers.someheader->first}"
+        headers: [{ name: "x-my-header", value: "{$request.headers.someheader->first}" }]
+      }
+      selection: "$"
+    )
+  failOnArray: [String!]!
+    @connect(
+      http: {
+        GET: "http://127.0.0.1/?something={$request.headers.someheader}"
+        headers: [{ name: "x-my-header", value: "{$request.headers.someheader}" }]
+      }
+      selection: "$"
+    )
+  failOnInvalidRequestProperty: [String!]!
+    @connect(
+      http: {
+        GET: "http://127.0.0.1/?something={$request.x}"
+        headers: [{ name: "x-my-header", value: "{$request.x}" }]
+      }
+      selection: "$"
+    )
+  failOnInvalidObject: [String!]!
+    @connect(
+      http: {
+        GET: "http://127.0.0.1/?something={$request.headers}"
+        headers: [{ name: "x-my-header", value: "{$request.headers}" }]
+      }
+      selection: "$"
+    )
+}

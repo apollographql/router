@@ -2,15 +2,15 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use futures::FutureExt;
-use http::header::CONTENT_LENGTH;
-use http::header::CONTENT_TYPE;
 use http::HeaderName;
 use http::HeaderValue;
+use http::header::CONTENT_LENGTH;
+use http::header::CONTENT_TYPE;
+use mediatype::MediaType;
+use mediatype::ReadParams;
 use mediatype::names::BOUNDARY;
 use mediatype::names::FORM_DATA;
 use mediatype::names::MULTIPART;
-use mediatype::MediaType;
-use mediatype::ReadParams;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -42,8 +42,6 @@ mod rearrange_query_plan;
 
 type Result<T> = std::result::Result<T, error::FileUploadError>;
 
-// FIXME: check if we need to hide docs
-#[doc(hidden)] // Only public for integration tests
 struct FileUploadsPlugin {
     enabled: bool,
     limits: MultipartRequestLimits,
@@ -68,7 +66,7 @@ impl PluginPrivate for FileUploadsPlugin {
         }
         let limits = self.limits;
         ServiceBuilder::new()
-            .oneshot_checkpoint_async(move |req: router::Request| {
+            .checkpoint_async(move |req: router::Request| {
                 async move {
                     let context = req.context.clone();
                     Ok(match router_layer(req, limits).await {
@@ -83,6 +81,7 @@ impl PluginPrivate for FileUploadsPlugin {
                 }
                 .boxed()
             })
+            .buffered()
             .service(service)
             .boxed()
     }
@@ -92,7 +91,7 @@ impl PluginPrivate for FileUploadsPlugin {
             return service;
         }
         ServiceBuilder::new()
-            .oneshot_checkpoint_async(move |req: supergraph::Request| {
+            .checkpoint_async(move |req: supergraph::Request| {
                 async move {
                     let context = req.context.clone();
                     Ok(match supergraph_layer(req).await {
@@ -107,6 +106,7 @@ impl PluginPrivate for FileUploadsPlugin {
                 }
                 .boxed()
             })
+            .buffered()
             .service(service)
             .boxed()
     }
@@ -141,18 +141,19 @@ impl PluginPrivate for FileUploadsPlugin {
             return service;
         }
         ServiceBuilder::new()
-            .oneshot_checkpoint_async(|req: subgraph::Request| {
+            .checkpoint_async(|req: subgraph::Request| {
                 subgraph_layer(req)
                     .boxed()
                     .map(|req| Ok(ControlFlow::Continue(req)))
                     .boxed()
             })
+            .buffered()
             .service(service)
             .boxed()
     }
 }
 
-fn get_multipart_mime(req: &router::Request) -> Option<MediaType> {
+fn get_multipart_mime(req: &router::Request) -> Option<MediaType<'_>> {
     req.router_request
         .headers()
         .get(CONTENT_TYPE)
@@ -162,6 +163,11 @@ fn get_multipart_mime(req: &router::Request) -> Option<MediaType> {
         .filter(|mime| mime.ty == MULTIPART && mime.subty == FORM_DATA)
 }
 
+/// Takes in multipart request bodies, and turns them into serialized JSON bodies that the rest of the router
+/// pipeline can understand.
+///
+/// # Context
+/// Adds a [`MultipartRequest`] value to context.
 async fn router_layer(
     req: router::Request,
     limits: MultipartRequestLimits,
@@ -174,12 +180,12 @@ async fn router_layer(
 
         let (mut request_parts, request_body) = req.router_request.into_parts();
 
-        let mut multipart = MultipartRequest::new(request_body.into(), boundary, limits);
+        let mut multipart = MultipartRequest::new(request_body, boundary, limits);
         let operations_stream = multipart.operations_field().await?;
 
         req.context
             .extensions()
-            .with_lock(|mut lock| lock.insert(multipart));
+            .with_lock(|lock| lock.insert(multipart));
 
         let content_type = operations_stream
             .headers()
@@ -191,9 +197,9 @@ async fn router_layer(
         request_parts.headers.insert(CONTENT_TYPE, content_type);
         request_parts.headers.remove(CONTENT_LENGTH);
 
-        let request_body = RouterBody::wrap_stream(operations_stream);
+        let request_body = router::body::from_result_stream(operations_stream);
         return Ok(router::Request::from((
-            http::Request::from_parts(request_parts, request_body.into_inner()),
+            http::Request::from_parts(request_parts, request_body),
             req.context,
         )));
     }
@@ -201,6 +207,14 @@ async fn router_layer(
     Ok(req)
 }
 
+/// Patch up the variable values in file upload requests.
+///
+/// File uploads do something funky: They use *required* GraphQL field arguments (`file: Upload!`),
+/// but then pass `null` as the variable value. This is invalid GraphQL, but it is how the file
+/// uploads spec works.
+///
+/// To make all this work in the router, we stick some placeholder value in the variables used for
+/// file uploads, and then remove them before we pass on the files to subgraphs.
 async fn supergraph_layer(mut req: supergraph::Request) -> Result<supergraph::Request> {
     let multipart = req
         .context
@@ -219,7 +233,7 @@ async fn supergraph_layer(mut req: supergraph::Request) -> Result<supergraph::Re
                         variables,
                         variable_path,
                         serde_json_bytes::Value::String(
-                            format!("<Placeholder for file '{}'>", filename).into(),
+                            format!("<Placeholder for file '{filename}'>").into(),
                         ),
                     )
                     .map_err(|path| FileUploadError::InputValueNotFound(path.join(".")))?;
@@ -227,7 +241,7 @@ async fn supergraph_layer(mut req: supergraph::Request) -> Result<supergraph::Re
             }
         }
 
-        req.context.extensions().with_lock(|mut lock| {
+        req.context.extensions().with_lock(|lock| {
             lock.insert(SupergraphLayerResult {
                 multipart,
                 map: Arc::new(map_field),
@@ -361,8 +375,9 @@ pub(crate) async fn http_request_wrapper(
         request_parts
             .headers
             .insert(CONTENT_TYPE, form.content_type());
-        let body = RouterBody::wrap_stream(form.into_stream(operations).await);
-        return http::Request::from_parts(request_parts, body);
+        let request_body = router::body::from_result_stream(form.into_stream(operations).await);
+
+        return http::Request::from_parts(request_parts, request_body);
     }
     req
 }

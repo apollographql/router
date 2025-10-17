@@ -1,0 +1,18 @@
+description: Apollo subgraph fetch duration histogram
+events:
+  - - context:
+        map:
+          "apollo::supergraph::operation_name": "Test"
+          "apollo::supergraph::operation_id": "myOperationID"
+          "apollo::supergraph::operation_kind": "query"
+          "apollo::telemetry::client_name": "myClient"
+          "apollo::telemetry::client_version": "v0.1.0"
+    - subgraph_request:
+        query: "query { hello }"
+        operation_name: "Products"
+        operation_kind: query
+        subgraph_name: "products"
+    - subgraph_response:
+        status: 200
+        data:
+          hello: "world"

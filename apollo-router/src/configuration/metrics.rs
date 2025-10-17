@@ -1,17 +1,19 @@
 use std::collections::HashMap;
 use std::str::FromStr;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 
 use jsonpath_rust::JsonPathInst;
+use opentelemetry::KeyValue;
+use opentelemetry::metrics::Meter;
 use opentelemetry::metrics::MeterProvider;
-use opentelemetry_api::metrics::Meter;
-use opentelemetry_api::KeyValue;
+use parking_lot::Mutex;
 use paste::paste;
 use serde_json::Value;
 
-use super::AvailableParallelism;
+use crate::Configuration;
 use crate::metrics::meter_provider;
 use crate::uplink::license_enforcement::LicenseState;
-use crate::Configuration;
 
 type InstrumentMap = HashMap<String, (u64, HashMap<String, opentelemetry::Value>)>;
 
@@ -38,7 +40,7 @@ impl Metrics {
         let mut data = InstrumentData::default();
 
         // Env variables and unit tests don't mix.
-        data.populate_env_instrument();
+        data.populate_cli_instrument();
         data.populate_config_instruments(
             configuration
                 .validated_yaml
@@ -47,9 +49,6 @@ impl Metrics {
         );
         data.populate_license_instrument(license_state);
         data.populate_user_plugins_instrument(configuration);
-        data.populate_query_planner_experimental_parallelism(configuration);
-        data.populate_deno_or_rust_mode_instruments(configuration);
-        data.populate_legacy_fragment_usage(configuration);
 
         data.into()
     }
@@ -64,10 +63,10 @@ impl InstrumentData {
     ) {
         if let Ok(json_path) = JsonPathInst::from_str(path) {
             let value_at_path = json_path.find_slice(value).into_iter().next();
-            if let Some(Value::Object(children)) = value_at_path.as_deref() {
-                if let Some(first_key) = children.keys().next() {
-                    attributes.insert(attr_name.to_string(), first_key.clone().into());
-                }
+            if let Some(Value::Object(children)) = value_at_path.as_deref()
+                && let Some(first_key) = children.keys().next()
+            {
+                attributes.insert(attr_name.to_string(), first_key.clone().into());
             }
         }
     }
@@ -124,19 +123,20 @@ impl InstrumentData {
     }
 
     pub(crate) fn populate_config_instruments(&mut self, yaml: &serde_json::Value) {
-        // This macro will query the config json for a primary metric and optionally metric attributes.
-
-        // The reason we use jsonpath_rust is that jsonpath_lib has correctness issues and looks abandoned.
-        // We should consider converting the rest of the codebase to use jsonpath_rust.
-
-        // Example usage:
-        // populate_usage_instrument!(
-        //             value.apollo.router.config.authorization, // The metric name
-        //             "$.authorization", // The path into the config
-        //             opt.require_authentication, // The name of the attribute
-        //             "$[?(@.require_authentication == true)]" // The path for the attribute relative to the metric
-        //         );
-
+        /// This macro will query the config json for a primary metric and optionally metric attributes.
+        ///
+        /// The reason we use jsonpath_rust is that jsonpath_lib has correctness issues and looks abandoned.
+        /// We should consider converting the rest of the codebase to use jsonpath_rust.
+        ///
+        /// Example usage:
+        /// ```rust,ignore
+        /// populate_config_instrument!(
+        ///     apollo.router.config.authorization, // The metric name
+        ///     "$.authorization", // The path into the config
+        ///     opt.require_authentication, // The name of the attribute
+        ///     "$[?(@.require_authentication == true)]" // The path for the attribute relative to the metric
+        /// );
+        /// ```
         macro_rules! populate_config_instrument {
             ($($metric:ident).+, $path:literal) => {
                 let instrument_name = stringify!($($metric).+).to_string();
@@ -303,9 +303,7 @@ impl InstrumentData {
             opt.subgraph.compression,
             "$[?(@.all.compression || @.subgraphs..compression)]",
             opt.subgraph.deduplicate_query,
-            "$[?(@.all.deduplicate_query == true || @.subgraphs..deduplicate_query == true)]",
-            opt.subgraph.retry,
-            "$[?(@.all.experimental_retry || @.subgraphs..experimental_retry)]"
+            "$[?(@.all.deduplicate_query == true || @.subgraphs..deduplicate_query == true)]"
         );
 
         populate_config_instrument!(
@@ -315,6 +313,27 @@ impl InstrumentData {
             "$[?(@.enabled)]",
             opt.subgraph.enabled,
             "$[?(@.subgraph.all.enabled)]",
+            opt.subgraph.enabled,
+            "$[?(@.subgraph.subgraphs..enabled)]",
+            opt.subgraph.ttl,
+            "$[?(@.subgraph.all.ttl || @.subgraph.subgraphs..ttl)]",
+            opt.subgraph.invalidation.enabled,
+            "$[?(@.subgraph.all.invalidation.enabled || @.subgraph.subgraphs..invalidation.enabled)]"
+        );
+
+        populate_config_instrument!(
+            apollo.router.config.response_cache,
+            "$.experimental_response_cache",
+            opt.enabled,
+            "$[?(@.enabled)]",
+            opt.debug,
+            "$[?(@.debug)]",
+            opt.subgraph.enabled,
+            "$[?(@.subgraph.all.enabled)]",
+            opt.subgraph.postgres.required_to_start,
+            "$[?(@.subgraph.all.postgres.required_to_start || @.subgraph.subgraphs..postgres.required_to_start)]",
+            opt.subgraph.postgres.cleanup_interval,
+            "$[?(@.subgraph.all.postgres.cleanup_interval || @.subgraph.subgraphs..postgres.cleanup_interval)]",
             opt.subgraph.enabled,
             "$[?(@.subgraph.subgraphs..enabled)]",
             opt.subgraph.ttl,
@@ -333,8 +352,6 @@ impl InstrumentData {
             "$..tracing.otlp[?(@.enabled==true)]",
             opt.tracing.datadog,
             "$..tracing.datadog[?(@.enabled==true)]",
-            opt.tracing.jaeger,
-            "$..tracing.jaeger[?(@.enabled==true)]",
             opt.tracing.zipkin,
             "$..tracing.zipkin[?(@.enabled==true)]",
             opt.events,
@@ -345,6 +362,8 @@ impl InstrumentData {
             "$..events.supergraph",
             opt.events.subgraph,
             "$..events.subgraph",
+            opt.events.connector,
+            "$..events.connector",
             opt.instruments,
             "$..instruments",
             opt.instruments.router,
@@ -353,6 +372,8 @@ impl InstrumentData {
             "$..instruments.supergraph",
             opt.instruments.subgraph,
             "$..instruments.subgraph",
+            opt.instruments.connector,
+            "$..instruments.connector",
             opt.instruments.graphql,
             "$..instruments.graphql",
             opt.instruments.default_attribute_requirement_level,
@@ -369,8 +390,8 @@ impl InstrumentData {
             "$..spans.subgraph",
             opt.spans.supergraph,
             "$..spans.supergraph",
-            opt.logging.experimental_when_header,
-            "$..logging.experimental_when_header"
+            opt.tracing.common.sampler,
+            "$..tracing.common.sampler"
         );
 
         populate_config_instrument!(
@@ -402,7 +423,51 @@ impl InstrumentData {
             opt.signature_normalization_algorithm,
             "$.signature_normalization_algorithm",
             opt.metrics_reference_mode,
-            "$.metrics_reference_mode"
+            "$.metrics_reference_mode",
+            opt.errors.preview_extended_error_metrics,
+            "$.errors.preview_extended_error_metrics",
+            opt.field_level_instrumentation_sampler,
+            "$.field_level_instrumentation_sampler",
+            opt.tracing.batch_processor.scheduled_delay,
+            "$.tracing.batch_processor.scheduled_delay",
+            opt.tracing.batch_processor.max_concurrent_exports,
+            "$.tracing.batch_processor.max_concurrent_exports",
+            opt.tracing.batch_processor.max_export_batch_size,
+            "$.tracing.batch_processor.max_export_batch_size",
+            opt.tracing.batch_processor.max_export_timeout,
+            "$.tracing.batch_processor.max_export_timeout",
+            opt.tracing.batch_processor.max_queue_size,
+            "$.tracing.batch_processor.max_queue_size",
+            opt.metrics.otlp.batch_processor.scheduled_delay,
+            "$.metrics.otlp.batch_processor.scheduled_delay",
+            opt.metrics.otlp.batch_processor.max_export_timeout,
+            "$.metrics.otlp.batch_processor.max_export_timeout",
+            opt.metrics.usage_reports.batch_processor.scheduled_delay,
+            "$.metrics.usage_reports.batch_processor.scheduled_delay",
+            opt.metrics
+                .usage_reports
+                .batch_processor
+                .max_concurrent_exports,
+            "$.metrics.usage_reports.batch_processor.max_concurrent_exports",
+            opt.metrics.usage_reports.batch_processor.max_export_timeout,
+            "$.metrics.usage_reports.batch_processor.max_export_timeout"
+        );
+
+        populate_config_instrument!(
+            apollo.router.config.connectors,
+            "$.connectors",
+            opt.debug_extensions,
+            "$[?(@.debug_extensions == true)]",
+            opt.expose_sources_in_context,
+            "$[?(@.expose_sources_in_context == true)]",
+            opt.max_requests_per_operation_per_source,
+            "$[?(@.max_requests_per_operation_per_source)]",
+            opt.subgraph.config,
+            "$[?(@.subgraphs..['$config'])]",
+            opt.source.override_url,
+            "$[?(@.subgraphs..sources..override_url)]",
+            opt.source.max_requests_per_operation,
+            "$[?(@.subgraphs..sources..max_requests_per_operation)]"
         );
 
         // We need to update the entry we just made because the selected strategy is a named object in the config.
@@ -419,45 +484,58 @@ impl InstrumentData {
         }
     }
 
-    fn populate_env_instrument(&mut self) {
-        #[cfg(not(test))]
-        fn env_var_exists(env_name: &str) -> opentelemetry::Value {
-            std::env::var(env_name)
-                .map(|_| true)
-                .unwrap_or(false)
-                .into()
+    fn populate_cli_instrument(&mut self) {
+        fn mutex_is_some(mutex: &Mutex<Option<String>>) -> opentelemetry::Value {
+            if cfg!(test) {
+                true.into()
+            } else {
+                mutex.lock().is_some().into()
+            }
         }
-        #[cfg(test)]
-        fn env_var_exists(_env_name: &str) -> opentelemetry::Value {
-            true.into()
+        fn atomic_is_true(atomic: &AtomicBool) -> opentelemetry::Value {
+            if cfg!(test) {
+                true.into()
+            } else {
+                atomic.load(Ordering::Relaxed).into()
+            }
         }
-
         let mut attributes = HashMap::new();
-        attributes.insert("opt.apollo.key".to_string(), env_var_exists("APOLLO_KEY"));
+        attributes.insert(
+            "opt.apollo.key".to_string(),
+            mutex_is_some(&crate::services::APOLLO_KEY),
+        );
         attributes.insert(
             "opt.apollo.graph_ref".to_string(),
-            env_var_exists("APOLLO_GRAPH_REF"),
+            mutex_is_some(&crate::services::APOLLO_GRAPH_REF),
         );
         attributes.insert(
             "opt.apollo.license".to_string(),
-            env_var_exists("APOLLO_ROUTER_LICENSE"),
+            atomic_is_true(&crate::executable::APOLLO_ROUTER_LICENCE_IS_SET),
         );
         attributes.insert(
             "opt.apollo.license.path".to_string(),
-            env_var_exists("APOLLO_ROUTER_LICENSE_PATH"),
+            atomic_is_true(&crate::executable::APOLLO_ROUTER_LICENCE_PATH_IS_SET),
         );
         attributes.insert(
             "opt.apollo.supergraph.urls".to_string(),
-            env_var_exists("APOLLO_ROUTER_SUPERGRAPH_URLS"),
+            atomic_is_true(&crate::executable::APOLLO_ROUTER_SUPERGRAPH_URLS_IS_SET),
         );
         attributes.insert(
             "opt.apollo.supergraph.path".to_string(),
-            env_var_exists("APOLLO_ROUTER_SUPERGRAPH_PATH"),
+            atomic_is_true(&crate::executable::APOLLO_ROUTER_SUPERGRAPH_PATH_IS_SET),
         );
-
         attributes.insert(
             "opt.apollo.dev".to_string(),
-            env_var_exists("APOLLO_ROUTER_DEV_ENV"),
+            atomic_is_true(&crate::executable::APOLLO_ROUTER_DEV_MODE),
+        );
+        attributes.insert(
+            "opt.security.recursive_selections".to_string(),
+            crate::services::layers::query_analysis::recursive_selections_check_enabled().into(),
+        );
+        attributes.insert(
+            "opt.security.non_local_selections".to_string(),
+            crate::query_planner::query_planner_service::non_local_selections_check_enabled()
+                .into(),
         );
 
         self.data
@@ -497,85 +575,6 @@ impl InstrumentData {
             ),
         );
     }
-
-    pub(crate) fn populate_legacy_fragment_usage(&mut self, configuration: &Configuration) {
-        // Fragment generation takes precedence over fragment reuse. Only report when fragment reuse is *actually active*.
-        if configuration.supergraph.reuse_query_fragments == Some(true)
-            && !configuration.supergraph.generate_query_fragments
-        {
-            self.data.insert(
-                "apollo.router.config.reuse_query_fragments".to_string(),
-                (1, HashMap::new()),
-            );
-        }
-    }
-
-    pub(crate) fn populate_query_planner_experimental_parallelism(
-        &mut self,
-        configuration: &Configuration,
-    ) {
-        let query_planner_parallelism_config = configuration
-            .supergraph
-            .query_planning
-            .experimental_parallelism;
-
-        if query_planner_parallelism_config != Default::default() {
-            let mut attributes = HashMap::new();
-            attributes.insert(
-                "mode".to_string(),
-                if let AvailableParallelism::Auto(_) = query_planner_parallelism_config {
-                    "auto"
-                } else {
-                    "static"
-                }
-                .into(),
-            );
-            self.data.insert(
-                "apollo.router.config.query_planning.parallelism".to_string(),
-                (
-                    configuration
-                        .supergraph
-                        .query_planning
-                        .experimental_query_planner_parallelism()
-                        .map(|n| {
-                            #[cfg(test)]
-                            {
-                                // Set to a fixed number for snapshot tests
-                                if let AvailableParallelism::Auto(_) =
-                                    query_planner_parallelism_config
-                                {
-                                    return 8;
-                                }
-                            }
-                            let as_usize: usize = n.into();
-                            let as_u64: u64 = as_usize.try_into().unwrap_or_default();
-                            as_u64
-                        })
-                        .unwrap_or_default(),
-                    attributes,
-                ),
-            );
-        }
-    }
-
-    /// Populate metrics on the rollout of experimental Rust replacements of JavaScript code.
-    pub(crate) fn populate_deno_or_rust_mode_instruments(&mut self, configuration: &Configuration) {
-        let experimental_query_planner_mode = match configuration.experimental_query_planner_mode {
-            super::QueryPlannerMode::Legacy => "legacy",
-            super::QueryPlannerMode::Both => "both",
-            super::QueryPlannerMode::BothBestEffort => "both_best_effort",
-            super::QueryPlannerMode::New => "new",
-            super::QueryPlannerMode::NewBestEffort => "new_best_effort",
-        };
-
-        self.data.insert(
-            "apollo.router.config.experimental_query_planner_mode".to_string(),
-            (
-                1,
-                HashMap::from_iter([("mode".to_string(), experimental_query_planner_mode.into())]),
-            ),
-        );
-    }
 }
 
 impl From<InstrumentData> for Metrics {
@@ -608,9 +607,8 @@ mod test {
 
     use crate::configuration::metrics::InstrumentData;
     use crate::configuration::metrics::Metrics;
-    use crate::configuration::QueryPlannerMode;
+    use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::license_enforcement::LicenseState;
-    use crate::Configuration;
 
     #[derive(RustEmbed)]
     #[folder = "src/configuration/testdata/metrics"]
@@ -628,8 +626,6 @@ mod test {
 
             let mut data = InstrumentData::default();
             data.populate_config_instruments(yaml);
-            let configuration: Configuration = input.parse().unwrap();
-            data.populate_query_planner_experimental_parallelism(&configuration);
             let _metrics: Metrics = data.into();
             assert_non_zero_metrics_snapshot!(file_name);
         }
@@ -638,7 +634,7 @@ mod test {
     #[test]
     fn test_env_metrics() {
         let mut data = InstrumentData::default();
-        data.populate_env_instrument();
+        data.populate_cli_instrument();
         let _metrics: Metrics = data.into();
         assert_non_zero_metrics_snapshot!();
     }
@@ -646,7 +642,9 @@ mod test {
     #[test]
     fn test_license_warn() {
         let mut data = InstrumentData::default();
-        data.populate_license_instrument(&LicenseState::LicensedWarn);
+        data.populate_license_instrument(&LicenseState::LicensedWarn {
+            limits: Some(LicenseLimits::default()),
+        });
         let _metrics: Metrics = data.into();
         assert_non_zero_metrics_snapshot!();
     }
@@ -654,7 +652,9 @@ mod test {
     #[test]
     fn test_license_halt() {
         let mut data = InstrumentData::default();
-        data.populate_license_instrument(&LicenseState::LicensedHalt);
+        data.populate_license_instrument(&LicenseState::LicensedHalt {
+            limits: Some(LicenseLimits::default()),
+        });
         let _metrics: Metrics = data.into();
         assert_non_zero_metrics_snapshot!();
     }
@@ -680,37 +680,6 @@ mod test {
         configuration.plugins.plugins = Some(custom_plugins);
         let mut data = InstrumentData::default();
         data.populate_user_plugins_instrument(&configuration);
-        let _metrics: Metrics = data.into();
-        assert_non_zero_metrics_snapshot!();
-    }
-
-    #[test]
-    fn test_experimental_mode_metrics() {
-        let mut data = InstrumentData::default();
-        data.populate_deno_or_rust_mode_instruments(&Configuration {
-            experimental_query_planner_mode: QueryPlannerMode::Both,
-            ..Default::default()
-        });
-        let _metrics: Metrics = data.into();
-        assert_non_zero_metrics_snapshot!();
-    }
-
-    #[test]
-    fn test_experimental_mode_metrics_2() {
-        let mut data = InstrumentData::default();
-        // Default query planner value should still be reported
-        data.populate_deno_or_rust_mode_instruments(&Configuration::default());
-        let _metrics: Metrics = data.into();
-        assert_non_zero_metrics_snapshot!();
-    }
-
-    #[test]
-    fn test_experimental_mode_metrics_3() {
-        let mut data = InstrumentData::default();
-        data.populate_deno_or_rust_mode_instruments(&Configuration {
-            experimental_query_planner_mode: QueryPlannerMode::New,
-            ..Default::default()
-        });
         let _metrics: Metrics = data.into();
         assert_non_zero_metrics_snapshot!();
     }

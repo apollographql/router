@@ -39,16 +39,8 @@ fuzz_target!(|data: &[u8]| {
     debug!("========================");
     debug!("======= RESPONSE =======");
     if router_response.is_ok() != subgraph_response.is_ok() {
-        let router_error = if let Err(err) = &router_response {
-            Some(err)
-        } else {
-            None
-        };
-        let subgraph_error = if let Err(err) = &subgraph_response {
-            Some(err)
-        } else {
-            None
-        };
+        let router_error = router_response.as_ref().err();
+        let subgraph_error = subgraph_response.as_ref().err();
         if router_error.is_some() && subgraph_error.is_some() {
             // Do not check errors for now
             return;

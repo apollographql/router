@@ -8,38 +8,58 @@ use std::time::SystemTime;
 use std::time::SystemTimeError;
 
 use async_trait::async_trait;
-use base64::prelude::BASE64_STANDARD;
 use base64::Engine as _;
+use base64::prelude::BASE64_STANDARD;
 use derivative::Derivative;
-use futures::future::BoxFuture;
 use futures::FutureExt;
-use futures::TryFutureExt;
+use futures::future::BoxFuture;
+use http::HeaderMap;
+use http::HeaderValue;
+use http::header::CACHE_CONTROL;
 use itertools::Itertools;
 use lru::LruCache;
-use opentelemetry::sdk::export::trace::ExportResult;
-use opentelemetry::sdk::export::trace::SpanData;
-use opentelemetry::sdk::export::trace::SpanExporter;
-use opentelemetry::sdk::trace::EvictedHashMap;
+use opentelemetry::Key;
+use opentelemetry::KeyValue;
+use opentelemetry::Value;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::Status;
 use opentelemetry::trace::TraceError;
 use opentelemetry::trace::TraceId;
-use opentelemetry::Key;
-use opentelemetry::KeyValue;
-use opentelemetry::Value;
+use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::export::trace::ExportResult;
+use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::export::trace::SpanExporter;
 use prost::Message;
 use rand::Rng;
 use serde::de::DeserializeOwned;
+use serde_json::Value as JSONValue;
 use thiserror::Error;
+use tracing::Level;
 use url::Url;
 
+use crate::json_ext::Path;
+use crate::plugins::response_cache::cache_control::CacheControl;
 use crate::plugins::telemetry;
+use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ALIASES;
+use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
+use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;
+use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ROOT_FIELDS;
+use crate::plugins::telemetry::BoxError;
+use crate::plugins::telemetry::LruSizeInstrument;
 use crate::plugins::telemetry::apollo::ErrorConfiguration;
+use crate::plugins::telemetry::apollo::ErrorRedactionPolicy;
 use crate::plugins::telemetry::apollo::ErrorsConfiguration;
 use crate::plugins::telemetry::apollo::OperationSubType;
 use crate::plugins::telemetry::apollo::SingleReport;
+use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::apollo_exporter::proto;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::CachePolicy;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Details;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Http;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Limits;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::QueryPlanNode;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::cache_policy::Scope;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::http::Method;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::http::Values;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::ConditionNode;
@@ -53,11 +73,6 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_pla
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::ParallelNode;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::ResponsePathElement;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::SequenceNode;
-use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Details;
-use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Http;
-use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Limits;
-use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::QueryPlanNode;
-use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::apollo_otlp_exporter::ApolloOtlpExporter;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Sampler;
@@ -66,20 +81,15 @@ use crate::plugins::telemetry::config_new::cost::APOLLO_PRIVATE_COST_ACTUAL;
 use crate::plugins::telemetry::config_new::cost::APOLLO_PRIVATE_COST_ESTIMATED;
 use crate::plugins::telemetry::config_new::cost::APOLLO_PRIVATE_COST_RESULT;
 use crate::plugins::telemetry::config_new::cost::APOLLO_PRIVATE_COST_STRATEGY;
+use crate::plugins::telemetry::consts::EVENT_ATTRIBUTE_OMIT_LOG;
 use crate::plugins::telemetry::consts::EXECUTION_SPAN_NAME;
+use crate::plugins::telemetry::consts::FIELD_EXCEPTION_MESSAGE;
 use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::otlp::Protocol;
-use crate::plugins::telemetry::tracing::apollo::TracesReport;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
-use crate::plugins::telemetry::BoxError;
-use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ALIASES;
-use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
-use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;
-use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ROOT_FIELDS;
-use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
-use crate::query_planner::OperationKind;
+use crate::plugins::telemetry::tracing::apollo::TracesReport;
 use crate::query_planner::CONDITION_ELSE_SPAN_NAME;
 use crate::query_planner::CONDITION_IF_SPAN_NAME;
 use crate::query_planner::CONDITION_SPAN_NAME;
@@ -88,9 +98,19 @@ use crate::query_planner::DEFER_PRIMARY_SPAN_NAME;
 use crate::query_planner::DEFER_SPAN_NAME;
 use crate::query_planner::FETCH_SPAN_NAME;
 use crate::query_planner::FLATTEN_SPAN_NAME;
+use crate::query_planner::OperationKind;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
 use crate::query_planner::SUBSCRIBE_SPAN_NAME;
+use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
+use crate::services::connector_service::APOLLO_CONNECTOR_DETAIL;
+use crate::services::connector_service::APOLLO_CONNECTOR_FIELD_ALIAS;
+use crate::services::connector_service::APOLLO_CONNECTOR_FIELD_NAME;
+use crate::services::connector_service::APOLLO_CONNECTOR_FIELD_RETURN_TYPE;
+use crate::services::connector_service::APOLLO_CONNECTOR_SELECTION;
+use crate::services::connector_service::APOLLO_CONNECTOR_SOURCE_DETAIL;
+use crate::services::connector_service::APOLLO_CONNECTOR_SOURCE_NAME;
+use crate::services::connector_service::APOLLO_CONNECTOR_TYPE;
 
 pub(crate) const APOLLO_PRIVATE_REQUEST: Key = Key::from_static_str("apollo_private.request");
 pub(crate) const APOLLO_PRIVATE_DURATION_NS: &str = "apollo_private.duration_ns";
@@ -118,6 +138,8 @@ const OPERATION_NAME: Key = Key::from_static_str("graphql.operation.name");
 const OPERATION_TYPE: Key = Key::from_static_str("graphql.operation.type");
 pub(crate) const OPERATION_SUBTYPE: Key = Key::from_static_str("apollo_private.operation.subtype");
 const EXT_TRACE_ID: Key = Key::from_static_str("trace_id");
+pub(crate) const GRAPHQL_ERROR_EXT_CODE: &str = "graphql.error.extensions.code";
+pub(crate) const GRAPHQL_ERROR_PATH: &str = "graphql.error.path";
 
 /// The set of attributes to include when sending to the Apollo Reports protocol.
 const REPORTS_INCLUDE_ATTRS: [Key; 26] = [
@@ -146,16 +168,31 @@ const REPORTS_INCLUDE_ATTRS: [Key; 26] = [
     CONDITION,
     OPERATION_NAME,
     OPERATION_TYPE,
-    opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD,
+    Key::from_static_str(opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD),
 ];
 
 /// Additional attributes to include when sending to the OTLP protocol.
-const OTLP_EXT_INCLUDE_ATTRS: [Key; 5] = [
+const OTLP_EXT_INCLUDE_ATTRS: [Key; 13] = [
     OPERATION_SUBTYPE,
     EXT_TRACE_ID,
-    opentelemetry_semantic_conventions::trace::HTTP_REQUEST_BODY_SIZE,
-    opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_BODY_SIZE,
-    opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE,
+    Key::from_static_str(opentelemetry_semantic_conventions::attribute::HTTP_REQUEST_BODY_SIZE),
+    Key::from_static_str(opentelemetry_semantic_conventions::attribute::HTTP_RESPONSE_BODY_SIZE),
+    Key::from_static_str(opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE),
+    APOLLO_CONNECTOR_TYPE,
+    APOLLO_CONNECTOR_DETAIL,
+    APOLLO_CONNECTOR_SELECTION,
+    APOLLO_CONNECTOR_FIELD_NAME,
+    APOLLO_CONNECTOR_FIELD_ALIAS,
+    APOLLO_CONNECTOR_FIELD_RETURN_TYPE,
+    APOLLO_CONNECTOR_SOURCE_NAME,
+    APOLLO_CONNECTOR_SOURCE_DETAIL,
+];
+
+/// Attributes on events to include when sending to the OTLP protocol.
+const OTLP_EXT_INCLUDE_EVENT_ATTRS: [Key; 3] = [
+    Key::from_static_str(GRAPHQL_ERROR_EXT_CODE),
+    Key::from_static_str(FIELD_EXCEPTION_MESSAGE),
+    Key::from_static_str(GRAPHQL_ERROR_PATH),
 ];
 
 const REPORTS_INCLUDE_SPANS: [&str; 16] = [
@@ -177,6 +214,27 @@ const REPORTS_INCLUDE_SPANS: [&str; 16] = [
     SUBSCRIPTION_EVENT_SPAN_NAME,
 ];
 
+pub(crate) fn emit_error_event(error_code: &str, error_message: &str, error_path: Option<Path>) {
+    if let Some(path) = error_path {
+        tracing::event!(
+            Level::ERROR,
+            { GRAPHQL_ERROR_EXT_CODE } = error_code,
+            { FIELD_EXCEPTION_MESSAGE } = error_message,
+            { GRAPHQL_ERROR_PATH } = path.to_string().as_str(),
+            { EVENT_ATTRIBUTE_OMIT_LOG } = true,
+            error_message
+        );
+    } else {
+        tracing::event!(
+            Level::ERROR,
+            { GRAPHQL_ERROR_EXT_CODE } = error_code,
+            { FIELD_EXCEPTION_MESSAGE } = error_message,
+            { EVENT_ATTRIBUTE_OMIT_LOG } = true,
+            error_message
+        );
+    }
+}
+
 #[derive(Error, Debug)]
 pub(crate) enum Error {
     #[error("subgraph protobuf decode error")]
@@ -196,6 +254,13 @@ pub(crate) enum Error {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub(crate) struct LightSpanEventData {
+    pub(crate) timestamp: SystemTime,
+    pub(crate) name: Cow<'static, str>,
+    pub(crate) attributes: HashMap<Key, Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct LightSpanData {
     pub(crate) trace_id: TraceId,
     pub(crate) span_id: SpanId,
@@ -204,33 +269,63 @@ pub(crate) struct LightSpanData {
     pub(crate) name: Cow<'static, str>,
     pub(crate) start_time: SystemTime,
     pub(crate) end_time: SystemTime,
-    pub(crate) attributes: EvictedHashMap,
+    pub(crate) attributes: HashMap<Key, Value>,
     pub(crate) status: Status,
+    pub(crate) droppped_attribute_count: u32,
+    pub(crate) events: Vec<LightSpanEventData>,
 }
 
 impl LightSpanData {
     /// Convert from a full Span into a lighter more memory-efficient span for caching purposes.
     /// - If `include_attr_names` is passed, filter out any attributes that are not in the list.
-    fn from_span_data(value: SpanData, include_attr_names: &Option<HashSet<Key>>) -> Self {
+    fn from_span_data(
+        value: SpanData,
+        include_attr_names: &Option<HashSet<Key>>,
+        include_attr_event_names: &Option<HashSet<Key>>,
+    ) -> Self {
         let filtered_attributes = match include_attr_names {
-            None => value.attributes,
-            Some(attr_names) => {
-                // Looks like this transformation will be easier after upgrading opentelemetry_sdk >= 0.21
-                // when attributes are stored as Vec<KeyValue>.
-                // https://github.com/open-telemetry/opentelemetry-rust/blob/943bb7a03f9cd17a0b6b53c2eb12acf77764c122/opentelemetry-sdk/CHANGELOG.md?plain=1#L157-L159
-                let max_attr_len = std::cmp::min(attr_names.len(), value.attributes.len());
-                let mut new_attrs = EvictedHashMap::new(
-                    max_attr_len.try_into().expect("expected usize -> u32"),
-                    max_attr_len,
-                );
-                value.attributes.into_iter().for_each(|(key, value)| {
-                    if attr_names.contains(&key) {
-                        new_attrs.insert(KeyValue::new(key, value))
+            None => value
+                .attributes
+                .into_iter()
+                .map(|KeyValue { key, value }| (key, value))
+                .collect(),
+            Some(attr_names) => value
+                .attributes
+                .into_iter()
+                .filter_map(|kv| {
+                    if attr_names.contains(&kv.key) {
+                        Some((kv.key, kv.value))
+                    } else {
+                        None
                     }
-                });
-                new_attrs
-            }
+                })
+                .collect(),
         };
+
+        let filtered_events = match include_attr_event_names {
+            None => vec![],
+            Some(event_names) => value
+                .events
+                .into_iter()
+                .map(|event| LightSpanEventData {
+                    timestamp: event.timestamp,
+                    name: event.name,
+                    attributes: event
+                        .attributes
+                        .into_iter()
+                        .filter_map(|kv| {
+                            if event_names.contains(&kv.key) {
+                                Some((kv.key, kv.value))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect(),
+                })
+                .filter(|event| !event.attributes.is_empty())
+                .collect(),
+        };
+
         Self {
             trace_id: value.span_context.trace_id(),
             span_id: value.span_context.span_id(),
@@ -241,6 +336,8 @@ impl LightSpanData {
             end_time: value.end_time,
             attributes: filtered_attributes,
             status: value.status,
+            droppped_attribute_count: value.dropped_attributes_count,
+            events: filtered_events,
         }
     }
 }
@@ -253,16 +350,19 @@ impl LightSpanData {
 #[derivative(Debug)]
 pub(crate) struct Exporter {
     spans_by_parent_id: LruCache<SpanId, LruCache<usize, LightSpanData>>,
+    /// An externally updateable gauge for "apollo.router.exporter.span.lru.size".
+    span_lru_size_instrument: LruSizeInstrument,
     #[derivative(Debug = "ignore")]
     report_exporter: Option<Arc<ApolloExporter>>,
     #[derivative(Debug = "ignore")]
-    otlp_exporter: Option<Arc<ApolloOtlpExporter>>,
+    otlp_exporter: Option<ApolloOtlpExporter>,
     otlp_tracing_ratio: f64,
     field_execution_weight: f64,
     errors_configuration: ErrorsConfiguration,
     use_legacy_request_span: bool,
     include_span_names: HashSet<&'static str>,
     include_attr_names: Option<HashSet<Key>>,
+    include_attr_event_names: Option<HashSet<Key>>,
 }
 
 #[derive(Debug)]
@@ -301,53 +401,56 @@ impl Exporter {
         apollo_key: &'a str,
         apollo_graph_ref: &'a str,
         schema_id: &'a str,
+        router_id: String,
         buffer_size: NonZeroUsize,
         field_execution_sampler: &'a SamplerOption,
         errors_configuration: &'a ErrorsConfiguration,
-        batch_config: &'a BatchProcessorConfig,
+        batch_processor_config: &'a BatchProcessorConfig,
         use_legacy_request_span: Option<bool>,
         metrics_reference_mode: ApolloMetricsReferenceMode,
     ) -> Result<Self, BoxError> {
-        tracing::debug!("creating studio exporter");
-
         let otlp_tracing_ratio = match otlp_tracing_sampler {
             SamplerOption::TraceIdRatioBased(ratio) => {
                 // can't use std::cmp::min because f64 is not Ord
-                if *ratio > 1.0 {
-                    1.0
-                } else {
-                    *ratio
-                }
+                if *ratio > 1.0 { 1.0 } else { *ratio }
             }
             SamplerOption::Always(s) => match s {
                 Sampler::AlwaysOn => 1f64,
                 Sampler::AlwaysOff => 0f64,
             },
         };
+
+        tracing::info!("configuring Apollo tracing: {}", batch_processor_config);
+
+        let span_lru_size_instrument =
+            LruSizeInstrument::new("apollo.router.exporter.span.lru.size");
+
         Ok(Self {
             spans_by_parent_id: LruCache::new(buffer_size),
+            span_lru_size_instrument,
             report_exporter: if otlp_tracing_ratio < 1f64 {
                 Some(Arc::new(ApolloExporter::new(
                     endpoint,
-                    batch_config,
+                    &batch_processor_config.into(),
                     apollo_key,
                     apollo_graph_ref,
                     schema_id,
+                    router_id,
                     metrics_reference_mode,
                 )?))
             } else {
                 None
             },
             otlp_exporter: if otlp_tracing_ratio > 0f64 {
-                Some(Arc::new(ApolloOtlpExporter::new(
+                Some(ApolloOtlpExporter::new(
                     otlp_endpoint,
                     otlp_tracing_protocol,
-                    batch_config,
+                    batch_processor_config,
                     apollo_key,
                     apollo_graph_ref,
                     schema_id,
                     errors_configuration,
-                )?))
+                )?)
             } else {
                 None
             },
@@ -367,6 +470,11 @@ impl Exporter {
             } else {
                 Some(HashSet::from(REPORTS_INCLUDE_ATTRS))
             },
+            include_attr_event_names: if otlp_tracing_ratio > 0f64 {
+                Some(HashSet::from(OTLP_EXT_INCLUDE_EVENT_ATTRS))
+            } else {
+                None
+            },
         })
     }
 
@@ -376,7 +484,7 @@ impl Exporter {
         child_nodes: Vec<TreeData>,
     ) -> Result<Vec<proto::reports::Trace>, Error> {
         let mut results: Vec<proto::reports::Trace> = vec![];
-        let http = extract_http_data(span);
+        let (http, cache_control) = extract_http_data(span);
         let mut root_trace = proto::reports::Trace {
             start_time: Some(span.start_time.into()),
             end_time: Some(span.end_time.into()),
@@ -384,6 +492,21 @@ impl Exporter {
             root: None,
             details: None,
             http: (http.method != Method::Unknown as i32).then_some(http),
+            cache_policy: cache_control.map(|cc| {
+                let scope = if cc.private() {
+                    Scope::Private
+                } else if cc.public() {
+                    Scope::Public
+                } else {
+                    Scope::Unknown
+                } as i32;
+                let ttl = cc.ttl().unwrap_or_default();
+
+                CachePolicy {
+                    scope,
+                    max_age_ns: ttl as i64 * 1_000_000_000,
+                }
+            }),
             ..Default::default()
         };
 
@@ -618,7 +741,7 @@ impl Exporter {
             }
             ROUTER_SPAN_NAME => {
                 child_nodes.push(TreeData::Router {
-                    http: Box::new(extract_http_data(span)),
+                    http: Box::new(extract_http_data(span).0),
                     client_name: span
                         .attributes
                         .get(&CLIENT_NAME_KEY)
@@ -643,10 +766,10 @@ impl Exporter {
                         .collect()
                 }
             }
-            _ if span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some() => {
+            _ if span.attributes.contains_key(&APOLLO_PRIVATE_REQUEST) => {
                 if !self.use_legacy_request_span {
                     child_nodes.push(TreeData::Router {
-                        http: Box::new(extract_http_data(span)),
+                        http: Box::new(extract_http_data(span).0),
                         client_name: span
                             .attributes
                             .get(&CLIENT_NAME_KEY)
@@ -745,7 +868,7 @@ impl Exporter {
             SUBSCRIPTION_EVENT_SPAN_NAME => {
                 // To put the duration
                 child_nodes.push(TreeData::Router {
-                    http: Box::new(extract_http_data(span)),
+                    http: Box::new(extract_http_data(span).0),
                     client_name: span
                         .attributes
                         .get(&CLIENT_NAME_KEY)
@@ -932,6 +1055,27 @@ pub(crate) fn extract_ftv1_trace(
     None
 }
 
+fn perform_extended_redaction(error_json: &str) -> String {
+    serde_json::from_str::<JSONValue>(error_json)
+        .ok()
+        .and_then(|error_json_value| {
+            let error_code = &error_json_value["extensions"]["code"];
+            if !error_code.is_null() {
+                Some(
+                    serde_json_bytes::json!({
+                        "extensions": {
+                            "code": error_code,
+                        }
+                    })
+                    .to_string(),
+                )
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default()
+}
+
 fn preprocess_errors(
     t: &mut proto::reports::trace::Node,
     error_config: &ErrorConfiguration,
@@ -942,7 +1086,14 @@ fn preprocess_errors(
             t.error.iter_mut().for_each(|err| {
                 err.message = String::from("<redacted>");
                 err.location = Vec::new();
-                err.json = String::new();
+                err.json = if matches!(
+                    error_config.redaction_policy,
+                    ErrorRedactionPolicy::Extended
+                ) {
+                    perform_extended_redaction(&err.json)
+                } else {
+                    String::new()
+                }
             });
         }
         error_count += u64::try_from(t.error.len()).expect("expected u64");
@@ -964,10 +1115,10 @@ pub(crate) fn encode_ftv1_trace(trace: &proto::reports::Trace) -> String {
     BASE64_STANDARD.encode(trace.encode_to_vec())
 }
 
-fn extract_http_data(span: &LightSpanData) -> Http {
+fn extract_http_data(span: &LightSpanData) -> (Http, Option<CacheControl>) {
     let method = match span
         .attributes
-        .get(&opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD)
+        .get(opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD)
         .map(|data| data.as_str())
         .unwrap_or_default()
         .as_ref()
@@ -991,21 +1142,37 @@ fn extract_http_data(span: &LightSpanData) -> Http {
         .into_iter()
         .map(|(header_name, value)| (header_name.to_lowercase(), Values { value }))
         .collect();
+    let mut cache_control = None;
     let response_headers = span
         .attributes
         .get(&APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS)
         .and_then(extract_json::<HashMap<String, Vec<String>>>)
         .unwrap_or_default()
         .into_iter()
-        .map(|(header_name, value)| (header_name.to_lowercase(), Values { value }))
+        .map(|(header_name, value)| {
+            if header_name.as_str() == CACHE_CONTROL.as_str()
+                && let Some(first_value) = value.first()
+            {
+                let cc_value = HeaderValue::from_str(first_value).ok();
+                if let Some(cc_value) = cc_value {
+                    cache_control =
+                        CacheControl::new(&HeaderMap::from_iter([(CACHE_CONTROL, cc_value)]), None)
+                            .ok();
+                }
+            }
+            (header_name.to_lowercase(), Values { value })
+        })
         .collect();
 
-    Http {
-        method: method.into(),
-        request_headers,
-        response_headers,
-        status_code: 0,
-    }
+    (
+        Http {
+            method: method.into(),
+            request_headers,
+            response_headers,
+            status_code: 0,
+        },
+        cache_control,
+    )
 }
 
 #[async_trait]
@@ -1020,15 +1187,21 @@ impl SpanExporter for Exporter {
 
         // Decide whether to send via OTLP or reports proto based on the sampling config.  Roll dice if using a percentage rollout.
         let send_otlp = self.otlp_exporter.is_some()
-            && rand::thread_rng().gen_range(0.0..1.0) < self.otlp_tracing_ratio;
+            && rand::rng().random_range(0.0..1.0) < self.otlp_tracing_ratio;
         let send_reports = self.report_exporter.is_some() && !send_otlp;
 
         for span in batch {
-            if span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some()
-                || span.name == SUBSCRIPTION_EVENT_SPAN_NAME
+            if span.name == SUBSCRIPTION_EVENT_SPAN_NAME
+                || span
+                    .attributes
+                    .iter()
+                    .any(|kv| kv.key == APOLLO_PRIVATE_REQUEST)
             {
-                let root_span: LightSpanData =
-                    LightSpanData::from_span_data(span, &self.include_attr_names);
+                let root_span: LightSpanData = LightSpanData::from_span_data(
+                    span,
+                    &self.include_attr_names,
+                    &self.include_attr_event_names,
+                );
                 if send_otlp {
                     let grouped_trace_spans = self.group_by_trace(root_span);
                     if let Some(trace) = self
@@ -1077,51 +1250,55 @@ impl SpanExporter for Exporter {
                     .expect("capacity of cache was zero")
                     .push(
                         len,
-                        LightSpanData::from_span_data(span, &self.include_attr_names),
+                        LightSpanData::from_span_data(
+                            span,
+                            &self.include_attr_names,
+                            &self.include_attr_event_names,
+                        ),
                     );
             }
         }
-        tracing::info!(value.apollo_router_span_lru_size = self.spans_by_parent_id.len() as u64,);
 
-        #[allow(clippy::manual_map)] // https://github.com/rust-lang/rust-clippy/issues/8346
-        let report_exporter = match self.report_exporter.as_ref() {
-            Some(exporter) => Some(exporter.clone()),
-            None => None,
-        };
-        #[allow(clippy::manual_map)] // https://github.com/rust-lang/rust-clippy/issues/8346
-        let otlp_exporter = match self.otlp_exporter.as_ref() {
-            Some(exporter) => Some(exporter.clone()),
-            None => None,
-        };
+        // Note this won't be correct anymore if there is any way outside of `.export()`
+        // to affect the size of the cache.
+        self.span_lru_size_instrument
+            .update(self.spans_by_parent_id.len() as u64);
 
-        let fut = async move {
-            if send_otlp && !otlp_trace_spans.is_empty() {
-                otlp_exporter
-                    .as_ref()
-                    .expect("expected an otel exporter")
-                    .export(otlp_trace_spans.into_iter().flatten().collect())
-                    .await
-            } else if send_reports && !traces.is_empty() {
-                let mut report = telemetry::apollo::Report::default();
-                report += SingleReport::Traces(TracesReport { traces });
-                report_exporter
-                    .as_ref()
-                    .expect("expected an apollo exporter")
+        if send_otlp && !otlp_trace_spans.is_empty() {
+            self.otlp_exporter
+                .as_mut()
+                .expect("expected an otel exporter")
+                .export(otlp_trace_spans.into_iter().flatten().collect())
+        } else if send_reports && !traces.is_empty() {
+            let mut report = telemetry::apollo::Report::default();
+            report += SingleReport::Traces(TracesReport { traces });
+            let exporter = self
+                .report_exporter
+                .as_ref()
+                .expect("expected an apollo exporter")
+                .clone();
+            async move {
+                exporter
                     .submit_report(report)
-                    .map_err(|e| TraceError::ExportFailed(Box::new(e)))
                     .await
-            } else {
-                ExportResult::Ok(())
+                    .map_err(|e| TraceError::ExportFailed(Box::new(e)))
             }
-        };
-        fut.boxed()
+            .boxed()
+        } else {
+            async { ExportResult::Ok(()) }.boxed()
+        }
     }
 
     fn shutdown(&mut self) {
         // Currently only handled in the OTLP case.
-        if let Some(exporter) = &self.otlp_exporter {
+        if let Some(exporter) = &mut self.otlp_exporter {
             exporter.shutdown()
         };
+    }
+
+    fn set_resource(&mut self, _resource: &Resource) {
+        // This is intentionally a NOOP. The reason for this is that we do not allow users to set the resource attributes
+        // for telemetry that is sent to Apollo. To do so would expose potential private information that the user did not intend for us.
     }
 }
 
@@ -1139,10 +1316,9 @@ impl ChildNodes for Vec<TreeData> {
         if let Some((idx, _)) = self
             .iter()
             .find_position(|child| matches!(child, TreeData::QueryPlanNode(_)))
+            && let TreeData::QueryPlanNode(node) = self.remove(idx)
         {
-            if let TreeData::QueryPlanNode(node) = self.remove(idx) {
-                return Some(node);
-            }
+            return Some(node);
         }
         None
     }
@@ -1165,10 +1341,9 @@ impl ChildNodes for Vec<TreeData> {
         if let Some((idx, _)) = self
             .iter()
             .find_position(|child| matches!(child, TreeData::DeferPrimary(_)))
+            && let TreeData::DeferPrimary(node) = self.remove(idx)
         {
-            if let TreeData::DeferPrimary(node) = self.remove(idx) {
-                return Some(node);
-            }
+            return Some(node);
         }
         None
     }
@@ -1191,10 +1366,9 @@ impl ChildNodes for Vec<TreeData> {
         if let Some((idx, _)) = self
             .iter()
             .find_position(|child| matches!(child, TreeData::ConditionIf(_)))
+            && let TreeData::ConditionIf(node) = self.remove(idx)
         {
-            if let TreeData::ConditionIf(node) = self.remove(idx) {
-                return node;
-            }
+            return node;
         }
         None
     }
@@ -1203,10 +1377,9 @@ impl ChildNodes for Vec<TreeData> {
         if let Some((idx, _)) = self
             .iter()
             .find_position(|child| matches!(child, TreeData::ConditionElse(_)))
+            && let TreeData::ConditionElse(node) = self.remove(idx)
         {
-            if let TreeData::ConditionElse(node) = self.remove(idx) {
-                return node;
-            }
+            return node;
         }
         None
     }
@@ -1214,18 +1387,17 @@ impl ChildNodes for Vec<TreeData> {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashMap;
     use std::time::SystemTime;
     use opentelemetry::Value;
-    use opentelemetry_api::KeyValue;
-    use opentelemetry_api::trace::{SpanId, SpanKind, TraceId};
-    use opentelemetry_sdk::trace::EvictedHashMap;
+    use opentelemetry::trace::{SpanId, SpanKind, TraceId};
     use serde_json::json;
-    use crate::plugins::telemetry::apollo::ErrorConfiguration;
+    use crate::plugins::telemetry::apollo::{ErrorConfiguration, ErrorRedactionPolicy};
     use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::{DeferNodePrimary, DeferredNode, ResponsePathElement};
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::{QueryPlanNode, Node, Error};
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::response_path_element::Id;
-    use crate::plugins::telemetry::tracing::apollo_telemetry::{extract_ftv1_trace, extract_ftv1_trace_with_error_count, extract_i64, extract_json, extract_path, extract_string, preprocess_errors, encode_ftv1_trace, ChildNodes, TreeData, LightSpanData, APOLLO_PRIVATE_COST_RESULT, APOLLO_PRIVATE_COST_ESTIMATED, APOLLO_PRIVATE_COST_ACTUAL, APOLLO_PRIVATE_COST_STRATEGY, extract_limits, APOLLO_PRIVATE_QUERY_ALIASES, APOLLO_PRIVATE_QUERY_DEPTH, APOLLO_PRIVATE_QUERY_HEIGHT, APOLLO_PRIVATE_QUERY_ROOT_FIELDS};
+    use crate::plugins::telemetry::tracing::apollo_telemetry::{encode_ftv1_trace, extract_ftv1_trace, extract_ftv1_trace_with_error_count, extract_http_data, extract_i64, extract_json, extract_limits, extract_path, extract_string, preprocess_errors, ChildNodes, LightSpanData, TreeData, APOLLO_PRIVATE_COST_ACTUAL, APOLLO_PRIVATE_COST_ESTIMATED, APOLLO_PRIVATE_COST_RESULT, APOLLO_PRIVATE_COST_STRATEGY, APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS, APOLLO_PRIVATE_QUERY_ALIASES, APOLLO_PRIVATE_QUERY_DEPTH, APOLLO_PRIVATE_QUERY_HEIGHT, APOLLO_PRIVATE_QUERY_ROOT_FIELDS};
 
     fn elements(tree_data: Vec<TreeData>) -> Vec<&'static str> {
         let mut elements = Vec::new();
@@ -1427,6 +1599,7 @@ mod test {
             &ErrorConfiguration {
                 send: true,
                 redact: false,
+                redaction_policy: ErrorRedactionPolicy::Strict,
             },
         )
         .expect("there was a trace here")
@@ -1436,13 +1609,15 @@ mod test {
     }
 
     #[test]
-    fn test_preprocess_errors() {
+    fn test_preprocess_errors_with_strict_redaction() {
         let sub_node = Node {
             error: vec![Error {
                 message: "this is my error".to_string(),
                 location: Vec::new(),
                 time_ns: 5,
-                json: String::from(r#"{"foo": "bar"}"#),
+                json: String::from(
+                    r#"{"extensions":{"code":"AN_ERROR_CODE","ignored":"other stuff"}}"#,
+                ),
             }],
             ..Default::default()
         };
@@ -1467,6 +1642,7 @@ mod test {
         let error_config = ErrorConfiguration {
             send: true,
             redact: true,
+            redaction_policy: ErrorRedactionPolicy::Strict,
         };
         let error_count = preprocess_errors(&mut node, &error_config);
         assert_eq!(error_count, 3);
@@ -1483,13 +1659,18 @@ mod test {
         assert!(node.child[0].error[0].location.is_empty());
         assert_eq!(node.child[0].error[0].message.as_str(), "<redacted>");
         assert_eq!(node.child[0].error[0].time_ns, 5u64);
+    }
 
+    #[test]
+    fn test_preprocess_errors_with_redaction_disabled() {
         let sub_node = Node {
             error: vec![Error {
                 message: "this is my error".to_string(),
                 location: Vec::new(),
                 time_ns: 5,
-                json: String::from(r#"{"foo": "bar"}"#),
+                json: String::from(
+                    r#"{"extensions":{"code":"AN_ERROR_CODE","ignored":"other stuff"}}"#,
+                ),
             }],
             ..Default::default()
         };
@@ -1514,6 +1695,7 @@ mod test {
         let error_config = ErrorConfiguration {
             send: true,
             redact: false,
+            redaction_policy: ErrorRedactionPolicy::Strict,
         };
         let error_count = preprocess_errors(&mut node, &error_config);
         assert_eq!(error_count, 3);
@@ -1523,8 +1705,68 @@ mod test {
         assert_eq!(node.error[1].message.as_str(), "this is my other error");
         assert_eq!(node.error[1].time_ns, 5u64);
 
-        assert!(!node.child[0].error[0].json.is_empty());
+        assert_eq!(
+            node.child[0].error[0].json,
+            String::from(r#"{"extensions":{"code":"AN_ERROR_CODE","ignored":"other stuff"}}"#,)
+        );
         assert_eq!(node.child[0].error[0].message.as_str(), "this is my error");
+        assert_eq!(node.child[0].error[0].time_ns, 5u64);
+    }
+
+    #[test]
+    fn test_preprocess_errors_with_extended_redaction_enabled() {
+        let sub_node = Node {
+            error: vec![Error {
+                message: "this is my error".to_string(),
+                location: Vec::new(),
+                time_ns: 5,
+                json: String::from(
+                    r#"{"extensions":{"code":"AN_ERROR_CODE","ignored":"other stuff"}}"#,
+                ),
+            }],
+            ..Default::default()
+        };
+        let mut node = Node {
+            error: vec![
+                Error {
+                    message: "this is my error".to_string(),
+                    location: Vec::new(),
+                    time_ns: 5,
+                    json: String::from(r#"{"foo": "bar"}"#),
+                },
+                Error {
+                    message: "this is my other error".to_string(),
+                    location: Vec::new(),
+                    time_ns: 5,
+                    json: String::from(r#"{"foo": "bar"}"#),
+                },
+            ],
+            ..Default::default()
+        };
+        node.child.push(sub_node);
+        let error_config = ErrorConfiguration {
+            send: true,
+            redact: true,
+            redaction_policy: ErrorRedactionPolicy::Extended,
+        };
+        let error_count = preprocess_errors(&mut node, &error_config);
+        assert_eq!(error_count, 3);
+        assert!(node.error[0].location.is_empty());
+        assert_eq!(node.error[0].message.as_str(), "<redacted>");
+        assert_eq!(node.error[0].time_ns, 5u64);
+        assert!(node.error[1].json.is_empty());
+        assert!(node.error[1].location.is_empty());
+        assert_eq!(node.error[1].message.as_str(), "<redacted>");
+        assert_eq!(node.error[1].time_ns, 5u64);
+
+        // the "ignored" field should be filtered out in this scenario, but the
+        // code left alone.
+        assert_eq!(
+            node.child[0].error[0].json,
+            String::from(r#"{"extensions":{"code":"AN_ERROR_CODE"}}"#,)
+        );
+        assert!(node.child[0].error[0].location.is_empty());
+        assert_eq!(node.child[0].error[0].message.as_str(), "<redacted>");
         assert_eq!(node.child[0].error[0].time_ns, 5u64);
     }
 
@@ -1560,6 +1802,7 @@ mod test {
         let error_config = ErrorConfiguration {
             send: false,
             redact: true,
+            redaction_policy: ErrorRedactionPolicy::Strict,
         };
         let error_count = preprocess_errors(&mut node, &error_config);
         assert_eq!(error_count, 0);
@@ -1577,40 +1820,30 @@ mod test {
             name: Default::default(),
             start_time: SystemTime::now(),
             end_time: SystemTime::now(),
-            attributes: EvictedHashMap::new(10, 10),
+            attributes: HashMap::with_capacity(10),
             status: Default::default(),
+            droppped_attribute_count: 0,
+            events: Default::default(),
         };
 
-        span.attributes.insert(KeyValue::new(
-            APOLLO_PRIVATE_COST_RESULT,
-            Value::String("OK".into()),
-        ));
-        span.attributes.insert(KeyValue::new(
-            APOLLO_PRIVATE_COST_ESTIMATED,
-            Value::F64(9.2),
-        ));
         span.attributes
-            .insert(KeyValue::new(APOLLO_PRIVATE_COST_ACTUAL, Value::F64(6.9)));
-        span.attributes.insert(KeyValue::new(
+            .insert(APOLLO_PRIVATE_COST_RESULT, Value::String("OK".into()));
+        span.attributes
+            .insert(APOLLO_PRIVATE_COST_ESTIMATED, Value::F64(9.2));
+        span.attributes
+            .insert(APOLLO_PRIVATE_COST_ACTUAL, Value::F64(6.9));
+        span.attributes.insert(
             APOLLO_PRIVATE_COST_STRATEGY,
             Value::String("static_estimated".into()),
-        ));
-        span.attributes.insert(KeyValue::new(
-            APOLLO_PRIVATE_QUERY_ALIASES,
-            Value::I64(0.into()),
-        ));
-        span.attributes.insert(KeyValue::new(
-            APOLLO_PRIVATE_QUERY_DEPTH,
-            Value::I64(5.into()),
-        ));
-        span.attributes.insert(KeyValue::new(
-            APOLLO_PRIVATE_QUERY_HEIGHT,
-            Value::I64(7.into()),
-        ));
-        span.attributes.insert(KeyValue::new(
-            APOLLO_PRIVATE_QUERY_ROOT_FIELDS,
-            Value::I64(1.into()),
-        ));
+        );
+        span.attributes
+            .insert(APOLLO_PRIVATE_QUERY_ALIASES, Value::I64(0.into()));
+        span.attributes
+            .insert(APOLLO_PRIVATE_QUERY_DEPTH, Value::I64(5.into()));
+        span.attributes
+            .insert(APOLLO_PRIVATE_QUERY_HEIGHT, Value::I64(7.into()));
+        span.attributes
+            .insert(APOLLO_PRIVATE_QUERY_ROOT_FIELDS, Value::I64(1.into()));
         let limits = extract_limits(&span);
         assert_eq!(limits.result, "OK");
         assert_eq!(limits.cost_estimated, 9);
@@ -1619,5 +1852,34 @@ mod test {
         assert_eq!(limits.depth, 5);
         assert_eq!(limits.height, 7);
         assert_eq!(limits.root_field_count, 1);
+    }
+
+    #[test]
+    fn test_extract_cache_control() {
+        let mut span = LightSpanData {
+            trace_id: TraceId::from_u128(0),
+            span_id: SpanId::from_u64(1),
+            parent_span_id: SpanId::INVALID,
+            span_kind: SpanKind::Client,
+            name: Default::default(),
+            start_time: SystemTime::now(),
+            end_time: SystemTime::now(),
+            attributes: HashMap::with_capacity(10),
+            status: Default::default(),
+            droppped_attribute_count: 0,
+            events: Default::default(),
+        };
+
+        span.attributes.insert(
+            APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS,
+            Value::String(
+                serde_json::to_string(&json!({"cache-control": ["public, max-age=360"]}))
+                    .unwrap()
+                    .into(),
+            ),
+        );
+        let (_, cache_control) = extract_http_data(&span);
+        assert!(cache_control.as_ref().unwrap().public());
+        assert_eq!(cache_control.as_ref().unwrap().ttl().unwrap(), 360);
     }
 }

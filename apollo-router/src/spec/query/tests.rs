@@ -1829,7 +1829,7 @@ fn variable_validation() {
         }}",
         json!({"input":{}})
     );
-    assert!(res.is_ok(), "validation should have succeeded: {:?}", res);
+    assert!(res.is_ok(), "validation should have succeeded: {res:?}");
 }
 
 #[test]
@@ -5766,7 +5766,7 @@ fn filtered_defer_fragment() {
         .unwrap();
     let doc = ast.to_executable(schema.supergraph_schema()).unwrap();
     let (fragments, operation, defer_stats, schema_aware_hash) =
-        Query::extract_query_information(&schema, &doc, None).unwrap();
+        Query::extract_query_information(&schema, filtered_query, &doc, None).unwrap();
 
     let subselections = crate::spec::query::subselections::collect_subselections(
         &config,
@@ -5792,7 +5792,7 @@ fn filtered_defer_fragment() {
         .unwrap();
     let doc = ast.to_executable(schema.supergraph_schema()).unwrap();
     let (fragments, operation, defer_stats, schema_aware_hash) =
-        Query::extract_query_information(&schema, &doc, None).unwrap();
+        Query::extract_query_information(&schema, filtered_query, &doc, None).unwrap();
 
     let subselections = crate::spec::query::subselections::collect_subselections(
         &config,

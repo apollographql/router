@@ -3,11 +3,11 @@ use std::collections::HashSet;
 use std::fmt;
 use std::io;
 
-use opentelemetry::sdk::Resource;
 use opentelemetry::Array;
 use opentelemetry::Key;
-use opentelemetry::OrderMap;
+use opentelemetry::KeyValue;
 use opentelemetry::Value;
+use opentelemetry_sdk::Resource;
 use serde::ser::SerializeMap;
 use serde::ser::Serializer as _;
 use serde_json::Serializer;
@@ -18,10 +18,11 @@ use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::registry::SpanRef;
 
-use super::get_trace_and_span_id;
-use super::EventFormatter;
+use super::APOLLO_CONNECTOR_PREFIX;
 use super::APOLLO_PRIVATE_PREFIX;
 use super::EXCLUDED_ATTRIBUTES;
+use super::EventFormatter;
+use super::get_trace_and_span_id;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::TraceIdFormat;
 use crate::plugins::telemetry::config_new::logging::DisplayTraceIdFormat;
@@ -60,7 +61,7 @@ impl Default for Json {
 
 struct SerializableResources<'a>(&'a Vec<(String, serde_json::Value)>);
 
-impl<'a> serde::ser::Serialize for SerializableResources<'a> {
+impl serde::ser::Serialize for SerializableResources<'_> {
     fn serialize<Ser>(&self, serializer_o: Ser) -> Result<Ser::Ok, Ser::Error>
     where
         Ser: serde::ser::Serializer,
@@ -79,7 +80,7 @@ struct SerializableContext<'a, 'b, Span>(Option<SpanRef<'a, Span>>, &'b HashSet<
 where
     Span: Subscriber + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>;
 
-impl<'a, 'b, Span> serde::ser::Serialize for SerializableContext<'a, 'b, Span>
+impl<Span> serde::ser::Serialize for SerializableContext<'_, '_, Span>
 where
     Span: Subscriber + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
 {
@@ -108,7 +109,7 @@ struct SerializableSpan<'a, 'b, Span>(
 where
     Span: for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>;
 
-impl<'a, 'b, Span> serde::ser::Serialize for SerializableSpan<'a, 'b, Span>
+impl<Span> serde::ser::Serialize for SerializableSpan<'_, '_, Span>
 where
     Span: for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
 {
@@ -126,11 +127,13 @@ where
                 .get::<OtelData>()
                 .and_then(|otel_data| otel_data.builder.attributes.as_ref());
             if let Some(otel_attributes) = otel_attributes {
-                for (key, value) in otel_attributes.iter().filter(|(key, _)| {
-                    let key_name = key.as_str();
-                    !key_name.starts_with(APOLLO_PRIVATE_PREFIX) && !self.1.contains(&key_name)
+                for kv in otel_attributes.iter().filter(|kv| {
+                    let key_name = kv.key.as_str();
+                    !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
+                        && !key_name.starts_with(APOLLO_CONNECTOR_PREFIX)
+                        && !self.1.contains(&key_name)
                 }) {
-                    serializer.serialize_entry(key.as_str(), &value.as_str())?;
+                    serializer.serialize_entry(kv.key.as_str(), &kv.value.as_str())?;
                 }
             }
         }
@@ -147,7 +150,9 @@ where
                 };
                 for kv in custom_attributes.iter().filter(|kv| {
                     let key_name = kv.key.as_str();
-                    !key_name.starts_with(APOLLO_PRIVATE_PREFIX) && !self.1.contains(&key_name)
+                    !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
+                        && !key_name.starts_with(APOLLO_CONNECTOR_PREFIX)
+                        && !self.1.contains(&key_name)
                 }) {
                     match &kv.value {
                         Value::Bool(value) => {
@@ -268,12 +273,11 @@ where
                         None => {
                             let event_attributes = extensions.get_mut::<EventAttributes>();
                             event_attributes.map(|event_attributes| {
-                                OrderMap::from_iter(
-                                    event_attributes
-                                        .take()
-                                        .into_iter()
-                                        .map(|kv| (kv.key, kv.value)),
-                                )
+                                event_attributes
+                                    .take()
+                                    .into_iter()
+                                    .map(|KeyValue { key, value }| (key, value))
+                                    .collect()
                             })
                         }
                     }
@@ -302,31 +306,31 @@ where
                 serializer.serialize_entry("target", meta.target())?;
             }
 
-            if self.config.display_filename {
-                if let Some(filename) = meta.file() {
-                    serializer.serialize_entry("filename", filename)?;
-                }
+            if self.config.display_filename
+                && let Some(filename) = meta.file()
+            {
+                serializer.serialize_entry("filename", filename)?;
             }
 
-            if self.config.display_line_number {
-                if let Some(line_number) = meta.line() {
-                    serializer.serialize_entry("line_number", &line_number)?;
-                }
+            if self.config.display_line_number
+                && let Some(line_number) = meta.line()
+            {
+                serializer.serialize_entry("line_number", &line_number)?;
             }
-            if self.config.display_current_span {
-                if let Some(ref span) = current_span {
-                    serializer
-                        .serialize_entry("span", &SerializableSpan(span, &self.excluded_attributes))
-                        .unwrap_or(());
-                }
+            if self.config.display_current_span
+                && let Some(ref span) = current_span
+            {
+                serializer
+                    .serialize_entry("span", &SerializableSpan(span, &self.excluded_attributes))
+                    .unwrap_or(());
             }
 
             // dd.trace_id is special. It must appear as a root attribute on log lines, so we need to extract it from the root span.
             // We're just going to assume if it's there then we should output it, as the user will have to have configured it to be there.
-            if let Some(span) = &current_span {
-                if let Some(dd_trace_id) = extract_dd_trace_id(span) {
-                    serializer.serialize_entry("dd.trace_id", &dd_trace_id)?;
-                }
+            if let Some(span) = &current_span
+                && let Some(dd_trace_id) = extract_dd_trace_id(span)
+            {
+                serializer.serialize_entry("dd.trace_id", &dd_trace_id)?;
             }
             if self.config.display_span_list && current_span.is_some() {
                 serializer.serialize_entry(
@@ -353,27 +357,23 @@ fn extract_dd_trace_id<'a, 'b, T: LookupSpan<'a>>(span: &SpanRef<'a, T>) -> Opti
     if let Some(root_span) = root.next() {
         let ext = root_span.extensions();
         // Extract dd_trace_id, this could be in otel data or log attributes
-        if let Some(otel_data) = root_span.extensions().get::<OtelData>() {
-            if let Some(attributes) = otel_data.builder.attributes.as_ref() {
-                if let Some((_k, v)) = attributes
-                    .iter()
-                    .find(|(k, _v)| k.as_str() == "dd.trace_id")
-                {
-                    dd_trace_id = Some(v.to_string());
-                }
-            }
+        if let Some(otel_data) = ext.get::<OtelData>()
+            && let Some(attributes) = otel_data.builder.attributes.as_ref()
+            && let Some(kv) = attributes
+                .iter()
+                .find(|kv| kv.key.as_str() == "dd.trace_id")
+        {
+            dd_trace_id = Some(kv.value.to_string());
         };
 
-        if dd_trace_id.is_none() {
-            if let Some(log_attr) = ext.get::<LogAttributes>() {
-                if let Some(kv) = log_attr
-                    .attributes()
-                    .iter()
-                    .find(|kv| kv.key.as_str() == "dd.trace_id")
-                {
-                    dd_trace_id = Some(kv.value.to_string());
-                }
-            }
+        if dd_trace_id.is_none()
+            && let Some(log_attr) = ext.get::<LogAttributes>()
+            && let Some(kv) = log_attr
+                .attributes()
+                .iter()
+                .find(|kv| kv.key.as_str() == "dd.trace_id")
+        {
+            dd_trace_id = Some(kv.value.to_string());
         }
     }
     dd_trace_id
@@ -400,12 +400,13 @@ where
                     attributes.extend(
                         otel_attributes
                             .iter()
-                            .filter(|(key, _)| {
-                                let key_name = key.as_str();
+                            .filter(|kv| {
+                                let key_name = kv.key.as_str();
                                 !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
+                                    && !key_name.starts_with(APOLLO_CONNECTOR_PREFIX)
                                     && include_attributes.contains(key_name)
                             })
-                            .map(|(key, val)| (key.clone(), val.clone())),
+                            .map(|kv| (kv.key.clone(), kv.value.clone())),
                     );
                 }
             }
@@ -427,6 +428,7 @@ where
                             .filter(|kv| {
                                 let key_name = kv.key.as_str();
                                 !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
+                                    && !key_name.starts_with(APOLLO_CONNECTOR_PREFIX)
                                     && include_attributes.contains(key_name)
                             })
                             .map(|kv| (kv.key.clone(), kv.value.clone())),
@@ -449,16 +451,14 @@ impl<'a> WriteAdaptor<'a> {
     }
 }
 
-impl<'a> io::Write for WriteAdaptor<'a> {
+impl io::Write for WriteAdaptor<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let s =
             std::str::from_utf8(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-        self.fmt_write
-            .write_str(s)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        self.fmt_write.write_str(s).map_err(io::Error::other)?;
 
-        Ok(s.as_bytes().len())
+        Ok(s.len())
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -466,7 +466,7 @@ impl<'a> io::Write for WriteAdaptor<'a> {
     }
 }
 
-impl<'a> fmt::Debug for WriteAdaptor<'a> {
+impl fmt::Debug for WriteAdaptor<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.pad("WriteAdaptor { .. }")
     }
@@ -477,11 +477,11 @@ mod test {
     use tracing::subscriber;
     use tracing_core::Event;
     use tracing_core::Subscriber;
+    use tracing_subscriber::Layer;
+    use tracing_subscriber::Registry;
     use tracing_subscriber::layer::Context;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::registry::LookupSpan;
-    use tracing_subscriber::Layer;
-    use tracing_subscriber::Registry;
 
     use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;

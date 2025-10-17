@@ -29,6 +29,9 @@ fn process_common_request(check_context_method_and_id, check_body, request) {
             throw(`query: expected: #{}, actual: ${request.body.extensions}`);
         }
     }
+    if request.uri.scheme != () {
+        throw(`query: expected: (), actual: ${request.uri.scheme}`);
+    }
     if request.uri.host != () {
         throw(`query: expected: (), actual: ${request.uri.host}`);
     }
@@ -160,6 +163,9 @@ fn process_common_response(response) {
 }
 
 fn test_parse_request_details(request){
+    if request.uri.scheme != "https" {
+        throw(`query: expected: "https", actual: ${request.uri.scheme}`);
+    }
     if request.uri.host != "not-default" {
         throw(`query: expected: not-default, actual: ${request.uri.host}`);
     }

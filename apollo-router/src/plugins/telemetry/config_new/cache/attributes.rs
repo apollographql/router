@@ -1,15 +1,15 @@
-use opentelemetry_api::KeyValue;
+use opentelemetry::KeyValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
-use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
+use crate::Context;
 use crate::plugins::telemetry::config_new::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selectors;
+use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::subgraph;
-use crate::Context;
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug, PartialEq)]
 #[serde(deny_unknown_fields, default)]
@@ -25,11 +25,11 @@ impl DefaultForLevel for CacheAttributes {
         requirement_level: DefaultAttributeRequirementLevel,
         kind: TelemetryDataKind,
     ) {
-        if let TelemetryDataKind::Metrics = kind {
-            if let DefaultAttributeRequirementLevel::Required = requirement_level {
-                self.entity_type
-                    .get_or_insert(StandardAttribute::Bool(false));
-            }
+        if let TelemetryDataKind::Metrics = kind
+            && let DefaultAttributeRequirementLevel::Required = requirement_level
+        {
+            self.entity_type
+                .get_or_insert(StandardAttribute::Bool(false));
         }
     }
 }

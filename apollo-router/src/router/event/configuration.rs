@@ -1,18 +1,19 @@
 use std::path::Path;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::time::Duration;
+use std::sync::Arc;
 
 use derivative::Derivative;
 use derive_more::Display;
 use derive_more::From;
 use futures::prelude::*;
 
+use crate::Configuration;
 use crate::router::Event;
 use crate::router::Event::NoMoreConfiguration;
+use crate::router::Event::RhaiReload;
 use crate::router::Event::UpdateConfiguration;
 use crate::uplink::UplinkConfig;
-use crate::Configuration;
 
 type ConfigurationStream = Pin<Box<dyn Stream<Item = Configuration> + Send>>;
 
@@ -25,28 +26,23 @@ pub enum ConfigurationSource {
     ///
     /// Can be created through `serde::Deserialize` from various formats,
     /// or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.
-    #[display(fmt = "Static")]
-    #[from(types(Configuration))]
+    #[display("Static")]
+    #[from(Configuration, Box<Configuration>)]
     Static(Box<Configuration>),
 
     /// A configuration stream where the server will react to new configuration. If possible
     /// the configuration will be applied without restarting the internal http server.
-    #[display(fmt = "Stream")]
+    #[display("Stream")]
     Stream(#[derivative(Debug = "ignore")] ConfigurationStream),
 
     /// A yaml file that may be watched for changes
-    #[display(fmt = "File")]
+    #[display("File")]
     File {
         /// The path of the configuration file.
         path: PathBuf,
 
         /// `true` to watch the file for changes and hot apply them.
         watch: bool,
-
-        /// When watching, the delay to wait before applying the new configuration.
-        /// Note: This variable is deprecated and has no effect.
-        #[deprecated]
-        delay: Option<Duration>,
     },
 }
 
@@ -65,20 +61,15 @@ impl ConfigurationSource {
         match self {
             ConfigurationSource::Static(mut instance) => {
                 instance.uplink = uplink_config;
-                stream::iter(vec![UpdateConfiguration(*instance)]).boxed()
+                stream::iter(vec![UpdateConfiguration(instance.into())]).boxed()
             }
             ConfigurationSource::Stream(stream) => stream
                 .map(move |mut c| {
                     c.uplink = uplink_config.clone();
-                    UpdateConfiguration(c)
+                    UpdateConfiguration(Arc::new(c))
                 })
                 .boxed(),
-            #[allow(deprecated)]
-            ConfigurationSource::File {
-                path,
-                watch,
-                delay: _,
-            } => {
+            ConfigurationSource::File { path, watch } => {
                 // Sanity check, does the config file exists, if it doesn't then bail.
                 if !path.exists() {
                     tracing::error!(
@@ -90,7 +81,7 @@ impl ConfigurationSource {
                     match ConfigurationSource::read_config(&path) {
                         Ok(mut configuration) => {
                             if watch {
-                                crate::files::watch(&path)
+                                let config_watcher = crate::files::watch(&path)
                                     .filter_map(move |_| {
                                         let path = path.clone();
                                         let uplink_config = uplink_config.clone();
@@ -100,7 +91,9 @@ impl ConfigurationSource {
                                             {
                                                 Ok(mut configuration) => {
                                                     configuration.uplink = uplink_config.clone();
-                                                    Some(UpdateConfiguration(configuration))
+                                                    Some(UpdateConfiguration(Arc::new(
+                                                        configuration,
+                                                    )))
                                                 }
                                                 Err(err) => {
                                                     tracing::error!("{}", err);
@@ -109,11 +102,39 @@ impl ConfigurationSource {
                                             }
                                         }
                                     })
-                                    .boxed()
+                                    .boxed();
+                                if let Some(rhai_plugin) =
+                                    configuration.apollo_plugins.plugins.get("rhai")
+                                {
+                                    let scripts_path = match rhai_plugin["scripts"].as_str() {
+                                        Some(path) => Path::new(path),
+                                        None => Path::new("rhai"),
+                                    };
+                                    // If our path is relative, add it to the current dir
+                                    let scripts_watch = if scripts_path.is_relative() {
+                                        let current_directory = std::env::current_dir();
+                                        if current_directory.is_err() {
+                                            tracing::error!("No current directory found",);
+                                            return stream::empty().boxed();
+                                        }
+                                        current_directory.unwrap().join(scripts_path)
+                                    } else {
+                                        scripts_path.into()
+                                    };
+                                    let rhai_watcher = crate::files::watch_rhai(&scripts_watch)
+                                        .filter_map(move |_| future::ready(Some(RhaiReload)))
+                                        .boxed();
+                                    // Select across both our streams
+                                    futures::stream::select(config_watcher, rhai_watcher).boxed()
+                                } else {
+                                    config_watcher
+                                }
                             } else {
                                 configuration.uplink = uplink_config.clone();
-                                stream::once(future::ready(UpdateConfiguration(configuration)))
-                                    .boxed()
+                                stream::once(future::ready(UpdateConfiguration(Arc::new(
+                                    configuration,
+                                ))))
+                                .boxed()
                             }
                         }
                         Err(err) => {
@@ -150,6 +171,8 @@ enum ReadConfigError {
 mod tests {
     use std::env::temp_dir;
 
+    use futures::StreamExt;
+
     use super::*;
     use crate::files::tests::create_temp_file;
     use crate::files::tests::write_and_flush;
@@ -160,13 +183,9 @@ mod tests {
         let (path, mut file) = create_temp_file();
         let contents = include_str!("../../testdata/supergraph_config.router.yaml");
         write_and_flush(&mut file, contents).await;
-        let mut stream = ConfigurationSource::File {
-            path,
-            watch: true,
-            delay: None,
-        }
-        .into_stream(Some(UplinkConfig::default()))
-        .boxed();
+        let mut stream = ConfigurationSource::File { path, watch: true }
+            .into_stream(Some(UplinkConfig::default()))
+            .boxed();
 
         // First update is guaranteed
         assert!(matches!(
@@ -185,7 +204,7 @@ mod tests {
 
         // This time write garbage, there should not be an update.
         write_and_flush(&mut file, ":garbage").await;
-        let event = stream.into_future().now_or_never();
+        let event = StreamExt::into_future(stream).now_or_never();
         assert!(event.is_none() || matches!(event, Some((Some(NoMoreConfiguration), _))));
     }
 
@@ -194,7 +213,6 @@ mod tests {
         let mut stream = ConfigurationSource::File {
             path: temp_dir().join("does_not_exit"),
             watch: true,
-            delay: None,
         }
         .into_stream(Some(UplinkConfig::default()));
 
@@ -206,12 +224,8 @@ mod tests {
     async fn config_by_file_invalid() {
         let (path, mut file) = create_temp_file();
         write_and_flush(&mut file, "Garbage").await;
-        let mut stream = ConfigurationSource::File {
-            path,
-            watch: true,
-            delay: None,
-        }
-        .into_stream(Some(UplinkConfig::default()));
+        let mut stream = ConfigurationSource::File { path, watch: true }
+            .into_stream(Some(UplinkConfig::default()));
 
         // First update fails because the file is invalid.
         assert!(matches!(stream.next().await.unwrap(), NoMoreConfiguration));
@@ -223,12 +237,8 @@ mod tests {
         let contents = include_str!("../../testdata/supergraph_config.router.yaml");
         write_and_flush(&mut file, contents).await;
 
-        let mut stream = ConfigurationSource::File {
-            path,
-            watch: false,
-            delay: None,
-        }
-        .into_stream(Some(UplinkConfig::default()));
+        let mut stream = ConfigurationSource::File { path, watch: false }
+            .into_stream(Some(UplinkConfig::default()));
         assert!(matches!(
             stream.next().await.unwrap(),
             UpdateConfiguration(_)

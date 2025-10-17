@@ -13,8 +13,8 @@ use tower::ServiceExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
-use crate::services::subgraph;
 use crate::services::SubgraphRequest;
+use crate::services::subgraph;
 
 #[derive(Debug, Clone)]
 struct OverrideSubgraphUrl {
@@ -85,15 +85,15 @@ mod tests {
 
     use http::Uri;
     use serde_json::Value;
-    use tower::util::BoxService;
     use tower::Service;
     use tower::ServiceExt;
+    use tower::util::BoxService;
 
-    use crate::plugin::test::MockSubgraphService;
+    use crate::Context;
     use crate::plugin::DynPlugin;
+    use crate::plugin::test::MockSubgraphService;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
-    use crate::Context;
 
     #[tokio::test]
     async fn plugin_registered() {

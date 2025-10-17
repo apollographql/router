@@ -1,0 +1,335 @@
+---
+title: Router CLI Configuration Reference
+subtitle: ""
+description: Reference of command-line options for Apollo GraphOS Router and Apollo Router Core.
+---
+
+import RouterYaml from "../../../shared/router-yaml-complete.mdx";
+import RouterConfigTable from "../../../shared/router-config-properties-table.mdx";
+
+This reference covers the command-line options for configuring an Apollo Router.
+
+## Command-line options
+
+This reference lists and describes the options supported by the `router` binary via command-line options. Where indicated, some of these options can also be provided via an environment variable.
+
+<Tip>
+
+For options available as both a command-line option and an environment variable, the command-line value takes precedence.
+
+</Tip>
+
+<table class="field-table api-ref">
+  <thead>
+    <tr>
+      <th>Option / Environment Variable</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+
+<tbody>
+
+<tr class="required">
+<td>
+
+##### `-s` / `--supergraph`
+
+`APOLLO_ROUTER_SUPERGRAPH_PATH`, `APOLLO_ROUTER_SUPERGRAPH_URLS`
+
+</td>
+<td>
+
+The [supergraph schema](/federation/federated-types/overview#supergraph-schema) of a router. Specified by absolute or relative path (`-s` / `--supergraph <supergraph_path>`, or `APOLLO_ROUTER_SUPERGRAPH_PATH`), or a comma-separated list of URLs (`--supergraph-urls <urls>`, or `APOLLO_ROUTER_SUPERGRAPH_URLS`).<br/><br/>
+
+> &#x1F4A1; Avoid embedding tokens in `APOLLO_ROUTER_SUPERGRAPH_URLS` because the URLs may appear in log messages.<br/><br/>
+
+Setting this option disables polling from Apollo Uplink to fetch the latest supergraph schema.<br/>
+
+To learn how to compose your supergraph schema with the Rover CLI, see the [Federation quickstart](/federation/quickstart).<br/><br/>
+
+**Required** if you are _not_ using managed federation. If you _are_ using managed federation, you may need to set this option when following [advanced deployment workflows](/federation/managed-federation/deployment/#advanced-deployment-workflows).
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `-c` / `--config`
+
+`APOLLO_ROUTER_CONFIG_PATH`
+
+</td>
+<td>
+
+The absolute or relative path to the router's optional [YAML configuration file](/graphos/routing/configuration/yaml).
+
+</td>
+
+</tr>
+<tr>
+<td style="min-width: 150px;">
+
+##### `--apollo-key-path`
+
+`APOLLO_KEY_PATH`
+
+</td>
+<td>
+
+The absolute or relative path to a file containing the Apollo graph API key for use with managed federation.
+
+⚠️ **This is not available on Windows.**
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--dev`
+
+</td>
+<td>
+
+⚠️ **Do not set this option in production!**
+
+<br />
+If set, a router runs in dev mode to help with local development.
+
+[Learn more about dev mode](#development-mode).
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--hr` / `--hot-reload`
+
+`APOLLO_ROUTER_HOT_RELOAD`
+
+</td>
+<td>
+
+If set, the router watches for changes to its configuration file and any supergraph file passed with `--supergraph` and reloads them automatically without downtime. This setting only affects local files provided to the router. The supergraph and configuration provided from GraphOS via Launches (and delivered via Uplink) are _always_ loaded automatically, regardless of this setting.
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--log`
+
+`APOLLO_ROUTER_LOG`
+
+</td>
+<td>
+
+The log level, indicating the _most_ severe log message type to include. In ascending order of verbosity, can be one of: `off`, `error`, `warn`, `info`, `debug`, or `trace`.
+
+The default value is `info`.
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--license`
+
+`APOLLO_ROUTER_LICENSE_PATH`, `APOLLO_ROUTER_LICENSE`
+
+</td>
+<td>
+
+An offline GraphOS Enterprise license. Enables Enterprise router features when disconnected from GraphOS.<br/>
+
+An offline license is specified either as an absolute or relative path to a license file (`--license <license_path>` or `APOLLO_ROUTER_LICENSE_PATH`), or as the stringified contents of a license (`APOLLO_ROUTER_LICENSE`).<br/>
+
+When not set, the router retrieves an Enterprise license [from GraphOS via Apollo Uplink](/router/enterprise-features/#the-enterprise-license).<br/>
+
+For information about fetching an offline license and configuring the router, see [Offline Enterprise license](/graphos/routing/license/#offline-license).
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--apollo-uplink-endpoints`
+
+`APOLLO_UPLINK_ENDPOINTS`
+
+</td>
+<td>
+
+If using [managed federation](/federation/managed-federation/overview/), the Apollo Uplink URL(s) that the router should poll to fetch its latest configuration. Almost all managed router instances should _omit_ this option to use the default set of Uplink URLs.<br/>
+
+If you specify multiple URLs, separate them with commas (no whitespace).<br/>
+
+For default behavior and possible values, see [Apollo Uplink](/federation/managed-federation/uplink/).
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--graph-artifact-reference`
+
+`APOLLO_GRAPH_ARTIFACT_REFERENCE`
+
+</td>
+<td>
+
+An OCI reference to an image that contains the supergraph schema for the router.<br/>
+
+When this option is set, the router will fetch the schema from the specified OCI image instead of using Apollo Uplink. Note that Apollo Uplink will still be used for entitlements and persisted queries.<br/>
+
+⚠️ **This option does not support hot reloading schemas.**
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--apollo-uplink-timeout`
+
+`APOLLO_UPLINK_TIMEOUT`
+
+</td>
+<td>
+
+The request timeout for each poll sent to Apollo Uplink.
+
+The default value is `30s` (thirty seconds).
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--anonymous-telemetry-disabled`
+
+`APOLLO_TELEMETRY_DISABLED`
+
+</td>
+<td>
+
+If set, disables sending anonymous usage information to Apollo.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+##### `--listen`
+
+`APOLLO_ROUTER_LISTEN_ADDRESS`
+
+</td>
+<td>
+
+If set, the listen address of the router.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+##### `-V` / `--version`
+
+</td>
+<td>
+
+If set, the router prints its version number, then exits.
+
+</td>
+</tr>
+
+</tbody>
+</table>
+
+### Development mode
+
+The router can be run in development mode by using the `--dev` command-line option.
+
+The `--dev` option is equivalent to running the router with the `--hot-reload` option the following configuration options:
+
+```yaml
+sandbox:
+  enabled: true
+homepage:
+  enabled: false
+supergraph:
+  introspection: true
+include_subgraph_errors:
+  all: true
+plugins:
+  # Enable with the header, Apollo-Expose-Query-Plan: true
+  experimental.expose_query_plan: true
+```
+
+<Caution>
+
+**Don't set the `--dev` option in production.** If you want to replicate any specific dev mode functionality in production, set the corresponding option in your [YAML config file](/graphos/routing/configuration/yaml).
+
+</Caution>
+
+## Configuration schema for IDE validation
+
+The router can generate a JSON schema for config validation in your text editor. This schema helps you format the YAML file correctly and also provides content assistance.
+
+Generate the schema with the following command:
+
+```bash
+./router config schema > configuration_schema.json
+```
+
+After you generate the schema, configure your text editor. Here are the instructions for some commonly used editors:
+
+- [Visual Studio Code](https://code.visualstudio.com/docs/languages/json#_json-schemas-and-settings)
+- [Emacs](https://emacs-lsp.github.io/lsp-mode/page/lsp-yaml)
+- [IntelliJ](https://www.jetbrains.com/help/idea/json.html#ws_json_using_schemas)
+- [Sublime](https://github.com/sublimelsp/LSP-yaml)
+- [Vim](https://github.com/Quramy/vison)
+
+## Upgrading your router configuration
+
+New releases of the router might introduce breaking changes to the [YAML config file's](/graphos/routing/configuration/yaml) expected format, usually to extend existing functionality or improve usability.
+
+**If you run a new version of your router with a configuration file that it no longer supports, it emits a warning on startup and terminates.**
+
+If you encounter this warning, you can use the `router config upgrade` command to see the new expected format for your existing configuration file:
+
+```bash
+./router config upgrade <path_to_config.yaml>
+```
+
+You can also view a diff of exactly which changes are necessary to upgrade your existing configuration file:
+
+```bash
+./router config upgrade --diff <path_to_config.yaml>
+```
+
+## Validating your router configuration
+
+The router can be used to validate an existing configuration file. This can be useful if you want to have a validate step as part of your CI pipeline.
+
+```
+./router config validate <path-to-config-file.yaml>
+```
+
+This command takes a config file and validates it against the router's full supported configuration format.
+
+<Note>
+
+This is a static validation that checks if it is syntactically correct using the JSON schema. The router does additional logical checks on startup against the config that this command does not capture.
+
+</Note>

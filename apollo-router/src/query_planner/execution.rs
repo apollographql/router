@@ -1,45 +1,53 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use apollo_compiler::validation::Valid;
+use futures::StreamExt;
 use futures::future::join_all;
 use futures::prelude::*;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::BroadcastStream;
+use tower::ServiceExt;
 use tracing::Instrument;
 
-use super::log;
-use super::subscription::SubscriptionHandle;
 use super::DeferredNode;
 use super::PlanNode;
 use super::QueryPlan;
+use super::log;
+use super::subscription::SubscriptionHandle;
+use crate::Context;
 use crate::axum_factory::CanceledRequest;
 use crate::error::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
+use crate::json_ext::PathElement;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::plugins::subscription::SubscriptionConfig;
-use crate::query_planner::FlattenNode;
-use crate::query_planner::Primary;
 use crate::query_planner::CONDITION_ELSE_SPAN_NAME;
 use crate::query_planner::CONDITION_IF_SPAN_NAME;
 use crate::query_planner::CONDITION_SPAN_NAME;
 use crate::query_planner::DEFER_DEFERRED_SPAN_NAME;
 use crate::query_planner::DEFER_PRIMARY_SPAN_NAME;
 use crate::query_planner::DEFER_SPAN_NAME;
-use crate::query_planner::FETCH_SPAN_NAME;
 use crate::query_planner::FLATTEN_SPAN_NAME;
+use crate::query_planner::FlattenNode;
 use crate::query_planner::PARALLEL_SPAN_NAME;
+use crate::query_planner::Primary;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
-use crate::query_planner::SUBSCRIBE_SPAN_NAME;
-use crate::services::SubgraphServiceFactory;
+use crate::query_planner::fetch::FetchNode;
+use crate::query_planner::fetch::SubgraphSchemas;
+use crate::query_planner::fetch::Variables;
+use crate::services::FetchRequest;
+use crate::services::fetch;
+use crate::services::fetch::ErrorMapping;
+use crate::services::fetch::SubscriptionRequest;
+use crate::services::fetch_service::FetchServiceFactory;
+use crate::services::new_service::ServiceFactory;
 use crate::spec::Query;
 use crate::spec::Schema;
-use crate::Context;
 
 impl QueryPlan {
     #[allow(clippy::too_many_arguments)]
@@ -47,13 +55,18 @@ impl QueryPlan {
     pub(crate) async fn execute<'a>(
         &self,
         context: &'a Context,
-        service_factory: &'a Arc<SubgraphServiceFactory>,
+        service_factory: &'a Arc<FetchServiceFactory>,
+        // The original supergraph request is used to populate variable values and for plugin
+        // features like propagating headers or subgraph telemetry based on supergraph request
+        // values.
         supergraph_request: &'a Arc<http::Request<Request>>,
         schema: &'a Arc<Schema>,
-        subgraph_schemas: &'a Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+        subgraph_schemas: &'a Arc<SubgraphSchemas>,
+        // Sender for additional responses past the first one (@defer, @stream, subscriptions)
         sender: mpsc::Sender<Response>,
         subscription_handle: Option<SubscriptionHandle>,
         subscription_config: &'a Option<SubscriptionConfig>,
+        // Query plan execution builds up a JSON result value, use this as the initial data.
         initial_value: Option<Value>,
     ) -> Response {
         let root = Path::empty();
@@ -104,9 +117,9 @@ impl QueryPlan {
 // holds the query plan executon arguments that do not change between calls
 pub(crate) struct ExecutionParameters<'a> {
     pub(crate) context: &'a Context,
-    pub(crate) service_factory: &'a Arc<SubgraphServiceFactory>,
+    pub(crate) service_factory: &'a Arc<FetchServiceFactory>,
     pub(crate) schema: &'a Arc<Schema>,
-    pub(crate) subgraph_schemas: &'a Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    pub(crate) subgraph_schemas: &'a Arc<SubgraphSchemas>,
     pub(crate) supergraph_request: &'a Arc<http::Request<Request>>,
     pub(crate) deferred_fetches: &'a HashMap<String, broadcast::Sender<(Value, Vec<Error>)>>,
     pub(crate) query: &'a Arc<Query>,
@@ -122,7 +135,7 @@ impl PlanNode {
         current_dir: &'a Path,
         parent_value: &'a Value,
         sender: mpsc::Sender<Response>,
-    ) -> future::BoxFuture<(Value, Vec<Error>)> {
+    ) -> future::BoxFuture<'a, (Value, Vec<Error>)> {
         Box::pin(async move {
             tracing::trace!("executing plan:\n{:#?}", self);
             let mut value;
@@ -201,33 +214,65 @@ impl PlanNode {
                     value = v;
                     errors = err;
                 }
-                PlanNode::Subscription { primary, .. } => {
-                    if parameters.subscription_handle.is_some() {
-                        let fetch_time_offset =
-                            parameters.context.created_at.elapsed().as_nanos() as i64;
-                        errors = primary
-                            .execute_recursively(parameters, current_dir, parent_value, sender)
-                            .instrument(tracing::info_span!(
-                                SUBSCRIBE_SPAN_NAME,
-                                "otel.kind" = "INTERNAL",
-                                "apollo.subgraph.name" = primary.service_name.as_ref(),
-                                "apollo_private.sent_time_offset" = fetch_time_offset
-                            ))
-                            .await;
-                    } else {
+                PlanNode::Subscription {
+                    primary: subscription_node,
+                    ..
+                } => {
+                    if parameters.subscription_handle.is_none() {
                         tracing::error!("No subscription handle provided for a subscription");
-                        errors = vec![Error::builder()
-                            .message("no subscription handle provided for a subscription")
-                            .extension_code("NO_SUBSCRIPTION_HANDLE")
-                            .build()];
-                    };
-
-                    value = Value::default();
+                        value = Value::default();
+                        errors = vec![
+                            Error::builder()
+                                .message("no subscription handle provided for a subscription")
+                                .extension_code("NO_SUBSCRIPTION_HANDLE")
+                                .build(),
+                        ];
+                    } else {
+                        match Variables::new(
+                            &[],
+                            &subscription_node.variable_usages,
+                            parent_value,
+                            current_dir,
+                            parameters.supergraph_request,
+                            parameters.schema,
+                            &subscription_node.input_rewrites,
+                            &None,
+                        ) {
+                            Some(variables) => {
+                                let service = parameters.service_factory.create();
+                                let request = fetch::Request::Subscription(
+                                    SubscriptionRequest::builder()
+                                        .context(parameters.context.clone())
+                                        .subscription_node(subscription_node.clone())
+                                        .supergraph_request(parameters.supergraph_request.clone())
+                                        .variables(variables)
+                                        .current_dir(current_dir.clone())
+                                        .sender(sender)
+                                        .and_subscription_handle(
+                                            parameters.subscription_handle.clone(),
+                                        )
+                                        .and_subscription_config(
+                                            parameters.subscription_config.clone(),
+                                        )
+                                        .build(),
+                                );
+                                (value, errors) =
+                                    match service.oneshot(request).await.map_to_graphql_error(
+                                        subscription_node.service_name.to_string(),
+                                        current_dir,
+                                    ) {
+                                        Ok(r) => r,
+                                        Err(e) => (Value::default(), vec![e]),
+                                    };
+                            }
+                            None => {
+                                value = Value::Object(Object::default());
+                                errors = Vec::new();
+                            }
+                        };
+                    }
                 }
                 PlanNode::Fetch(fetch_node) => {
-                    let fetch_time_offset =
-                        parameters.context.created_at.elapsed().as_nanos() as i64;
-
                     // The client closed the connection, we are still executing the request pipeline,
                     // but we won't send unused trafic to subgraph
                     if parameters
@@ -238,17 +283,76 @@ impl PlanNode {
                         value = Value::Object(Object::default());
                         errors = Vec::new();
                     } else {
-                        let (v, e) = fetch_node
-                            .fetch_node(parameters, parent_value, current_dir)
-                            .instrument(tracing::info_span!(
-                                FETCH_SPAN_NAME,
-                                "otel.kind" = "INTERNAL",
-                                "apollo.subgraph.name" = fetch_node.service_name.as_ref(),
-                                "apollo_private.sent_time_offset" = fetch_time_offset
-                            ))
-                            .await;
-                        value = v;
-                        errors = e;
+                        match Variables::new(
+                            &fetch_node.requires,
+                            &fetch_node.variable_usages,
+                            parent_value,
+                            current_dir,
+                            parameters.supergraph_request,
+                            parameters.schema.as_ref(),
+                            &fetch_node.input_rewrites,
+                            &fetch_node.context_rewrites,
+                        ) {
+                            Some(variables) => {
+                                let paths = variables.inverted_paths.clone();
+                                let service = parameters.service_factory.create();
+                                let request = fetch::Request::Fetch(
+                                    FetchRequest::builder()
+                                        .context(parameters.context.clone())
+                                        .fetch_node(fetch_node.clone())
+                                        .supergraph_request(parameters.supergraph_request.clone())
+                                        .variables(variables)
+                                        .current_dir(current_dir.clone())
+                                        .build(),
+                                );
+                                let raw_errors;
+                                (value, raw_errors) =
+                                    match service.oneshot(request).await.map_to_graphql_error(
+                                        fetch_node.service_name.to_string(),
+                                        current_dir,
+                                    ) {
+                                        Ok(r) => r,
+                                        Err(e) => (Value::default(), vec![e]),
+                                    };
+
+                                // When a subgraph returns an unexpected response (ie not a body with
+                                // at least one of errors or data), the errors surfaced by the router
+                                // include an @ in the path. This indicates the error should be applied
+                                // to all elements in the array.
+                                errors = Vec::default();
+                                for err in raw_errors {
+                                    if let Some(err_path) = err.path.as_ref()
+                                        && err_path
+                                            .iter()
+                                            .any(|elem| matches!(elem, PathElement::Flatten(_)))
+                                    {
+                                        for path in paths.iter().flatten() {
+                                            if err_path.equal_if_flattened(path) {
+                                                let mut err = err.clone();
+                                                err.path = Some(path.clone());
+                                                errors.push(err);
+                                            }
+                                        }
+
+                                        continue;
+                                    }
+
+                                    errors.push(err);
+                                }
+
+                                FetchNode::deferred_fetches(
+                                    current_dir,
+                                    &fetch_node.id,
+                                    parameters.deferred_fetches,
+                                    &value,
+                                    &errors,
+                                );
+                            }
+                            None => {
+                                value = Value::Object(Object::default());
+                                errors = Vec::new();
+                            }
+                        };
                     }
                 }
                 PlanNode::Defer {
@@ -407,7 +511,7 @@ impl DeferredNode {
         sender: mpsc::Sender<Response>,
         primary_sender: &broadcast::Sender<(Value, Vec<Error>)>,
         deferred_fetches: &mut HashMap<String, broadcast::Sender<(Value, Vec<Error>)>>,
-    ) -> impl Future<Output = ()> {
+    ) -> impl Future<Output = ()> + use<> {
         let mut deferred_receivers = Vec::new();
 
         for d in self.depends.iter() {
@@ -415,11 +519,11 @@ impl DeferredNode {
                 None => {
                     let (sender, receiver) = tokio::sync::broadcast::channel(1);
                     deferred_fetches.insert(d.id.clone(), sender.clone());
-                    deferred_receivers.push(BroadcastStream::new(receiver).into_future());
+                    deferred_receivers.push(StreamExt::into_future(BroadcastStream::new(receiver)));
                 }
                 Some(sender) => {
                     let receiver = sender.subscribe();
-                    deferred_receivers.push(BroadcastStream::new(receiver).into_future());
+                    deferred_receivers.push(StreamExt::into_future(BroadcastStream::new(receiver)));
                 }
             }
         }

@@ -1,0 +1,4 @@
+description: supergraph.query_planning.experimental_parallelism config is no longer supported as a result of the legacy query planner removal
+actions:
+  - type: delete
+    path: supergraph.query_planning.experimental_parallelism

@@ -1,0 +1,1 @@
+Tests using @cost and @listSize directives with connectors

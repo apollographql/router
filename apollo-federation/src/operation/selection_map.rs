@@ -1,22 +1,24 @@
 use std::borrow::Cow;
 use std::hash::BuildHasher;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
 use hashbrown::DefaultHashBuilder;
 use hashbrown::HashTable;
-use serde::ser::SerializeSeq;
+use itertools::Itertools;
 use serde::Serialize;
+use serde::ser::SerializeSeq;
 
 use crate::error::FederationError;
-use crate::operation::field_selection::FieldSelection;
-use crate::operation::fragment_spread_selection::FragmentSpreadSelection;
-use crate::operation::inline_fragment_selection::InlineFragmentSelection;
 use crate::operation::DirectiveList;
 use crate::operation::Selection;
 use crate::operation::SelectionId;
 use crate::operation::SelectionSet;
 use crate::operation::SiblingTypename;
+use crate::operation::field_selection::FieldSelection;
+use crate::operation::inline_fragment_selection::InlineFragmentSelection;
 
 /// A selection "key" (unrelated to the federation `@key` directive) is an identifier of a selection
 /// (field, inline fragment, or fragment spread) that is used to determine whether two selections
@@ -138,12 +140,12 @@ impl OwnedSelectionKey {
     }
 }
 
+#[cfg(test)]
 impl<'a> SelectionKey<'a> {
     /// Create a selection key for a specific field name.
     ///
     /// This is available for tests only as selection keys should not normally be created outside of
     /// `HasSelectionKey::key`.
-    #[cfg(test)]
     pub(crate) fn field_name(name: &'a Name) -> Self {
         static EMPTY_LIST: DirectiveList = DirectiveList::new();
         SelectionKey::Field {
@@ -196,6 +198,14 @@ impl PartialEq for SelectionMap {
 
 impl Eq for SelectionMap {}
 
+impl Hash for SelectionMap {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.values()
+            .sorted()
+            .for_each(|hash_key| hash_key.hash(state));
+    }
+}
+
 impl Serialize for SelectionMap {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -224,7 +234,7 @@ pub(crate) type IntoValues = std::vec::IntoIter<Selection>;
 /// matches the given key.
 ///
 /// The returned function panics if the index is out of bounds.
-fn key_eq<'a>(selections: &'a [Selection], key: SelectionKey<'a>) -> impl Fn(&Bucket) -> bool + 'a {
+fn key_eq(selections: &[Selection], key: SelectionKey<'_>) -> impl Fn(&Bucket) -> bool {
     move |bucket| selections[bucket.index].key() == key
 }
 
@@ -249,13 +259,13 @@ impl SelectionMap {
     }
 
     /// Computes the hash of a selection key.
-    fn hash(&self, key: SelectionKey<'_>) -> u64 {
+    fn hash_key(&self, key: SelectionKey<'_>) -> u64 {
         self.hash_builder.hash_one(key)
     }
 
     /// Returns true if the given key exists in the map.
     pub(crate) fn contains_key(&self, key: SelectionKey<'_>) -> bool {
-        let hash = self.hash(key);
+        let hash = self.hash_key(key);
         self.table
             .find(hash, key_eq(&self.selections, key))
             .is_some()
@@ -263,13 +273,13 @@ impl SelectionMap {
 
     /// Returns true if the given key exists in the map.
     pub(crate) fn get(&self, key: SelectionKey<'_>) -> Option<&Selection> {
-        let hash = self.hash(key);
+        let hash = self.hash_key(key);
         let bucket = self.table.find(hash, key_eq(&self.selections, key))?;
         Some(&self.selections[bucket.index])
     }
 
     pub(crate) fn get_mut(&mut self, key: SelectionKey<'_>) -> Option<SelectionValue<'_>> {
-        let hash = self.hash(key);
+        let hash = self.hash_key(key);
         let bucket = self.table.find_mut(hash, key_eq(&self.selections, key))?;
         Some(SelectionValue::new(&mut self.selections[bucket.index]))
     }
@@ -293,7 +303,7 @@ impl SelectionMap {
         assert!(self.table.capacity() >= self.selections.len());
         self.table.clear();
         for (index, selection) in self.selections.iter().enumerate() {
-            let hash = self.hash(selection.key());
+            let hash = self.hash_key(selection.key());
             self.table
                 .insert_unique(hash, Bucket { index, hash }, |existing| existing.hash);
         }
@@ -309,13 +319,13 @@ impl SelectionMap {
     }
 
     pub(crate) fn insert(&mut self, value: Selection) {
-        let hash = self.hash(value.key());
+        let hash = self.hash_key(value.key());
         self.raw_insert(hash, value);
     }
 
     /// Remove a selection from the map. Returns the selection and its numeric index.
     pub(crate) fn remove(&mut self, key: SelectionKey<'_>) -> Option<(usize, Selection)> {
-        let hash = self.hash(key);
+        let hash = self.hash_key(key);
         let entry = self
             .table
             .find_entry(hash, key_eq(&self.selections, key))
@@ -361,7 +371,7 @@ impl SelectionMap {
     /// Provides mutable access to a selection key. A new selection can be inserted or an existing
     /// selection modified.
     pub(super) fn entry<'a>(&'a mut self, key: SelectionKey<'a>) -> Entry<'a> {
-        let hash = self.hash(key);
+        let hash = self.hash_key(key);
         let slot = self.table.find_entry(hash, key_eq(&self.selections, key));
         match slot {
             Ok(occupied) => {
@@ -404,16 +414,16 @@ impl SelectionMap {
     /// filtering has happened on all the selections of its sub-selection.
     pub(crate) fn filter_recursive_depth_first(
         &self,
-        predicate: &mut dyn FnMut(&Selection) -> Result<bool, FederationError>,
-    ) -> Result<Cow<'_, Self>, FederationError> {
+        predicate: &mut dyn FnMut(&Selection) -> bool,
+    ) -> Cow<'_, Self> {
         fn recur_sub_selections<'sel>(
             selection: &'sel Selection,
-            predicate: &mut dyn FnMut(&Selection) -> Result<bool, FederationError>,
-        ) -> Result<Cow<'sel, Selection>, FederationError> {
-            Ok(match selection {
+            predicate: &mut dyn FnMut(&Selection) -> bool,
+        ) -> Cow<'sel, Selection> {
+            match selection {
                 Selection::Field(field) => {
                     if let Some(sub_selections) = &field.selection_set {
-                        match sub_selections.filter_recursive_depth_first(predicate)? {
+                        match sub_selections.filter_recursive_depth_first(predicate) {
                             Cow::Borrowed(_) => Cow::Borrowed(selection),
                             Cow::Owned(new) => {
                                 Cow::Owned(Selection::from_field(field.field.clone(), Some(new)))
@@ -425,7 +435,7 @@ impl SelectionMap {
                 }
                 Selection::InlineFragment(fragment) => match fragment
                     .selection_set
-                    .filter_recursive_depth_first(predicate)?
+                    .filter_recursive_depth_first(predicate)
                 {
                     Cow::Borrowed(_) => Cow::Borrowed(selection),
                     Cow::Owned(selection_set) => Cow::Owned(Selection::InlineFragment(Arc::new(
@@ -435,20 +445,17 @@ impl SelectionMap {
                         ),
                     ))),
                 },
-                Selection::FragmentSpread(_) => {
-                    return Err(FederationError::internal("unexpected fragment spread"))
-                }
-            })
+            }
         }
         let mut iter = self.values();
         let mut enumerated = (&mut iter).enumerate();
         let mut new_map: Self;
         loop {
             let Some((index, selection)) = enumerated.next() else {
-                return Ok(Cow::Borrowed(self));
+                return Cow::Borrowed(self);
             };
-            let filtered = recur_sub_selections(selection, predicate)?;
-            let keep = predicate(&filtered)?;
+            let filtered = recur_sub_selections(selection, predicate);
+            let keep = predicate(&filtered);
             if keep && matches!(filtered, Cow::Borrowed(_)) {
                 // Nothing changed so far, continue without cloning
                 continue;
@@ -463,12 +470,12 @@ impl SelectionMap {
             break;
         }
         for selection in iter {
-            let filtered = recur_sub_selections(selection, predicate)?;
-            if predicate(&filtered)? {
+            let filtered = recur_sub_selections(selection, predicate);
+            if predicate(&filtered) {
                 new_map.insert(filtered.into_owned());
             }
         }
-        Ok(Cow::Owned(new_map))
+        Cow::Owned(new_map)
     }
 }
 
@@ -493,7 +500,6 @@ where
 #[derive(Debug)]
 pub(crate) enum SelectionValue<'a> {
     Field(FieldSelectionValue<'a>),
-    FragmentSpread(FragmentSpreadSelectionValue<'a>),
     InlineFragment(InlineFragmentSelectionValue<'a>),
 }
 
@@ -503,9 +509,6 @@ impl<'a> SelectionValue<'a> {
             Selection::Field(field_selection) => {
                 SelectionValue::Field(FieldSelectionValue::new(field_selection))
             }
-            Selection::FragmentSpread(fragment_spread_selection) => SelectionValue::FragmentSpread(
-                FragmentSpreadSelectionValue::new(fragment_spread_selection),
-            ),
             Selection::InlineFragment(inline_fragment_selection) => SelectionValue::InlineFragment(
                 InlineFragmentSelectionValue::new(inline_fragment_selection),
             ),
@@ -515,7 +518,6 @@ impl<'a> SelectionValue<'a> {
     pub(super) fn key(&self) -> SelectionKey<'_> {
         match self {
             Self::Field(field) => field.get().key(),
-            Self::FragmentSpread(frag) => frag.get().key(),
             Self::InlineFragment(frag) => frag.get().key(),
         }
     }
@@ -525,7 +527,6 @@ impl<'a> SelectionValue<'a> {
     pub(super) fn get_selection_set_mut(&mut self) -> Option<&mut SelectionSet> {
         match self {
             SelectionValue::Field(field) => field.get_selection_set_mut(),
-            SelectionValue::FragmentSpread(frag) => Some(frag.get_selection_set_mut()),
             SelectionValue::InlineFragment(frag) => Some(frag.get_selection_set_mut()),
         }
     }
@@ -549,24 +550,6 @@ impl<'a> FieldSelectionValue<'a> {
 
     pub(crate) fn get_selection_set_mut(&mut self) -> Option<&mut SelectionSet> {
         Arc::make_mut(self.0).selection_set.as_mut()
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct FragmentSpreadSelectionValue<'a>(&'a mut Arc<FragmentSpreadSelection>);
-
-impl<'a> FragmentSpreadSelectionValue<'a> {
-    pub(crate) fn new(fragment_spread_selection: &'a mut Arc<FragmentSpreadSelection>) -> Self {
-        Self(fragment_spread_selection)
-    }
-
-    pub(crate) fn get(&self) -> &Arc<FragmentSpreadSelection> {
-        self.0
-    }
-
-    #[cfg(test)]
-    pub(crate) fn get_selection_set_mut(&mut self) -> &mut SelectionSet {
-        &mut Arc::make_mut(self.0).selection_set
     }
 }
 

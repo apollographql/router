@@ -1,0 +1,85 @@
+---
+source: apollo-federation/src/connectors/url_template.rs
+expression: "URLTemplate::from_str(\"http://example.com/{$args.abc}/def\")"
+---
+Ok(
+    URLTemplate {
+        base: Some(
+            Url {
+                scheme: "http",
+                cannot_be_a_base: false,
+                username: "",
+                password: None,
+                host: Some(
+                    Domain(
+                        "example.com",
+                    ),
+                ),
+                port: None,
+                path: "/",
+                query: None,
+                fragment: None,
+            },
+        ),
+        path: [
+            StringTemplate {
+                parts: [
+                    Expression(
+                        Expression {
+                            expression: Path(
+                                PathSelection {
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $args,
+                                                range: Some(
+                                                    0..5,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Key(
+                                                    WithRange {
+                                                        node: Field(
+                                                            "abc",
+                                                        ),
+                                                        range: Some(
+                                                            6..9,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Empty,
+                                                        range: Some(
+                                                            9..9,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    5..9,
+                                                ),
+                                            },
+                                        ),
+                                        range: Some(
+                                            0..9,
+                                        ),
+                                    },
+                                },
+                            ),
+                            location: 20..29,
+                        },
+                    ),
+                ],
+            },
+            StringTemplate {
+                parts: [
+                    Constant(
+                        Constant {
+                            value: "def",
+                            location: 31..34,
+                        },
+                    ),
+                ],
+            },
+        ],
+        query: [],
+    },
+)

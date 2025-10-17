@@ -1,0 +1,22 @@
+---
+source: apollo-federation/src/connectors/url_template.rs
+expression: "URLTemplate::from_str(\"/abc\")"
+---
+Ok(
+    URLTemplate {
+        base: None,
+        path: [
+            StringTemplate {
+                parts: [
+                    Constant(
+                        Constant {
+                            value: "abc",
+                            location: 1..4,
+                        },
+                    ),
+                ],
+            },
+        ],
+        query: [],
+    },
+)

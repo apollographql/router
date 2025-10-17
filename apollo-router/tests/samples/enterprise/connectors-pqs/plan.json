@@ -1,0 +1,54 @@
+{
+  "enterprise": true,
+  "redis": false,
+  "snapshot": true,
+  "actions": [
+    {
+      "type": "Start",
+      "schema_path": "./supergraph.graphql",
+      "configuration_path": "./configuration.yaml",
+      "subgraphs": {
+        "one": {
+          "snapshot": {
+            "path": "./http_snapshots.json",
+            "base_url": "http://localhost:4001"
+          }
+        }
+      }
+    },
+    {
+      "type": "Request",
+      "request": {
+        "variables": {
+          "search": "Boston"
+        },
+        "extensions": {
+          "persistedQuery": {
+            "version": 1,
+            "sha256Hash": "87b3393750af706fde5c3bbdf37533012f4d4eeecb82f621b596c34249428153"
+          }
+        }
+      },
+      "expected_response": {
+        "data": {
+          "geoByAddress": {
+            "lat": "1.1",
+            "long": "2.2",
+            "weather": {
+              "conditions": "cold",
+              "forecastSnowFall": 1.1,
+              "temperature": 2.2,
+              "windSpeed": 3.3,
+              "currentSnowDepth": 4.4,
+              "__typename": "Weather"
+            },
+            "__typename": "Geo"
+          }
+        }
+      }
+    },
+    {
+      "type": "Stop"
+    }
+  ]
+}

@@ -2,8 +2,9 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use futures::stream::once;
 use futures::StreamExt;
+use futures::stream::once;
+use http_body_util::BodyExt;
 use tokio::fs;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -19,7 +20,6 @@ use crate::plugin::PluginInit;
 use crate::services::execution;
 use crate::services::external::externalize_header_map;
 use crate::services::router;
-use crate::services::router::body::RouterBody;
 use crate::services::subgraph;
 use crate::services::supergraph;
 
@@ -98,7 +98,7 @@ impl Plugin for Record {
                     let after_complete = once(async move {
                         let recording = context
                             .extensions()
-                            .with_lock(|mut lock| lock.remove::<Recording>());
+                            .with_lock(|lock| lock.remove::<Recording>());
 
                         if let Some(mut recording) = recording {
                             let res_headers = externalize_header_map(&headers)?;
@@ -125,15 +125,15 @@ impl Plugin for Record {
                     })
                     .filter_map(|a| async move { a.unwrap() });
 
-                    let stream = stream.chain(after_complete);
+                    let stream = stream.into_data_stream().chain(after_complete);
 
-                    Ok(router::Response {
-                        context: res.context,
-                        response: http::Response::from_parts(
+                    router::Response::http_response_builder()
+                        .context(res.context)
+                        .response(http::Response::from_parts(
                             parts,
-                            RouterBody::wrap_stream(stream).into_inner(),
-                        ),
-                    })
+                            router::body::from_result_stream(stream),
+                        ))
+                        .build()
                 }
             })
             .service(service)
@@ -155,7 +155,7 @@ impl Plugin for Record {
 
                 let recording_enabled =
                     if req.supergraph_request.headers().contains_key(RECORD_HEADER) {
-                        req.context.extensions().with_lock(|mut lock| {
+                        req.context.extensions().with_lock(|lock| {
                             lock.insert(Recording {
                                 supergraph_sdl: supergraph_sdl.clone().to_string(),
                                 client_request: Default::default(),
@@ -178,7 +178,7 @@ impl Plugin for Record {
                     let method = req.supergraph_request.method().to_string();
                     let uri = req.supergraph_request.uri().to_string();
 
-                    req.context.extensions().with_lock(|mut lock| {
+                    req.context.extensions().with_lock(|lock| {
                         if let Some(recording) = lock.get_mut::<Recording>() {
                             recording.client_request = RequestDetails {
                                 query,
@@ -196,7 +196,7 @@ impl Plugin for Record {
             .map_response(|res: supergraph::Response| {
                 let context = res.context.clone();
                 res.map_stream(move |chunk| {
-                    context.extensions().with_lock(|mut lock| {
+                    context.extensions().with_lock(|lock| {
                         if let Some(recording) = lock.get_mut::<Recording>() {
                             recording.client_response.chunks.push(chunk.clone());
                         }
@@ -212,7 +212,7 @@ impl Plugin for Record {
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         ServiceBuilder::new()
             .map_request(|req: execution::Request| {
-                req.context.extensions().with_lock(|mut lock| {
+                req.context.extensions().with_lock(|lock| {
                     if let Some(recording) = lock.get_mut::<Recording>() {
                         recording.formatted_query_plan =
                             req.query_plan.formatted_query_plan.clone();
@@ -250,43 +250,35 @@ impl Plugin for Record {
                     let subgraph_name = subgraph_name.clone();
                     async move {
                         let res: subgraph::ServiceResult = future.await;
+                        let res = res?;
 
                         let operation_name = req
                             .operation_name
                             .clone()
                             .unwrap_or_else(|| "UnnamedOperation".to_string());
 
-                        let res = match res {
-                            Ok(res) => {
-                                let subgraph = Subgraph {
-                                    subgraph_name,
-                                    response: ResponseDetails {
-                                        headers: externalize_header_map(
-                                            &res.response.headers().clone(),
-                                        )
-                                        .expect("failed to externalize header map"),
-                                        chunks: vec![res.response.body().clone()],
-                                    },
-                                    request: req,
-                                };
-
-                                res.context.extensions().with_lock(|mut lock| {
-                                    if let Some(recording) = lock.get_mut::<Recording>() {
-                                        if recording.subgraph_fetches.is_none() {
-                                            recording.subgraph_fetches = Some(Default::default());
-                                        }
-
-                                        if let Some(fetches) = &mut recording.subgraph_fetches {
-                                            fetches.insert(operation_name, subgraph);
-                                        }
-                                    }
-                                });
-                                Ok(res)
-                            }
-                            Err(err) => Err(err),
+                        let subgraph = Subgraph {
+                            subgraph_name,
+                            response: ResponseDetails {
+                                headers: externalize_header_map(&res.response.headers().clone())
+                                    .expect("failed to externalize header map"),
+                                chunks: vec![res.response.body().clone()],
+                            },
+                            request: req,
                         };
 
-                        res
+                        res.context.extensions().with_lock(|lock| {
+                            if let Some(recording) = lock.get_mut::<Recording>() {
+                                if recording.subgraph_fetches.is_none() {
+                                    recording.subgraph_fetches = Some(Default::default());
+                                }
+
+                                if let Some(fetches) = &mut recording.subgraph_fetches {
+                                    fetches.insert(operation_name, subgraph);
+                                }
+                            }
+                        });
+                        Ok(res)
                     }
                 },
             )
@@ -304,17 +296,14 @@ async fn write_file(dir: Arc<Path>, path: &PathBuf, contents: &[u8]) -> Result<(
 }
 
 fn is_introspection(request: &supergraph::Request) -> bool {
-    request
-        .context
-        .unsupported_executable_document()
-        .is_some_and(|doc| {
-            doc.operations
-                .get(request.supergraph_request.body().operation_name.as_deref())
-                .ok()
-                .is_some_and(|op| {
-                    op.root_fields(&doc).all(|field| {
-                        matches!(field.name.as_str(), "__typename" | "__schema" | "__type")
-                    })
+    request.context.executable_document().is_some_and(|doc| {
+        doc.operations
+            .get(request.supergraph_request.body().operation_name.as_deref())
+            .ok()
+            .is_some_and(|op| {
+                op.root_fields(&doc).all(|field| {
+                    matches!(field.name.as_str(), "__typename" | "__schema" | "__type")
                 })
-        })
+            })
+    })
 }

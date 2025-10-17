@@ -1,0 +1,5 @@
+description: The OTLP error metrics option is now in the preview release stage
+actions:
+  - type: move
+    from: telemetry.apollo.errors.experimental_otlp_error_metrics
+    to: telemetry.apollo.errors.preview_extended_error_metrics

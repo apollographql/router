@@ -1,0 +1,24 @@
+---
+source: apollo-router/src/plugins/include_subgraph_errors/tests.rs
+description: "CONFIG:\n---\nall: true\n\n\nREQUEST:\n[\n  {\n    \"data\": {\n      \"topProducts\": null\n    },\n    \"errors\": [\n      {\n        \"message\": \"Main errors error\",\n        \"path\": [],\n        \"extensions\": {\n          \"test\": \"value\",\n          \"code\": \"MAIN_ERROR\",\n          \"apollo.subgraph.name\": \"products\"\n        }\n      }\n    ]\n  },\n  {\n    \"incremental\": [\n      {\n        \"data\": {\n          \"topProducts\": null\n        },\n        \"errors\": [\n          {\n            \"message\": \"Incremental error\",\n            \"path\": [],\n            \"extensions\": {\n              \"test\": \"value\",\n              \"code\": \"INCREMENTAL_ERROR\",\n              \"apollo.subgraph.name\": \"products\"\n            }\n          }\n        ]\n      }\n    ]\n  }\n]"
+expression: actual_responses
+---
+- data:
+    topProducts: ~
+  errors:
+    - message: Main errors error
+      path: []
+      extensions:
+        test: value
+        code: MAIN_ERROR
+        service: products
+- incremental:
+    - data:
+        topProducts: ~
+      errors:
+        - message: Incremental error
+          path: []
+          extensions:
+            test: value
+            code: INCREMENTAL_ERROR
+            service: products

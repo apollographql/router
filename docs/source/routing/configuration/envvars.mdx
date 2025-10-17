@@ -1,0 +1,83 @@
+---
+title: Router Environment Variable Configuration Reference
+subtitle: ""
+description: Reference of YAML configuration properties for Apollo GraphOS Router and Apollo Router Core.
+---
+
+This reference covers the environment variables for configuring an Apollo Router. 
+
+## Environment variables
+
+This section lists and describes the environment variables you can set when running the `router` binary. 
+
+<Tip>
+
+These environment variables apply only if your supergraph schema is managed by GraphOS.
+
+</Tip>
+
+<table class="field-table api-ref">
+  <thead>
+    <tr>
+      <th>Environment Variable</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+
+<tbody>
+<tr class="required">
+<td style="min-width: 150px;">
+
+##### `APOLLO_GRAPH_REF`
+
+</td>
+<td>
+
+The graph ref for the GraphOS graph and variant that the router fetches its supergraph schema from (e.g., `docs-example-graph@staging`).
+
+**Required** when using [managed federation](/federation/managed-federation/overview/), except when using an [offline license](/graphos/routing/license/#offline-license) to run the router.
+
+</td>
+</tr>
+<tr class="required">
+<td style="min-width: 150px;">
+
+##### `APOLLO_KEY`
+
+</td>
+<td>
+
+The [graph API key](/graphos/api-keys/#graph-api-keys) that the router should use to authenticate with GraphOS when fetching its supergraph schema.
+
+**Required** when using [managed federation](/federation/managed-federation/overview/), except when using an [offline license](/graphos/routing/license/#offline-license) to run the router or when using `APOLLO_KEY_PATH`.
+
+</td>
+</tr>
+<tr class="required">
+<td style="min-width: 150px;">
+
+##### `APOLLO_KEY_PATH`
+
+</td>
+<td>
+
+⚠️ **This is not available on Windows.**
+
+A path to a file containing the [graph API key](/graphos/api-keys/#graph-api-keys) that the router should use to authenticate with GraphOS when fetching its supergraph schema.
+
+**Required** when using [managed federation](/federation/managed-federation/overview/), except when using an [offline license](/graphos/routing/license/#offline-license) to run the router or when using `APOLLO_KEY`.
+
+</td>
+</tr>
+<tr>
+</tr>
+</tbody>
+</table>
+
+## Example command
+
+To use environment variables when running router, you must set them before the `router` command:
+
+```bash
+APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
+```

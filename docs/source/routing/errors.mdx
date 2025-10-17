@@ -1,0 +1,229 @@
+---
+title: Router Errors
+subtitle: Error and status codes returned by GraphOS Router and Apollo Router Core
+description: Reference of error codes and HTTP status codes returned by Apollo GraphOS Router and Apollo Router Core, including explanations and solutions.
+---
+
+Learn about error codes and HTTP response status codes returned by GraphOS Router and Apollo Router Core.
+
+## HTTP status codes
+
+<PropertyList kind="errCodes">
+<Property name="400" short="Bad request">
+
+A request failed GraphQL validation or failed to be parsed.
+
+</Property>
+<Property name="401" short="Unauthorized">
+
+Requests may receive this response in two cases:
+
+- For a client request that requires authentication, the client's JWT failed verification.
+- For a non-client subscription endpoint calling a subscription callback URL, the router couldn't find a matching subscription identifier between its registered subscriptions and a subscription event.
+
+</Property>
+<Property name="405" short="Method not allowed">
+
+<Note>
+
+Both mutations and subscriptions must use POST.
+
+</Note>
+
+</Property>
+<Property name="406" short="Not acceptable">
+
+A request's HTTP `Accept` header didn't contain any of the router's supported mime-types:
+
+- `application/json`
+- `application/graphql-response+json`
+- `multipart/mixed;deferSpec=20220824`
+- `multipart/mixed;subscriptionSpec=1.0`.
+
+</Property>
+
+<Property name="429" short="Too many requests">
+
+Request traffic exceeded configured rate limits. See [client side traffic shaping](/router/configuration/traffic-shaping/#client-side-traffic-shaping).
+
+</Property>
+<Property name="499" short="Request canceled by client">
+
+The request was canceled because the client closed the connection, possibly due to a client side timeout.
+
+</Property>
+<Property name="500" short="Internal server error">
+
+The router encountered an unexpected issue. [Report](https://github.com/apollographql/router/issues/new?assignees=&labels=raised+by+user&projects=&template=bug_report.md&title=) this possible bug to the router team.
+
+</Property>
+
+<Property name="504" short="Request timed out">
+
+The request was not able to complete within a configured amount of time. See [client side traffic shaping timeouts](/router/configuration/traffic-shaping/#timeouts).
+
+</Property>
+</PropertyList>
+
+<Note>
+
+You can create Rhai scripts that throw custom status codes. See [Terminating client requests](/graphos/reference/router/rhai#terminating-client-requests) to learn more.
+
+</Note>
+
+## GraphQL spec error codes
+
+These error codes are defined in the [GraphQL spec](https://spec.graphql.org/October2021/) and can appear in client responses under `errors[].extensions.code`, which is an established convention found in [GraphQL error extensions](https://spec.graphql.org/October2021/#sec-Errors.Error-result-format). Because these error codes are part of the core spec, you can't disable them. Only Apollo Router-specific features or subgraph errors can be disabled.
+
+Changing these errors makes your router non-compliant with the GraphQL spec. If you need to change these errors, you need to use an external system, such as an HTTP proxy layer.
+
+Learn how to see these error codes in Studio with [extended error reporting](/graphos/routing/graphos-reporting#enabling-extended-error-reporting).
+
+<PropertyList kind="errCodes">
+
+
+<Property name="GRAPHQL_VALIDATION_FAILED">
+
+The operation failed during GraphQL validation.
+
+</Property>
+<Property name="GRAPHQL_UNKNOWN_OPERATION_NAME">
+
+The operation could not be executed because the operation name was invalid or
+did not match an operation in the query document.
+
+</Property>
+<Property name="PARSING_ERROR">
+
+The operation could not be parsed as GraphQL.
+
+</Property>
+
+</PropertyList>
+
+## Apollo Router error codes
+
+Additional error codes can appear in client responses under `errors[].extensions.code`, which is an established convention found in [GraphQL error extensions](https://spec.graphql.org/October2021/#sec-Errors.Error-result-format). Learn how to see these error codes in Studio with [extended error reporting](/graphos/routing/graphos-reporting#enabling-extended-error-reporting).
+
+You can suppress or disable these error codes using [router customizations](/graphos/routing/customization/overview).
+
+<PropertyList kind="errCodes">
+
+<Property name="CANNOT_SEND_PQ_ID_AND_BODY">
+
+The operation was not executed because sending a persisted query ID and a
+body in the same request is disallowed.
+
+</Property>
+<Property name="CONNECTOR_FETCH">
+
+There was an error fetching data from a connector service.
+
+</Property>
+<Property name="COST_ESTIMATED_TOO_EXPENSIVE">
+
+The estimated cost of the query was greater than the configured maximum cost.
+
+</Property>
+<Property name="COST_ACTUAL_TOO_EXPENSIVE">
+
+The actual cost of the query was greater than the configured maximum cost.
+
+</Property>
+<Property name="COST_QUERY_PARSE_FAILURE">
+
+The query could not be parsed.
+
+</Property>
+<Property name="COST_RESPONSE_TYPING_FAILURE">
+
+The response from a subgraph did not match the GraphQL schema.
+
+</Property>
+<Property name="GATEWAY_TIMEOUT">
+
+The request timed out when fetching data from a connector service.
+
+</Property>
+<Property name="HTTP_CLIENT_ERROR">
+
+There was an error at the HTTP transport layer when fetching data from a
+connector service.
+
+</Property>
+<Property name="MAX_ALIASES_LIMIT">
+
+The operation was not executed due to exceeding the `max_aliases` limit.
+
+</Property>
+<Property name="MAX_DEPTH_LIMIT">
+
+The operation was not executed due to exceeding the `max_depth` limit.
+
+</Property>
+<Property name="MAX_HEIGHT_LIMIT">
+
+The operation was not executed due to exceeding the `max_height` limit.
+
+</Property>
+<Property name="MAX_ROOT_FIELDS_LIMIT">
+
+The operation was not executed due to exceeding the `max_root_fields` limit.
+
+</Property>
+<Property name="QUERY_NOT_IN_SAFELIST">
+
+The operation was not executed because safelisting is enabled and the freeform GraphQL document provided was not found in the persisted query safelist.
+
+</Property>
+<Property name="PERSISTED_QUERY_HASH_MISMATCH">
+
+The operation was not executed due to a mismatch with the automatic persisted query (APQ) protocol.
+There was an attempt to store this operation in the APQ cache, but the provided hash did not match the operation.
+
+</Property>
+<Property name="PERSISTED_QUERY_NOT_FOUND">
+
+The operation was not executed because it was not found in the automatic persisted query (APQ) cache.  
+This is an expected behavior when using the APQ protocol.
+
+</Property>
+<Property name="PERSISTED_QUERY_NOT_SUPPORTED">
+
+An operation attempted to use automatic persisted queries, but the feature was not enabled.
+
+</Property>
+<Property name="PERSISTED_QUERY_NOT_IN_LIST">
+
+The operation (specified by ID) was not executed because the ID was not found in the persisted query manifest, and APQs are not enabled.
+
+</Property>
+<Property name="PERSISTED_QUERY_ID_REQUIRED">
+
+The router is configured to only execute operations specified by persisted query ID, but the request contained freeform GraphQL instead.
+
+</Property>
+<Property name="REQUEST_LIMIT_EXCEEDED">
+
+There was an error due to exceeding the max requests configuration for a
+connector service.
+
+</Property>
+<Property name="RESPONSE_VALIDATION_FAILED">
+
+The response returned from a subgraph failed validation for the supergraph
+schema.
+
+</Property>
+<Property name="SUBREQUEST_HTTP_ERROR">
+
+There was an error at the HTTP transport layer when fetching data from a subgraph service.
+
+</Property>
+<Property name="UNAUTHORIZED_FIELD_OR_TYPE">
+
+The operation was not fully executed because it attempted to use a field
+or type was unauthorized.
+
+</Property>
+</PropertyList>

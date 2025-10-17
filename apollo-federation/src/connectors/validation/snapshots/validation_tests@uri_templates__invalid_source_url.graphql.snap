@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/uri_templates/invalid_source_url.graphql
+---
+[
+    Message {
+        code: InvalidUrlScheme,
+        message: "Base URL for `@source(baseURL:)` did not start with http:// or https://.",
+        locations: [
+            6:40..6:51,
+        ],
+    },
+]

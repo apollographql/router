@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::task::Poll;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -8,18 +9,20 @@ use http::header;
 use parking_lot::Mutex;
 use serde_json_bytes::Value;
 use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
 use tower_service::Service;
 
+use super::entity::REPRESENTATIONS;
+use super::entity::Ttl;
 use super::entity::hash_query;
 use super::entity::hash_vary_headers;
-use super::entity::Ttl;
-use super::entity::REPRESENTATIONS;
+use crate::layers::ServiceBuilderExt;
 use crate::services::subgraph;
 use crate::spec::TYPENAME;
 
 pub(crate) const CACHE_INFO_SUBGRAPH_CONTEXT_KEY: &str =
     "apollo::router::entity_cache_info_subgraph";
-pub(crate) struct CacheMetricsService(Option<InnerCacheMetricsService>);
 
 impl CacheMetricsService {
     pub(crate) fn create(
@@ -28,19 +31,23 @@ impl CacheMetricsService {
         ttl: Option<&Ttl>,
         separate_per_type: bool,
     ) -> subgraph::BoxService {
-        tower::util::BoxService::new(CacheMetricsService(Some(InnerCacheMetricsService {
-            service,
+        tower::util::BoxService::new(CacheMetricsService {
+            service: ServiceBuilder::new()
+                .buffered()
+                .service(service)
+                .boxed_clone(),
             name: Arc::new(name),
             counter: Some(Arc::new(Mutex::new(CacheCounter::new(
                 ttl.map(|t| t.0).unwrap_or_else(|| Duration::from_secs(60)),
                 separate_per_type,
             )))),
-        })))
+        })
     }
 }
 
-pub(crate) struct InnerCacheMetricsService {
-    service: subgraph::BoxService,
+#[derive(Clone)]
+pub(crate) struct CacheMetricsService {
+    service: subgraph::BoxCloneService,
     name: Arc<String>,
     counter: Option<Arc<Mutex<CacheCounter>>>,
 }
@@ -52,35 +59,32 @@ impl Service<subgraph::Request> for CacheMetricsService {
 
     fn poll_ready(
         &mut self,
-        cx: &mut std::task::Context<'_>,
+        _cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
-        match &mut self.0 {
-            Some(s) => s.service.poll_ready(cx),
-            None => panic!("service should have been called only once"),
-        }
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, request: subgraph::Request) -> Self::Future {
-        match self.0.take() {
-            None => panic!("service should have been called only once"),
-            Some(s) => Box::pin(s.call_inner(request)),
-        }
+        let clone = self.clone();
+        let inner = std::mem::replace(self, clone);
+
+        Box::pin(inner.call_inner(request))
     }
 }
 
-impl InnerCacheMetricsService {
+impl CacheMetricsService {
     async fn call_inner(
         mut self,
         mut request: subgraph::Request,
     ) -> Result<subgraph::Response, BoxError> {
         let cache_attributes = Self::get_cache_attributes(&mut request);
 
-        let response = self.service.call(request).await?;
+        let response = self.service.ready().await?.call(request).await?;
 
-        if let Some(cache_attributes) = cache_attributes {
-            if let Some(counter) = &self.counter {
-                Self::update_cache_metrics(&self.name, counter, &response, cache_attributes)
-            }
+        if let Some(cache_attributes) = cache_attributes
+            && let Some(counter) = &self.counter
+        {
+            Self::update_cache_metrics(&self.name, counter, &response, cache_attributes)
         }
 
         Ok(response)
@@ -197,7 +201,7 @@ impl CacheCounter {
 
     fn make_filter() -> Bloom<CacheKey> {
         // the filter is around 4kB in size (can be calculated with `Bloom::compute_bitmap_size`)
-        Bloom::new_for_fp_rate(10000, 0.2)
+        Bloom::new_for_fp_rate(10000, 0.2).expect("no OS source of randomness, that's a bit much")
     }
 
     pub(crate) fn record(
@@ -244,15 +248,21 @@ impl CacheCounter {
 
         for (typename, (cache_hit, total_entities)) in seen.into_iter() {
             if separate_metrics_per_type {
-                ::tracing::info!(
-                    histogram.apollo.router.operations.entity.cache_hit = (cache_hit as f64 / total_entities as f64) * 100f64,
-                    entity_type = %typename,
-                    subgraph = %subgraph_name,
+                f64_histogram!(
+                    "apollo.router.operations.entity.cache_hit",
+                    "Hit rate percentage of cached entities",
+                    (cache_hit as f64 / total_entities as f64) * 100f64,
+                    // Can't just `Arc::clone` these because they're `Arc<String>`,
+                    // while opentelemetry supports `Arc<str>`
+                    entity_type = typename.to_string(),
+                    subgraph = subgraph_name.to_string()
                 );
             } else {
-                ::tracing::info!(
-                    histogram.apollo.router.operations.entity.cache_hit = (cache_hit as f64 / total_entities as f64) * 100f64,
-                    subgraph = %subgraph_name,
+                f64_histogram!(
+                    "apollo.router.operations.entity.cache_hit",
+                    "Hit rate percentage of cached entities",
+                    (cache_hit as f64 / total_entities as f64) * 100f64,
+                    subgraph = subgraph_name.to_string()
                 );
             }
         }

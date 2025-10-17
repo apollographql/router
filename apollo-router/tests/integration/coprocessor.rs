@@ -1,15 +1,15 @@
 use insta::assert_yaml_snapshot;
 use serde_json::json;
 use tower::BoxError;
+use wiremock::Mock;
+use wiremock::ResponseTemplate;
 use wiremock::matchers::body_partial_json;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
-use wiremock::Mock;
-use wiremock::ResponseTemplate;
 
-use crate::integration::common::graph_os_enabled;
-use crate::integration::common::Query;
 use crate::integration::IntegrationTest;
+use crate::integration::common::Query;
+use crate::integration::common::graph_os_enabled;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_error_not_propagated_to_client() -> Result<(), BoxError> {
@@ -27,7 +27,7 @@ async fn test_error_not_propagated_to_client() -> Result<(), BoxError> {
     let (_trace_id, response) = router.execute_default_query().await;
     assert_eq!(response.status(), 500);
     assert_yaml_snapshot!(response.text().await?);
-    router.assert_log_contains("INTERNAL_SERVER_ERROR").await;
+    router.wait_for_log_message("Internal Server Error").await;
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -103,11 +103,11 @@ async fn test_coprocessor_response_handling() -> Result<(), BoxError> {
     test_full_pipeline(500, "RouterRequest", empty_body_object).await;
     test_full_pipeline(500, "RouterResponse", empty_body_object).await;
     test_full_pipeline(200, "SupergraphRequest", empty_body_object).await;
-    test_full_pipeline(200, "SupergraphResponse", empty_body_object).await;
+    test_full_pipeline(500, "SupergraphResponse", empty_body_object).await;
     test_full_pipeline(200, "SubgraphRequest", empty_body_object).await;
     test_full_pipeline(200, "SubgraphResponse", empty_body_object).await;
     test_full_pipeline(200, "ExecutionRequest", empty_body_object).await;
-    test_full_pipeline(200, "ExecutionResponse", empty_body_object).await;
+    test_full_pipeline(500, "ExecutionResponse", empty_body_object).await;
 
     test_full_pipeline(200, "RouterRequest", remove_body).await;
     test_full_pipeline(200, "RouterResponse", remove_body).await;
@@ -130,20 +130,12 @@ async fn test_coprocessor_response_handling() -> Result<(), BoxError> {
 }
 
 fn empty_body_object(mut body: serde_json::Value) -> serde_json::Value {
-    *body
-        .as_object_mut()
-        .expect("body")
-        .get_mut("body")
-        .expect("body") = serde_json::Value::Object(serde_json::Map::new());
+    *body.pointer_mut("/body").expect("body") = json!({});
     body
 }
 
 fn empty_body_string(mut body: serde_json::Value) -> serde_json::Value {
-    *body
-        .as_object_mut()
-        .expect("body")
-        .get_mut("body")
-        .expect("body") = serde_json::Value::String("".to_string());
+    *body.pointer_mut("/body").expect("body") = json!("");
     body
 }
 
@@ -153,7 +145,7 @@ fn remove_body(mut body: serde_json::Value) -> serde_json::Value {
 }
 
 fn null_out_response(_body: serde_json::Value) -> serde_json::Value {
-    serde_json::Value::String("".to_string())
+    json!("")
 }
 
 async fn test_full_pipeline(
@@ -200,8 +192,7 @@ async fn test_full_pipeline(
     assert_eq!(
         response.status(),
         response_status,
-        "Failed at stage {}",
-        stage
+        "Failed at stage {stage}"
     );
 
     router.graceful_shutdown().await;
@@ -223,9 +214,9 @@ async fn test_coprocessor_demand_control_access() -> Result<(), BoxError> {
         "stage": "ExecutionRequest",
         "context": {
             "entries": {
-                "cost.estimated": 10.0,
-                "cost.result": "COST_OK",
-                "cost.strategy": "static_estimated"
+                "apollo::demand_control::estimated_cost": 10.0,
+                "apollo::demand_control::result": "COST_OK",
+                "apollo::demand_control::strategy": "static_estimated"
             }}})))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                         "version":1,
@@ -242,10 +233,10 @@ async fn test_coprocessor_demand_control_access() -> Result<(), BoxError> {
         .and(body_partial_json(json!({
             "stage": "SupergraphResponse",
             "context": {"entries": {
-            "cost.actual": 3.0,
-            "cost.estimated": 10.0,
-            "cost.result": "COST_OK",
-            "cost.strategy": "static_estimated"
+            "apollo::demand_control::actual_cost": 3.0,
+            "apollo::demand_control::estimated_cost": 10.0,
+            "apollo::demand_control::result": "COST_OK",
+            "apollo::demand_control::strategy": "static_estimated"
         }}})))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                         "version":1,
@@ -273,4 +264,228 @@ async fn test_coprocessor_demand_control_access() -> Result<(), BoxError> {
     router.graceful_shutdown().await;
 
     Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_proxying_error_response() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let mock_coprocessor = wiremock::MockServer::start().await;
+    let coprocessor_address = mock_coprocessor.uri();
+
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(|req: &wiremock::Request| {
+            let body = req.body_json::<serde_json::Value>().expect("body");
+            ResponseTemplate::new(200).set_body_json(body)
+        })
+        .mount(&mock_coprocessor)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            include_str!("fixtures/coprocessor.router.yaml")
+                .replace("<replace>", &coprocessor_address),
+        )
+        .responder(ResponseTemplate::new(200).set_body_json(json!({
+            "errors": [{ "message": "subgraph error", "path": [] }],
+            "data": null
+        })))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response.json::<serde_json::Value>().await?,
+        json!({
+            "errors": [{ "message": "Subgraph errors redacted", "path": [] }],
+            "data": null
+        })
+    );
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+mod on_graphql_error_selector {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use std::sync::RwLock;
+
+    use serde_json::json;
+    use serde_json::value::Value;
+    use tower::BoxError;
+    use wiremock::Mock;
+    use wiremock::ResponseTemplate;
+    use wiremock::matchers::method;
+    use wiremock::matchers::path;
+
+    use crate::integration::IntegrationTest;
+    use crate::integration::common::Query;
+    use crate::integration::common::graph_os_enabled;
+
+    fn query() -> Query {
+        Query::builder()
+            .traced(true)
+            .body(json!({"query": "query Q { topProducts { name inStock } }"}))
+            .build()
+    }
+
+    fn products_response(errors: bool) -> Value {
+        if errors {
+            json!({"errors": [{ "message": "products error", "path": [] }]})
+        } else {
+            json!({
+                "data": {
+                    "topProducts": [
+                        { "__typename": "Product", "name": "Table", "upc": "1" },
+                        { "__typename": "Product", "name": "Chair", "upc": "2" },
+                    ]
+                },
+            })
+        }
+    }
+
+    fn inventory_response(errors: bool) -> Value {
+        if errors {
+            json!({"errors": [{ "message": "inventory error", "path": [] }]})
+        } else {
+            json!({"data": {"_entities": [{"inStock": true}, {"inStock": false}]}})
+        }
+    }
+
+    fn response_template(response_json: Value) -> ResponseTemplate {
+        ResponseTemplate::new(200).set_body_json(response_json)
+    }
+
+    async fn send_query_to_coprocessor_enabled_router(
+        query: Query,
+        subgraph_response_products: ResponseTemplate,
+        subgraph_response_inventory: ResponseTemplate,
+    ) -> Result<(Value, HashMap<String, usize>), BoxError> {
+        let coprocessor_hits: Arc<RwLock<HashMap<String, usize>>> =
+            Arc::new(RwLock::new(HashMap::default()));
+        let coprocessor_hits_clone = coprocessor_hits.clone();
+        let coprocessor_response = move |req: &wiremock::Request| {
+            let req_body = req.body_json::<serde_json::Value>().expect("body");
+            let stage = req_body.as_object()?.get("stage")?.as_str()?.to_string();
+
+            let mut binding = coprocessor_hits_clone.write().ok()?;
+            let entry = binding.entry(stage).or_default();
+            *entry += 1;
+            Some(response_template(req_body))
+        };
+
+        let mock_coprocessor = wiremock::MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(move |r: &wiremock::Request| coprocessor_response(r).unwrap())
+            .mount(&mock_coprocessor)
+            .await;
+
+        let mock_products = wiremock::MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(subgraph_response_products)
+            .mount(&mock_products)
+            .await;
+
+        let mock_inventory = wiremock::MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(subgraph_response_inventory)
+            .mount(&mock_inventory)
+            .await;
+
+        let mut router = IntegrationTest::builder()
+            .config(
+                include_str!("fixtures/coprocessor_conditional.router.yaml")
+                    .replace("<replace>", &mock_coprocessor.uri()),
+            )
+            .subgraph_override("products", mock_products.uri())
+            .subgraph_override("inventory", mock_inventory.uri())
+            .build()
+            .await;
+        router.start().await;
+        router.assert_started().await;
+
+        let (_, response) = router.execute_query(query).await;
+        assert_eq!(response.status(), 200);
+
+        let response = serde_json::from_str(&response.text().await?).unwrap();
+
+        // NB: should be ok to read and clone bc response should have finished
+        Ok((response, coprocessor_hits.read().unwrap().clone()))
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_all_successful() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        let (response, coprocessor_hits) = send_query_to_coprocessor_enabled_router(
+            query(),
+            response_template(products_response(false)),
+            response_template(inventory_response(false)),
+        )
+        .await?;
+
+        let errors = response.as_object().unwrap().get("errors");
+        assert!(errors.is_none());
+        assert!(coprocessor_hits.is_empty());
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_first_response_failure() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        let (response, coprocessor_hits) = send_query_to_coprocessor_enabled_router(
+            query(),
+            response_template(products_response(true)),
+            response_template(inventory_response(false)),
+        )
+        .await?;
+
+        let errors = response.as_object().unwrap().get("errors").unwrap();
+        insta::assert_json_snapshot!(errors);
+
+        assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 1);
+        assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 1);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_nested_response_failure() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        let (response, coprocessor_hits) = send_query_to_coprocessor_enabled_router(
+            query(),
+            response_template(products_response(false)),
+            response_template(inventory_response(true)),
+        )
+        .await?;
+
+        let errors = response.as_object().unwrap().get("errors").unwrap();
+        insta::assert_json_snapshot!(errors);
+
+        assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 1);
+        assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 1);
+
+        Ok(())
+    }
 }

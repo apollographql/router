@@ -1,0 +1,58 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/url_properties/query_params.graphql
+---
+[
+    Message {
+        code: InvalidUrlProperty,
+        message: "In `@source(name: \"v3\")`, the `queryParams` argument is invalid: `*.bad` must start with one of $config, $context, $request, $env",
+        locations: [
+            19:59..19:62,
+        ],
+    },
+    Message {
+        code: InvalidUrlProperty,
+        message: "In `@source(name: \"v4\")`, the `queryParams` argument is invalid: array values aren't valid here",
+        locations: [
+            23:61..23:63,
+        ],
+    },
+    Message {
+        code: InvalidUrlProperty,
+        message: "In `@source(name: \"v5\")`, the `queryParams` argument is invalid: string values aren't valid here",
+        locations: [
+            27:61..27:66,
+        ],
+    },
+    Message {
+        code: InvalidUrlProperty,
+        message: "In `@connect` on `Query.resources`, the `queryParams` argument is invalid: `*.bad` must start with one of $args, $config, $context, $request, $env",
+        locations: [
+            47:39..47:42,
+        ],
+    },
+    Message {
+        code: InvalidUrlProperty,
+        message: "In `@connect` on `Query.resources`, the `queryParams` argument is invalid: string values aren't valid here",
+        locations: [
+            52:41..52:46,
+        ],
+    },
+    Message {
+        code: InvalidUrlProperty,
+        message: "In `@connect` on `Query.resources`, the `queryParams` argument is invalid: array values aren't valid here",
+        locations: [
+            57:41..57:48,
+        ],
+    },
+    Message {
+        code: InvalidUrlProperty,
+        message: "In `@connect` on `Query.resources`, the `queryParams` argument is invalid: string values aren't valid here",
+        locations: [
+            31:16..31:22,
+            31:13..31:22,
+            67:45..67:46,
+        ],
+    },
+]

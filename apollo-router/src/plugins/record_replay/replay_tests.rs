@@ -32,7 +32,7 @@ async fn replay_recording() {
     let mut resp = test_harness.oneshot(req).await.unwrap();
     while (resp.next_response().await).is_some() {}
 
-    let report = report.lock().unwrap();
+    let report = report.lock();
     let has_items = report.len();
 
     if has_items == 0 {

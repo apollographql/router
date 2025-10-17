@@ -1,14 +1,14 @@
 use std::time::Duration;
 
 use anyhow::anyhow;
-use opentelemetry_api::trace::SpanContext;
-use opentelemetry_api::trace::TraceId;
+use opentelemetry::trace::SpanContext;
+use opentelemetry::trace::TraceId;
 use serde_json::Value;
 use tower::BoxError;
 
+use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
 use crate::integration::telemetry::TraceSpec;
-use crate::integration::IntegrationTest;
 
 pub trait Verifier {
     fn spec(&self) -> &TraceSpec;
@@ -86,7 +86,7 @@ pub trait Verifier {
 
         // For now just validate service name.
         let trace: Value = self.get_trace(trace_id).await?;
-        println!("trace: {}", trace_id);
+        println!("trace: {trace_id}");
         self.verify_services(&trace)?;
         println!("services verified");
         self.verify_spans_present(&trace)?;
@@ -102,6 +102,8 @@ pub trait Verifier {
         self.verify_span_kinds(&trace)?;
         println!("span kinds verified");
         self.verify_span_attributes(&trace)?;
+        println!("span attributes verified");
+        self.verify_resources(&trace)?;
         println!("span attributes verified");
         Ok(())
     }
@@ -156,4 +158,6 @@ pub trait Verifier {
     fn verify_operation_name(&self, trace: &Value) -> Result<(), BoxError>;
 
     fn verify_priority_sampled(&self, trace: &Value) -> Result<(), BoxError>;
+
+    fn verify_resources(&self, _trace: &Value) -> Result<(), BoxError>;
 }

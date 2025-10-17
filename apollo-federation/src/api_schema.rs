@@ -1,16 +1,16 @@
 //! Implements API schema generation.
+use apollo_compiler::Node;
 use apollo_compiler::name;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::DirectiveLocation;
 use apollo_compiler::schema::InputValueDefinition;
 use apollo_compiler::ty;
-use apollo_compiler::Node;
 
 use crate::error::FederationError;
 use crate::link::inaccessible_spec_definition::InaccessibleSpecDefinition;
-use crate::schema::position;
 use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;
+use crate::schema::position;
 
 /// Remove types and directives imported by `@link`.
 fn remove_core_feature_elements(schema: &mut FederationSchema) -> Result<(), FederationError> {

@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO cache ( cache_key, data, control, expires_at )\n        VALUES ( $1, $2, $3, $4 )\n        ON CONFLICT (cache_key) DO UPDATE SET data = $2, control = $3, expires_at = $4\n        RETURNING id\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6e77a91b9716475f81f81e188b13813f86f0b8072bbd241ed1090b5c37b932c8"
+}

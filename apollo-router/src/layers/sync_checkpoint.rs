@@ -51,13 +51,13 @@ where
     /// Create a `CheckpointLayer` from a function that takes a Service Request and returns a `ControlFlow`
     pub fn new(
         checkpoint_fn: impl Fn(
-                Request,
-            ) -> Result<
-                ControlFlow<<S as Service<Request>>::Response, Request>,
-                <S as Service<Request>>::Error,
-            > + Send
-            + Sync
-            + 'static,
+            Request,
+        ) -> Result<
+            ControlFlow<<S as Service<Request>>::Response, Request>,
+            <S as Service<Request>>::Error,
+        > + Send
+        + Sync
+        + 'static,
     ) -> Self {
         Self {
             checkpoint_fn: Arc::new(checkpoint_fn),
@@ -119,13 +119,13 @@ where
     /// Create a `CheckpointLayer` from a function that takes a Service Request and returns a `ControlFlow`
     pub fn new(
         checkpoint_fn: impl Fn(
-                Request,
-            ) -> Result<
-                ControlFlow<<S as Service<Request>>::Response, Request>,
-                <S as Service<Request>>::Error,
-            > + Send
-            + Sync
-            + 'static,
+            Request,
+        ) -> Result<
+            ControlFlow<<S as Service<Request>>::Response, Request>,
+            <S as Service<Request>>::Error,
+        > + Send
+        + Sync
+        + 'static,
         inner: S,
     ) -> Self {
         Self {

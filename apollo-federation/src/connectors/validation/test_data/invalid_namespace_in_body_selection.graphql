@@ -1,0 +1,25 @@
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.2"
+    import: ["@connect"]
+  )
+
+type Mutation {
+  createUser(id: ID!): String
+    @connect(
+      http: {
+        POST: "http://127.0.0.1/users/{$args.id}"
+        body: """
+        id: $args.id
+        foo: $config.foo
+        bar: {
+          bar: $config.bar
+          baz: {
+            baz: $config.baz
+          }
+        }
+        status: $status
+        """
+      }
+      selection: "$status"
+    )

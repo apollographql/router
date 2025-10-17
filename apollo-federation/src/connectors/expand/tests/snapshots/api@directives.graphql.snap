@@ -1,0 +1,33 @@
+---
+source: apollo-federation/src/connectors/expand/tests/mod.rs
+expression: api_schema
+input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/directives.graphql
+---
+directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+type Query {
+  tagged: String
+  custom: T
+  authenticated: String
+  requiresScopes: String
+  policy: String
+  overridden: String
+  weird: [String]
+  customAgain: String
+  z: Z
+}
+
+type T {
+  field: String
+}
+
+type X {
+  id: ID!
+  w: String
+}
+
+type Z {
+  id: ID!
+  y: String
+  x: X
+}

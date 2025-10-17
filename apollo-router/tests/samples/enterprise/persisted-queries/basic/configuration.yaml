@@ -1,6 +1,6 @@
 persisted_queries:
   enabled: true
-  experimental_local_manifests: 
+  local_manifests:
     - tests/samples/enterprise/persisted-queries/basic/persisted-query-manifest.json
 apq:
   enabled: false

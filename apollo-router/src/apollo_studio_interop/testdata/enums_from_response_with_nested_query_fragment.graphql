@@ -1,0 +1,11 @@
+fragment EnumNestedQueryFragment on Query {
+  enumNestedQuery {
+    nestedQuery(input: SOME_VALUE_1) {
+      str
+    }
+  }
+}
+
+query QueryWithNestedQuery {
+  ...EnumNestedQueryFragment
+}

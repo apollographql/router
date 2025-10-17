@@ -1,5 +1,6 @@
 #![allow(missing_docs)] // FIXME
 
+use std::collections::HashSet;
 use std::fmt::Display;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -21,18 +22,18 @@ use tokio::sync::mpsc;
 use tokio_stream::Stream;
 use tower::BoxError;
 
+use crate::Context;
 use crate::error::Error;
 use crate::graphql;
-use crate::http_ext::header_map;
 use crate::http_ext::TryIntoHeaderName;
 use crate::http_ext::TryIntoHeaderValue;
+use crate::http_ext::header_map;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::fetch::OperationKind;
-use crate::query_planner::fetch::QueryHash;
-use crate::Context;
+use crate::spec::QueryHash;
 
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
@@ -60,9 +61,8 @@ pub struct Request {
 
     pub context: Context,
 
-    // FIXME for router 2.x
-    /// Name of the subgraph, it's an Option to not introduce breaking change
-    pub(crate) subgraph_name: Option<String>,
+    /// Name of the subgraph
+    pub(crate) subgraph_name: String,
     /// Channel to send the subscription stream to listen on events coming from subgraph in a task
     pub(crate) subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
     /// Channel triggered when the client connection has been dropped
@@ -91,8 +91,9 @@ impl Request {
         operation_kind: OperationKind,
         context: Context,
         subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
-        subgraph_name: Option<String>,
+        subgraph_name: String,
         connection_closed_signal: Option<broadcast::Receiver<()>>,
+        executable_document: Option<Arc<Valid<apollo_compiler::ExecutableDocument>>>,
     ) -> Request {
         Self {
             supergraph_request,
@@ -102,9 +103,12 @@ impl Request {
             subgraph_name,
             subscription_stream,
             connection_closed_signal,
-            query_hash: Default::default(),
+            // It's NOT GREAT! to have an empty hash value here.
+            // This value is populated based on the subgraph query hash in the query planner code.
+            // At the time of writing it's in `crate::query_planner::fetch::FetchNode::fetch_node`.
+            query_hash: QueryHash::default().into(),
             authorization: Default::default(),
-            executable_document: None,
+            executable_document,
             id: SubgraphRequestId::new(),
         }
     }
@@ -130,8 +134,9 @@ impl Request {
             operation_kind.unwrap_or(OperationKind::Query),
             context.unwrap_or_default(),
             subscription_stream,
-            subgraph_name,
+            subgraph_name.unwrap_or_default(),
             connection_closed_signal,
+            None,
         )
     }
 }
@@ -205,9 +210,8 @@ assert_impl_all!(Response: Send);
 #[non_exhaustive]
 pub struct Response {
     pub response: http::Response<graphql::Response>,
-    // FIXME for router 2.x
-    /// Name of the subgraph, it's an Option to not introduce breaking change
-    pub(crate) subgraph_name: Option<String>,
+    /// Name of the subgraph
+    pub(crate) subgraph_name: String,
     pub context: Context,
     /// unique id matching the corresponding field in the request
     pub(crate) id: SubgraphRequestId,
@@ -224,11 +228,11 @@ impl Response {
         context: Context,
         subgraph_name: String,
         id: SubgraphRequestId,
-    ) -> Response {
+    ) -> Self {
         Self {
             response,
             context,
-            subgraph_name: Some(subgraph_name),
+            subgraph_name,
             id,
         }
     }
@@ -247,9 +251,9 @@ impl Response {
         status_code: Option<StatusCode>,
         context: Context,
         headers: Option<http::HeaderMap<http::HeaderValue>>,
-        subgraph_name: Option<String>,
+        subgraph_name: String,
         id: Option<SubgraphRequestId>,
-    ) -> Response {
+    ) -> Self {
         // Build a response
         let res = graphql::Response::builder()
             .and_label(label)
@@ -268,7 +272,7 @@ impl Response {
         *response.headers_mut() = headers.unwrap_or_default();
 
         // Warning: the id argument for this builder is an Option to make that a non breaking change
-        // but this means that if a subgraph response is created explicitely without an id, it will
+        // but this means that if a subgraph response is created explicitly without an id, it will
         // be generated here and not match the id from the subgraph request
         let id = id.unwrap_or_default();
 
@@ -298,8 +302,8 @@ impl Response {
         headers: Option<http::HeaderMap<http::HeaderValue>>,
         subgraph_name: Option<String>,
         id: Option<SubgraphRequestId>,
-    ) -> Response {
-        Response::new(
+    ) -> Self {
+        Self::new(
             label,
             data,
             path,
@@ -308,7 +312,7 @@ impl Response {
             status_code,
             context.unwrap_or_default(),
             headers,
-            subgraph_name,
+            subgraph_name.unwrap_or_default(),
             id,
         )
     }
@@ -333,7 +337,7 @@ impl Response {
         subgraph_name: Option<String>,
         id: Option<SubgraphRequestId>,
     ) -> Result<Response, BoxError> {
-        Ok(Response::new(
+        Ok(Self::new(
             label,
             data,
             path,
@@ -342,7 +346,7 @@ impl Response {
             status_code,
             context.unwrap_or_default(),
             Some(header_map(headers)?),
-            subgraph_name,
+            subgraph_name.unwrap_or_default(),
             id,
         ))
     }
@@ -355,10 +359,10 @@ impl Response {
         errors: Vec<Error>,
         status_code: Option<StatusCode>,
         context: Context,
-        subgraph_name: Option<String>,
+        subgraph_name: String,
         id: Option<SubgraphRequestId>,
-    ) -> Result<Response, BoxError> {
-        Ok(Response::new(
+    ) -> Self {
+        Self::new(
             Default::default(),
             Default::default(),
             Default::default(),
@@ -369,13 +373,12 @@ impl Response {
             Default::default(),
             subgraph_name,
             id,
-        ))
+        )
     }
 }
 
 impl Request {
-    #[allow(dead_code)]
-    pub(crate) fn to_sha256(&self) -> String {
+    pub(crate) fn to_sha256(&self, ignored_headers: &HashSet<String>) -> String {
         let mut hasher = Sha256::new();
         let http_req = &self.subgraph_request;
         hasher.update(http_req.method().as_str().as_bytes());
@@ -402,7 +405,11 @@ impl Request {
         }
 
         // this assumes headers are in the same order
-        for (name, value) in http_req.headers() {
+        for (name, value) in http_req
+            .headers()
+            .iter()
+            .filter(|(name, _)| !ignored_headers.contains(name.as_str()))
+        {
             hasher.update(name.as_str().as_bytes());
             hasher.update(value.to_str().unwrap_or("ERROR").as_bytes());
         }
@@ -421,15 +428,70 @@ impl Request {
         }
         for (var_name, var_value) in &body.variables {
             hasher.update(var_name.inner());
-            // TODO implement to_bytes() for value in serde_json_bytes
-            hasher.update(var_value.to_string().as_bytes());
+            hasher.update(var_value.to_bytes());
         }
         for (name, val) in &body.extensions {
             hasher.update(name.inner());
-            // TODO implement to_bytes() for value in serde_json_bytes
-            hasher.update(val.to_string().as_bytes());
+            hasher.update(val.to_bytes());
         }
 
         hex::encode(hasher.finalize())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_subgraph_request_hash() {
+        let subgraph_req_1 = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .header("public_header", "value")
+                    .header("auth", "my_token")
+                    .body(graphql::Request::default())
+                    .unwrap(),
+            )
+            .build();
+        let subgraph_req_2 = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .header("public_header", "value_bis")
+                    .header("auth", "my_token")
+                    .body(graphql::Request::default())
+                    .unwrap(),
+            )
+            .build();
+        let mut ignored_headers = HashSet::new();
+        ignored_headers.insert("public_header".to_string());
+        assert_eq!(
+            subgraph_req_1.to_sha256(&ignored_headers),
+            subgraph_req_2.to_sha256(&ignored_headers)
+        );
+
+        let subgraph_req_1 = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .header("public_header", "value")
+                    .header("auth", "my_token")
+                    .body(graphql::Request::default())
+                    .unwrap(),
+            )
+            .build();
+        let subgraph_req_2 = Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .header("public_header", "value_bis")
+                    .header("auth", "my_token")
+                    .body(graphql::Request::default())
+                    .unwrap(),
+            )
+            .build();
+        let ignored_headers = HashSet::new();
+        assert_ne!(
+            subgraph_req_1.to_sha256(&ignored_headers),
+            subgraph_req_2.to_sha256(&ignored_headers)
+        );
     }
 }

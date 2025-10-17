@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/is_success/is_success_invalid_sources.graphql
+---
+[
+    Message {
+        code: InvalidIsSuccess,
+        message: "In `@source(name: \"using_disallowed_var\" isSuccess:)`: $this is not valid here, must be one of $config, $context, $status, $request, $response, $env",
+        locations: [
+            13:17..13:39,
+        ],
+    },
+]

@@ -1,59 +1,87 @@
 ---
-title: Run in Docker
-subtitle: Run the router container image in Docker
-description: Run the Apollo Router Core container image in Docker with examples covering basic setup, configuration overrides, debugging, and building custom Docker images.
+title: Deploying the Apollo Runtime in Docker
+subtitle: Run an Apollo Runtime container image in Docker
+description: Easily deploy a container with everything you need to serve GraphQL requests using Apollo.
 ---
 
 import ElasticNotice from '../../../../shared/elastic-notice.mdx';
 
-This guide provides the following examples of running an Apollo Router Core container image in Docker:
+This guide provides the following examples of running an Apollo Router container image in Docker:
 
 * Running a basic example with default configuration.
 * Customizing your configuration to override the default configuration.
-* Debugging your containerized router.
 * Manually specifying a supergraph for your router.
-* Building your own router Docker image.
 
 The [documentation](https://docs.docker.com/engine/reference/run/) for the `docker run` command is a helpful reference for the examples in this guide.
 
-The exact image version to use depends on which release you wish to use. In the following examples, replace `<image version>` with your chosen version, for example `v1.32.0`.
+The exact image version to use depends on which release you wish to use. In the following examples, replace `<image version>` with your chosen version. For additional details on versioning, see the [container tags documentation](https://github.com/apollographql/apollo-runtime?tab=readme-ov-file#container-tags).
 
 <ElasticNotice />
 
-## Basic example running router in Docker
+## Quick start
 
 To run the router, your Docker container must have the [`APOLLO_GRAPH_REF`](/router/configuration/overview#apollo_graph_ref) and [`APOLLO_KEY`](/router/configuration/overview#apollo_key) environment variables set to your graph ref and API key, respectively.
 
-Here's a basic example of running a router image in Docker. Make sure to replace `<router-image-version>` with whichever version you want to use, such as `v1.32.0`.
+Below is a basic example of running an Apollo Runtime image with Docker. It downloads your supergraph schema from Apollo and uses a default configuration that listens for connections on port `4000`.
+
+You can use `docker run` with the following example command:
+
+```bash title="Docker"
+docker run \
+  -p 4000:4000 \
+  --env APOLLO_GRAPH_REF="<your-graph-ref>" \
+  --env APOLLO_KEY="<your-graph-api-key>" \
+  --rm \
+  ghcr.io/apollographql/apollo-runtime:latest
+```
+
+Make sure to replace `<your-graph-ref>` and `<your-graph-api-key>` with your graph reference and API key, respectively.
+
+## Enabling MCP
+
+<ExperimentalFeature>
+
+This feature is [experimental](/graphos/resources/feature-launch-stages#experimental). For more information about MCP support,  review the [MCP documentation](https://www.apollographql.com/docs/apollo-mcp-server).
+
+</ExperimentalFeature>
+
+To serve MCP requests, enable the [MCP server](https://www.apollographql.com/docs/apollo-mcp-server) using the `MCP_ENABLE` environment variable. You'll also need to export container port `5000` for HTTP Streamable connections to the MCP server, using the `-p 5000:5000` flag.
+
+```bash title="Docker" {3, 6}
+docker run \
+  -p 4000:4000 \
+  -p 5000:5000 \
+  --env APOLLO_GRAPH_REF="<your-graph-ref>" \
+  --env APOLLO_KEY="<your-graph-api-key>" \
+  --env MCP_ENABLE=1 \
+  --rm \
+  ghcr.io/apollographql/apollo-runtime:latest
+```
+
+## Configuring using local files
+
+You can provide your own configuration from the host environment to the router by mounting the directory containing your configuration files to `/config` as follows:
 
 ```bash title="Docker"
 docker run -p 4000:4000 \
   --env APOLLO_GRAPH_REF="<your-graph-ref>" \
   --env APOLLO_KEY="<your-graph-api-key>" \
+  -v <<ABSOLUTE_PATH_TO_THE_MY_CONFIG_DIRECTORY>>:/config
   --rm \
-  ghcr.io/apollographql/router:<router-image-version>
+  ghcr.io/apollographql/apollo-runtime:<runtime-image-version>
 ```
 
-This command downloads your supergraph schema from Apollo and uses a default configuration that listens for connections on port `4000`.
+You can also mount specific files, for example the schema file, by specifying:
 
-For more complex configurations, such as overriding subgraph URLs or propagating headers, see [Router Configuration](/router/configuration/overview/).
-
-## Override the configuration
-
-Apollo's default Docker images include a [basic router configuration](https://github.com/apollographql/router/blob/main/dockerfiles/router.yaml). Inside the container, this file is located at `/dist/config/router.yaml`.
-
-If you wish to override the default configuration, it is important preserve aspects of the default configuration. In particular, it is generally important for the router to bind to and listen on the special address of `0.0.0.0` (for all interfaces) to ensure it's exposed on a network interface that's accessible outside of the local container. Without this configuration, the router will only listen on `localhost`.
-
-You can provide your own configuration from the host environment to the router by mounting your configuration to `/dist/config/router.yaml` as follows:
-
-```bash {4}
-docker run -p 4000:4000 \
-  --env APOLLO_GRAPH_REF="<your-graph-ref>" \
-  --env APOLLO_KEY="<your-graph-api-key>" \
-  --mount "type=bind,source=/home/user/router.yaml,target=/dist/config/router.yaml" \
-  --rm \
-  ghcr.io/apollographql/router:<router-image-version>
+```bash title="Docker"
+...
+-v <<ABSOLUTE_PATH_TO_SCHEMA_FILE>:/config/schema.graphql 
+...
 ```
+
+If you wish to override the default router configuration, it is important to preserve aspects of the default configuration. In particular, it is generally important for the router to bind to and listen on the special address of `0.0.0.0` (for all interfaces) to ensure it's exposed on a network interface that's accessible outside of the local container. Without this configuration, the router will only listen on `localhost`.
+
+This allows for using local supergraph schemas, persisted query manifests, router configuration, and more. To learn more, [review the documentation](https://github.com/apollographql/apollo-runtime?tab=readme-ov-file#configuring-using-local-files).
 
 <Note>
 
@@ -61,101 +89,37 @@ Both local and container paths must be specified as absolute paths.
 
 </Note>
 
-In this example we are mounting a file from the host system (`/home/user/router.yaml`) in place of the default configuration provided in the image at `/dist/config/router.yaml`.
-
-## Passing command-line arguments to the router binary
-
-By default, the `router` command invoked inside the published container doesn't set any of the [available command-line options](/router/configuration/overview#command-line-options). To set them, append the desired option(s) to the `docker run` command. 
-
-For example, to start the router using the `--log debug` option, use the following `docker run` command with the option added at the end:
-
-```bash {5}
-docker run -p 4000:4000 \
-  --env APOLLO_GRAPH_REF="<your-graph-ref>" \
-  --env APOLLO_KEY="<your-graph-api-key>" \
-  --rm \
-  ghcr.io/apollographql/router:<router-image-version> --log debug
-```
-
-## Debugging your container
-
-You can debug your container by setting the `entrypoint` in a `docker run` command:
-
-```bash
-docker run -p 4000:4000 \
-  --env APOLLO_GRAPH_REF="<your graph>" \
-  --env APOLLO_KEY="<your key>" \
-  --mount "type=bind,source=/router.yaml,target=/dist/config/router.yaml" \
-  --rm \
-  --interactive \
-  --tty \
-  --entrypoint=bash \
-  ghcr.io/apollographql/router:<image version>
-dist# pwd
-/dist
-dist# ls
-config	router	schema
-dist# exit
-exit
-```
-
-In this example, we've added both interactive and tty flags, and we've changed the entrypoint of the image to be a bash shell.
-
-### Running the debug container to investigate memory issues
-
-```bash
-docker run -p 4000:4000 \
-  --env APOLLO_GRAPH_REF="<your graph>" \
-  --env APOLLO_KEY="<your key>" \
-  --mount "type=bind,source=/data,target=/dist/data"
-  --rm \
-  ghcr.io/apollographql/router:<image version>-debug
-```
-
-The router runs under the control of [heaptrack](https://github.com/KDE/heaptrack). The heaptrack output is saved to the `/data` directory. The output can be analyzed directly using `heaptrack_gui` or `heaptrack_print` or shared with Apollo support.
-
 ## Specifying the supergraph
 
-If you don't want to automatically update your supergraph via [Apollo Uplink](/federation/managed-federation/uplink/), or you don't have connectivity to access Apollo Uplink from your environment, you can manually specify the details of your supergraph in a `docker run` command:
+If you don't want to automatically update your supergraph via [Apollo Uplink](/federation/managed-federation/uplink/), or you don't have connectivity to access Apollo Uplink from your environment, you have two options:
+
+1. Using a local supergraph file, as documented in the [Configuring using local files](#configuring-using-local-files) section.
+1. Using an [OCI image reference](#using-an-oci-image-reference)
+
+### Using an OCI image reference
+
+You can use the `APOLLO_GRAPH_ARTIFACT_REFERENCE` environment variable to fetch the supergraph schema from an OCI image:
 
 ```bash
 docker run -p 4000:4000 \
-  --mount "type=bind,source=/docker.graphql,target=/dist/schema/local.graphql" \
+  --env APOLLO_KEY="<your-graph-api-key>" \
+  --env APOLLO_GRAPH_ARTIFACT_REFERENCE="<your-oci-reference>" \
   --rm \
-  ghcr.io/apollographql/router:<image version> -c config/router.yaml -s schema/local.graphql
+  ghcr.io/apollographql/apollo-runtime:<runtime-image-version>
 ```
 
-In this example, we have to mount the local definition of the supergraph into our image, _and_ specify the location of the file. It doesn't have to be mounted in the `/dist/schema` directory, but it's a reasonable location to use. We must specify the configuration file location as well, since overriding the default params will override our default config file location. In this case, since we don't want to change our router configuration but want to make sure it's used, we just specify the default location of the default configuration.
+When using this option, the router will fetch the schema from the specified OCI image instead of using Apollo Uplink. Additional information on graph artifacts is available in the [router CLI options documentation](/docs/graphos/routing/configuration/cli#command-line-options).
 
-## Building your own container
+## Running a specific Router and MCP version
 
-<Note>
+The container has a tagging scheme that consists of three parts, the container version, the Apollo Router version, and the MCP Server version, each separated by underscores.
 
-This section is aimed at developers familiar with tooling such as `docker` and `git` who wish to make their own DIY container images. The script documented here is not a part of the router product, but an illustrative example of what's involved in making your own images.
+To learn more, see the [tagging documentation](https://github.com/apollographql/apollo-runtime?tab=readme-ov-file#container-tags).
 
-</Note>
+## Additional router configuration information
 
-In the `dockerfiles/diy` directory, we now provide a script, `build_docker_image.sh` which illustrates how to build your own docker images from either our released tarballs or from a git commit hash or tag. Here's how to use it:
+For more complex configurations, such as overriding subgraph URLs or propagating headers, see [Router Configuration](/router/configuration/overview/).
 
-```bash
-% ./build_docker_image.sh -h
-Usage: build_docker_image.sh [-b [-r <repo>]] [-d] [<release>]
-	-b build docker image from the default repo, if not present build from a released version
-	-d build debug image, router will run under control of heaptrack
-	-r build docker image from a specified repo, only valid with -b flag
-	<release> a valid release. If [-b] is specified, this is optional
-	Example 1: Building HEAD from the repo
-		build_docker_image.sh -b
-	Example 2: Building HEAD from a different repo
-		build_docker_image.sh -b -r /Users/anon/dev/router
-	Example 3: Building tag from the repo
-		build_docker_image.sh -b v0.9.1
-	Example 4: Building commit hash from the repo
-		build_docker_image.sh -b 7f7d223f42af34fad35b898d976bc07d0f5440c5
-	Example 5: Building tag v0.9.1 from the released version
-		build_docker_image.sh v0.9.1
-	Example 6: Building a debug image with tag v0.9.1 from the released version
-		build_docker_image.sh -d v0.9.1
-```
+## Router-only Docker container
 
-The example uses [debian:bullseye-slim image](https://hub.docker.com/_/debian/) for the final image build. Feel free to modify the script to use images which better suit your own needs, but be careful if using the `-d` flag because it makes the assumption that there is a `heaptrack` package available to install.
+Learn more about the Docker container that includes only the Apollo Router in the [Router-only Docker container documentation](docker-router-only).

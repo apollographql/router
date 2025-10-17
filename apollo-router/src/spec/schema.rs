@@ -1,27 +1,35 @@
 //! GraphQL schema.
 
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
+use apollo_compiler::Name;
 use apollo_compiler::schema::Implementers;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Name;
-use apollo_federation::schema::ValidFederationSchema;
 use apollo_federation::ApiSchemaOptions;
 use apollo_federation::Supergraph;
+use apollo_federation::connectors::expand::Connectors;
+use apollo_federation::connectors::expand::ExpansionResult;
+use apollo_federation::connectors::expand::expand_connectors;
+use apollo_federation::router_supported_supergraph_specs;
+use apollo_federation::schema::ValidFederationSchema;
 use http::Uri;
 use semver::Version;
 use semver::VersionReq;
+use serde::Deserialize;
+use serde::Serialize;
 use sha2::Digest;
 use sha2::Sha256;
 
+use crate::Configuration;
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
+use crate::plugins::connectors::configuration::apply_config;
 use crate::query_planner::OperationKind;
 use crate::uplink::schema::SchemaState;
-use crate::Configuration;
 
 /// A GraphQL schema.
 pub(crate) struct Schema {
@@ -30,7 +38,8 @@ pub(crate) struct Schema {
     subgraphs: HashMap<String, Uri>,
     pub(crate) implementers_map: apollo_compiler::collections::HashMap<Name, Implementers>,
     api_schema: ApiSchema,
-    pub(crate) schema_id: Arc<String>,
+    pub(crate) schema_id: SchemaHash,
+    pub(crate) connectors: Option<Connectors>,
     pub(crate) launch_id: Option<Arc<String>>,
 }
 
@@ -48,7 +57,33 @@ impl Schema {
         config: &Configuration,
     ) -> Result<Self, SchemaError> {
         let start = Instant::now();
+
+        let api_schema_options = ApiSchemaOptions {
+            include_defer: config.supergraph.defer_support,
+            ..Default::default()
+        };
+
+        let expansion =
+            expand_connectors(&raw_sdl.sdl, &api_schema_options).map_err(SchemaError::Connector)?;
+        let preserved_launch_id = raw_sdl.launch_id.clone();
+        let (raw_sdl, api_schema, connectors) = match expansion {
+            ExpansionResult::Expanded {
+                raw_sdl,
+                api_schema: api,
+                connectors,
+            } => (
+                Arc::new(SchemaState {
+                    sdl: raw_sdl,
+                    launch_id: preserved_launch_id,
+                }),
+                Some(ValidFederationSchema::new(*api).map_err(SchemaError::Connector)?),
+                Some(apply_config(config, connectors)),
+            ),
+            ExpansionResult::Unchanged => (raw_sdl, None, None),
+        };
+
         let mut parser = apollo_compiler::parser::Parser::new();
+
         let result = parser.parse_ast(&raw_sdl.sdl, "schema.graphql");
 
         // Trace log recursion limit data
@@ -67,7 +102,7 @@ impl Schema {
         let mut subgraphs = HashMap::new();
         // TODO: error if not found?
         if let Some(join_enum) = definitions.get_enum("join__Graph") {
-            for (name, url) in join_enum.values.iter().filter_map(|(_name, value)| {
+            for (name, url) in join_enum.values.values().filter_map(|value| {
                 let join_directive = value.directives.get("join__graph")?;
                 let name = join_directive
                     .specified_argument_by_name("name")?
@@ -75,25 +110,34 @@ impl Schema {
                 let url = join_directive.specified_argument_by_name("url")?.as_str()?;
                 Some((name, url))
             }) {
-                if url.is_empty() {
-                    return Err(SchemaError::MissingSubgraphUrl(name.to_string()));
-                }
-                #[cfg(unix)]
-                // there is no standard for unix socket URLs apparently
-                let url = if let Some(path) = url.strip_prefix("unix://") {
-                    // there is no specified format for unix socket URLs (cf https://github.com/whatwg/url/issues/577)
-                    // so a unix:// URL will not be parsed by http::Uri
-                    // To fix that, hyperlocal came up with its own Uri type that can be converted to http::Uri.
-                    // It hides the socket path in a hex encoded authority that the unix socket connector will
-                    // know how to decode
-                    hyperlocal::Uri::new(path, "/").into()
+                let is_connector = connectors
+                    .as_ref()
+                    .map(|connectors| connectors.by_service_name.contains_key(name))
+                    .unwrap_or_default();
+
+                let url = if is_connector {
+                    Uri::from_static("http://unused")
                 } else {
+                    if url.is_empty() {
+                        return Err(SchemaError::MissingSubgraphUrl(name.to_string()));
+                    }
+                    #[cfg(unix)]
+                    // there is no standard for unix socket URLs apparently
+                    if let Some(path) = url.strip_prefix("unix://") {
+                        // there is no specified format for unix socket URLs (cf https://github.com/whatwg/url/issues/577)
+                        // so a unix:// URL will not be parsed by http::Uri
+                        // To fix that, hyperlocal came up with its own Uri type that can be converted to http::Uri.
+                        // It hides the socket path in a hex encoded authority that the unix socket connector will
+                        // know how to decode
+                        hyperlocal::Uri::new(path, "/").into()
+                    } else {
+                        Uri::from_str(url)
+                            .map_err(|err| SchemaError::UrlParse(name.to_string(), err))?
+                    }
+                    #[cfg(not(unix))]
                     Uri::from_str(url)
                         .map_err(|err| SchemaError::UrlParse(name.to_string(), err))?
                 };
-                #[cfg(not(unix))]
-                let url = Uri::from_str(url)
-                    .map_err(|err| SchemaError::UrlParse(name.to_string(), err))?;
 
                 if subgraphs.insert(name.to_string(), url).is_some() {
                     return Err(SchemaError::Api(format!(
@@ -105,25 +149,23 @@ impl Schema {
 
         f64_histogram!(
             "apollo.router.schema.load.duration",
-            "Time spent loading the supergraph schema.",
+            "Time spent loading the supergraph schema, in seconds.",
             start.elapsed().as_secs_f64()
         );
 
         let implementers_map = definitions.implementers_map();
-        let supergraph = Supergraph::from_schema(definitions)?;
+        let supergraph =
+            Supergraph::from_schema(definitions, Some(&router_supported_supergraph_specs()))?;
 
-        let schema_id = Arc::new(Schema::schema_id(&raw_sdl.sdl));
+        let schema_id = Schema::schema_id(&raw_sdl.sdl);
 
-        let api_schema = supergraph
-            .to_api_schema(ApiSchemaOptions {
-                include_defer: config.supergraph.defer_support,
-                ..Default::default()
-            })
-            .map_err(|e| {
+        let api_schema = api_schema.map(Ok).unwrap_or_else(|| {
+            supergraph.to_api_schema(api_schema_options).map_err(|e| {
                 SchemaError::Api(format!(
                     "The supergraph schema failed to produce a valid API schema: {e}"
                 ))
-            })?;
+            })
+        })?;
 
         Ok(Schema {
             launch_id: raw_sdl
@@ -137,6 +179,7 @@ impl Schema {
             implementers_map,
             api_schema: ApiSchema(api_schema),
             schema_id,
+            connectors,
         })
     }
 
@@ -148,10 +191,9 @@ impl Schema {
         self.supergraph.schema.schema()
     }
 
-    pub(crate) fn schema_id(sdl: &str) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(sdl.as_bytes());
-        format!("{:x}", hasher.finalize())
+    /// Compute the Schema ID for an SDL string.
+    pub(crate) fn schema_id(sdl: &str) -> SchemaHash {
+        SchemaHash::new(sdl)
     }
 
     /// Extracts a string containing the entire [`Schema`].
@@ -275,7 +317,7 @@ impl Schema {
                     };
 
                     let Some(version_in_url) =
-                        Version::parse(format!("{}.0", version_in_link).as_str()).ok()
+                        Version::parse(format!("{version_in_link}.0").as_str()).ok()
                     else {
                         return false;
                     };
@@ -313,7 +355,7 @@ impl Schema {
                     };
 
                     let Some(version_in_url) =
-                        Version::parse(format!("{}.0", version_in_link).as_str()).ok()
+                        Version::parse(format!("{version_in_link}.0").as_str()).ok()
                     else {
                         return false;
                     };
@@ -343,8 +385,9 @@ impl std::fmt::Debug for Schema {
             subgraphs,
             implementers_map,
             api_schema: _, // skip
-            schema_id: _,  // skip
-            launch_id: _,  // skip
+            schema_id: _,
+            connectors: _,
+            launch_id: _, // skip
         } = self;
         f.debug_struct("Schema")
             .field("raw_sdl", raw_sdl)
@@ -359,6 +402,118 @@ impl std::ops::Deref for ApiSchema {
 
     fn deref(&self) -> &Self::Target {
         self.0.schema()
+    }
+}
+
+/// A schema ID is the sha256 hash of the schema text.
+///
+/// That means that differences in whitespace and comments affect the hash, not only semantic
+/// differences in the schema.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Deserialize, Serialize)]
+pub(crate) struct SchemaHash(
+    /// The internal representation is a pointer to a string.
+    /// This is not ideal, it might be better eg. to just have a fixed-size byte array that can be
+    /// turned into a string as needed.
+    /// But `Arc<String>` is used in the public plugin interface and other places, so this is
+    /// essentially a backwards compatibility decision.
+    Arc<String>,
+);
+impl SchemaHash {
+    pub(crate) fn new(sdl: &str) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(sdl);
+        let hash = format!("{:x}", hasher.finalize());
+        Self(Arc::new(hash))
+    }
+
+    /// Return the underlying data.
+    pub(crate) fn into_inner(self) -> Arc<String> {
+        self.0
+    }
+
+    /// Return the hash as a hexadecimal string slice.
+    pub(crate) fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    /// Compute the hash for an executable document and operation name against this schema.
+    ///
+    /// See [QueryHash] for details of what's included.
+    pub(crate) fn operation_hash(
+        &self,
+        query_text: &str,
+        operation_name: Option<&str>,
+    ) -> QueryHash {
+        QueryHash::new(self, query_text, operation_name)
+    }
+}
+
+impl Display for SchemaHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.as_str())
+    }
+}
+
+/// A query hash is a unique hash for an operation from an executable document against a particular
+/// schema.
+///
+/// For a document with two queries A and B, queries A and B will result in a different hash even
+/// if the document text is identical.
+/// If query A is then executed against two different versions of the schema, the hash will be
+/// different again, depending on the [SchemaHash].
+///
+/// A query hash can be obtained from a schema ID using [SchemaHash::operation_hash].
+// FIXME: rename to OperationHash since it include operation name?
+#[derive(Clone, Hash, PartialEq, Eq, Deserialize, Serialize)]
+pub(crate) struct QueryHash(
+    /// Unlike SchemaHash, the query hash has no backwards compatibility motivations for the internal
+    /// type, as it's fully private. We could consider making this a fixed-size byte array rather
+    /// than a Vec, but it shouldn't make a huge difference.
+    #[serde(with = "hex")]
+    Vec<u8>,
+);
+
+impl QueryHash {
+    /// This constructor is not public, see [SchemaHash::operation_hash] instead.
+    fn new(schema_id: &SchemaHash, query_text: &str, operation_name: Option<&str>) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(schema_id.as_str());
+        // byte separator between each part that is hashed
+        hasher.update(&[0xFF][..]);
+        hasher.update(query_text);
+        hasher.update(&[0xFF][..]);
+        hasher.update(operation_name.unwrap_or("-"));
+        Self(hasher.finalize().as_slice().into())
+    }
+
+    /// Return the hash as a byte slice.
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for QueryHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("QueryHash")
+            .field(&hex::encode(&self.0))
+            .finish()
+    }
+}
+
+impl Display for QueryHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", hex::encode(&self.0))
+    }
+}
+
+// FIXME: It seems bad that you can create an empty hash easily and use it in security-critical
+// places. This impl should be deleted outright and we should update usage sites.
+// If the query hash is truly not required to contain data in those usage sites, we should use
+// something like an Option instead.
+#[allow(clippy::derivable_impls)] // need a place to add that comment ;)
+impl Default for QueryHash {
+    fn default() -> Self {
+        Self(Default::default())
     }
 }
 
@@ -414,7 +569,7 @@ mod tests {
             type Baz {
               me: String
             }
-            
+
             union UnionType2 = Foo | Bar
             "#,
             );
@@ -567,7 +722,7 @@ mod tests {
             let schema = Schema::parse(schema, &Default::default()).unwrap();
 
             assert_eq!(
-                Schema::schema_id(&schema.raw_sdl),
+                Schema::schema_id(&schema.raw_sdl).as_str(),
                 "23bcf0ea13a4e0429c942bba59573ba70b8d6970d73ad00c5230d08788bb1ba2".to_string()
             );
         }

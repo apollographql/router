@@ -2,26 +2,23 @@
 
 #![allow(missing_docs)] // FIXME
 
-pub(crate) use bridge_query_planner::*;
-pub(crate) use bridge_query_planner_pool::*;
 pub(crate) use caching_query_planner::*;
 pub use plan::QueryPlan;
 pub(crate) use plan::*;
+pub(crate) use query_planner_service::*;
+pub(crate) use subgraph_context::build_operation_with_aliasing;
 
 pub use self::fetch::OperationKind;
 
-pub(crate) mod bridge_query_planner;
-mod bridge_query_planner_pool;
 mod caching_query_planner;
 mod convert;
-pub(crate) mod dual_query_planner;
 mod execution;
 pub(crate) mod fetch;
 mod labeler;
 mod plan;
-pub(crate) mod plan_compare;
+pub(crate) mod query_planner_service;
 pub(crate) mod rewrites;
-mod selection;
+pub(crate) mod selection;
 mod subgraph_context;
 pub(crate) mod subscription;
 

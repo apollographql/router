@@ -2,34 +2,35 @@
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 
-use axum::headers::HeaderName;
+use axum_extra::headers::HeaderName;
 use derivative::Derivative;
 use num_traits::ToPrimitive;
-use opentelemetry::sdk::metrics::new_view;
-use opentelemetry::sdk::metrics::Aggregation;
-use opentelemetry::sdk::metrics::Instrument;
-use opentelemetry::sdk::metrics::Stream;
-use opentelemetry::sdk::metrics::View;
-use opentelemetry::sdk::trace::SpanLimits;
 use opentelemetry::Array;
 use opentelemetry::Value;
-use opentelemetry_api::metrics::MetricsError;
-use opentelemetry_api::metrics::Unit;
+use opentelemetry::metrics::MetricsError;
+use opentelemetry_sdk::metrics::Aggregation;
+use opentelemetry_sdk::metrics::Instrument;
+use opentelemetry_sdk::metrics::Stream;
+use opentelemetry_sdk::metrics::View;
+use opentelemetry_sdk::metrics::new_view;
+use opentelemetry_sdk::trace::SpanLimits;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 
-use super::metrics::MetricsAttributesConf;
 use super::*;
+use crate::Configuration;
 use crate::plugin::serde::deserialize_option_header_name;
+use crate::plugins::telemetry::apollo::Config as ApolloTelemetryConfig;
 use crate::plugins::telemetry::metrics;
 use crate::plugins::telemetry::resource::ConfigResource;
 use crate::plugins::telemetry::tracing::datadog::DatadogAgentSampling;
-use crate::Configuration;
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum Error {
-    #[error("field level instrumentation sampler must sample less frequently than tracing level sampler")]
+    #[error(
+        "field level instrumentation sampler must sample less frequently than tracing level sampler"
+    )]
     InvalidFieldLevelInstrumentationSampler,
 }
 
@@ -43,16 +44,6 @@ where
         }
         self
     }
-    fn try_with<B>(
-        self,
-        option: &Option<B>,
-        apply: fn(Self, &B) -> Result<Self, BoxError>,
-    ) -> Result<Self, BoxError> {
-        if let Some(option) = option {
-            return apply(self, option);
-        }
-        Ok(self)
-    }
 }
 
 impl<T> GenericWith<T> for T where Self: Sized {}
@@ -60,6 +51,7 @@ impl<T> GenericWith<T> for T where Self: Sized {}
 /// Telemetry configuration
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
+#[schemars(rename = "TelemetryConfig")]
 pub(crate) struct Conf {
     /// Apollo reporting configuration
     pub(crate) apollo: apollo::Config,
@@ -118,8 +110,6 @@ pub(crate) struct Metrics {
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct MetricsCommon {
-    /// Configuration to add custom labels/attributes to metrics
-    pub(crate) attributes: MetricsAttributesConf,
     /// Set a service.name resource in your metrics
     pub(crate) service_name: Option<String>,
     /// Set a service.namespace attribute in your metrics
@@ -135,7 +125,6 @@ pub(crate) struct MetricsCommon {
 impl Default for MetricsCommon {
     fn default() -> Self {
         Self {
-            attributes: Default::default(),
             service_name: None,
             service_namespace: None,
             resource: BTreeMap::new(),
@@ -183,7 +172,7 @@ impl TryInto<Box<dyn View>> for MetricView {
             mask = mask.description(desc);
         }
         if let Some(unit) = self.unit {
-            mask = mask.unit(Unit::new(unit));
+            mask = mask.unit(unit);
         }
         if let Some(aggregation) = aggregation {
             mask = mask.aggregation(aggregation);
@@ -221,8 +210,6 @@ pub(crate) struct Tracing {
     pub(crate) common: TracingCommon,
     /// OpenTelemetry native exporter configuration
     pub(crate) otlp: otlp::Config,
-    /// Jaeger exporter configuration
-    pub(crate) jaeger: tracing::jaeger::Config,
     /// Zipkin exporter configuration
     pub(crate) zipkin: tracing::zipkin::Config,
     /// Datadog exporter configuration
@@ -271,7 +258,7 @@ impl TraceIdFormat {
     pub(crate) fn format(&self, trace_id: TraceId) -> String {
         match self {
             TraceIdFormat::Hexadecimal | TraceIdFormat::OpenTelemetry => {
-                format!("{:032x}", trace_id)
+                format!("{trace_id:032x}")
             }
             TraceIdFormat::Decimal => format!("{}", u128::from_be_bytes(trace_id.to_bytes())),
             TraceIdFormat::Datadog => trace_id.to_datadog(),
@@ -286,10 +273,10 @@ impl TraceIdFormat {
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub(crate) enum ApolloSignatureNormalizationAlgorithm {
     /// Use the algorithm that matches the JavaScript-based implementation.
-    #[default]
     Legacy,
     /// Use a new algorithm that includes input object forms, normalized aliases and variable names, and removes some
     /// edge cases from the JS implementation that affected normalization.
+    #[default]
     Enhanced,
 }
 
@@ -298,9 +285,9 @@ pub(crate) enum ApolloSignatureNormalizationAlgorithm {
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub(crate) enum ApolloMetricsReferenceMode {
     /// Use the extended mode to report input object fields and enum value references as well as object fields.
+    #[default]
     Extended,
     /// Use the standard mode that only reports referenced object fields.
-    #[default]
     Standard,
 }
 
@@ -435,7 +422,8 @@ fn default_max_attributes_per_link() -> u32 {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(untagged, deny_unknown_fields)]
-pub(crate) enum AttributeValue {
+#[allow(missing_docs)] // only public-but-hidden for tests
+pub enum AttributeValue {
     /// bool values
     Bool(bool),
     /// i64 values
@@ -445,6 +433,7 @@ pub(crate) enum AttributeValue {
     /// String values
     String(String),
     /// Array of homogeneous values
+    #[allow(private_interfaces)]
     Array(AttributeArray),
 }
 
@@ -645,31 +634,31 @@ pub(crate) enum Sampler {
     AlwaysOff,
 }
 
-impl From<Sampler> for opentelemetry::sdk::trace::Sampler {
+impl From<Sampler> for opentelemetry_sdk::trace::Sampler {
     fn from(s: Sampler) -> Self {
         match s {
-            Sampler::AlwaysOn => opentelemetry::sdk::trace::Sampler::AlwaysOn,
-            Sampler::AlwaysOff => opentelemetry::sdk::trace::Sampler::AlwaysOff,
+            Sampler::AlwaysOn => opentelemetry_sdk::trace::Sampler::AlwaysOn,
+            Sampler::AlwaysOff => opentelemetry_sdk::trace::Sampler::AlwaysOff,
         }
     }
 }
 
-impl From<SamplerOption> for opentelemetry::sdk::trace::Sampler {
+impl From<SamplerOption> for opentelemetry_sdk::trace::Sampler {
     fn from(s: SamplerOption) -> Self {
         match s {
             SamplerOption::Always(s) => s.into(),
             SamplerOption::TraceIdRatioBased(ratio) => {
-                opentelemetry::sdk::trace::Sampler::TraceIdRatioBased(ratio)
+                opentelemetry_sdk::trace::Sampler::TraceIdRatioBased(ratio)
             }
         }
     }
 }
 
-impl From<&TracingCommon> for opentelemetry::sdk::trace::Config {
+impl From<&TracingCommon> for opentelemetry_sdk::trace::Config {
     fn from(config: &TracingCommon) -> Self {
-        let mut common = opentelemetry::sdk::trace::config();
+        let mut common = opentelemetry_sdk::trace::Config::default();
 
-        let mut sampler: opentelemetry::sdk::trace::Sampler = config.sampler.clone().into();
+        let mut sampler: opentelemetry_sdk::trace::Sampler = config.sampler.clone().into();
         if config.parent_based_sampler {
             sampler = parent_based(sampler);
         }
@@ -694,13 +683,13 @@ impl From<&TracingCommon> for opentelemetry::sdk::trace::Config {
     }
 }
 
-fn parent_based(sampler: opentelemetry::sdk::trace::Sampler) -> opentelemetry::sdk::trace::Sampler {
-    opentelemetry::sdk::trace::Sampler::ParentBased(Box::new(sampler))
+fn parent_based(sampler: opentelemetry_sdk::trace::Sampler) -> opentelemetry_sdk::trace::Sampler {
+    opentelemetry_sdk::trace::Sampler::ParentBased(Box::new(sampler))
 }
 
 impl Conf {
     pub(crate) fn calculate_field_level_instrumentation_ratio(&self) -> Result<f64, Error> {
-        // Because when datadog is enabled the global sampling is overriden to always_on
+        // Because when Datadog is enabled the global sampling is overridden to always_on
         if self
             .exporters
             .tracing
@@ -792,6 +781,18 @@ impl Conf {
                 }
             }
             _ => ApolloSignatureNormalizationAlgorithm::default(),
+        }
+    }
+
+    pub(crate) fn apollo(configuration: &Configuration) -> ApolloTelemetryConfig {
+        match configuration.apollo_plugins.plugins.get("telemetry") {
+            Some(telemetry_config) => {
+                match serde_json::from_value::<Conf>(telemetry_config.clone()) {
+                    Ok(conf) => conf.apollo,
+                    _ => ApolloTelemetryConfig::default(),
+                }
+            }
+            _ => ApolloTelemetryConfig::default(),
         }
     }
 }

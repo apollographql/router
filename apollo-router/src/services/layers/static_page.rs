@@ -1,35 +1,35 @@
-//!  (A)utomatic (P)ersisted (Q)ueries cache.
-//!
-//!  For more information on APQ see:
-//!  <https://www.apollographql.com/docs/apollo-server/performance/apq/>
+//! Provides the home page and sandbox page implementations.
 
 use std::ops::ControlFlow;
 
 use bytes::Bytes;
-use http::header::CONTENT_TYPE;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::Method;
-use mediatype::names::HTML;
-use mediatype::names::TEXT;
+use http::header::CONTENT_TYPE;
 use mediatype::MediaType;
 use mediatype::MediaTypeList;
+use mediatype::names::HTML;
+use mediatype::names::TEXT;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
 
+use crate::Configuration;
 use crate::configuration::Homepage;
 use crate::layers::sync_checkpoint::CheckpointService;
 use crate::services::router;
-use crate::Configuration;
 
-/// [`Layer`] That serves Static pages such as Homepage and Sandbox.
+/// A layer that serves a static page for all requests that accept a `text/html` response
+/// (typically a user navigating to a page in the browser).
 #[derive(Clone)]
 pub(crate) struct StaticPageLayer {
     static_page: Option<Bytes>,
 }
 
 impl StaticPageLayer {
+    /// Create a static page based on configuration: either an Apollo Sandbox, or a simple home
+    /// page.
     pub(crate) fn new(configuration: &Configuration) -> Self {
         let static_page = if configuration.sandbox.enabled {
             Some(Bytes::from(sandbox_page_content()))
@@ -57,19 +57,25 @@ where
             CheckpointService::new(
                 move |req| {
                     let res = if req.router_request.method() == Method::GET
-                        && prefers_html(req.router_request.headers())
+                        && accepts_html(req.router_request.headers())
                     {
-                        let response = http::Response::builder()
-                            .header(
-                                CONTENT_TYPE,
-                                HeaderValue::from_static(mime::TEXT_HTML_UTF_8.as_ref()),
-                            )
-                            .body(crate::services::router::Body::from(page.clone()))
-                            .unwrap();
-                        ControlFlow::Break(router::Response {
-                            response,
-                            context: req.context,
-                        })
+                        ControlFlow::Break(
+                            router::Response::http_response_builder()
+                                .response(
+                                    http::Response::builder()
+                                        .header(
+                                            CONTENT_TYPE,
+                                            HeaderValue::from_static(
+                                                mime::TEXT_HTML_UTF_8.as_ref(),
+                                            ),
+                                        )
+                                        .body(router::body::from_bytes(page.clone()))
+                                        .unwrap(),
+                                )
+                                .context(req.context)
+                                .build()
+                                .unwrap(),
+                        )
                     } else {
                         ControlFlow::Continue(req)
                     };
@@ -84,7 +90,11 @@ where
     }
 }
 
-fn prefers_html(headers: &HeaderMap) -> bool {
+/// Returns true if the given header map contains an `Accept` header which contains the "text/html"
+/// MIME type.
+///
+/// `Accept` priorities or preferences are not considered.
+fn accepts_html(headers: &HeaderMap) -> bool {
     let text_html = MediaType::new(TEXT, HTML);
 
     headers.get_all(&http::header::ACCEPT).iter().any(|value| {

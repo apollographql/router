@@ -1,0 +1,15 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/keys_and_entities/invalid/entity_arg_field_arg_name_mismatch.graphql
+---
+[
+    Message {
+        code: EntityResolverArgumentMismatch,
+        message: "`Query.product` has invalid arguments. Argument `id` does not have a matching field `id` on type `Product`.",
+        locations: [
+            6:11..6:18,
+            10:7..10:19,
+        ],
+    },
+]

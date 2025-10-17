@@ -1,0 +1,13 @@
+---
+source: apollo-router/src/plugins/include_subgraph_errors/tests.rs
+description: "CONFIG:\n---\nall:\n  redact_message: false\n  deny_extensions_keys:\n    - test\n    - service\nsubgraphs:\n  products:\n    allow_extensions_keys:\n      - code\n      - test\n\n\nREQUEST:\n{\n  \"data\": {\n    \"topProducts\": null\n  },\n  \"errors\": [\n    {\n      \"message\": \"Could not query products\",\n      \"path\": [],\n      \"extensions\": {\n        \"test\": \"value\",\n        \"code\": \"FETCH_ERROR\",\n        \"apollo.subgraph.name\": \"products\"\n      }\n    }\n  ]\n}"
+expression: actual_responses
+---
+- data:
+    topProducts: ~
+  errors:
+    - message: Could not query products
+      path: []
+      extensions:
+        code: FETCH_ERROR
+        test: value

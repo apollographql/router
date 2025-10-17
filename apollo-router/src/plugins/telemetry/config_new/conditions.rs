@@ -4,12 +4,17 @@ use serde::Deserialize;
 use tower::BoxError;
 
 use super::Stage;
+use crate::Context;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::Selector;
-use crate::Context;
 
+/// Specify a condition for when an [instrument][] should be mutated or an [event][] should be triggered.
+///
+/// [instrument]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/instruments
+/// [event]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/events
 #[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[schemars(rename = "Condition{T}")]
 pub(crate) enum Condition<T> {
     /// A condition to check a selection against a value.
     Eq([SelectorOrValue<T>; 2]),
@@ -45,6 +50,7 @@ impl Condition<()> {
 
 #[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+#[schemars(rename = "{T}OrValue")]
 pub(crate) enum SelectorOrValue<T> {
     /// A constant value.
     Value(AttributeValue),
@@ -56,46 +62,55 @@ impl<T> Condition<T>
 where
     T: Selector,
 {
-    /// restricted_stage is Some if this condiiton will only applies at a specific stage like for events for example
+    /// restricted_stage is Some if this condition will only applies at a specific stage like for events for example
     pub(crate) fn validate(&self, restricted_stage: Option<Stage>) -> Result<(), String> {
         match self {
-            Condition::Eq(arr) | Condition::Gt(arr) | Condition::Lt(arr) => match (&arr[0], &arr[1]) {
-                (SelectorOrValue::Value(val1), SelectorOrValue::Value(val2)) => {
-                    Err(format!("trying to compare 2 values ('{val1}' and '{val2}'), usually it's a syntax error because you want to use a specific selector and a value in a condition"))
-                }
-                (SelectorOrValue::Value(_), SelectorOrValue::Selector(sel)) | (SelectorOrValue::Selector(sel), SelectorOrValue::Value(_)) => {
-                    // Special condition for events
-                    if let Some(Stage::Request) = &restricted_stage {
-                        if !sel.is_active(Stage::Request) {
-                            return Err(format!("selector {sel:?} is only valid for request stage, this log event will never trigger"));
+            Condition::Eq(arr) | Condition::Gt(arr) | Condition::Lt(arr) => {
+                match (&arr[0], &arr[1]) {
+                    (SelectorOrValue::Value(val1), SelectorOrValue::Value(val2)) => Err(format!(
+                        "trying to compare 2 values ('{val1}' and '{val2}'), usually it's a syntax error because you want to use a specific selector and a value in a condition"
+                    )),
+                    (SelectorOrValue::Value(_), SelectorOrValue::Selector(sel))
+                    | (SelectorOrValue::Selector(sel), SelectorOrValue::Value(_)) => {
+                        // Special condition for events
+                        if let Some(Stage::Request) = &restricted_stage
+                            && !sel.is_active(Stage::Request)
+                        {
+                            return Err(format!(
+                                "selector {sel:?} is only valid for request stage, this log event will never trigger"
+                            ));
                         }
+                        Ok(())
                     }
-                    Ok(())
-                },
-                (SelectorOrValue::Selector(sel1), SelectorOrValue::Selector(sel2)) => {
-                    // Special condition for events
-                    if let Some(Stage::Request) = &restricted_stage {
-                        if !sel1.is_active(Stage::Request) {
-                            return Err(format!("selector {sel1:?} is only valid for request stage, this log event will never trigger"));
+                    (SelectorOrValue::Selector(sel1), SelectorOrValue::Selector(sel2)) => {
+                        // Special condition for events
+                        if let Some(Stage::Request) = &restricted_stage {
+                            if !sel1.is_active(Stage::Request) {
+                                return Err(format!(
+                                    "selector {sel1:?} is only valid for request stage, this log event will never trigger"
+                                ));
+                            }
+                            if !sel2.is_active(Stage::Request) {
+                                return Err(format!(
+                                    "selector {sel2:?} is only valid for request stage, this log event will never trigger"
+                                ));
+                            }
                         }
-                        if !sel2.is_active(Stage::Request) {
-                            return Err(format!("selector {sel2:?} is only valid for request stage, this log event will never trigger"));
-                        }
+                        Ok(())
                     }
-                    Ok(())
-                },
-            },
-            Condition::Exists(sel) => {
-                match restricted_stage {
-                    Some(stage) => {
-                        if sel.is_active(stage) {
-                            Ok(())
-                        } else {
-                            Err(format!("the 'exists' condition use a selector applied at the wrong stage, this condition will be executed at the {} stage", stage))
-                        }
-                    },
-                    None => Ok(())
                 }
+            }
+            Condition::Exists(sel) => match restricted_stage {
+                Some(stage) => {
+                    if sel.is_active(stage) {
+                        Ok(())
+                    } else {
+                        Err(format!(
+                            "the 'exists' condition use a selector applied at the wrong stage, this condition will be executed at the {stage} stage"
+                        ))
+                    }
+                }
+                None => Ok(()),
             },
             Condition::All(all) => {
                 for cond in all {
@@ -103,14 +118,14 @@ where
                 }
 
                 Ok(())
-            },
+            }
             Condition::Any(any) => {
                 for cond in any {
                     cond.validate(restricted_stage)?;
                 }
 
                 Ok(())
-            },
+            }
             Condition::Not(cond) => cond.validate(restricted_stage),
             Condition::True | Condition::False => Ok(()),
         }
@@ -295,7 +310,7 @@ where
                 let right_att = gt[1]
                     .on_response_event(response, ctx)
                     .map(AttributeValue::from);
-                left_att.zip(right_att).map_or(false, |(l, r)| l > r)
+                left_att.zip(right_att).is_some_and(|(l, r)| l > r)
             }
             Condition::Lt(gt) => {
                 let left_att = gt[0]
@@ -304,7 +319,7 @@ where
                 let right_att = gt[1]
                     .on_response_event(response, ctx)
                     .map(AttributeValue::from);
-                left_att.zip(right_att).map_or(false, |(l, r)| l < r)
+                left_att.zip(right_att).is_some_and(|(l, r)| l < r)
             }
             Condition::Exists(exist) => exist.on_response_event(response, ctx).is_some(),
             Condition::All(all) => all.iter().all(|c| c.evaluate_event_response(response, ctx)),
@@ -325,12 +340,12 @@ where
             Condition::Gt(gt) => {
                 let left_att = gt[0].on_response(response).map(AttributeValue::from);
                 let right_att = gt[1].on_response(response).map(AttributeValue::from);
-                left_att.zip(right_att).map_or(false, |(l, r)| l > r)
+                left_att.zip(right_att).is_some_and(|(l, r)| l > r)
             }
             Condition::Lt(gt) => {
                 let left_att = gt[0].on_response(response).map(AttributeValue::from);
                 let right_att = gt[1].on_response(response).map(AttributeValue::from);
-                left_att.zip(right_att).map_or(false, |(l, r)| l < r)
+                left_att.zip(right_att).is_some_and(|(l, r)| l < r)
             }
             Condition::Exists(exist) => exist.on_response(response).is_some(),
             Condition::All(all) => all.iter().all(|c| c.evaluate_response(response)),
@@ -351,12 +366,12 @@ where
             Condition::Gt(gt) => {
                 let left_att = gt[0].on_error(error, ctx).map(AttributeValue::from);
                 let right_att = gt[1].on_error(error, ctx).map(AttributeValue::from);
-                left_att.zip(right_att).map_or(false, |(l, r)| l > r)
+                left_att.zip(right_att).is_some_and(|(l, r)| l > r)
             }
             Condition::Lt(gt) => {
                 let left_att = gt[0].on_error(error, ctx).map(AttributeValue::from);
                 let right_att = gt[1].on_error(error, ctx).map(AttributeValue::from);
-                left_att.zip(right_att).map_or(false, |(l, r)| l < r)
+                left_att.zip(right_att).is_some_and(|(l, r)| l < r)
             }
             Condition::Exists(exist) => exist.on_error(error, ctx).is_some(),
             Condition::All(all) => all.iter().all(|c| c.evaluate_error(error, ctx)),
@@ -387,7 +402,7 @@ where
                 let right_att = gt[1]
                     .on_response_field(ty, field, value, ctx)
                     .map(AttributeValue::from);
-                left_att.zip(right_att).map_or(false, |(l, r)| l > r)
+                left_att.zip(right_att).is_some_and(|(l, r)| l > r)
             }
             Condition::Lt(gt) => {
                 let left_att = gt[0]
@@ -396,7 +411,7 @@ where
                 let right_att = gt[1]
                     .on_response_field(ty, field, value, ctx)
                     .map(AttributeValue::from);
-                left_att.zip(right_att).map_or(false, |(l, r)| l < r)
+                left_att.zip(right_att).is_some_and(|(l, r)| l < r)
             }
             Condition::Exists(exist) => exist.on_response_field(ty, field, value, ctx).is_some(),
             Condition::All(all) => all
@@ -569,20 +584,20 @@ where
 
 #[cfg(test)]
 mod test {
-    use opentelemetry::Value;
-    use serde_json_bytes::json;
-    use tower::BoxError;
     use TestSelector::Req;
     use TestSelector::Resp;
     use TestSelector::Static;
+    use opentelemetry::Value;
+    use serde_json_bytes::json;
+    use tower::BoxError;
 
+    use crate::Context;
+    use crate::plugins::telemetry::config_new::Selector;
+    use crate::plugins::telemetry::config_new::Stage;
     use crate::plugins::telemetry::config_new::conditions::Condition;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::plugins::telemetry::config_new::test::field;
     use crate::plugins::telemetry::config_new::test::ty;
-    use crate::plugins::telemetry::config_new::Selector;
-    use crate::plugins::telemetry::config_new::Stage;
-    use crate::Context;
 
     #[derive(Debug)]
     enum TestSelector {

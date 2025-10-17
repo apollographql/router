@@ -1,6 +1,6 @@
+use apollo_compiler::Schema;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::ast::Type;
-use apollo_compiler::Schema;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
@@ -11,7 +11,7 @@ fn is_composite_type(ty: &NamedType, schema: &Schema) -> Result<bool, Federation
             .types
             .get(ty)
             .ok_or_else(|| SingleFederationError::Internal {
-                message: format!("Cannot find type `'{}\'", ty),
+                message: format!("Cannot find type `'{ty}\'"),
             })?,
         apollo_compiler::schema::ExtendedType::Object(_)
             | apollo_compiler::schema::ExtendedType::Interface(_)
@@ -36,7 +36,7 @@ pub(crate) fn types_can_be_merged(
         }
         (Type::List(inner1), Type::List(inner2))
         | (Type::NonNullList(inner1), Type::NonNullList(inner2)) => {
-            return types_can_be_merged(inner1, inner2, schema)
+            return types_can_be_merged(inner1, inner2, schema);
         }
         _ => return Ok(false),
     };

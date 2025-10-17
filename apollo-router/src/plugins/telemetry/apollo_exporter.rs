@@ -4,20 +4,20 @@ use std::io::Write;
 use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
 
 use bytes::BytesMut;
-use flate2::write::GzEncoder;
 use flate2::Compression;
+use flate2::write::GzEncoder;
+use http::StatusCode;
 use http::header::ACCEPT;
 use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
 use http::header::RETRY_AFTER;
 use http::header::USER_AGENT;
-use http::StatusCode;
 use opentelemetry::ExportError;
+use parking_lot::Mutex;
 pub(crate) use prost::*;
 use reqwest::Client;
 use serde::ser::SerializeStruct;
@@ -30,7 +30,7 @@ use url::Url;
 use super::apollo::Report;
 use super::apollo::SingleReport;
 use super::config::ApolloMetricsReferenceMode;
-use crate::plugins::telemetry::tracing::BatchProcessorConfig;
+use crate::plugins::telemetry::apollo::ApolloUsageReportsBatchProcessorConfiguration;
 
 const BACKOFF_INCREMENT: Duration = Duration::from_millis(50);
 const ROUTER_REPORT_TYPE_METRICS: &str = "metrics";
@@ -86,7 +86,7 @@ impl Sender {
 /// Retrying when sending fails.
 /// Sending periodically (in the case of metrics).
 pub(crate) struct ApolloExporter {
-    batch_config: BatchProcessorConfig,
+    batch_config: ApolloUsageReportsBatchProcessorConfiguration,
     endpoint: Url,
     apollo_key: String,
     header: proto::reports::ReportHeader,
@@ -99,10 +99,11 @@ pub(crate) struct ApolloExporter {
 impl ApolloExporter {
     pub(crate) fn new(
         endpoint: &Url,
-        batch_config: &BatchProcessorConfig,
+        batch_config: &ApolloUsageReportsBatchProcessorConfiguration,
         apollo_key: &str,
         apollo_graph_ref: &str,
         schema_id: &str,
+        agent_id: String,
         metrics_reference_mode: ApolloMetricsReferenceMode,
     ) -> Result<ApolloExporter, BoxError> {
         let header = proto::reports::ReportHeader {
@@ -116,6 +117,7 @@ impl ApolloExporter {
             runtime_version: "rust".to_string(),
             uname: get_uname()?,
             executable_schema_id: schema_id.to_string(),
+            agent_id,
             ..Default::default()
         };
 
@@ -193,7 +195,7 @@ impl ApolloExporter {
         }
 
         // If studio has previously told us not to submit reports, return for further processing
-        let expires_at = *self.studio_backoff.lock().unwrap();
+        let expires_at = *self.studio_backoff.lock();
         let now = Instant::now();
         if expires_at > now {
             let remaining = expires_at - now;
@@ -261,8 +263,11 @@ impl ApolloExporter {
         let retries = if has_traces { 5 } else { 1 };
 
         for i in 0..retries {
-            // We know these requests can be cloned
-            let task_req = req.try_clone().expect("requests must be clone-able");
+            let task_req = req.try_clone().ok_or_else(|| {
+                ApolloExportError::ServerError(
+                    "Tried to clone a request that cannot be cloned".to_string(),
+                )
+            })?;
             match self.client.execute(task_req).await {
                 Ok(v) => {
                     let status = v.status();
@@ -292,7 +297,7 @@ impl ApolloExporter {
                                 opt_header_retry.and_then(|v| v.to_str().ok()?.parse::<u64>().ok())
                             {
                                 retry_after = returned_retry_after;
-                                *self.studio_backoff.lock().unwrap() =
+                                *self.studio_backoff.lock() =
                                     Instant::now() + Duration::from_secs(retry_after);
                             }
                             // Even if we can't update the studio_backoff, we should not continue to
@@ -316,11 +321,13 @@ impl ApolloExporter {
                         );
                         if has_traces && !self.strip_traces.load(Ordering::SeqCst) {
                             // If we had traces then maybe disable sending traces from this exporter based on the response.
-                            if let Ok(response) = serde_json::Value::from_str(&data) {
-                                if let Some(Value::Bool(true)) = response.get("tracesIgnored") {
-                                    tracing::warn!("traces will not be sent to Apollo as this account is on a free plan");
-                                    self.strip_traces.store(true, Ordering::SeqCst);
-                                }
+                            if let Ok(response) = serde_json::Value::from_str(&data)
+                                && let Some(Value::Bool(true)) = response.get("tracesIgnored")
+                            {
+                                tracing::warn!(
+                                    "traces will not be sent to Apollo as this account is on a free plan"
+                                );
+                                self.strip_traces.store(true, Ordering::SeqCst);
                             }
                         }
                         return Ok(());

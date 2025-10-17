@@ -1,21 +1,27 @@
 ---
 source: apollo-router/src/services/layers/persisted_queries/mod.rs
 expression: yaml
-snapshot_kind: text
 ---
+- fields: {}
+  level: INFO
+  message: Loaded 2 persisted queries.
 - fields:
+    enforcement_skipped: false
     operation_body: "query SomeQuery { me { id } }"
   level: WARN
   message: unknown operation
 - fields:
+    enforcement_skipped: true
     operation_body: "query SomeQuery { me { id } }"
   level: WARN
   message: unknown operation
 - fields:
+    enforcement_skipped: false
     operation_body: "fragment A on Query { me { id } }    query SomeOp { ...A ...B }    fragment,,, B on Query{me{username,name}  } # yeah"
   level: WARN
   message: unknown operation
 - fields:
+    enforcement_skipped: false
     operation_body: "fragment F on Query { __typename foo: __schema { __typename } me { id } } query Q { __type(name: \"foo\") { name } ...F }"
   level: WARN
   message: unknown operation

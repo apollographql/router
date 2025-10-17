@@ -137,8 +137,6 @@
 mod exporter;
 
 #[allow(unused_imports)]
-pub use exporter::new_pipeline;
-#[allow(unused_imports)]
 pub use exporter::ApiVersion;
 #[allow(unused_imports)]
 pub use exporter::DatadogExporter;
@@ -151,6 +149,8 @@ pub use exporter::FieldMappingFn;
 #[allow(unused_imports)]
 pub use exporter::ModelConfig;
 #[allow(unused_imports)]
+pub use exporter::new_pipeline;
+#[allow(unused_imports)]
 pub use propagator::DatadogPropagator;
 #[allow(unused_imports)]
 pub use propagator::DatadogTraceState;
@@ -161,17 +161,17 @@ pub(crate) mod propagator {
     use std::fmt::Display;
 
     use once_cell::sync::Lazy;
-    use opentelemetry::propagation::text_map_propagator::FieldIter;
+    use opentelemetry::Context;
     use opentelemetry::propagation::Extractor;
     use opentelemetry::propagation::Injector;
     use opentelemetry::propagation::TextMapPropagator;
+    use opentelemetry::propagation::text_map_propagator::FieldIter;
     use opentelemetry::trace::SpanContext;
     use opentelemetry::trace::SpanId;
     use opentelemetry::trace::TraceContextExt;
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
-    use opentelemetry::Context;
 
     const DATADOG_TRACE_ID_HEADER: &str = "x-datadog-trace-id";
     const DATADOG_PARENT_ID_HEADER: &str = "x-datadog-parent-id";
@@ -309,7 +309,7 @@ pub(crate) mod propagator {
                 SamplingPriority::AutoKeep => 1,
                 SamplingPriority::UserKeep => 2,
             };
-            write!(f, "{}", value)
+            write!(f, "{value}")
         }
     }
 

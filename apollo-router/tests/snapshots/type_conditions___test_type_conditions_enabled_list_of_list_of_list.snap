@@ -138,14 +138,14 @@ expression: response
               "kind": "Fetch",
               "serviceName": "searchSubgraph",
               "variableUsages": [],
-              "operation": "query Search__searchSubgraph__0 { searchListOfListOfList { __typename ..._generated_onMovieResult2_0 ..._generated_onArticleResult2_0 } } fragment _generated_onEntityCollectionSection2_0 on EntityCollectionSection { __typename id } fragment _generated_onGallerySection2_0 on GallerySection { __typename id } fragment _generated_onMovieResult2_0 on MovieResult { sections { __typename ..._generated_onEntityCollectionSection2_0 ..._generated_onGallerySection2_0 } id } fragment _generated_onArticleResult2_0 on ArticleResult { id sections { __typename ..._generated_onGallerySection2_0 ..._generated_onEntityCollectionSection2_0 } }",
+              "operation": "query Search__searchSubgraph__0 { searchListOfListOfList { __typename ... on MovieResult { sections { ...c } id } ... on ArticleResult { id sections { ...c } } } } fragment a on EntityCollectionSection { __typename id } fragment b on GallerySection { __typename id } fragment c on Section { __typename ...a ...b }",
               "operationName": "Search__searchSubgraph__0",
               "operationKind": "query",
               "id": null,
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-              "schemaAwareHash": "f2466229a91f69cadfa844a20343b03668b7f85fd1310a4b20ba9382ffa2f5e7",
+              "schemaAwareHash": "c4687169a3a7ef9487c1ad444e6c0f9eb354bc1c1ab105792723d8fc0705100b",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -158,69 +158,6 @@ expression: response
                 {
                   "kind": "Flatten",
                   "path": [
-                    "",
-                    "searchListOfListOfList",
-                    "@",
-                    "@",
-                    "@|[MovieResult]",
-                    "sections",
-                    "@"
-                  ],
-                  "node": {
-                    "kind": "Fetch",
-                    "serviceName": "artworkSubgraph",
-                    "requires": [
-                      {
-                        "kind": "InlineFragment",
-                        "typeCondition": "EntityCollectionSection",
-                        "selections": [
-                          {
-                            "kind": "Field",
-                            "name": "__typename"
-                          },
-                          {
-                            "kind": "Field",
-                            "name": "id"
-                          }
-                        ]
-                      },
-                      {
-                        "kind": "InlineFragment",
-                        "typeCondition": "GallerySection",
-                        "selections": [
-                          {
-                            "kind": "Field",
-                            "name": "__typename"
-                          },
-                          {
-                            "kind": "Field",
-                            "name": "id"
-                          }
-                        ]
-                      }
-                    ],
-                    "variableUsages": [
-                      "movieResultParam"
-                    ],
-                    "operation": "query Search__artworkSubgraph__1($representations: [_Any!]!, $movieResultParam: String) { _entities(representations: $representations) { ..._generated_onEntityCollectionSection2_0 ... on GallerySection { artwork(params: $movieResultParam) } } } fragment _generated_onEntityCollectionSection2_0 on EntityCollectionSection { title artwork(params: $movieResultParam) }",
-                    "operationName": "Search__artworkSubgraph__1",
-                    "operationKind": "query",
-                    "id": null,
-                    "inputRewrites": null,
-                    "outputRewrites": null,
-                    "contextRewrites": null,
-                    "schemaAwareHash": "7f3ec4c2c644d43e54d95da83790166d87ab6bfcb31fe5692d8262199bff6d3f",
-                    "authorization": {
-                      "is_authenticated": false,
-                      "scopes": [],
-                      "policies": []
-                    }
-                  }
-                },
-                {
-                  "kind": "Flatten",
-                  "path": [
-                    "",
                     "searchListOfListOfList",
                     "@",
                     "@",
@@ -264,14 +201,75 @@ expression: response
                     "variableUsages": [
                       "articleResultParam"
                     ],
-                    "operation": "query Search__artworkSubgraph__2($representations: [_Any!]!, $articleResultParam: String) { _entities(representations: $representations) { ... on GallerySection { artwork(params: $articleResultParam) } ..._generated_onEntityCollectionSection2_0 } } fragment _generated_onEntityCollectionSection2_0 on EntityCollectionSection { artwork(params: $articleResultParam) title }",
+                    "operation": "query Search__artworkSubgraph__1($representations: [_Any!]!, $articleResultParam: String) { _entities(representations: $representations) { ... on GallerySection { artwork(params: $articleResultParam) } ... on EntityCollectionSection { artwork(params: $articleResultParam) title } } }",
+                    "operationName": "Search__artworkSubgraph__1",
+                    "operationKind": "query",
+                    "id": null,
+                    "inputRewrites": null,
+                    "outputRewrites": null,
+                    "contextRewrites": null,
+                    "schemaAwareHash": "75bfbb6e482fd72ae0f8a154c8333a8a899928d5845dc27d622a124b9904fe89",
+                    "authorization": {
+                      "is_authenticated": false,
+                      "scopes": [],
+                      "policies": []
+                    }
+                  }
+                },
+                {
+                  "kind": "Flatten",
+                  "path": [
+                    "searchListOfListOfList",
+                    "@",
+                    "@",
+                    "@|[MovieResult]",
+                    "sections",
+                    "@"
+                  ],
+                  "node": {
+                    "kind": "Fetch",
+                    "serviceName": "artworkSubgraph",
+                    "requires": [
+                      {
+                        "kind": "InlineFragment",
+                        "typeCondition": "EntityCollectionSection",
+                        "selections": [
+                          {
+                            "kind": "Field",
+                            "name": "__typename"
+                          },
+                          {
+                            "kind": "Field",
+                            "name": "id"
+                          }
+                        ]
+                      },
+                      {
+                        "kind": "InlineFragment",
+                        "typeCondition": "GallerySection",
+                        "selections": [
+                          {
+                            "kind": "Field",
+                            "name": "__typename"
+                          },
+                          {
+                            "kind": "Field",
+                            "name": "id"
+                          }
+                        ]
+                      }
+                    ],
+                    "variableUsages": [
+                      "movieResultParam"
+                    ],
+                    "operation": "query Search__artworkSubgraph__2($representations: [_Any!]!, $movieResultParam: String) { _entities(representations: $representations) { ... on EntityCollectionSection { title artwork(params: $movieResultParam) } ... on GallerySection { artwork(params: $movieResultParam) } } }",
                     "operationName": "Search__artworkSubgraph__2",
                     "operationKind": "query",
                     "id": null,
                     "inputRewrites": null,
                     "outputRewrites": null,
                     "contextRewrites": null,
-                    "schemaAwareHash": "3874fd9db4a0302422701b93506f42a5de5604355be7093fa2abe23f440161f9",
+                    "schemaAwareHash": "d49281e1c4281485ae2f9ee8f82c313d79da4d8d54bc8a8a1ddd1a67c61a5f7b",
                     "authorization": {
                       "is_authenticated": false,
                       "scopes": [],
@@ -284,7 +282,7 @@ expression: response
           ]
         }
       },
-      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"searchSubgraph\") {\n      {\n        searchListOfListOfList {\n          __typename\n          ..._generated_onMovieResult2_0\n          ..._generated_onArticleResult2_0\n        }\n      }\n      \n      fragment _generated_onEntityCollectionSection2_0 on EntityCollectionSection {\n        __typename\n        id\n      }\n      \n      fragment _generated_onGallerySection2_0 on GallerySection {\n        __typename\n        id\n      }\n      \n      fragment _generated_onMovieResult2_0 on MovieResult {\n        sections {\n          __typename\n          ..._generated_onEntityCollectionSection2_0\n          ..._generated_onGallerySection2_0\n        }\n        id\n      }\n      \n      fragment _generated_onArticleResult2_0 on ArticleResult {\n        id\n        sections {\n          __typename\n          ..._generated_onGallerySection2_0\n          ..._generated_onEntityCollectionSection2_0\n        }\n      }\n    },\n    Parallel {\n      Flatten(path: \".searchListOfListOfList.@.@.@|[MovieResult].sections.@\") {\n        Fetch(service: \"artworkSubgraph\") {\n          {\n            ... on EntityCollectionSection {\n              __typename\n              id\n            }\n            ... on GallerySection {\n              __typename\n              id\n            }\n          } =>\n          {\n            ..._generated_onEntityCollectionSection2_0\n            ... on GallerySection {\n              artwork(params: $movieResultParam)\n            }\n          }\n          \n          fragment _generated_onEntityCollectionSection2_0 on EntityCollectionSection {\n            title\n            artwork(params: $movieResultParam)\n          }\n        },\n      },\n      Flatten(path: \".searchListOfListOfList.@.@.@|[ArticleResult].sections.@\") {\n        Fetch(service: \"artworkSubgraph\") {\n          {\n            ... on GallerySection {\n              __typename\n              id\n            }\n            ... on EntityCollectionSection {\n              __typename\n              id\n            }\n          } =>\n          {\n            ... on GallerySection {\n              artwork(params: $articleResultParam)\n            }\n            ..._generated_onEntityCollectionSection2_0\n          }\n          \n          fragment _generated_onEntityCollectionSection2_0 on EntityCollectionSection {\n            artwork(params: $articleResultParam)\n            title\n          }\n        },\n      },\n    },\n  },\n}"
+      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"searchSubgraph\") {\n      {\n        searchListOfListOfList {\n          __typename\n          ... on MovieResult {\n            sections {\n              ...c\n            }\n            id\n          }\n          ... on ArticleResult {\n            id\n            sections {\n              ...c\n            }\n          }\n        }\n      }\n\n      fragment a on EntityCollectionSection {\n        __typename\n        id\n      }\n\n      fragment b on GallerySection {\n        __typename\n        id\n      }\n\n      fragment c on Section {\n        __typename\n        ...a\n        ...b\n      }\n    },\n    Parallel {\n      Flatten(path: \"searchListOfListOfList.@.@.@|[ArticleResult].sections.@\") {\n        Fetch(service: \"artworkSubgraph\") {\n          {\n            ... on GallerySection {\n              __typename\n              id\n            }\n            ... on EntityCollectionSection {\n              __typename\n              id\n            }\n          } =>\n          {\n            ... on GallerySection {\n              artwork(params: $articleResultParam)\n            }\n            ... on EntityCollectionSection {\n              artwork(params: $articleResultParam)\n              title\n            }\n          }\n        },\n      },\n      Flatten(path: \"searchListOfListOfList.@.@.@|[MovieResult].sections.@\") {\n        Fetch(service: \"artworkSubgraph\") {\n          {\n            ... on EntityCollectionSection {\n              __typename\n              id\n            }\n            ... on GallerySection {\n              __typename\n              id\n            }\n          } =>\n          {\n            ... on EntityCollectionSection {\n              title\n              artwork(params: $movieResultParam)\n            }\n            ... on GallerySection {\n              artwork(params: $movieResultParam)\n            }\n          }\n        },\n      },\n    },\n  },\n}"
     }
   }
 }

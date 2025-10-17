@@ -2,9 +2,6 @@
   "title": "Self-Hosted Router",
   "algoliaFilters": ["docset:router"],
   "sidebar": {
-    "Routing": {
-      "About Router": "/routing/about-router"
-    },
     "Reference": {
       "Migration": {
         "From Gateway": "/reference/migration/from-gateway"

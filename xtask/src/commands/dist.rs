@@ -25,10 +25,7 @@ impl Dist {
                 args.push(target);
                 cargo!(args);
 
-                let bin_path = TARGET_DIR
-                    .join(target.to_string())
-                    .join("release")
-                    .join(RELEASE_BIN);
+                let bin_path = TARGET_DIR.join(target).join("release").join(RELEASE_BIN);
 
                 eprintln!("successfully compiled to: {}", &bin_path);
             }

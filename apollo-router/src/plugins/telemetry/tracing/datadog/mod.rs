@@ -12,16 +12,16 @@ use ahash::HashMap;
 use ahash::HashMapExt;
 use futures::future::BoxFuture;
 use http::Uri;
-use opentelemetry::sdk;
-use opentelemetry::sdk::trace::Builder;
+use opentelemetry::Key;
+use opentelemetry::KeyValue;
 use opentelemetry::Value;
-use opentelemetry_api::trace::SpanContext;
-use opentelemetry_api::trace::SpanKind;
-use opentelemetry_api::Key;
-use opentelemetry_api::KeyValue;
+use opentelemetry::trace::SpanContext;
+use opentelemetry::trace::SpanKind;
+use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::export::trace::ExportResult;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::export::trace::SpanExporter;
+use opentelemetry_sdk::trace::Builder;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 use schemars::JsonSchema;
@@ -42,11 +42,12 @@ use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
-use crate::plugins::telemetry::tracing::datadog_exporter;
-use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
+use crate::plugins::telemetry::otel::named_runtime_channel::NamedTokioRuntime;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
+use crate::plugins::telemetry::tracing::datadog_exporter;
+use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
 
 fn default_resource_mappings() -> HashMap<String, String> {
     let mut map = HashMap::with_capacity(7);
@@ -67,6 +68,7 @@ const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:8126";
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields)]
+#[schemars(rename = "DatadogConfig")]
 pub(crate) struct Config {
     /// Enable datadog
     enabled: bool,
@@ -98,7 +100,7 @@ pub(crate) struct Config {
     resource_mapping: HashMap<String, String>,
 
     /// Which spans will be eligible for span stats to be collected for viewing in the APM view.
-    /// Defaults to true for `request`, `router`, `query_parsing`, `supergraph`, `execution`, `query_planning`, `subgraph`, `subgraph_request` and `http_request`.
+    /// Defaults to true for `request`, `router`, `query_parsing`, `supergraph`, `execution`, `query_planning`, `subgraph`, `subgraph_request`, `connect`, `connect_request` and `http_request`.
     #[serde(default = "default_span_metrics")]
     span_metrics: HashMap<String, bool>,
 }
@@ -127,7 +129,7 @@ impl TracingConfigurator for Config {
         _spans_config: &Spans,
     ) -> Result<Builder, BoxError> {
         tracing::info!("Configuring Datadog tracing: {}", self.batch_processor);
-        let common: sdk::trace::Config = trace.into();
+        let common: opentelemetry_sdk::trace::Config = trace.into();
 
         // Precompute representation otel Keys for the mappings so that we don't do heap allocation for each span
         let resource_mappings = self.enable_span_mapping.then(|| {
@@ -140,50 +142,54 @@ impl TracingConfigurator for Config {
         });
 
         let fixed_span_names = self.fixed_span_names;
+        let endpoint = &self
+            .endpoint
+            .to_full_uri(&Uri::from_static(DEFAULT_ENDPOINT));
 
         let exporter = datadog_exporter::new_pipeline()
-            .with(
-                &self.endpoint.to_uri(&Uri::from_static(DEFAULT_ENDPOINT)),
-                |builder, e| builder.with_agent_endpoint(e.to_string().trim_end_matches('/')),
-            )
+            .with_agent_endpoint(endpoint.to_string().trim_end_matches('/'))
             .with(&resource_mappings, |builder, resource_mappings| {
                 let resource_mappings = resource_mappings.clone();
                 builder.with_resource_mapping(move |span, _model_config| {
                     let span_name = if let Some(original) = span
                         .attributes
-                        .get(&Key::from_static_str(OTEL_ORIGINAL_NAME))
+                        .iter()
+                        .find(|kv| kv.key.as_str() == OTEL_ORIGINAL_NAME)
                     {
-                        original.as_str()
+                        original.value.as_str()
                     } else {
                         span.name.clone()
                     };
-                    if let Some(mapping) = resource_mappings.get(span_name.as_ref()) {
-                        if let Some(Value::String(value)) = span.attributes.get(mapping) {
-                            return value.as_str();
-                        }
+                    if let Some(mapping) = resource_mappings.get(span_name.as_ref())
+                        && let Some(KeyValue {
+                            key: _,
+                            value: Value::String(v),
+                        }) = span.attributes.iter().find(|kv| kv.key == *mapping)
+                    {
+                        return v.as_str();
                     }
-                    return span.name.as_ref();
+                    span.name.as_ref()
                 })
             })
             .with_name_mapping(move |span, _model_config| {
-                if fixed_span_names {
-                    if let Some(original) = span
+                if fixed_span_names
+                    && let Some(original) = span
                         .attributes
-                        .get(&Key::from_static_str(OTEL_ORIGINAL_NAME))
-                    {
-                        // Datadog expects static span names, not the ones in the otel spec.
-                        // Remap the span name to the original name if it was remapped.
-                        for name in BUILT_IN_SPAN_NAMES {
-                            if name == original.as_str() {
-                                return name;
-                            }
+                        .iter()
+                        .find(|kv| kv.key.as_str() == OTEL_ORIGINAL_NAME)
+                {
+                    // Datadog expects static span names, not the ones in the otel spec.
+                    // Remap the span name to the original name if it was remapped.
+                    for name in BUILT_IN_SPAN_NAMES {
+                        if name == original.value.as_str() {
+                            return name;
                         }
                     }
                 }
                 &span.name
             })
             .with(
-                &common.resource.get(SERVICE_NAME),
+                &common.resource.get(SERVICE_NAME.into()),
                 |builder, service_name| {
                     // Datadog exporter incorrectly ignores the service name in the resource
                     // Set it explicitly here
@@ -196,7 +202,7 @@ impl TracingConfigurator for Config {
             .with_version(
                 common
                     .resource
-                    .get(SERVICE_VERSION)
+                    .get(SERVICE_VERSION.into())
                     .expect("cargo version is set as a resource default;qed")
                     .to_string(),
             )
@@ -214,12 +220,12 @@ impl TracingConfigurator for Config {
         let mut span_metrics = default_span_metrics();
         span_metrics.extend(self.span_metrics.clone());
 
-        let batch_processor = opentelemetry::sdk::trace::BatchSpanProcessor::builder(
+        let batch_processor = opentelemetry_sdk::trace::BatchSpanProcessor::builder(
             ExporterWrapper {
                 delegate: exporter,
                 span_metrics,
             },
-            opentelemetry::runtime::Tokio,
+            NamedTokioRuntime::new("datadog-tracing"),
         )
         .with_batch_config(self.batch_processor.clone().into())
         .build()
@@ -255,8 +261,9 @@ impl SpanExporter for ExporterWrapper {
             // We do all this dancing to avoid allocating.
             let original_span_name = span
                 .attributes
-                .get(&Key::from_static_str(OTEL_ORIGINAL_NAME))
-                .map(|v| v.as_str());
+                .iter()
+                .find(|kv| kv.key.as_str() == OTEL_ORIGINAL_NAME)
+                .map(|kv| kv.value.as_str());
             let final_span_name = if let Some(span_name) = &original_span_name {
                 span_name.as_ref()
             } else {
@@ -264,17 +271,17 @@ impl SpanExporter for ExporterWrapper {
             };
 
             // Unfortunately trace state is immutable, so we have to create a new one
-            if let Some(setting) = self.span_metrics.get(final_span_name) {
-                if *setting != span.span_context.trace_state().measuring_enabled() {
-                    let new_trace_state = span.span_context.trace_state().with_measuring(*setting);
-                    span.span_context = SpanContext::new(
-                        span.span_context.trace_id(),
-                        span.span_context.span_id(),
-                        span.span_context.trace_flags(),
-                        span.span_context.is_remote(),
-                        new_trace_state,
-                    )
-                }
+            if let Some(setting) = self.span_metrics.get(final_span_name)
+                && *setting != span.span_context.trace_state().measuring_enabled()
+            {
+                let new_trace_state = span.span_context.trace_state().with_measuring(*setting);
+                span.span_context = SpanContext::new(
+                    span.span_context.trace_id(),
+                    span.span_context.span_id(),
+                    span.span_context.trace_flags(),
+                    span.span_context.is_remote(),
+                    new_trace_state,
+                )
             }
 
             // Set the span kind https://github.com/DataDog/dd-trace-go/blob/main/ddtrace/ext/span_kind.go
@@ -285,8 +292,7 @@ impl SpanExporter for ExporterWrapper {
                 SpanKind::Consumer => "consumer",
                 SpanKind::Internal => "internal",
             };
-            span.attributes
-                .insert(KeyValue::new("span.kind", span_kind));
+            span.attributes.push(KeyValue::new("span.kind", span_kind));
 
             // Note we do NOT set span.type as it isn't a good fit for otel.
         }
@@ -297,5 +303,8 @@ impl SpanExporter for ExporterWrapper {
     }
     fn force_flush(&mut self) -> BoxFuture<'static, ExportResult> {
         self.delegate.force_flush()
+    }
+    fn set_resource(&mut self, resource: &Resource) {
+        self.delegate.set_resource(resource);
     }
 }

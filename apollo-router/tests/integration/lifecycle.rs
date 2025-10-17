@@ -1,16 +1,18 @@
 use std::path::Path;
 use std::time::Duration;
 
+use apollo_router::Context;
+use apollo_router::TestHarness;
 use apollo_router::graphql;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
 use apollo_router::services::router;
 use apollo_router::services::supergraph;
-use apollo_router::Context;
-use apollo_router::TestHarness;
 use async_trait::async_trait;
+use axum::handler::HandlerWithoutStateExt;
 use futures::FutureExt;
+use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
@@ -22,6 +24,7 @@ use tower::ServiceExt;
 use wiremock::ResponseTemplate;
 
 use crate::integration::IntegrationTest;
+use crate::integration::common::graph_os_enabled;
 
 const HAPPY_CONFIG: &str = include_str!("fixtures/happy.router.yaml");
 const BROKEN_PLUGIN_CONFIG: &str = include_str!("fixtures/broken_plugin.router.yaml");
@@ -136,18 +139,35 @@ async fn test_graceful_shutdown() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_force_reload() -> Result<(), BoxError> {
+async fn test_force_config_reload_via_chaos() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .config(
             "experimental_chaos:
-                force_reload: 1s",
+                force_config_reload: 1s",
         )
         .build()
         .await;
     router.start().await;
     router.assert_started().await;
     tokio::time::sleep(Duration::from_secs(2)).await;
-    router.assert_no_reload_necessary().await;
+    router.assert_reloaded().await;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_force_schema_reload_via_chaos() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .config(
+            "experimental_chaos:
+                force_schema_reload: 1s",
+        )
+        .build()
+        .await;
+    router.start().await;
+    router.assert_started().await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    router.assert_reloaded().await;
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -231,12 +251,10 @@ async fn test_experimental_notice() {
         .config(
             "
             telemetry:
-                logging:
-                    experimental_when_header:
-                    - name: apollo-router-log-request
-                      value: test
-                      headers: true
-                      body: true
+              exporters:
+                tracing:
+                  experimental_response_trace_id:
+                    enabled: true
             ",
         )
         .build()
@@ -244,7 +262,9 @@ async fn test_experimental_notice() {
     router.start().await;
     router.assert_started().await;
     router
-        .assert_log_contains("You're using some \\\"experimental\\\" features of the Apollo Router")
+        .wait_for_log_message(
+            "You're using some \\\"experimental\\\" features of the Apollo Router",
+        )
         .await;
     router.graceful_shutdown().await;
 }
@@ -254,11 +274,7 @@ const TEST_PLUGIN_ORDERING_CONTEXT_KEY: &str = "ordering-trace";
 /// <https://github.com/apollographql/router/issues/3207>
 #[tokio::test(flavor = "multi_thread")]
 async fn test_plugin_ordering() {
-    async fn coprocessor(
-        request: http::Request<hyper::Body>,
-    ) -> Result<http::Response<hyper::Body>, BoxError> {
-        let body = hyper::body::to_bytes(request.into_body()).await?;
-        let mut json: serde_json::Value = serde_json::from_slice(&body)?;
+    async fn coprocessor(mut json: axum::Json<serde_json::Value>) -> axum::Json<serde_json::Value> {
         let stage = json["stage"].as_str().unwrap().to_owned();
         json["context"]["entries"]
             .as_object_mut()
@@ -268,26 +284,21 @@ async fn test_plugin_ordering() {
             .as_array_mut()
             .unwrap()
             .push(format!("coprocessor {stage}").into());
-        Ok(http::Response::new(hyper::Body::from(
-            serde_json::to_string(&json)?,
-        )))
+        json
     }
 
     async fn spawn_coprocessor() -> (String, ShutdownOnDrop) {
         let (tx, rx) = tokio::sync::oneshot::channel::<()>();
         let shutdown_on_drop = ShutdownOnDrop(Some(tx));
-        let service = hyper::service::make_service_fn(|_| async {
-            Ok::<_, hyper::Error>(hyper::service::service_fn(coprocessor))
-        });
-        // Bind to "port 0" to let the kernel choose an available port number.
-        let server = hyper::Server::bind(&([127, 0, 0, 1], 0).into()).serve(service);
-        let coprocessor_url = format!("http://{}", server.local_addr());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let coprocessor_url = format!("http://{}", listener.local_addr().unwrap());
+        let server = axum::serve(listener, coprocessor.into_make_service());
         let server = server.with_graceful_shutdown(async {
             let _ = rx.await;
         });
         tokio::spawn(async move {
             if let Err(e) = server.await {
-                eprintln!("coprocessor server error: {}", e);
+                eprintln!("coprocessor server error: {e}");
             }
         });
         (coprocessor_url, shutdown_on_drop)
@@ -309,30 +320,30 @@ async fn test_plugin_ordering() {
         .join("tests")
         .join("fixtures")
         .join("test_plugin_ordering.rhai");
-    let mut service = TestHarness::builder()
-        .configuration_json(json!({
-            "plugins": {
-                "experimental.test_ordering_1": {},
-                "experimental.test_ordering_2": {},
-                "experimental.test_ordering_3": {},
-            },
-            "rhai": {
-                "main": rhai_main,
-            },
-            "coprocessor": {
-                "url": coprocessor_url,
-                "router": {
-                    "request": { "context": true },
-                    "response": { "context": true },
-                }
-            },
-        }))
-        .unwrap()
-        .build_router()
-        .await
-        .unwrap();
     // Repeat to get more confidence it’s deterministic
     for _ in 0..10 {
+        let mut service = TestHarness::builder()
+            .configuration_json(json!({
+                "plugins": {
+                    "experimental.test_ordering_1": {},
+                    "experimental.test_ordering_2": {},
+                    "experimental.test_ordering_3": {},
+                },
+                "rhai": {
+                    "main": rhai_main,
+                },
+                "coprocessor": {
+                    "url": coprocessor_url,
+                    "router": {
+                        "request": { "context": true },
+                        "response": { "context": true },
+                    }
+                },
+            }))
+            .unwrap()
+            .build_router()
+            .await
+            .unwrap();
         let request = supergraph::Request::canned_builder().build().unwrap();
         let mut response = service
             .ready()
@@ -459,4 +470,149 @@ fn test_plugin_ordering_push_trace(context: &Context, entry: String) {
             },
         )
         .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_multi_pipelines() {
+    if !graph_os_enabled() {
+        eprintln!("test skipped");
+        return;
+    }
+    let mut router = IntegrationTest::builder()
+        .config(include_str!("fixtures/prometheus.router.yaml"))
+        .responder(ResponseTemplate::new(500).set_delay(Duration::from_secs(10)))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let query = router.execute_default_query();
+    // Long running request 1
+    let _h1 = tokio::task::spawn(query);
+    router
+        .update_config(include_str!("fixtures/prometheus_updated.router.yaml"))
+        .await;
+
+    router.assert_reloaded().await;
+    // Long running request 2
+    let query = router.execute_default_query();
+    let _h2 = tokio::task::spawn(query);
+    let metrics = router
+        .get_metrics_response()
+        .await
+        .expect("metrics")
+        .text()
+        .await
+        .expect("metrics");
+
+    // There should be two instances of the pipeline metrics
+    let pipelines = Regex::new(r#"(?m)^apollo_router_pipelines[{].+[}] 1"#).expect("regex");
+    assert_eq!(pipelines.captures_iter(&metrics).count(), 2);
+
+    // There should be at least two connections, one active and one terminating.
+    // There may be more than one in each category because reqwest does connection pooling.
+    let terminating =
+        Regex::new(r#"(?m)^apollo_router_open_connections[{].+terminating.+[}]"#).expect("regex");
+    assert_eq!(terminating.captures_iter(&metrics).count(), 1);
+    let active =
+        Regex::new(r#"(?m)^apollo_router_open_connections[{].+active.+[}]"#).expect("regex");
+    assert_eq!(active.captures_iter(&metrics).count(), 1);
+}
+
+/// This test ensures that the router will not leave pipelines hanging around
+/// It has early cancel set to true in the config so that when we look at the pipelines after connection
+/// termination they are removed.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_forced_connection_shutdown() {
+    if !graph_os_enabled() {
+        eprintln!("test skipped");
+        return;
+    }
+    let mut router = IntegrationTest::builder()
+        .config(include_str!(
+            "fixtures/small_connection_shutdown_timeout.router.yaml"
+        ))
+        .responder(ResponseTemplate::new(500).set_delay(Duration::from_secs(10)))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let query = router.execute_default_query();
+    // Long running request 1
+    let _h1 = tokio::task::spawn(query);
+    router
+        .update_config(include_str!(
+            "fixtures/small_connection_shutdown_timeout_updated.router.yaml"
+        ))
+        .await;
+
+    router.assert_reloaded().await;
+    // Long running request 2
+    let query = router.execute_default_query();
+    let _h2 = tokio::task::spawn(query);
+    let metrics = router
+        .get_metrics_response()
+        .await
+        .expect("metrics")
+        .text()
+        .await
+        .expect("metrics");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    // There should be two instances of the pipeline metrics
+    let pipelines = Regex::new(r#"(?m)^apollo_router_pipelines[{].+[}] 1"#).expect("regex");
+    assert_eq!(pipelines.captures_iter(&metrics).count(), 1);
+
+    let terminating =
+        Regex::new(r#"(?m)^apollo_router_open_connections[{].+active.+[}]"#).expect("regex");
+    assert_eq!(terminating.captures_iter(&metrics).count(), 1);
+    router.read_logs();
+    router.assert_log_contained("connection shutdown exceeded, forcing close");
+}
+
+/// Test that plugins receive their previous configuration during hot reload
+/// Uses the telemetry plugin which logs whether it received previous config
+#[tokio::test(flavor = "multi_thread")]
+async fn test_previous_configuration_propagation() -> Result<(), BoxError> {
+    // Initial configuration with telemetry plugin
+    let initial_config = r#"
+telemetry:
+  exporters:
+    metrics:
+      prometheus:
+        enabled: true
+"#;
+
+    // Updated configuration - change prometheus setting to trigger reload
+    let updated_config = r#"
+telemetry:
+  exporters:
+    metrics:
+      prometheus:
+        enabled: false
+"#;
+
+    let mut router = IntegrationTest::builder()
+        .config(initial_config)
+        .log("error,apollo_router=info,apollo_router::plugins::telemetry=debug")
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Verify initial startup log - telemetry plugin should log no previous config
+    router.assert_log_contained("Telemetry plugin initial startup without previous configuration");
+
+    // Update configuration to trigger hot reload
+    router.update_config(updated_config).await;
+    router.assert_reloaded().await;
+
+    // Verify that telemetry plugin received previous configuration during reload
+    router.assert_log_contained("Telemetry plugin reload detected with previous configuration");
+
+    router.graceful_shutdown().await;
+    Ok(())
 }

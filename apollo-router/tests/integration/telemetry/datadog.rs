@@ -4,18 +4,18 @@ use std::collections::HashSet;
 use std::ops::Deref;
 
 use anyhow::anyhow;
-use opentelemetry_api::trace::TraceId;
+use opentelemetry::trace::TraceId;
 use serde_json::Value;
 use tower::BoxError;
 
-use crate::integration::common::graph_os_enabled;
-use crate::integration::common::Query;
-use crate::integration::common::Telemetry;
-use crate::integration::telemetry::verifier::Verifier;
-use crate::integration::telemetry::DatadogId;
-use crate::integration::telemetry::TraceSpec;
 use crate::integration::IntegrationTest;
 use crate::integration::ValueExt;
+use crate::integration::common::Query;
+use crate::integration::common::Telemetry;
+use crate::integration::common::graph_os_enabled;
+use crate::integration::telemetry::DatadogId;
+use crate::integration::telemetry::TraceSpec;
+use crate::integration::telemetry::verifier::Verifier;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_no_sample() -> Result<(), BoxError> {
@@ -422,8 +422,8 @@ async fn test_priority_sampling_parent_sampler_very_small_no_parent() -> Result<
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_priority_sampling_parent_sampler_very_small_no_parent_no_agent_sampling(
-) -> Result<(), BoxError> {
+async fn test_priority_sampling_parent_sampler_very_small_no_parent_no_agent_sampling()
+-> Result<(), BoxError> {
     // Note that there is a very small chance this test will fail. We are trying to test a non-zero sampler.
 
     if !graph_os_enabled() {
@@ -481,8 +481,8 @@ async fn test_priority_sampling_parent_sampler_very_small_no_parent_no_agent_sam
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_priority_sampling_parent_sampler_very_small_parent_no_agent_sampling(
-) -> Result<(), BoxError> {
+async fn test_priority_sampling_parent_sampler_very_small_parent_no_agent_sampling()
+-> Result<(), BoxError> {
     // Note that there is a very small chance this test will fail. We are trying to test a non-zero sampler.
 
     if !graph_os_enabled() {
@@ -963,6 +963,63 @@ async fn test_span_metrics() -> Result<(), BoxError> {
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_resources() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!("fixtures/datadog.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    TraceSpec::builder()
+        .operation_name("ExampleQuery")
+        .resource("env", "local1")
+        .resource("service.version", "router_version_override")
+        .resource("service.name", "router")
+        .services(["client", "router", "subgraph"].into())
+        .build()
+        .validate_datadog_trace(&mut router, Query::builder().traced(true).build())
+        .await?;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_attributes() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!("fixtures/datadog.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .attribute("client.name", "foo")
+        .build()
+        .validate_datadog_trace(
+            &mut router,
+            Query::builder()
+                .traced(true)
+                .header("apollographql-client-name", "foo")
+                .build(),
+        )
+        .await?;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
 struct DatadogTraceSpec {
     trace_spec: TraceSpec,
 }
@@ -1135,7 +1192,50 @@ impl Verifier for DatadogTraceSpec {
         Ok(())
     }
 
-    fn verify_span_attributes(&self, _trace: &Value) -> Result<(), BoxError> {
+    fn verify_span_attributes(&self, trace: &Value) -> Result<(), BoxError> {
+        for (key, value) in self.attributes.iter() {
+            // extracts a list of span attribute values with the provided key
+            let binding = trace.select_path(&format!("$..meta..['{key}']"))?;
+            let matches_value = binding.iter().any(|v| match v {
+                Value::Bool(v) => (*v).to_string() == *value,
+                Value::Number(n) => (*n).to_string() == *value,
+                Value::String(s) => s == value,
+                _ => false,
+            });
+            if !matches_value {
+                return Err(BoxError::from(format!(
+                    "unexpected attribute values for key `{key}`, expected value `{value}` but got {binding:?}"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn verify_resources(&self, trace: &Value) -> Result<(), BoxError> {
+        if !self.trace_spec.resources.is_empty() {
+            let spans = trace.select_path("$..[?(@.service=='router')]")?;
+            for span in spans {
+                for resource in span.select_path("$.meta")? {
+                    for (key, value) in &self.trace_spec.resources {
+                        let mut found = false;
+                        if let Some(resource_value) =
+                            resource.as_object().and_then(|resource| resource.get(*key))
+                        {
+                            let resource_value =
+                                resource_value.as_string().expect("resources are strings");
+                            if resource_value == *value {
+                                found = true;
+                            }
+                        }
+                        if !found {
+                            return Err(BoxError::from(format!(
+                                "resource not found: {key}={value}",
+                            )));
+                        }
+                    }
+                }
+            }
+        }
         Ok(())
     }
 }

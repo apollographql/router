@@ -1,8 +1,8 @@
-use apollo_compiler::schema;
 use apollo_compiler::Name;
-use serde::de::Error as _;
+use apollo_compiler::schema;
 use serde::Deserialize;
 use serde::Serialize;
+use serde::de::Error as _;
 
 use super::query::parse_hir_value;
 use crate::json_ext::Value;
@@ -12,8 +12,38 @@ use crate::spec::Schema;
 #[derive(Debug)]
 pub(crate) struct InvalidValue;
 
+/// {0}
+#[derive(thiserror::Error, displaydoc::Display, Debug, Clone, Serialize, Eq, PartialEq)]
+pub(crate) struct InvalidInputValue(pub(crate) String);
+
+fn describe_json_value(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "map",
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct FieldType(pub(crate) schema::Type);
+
+/// A path within a JSON object that doesn’t need heap allocation in the happy path
+pub(crate) enum JsonValuePath<'a> {
+    Variable {
+        name: &'a str,
+    },
+    ObjectKey {
+        key: &'a str,
+        parent: &'a JsonValuePath<'a>,
+    },
+    ArrayItem {
+        index: usize,
+        parent: &'a JsonValuePath<'a>,
+    },
+}
 
 // schema::Type does not implement Serialize or Deserialize,
 // and <https://serde.rs/remote-derive.html> seems not to work for recursive types.
@@ -26,7 +56,7 @@ impl Serialize for FieldType {
     {
         struct BorrowedFieldType<'a>(&'a schema::Type);
 
-        impl<'a> Serialize for BorrowedFieldType<'a> {
+        impl Serialize for BorrowedFieldType<'_> {
             fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
             where
                 S: serde::Serializer,
@@ -85,30 +115,64 @@ impl std::fmt::Display for FieldType {
     }
 }
 
+/// This function currently stops at the first error it finds.
+/// It may be nicer to return a `Vec` of errors, but its size should be limited
+/// in case e.g. every item of a large array is invalid.
 fn validate_input_value(
     ty: &schema::Type,
-    value: &Value,
+    value: Option<&Value>,
     schema: &Schema,
-) -> Result<(), InvalidValue> {
+    path: &JsonValuePath<'_>,
+) -> Result<(), InvalidInputValue> {
+    let fmt_path = || match path {
+        JsonValuePath::Variable { .. } => format!("variable `{path}`"),
+        _ => format!("input value at `{path}`"),
+    };
+    let Some(value) = value else {
+        if ty.is_non_null() {
+            return Err(InvalidInputValue(format!(
+                "missing {}: for required GraphQL type `{ty}`",
+                fmt_path(),
+            )));
+        } else {
+            return Ok(());
+        }
+    };
+    let invalid = || {
+        InvalidInputValue(format!(
+            "invalid {}: found JSON {} for GraphQL type `{ty}`",
+            fmt_path(),
+            describe_json_value(value)
+        ))
+    };
     if value.is_null() {
-        return match ty {
-            schema::Type::Named(_) | schema::Type::List(_) => Ok(()),
-            schema::Type::NonNullNamed(_) | schema::Type::NonNullList(_) => Err(InvalidValue),
-        };
+        if ty.is_non_null() {
+            return Err(invalid());
+        } else {
+            return Ok(());
+        }
     }
     let type_name = match ty {
         schema::Type::Named(name) | schema::Type::NonNullNamed(name) => name,
         schema::Type::List(inner_type) | schema::Type::NonNullList(inner_type) => {
-            return if let Value::Array(vec) = value {
-                vec.iter()
-                    .try_for_each(|x| validate_input_value(inner_type, x, schema))
+            if let Value::Array(vec) = value {
+                for (i, x) in vec.iter().enumerate() {
+                    let path = JsonValuePath::ArrayItem {
+                        index: i,
+                        parent: path,
+                    };
+                    validate_input_value(inner_type, Some(x), schema, &path)?
+                }
+                return Ok(());
             } else {
                 // For coercion from single value to list
-                validate_input_value(inner_type, value, schema)
-            };
+                return validate_input_value(inner_type, Some(value), schema, path);
+            }
         }
     };
-    let from_bool = |condition| if condition { Ok(()) } else { Err(InvalidValue) };
+    let from_bool = |condition| {
+        if condition { Ok(()) } else { Err(invalid()) }
+    };
     match type_name.as_str() {
         "String" => return from_bool(value.is_string()),
         // Spec: https://spec.graphql.org/June2018/#sec-Int
@@ -129,7 +193,8 @@ fn validate_input_value(
         .supergraph_schema()
         .types
         .get(type_name)
-        .ok_or(InvalidValue)?;
+        // Should never happen in a valid schema
+        .ok_or_else(invalid)?;
     match (type_def, value) {
         // Custom scalar: accept any JSON value
         (schema::ExtendedType::Scalar(_), _) => Ok(()),
@@ -137,25 +202,28 @@ fn validate_input_value(
         (schema::ExtendedType::Enum(def), Value::String(s)) => {
             from_bool(def.values.contains_key(s.as_str()))
         }
-        (schema::ExtendedType::Enum(_), _) => Err(InvalidValue),
+        (schema::ExtendedType::Enum(_), _) => Err(invalid()),
 
         (schema::ExtendedType::InputObject(def), Value::Object(obj)) => {
             // TODO: check keys in `obj` but not in `def.fields`?
-            def.fields
-                .values()
-                .try_for_each(|field| match obj.get(field.name.as_str()) {
+            def.fields.values().try_for_each(|field| {
+                let path = JsonValuePath::ObjectKey {
+                    key: &field.name,
+                    parent: path,
+                };
+                match obj.get(field.name.as_str()) {
                     Some(&Value::Null) | None => {
                         let default = field
                             .default_value
                             .as_ref()
-                            .and_then(|v| parse_hir_value(v))
-                            .unwrap_or(Value::Null);
-                        validate_input_value(&field.ty, &default, schema)
+                            .and_then(|v| parse_hir_value(v));
+                        validate_input_value(&field.ty, default.as_ref(), schema, &path)
                     }
-                    Some(value) => validate_input_value(&field.ty, value, schema),
-                })
+                    value => validate_input_value(&field.ty, value, schema, &path),
+                }
+            })
         }
-        _ => Err(InvalidValue),
+        _ => Err(invalid()),
     }
 }
 
@@ -168,10 +236,11 @@ impl FieldType {
     // Each of the values are validated against the "input coercion" rules.
     pub(crate) fn validate_input_value(
         &self,
-        value: &Value,
+        value: Option<&Value>,
         schema: &Schema,
-    ) -> Result<(), InvalidValue> {
-        validate_input_value(&self.0, value, schema)
+        path: &JsonValuePath<'_>,
+    ) -> Result<(), InvalidInputValue> {
+        validate_input_value(&self.0, value, schema, path)
     }
 
     pub(crate) fn is_non_null(&self) -> bool {
@@ -182,6 +251,26 @@ impl FieldType {
 impl From<&'_ schema::Type> for FieldType {
     fn from(ty: &'_ schema::Type) -> Self {
         Self(ty.clone())
+    }
+}
+
+impl std::fmt::Display for JsonValuePath<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Variable { name } => {
+                f.write_str("$")?;
+                f.write_str(name)
+            }
+            Self::ObjectKey { key, parent } => {
+                parent.fmt(f)?;
+                f.write_str(".")?;
+                f.write_str(key)
+            }
+            Self::ArrayItem { index, parent } => {
+                parent.fmt(f)?;
+                write!(f, "[{index}]")
+            }
+        }
     }
 }
 

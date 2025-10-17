@@ -1,6 +1,7 @@
 ---
 source: apollo-router/tests/apollo_otel_traces.rs
 expression: report
+snapshot_kind: text
 ---
 resourceSpans:
   - resource:
@@ -35,69 +36,9 @@ resourceSpans:
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: query one
             kind: 2
-            startTimeUnixNano: "[start_time]"
-            endTimeUnixNano: "[end_time]"
-            attributes:
-              - key: apollo_private.request
-                value:
-                  boolValue: true
-              - key: graphql.operation.name
-                value:
-                  stringValue: "[redacted]"
-              - key: graphql.operation.type
-                value:
-                  stringValue: query
-              - key: http.request.method
-                value:
-                  stringValue: POST
-            droppedAttributesCount: 0
-            events: []
-            droppedEventsCount: 0
-            links: []
-            droppedLinksCount: 0
-            status:
-              message: ""
-              code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
-          - traceId: "[trace_id]"
-            spanId: "[span_id]"
-            traceState: ""
-            parentSpanId: "[span_id]"
-            flags: 0
-            name: router
-            kind: 1
             startTimeUnixNano: "[start_time]"
             endTimeUnixNano: "[end_time]"
             attributes:
@@ -110,6 +51,9 @@ resourceSpans:
               - key: apollo_private.http.response_headers
                 value:
                   stringValue: "[redacted]"
+              - key: apollo_private.request
+                value:
+                  boolValue: true
               - key: client.name
                 value:
                   stringValue: ""
@@ -121,10 +65,7 @@ resourceSpans:
                   stringValue: POST
               - key: http.response.status_code
                 value:
-                  intValue: 200
-              - key: trace_id
-                value:
-                  stringValue: "[redacted]"
+                  intValue: "200"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -133,41 +74,11 @@ resourceSpans:
             status:
               message: ""
               code: 1
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: rhai_plugin
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -181,41 +92,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: parse_query
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -229,41 +110,47 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
+            name: compute_job
+            kind: 1
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
+            attributes: []
+            droppedAttributesCount: 0
+            events: []
+            droppedEventsCount: 0
+            links: []
+            droppedLinksCount: 0
+            status:
+              message: ""
+              code: 0
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
+            traceState: ""
+            parentSpanId: "[span_id]"
+            flags: 1
+            name: compute_job.execution
+            kind: 1
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
+            attributes: []
+            droppedAttributesCount: 0
+            events: []
+            droppedEventsCount: 0
+            links: []
+            droppedLinksCount: 0
+            status:
+              message: ""
+              code: 0
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
+            traceState: ""
+            parentSpanId: "[span_id]"
+            flags: 1
             name: parse_query
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -277,41 +164,47 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
+            name: compute_job
+            kind: 1
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
+            attributes: []
+            droppedAttributesCount: 0
+            events: []
+            droppedEventsCount: 0
+            links: []
+            droppedLinksCount: 0
+            status:
+              message: ""
+              code: 0
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
+            traceState: ""
+            parentSpanId: "[span_id]"
+            flags: 1
+            name: compute_job.execution
+            kind: 1
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
+            attributes: []
+            droppedAttributesCount: 0
+            events: []
+            droppedEventsCount: 0
+            links: []
+            droppedLinksCount: 0
+            status:
+              message: ""
+              code: 0
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
+            traceState: ""
+            parentSpanId: "[span_id]"
+            flags: 1
             name: supergraph
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -325,19 +218,16 @@ resourceSpans:
                   stringValue: "[redacted]"
               - key: apollo_private.query.aliases
                 value:
-                  intValue: 0
+                  intValue: "0"
               - key: apollo_private.query.depth
                 value:
-                  intValue: 4
+                  intValue: "4"
               - key: apollo_private.query.height
                 value:
-                  intValue: 7
+                  intValue: "7"
               - key: apollo_private.query.root_fields
                 value:
-                  intValue: 1
-              - key: graphql.operation.name
-                value:
-                  stringValue: "[redacted]"
+                  intValue: "1"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -346,41 +236,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: rhai_plugin
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -394,41 +254,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: query_planning
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -442,41 +272,47 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
+            name: compute_job
+            kind: 1
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
+            attributes: []
+            droppedAttributesCount: 0
+            events: []
+            droppedEventsCount: 0
+            links: []
+            droppedLinksCount: 0
+            status:
+              message: ""
+              code: 0
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
+            traceState: ""
+            parentSpanId: "[span_id]"
+            flags: 1
+            name: compute_job.execution
+            kind: 1
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
+            attributes: []
+            droppedAttributesCount: 0
+            events: []
+            droppedEventsCount: 0
+            links: []
+            droppedLinksCount: 0
+            status:
+              message: ""
+              code: 0
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
+            traceState: ""
+            parentSpanId: "[span_id]"
+            flags: 1
             name: execution
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -493,41 +329,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: rhai_plugin
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -541,41 +347,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: sequence
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -589,41 +365,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: fetch
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -643,53 +389,17 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: subgraph
             kind: 1
             startTimeUnixNano: "[start_time]"
             endTimeUnixNano: "[end_time]"
             attributes:
-              - key: apollo.subgraph.name
-                value:
-                  stringValue: products
               - key: apollo_private.ftv1
-                value:
-                  stringValue: "[redacted]"
-              - key: graphql.operation.name
                 value:
                   stringValue: "[redacted]"
             droppedAttributesCount: 0
@@ -700,41 +410,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: rhai_plugin
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -748,41 +428,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: subgraph_request
             kind: 3
             startTimeUnixNano: "[start_time]"
@@ -802,41 +452,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: http_request
             kind: 3
             startTimeUnixNano: "[start_time]"
@@ -850,41 +470,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: flatten
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -901,41 +491,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: fetch
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -955,53 +515,17 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: subgraph
             kind: 1
             startTimeUnixNano: "[start_time]"
             endTimeUnixNano: "[end_time]"
             attributes:
-              - key: apollo.subgraph.name
-                value:
-                  stringValue: reviews
               - key: apollo_private.ftv1
-                value:
-                  stringValue: "[redacted]"
-              - key: graphql.operation.name
                 value:
                   stringValue: "[redacted]"
             droppedAttributesCount: 0
@@ -1012,41 +536,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: rhai_plugin
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -1060,41 +554,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: subgraph_request
             kind: 3
             startTimeUnixNano: "[start_time]"
@@ -1114,41 +578,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: http_request
             kind: 3
             startTimeUnixNano: "[start_time]"
@@ -1162,41 +596,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: flatten
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -1213,41 +617,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: fetch
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -1267,53 +641,17 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: subgraph
             kind: 1
             startTimeUnixNano: "[start_time]"
             endTimeUnixNano: "[end_time]"
             attributes:
-              - key: apollo.subgraph.name
-                value:
-                  stringValue: accounts
               - key: apollo_private.ftv1
-                value:
-                  stringValue: "[redacted]"
-              - key: graphql.operation.name
                 value:
                   stringValue: "[redacted]"
             droppedAttributesCount: 0
@@ -1324,41 +662,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: rhai_plugin
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -1372,41 +680,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: subgraph_request
             kind: 3
             startTimeUnixNano: "[start_time]"
@@ -1426,41 +704,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: http_request
             kind: 3
             startTimeUnixNano: "[start_time]"
@@ -1474,41 +722,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: supergraph
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -1522,19 +740,16 @@ resourceSpans:
                   stringValue: "[redacted]"
               - key: apollo_private.query.aliases
                 value:
-                  intValue: 0
+                  intValue: "0"
               - key: apollo_private.query.depth
                 value:
-                  intValue: 4
+                  intValue: "4"
               - key: apollo_private.query.height
                 value:
-                  intValue: 7
+                  intValue: "7"
               - key: apollo_private.query.root_fields
                 value:
-                  intValue: 1
-              - key: graphql.operation.name
-                value:
-                  stringValue: "[redacted]"
+                  intValue: "1"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -1543,41 +758,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: rhai_plugin
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -1591,41 +776,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: query_planning
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -1639,41 +794,47 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
+            name: compute_job
+            kind: 1
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
+            attributes: []
+            droppedAttributesCount: 0
+            events: []
+            droppedEventsCount: 0
+            links: []
+            droppedLinksCount: 0
+            status:
+              message: ""
+              code: 0
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
+            traceState: ""
+            parentSpanId: "[span_id]"
+            flags: 1
+            name: compute_job.execution
+            kind: 1
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
+            attributes: []
+            droppedAttributesCount: 0
+            events: []
+            droppedEventsCount: 0
+            links: []
+            droppedLinksCount: 0
+            status:
+              message: ""
+              code: 0
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
+            traceState: ""
+            parentSpanId: "[span_id]"
+            flags: 1
             name: execution
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -1690,41 +851,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: rhai_plugin
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -1738,41 +869,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: sequence
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -1786,41 +887,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: fetch
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -1840,53 +911,17 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: subgraph
             kind: 1
             startTimeUnixNano: "[start_time]"
             endTimeUnixNano: "[end_time]"
             attributes:
-              - key: apollo.subgraph.name
-                value:
-                  stringValue: products
               - key: apollo_private.ftv1
-                value:
-                  stringValue: "[redacted]"
-              - key: graphql.operation.name
                 value:
                   stringValue: "[redacted]"
             droppedAttributesCount: 0
@@ -1897,41 +932,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: rhai_plugin
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -1945,41 +950,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: subgraph_request
             kind: 3
             startTimeUnixNano: "[start_time]"
@@ -1999,41 +974,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: http_request
             kind: 3
             startTimeUnixNano: "[start_time]"
@@ -2047,41 +992,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: flatten
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -2098,41 +1013,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: fetch
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -2152,53 +1037,17 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: subgraph
             kind: 1
             startTimeUnixNano: "[start_time]"
             endTimeUnixNano: "[end_time]"
             attributes:
-              - key: apollo.subgraph.name
-                value:
-                  stringValue: reviews
               - key: apollo_private.ftv1
-                value:
-                  stringValue: "[redacted]"
-              - key: graphql.operation.name
                 value:
                   stringValue: "[redacted]"
             droppedAttributesCount: 0
@@ -2209,41 +1058,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: rhai_plugin
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -2257,41 +1076,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: subgraph_request
             kind: 3
             startTimeUnixNano: "[start_time]"
@@ -2311,41 +1100,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: http_request
             kind: 3
             startTimeUnixNano: "[start_time]"
@@ -2359,41 +1118,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: flatten
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -2410,41 +1139,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: fetch
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -2464,53 +1163,17 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: subgraph
             kind: 1
             startTimeUnixNano: "[start_time]"
             endTimeUnixNano: "[end_time]"
             attributes:
-              - key: apollo.subgraph.name
-                value:
-                  stringValue: accounts
               - key: apollo_private.ftv1
-                value:
-                  stringValue: "[redacted]"
-              - key: graphql.operation.name
                 value:
                   stringValue: "[redacted]"
             droppedAttributesCount: 0
@@ -2521,41 +1184,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: rhai_plugin
             kind: 1
             startTimeUnixNano: "[start_time]"
@@ -2569,41 +1202,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: subgraph_request
             kind: 3
             startTimeUnixNano: "[start_time]"
@@ -2623,41 +1226,11 @@ resourceSpans:
             status:
               message: ""
               code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
           - traceId: "[trace_id]"
             spanId: "[span_id]"
             traceState: ""
             parentSpanId: "[span_id]"
-            flags: 0
+            flags: 1
             name: http_request
             kind: 3
             startTimeUnixNano: "[start_time]"

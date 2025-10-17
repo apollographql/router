@@ -13,20 +13,20 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use crate::Context;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::plugins::limits::layer::BodyLimitControl;
 use crate::plugins::limits::layer::BodyLimitError;
 use crate::plugins::limits::layer::RequestBodyLimitLayer;
 use crate::services::router;
 use crate::services::router::BoxService;
-use crate::Context;
 
 /// Configuration for operation limits, parser limits, HTTP limits, etc.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
+#[schemars(rename = "LimitsConfig")]
 pub(crate) struct Config {
     /// If set, requests with operations deeper than this maximum
     /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
@@ -115,6 +115,13 @@ pub(crate) struct Config {
     /// Default is ~400kib.
     #[schemars(with = "Option<String>", default)]
     pub(crate) http1_max_request_buf_size: Option<ByteSize>,
+
+    /// Limit the depth of nested list fields in introspection queries
+    /// to protect avoid generating huge responses. Returns a GraphQL
+    /// error with `{ message: "Maximum introspection depth exceeded" }`
+    /// when nested fields exceed the limit.
+    /// Default: true
+    pub(crate) introspection_max_depth: bool,
 }
 
 impl Default for Config {
@@ -135,6 +142,8 @@ impl Default for Config {
             // but is still very high for "reasonable" queries.
             // https://github.com/apollographql/apollo-rs/blob/apollo-parser%400.7.3/crates/apollo-parser/src/parser/mod.rs#L93-L104
             parser_max_recursion: 500,
+
+            introspection_max_depth: true,
         }
     }
 }
@@ -157,16 +166,7 @@ impl Plugin for LimitsPlugin {
     }
 
     fn router_service(&self, service: BoxService) -> BoxService {
-        let control = BodyLimitControl::new(self.config.http_max_request_bytes);
-        let control_for_context = control.clone();
         ServiceBuilder::new()
-            .map_request(move |r: router::Request| {
-                let control_for_context = control_for_context.clone();
-                r.context
-                    .extensions()
-                    .with_lock(|mut lock| lock.insert(control_for_context));
-                r
-            })
             .map_future_with_request_data(
                 |r: &router::Request| r.context.clone(),
                 |ctx, f| async { Self::map_error_to_graphql(f.await, ctx) },
@@ -174,7 +174,9 @@ impl Plugin for LimitsPlugin {
             // Here we need to convert to and from the underlying http request types so that we can use existing middleware.
             .map_request(Into::into)
             .map_response(Into::into)
-            .layer(RequestBodyLimitLayer::new(control))
+            .layer(RequestBodyLimitLayer::new(
+                self.config.http_max_request_bytes,
+            ))
             .map_request(Into::into)
             .map_response(Into::into)
             .service(service)
@@ -194,7 +196,6 @@ impl LimitsPlugin {
         match resp {
             Ok(r) => {
                 if r.response.status() == StatusCode::PAYLOAD_TOO_LARGE {
-                    Self::increment_legacy_metric();
                     Ok(BodyLimitError::PayloadTooLarge.into_response(ctx))
                 } else {
                     Ok(r)
@@ -209,25 +210,10 @@ impl LimitsPlugin {
 
                 match root_cause.downcast_ref::<BodyLimitError>() {
                     None => Err(e),
-                    Some(_) => {
-                        Self::increment_legacy_metric();
-                        Ok(BodyLimitError::PayloadTooLarge.into_response(ctx))
-                    }
+                    Some(_) => Ok(BodyLimitError::PayloadTooLarge.into_response(ctx)),
                 }
             }
         }
-    }
-
-    fn increment_legacy_metric() {
-        // Remove this eventually
-        // This is already handled by the telemetry plugin via the http.server.request metric.
-        u64_counter!(
-            "apollo_router_http_requests_total",
-            "Total number of HTTP requests made.",
-            1,
-            status = StatusCode::PAYLOAD_TOO_LARGE.as_u16() as i64,
-            error = BodyLimitError::PayloadTooLarge.to_string()
-        );
     }
 }
 
@@ -257,26 +243,25 @@ mod test {
     use http::StatusCode;
     use tower::BoxError;
 
-    use crate::plugins::limits::layer::BodyLimitControl;
     use crate::plugins::limits::LimitsPlugin;
+    use crate::plugins::limits::layer::BodyLimitControl;
     use crate::plugins::test::PluginTestHarness;
     use crate::services::router;
-    use crate::services::router::body::get_body_bytes;
 
     #[tokio::test]
     async fn test_body_content_length_limit_exceeded() {
         let plugin = plugin().await;
         let resp = plugin
-            .call_router(
+            .router_service(|r| async {
+                let body = r.router_request.into_body();
+                let _ = router::body::into_bytes(body).await?;
+                panic!("should have failed to read stream")
+            })
+            .call(
                 router::Request::fake_builder()
-                    .body("This is a test")
+                    .body(router::body::from_bytes("This is a test"))
                     .build()
                     .unwrap(),
-                |r| async {
-                    let body = r.router_request.into_body();
-                    let _ = get_body_bytes(body).await?;
-                    panic!("should have failed to read stream")
-                },
             )
             .await;
         assert!(resp.is_ok());
@@ -284,7 +269,7 @@ mod test {
         assert_eq!(resp.response.status(), StatusCode::PAYLOAD_TOO_LARGE);
         assert_eq!(
             String::from_utf8(
-                get_body_bytes(resp.response.into_body())
+                router::body::into_bytes(resp.response.into_body())
                     .await
                     .unwrap()
                     .to_vec()
@@ -298,14 +283,17 @@ mod test {
     async fn test_body_content_length_limit_ok() {
         let plugin = plugin().await;
         let resp = plugin
-            .call_router(
-                router::Request::fake_builder().body("").build().unwrap(),
-                |r| async {
-                    let body = r.router_request.into_body();
-                    let body = get_body_bytes(body).await;
-                    assert!(body.is_ok());
-                    Ok(router::Response::fake_builder().build().unwrap())
-                },
+            .router_service(|r| async {
+                let body = r.router_request.into_body();
+                let body = router::body::into_bytes(body).await;
+                assert!(body.is_ok());
+                Ok(router::Response::fake_builder().build().unwrap())
+            })
+            .call(
+                router::Request::fake_builder()
+                    .body(router::body::empty())
+                    .build()
+                    .unwrap(),
             )
             .await;
 
@@ -314,7 +302,7 @@ mod test {
         assert_eq!(resp.response.status(), StatusCode::OK);
         assert_eq!(
             String::from_utf8(
-                get_body_bytes(resp.response.into_body())
+                router::body::into_bytes(resp.response.into_body())
                     .await
                     .unwrap()
                     .to_vec()
@@ -328,13 +316,13 @@ mod test {
     async fn test_header_content_length_limit_exceeded() {
         let plugin = plugin().await;
         let resp = plugin
-            .call_router(
+            .router_service(|_| async { panic!("should have rejected request") })
+            .call(
                 router::Request::fake_builder()
                     .header("Content-Length", "100")
-                    .body("")
+                    .body(router::body::empty())
                     .build()
                     .unwrap(),
-                |_| async { panic!("should have rejected request") },
             )
             .await;
         assert!(resp.is_ok());
@@ -342,7 +330,7 @@ mod test {
         assert_eq!(resp.response.status(), StatusCode::PAYLOAD_TOO_LARGE);
         assert_eq!(
             String::from_utf8(
-                get_body_bytes(resp.response.into_body())
+                router::body::into_bytes(resp.response.into_body())
                     .await
                     .unwrap()
                     .to_vec()
@@ -356,13 +344,13 @@ mod test {
     async fn test_header_content_length_limit_ok() {
         let plugin = plugin().await;
         let resp = plugin
-            .call_router(
+            .router_service(|_| async { Ok(router::Response::fake_builder().build().unwrap()) })
+            .call(
                 router::Request::fake_builder()
                     .header("Content-Length", "5")
-                    .body("")
+                    .body(router::body::empty())
                     .build()
                     .unwrap(),
-                |_| async { Ok(router::Response::fake_builder().build().unwrap()) },
             )
             .await;
         assert!(resp.is_ok());
@@ -370,7 +358,7 @@ mod test {
         assert_eq!(resp.response.status(), StatusCode::OK);
         assert_eq!(
             String::from_utf8(
-                get_body_bytes(resp.response.into_body())
+                router::body::into_bytes(resp.response.into_body())
                     .await
                     .unwrap()
                     .to_vec()
@@ -385,9 +373,12 @@ mod test {
         // We should not be translating errors that are not limit errors into graphql errors
         let plugin = plugin().await;
         let resp = plugin
-            .call_router(
-                router::Request::fake_builder().body("").build().unwrap(),
-                |_| async { Err(BoxError::from("error")) },
+            .router_service(|_| async { Err(BoxError::from("error")) })
+            .call(
+                router::Request::fake_builder()
+                    .body(router::body::empty())
+                    .build()
+                    .unwrap(),
             )
             .await;
         assert!(resp.is_err());
@@ -397,31 +388,31 @@ mod test {
     async fn test_limits_dynamic_update() {
         let plugin = plugin().await;
         let resp = plugin
-            .call_router(
+            .router_service(|mut r: router::Request| async move {
+                // Before we go for the body, we'll update the limit
+                let control = r
+                    .router_request
+                    .extensions_mut()
+                    .get::<BodyLimitControl>()
+                    .expect("body limit control must have been set")
+                    .clone();
+
+                assert_eq!(control.remaining(), 10);
+                assert_eq!(control.limit(), 10);
+                control.update_limit(100);
+
+                let body = r.router_request.into_body();
+                let _ = router::body::into_bytes(body).await?;
+
+                // Now let's check progress
+                assert_eq!(control.remaining(), 86);
+                Ok(router::Response::fake_builder().build().unwrap())
+            })
+            .call(
                 router::Request::fake_builder()
-                    .body("This is a test")
+                    .body(router::body::from_bytes("This is a test"))
                     .build()
                     .unwrap(),
-                |r| async move {
-                    // Before we go for the body, we'll update the limit
-                    r.context.extensions().with_lock(|lock| {
-                        let control: &BodyLimitControl =
-                            lock.get().expect("mut have body limit control");
-                        assert_eq!(control.remaining(), 10);
-                        assert_eq!(control.limit(), 10);
-                        control.update_limit(100);
-                    });
-                    let body = r.router_request.into_body();
-                    let _ = get_body_bytes(body).await?;
-
-                    // Now let's check progress
-                    r.context.extensions().with_lock(|lock| {
-                        let control: &BodyLimitControl =
-                            lock.get().expect("mut have body limit control");
-                        assert_eq!(control.remaining(), 86);
-                    });
-                    Ok(router::Response::fake_builder().build().unwrap())
-                },
             )
             .await;
         assert!(resp.is_ok());
@@ -429,7 +420,7 @@ mod test {
         assert_eq!(resp.response.status(), StatusCode::OK);
         assert_eq!(
             String::from_utf8(
-                get_body_bytes(resp.response.into_body())
+                router::body::into_bytes(resp.response.into_body())
                     .await
                     .unwrap()
                     .to_vec()
@@ -440,11 +431,11 @@ mod test {
     }
 
     async fn plugin() -> PluginTestHarness<LimitsPlugin> {
-        let plugin: PluginTestHarness<LimitsPlugin> = PluginTestHarness::new(
-            Some(include_str!("fixtures/content_length_limit.router.yaml")),
-            None,
-        )
-        .await;
+        let plugin: PluginTestHarness<LimitsPlugin> = PluginTestHarness::builder()
+            .config(include_str!("fixtures/content_length_limit.router.yaml"))
+            .build()
+            .await
+            .expect("test harness");
         plugin
     }
 }

@@ -5,11 +5,11 @@
 
 use graphql_client::GraphQLQuery;
 
+use crate::uplink::UplinkRequest;
+use crate::uplink::UplinkResponse;
 use crate::uplink::persisted_queries_manifest_stream::persisted_queries_manifest_query::FetchErrorCode;
 use crate::uplink::persisted_queries_manifest_stream::persisted_queries_manifest_query::PersistedQueriesManifestQueryPersistedQueries;
 use crate::uplink::persisted_queries_manifest_stream::persisted_queries_manifest_query::PersistedQueriesManifestQueryPersistedQueriesOnPersistedQueriesResultChunks;
-use crate::uplink::UplinkRequest;
-use crate::uplink::UplinkResponse;
 
 #[derive(GraphQLQuery)]
 #[graphql(
@@ -19,7 +19,6 @@ use crate::uplink::UplinkResponse;
     response_derives = "PartialEq, Debug, Deserialize",
     deprecated = "warn"
 )]
-
 pub(crate) struct PersistedQueriesManifestQuery;
 
 impl From<UplinkRequest> for persisted_queries_manifest_query::Variables {
@@ -115,12 +114,12 @@ mod test {
     use futures::stream::StreamExt;
     use url::Url;
 
+    use crate::uplink::Endpoints;
+    use crate::uplink::GCP_URL;
+    use crate::uplink::UplinkConfig;
     use crate::uplink::persisted_queries_manifest_stream::MaybePersistedQueriesManifestChunks;
     use crate::uplink::persisted_queries_manifest_stream::PersistedQueriesManifestQuery;
     use crate::uplink::stream_from_uplink;
-    use crate::uplink::Endpoints;
-    use crate::uplink::UplinkConfig;
-    use crate::uplink::GCP_URL;
 
     #[tokio::test]
     async fn integration_test() {
@@ -137,7 +136,7 @@ mod test {
                     apollo_key: apollo_key.clone(),
                     apollo_graph_ref: apollo_graph_ref.clone(),
                     endpoints: Some(Endpoints::fallback(vec![
-                        Url::from_str(url).expect("url must be valid")
+                        Url::from_str(url).expect("url must be valid"),
                     ])),
                     poll_interval: Duration::from_secs(1),
                     timeout: Duration::from_secs(5),
@@ -148,9 +147,9 @@ mod test {
 
                 let persisted_query_manifest = results
                     .first()
-                    .unwrap_or_else(|| panic!("expected one result from {}", url))
+                    .unwrap_or_else(|| panic!("expected one result from {url}"))
                     .as_ref()
-                    .unwrap_or_else(|_| panic!("schema should be OK from {}", url))
+                    .unwrap_or_else(|_| panic!("schema should be OK from {url}"))
                     .as_ref()
                     .unwrap();
                 assert!(!persisted_query_manifest.is_empty())

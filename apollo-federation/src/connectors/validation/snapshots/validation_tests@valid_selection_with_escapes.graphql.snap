@@ -1,0 +1,21 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/valid_selection_with_escapes.graphql
+---
+[
+    Message {
+        code: InvalidSelection,
+        message: "`@connect(selection:)` on `Query.block` is not valid: Path selection . must be followed by key (identifier or quoted string literal): .",
+        locations: [
+            16:30..16:31,
+        ],
+    },
+    Message {
+        code: InvalidSelection,
+        message: "`@connect(selection:)` on `Query.standard` is not valid: Path selection . must be followed by key (identifier or quoted string literal): .",
+        locations: [
+            22:95..22:96,
+        ],
+    },
+]

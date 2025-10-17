@@ -1,13 +1,13 @@
 #![allow(missing_docs)] // FIXME
 
 use futures::future::ready;
-use futures::stream::once;
 use futures::stream::StreamExt;
-use http::header::HeaderName;
-use http::method::Method;
+use futures::stream::once;
 use http::HeaderValue;
 use http::StatusCode;
 use http::Uri;
+use http::header::HeaderName;
+use http::method::Method;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
 use serde_json_bytes::ByteString;
@@ -16,13 +16,14 @@ use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 
+use crate::Context;
+use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::error::Error;
 use crate::graphql;
-use crate::http_ext::header_map;
 use crate::http_ext::TryIntoHeaderName;
 use crate::http_ext::TryIntoHeaderValue;
+use crate::http_ext::header_map;
 use crate::json_ext::Path;
-use crate::Context;
 
 pub(crate) mod service;
 #[cfg(test)]
@@ -68,7 +69,6 @@ impl Request {
     /// This is the constructor (or builder) to use when constructing a real Request.
     ///
     /// Required parameters are required in non-testing code to create a Request.
-    #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub")]
     fn new(
         query: Option<String>,
@@ -179,12 +179,19 @@ pub struct Response {
     pub context: Context,
 }
 
+impl std::fmt::Debug for Response {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Response")
+            .field("context", &self.context)
+            .finish()
+    }
+}
+
 #[buildstructor::buildstructor]
 impl Response {
     /// This is the constructor (or builder) to use when constructing a real Response..
     ///
     /// Required parameters are required in non-testing code to create a Response..
-    #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub")]
     fn new(
         label: Option<String>,
@@ -197,6 +204,9 @@ impl Response {
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         context: Context,
     ) -> Result<Self, BoxError> {
+        if !errors.is_empty() {
+            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+        }
         // Build a response
         let b = graphql::Response::builder()
             .and_label(label)
@@ -230,7 +240,6 @@ impl Response {
     /// difficult to construct and not required for the purposes of the test.
     ///
     /// In addition, fake responses are expected to be valid, and will panic if given invalid values.
-    #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub")]
     fn fake_new(
         label: Option<String>,
@@ -308,7 +317,6 @@ impl Response {
     /// This is the constructor (or builder) to use when constructing a real Response..
     ///
     /// Required parameters are required in non-testing code to create a Response..
-    #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub(crate)")]
     fn infallible_new(
         label: Option<String>,
@@ -321,6 +329,9 @@ impl Response {
         headers: MultiMap<HeaderName, HeaderValue>,
         context: Context,
     ) -> Self {
+        if !errors.is_empty() {
+            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+        }
         // Build a response
         let b = graphql::Response::builder()
             .and_label(label)
@@ -346,6 +357,10 @@ impl Response {
     }
 
     pub(crate) fn new_from_graphql_response(response: graphql::Response, context: Context) -> Self {
+        if !response.errors.is_empty() {
+            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+        }
+
         Self {
             response: http::Response::new(once(ready(response)).boxed()),
             context,
@@ -362,7 +377,7 @@ impl Response {
         response: http::Response<graphql::ResponseStream>,
         context: Context,
     ) -> Self {
-        Self { response, context }
+        Self { context, response }.check_for_errors()
     }
 
     pub fn map<F>(self, f: F) -> Response
@@ -417,6 +432,16 @@ impl Response {
         F: 'static + Send + FnMut(graphql::Response) -> graphql::Response,
     {
         self.map(move |stream| stream.map(f).boxed())
+    }
+
+    fn check_for_errors(self) -> Self {
+        let context = self.context.clone();
+        self.map_stream(move |response| {
+            if !response.errors.is_empty() {
+                context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+            }
+            response
+        })
     }
 }
 

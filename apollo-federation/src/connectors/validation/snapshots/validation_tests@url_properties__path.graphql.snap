@@ -1,0 +1,58 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/url_properties/path.graphql
+---
+[
+    Message {
+        code: InvalidUrlProperty,
+        message: "In `@source(name: \"v2\")`, the `path` argument is invalid: `*.bad` must start with one of $config, $context, $request, $env",
+        locations: [
+            13:70..13:73,
+        ],
+    },
+    Message {
+        code: InvalidUrlProperty,
+        message: "In `@source(name: \"v3\")`, the `path` argument is invalid: string values aren't valid here",
+        locations: [
+            16:54..16:59,
+        ],
+    },
+    Message {
+        code: InvalidUrlProperty,
+        message: "In `@source(name: \"v4\")`, the `path` argument is invalid: object values aren't valid here",
+        locations: [
+            20:54..20:66,
+        ],
+    },
+    Message {
+        code: InvalidUrlProperty,
+        message: "In `@connect` on `Query.resources`, the `path` argument is invalid: `*.bad` must start with one of $args, $config, $context, $request, $env",
+        locations: [
+            35:53..35:56,
+        ],
+    },
+    Message {
+        code: InvalidUrlProperty,
+        message: "In `@connect` on `Query.resources`, the `path` argument is invalid: string values aren't valid here",
+        locations: [
+            36:55..36:60,
+        ],
+    },
+    Message {
+        code: InvalidUrlProperty,
+        message: "In `@connect` on `Query.resources`, the `path` argument is invalid: object values aren't valid here",
+        locations: [
+            39:34..39:46,
+        ],
+    },
+    Message {
+        code: InvalidUrlProperty,
+        message: "In `@connect` on `Query.resources`, the `path` argument is invalid: string values aren't valid here",
+        locations: [
+            24:16..24:22,
+            24:13..24:22,
+            47:59..47:60,
+        ],
+    },
+]

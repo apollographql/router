@@ -1,0 +1,23 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/headers/expressions_that_evaluate_to_invalid_types.graphql
+---
+[
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)`: object values aren't valid here",
+        locations: [
+            12:45..12:47,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@connect(http.headers:)` on `Query.blah`: array values aren't valid here",
+        locations: [
+            19:10..19:27,
+            19:10..19:27,
+            21:73..21:80,
+        ],
+    },
+]

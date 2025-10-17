@@ -1,38 +1,37 @@
+use std::error::Error as _;
 use std::fmt::Display;
 use std::sync::Arc;
 use std::task::Poll;
 use std::time::Duration;
 
 use ::serde::Deserialize;
-use bytes::Bytes;
 use futures::future::BoxFuture;
-use futures::Stream;
-use futures::TryFutureExt;
 use global::get_text_map_propagator;
-use http::header::ACCEPT_ENCODING;
-use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use http::Request;
-use hyper::client::HttpConnector;
+use http::header::ACCEPT_ENCODING;
+use http::header::CONTENT_ENCODING;
+use http_body_util::BodyExt;
 use hyper_rustls::HttpsConnector;
+use hyper_util::client::legacy::connect::HttpConnector;
 #[cfg(unix)]
 use hyperlocal::UnixConnector;
 use opentelemetry::global;
-use pin_project_lite::pin_project;
 use rustls::ClientConfig;
 use rustls::RootCertStore;
 use schemars::JsonSchema;
-use tower::util::Either;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
+#[cfg(unix)]
+use tower::util::Either;
 use tower_http::decompression::Decompression;
-use tower_http::decompression::DecompressionBody;
 use tower_http::decompression::DecompressionLayer;
 use tracing::Instrument;
 
 use super::HttpRequest;
 use super::HttpResponse;
+use crate::Configuration;
 use crate::axum_factory::compression::Compressor;
 use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
@@ -40,19 +39,20 @@ use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::prepare_context;
-use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
-use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 use crate::plugins::traffic_shaping::Http2Config;
-use crate::services::hickory_dns_connector::new_async_http_connector;
 use crate::services::hickory_dns_connector::AsyncHyperResolver;
+use crate::services::hickory_dns_connector::new_async_http_connector;
+use crate::services::router;
 use crate::services::router::body::RouterBody;
-use crate::Configuration;
-use crate::Context;
 
-type HTTPClient =
-    Decompression<hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>, RouterBody>>;
+type HTTPClient = Decompression<
+    hyper_util::client::legacy::Client<
+        HttpsConnector<HttpConnector<AsyncHyperResolver>>,
+        RouterBody,
+    >,
+>;
 #[cfg(unix)]
-type UnixHTTPClient = Decompression<hyper::Client<UnixConnector, RouterBody>>;
+type UnixHTTPClient = Decompression<hyper_util::client::legacy::Client<UnixConnector, RouterBody>>;
 #[cfg(unix)]
 type MixedClient = Either<HTTPClient, UnixHTTPClient>;
 #[cfg(not(unix))]
@@ -89,7 +89,7 @@ impl Display for Compression {
 
 #[derive(Clone)]
 pub(crate) struct HttpClientService {
-    // Note: We use hyper::Client here in preference to reqwest to avoid expensive URL translation
+    // Note: We use hyper_util::client::legacy::Client here in preference to reqwest to avoid expensive URL translation
     // in the hot path. We use reqwest elsewhere because it's convenient and some of the
     // opentelemetry crate require reqwest clients to work correctly (at time of writing).
     http_client: HTTPClient,
@@ -99,13 +99,20 @@ pub(crate) struct HttpClientService {
 }
 
 impl HttpClientService {
-    pub(crate) fn from_config(
+    pub(crate) fn from_config_for_subgraph(
         service: impl Into<String>,
         configuration: &Configuration,
         tls_root_store: &RootCertStore,
         client_config: crate::configuration::shared::Client,
     ) -> Result<Self, BoxError> {
         let name: String = service.into();
+        let default_client_cert_config = configuration
+            .tls
+            .subgraph
+            .all
+            .client_authentication
+            .as_ref();
+
         let tls_cert_store = configuration
             .tls
             .subgraph
@@ -122,14 +129,48 @@ impl HttpClientService {
             .get(&name)
             .as_ref()
             .and_then(|tls| tls.client_authentication.as_ref())
-            .or(configuration
-                .tls
-                .subgraph
-                .all
-                .client_authentication
-                .as_ref());
+            .or(default_client_cert_config);
 
-        let tls_client_config = generate_tls_client_config(tls_cert_store, client_cert_config)?;
+        let tls_client_config =
+            generate_tls_client_config(tls_cert_store, client_cert_config.map(|arc| arc.as_ref()))?;
+
+        HttpClientService::new(name, tls_client_config, client_config)
+    }
+
+    pub(crate) fn from_config_for_connector(
+        source_name: impl Into<String>,
+        configuration: &Configuration,
+        tls_root_store: &RootCertStore,
+        client_config: crate::configuration::shared::Client,
+    ) -> Result<Self, BoxError> {
+        let name: String = source_name.into();
+        let default_client_cert_config = configuration
+            .tls
+            .connector
+            .all
+            .client_authentication
+            .as_ref();
+
+        let tls_cert_store = configuration
+            .tls
+            .connector
+            .sources
+            .get(&name)
+            .as_ref()
+            .and_then(|subgraph| subgraph.create_certificate_store())
+            .transpose()?
+            .unwrap_or_else(|| tls_root_store.clone());
+        let client_cert_config = configuration
+            .tls
+            .connector
+            .sources
+            .get(&name)
+            .as_ref()
+            .and_then(|tls| tls.client_authentication.as_ref())
+            .or(default_client_cert_config);
+
+        let tls_client_config =
+            generate_tls_client_config(tls_cert_store, client_cert_config.map(|arc| arc.as_ref()))?;
 
         HttpClientService::new(name, tls_client_config, client_config)
     }
@@ -157,10 +198,11 @@ impl HttpClientService {
             builder.wrap_connector(http_connector)
         };
 
-        let http_client = hyper::Client::builder()
-            .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
-            .http2_only(http2 == Http2Config::Http2Only)
-            .build(connector);
+        let http_client =
+            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+                .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
+                .http2_only(http2 == Http2Config::Http2Only)
+                .build(connector);
         Ok(Self {
             http_client: ServiceBuilder::new()
                 .layer(DecompressionLayer::new())
@@ -168,33 +210,23 @@ impl HttpClientService {
             #[cfg(unix)]
             unix_client: ServiceBuilder::new()
                 .layer(DecompressionLayer::new())
-                .service(hyper::Client::builder().build(UnixConnector)),
+                .service(
+                    hyper_util::client::legacy::Client::builder(
+                        hyper_util::rt::TokioExecutor::new(),
+                    )
+                    .build(UnixConnector),
+                ),
             service: Arc::new(service.into()),
         })
     }
 
     pub(crate) fn native_roots_store() -> RootCertStore {
         let mut roots = rustls::RootCertStore::empty();
-        let mut valid_count = 0;
-        let mut invalid_count = 0;
 
-        for cert in rustls_native_certs::load_native_certs().expect("could not load platform certs")
-        {
-            let cert = rustls::Certificate(cert.0);
-            match roots.add(&cert) {
-                Ok(_) => valid_count += 1,
-                Err(err) => {
-                    tracing::trace!("invalid cert der {:?}", cert.0);
-                    tracing::debug!("certificate parsing failed: {:?}", err);
-                    invalid_count += 1
-                }
-            }
-        }
-        tracing::debug!(
-            "with_native_roots processed {} valid and {} invalid certs",
-            valid_count,
-            invalid_count
+        roots.add_parsable_certificates(
+            rustls_native_certs::load_native_certs().expect("could not load platform certs"),
         );
+
         assert!(!roots.is_empty(), "no CA certificates found");
         roots
     }
@@ -204,13 +236,14 @@ pub(crate) fn generate_tls_client_config(
     tls_cert_store: RootCertStore,
     client_cert_config: Option<&TlsClientAuth>,
 ) -> Result<rustls::ClientConfig, BoxError> {
-    let tls_builder = rustls::ClientConfig::builder().with_safe_defaults();
+    let tls_builder = rustls::ClientConfig::builder();
+
     Ok(match client_cert_config {
         Some(client_auth_config) => tls_builder
             .with_root_certificates(tls_cert_store)
             .with_client_auth_cert(
                 client_auth_config.certificate_chain.clone(),
-                client_auth_config.key.clone(),
+                client_auth_config.key.clone_key(),
             )?,
         None => tls_builder
             .with_root_certificates(tls_cert_store)
@@ -251,11 +284,23 @@ impl tower::Service<HttpRequest> for HttpClientService {
 
         #[cfg(unix)]
         let client = match schema_uri.scheme().map(|s| s.as_str()) {
-            Some("unix") => Either::B(self.unix_client.clone()),
-            _ => Either::A(self.http_client.clone()),
+            Some("unix") => {
+                // Because we clone our inner service, we'd better swap the readied one
+                let clone = self.unix_client.clone();
+                Either::Right(std::mem::replace(&mut self.unix_client, clone))
+            }
+            _ => {
+                // Because we clone our inner service, we'd better swap the readied one
+                let clone = self.http_client.clone();
+                Either::Left(std::mem::replace(&mut self.http_client, clone))
+            }
         };
         #[cfg(not(unix))]
-        let client = self.http_client.clone();
+        let client = {
+            // Because we clone our inner service, we'd better swap the readied one
+            let clone = self.http_client.clone();
+            std::mem::replace(&mut self.http_client, clone)
+        };
 
         let service_name = self.service.clone();
 
@@ -274,7 +319,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
         get_text_map_propagator(|propagator| {
             propagator.inject_context(
                 &prepare_context(http_req_span.context()),
-                &mut opentelemetry_http::HeaderInjector(http_request.headers_mut()),
+                &mut crate::otel_compat::HeaderInjector(http_request.headers_mut()),
             );
         });
 
@@ -288,8 +333,9 @@ impl tower::Service<HttpRequest> for HttpClientService {
 
         let body = match opt_compressor {
             None => body,
-            Some(compressor) => RouterBody::wrap_stream(compressor.process(body)),
+            Some(compressor) => router::body::from_result_stream(compressor.process(body)),
         };
+
         let mut http_request = http::Request::from_parts(parts, body);
 
         http_request
@@ -307,25 +353,9 @@ impl tower::Service<HttpRequest> for HttpClientService {
                 http_request
             };
 
-            let display_headers = context.contains_key(LOGGING_DISPLAY_HEADERS);
-            let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
-
-            // Print out the debug for the request
-            if display_headers {
-                tracing::info!(http.request.headers = ?http_request.headers(), apollo.subgraph.name = %service_name, "Request headers to subgraph {service_name:?}");
-            }
-            if display_body {
-                tracing::info!(http.request.body = ?http_request.body(), apollo.subgraph.name = %service_name, "Request body to subgraph {service_name:?}");
-            }
-
-            let http_response = do_fetch(client, &context, &service_name, http_request)
+            let http_response = do_fetch(client, &service_name, http_request)
                 .instrument(http_req_span)
                 .await?;
-
-            // Print out the debug for the response
-            if display_headers {
-                tracing::info!(response.headers = ?http_response.headers(), apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}");
-            }
 
             Ok(HttpResponse {
                 http_response,
@@ -335,58 +365,53 @@ impl tower::Service<HttpRequest> for HttpClientService {
     }
 }
 
+/// Hyper client errors are very opaque. This function peels back the layers and attempts to
+/// provide a useful message to end users.
+fn report_hyper_client_error(err: hyper_util::client::legacy::Error) -> String {
+    // At the time of writing, a hyper-util error only prints "client error", and no useful further
+    // information. So if we have a source error (always true in practice), we simply discard the
+    // "client error" part and only report the inner error.
+    let Some(source) = err.source() else {
+        // No further information
+        return err.to_string();
+    };
+
+    // If there was a connection, parsing, http, etc, error, the source will be a
+    // `hyper::Error`. `hyper::Error` provides a minimal error message only, that
+    // will explain vaguely where the problem is, like "error in user's Body stream",
+    // or "error parsing http header".
+    // This is important to preserve as it may clarify the difference between a malfunctioning
+    // subgraph and a buggy router.
+    // It's not enough information though, in particular for the user error kinds, so if there is
+    // another inner error, we report *both* the hyper error and the inner error.
+    let subsource = source
+        .downcast_ref::<hyper::Error>()
+        .and_then(|err| err.source());
+    match subsource {
+        Some(inner_err) => format!("{source}: {inner_err}"),
+        None => source.to_string(),
+    }
+}
+
 async fn do_fetch(
     mut client: MixedClient,
-    context: &Context,
     service_name: &str,
     request: Request<RouterBody>,
 ) -> Result<http::Response<RouterBody>, FetchError> {
-    let _active_request_guard = context.enter_active_request();
     let (parts, body) = client
         .call(request)
+        .await
         .map_err(|err| {
             tracing::error!(fetch_error = ?err);
             FetchError::SubrequestHttpError {
                 status_code: None,
                 service: service_name.to_string(),
-                reason: err.to_string(),
+                reason: report_hyper_client_error(err),
             }
-        })
-        .await?
+        })?
         .into_parts();
     Ok(http::Response::from_parts(
         parts,
-        RouterBody::wrap_stream(BodyStream { inner: body }),
+        RouterBody::new(body.map_err(axum::Error::new)),
     ))
-}
-
-pin_project! {
-    pub(crate) struct BodyStream<B: hyper::body::HttpBody> {
-        #[pin]
-        inner: DecompressionBody<B>
-    }
-}
-
-impl<B: hyper::body::HttpBody> BodyStream<B> {
-    /// Create a new `BodyStream`.
-    pub(crate) fn new(body: DecompressionBody<B>) -> Self {
-        Self { inner: body }
-    }
-}
-
-impl<B> Stream for BodyStream<B>
-where
-    B: hyper::body::HttpBody,
-    B::Error: Into<tower_http::BoxError>,
-{
-    type Item = Result<Bytes, BoxError>;
-
-    fn poll_next(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        use hyper::body::HttpBody;
-
-        self.project().inner.poll_data(cx)
-    }
 }

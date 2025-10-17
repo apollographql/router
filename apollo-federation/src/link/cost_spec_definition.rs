@@ -1,29 +1,38 @@
-use std::collections::HashSet;
+use std::sync::LazyLock;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveList;
+use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
-use lazy_static::lazy_static;
+use apollo_compiler::schema::Value;
+use apollo_compiler::ty;
+use indexmap::IndexSet;
 
 use crate::error::FederationError;
 use crate::internal_error;
+use crate::link::Purpose;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
+use crate::schema::FederationSchema;
+use crate::schema::argument_composition_strategies::ArgumentCompositionStrategy;
 use crate::schema::position::EnumTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
-use crate::schema::FederationSchema;
+use crate::schema::type_and_directive_specification::ArgumentSpecification;
+use crate::schema::type_and_directive_specification::DirectiveArgumentSpecification;
+use crate::schema::type_and_directive_specification::DirectiveSpecification;
+use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
 const COST_DIRECTIVE_NAME: Name = name!("cost");
 const COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME: Name = name!("weight");
@@ -37,7 +46,7 @@ const LIST_SIZE_DIRECTIVE_REQUIRE_ONE_SLICING_ARGUMENT_ARGUMENT_NAME: Name =
 #[derive(Clone)]
 pub struct CostSpecDefinition {
     url: Url,
-    minimum_federation_version: Option<Version>,
+    minimum_federation_version: Version,
 }
 
 macro_rules! propagate_demand_control_directives {
@@ -109,7 +118,7 @@ macro_rules! propagate_demand_control_directives_to_position {
 }
 
 impl CostSpecDefinition {
-    pub(crate) fn new(version: Version, minimum_federation_version: Option<Version>) -> Self {
+    pub(crate) fn new(version: Version, minimum_federation_version: Version) -> Self {
         Self {
             url: Url {
                 identity: Identity::cost_identity(),
@@ -172,7 +181,9 @@ impl CostSpecDefinition {
     /// Returns the name of the `@cost` directive in the given schema, accounting for import aliases or specification name
     /// prefixes such as `@federation__cost`. This checks the linked cost specification, if there is one, and falls back
     /// to the federation spec.
-    fn cost_directive_name(schema: &FederationSchema) -> Result<Option<Name>, FederationError> {
+    pub(crate) fn cost_directive_name(
+        schema: &FederationSchema,
+    ) -> Result<Option<Name>, FederationError> {
         if let Some(spec) = Self::for_federation_schema(schema) {
             spec.directive_name_in_schema(schema, &COST_DIRECTIVE_NAME)
         } else if let Ok(fed_spec) = get_federation_spec_definition_from_subgraph(schema) {
@@ -185,7 +196,7 @@ impl CostSpecDefinition {
     /// Returns the name of the `@listSize` directive in the given schema, accounting for import aliases or specification name
     /// prefixes such as `@federation__listSize`. This checks the linked cost specification, if there is one, and falls back
     /// to the federation spec.
-    fn list_size_directive_name(
+    pub(crate) fn list_size_directive_name(
         schema: &FederationSchema,
     ) -> Result<Option<Name>, FederationError> {
         if let Some(spec) = Self::for_federation_schema(schema) {
@@ -236,6 +247,77 @@ impl CostSpecDefinition {
             Ok(None)
         }
     }
+
+    fn cost_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            COST_DIRECTIVE_NAME,
+            &[DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME,
+                    get_type: |_, _| Ok(ty!(Int!)),
+                    default_value: None,
+                },
+                composition_strategy: Some(ArgumentCompositionStrategy::Max),
+            }],
+            false,
+            &[
+                DirectiveLocation::ArgumentDefinition,
+                DirectiveLocation::Enum,
+                DirectiveLocation::FieldDefinition,
+                DirectiveLocation::InputFieldDefinition,
+                DirectiveLocation::Object,
+                DirectiveLocation::Scalar,
+            ],
+            true,
+            Some(&|v| COST_VERSIONS.get_dyn_minimum_required_version(v)),
+            None,
+        )
+    }
+
+    fn list_size_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            LIST_SIZE_DIRECTIVE_NAME,
+            &[
+                DirectiveArgumentSpecification {
+                    base_spec: ArgumentSpecification {
+                        name: LIST_SIZE_DIRECTIVE_ASSUMED_SIZE_ARGUMENT_NAME,
+                        get_type: |_, _| Ok(ty!(Int)),
+                        default_value: None,
+                    },
+                    composition_strategy: Some(ArgumentCompositionStrategy::NullableMax),
+                },
+                DirectiveArgumentSpecification {
+                    base_spec: ArgumentSpecification {
+                        name: LIST_SIZE_DIRECTIVE_SLICING_ARGUMENTS_ARGUMENT_NAME,
+                        get_type: |_, _| Ok(ty!([String!])),
+                        default_value: None,
+                    },
+                    composition_strategy: Some(ArgumentCompositionStrategy::NullableUnion),
+                },
+                DirectiveArgumentSpecification {
+                    base_spec: ArgumentSpecification {
+                        name: LIST_SIZE_DIRECTIVE_SIZED_FIELDS_ARGUMENT_NAME,
+                        get_type: |_, _| Ok(ty!([String!])),
+                        default_value: None,
+                    },
+                    composition_strategy: Some(ArgumentCompositionStrategy::NullableUnion),
+                },
+                DirectiveArgumentSpecification {
+                    base_spec: ArgumentSpecification {
+                        name: LIST_SIZE_DIRECTIVE_REQUIRE_ONE_SLICING_ARGUMENT_ARGUMENT_NAME,
+                        get_type: |_, _| Ok(ty!(Boolean)),
+                        default_value: Some(Value::Boolean(true)),
+                    },
+                    composition_strategy: Some(ArgumentCompositionStrategy::NullableAnd),
+                },
+            ],
+            false,
+            &[DirectiveLocation::FieldDefinition],
+            true,
+            Some(&|v| COST_VERSIONS.get_dyn_minimum_required_version(v)),
+            None,
+        )
+    }
 }
 
 impl SpecDefinition for CostSpecDefinition {
@@ -243,21 +325,35 @@ impl SpecDefinition for CostSpecDefinition {
         &self.url
     }
 
-    fn minimum_federation_version(&self) -> Option<&Version> {
-        self.minimum_federation_version.as_ref()
+    fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+        vec![
+            Box::new(Self::cost_directive_specification()),
+            Box::new(Self::list_size_directive_specification()),
+        ]
+    }
+
+    fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+        vec![]
+    }
+
+    fn minimum_federation_version(&self) -> &Version {
+        &self.minimum_federation_version
+    }
+
+    fn purpose(&self) -> Option<Purpose> {
+        None
     }
 }
 
-lazy_static! {
-    pub(crate) static ref COST_VERSIONS: SpecDefinitions<CostSpecDefinition> = {
+pub(crate) static COST_VERSIONS: LazyLock<SpecDefinitions<CostSpecDefinition>> =
+    LazyLock::new(|| {
         let mut definitions = SpecDefinitions::new(Identity::cost_identity());
         definitions.add(CostSpecDefinition::new(
             Version { major: 0, minor: 1 },
-            Some(Version { major: 2, minor: 9 }),
+            Version { major: 2, minor: 9 },
         ));
         definitions
-    };
-}
+    });
 
 pub struct CostDirective {
     weight: i32,
@@ -268,7 +364,10 @@ impl CostDirective {
         self.weight as f64
     }
 
-    fn from_directives(directive_name: &Name, directives: &DirectiveList) -> Option<Self> {
+    pub(crate) fn from_directives(
+        directive_name: &Name,
+        directives: &DirectiveList,
+    ) -> Option<Self> {
         directives
             .get(directive_name)?
             .specified_argument_by_name(&COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME)?
@@ -276,7 +375,7 @@ impl CostDirective {
             .map(|weight| Self { weight })
     }
 
-    fn from_schema_directives(
+    pub(crate) fn from_schema_directives(
         directive_name: &Name,
         directives: &apollo_compiler::schema::DirectiveList,
     ) -> Option<Self> {
@@ -290,8 +389,8 @@ impl CostDirective {
 
 pub struct ListSizeDirective {
     pub assumed_size: Option<i32>,
-    pub slicing_argument_names: Option<HashSet<String>>,
-    pub sized_fields: Option<HashSet<String>>,
+    pub slicing_argument_names: Option<IndexSet<String>>,
+    pub sized_fields: Option<IndexSet<String>>,
     pub require_one_slicing_argument: bool,
 }
 
@@ -321,7 +420,7 @@ impl ListSizeDirective {
             .to_i32()
     }
 
-    fn slicing_argument_names(directive: &Directive) -> Option<HashSet<String>> {
+    fn slicing_argument_names(directive: &Directive) -> Option<IndexSet<String>> {
         let names = directive
             .specified_argument_by_name(&LIST_SIZE_DIRECTIVE_SLICING_ARGUMENTS_ARGUMENT_NAME)?
             .as_list()?
@@ -332,7 +431,7 @@ impl ListSizeDirective {
         Some(names)
     }
 
-    fn sized_fields(directive: &Directive) -> Option<HashSet<String>> {
+    fn sized_fields(directive: &Directive) -> Option<IndexSet<String>> {
         let fields = directive
             .specified_argument_by_name(&LIST_SIZE_DIRECTIVE_SIZED_FIELDS_ARGUMENT_NAME)?
             .as_list()?

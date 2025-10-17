@@ -5,9 +5,9 @@ use std::ops::ControlFlow;
 use tower::BoxError;
 
 use super::ErrorDetails;
+use crate::Context;
 use crate::graphql::Error;
 pub(crate) use crate::services::execution::*;
-use crate::Context;
 
 pub(crate) type FirstResponse = super::engine::RhaiExecutionResponse;
 pub(crate) type DeferredResponse = super::engine::RhaiExecutionDeferredResponse;
@@ -28,10 +28,11 @@ pub(super) fn request_failure(
             .build()?
     } else {
         Response::error_builder()
-            .errors(vec![Error {
-                message: error_details.message.unwrap_or_default(),
-                ..Default::default()
-            }])
+            .errors(vec![
+                Error::builder()
+                    .message(error_details.message.unwrap_or_default())
+                    .build(),
+            ])
             .context(context)
             .status_code(error_details.status)
             .build()?
@@ -53,10 +54,11 @@ pub(super) fn response_failure(context: Context, error_details: ErrorDetails) ->
             .build()
     } else {
         Response::error_builder()
-            .errors(vec![Error {
-                message: error_details.message.unwrap_or_default(),
-                ..Default::default()
-            }])
+            .errors(vec![
+                Error::builder()
+                    .message(error_details.message.unwrap_or_default())
+                    .build(),
+            ])
             .status_code(error_details.status)
             .context(context)
             .build()

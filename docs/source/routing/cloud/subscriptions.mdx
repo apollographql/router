@@ -4,6 +4,7 @@ subtitle: Real-time data delivery across your services
 description: Cloud routers support GraphQL subscriptions by default, enabling clients to receive real-time updates via WebSocket or HTTP callbacks.
 redirectFrom:
     - /graphos/operations/subscriptions
+releaseStage: preview
 ---
 
 <PreviewFeature >
@@ -75,7 +76,7 @@ Subscriptions are enabled automatically for GraphOS Cloud with the following def
 
 ```yaml
 subscription:
-  enabled: true
+  enabled: true # Enabled by default, you don't need to add this to your configuration
   mode:
     passthrough:
       all:

@@ -1,0 +1,45 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/connectors/validation/test_data/uri_templates/invalid_types.graphql
+---
+[
+    Message {
+        code: InvalidUrl,
+        message: "In `GET` in `@connect(http:)` on `Query.argIsArray`: array values aren't valid here",
+        locations: [
+            8:16..8:29,
+            8:16..8:29,
+            10:47..10:50,
+        ],
+    },
+    Message {
+        code: InvalidUrl,
+        message: "In `GET` in `@connect(http:)` on `Query.argIsObject`: object values aren't valid here",
+        locations: [
+            36:1..38:2,
+            14:22..14:27,
+            14:17..14:27,
+            16:47..16:50,
+        ],
+    },
+    Message {
+        code: InvalidUrl,
+        message: "In `GET` in `@connect(http:)` on `This.thisIsArray`: array values aren't valid here",
+        locations: [
+            22:5..22:32,
+            22:5..22:32,
+            25:47..25:54,
+        ],
+    },
+    Message {
+        code: InvalidUrl,
+        message: "In `GET` in `@connect(http:)` on `This.requiresAnObject`: object values aren't valid here",
+        locations: [
+            40:1..42:2,
+            28:15..28:21,
+            28:5..28:31,
+            31:51..31:59,
+        ],
+    },
+]

@@ -1,0 +1,69 @@
+---
+source: apollo-router/tests/integration/query_planner/error_paths.rs
+expression: response
+---
+{
+  "data": {
+    "topProducts": [
+      {
+        "name": "Table",
+        "inStock": null,
+        "reviews": [
+          {
+            "id": "1",
+            "author": {
+              "username": "@ada",
+              "name": "Ada"
+            }
+          },
+          {
+            "id": "2",
+            "author": {
+              "username": "@alan",
+              "name": "Alan"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Chair",
+        "inStock": null,
+        "reviews": [
+          {
+            "id": "3",
+            "author": {
+              "username": "@alan",
+              "name": "Alan"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "errors": [
+    {
+      "message": "service 'inventory' response was malformed: graphql response without data must contain at least one error",
+      "path": [
+        "topProducts",
+        0
+      ],
+      "extensions": {
+        "service": "inventory",
+        "reason": "graphql response without data must contain at least one error",
+        "code": "SUBREQUEST_MALFORMED_RESPONSE"
+      }
+    },
+    {
+      "message": "service 'inventory' response was malformed: graphql response without data must contain at least one error",
+      "path": [
+        "topProducts",
+        1
+      ],
+      "extensions": {
+        "service": "inventory",
+        "reason": "graphql response without data must contain at least one error",
+        "code": "SUBREQUEST_MALFORMED_RESPONSE"
+      }
+    }
+  ]
+}

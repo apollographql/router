@@ -62,7 +62,7 @@ pub struct ValidFederationSubgraph {
 }
 
 pub struct ValidFederationSubgraphs {
-    pub(super) subgraphs: BTreeMap<Arc<str>, ValidFederationSubgraph>,
+    pub subgraphs: BTreeMap<Arc<str>, ValidFederationSubgraph>,
 }
 
 impl fmt::Debug for ValidFederationSubgraphs {

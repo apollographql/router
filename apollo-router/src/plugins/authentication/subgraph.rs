@@ -1,37 +1,45 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::RwLock;
 use std::time::Duration;
 use std::time::SystemTime;
 
-use aws_credential_types::provider::error::CredentialsError;
-use aws_credential_types::provider::ProvideCredentials;
+use aws_config::provider_config::ProviderConfig;
 use aws_credential_types::Credentials;
-use aws_sigv4::http_request::sign;
+use aws_credential_types::provider::ProvideCredentials;
+use aws_credential_types::provider::error::CredentialsError;
 use aws_sigv4::http_request::PayloadChecksumKind;
 use aws_sigv4::http_request::SignableBody;
 use aws_sigv4::http_request::SignableRequest;
 use aws_sigv4::http_request::SigningSettings;
+use aws_sigv4::http_request::sign;
+use aws_smithy_async::rt::sleep::TokioSleep;
+use aws_smithy_async::time::SystemTimeSource;
+use aws_smithy_http_client::tls::Provider;
+use aws_smithy_http_client::tls::rustls_provider::CryptoMode;
+use aws_smithy_runtime_api::client::behavior_version::BehaviorVersion;
 use aws_smithy_runtime_api::client::identity::Identity;
+use aws_types::SdkConfig;
 use aws_types::region::Region;
 use aws_types::sdk_config::SharedCredentialsProvider;
 use http::HeaderMap;
 use http::Request;
+use parking_lot::RwLock;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde::Serialize;
 use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
-use crate::services::router::body::get_body_bytes;
-use crate::services::router::body::RouterBody;
 use crate::services::SubgraphRequest;
+use crate::services::router;
+use crate::services::router::body::RouterBody;
 
 /// Hardcoded Config using access_key and secret.
 /// Prefer using DefaultChain instead.
-#[derive(Clone, JsonSchema, Deserialize, Debug)]
+#[derive(Clone, JsonSchema, Deserialize, Serialize, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct AWSSigV4HardcodedConfig {
     /// The ID for this access key.
@@ -64,7 +72,7 @@ impl ProvideCredentials for AWSSigV4HardcodedConfig {
 }
 
 /// Configuration of the DefaultChainProvider
-#[derive(Clone, JsonSchema, Deserialize, Debug)]
+#[derive(Clone, JsonSchema, Deserialize, Serialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct DefaultChainConfig {
     /// The AWS region this chain applies to.
@@ -78,7 +86,7 @@ pub(crate) struct DefaultChainConfig {
 }
 
 /// Specify assumed role configuration.
-#[derive(Clone, JsonSchema, Deserialize, Debug)]
+#[derive(Clone, JsonSchema, Deserialize, Serialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AssumeRoleProvider {
     /// Amazon Resource Name (ARN)
@@ -91,7 +99,7 @@ pub(crate) struct AssumeRoleProvider {
 }
 
 /// Configure AWS sigv4 auth.
-#[derive(Clone, JsonSchema, Deserialize, Debug)]
+#[derive(Clone, JsonSchema, Deserialize, Serialize, Debug)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum AWSSigV4Config {
     Hardcoded(AWSSigV4HardcodedConfig),
@@ -105,6 +113,18 @@ impl AWSSigV4Config {
         let role_provider_builder = self.assume_role().map(|assume_role_provider| {
             let rp =
                 aws_config::sts::AssumeRoleProvider::builder(assume_role_provider.role_arn.clone())
+                    .configure(
+                        &SdkConfig::builder()
+                            .http_client(
+                                aws_smithy_http_client::Builder::new()
+                                    .tls_provider(Provider::Rustls(CryptoMode::Ring))
+                                    .build_https(),
+                            )
+                            .sleep_impl(TokioSleep::new())
+                            .time_source(SystemTimeSource::new())
+                            .behavior_version(BehaviorVersion::latest())
+                            .build(),
+                    )
                     .session_name(assume_role_provider.session_name.clone())
                     .region(region.clone());
             if let Some(external_id) = &assume_role_provider.external_id {
@@ -116,9 +136,7 @@ impl AWSSigV4Config {
 
         match self {
             Self::DefaultChain(config) => {
-                let aws_config =
-                    aws_config::default_provider::credentials::DefaultCredentialsChain::builder()
-                        .region(region.clone());
+                let aws_config = credentials_chain_builder().region(region.clone());
 
                 let aws_config = if let Some(profile_name) = &config.profile_name {
                     aws_config.profile_name(profile_name.as_str())
@@ -134,10 +152,7 @@ impl AWSSigV4Config {
                 }
             }
             Self::Hardcoded(config) => {
-                let chain =
-                    aws_config::default_provider::credentials::DefaultCredentialsChain::builder()
-                        .build()
-                        .await;
+                let chain = credentials_chain_builder().build().await;
                 if let Some(assume_role_provider) = role_provider_builder {
                     Arc::new(assume_role_provider.build_from_provider(chain).await)
                 } else {
@@ -170,7 +185,20 @@ impl AWSSigV4Config {
     }
 }
 
-#[derive(Clone, Debug, JsonSchema, Deserialize)]
+fn credentials_chain_builder() -> aws_config::default_provider::credentials::Builder {
+    aws_config::default_provider::credentials::DefaultCredentialsChain::builder().configure(
+        ProviderConfig::default()
+            .with_http_client(
+                aws_smithy_http_client::Builder::new()
+                    .tls_provider(Provider::Rustls(CryptoMode::Ring))
+                    .build_https(),
+            )
+            .with_sleep_impl(TokioSleep::new())
+            .with_time_source(SystemTimeSource::new()),
+    )
+}
+
+#[derive(Clone, Debug, JsonSchema, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) enum AuthConfig {
     #[serde(rename = "aws_sig_v4")]
@@ -180,6 +208,7 @@ pub(crate) enum AuthConfig {
 /// Configure subgraph authentication
 #[derive(Clone, Debug, Default, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[schemars(rename = "AuthenticationSubgraphConfig")]
 pub(crate) struct Config {
     /// Configuration that will apply to all subgraphs.
     #[serde(default)]
@@ -263,9 +292,7 @@ async fn refresh_credentials(
 ) -> Option<Duration> {
     match credentials_provider.provide_credentials().await {
         Ok(new_credentials) => {
-            let mut credentials = credentials
-                .write()
-                .expect("authentication: credentials RwLock poisoned");
+            let mut credentials = credentials.write();
             *credentials = new_credentials;
             next_refresh_timer(&credentials)
         }
@@ -296,7 +323,6 @@ impl ProvideCredentials for CredentialsProvider {
         aws_credential_types::provider::future::ProvideCredentials::ready(Ok(self
             .credentials
             .read()
-            .expect("authentication: credentials RwLock poisoned")
             .clone()))
     }
 }
@@ -314,7 +340,7 @@ impl SigningParamsConfig {
         // We'll go with default signed headers
         let headers = HeaderMap::<&'static str>::default();
         // UnsignedPayload only applies to lattice
-        let body_bytes = get_body_bytes(body).await?.to_vec();
+        let body_bytes = router::body::into_bytes(body).await?.to_vec();
         let signable_request = SignableRequest::new(
             parts.method.as_str(),
             parts.uri.to_string(),
@@ -330,13 +356,13 @@ impl SigningParamsConfig {
         let (signing_instructions, _signature) = sign(signable_request, &signing_params.into())
             .map_err(|err| {
                 increment_failure_counter(subgraph_name);
-                let error = format!("failed to sign GraphQL body for AWS SigV4: {}", err);
+                let error = format!("failed to sign GraphQL body for AWS SigV4: {err}");
                 tracing::error!("{}", error);
                 error
             })?
             .into_parts();
-        req = Request::<RouterBody>::from_parts(parts, body_bytes.into());
-        signing_instructions.apply_to_request_http0x(&mut req);
+        req = Request::<RouterBody>::from_parts(parts, router::body::from_bytes(body_bytes));
+        signing_instructions.apply_to_request_http1x(&mut req);
         increment_success_counter(subgraph_name);
         Ok(req)
     }
@@ -369,13 +395,13 @@ impl SigningParamsConfig {
         let (signing_instructions, _signature) = sign(signable_request, &signing_params.into())
             .map_err(|err| {
                 increment_failure_counter(subgraph_name);
-                let error = format!("failed to sign GraphQL body for AWS SigV4: {}", err);
+                let error = format!("failed to sign GraphQL body for AWS SigV4: {err}");
                 tracing::error!("{}", error);
                 error
             })?
             .into_parts();
         req = Request::<()>::from_parts(parts, ());
-        signing_instructions.apply_to_request_http0x(&mut req);
+        signing_instructions.apply_to_request_http1x(&mut req);
         increment_success_counter(subgraph_name);
         Ok(req)
     }
@@ -400,7 +426,7 @@ impl SigningParamsConfig {
             .await
             .map_err(|err| {
                 increment_failure_counter(self.subgraph_name.as_str());
-                let error = format!("failed to get credentials for AWS SigV4 signing: {}", err);
+                let error = format!("failed to get credentials for AWS SigV4 signing: {err}");
                 tracing::error!("{}", error);
                 error.into()
             })
@@ -475,7 +501,7 @@ impl SubgraphAuth {
                     let signing_params = signing_params.clone();
                     req.context
                         .extensions()
-                        .with_lock(|mut lock| lock.insert(signing_params));
+                        .with_lock(|lock| lock.insert(signing_params));
                     req
                 })
                 .service(service)
@@ -498,9 +524,9 @@ impl SubgraphAuth {
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
-    use std::sync::Arc;
 
     use http::header::CONTENT_LENGTH;
     use http::header::CONTENT_TYPE;
@@ -509,13 +535,13 @@ mod test {
     use tower::Service;
 
     use super::*;
+    use crate::Context;
     use crate::graphql::Request;
     use crate::plugin::test::MockSubgraphService;
     use crate::query_planner::fetch::OperationKind;
-    use crate::services::subgraph::SubgraphRequestId;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
-    use crate::Context;
+    use crate::services::subgraph::SubgraphRequestId;
 
     async fn test_signing_settings(service_name: &str) -> SigningSettings {
         let params: SigningParamsConfig = make_signing_params(
@@ -810,7 +836,7 @@ mod test {
         Ok(SubgraphResponse::new_from_response(
             http::Response::default(),
             Context::new(),
-            req.subgraph_name.unwrap_or_else(|| String::from("test")),
+            req.subgraph_name,
             SubgraphRequestId(String::new()),
         ))
     }
@@ -841,6 +867,7 @@ mod test {
             )
             .operation_kind(OperationKind::Query)
             .context(Context::new())
+            .subgraph_name(String::default())
             .build()
     }
 
@@ -857,7 +884,7 @@ mod test {
         let http_request = request
             .clone()
             .subgraph_request
-            .map(|body| RouterBody::from(serde_json::to_string(&body).unwrap()));
+            .map(|body| router::body::from_bytes(serde_json::to_string(&body).unwrap()));
 
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();

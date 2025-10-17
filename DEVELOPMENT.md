@@ -18,16 +18,13 @@ The **Apollo Router Core** is a configurable, high-performance **graph router** 
 
 ## Development
 
-You will need a recent version of rust (`1.72` works well as of writing).
-Installing rust [using rustup](https://www.rust-lang.org/tools/install) is
-the recommended way to do it as it will install rustup, rustfmt and other
-goodies that are not always included by default in other rust distribution channels:
+You will need a recent version of rust, as specified in `rust-toolchain.toml`.
+We recommend [using rustup](https://www.rust-lang.org/tools/install)
+as it will automatically install the requiried toolchain version,
+including rustfmt and clippy
+that are not always included by default in other rust distribution channels.
 
-```
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-In addition, you will need to [install protoc](https://grpc.io/docs/protoc-installation/) and [cmake](https://cmake.org/).
+In addition, you will need to [install protoc](https://grpc.io/docs/protoc-installation/).
 
 Set up your git hooks:
 
@@ -39,17 +36,94 @@ git config --local core.hooksPath .githooks/
 
 Use `cargo build --all-targets` to build the project.
 
-Some tests use external services such as Jaeger and Redis.
+#### External test dependencies
+
+Some tests require external services for caching, telemetry, and database functionality.
 
 To start these services:
 
-```
+```shell
 docker-compose up -d
 ```
 
-**Note:** `-d` is for running into background. You can remove `-d` if you
-have issues and you want to see the logs or if you want to run the service
-in foreground.
+This starts:
+- **Redis** (port 6379) - Required for entity caching, response caching, and Redis-related integration tests
+- **PostgreSQL** (port 5432) - Used by database integration tests
+- **Zipkin** (port 9411) - For distributed tracing tests
+- **Datadog Agent** (port 8126) - For Datadog telemetry integration tests
+
+Some tests that use the features above are configured with `required_to_start: true`. The router won't start if these services aren't available, causing test failures.
+
+**Note:** `-d` runs services in the background. Remove `-d` if you want to see logs or run in foreground.
+
+#### Enterprise feature testing
+
+Some tests require Apollo GraphOS credentials to test enterprise features like licensing, reporting, and Apollo Studio integration.
+
+If you have access to a GraphOS graph, set these environment variables:
+
+```shell
+export TEST_APOLLO_KEY="your-apollo-api-key"
+export TEST_APOLLO_GRAPH_REF="your-graph-ref@variant"
+```
+
+**When these are NOT set:** Enterprise tests will be automatically skipped rather than failing. This is gated by a `graph_os_enabled` function used in tests. _Developers: to ensure that enterprise tests are skipped, make sure to include this check!_
+**When these ARE set:** Tests will connect to Apollo GraphOS services for full integration testing.
+
+### Testing
+
+Tests on this repository are run using [nextest](https://nexte.st/).
+
+#### Installing nextest
+
+If you don't already have nextest installed:
+
+```shell
+cargo install cargo-nextest --locked
+```
+
+#### Test environment setup
+
+**For basic unit and integration tests:**
+```shell
+# Start external services (eg, Redis, PostgreSQL)
+docker-compose up -d
+```
+
+**For enterprise/GraphOS feature tests:**
+
+This is optional. See above for how these tests will be skipped when these environment variables aren't set along with other nuances of how tests are run.
+
+```shell
+# Set GraphOS credentials (optional)
+export TEST_APOLLO_KEY="your-apollo-api-key"
+export TEST_APOLLO_GRAPH_REF="your-graph-ref@variant"
+```
+
+#### Using nextest with integration tests
+
+```shell
+# Run all integration tests
+cargo nextest run --test integration_tests
+
+# Run all lifecycle module tests
+cargo nextest run --test integration_tests -E 'test(integration::lifecycle)'
+
+# Run a specific test (e.g., test_happy)
+cargo nextest run --test integration_tests -E 'test(integration::lifecycle::test_happy)'
+```
+
+For more complex test selection, nextest supports [filtersets](https://nexte.st/docs/filtersets/reference/) using the `-E` flag, which allow you to run specific subsets of tests using logical operators and pattern matching.
+
+#### Using nextest for unit tests, with filters
+
+```shell
+# Run a single unit test
+cargo nextest run --lib -E 'test(test_router_trace_attributes)'
+# Run a suite of unit tests
+cargo nextest run --lib -p apollo-router -E 'test(services::router)'
+```
+
 
 ### Run against the docker-compose or Node.js setup
 
@@ -98,25 +172,40 @@ You have to build the router with your choice of feature flags and you must use 
 e.g.: heap and ad-hoc allocation tracing
 
 ```shell
-# e.g. heap and ad-hoc allocation tracing: cargo build --profile release-dhat --features dhat-heap,dhat-ad-hoc
+cargo build --profile release-dhat --features dhat-heap,dhat-ad-hoc
 ```
 
 e.g.: heap allocation tracing
 
 ```shell
-cargo build --profile release-dhat --features dhat-heap 
+cargo build --profile release-dhat --features dhat-heap
 ```
 
-This will create a router in `./target/release-dhat`.
+This will create a router in `./target/release-dhat`, which can be run with:
+```shell
+cargo run --profile release-dhat --features dhat-heap -- -s ./apollo-router/testing_schema.graphql -c router.yaml
+```
 
 When you run your binary, on termination you will get `dhat-heap.json` and/or `dhat-ad-hoc.json` files which can
-be examined using standard DHAT tooling.
+be examined using standard DHAT tooling, e.g. [DHAT html viewer](https://nnethercote.github.io/dh_view/dh_view.html)
 
 For more details on interpreting these files and running tests, see the [dhat-rs](https://docs.rs/dhat/latest/dhat/#running) crate documentation.
 
 ### Troubleshoot
 
 * If you have an issue with rust-analyzer reporting an unresolved import about `derivative::Derivative` [check this solution](https://github.com/rust-analyzer/rust-analyzer/issues/7459#issuecomment-876796459) found in a rust-analyzer issue.
+
+### Code coverage
+
+Code coverage is run in CI nightly, but not done on every commit.  To view coverage from nightly runs visit [our coverage on Codecov](https://codecov.io/gh/apollographql/router).
+
+To run code coverage locally, you can `cargo install cargo-llvm-cov`, and run:
+
+```shell
+cargo llvm-cov nextest --summary-only
+```
+
+For full information on available options, including HTML reports and `lcov.info` file support, see [nextest documentation](https://nexte.st/book/coverage.html) and [cargo llvm-cov documentation](https://github.com/taiki-e/cargo-llvm-cov#get-coverage-of-cc-code-linked-to-rust-librarybinary).
 
 ## Project maintainers
 

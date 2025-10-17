@@ -1,0 +1,116 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.10")
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.2"
+    import: ["@connect", "@source"]
+  )
+  @source(
+    name: "api"
+    http: {baseURL: "https://api.example.com"}
+  )
+
+type Mutation {
+  mutate(input: [Input!]): String
+    @connect(
+      source: "api"
+      http: {
+        POST: "/"
+        body: """
+        $args.input {
+          FIELD1: field1
+          field2
+          field3
+          field4
+          field5
+          FIELD6: field6
+          field7 {
+            field1
+            field2
+            field3
+            field4
+            field5
+            field6
+            field7
+            field8
+            field9
+            field10 {
+              field
+              field2
+            }
+            field11 {
+              field
+              field2
+              field3
+              field4
+              field5
+              field6
+              field7
+              field8
+              field9
+              field10
+            }
+            field12
+            field13
+            field14
+            field15
+            field16
+            field17
+            field18
+            field19
+          }
+        }
+        """
+      }
+      selection: "$"
+    )
+}
+
+input Input {
+  field1: String!
+  field2: String!
+  field3: String!
+  field4: String!
+  field5: String!
+  field6: String!
+  field7: Field7!
+}
+
+input Field7 {
+  field1: String!
+  field2: String!
+  field3: String!
+  field4: String!
+  field5: String!
+  field6: String!
+  field7: String!
+  field8: String!
+  field9: String!
+  field10: [Field10!]
+  field11: [Field11!]
+  field12: String!
+  field13: String!
+  field14: String!
+  field15: String!
+  field16: String!
+  field17: String!
+  field18: String!
+  field19: String!
+}
+
+input Field10 {
+  field: String!
+  field2: String!
+}
+
+input Field11 {
+  field: String!
+  field2: String!
+  field3: String!
+  field4: String!
+  field5: String!
+  field6: String!
+  field7: String!
+  field8: String!
+  field9: String!
+  field10: String!
+}

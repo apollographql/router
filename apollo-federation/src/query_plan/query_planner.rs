@@ -1,45 +1,52 @@
 use std::cell::Cell;
 use std::num::NonZeroU32;
-use std::ops::Deref;
+use std::ops::ControlFlow;
 use std::sync::Arc;
 
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Name;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::ExecutableDocument;
-use apollo_compiler::Name;
 use itertools::Itertools;
+use serde::Deserialize;
 use serde::Serialize;
 use tracing::trace;
 
-use super::fetch_dependency_graph::FetchIdGenerator;
 use super::ConditionNode;
+use super::QueryPlanCost;
+use super::fetch_dependency_graph::FetchIdGenerator;
+use crate::ApiSchemaOptions;
+use crate::Supergraph;
 use crate::bail;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::operation::normalize_operation;
-use crate::operation::NamedFragments;
+use crate::internal_error;
 use crate::operation::NormalizedDefer;
 use crate::operation::Operation;
 use crate::operation::SelectionSet;
-use crate::query_graph::build_federated_query_graph;
-use crate::query_graph::path_tree::OpPathTree;
+use crate::operation::normalize_operation;
+use crate::query_graph::OverrideConditions;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphNodeType;
-use crate::query_plan::fetch_dependency_graph::compute_nodes_for_tree;
-use crate::query_plan::fetch_dependency_graph::FetchDependencyGraph;
-use crate::query_plan::fetch_dependency_graph::FetchDependencyGraphNodePath;
-use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
-use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
-use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToQueryPlanProcessor;
-use crate::query_plan::query_planning_traversal::convert_type_from_subgraph;
-use crate::query_plan::query_planning_traversal::BestQueryPlanInfo;
-use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
-use crate::query_plan::query_planning_traversal::QueryPlanningTraversal;
+use crate::query_graph::build_federated_query_graph;
+use crate::query_graph::path_tree::OpPathTree;
 use crate::query_plan::PlanNode;
 use crate::query_plan::QueryPlan;
 use crate::query_plan::SequenceNode;
 use crate::query_plan::TopLevelPlanNode;
+use crate::query_plan::fetch_dependency_graph::FetchDependencyGraph;
+use crate::query_plan::fetch_dependency_graph::FetchDependencyGraphNodePath;
+use crate::query_plan::fetch_dependency_graph::compute_nodes_for_tree;
+use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
+use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
+use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToQueryPlanProcessor;
+use crate::query_plan::query_planning_traversal::BestQueryPlanInfo;
+use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
+use crate::query_plan::query_planning_traversal::QueryPlanningTraversal;
+use crate::query_plan::query_planning_traversal::convert_type_from_subgraph;
+use crate::query_plan::query_planning_traversal::non_local_selections_estimation;
+use crate::schema::ValidFederationSchema;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
@@ -47,16 +54,12 @@ use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::TypeDefinitionPosition;
-use crate::schema::ValidFederationSchema;
 use crate::utils::logging::snapshot;
-use crate::ApiSchemaOptions;
-use crate::Supergraph;
 
 #[derive(Debug, Clone, Hash, Serialize)]
 pub struct QueryPlannerConfig {
-    /// If enabled, the query planner will extract inline fragments into fragment
-    /// definitions before sending queries to subgraphs. This can significantly
-    /// reduce the size of the query sent to subgraphs.
+    /// If enabled, the query planner will attempt to extract common subselections into named
+    /// fragments. This can significantly reduce the size of the query sent to subgraphs.
     ///
     /// Defaults to false.
     pub generate_query_fragments: bool,
@@ -73,7 +76,7 @@ pub struct QueryPlannerConfig {
     // Side-note: implemented as an object instead of single boolean because we expect to add more
     // to this soon enough. In particular, once defer-passthrough to subgraphs is implemented, the
     // idea would be to add a new `passthrough_subgraphs` option that is the list of subgraphs to
-    // which we can pass-through some @defer (and it would be empty by default). Similarly, once we
+    // which we can pass through some @defer (and it would be empty by default). Similarly, once we
     // support @stream, grouping the options here will make sense too.
     pub incremental_delivery: QueryPlanIncrementalDeliveryConfig,
 
@@ -165,13 +168,16 @@ impl Default for QueryPlannerDebugConfig {
 }
 
 // PORT_NOTE: renamed from PlanningStatistics in the JS codebase.
-#[derive(Debug, PartialEq, Default, Serialize)]
+#[derive(Debug, PartialEq, Default, Serialize, Deserialize)]
 pub struct QueryPlanningStatistics {
     pub evaluated_plan_count: Cell<usize>,
+    pub evaluated_plan_paths: Cell<usize>,
+    /// `best_plan_cost` can be NaN, if the cost is not computed or irrelevant.
+    pub best_plan_cost: f64,
 }
 
-#[derive(Debug, Default, Clone)]
-pub struct QueryPlanOptions {
+#[derive(Clone)]
+pub struct QueryPlanOptions<'a> {
     /// A set of labels which will be used _during query planning_ to
     /// enable/disable edges with a matching label in their override condition.
     /// Edges with override conditions require their label to be present or absent
@@ -179,16 +185,53 @@ pub struct QueryPlanOptions {
     /// progressive @override feature.
     // PORT_NOTE: In JS implementation this was a Map
     pub override_conditions: Vec<String>,
+    /// An optional function that will be called to check if the query plan should be cancelled.
+    ///
+    /// Cooperative cancellation occurs when the original client has abandoned the query.
+    /// When this happens, the query plan should be cancelled to free up resources.
+    ///
+    /// This function should return `ControlFlow::Break` if the query plan should be cancelled.
+    ///
+    /// Defaults to `None`.
+    pub check_for_cooperative_cancellation: Option<&'a dyn Fn() -> ControlFlow<()>>,
+    /// Impose a limit on the number of non-local selections, which can be a
+    /// performance hazard. On by default.
+    pub non_local_selections_limit_enabled: bool,
+    /// Names of subgraphs that are disabled and should be avoided during
+    /// planning. If this is non-empty, query planner may error if it cannot
+    /// find a plan that doesn't use the disabled subgraphs, specifically with
+    /// `SingleFederationError::NoPlanFoundWithDisabledSubgraphs`.
+    pub disabled_subgraph_names: IndexSet<String>,
 }
 
-#[derive(Debug, Default, Clone)]
-pub(crate) struct EnabledOverrideConditions(IndexSet<String>);
+impl Default for QueryPlanOptions<'_> {
+    fn default() -> Self {
+        Self {
+            override_conditions: Vec::new(),
+            check_for_cooperative_cancellation: None,
+            non_local_selections_limit_enabled: true,
+            disabled_subgraph_names: Default::default(),
+        }
+    }
+}
 
-impl Deref for EnabledOverrideConditions {
-    type Target = IndexSet<String>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
+impl std::fmt::Debug for QueryPlanOptions<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("QueryPlanOptions")
+            .field("override_conditions", &self.override_conditions)
+            .field(
+                "check_for_cooperative_cancellation",
+                if self.check_for_cooperative_cancellation.is_some() {
+                    &"Some(...)"
+                } else {
+                    &"None"
+                },
+            )
+            .field(
+                "non_local_selections_limit_enabled",
+                &self.non_local_selections_limit_enabled,
+            )
+            .finish()
     }
 }
 
@@ -204,7 +247,7 @@ pub struct QueryPlanner {
     /// subgraphs.
     // PORT_NOTE: Named `inconsistentAbstractTypesRuntimes` in the JS codebase, which was slightly
     // confusing.
-    abstract_types_with_inconsistent_runtime_types: IndexSet<AbstractTypeDefinitionPosition>,
+    abstract_types_with_inconsistent_runtime_types: IndexSet<Name>,
 }
 
 impl QueryPlanner {
@@ -297,6 +340,7 @@ impl QueryPlanner {
             .get_types()
             .filter_map(|position| AbstractTypeDefinitionPosition::try_from(position).ok())
             .filter(|position| is_inconsistent(position.clone()))
+            .map(|position| position.type_name().clone())
             .collect::<IndexSet<_>>();
 
         Ok(Self {
@@ -345,34 +389,25 @@ impl QueryPlanner {
 
         let normalized_operation = normalize_operation(
             operation,
-            NamedFragments::new(&document.fragments, &self.api_schema),
+            &document.fragments,
             &self.api_schema,
             &self.interface_types_with_interface_objects,
+            &|| {
+                QueryPlanningParameters::check_cancellation_with(
+                    &options.check_for_cooperative_cancellation,
+                )
+            },
         )?;
 
-        let (normalized_operation, assigned_defer_labels, defer_conditions, has_defers) =
-            if self.config.incremental_delivery.enable_defer {
-                let NormalizedDefer {
-                    operation,
-                    assigned_defer_labels,
-                    defer_conditions,
-                    has_defers,
-                } = normalized_operation.with_normalized_defer()?;
-                if has_defers && is_subscription {
-                    return Err(SingleFederationError::DeferredSubscriptionUnsupported.into());
-                }
-                (
-                    operation,
-                    Some(assigned_defer_labels),
-                    Some(defer_conditions),
-                    has_defers,
-                )
-            } else {
-                // If defer is not enabled, we remove all @defer from the query. This feels cleaner do this once here than
-                // having to guard all the code dealing with defer later, and is probably less error prone too (less likely
-                // to end up passing through a @defer to a subgraph by mistake).
-                (normalized_operation.without_defer()?, None, None, false)
-            };
+        let NormalizedDefer {
+            operation: normalized_operation,
+            assigned_defer_labels,
+            defer_conditions,
+            has_defers,
+        } = normalized_operation.with_normalized_defer()?;
+        if has_defers && is_subscription {
+            return Err(SingleFederationError::DeferredSubscriptionUnsupported.into());
+        }
 
         if normalized_operation.selection_set.is_empty() {
             return Ok(QueryPlan::default());
@@ -425,22 +460,43 @@ impl QueryPlanner {
                 .clone()
                 .into(),
             config: self.config.clone(),
-            override_conditions: EnabledOverrideConditions(IndexSet::from_iter(
-                options.override_conditions,
-            )),
+            override_conditions: OverrideConditions::new(
+                &self.federated_query_graph,
+                &IndexSet::from_iter(options.override_conditions),
+            ),
+            check_for_cooperative_cancellation: options.check_for_cooperative_cancellation,
             fetch_id_generator: Arc::new(FetchIdGenerator::new()),
+            disabled_subgraphs: self
+                .federated_query_graph
+                .subgraphs()
+                .filter_map(|(subgraph, _)| {
+                    if options.disabled_subgraph_names.contains(subgraph.as_ref()) {
+                        Some(subgraph.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
         };
 
-        let root_node = match defer_conditions {
-            Some(defer_conditions) if !defer_conditions.is_empty() => {
-                compute_plan_for_defer_conditionals(
-                    &mut parameters,
-                    &mut processor,
-                    defer_conditions,
-                )?
-            }
-            _ => compute_plan_internal(&mut parameters, &mut processor, has_defers)?,
-        };
+        let mut non_local_selection_state = options
+            .non_local_selections_limit_enabled
+            .then(non_local_selections_estimation::State::default);
+        let (root_node, cost) = if !defer_conditions.is_empty() {
+            compute_plan_for_defer_conditionals(
+                &mut parameters,
+                &mut processor,
+                defer_conditions,
+                &mut non_local_selection_state,
+            )
+        } else {
+            compute_plan_internal(
+                &mut parameters,
+                &mut processor,
+                has_defers,
+                &mut non_local_selection_state,
+            )
+        }?;
 
         let root_node = match root_node {
             // If this is a subscription, we want to make sure that we return a SubscriptionNode rather than a PlanNode
@@ -454,10 +510,11 @@ impl QueryPlanner {
             ),
             Some(PlanNode::Sequence(root_node)) if is_subscription => {
                 let Some((primary, rest)) = root_node.nodes.split_first() else {
-                    unreachable!("Sequence must have at least one node");
+                    // TODO(@goto-bus-stop): We could probably guarantee this in the type system
+                    bail!("Invalid query plan: Sequence must have at least one node");
                 };
                 let PlanNode::Fetch(primary) = primary.clone() else {
-                    unreachable!("Primary node of a subscription is not a Fetch");
+                    bail!("Invalid query plan: Primary node of a subscription is not a Fetch");
                 };
                 let rest = PlanNode::Sequence(SequenceNode {
                     nodes: rest.to_vec(),
@@ -470,9 +527,10 @@ impl QueryPlanner {
                 ))
             }
             Some(node) if is_subscription => {
-                unreachable!(
-                    "Unexpected top level PlanNode: '{node:?}' when processing subscription"
-                )
+                bail!(
+                    "Invalid query plan for subscription: unexpected {} at root",
+                    node.node_kind()
+                );
             }
             Some(PlanNode::Fetch(inner)) => Some(TopLevelPlanNode::Fetch(inner)),
             Some(PlanNode::Sequence(inner)) => Some(TopLevelPlanNode::Sequence(inner)),
@@ -485,7 +543,10 @@ impl QueryPlanner {
 
         let plan = QueryPlan {
             node: root_node,
-            statistics,
+            statistics: QueryPlanningStatistics {
+                best_plan_cost: cost,
+                ..statistics
+            },
         };
 
         snapshot!(
@@ -505,11 +566,20 @@ impl QueryPlanner {
     pub fn api_schema(&self) -> &ValidFederationSchema {
         &self.api_schema
     }
+
+    pub fn supergraph_schema(&self) -> &ValidFederationSchema {
+        &self.supergraph_schema
+    }
+
+    pub fn override_condition_labels(&self) -> &IndexSet<Arc<str>> {
+        self.federated_query_graph.override_condition_labels()
+    }
 }
 
 fn compute_root_serial_dependency_graph(
     parameters: &QueryPlanningParameters,
     has_defers: bool,
+    non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
 ) -> Result<Vec<FetchDependencyGraph>, FederationError> {
     let QueryPlanningParameters {
         supergraph_schema,
@@ -536,14 +606,24 @@ fn compute_root_serial_dependency_graph(
         mut fetch_dependency_graph,
         path_tree: mut prev_path,
         ..
-    } = compute_root_parallel_best_plan(parameters, selection_set, has_defers)?;
+    } = compute_root_parallel_best_plan(
+        parameters,
+        selection_set,
+        has_defers,
+        non_local_selection_state,
+    )?;
     let mut prev_subgraph = only_root_subgraph(&fetch_dependency_graph)?;
     for selection_set in split_roots {
         let BestQueryPlanInfo {
             fetch_dependency_graph: new_dep_graph,
             path_tree: new_path,
             ..
-        } = compute_root_parallel_best_plan(parameters, selection_set, has_defers)?;
+        } = compute_root_parallel_best_plan(
+            parameters,
+            selection_set,
+            has_defers,
+            non_local_selection_state,
+        )?;
         let new_subgraph = only_root_subgraph(&new_dep_graph)?;
         if new_subgraph == prev_subgraph {
             // The new operation (think 'mutation' operation) is on the same subgraph than the previous one, so we can concat them in a single fetch
@@ -568,12 +648,13 @@ fn compute_root_serial_dependency_graph(
                 &mut fetch_dependency_graph,
                 &prev_path,
                 parameters.config.type_conditioned_fetching,
+                &|| parameters.check_cancellation(),
             )?;
         } else {
             // PORT_NOTE: It is unclear if they correct thing to do here is get the next ID, use
             // the current ID that is inside the fetch dep graph's ID generator, or to use the
             // starting ID. Because this method ensure uniqueness between IDs, this approach was
-            // taken; however, it could be the case that this causes unforseen issues.
+            // taken; however, it could be the case that this causes unforeseen issues.
             digest.push(std::mem::replace(
                 &mut fetch_dependency_graph,
                 new_dep_graph,
@@ -606,6 +687,7 @@ pub(crate) fn compute_root_fetch_groups(
     dependency_graph: &mut FetchDependencyGraph,
     path: &OpPathTree,
     type_conditioned_fetching_enabled: bool,
+    check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
 ) -> Result<(), FederationError> {
     // The root of the pathTree is one of the "fake" root of the subgraphs graph,
     // which belongs to no subgraph but points to each ones.
@@ -625,7 +707,7 @@ pub(crate) fn compute_root_fetch_groups(
             ty => {
                 return Err(FederationError::internal(format!(
                     "expected an object type for the root of a subgraph, found {ty}"
-                )))
+                )));
             }
         };
         let fetch_dependency_node = dependency_graph.get_or_create_root_node(
@@ -655,6 +737,7 @@ pub(crate) fn compute_root_fetch_groups(
             )?,
             Default::default(),
             &Default::default(),
+            check_cancellation,
         )?;
     }
     Ok(())
@@ -663,22 +746,29 @@ pub(crate) fn compute_root_fetch_groups(
 fn compute_root_parallel_dependency_graph(
     parameters: &QueryPlanningParameters,
     has_defers: bool,
-) -> Result<FetchDependencyGraph, FederationError> {
+    non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
+) -> Result<(FetchDependencyGraph, QueryPlanCost), FederationError> {
     trace!("Starting process to construct a parallel fetch dependency graph");
     let selection_set = parameters.operation.selection_set.clone();
-    let best_plan = compute_root_parallel_best_plan(parameters, selection_set, has_defers)?;
+    let best_plan = compute_root_parallel_best_plan(
+        parameters,
+        selection_set,
+        has_defers,
+        non_local_selection_state,
+    )?;
     snapshot!(
         "FetchDependencyGraph",
         best_plan.fetch_dependency_graph.to_dot(),
         "Fetch dependency graph returned from compute_root_parallel_best_plan"
     );
-    Ok(best_plan.fetch_dependency_graph)
+    Ok((best_plan.fetch_dependency_graph, best_plan.cost))
 }
 
 fn compute_root_parallel_best_plan(
     parameters: &QueryPlanningParameters,
     selection: SelectionSet,
     has_defers: bool,
+    non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
 ) -> Result<BestQueryPlanInfo, FederationError> {
     let planning_traversal = QueryPlanningTraversal::new(
         parameters,
@@ -686,6 +776,7 @@ fn compute_root_parallel_best_plan(
         has_defers,
         parameters.operation.root_kind,
         FetchDependencyGraphToCostProcessor,
+        non_local_selection_state.as_mut(),
     )?;
 
     // Getting no plan means the query is essentially unsatisfiable (it's a valid query, but we can prove it will never return a result),
@@ -699,11 +790,18 @@ fn compute_plan_internal(
     parameters: &mut QueryPlanningParameters,
     processor: &mut FetchDependencyGraphToQueryPlanProcessor,
     has_defers: bool,
-) -> Result<Option<PlanNode>, FederationError> {
+    non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
+) -> Result<(Option<PlanNode>, QueryPlanCost), FederationError> {
     let root_kind = parameters.operation.root_kind;
 
-    let (main, deferred, primary_selection) = if root_kind == SchemaRootDefinitionKind::Mutation {
-        let dependency_graphs = compute_root_serial_dependency_graph(parameters, has_defers)?;
+    let (main, deferred, primary_selection, cost) = if root_kind
+        == SchemaRootDefinitionKind::Mutation
+    {
+        let dependency_graphs = compute_root_serial_dependency_graph(
+            parameters,
+            has_defers,
+            non_local_selection_state,
+        )?;
         let mut main = None;
         let mut deferred = vec![];
         let mut primary_selection = None::<SelectionSet>;
@@ -725,9 +823,14 @@ fn compute_plan_internal(
                 None => primary_selection = new_selection,
             }
         }
-        (main, deferred, primary_selection)
+        // No cost computation necessary. Return NaN for cost.
+        (main, deferred, primary_selection, f64::NAN)
     } else {
-        let mut dependency_graph = compute_root_parallel_dependency_graph(parameters, has_defers)?;
+        let (mut dependency_graph, cost) = compute_root_parallel_dependency_graph(
+            parameters,
+            has_defers,
+            non_local_selection_state,
+        )?;
 
         let (main, deferred) = dependency_graph.process(&mut *processor, root_kind)?;
         snapshot!(
@@ -738,16 +841,17 @@ fn compute_plan_internal(
         // XXX(@goto-bus-stop) Maybe `.defer_tracking` should be on the return value of `process()`..?
         let primary_selection = dependency_graph.defer_tracking.primary_selection;
 
-        (main, deferred, primary_selection)
+        (main, deferred, primary_selection, cost)
     };
 
     if deferred.is_empty() {
-        Ok(main)
+        Ok((main, cost))
     } else {
         let Some(primary_selection) = primary_selection else {
             unreachable!("Should have had a primary selection created");
         };
-        processor.reduce_defer(main, &primary_selection, deferred)
+        let reduced_main = processor.reduce_defer(main, &primary_selection, deferred)?;
+        Ok((reduced_main, cost))
     }
 }
 
@@ -755,13 +859,14 @@ fn compute_plan_for_defer_conditionals(
     parameters: &mut QueryPlanningParameters,
     processor: &mut FetchDependencyGraphToQueryPlanProcessor,
     defer_conditions: IndexMap<Name, IndexSet<String>>,
-) -> Result<Option<PlanNode>, FederationError> {
+    non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
+) -> Result<(Option<PlanNode>, QueryPlanCost), FederationError> {
     generate_condition_nodes(
         parameters.operation.clone(),
         defer_conditions.iter(),
         &mut |op| {
             parameters.operation = op;
-            compute_plan_internal(parameters, processor, true)
+            compute_plan_internal(parameters, processor, true, non_local_selection_state)
         },
     )
 }
@@ -769,25 +874,31 @@ fn compute_plan_for_defer_conditionals(
 fn generate_condition_nodes<'a>(
     op: Arc<Operation>,
     mut conditions: impl Clone + Iterator<Item = (&'a Name, &'a IndexSet<String>)>,
-    on_final_operation: &mut impl FnMut(Arc<Operation>) -> Result<Option<PlanNode>, FederationError>,
-) -> Result<Option<PlanNode>, FederationError> {
+    on_final_operation: &mut impl FnMut(
+        Arc<Operation>,
+    ) -> Result<(Option<PlanNode>, f64), FederationError>,
+) -> Result<(Option<PlanNode>, f64), FederationError> {
     match conditions.next() {
         None => on_final_operation(op),
         Some((cond, labels)) => {
             let else_op = Arc::unwrap_or_clone(op.clone()).reduce_defer(labels)?;
             let if_op = op;
+            let (if_node, if_cost) =
+                generate_condition_nodes(if_op, conditions.clone(), on_final_operation)?;
+            let (else_node, else_cost) = generate_condition_nodes(
+                Arc::new(else_op),
+                conditions.clone(),
+                on_final_operation,
+            )?;
             let node = ConditionNode {
                 condition_variable: cond.clone(),
-                if_clause: generate_condition_nodes(if_op, conditions.clone(), on_final_operation)?
-                    .map(Box::new),
-                else_clause: generate_condition_nodes(
-                    Arc::new(else_op),
-                    conditions.clone(),
-                    on_final_operation,
-                )?
-                .map(Box::new),
+                if_clause: if_node.map(Box::new),
+                else_clause: else_node.map(Box::new),
             };
-            Ok(Some(PlanNode::Condition(Box::new(node))))
+            Ok((
+                Some(PlanNode::Condition(Box::new(node))),
+                if_cost.max(else_cost),
+            ))
         }
     }
 }
@@ -799,14 +910,24 @@ pub(crate) enum SubgraphOperationCompression {
 
 impl SubgraphOperationCompression {
     /// Compress a subgraph operation.
-    pub(crate) fn compress(&mut self, operation: Operation) -> Result<Operation, FederationError> {
+    pub(crate) fn compress(
+        &mut self,
+        operation: Operation,
+    ) -> Result<Valid<ExecutableDocument>, FederationError> {
         match self {
-            Self::GenerateFragments => {
-                let mut operation = operation;
-                operation.generate_fragments()?;
-                Ok(operation)
+            Self::GenerateFragments => Ok(operation.generate_fragments()?),
+            Self::Disabled => {
+                let operation_document = operation.try_into().map_err(|err: FederationError| {
+                    if err.has_invalid_graphql_error() {
+                        internal_error!(
+                            "Query planning produced an invalid subgraph operation.\n{err}"
+                        )
+                    } else {
+                        err
+                    }
+                })?;
+                Ok(operation_document)
             }
-            Self::Disabled => Ok(operation),
         }
     }
 }
@@ -814,7 +935,6 @@ impl SubgraphOperationCompression {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::subgraph::Subgraph;
 
     const TEST_SUPERGRAPH: &str = r#"
 schema
@@ -1223,33 +1343,18 @@ type User
 
     #[test]
     fn drop_operation_root_level_typename() {
-        let subgraph1 = Subgraph::parse_and_expand(
-            "Subgraph1",
-            "https://Subgraph1",
-            r#"
-                type Query {
-                    t: T
-                }
-
-                type T @key(fields: "id") {
-                    id: ID!
-                    x: Int
-                }
-            "#,
-        )
-        .unwrap();
-        let subgraphs = vec![&subgraph1];
-        let supergraph = Supergraph::compose(subgraphs).unwrap();
+        let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
         let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+
         let document = ExecutableDocument::parse_and_validate(
             planner.api_schema().schema(),
             r#"
-                query {
-                    __typename
-                    t {
-                        x
-                    }
+            {
+                __typename
+                bestRatedProducts {
+                    id
                 }
+            }
             "#,
             "operation.graphql",
         )
@@ -1257,12 +1362,14 @@ type User
         let plan = planner
             .build_query_plan(&document, None, Default::default())
             .unwrap();
+        // Note: There should be no `__typename` selection at the root level.
         insta::assert_snapshot!(plan, @r###"
         QueryPlan {
-          Fetch(service: "Subgraph1") {
+          Fetch(service: "reviews") {
             {
-              t {
-                x
+              bestRatedProducts {
+                __typename
+                id
               }
             }
           },

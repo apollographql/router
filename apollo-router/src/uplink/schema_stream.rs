@@ -6,10 +6,10 @@
 use graphql_client::GraphQLQuery;
 
 use super::schema::SchemaState;
-use crate::uplink::schema_stream::supergraph_sdl_query::FetchErrorCode;
-use crate::uplink::schema_stream::supergraph_sdl_query::SupergraphSdlQueryRouterConfig;
 use crate::uplink::UplinkRequest;
 use crate::uplink::UplinkResponse;
+use crate::uplink::schema_stream::supergraph_sdl_query::FetchErrorCode;
+use crate::uplink::schema_stream::supergraph_sdl_query::SupergraphSdlQueryRouterConfig;
 
 #[derive(GraphQLQuery)]
 #[graphql(
@@ -19,7 +19,6 @@ use crate::uplink::UplinkResponse;
     response_derives = "PartialEq, Debug, Deserialize",
     deprecated = "warn"
 )]
-
 pub(crate) struct SupergraphSdlQuery;
 
 impl From<UplinkRequest> for supergraph_sdl_query::Variables {
@@ -107,12 +106,12 @@ mod test {
     use futures::stream::StreamExt;
     use url::Url;
 
+    use crate::uplink::AWS_URL;
+    use crate::uplink::Endpoints;
+    use crate::uplink::GCP_URL;
+    use crate::uplink::UplinkConfig;
     use crate::uplink::schema_stream::SupergraphSdlQuery;
     use crate::uplink::stream_from_uplink;
-    use crate::uplink::Endpoints;
-    use crate::uplink::UplinkConfig;
-    use crate::uplink::AWS_URL;
-    use crate::uplink::GCP_URL;
 
     #[tokio::test]
     async fn integration_test() {
@@ -125,7 +124,7 @@ mod test {
                     apollo_key,
                     apollo_graph_ref,
                     endpoints: Some(Endpoints::fallback(vec![
-                        Url::from_str(url).expect("url must be valid")
+                        Url::from_str(url).expect("url must be valid"),
                     ])),
                     poll_interval: Duration::from_secs(1),
                     timeout: Duration::from_secs(5),
@@ -136,9 +135,9 @@ mod test {
 
                 let schema = results
                     .first()
-                    .unwrap_or_else(|| panic!("expected one result from {}", url))
+                    .unwrap_or_else(|| panic!("expected one result from {url}"))
                     .as_ref()
-                    .unwrap_or_else(|_| panic!("schema should be OK from {}", url));
+                    .unwrap_or_else(|_| panic!("schema should be OK from {url}"));
                 assert!(schema.contains("type Product"))
             }
         }

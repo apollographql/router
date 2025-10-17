@@ -1,22 +1,24 @@
-use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
 
-use apollo_compiler::ast;
-use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::ast;
+use apollo_compiler::collections::HashMap;
+use apollo_compiler::validation::Valid;
+use apollo_federation::query_plan::requires_selection;
+use apollo_federation::query_plan::serializable_document::SerializableDocument;
 use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json_bytes::ByteString;
+use serde_json_bytes::Map;
+use tokio::sync::broadcast::Sender;
 use tower::ServiceExt;
-use tracing::instrument;
 use tracing::Instrument;
+use tracing::instrument;
 
-use super::execution::ExecutionParameters;
 use super::rewrites;
 use super::selection::execute_selection_set;
-use super::selection::Selection;
-use super::subgraph_context::build_operation_with_aliasing;
 use super::subgraph_context::ContextualArguments;
 use super::subgraph_context::SubgraphContext;
 use crate::error::Error;
@@ -24,7 +26,6 @@ use crate::error::FetchError;
 use crate::error::ValidationErrors;
 use crate::graphql;
 use crate::graphql::Request;
-use crate::http_ext;
 use crate::json_ext;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
@@ -33,8 +34,11 @@ use crate::json_ext::ValueExt;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::services::SubgraphRequest;
-use crate::spec::query::change::QueryHashVisitor;
+use crate::services::fetch::ErrorMapping;
+use crate::services::subgraph::BoxService;
+use crate::spec::QueryHash;
 use crate::spec::Schema;
+use crate::spec::SchemaHash;
 
 /// GraphQL operation type.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -93,7 +97,23 @@ impl From<ast::OperationType> for OperationKind {
     }
 }
 
-pub(crate) type SubgraphSchemas = HashMap<String, Arc<Valid<apollo_compiler::Schema>>>;
+pub(crate) type SubgraphSchemas = HashMap<String, SubgraphSchema>;
+
+pub(crate) struct SubgraphSchema {
+    pub(crate) schema: Arc<Valid<apollo_compiler::Schema>>,
+    // TODO: Ideally should have separate nominal type for subgraph's schema hash
+    pub(crate) hash: SchemaHash,
+}
+
+impl SubgraphSchema {
+    pub(crate) fn new(schema: Valid<apollo_compiler::Schema>) -> Self {
+        let sdl = schema.serialize().no_indent().to_string();
+        Self {
+            schema: Arc::new(schema),
+            hash: SchemaHash::new(&sdl),
+        }
+    }
+}
 
 /// A fetch node.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -105,13 +125,13 @@ pub(crate) struct FetchNode {
     /// The data that is required for the subgraph fetch.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     #[serde(default)]
-    pub(crate) requires: Vec<Selection>,
+    pub(crate) requires: Vec<requires_selection::Selection>,
 
     /// The variables that are used for the subgraph fetch.
     pub(crate) variable_usages: Vec<Arc<str>>,
 
     /// The GraphQL subquery that is used for the fetch.
-    pub(crate) operation: SubgraphOperation,
+    pub(crate) operation: SerializableDocument,
 
     /// The GraphQL subquery operation name.
     pub(crate) operation_name: Option<Arc<str>>,
@@ -141,128 +161,7 @@ pub(crate) struct FetchNode {
     pub(crate) authorization: Arc<CacheKeyMetadata>,
 }
 
-#[derive(Clone)]
-pub(crate) struct SubgraphOperation {
-    serialized: String,
-    /// Ideally this would be always present, but we don’t have access to the subgraph schemas
-    /// during `Deserialize`.
-    parsed: Option<Arc<Valid<ExecutableDocument>>>,
-}
-
-impl SubgraphOperation {
-    pub(crate) fn from_string(serialized: impl Into<String>) -> Self {
-        Self {
-            serialized: serialized.into(),
-            parsed: None,
-        }
-    }
-
-    pub(crate) fn from_parsed(parsed: impl Into<Arc<Valid<ExecutableDocument>>>) -> Self {
-        let parsed = parsed.into();
-        Self {
-            serialized: parsed.serialize().no_indent().to_string(),
-            parsed: Some(parsed),
-        }
-    }
-
-    pub(crate) fn as_serialized(&self) -> &str {
-        &self.serialized
-    }
-
-    pub(crate) fn init_parsed(
-        &mut self,
-        subgraph_schema: &Valid<apollo_compiler::Schema>,
-    ) -> Result<&Arc<Valid<ExecutableDocument>>, ValidationErrors> {
-        match &mut self.parsed {
-            Some(parsed) => Ok(parsed),
-            option => {
-                let parsed = Arc::new(ExecutableDocument::parse_and_validate(
-                    subgraph_schema,
-                    &self.serialized,
-                    "operation.graphql",
-                )?);
-                Ok(option.insert(parsed))
-            }
-        }
-    }
-
-    pub(crate) fn as_parsed(
-        &self,
-    ) -> Result<&Arc<Valid<ExecutableDocument>>, SubgraphOperationNotInitialized> {
-        self.parsed.as_ref().ok_or(SubgraphOperationNotInitialized)
-    }
-}
-
-/// Failed to call `SubgraphOperation::init_parsed` after creating a query plan
-#[derive(Debug, displaydoc::Display, thiserror::Error)]
-pub(crate) struct SubgraphOperationNotInitialized;
-
-impl SubgraphOperationNotInitialized {
-    pub(crate) fn into_graphql_errors(self) -> Vec<Error> {
-        vec![graphql::Error::builder()
-            .extension_code(self.code())
-            .message(self.to_string())
-            .build()]
-    }
-
-    pub(crate) fn code(&self) -> &'static str {
-        "SUBGRAPH_OPERATION_NOT_INITIALIZED"
-    }
-}
-
-impl Serialize for SubgraphOperation {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.as_serialized().serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for SubgraphOperation {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        Ok(Self::from_string(String::deserialize(deserializer)?))
-    }
-}
-
-impl PartialEq for SubgraphOperation {
-    fn eq(&self, other: &Self) -> bool {
-        self.as_serialized() == other.as_serialized()
-    }
-}
-
-impl std::fmt::Debug for SubgraphOperation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Debug::fmt(self.as_serialized(), f)
-    }
-}
-
-impl std::fmt::Display for SubgraphOperation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(self.as_serialized(), f)
-    }
-}
-
-#[derive(Clone, Default, Hash, PartialEq, Eq, Deserialize, Serialize)]
-pub(crate) struct QueryHash(#[serde(with = "hex")] pub(crate) Vec<u8>);
-
-impl std::fmt::Debug for QueryHash {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("QueryHash")
-            .field(&hex::encode(&self.0))
-            .finish()
-    }
-}
-
-impl Display for QueryHash {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", hex::encode(&self.0))
-    }
-}
-
+#[derive(Default)]
 pub(crate) struct Variables {
     pub(crate) variables: Object,
     pub(crate) inverted_paths: Vec<Vec<Path>>,
@@ -272,8 +171,8 @@ pub(crate) struct Variables {
 impl Variables {
     #[instrument(skip_all, level = "debug", name = "make_variables")]
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn new(
-        requires: &[Selection],
+    pub(crate) fn new(
+        requires: &[requires_selection::Selection],
         variable_usages: &[Arc<str>],
         data: &Value,
         current_dir: &Path,
@@ -366,176 +265,75 @@ impl Variables {
 
 impl FetchNode {
     #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn fetch_node<'a>(
-        &'a self,
-        parameters: &'a ExecutionParameters<'a>,
-        data: &'a Value,
-        current_dir: &'a Path,
+    pub(crate) async fn subgraph_fetch(
+        &self,
+        service: BoxService,
+        subgraph_request: SubgraphRequest,
+        current_dir: &Path,
+        schema: &Schema,
+        paths: Vec<Vec<Path>>,
+        operation_str: &str,
+        variables: Map<ByteString, Value>,
     ) -> (Value, Vec<Error>) {
-        let FetchNode {
-            operation,
-            operation_kind,
-            operation_name,
-            service_name,
-            ..
-        } = self;
-
-        let Variables {
-            variables,
-            inverted_paths: paths,
-            contextual_arguments,
-        } = match Variables::new(
-            &self.requires,
-            &self.variable_usages,
-            data,
-            current_dir,
-            // Needs the original request here
-            parameters.supergraph_request,
-            parameters.schema,
-            &self.input_rewrites,
-            &self.context_rewrites,
-        ) {
-            Some(variables) => variables,
-            None => {
-                return (Value::Object(Object::default()), Vec::new());
-            }
-        };
-
-        let alias_query_string; // this exists outside the if block to allow the as_str() to be longer lived
-        let aliased_operation = if let Some(ctx_arg) = contextual_arguments {
-            if let Some(subgraph_schema) =
-                parameters.subgraph_schemas.get(&service_name.to_string())
-            {
-                match build_operation_with_aliasing(operation, &ctx_arg, subgraph_schema) {
-                    Ok(op) => {
-                        alias_query_string = op.serialize().no_indent().to_string();
-                        alias_query_string.as_str()
-                    }
-                    Err(errors) => {
-                        tracing::debug!(
-                            "couldn't generate a valid executable document? {:?}",
-                            errors
-                        );
-                        operation.as_serialized()
-                    }
-                }
-            } else {
-                tracing::debug!(
-                    "couldn't find a subgraph schema for service {:?}",
-                    &service_name
-                );
-                operation.as_serialized()
-            }
-        } else {
-            operation.as_serialized()
-        };
-
-        let mut subgraph_request = SubgraphRequest::builder()
-            .supergraph_request(parameters.supergraph_request.clone())
-            .subgraph_request(
-                http_ext::Request::builder()
-                    .method(http::Method::POST)
-                    .uri(
-                        parameters
-                            .schema
-                            .subgraph_url(service_name)
-                            .unwrap_or_else(|| {
-                                panic!(
-                                    "schema uri for subgraph '{service_name}' should already have been checked"
-                                )
-                            })
-                            .clone(),
-                    )
-                    .body(
-                        Request::builder()
-                            .query(aliased_operation)
-                            .and_operation_name(operation_name.as_ref().map(|n| n.to_string()))
-                            .variables(variables.clone())
-                            .build(),
-                    )
-                    .build()
-                    .expect("it won't fail because the url is correct and already checked; qed"),
-            )
-            .subgraph_name(self.service_name.to_string())
-            .operation_kind(*operation_kind)
-            .context(parameters.context.clone())
-            .build();
-        subgraph_request.query_hash = self.schema_aware_hash.clone();
-        subgraph_request.authorization = self.authorization.clone();
-
-        let service = parameters
-            .service_factory
-            .create(service_name)
-            .expect("we already checked that the service exists during planning; qed");
-
         let (_parts, response) = match service
             .oneshot(subgraph_request)
             .instrument(tracing::trace_span!("subfetch_stream"))
             .await
-            // TODO this is a problem since it restores details about failed service
-            // when errors have been redacted in the include_subgraph_errors module.
-            // Unfortunately, not easy to fix here, because at this point we don't
-            // know if we should be redacting errors for this subgraph...
-            .map_err(|e| match e.downcast::<FetchError>() {
-                Ok(inner) => match *inner {
-                    FetchError::SubrequestHttpError { .. } => *inner,
-                    _ => FetchError::SubrequestHttpError {
-                        status_code: None,
-                        service: service_name.to_string(),
-                        reason: inner.to_string(),
-                    },
-                },
-                Err(e) => FetchError::SubrequestHttpError {
-                    status_code: None,
-                    service: service_name.to_string(),
-                    reason: e.to_string(),
-                },
-            }) {
+            .map_to_graphql_error(self.service_name.to_string(), current_dir)
+        {
             Err(e) => {
-                return (
-                    Value::default(),
-                    vec![e.to_graphql_error(Some(current_dir.to_owned()))],
-                );
+                return (Value::default(), vec![e]);
             }
             Ok(res) => res.response.into_parts(),
         };
 
-        super::log::trace_subfetch(
-            service_name,
-            operation.as_serialized(),
-            &variables,
-            &response,
-        );
+        super::log::trace_subfetch(&self.service_name, operation_str, &variables, &response);
 
         if !response.is_primary() {
             return (
                 Value::default(),
-                vec![FetchError::SubrequestUnexpectedPatchResponse {
-                    service: service_name.to_string(),
-                }
-                .to_graphql_error(Some(current_dir.to_owned()))],
+                vec![
+                    FetchError::SubrequestUnexpectedPatchResponse {
+                        service: self.service_name.to_string(),
+                    }
+                    .to_graphql_error(Some(current_dir.to_owned())),
+                ],
             );
         }
 
-        let (value, errors) =
-            self.response_at_path(parameters.schema, current_dir, paths, response);
-        if let Some(id) = &self.id {
-            if let Some(sender) = parameters.deferred_fetches.get(id.as_str()) {
-                u64_counter!(
-                    "apollo.router.operations.defer.fetch",
-                    "Number of deferred responses fetched from subgraphs",
-                    1
-                );
-                if let Err(e) = sender.clone().send((value.clone(), errors.clone())) {
-                    tracing::error!("error sending fetch result at path {} and id {:?} for deferred response building: {}", current_dir, self.id, e);
-                }
-            }
-        }
+        let (value, errors) = self.response_at_path(schema, current_dir, paths, response);
+
         (value, errors)
     }
 
+    pub(crate) fn deferred_fetches(
+        current_dir: &Path,
+        id: &Option<String>,
+        deferred_fetches: &std::collections::HashMap<String, Sender<(Value, Vec<Error>)>>,
+        value: &Value,
+        errors: &[Error],
+    ) {
+        if let Some(id) = id
+            && let Some(sender) = deferred_fetches.get(id.as_str())
+        {
+            u64_counter!(
+                "apollo.router.operations.defer.fetch",
+                "Number of deferred responses fetched from subgraphs",
+                1
+            );
+            if let Err(e) = sender.clone().send((value.clone(), Vec::from(errors))) {
+                tracing::error!(
+                    "error sending fetch result at path {} and id {:?} for deferred response building: {}",
+                    current_dir,
+                    id,
+                    e
+                );
+            }
+        }
+    }
+
     #[instrument(skip_all, level = "debug", name = "response_insert")]
-    fn response_at_path<'a>(
+    pub(crate) fn response_at_path<'a>(
         &'a self,
         schema: &Schema,
         current_dir: &'a Path,
@@ -564,16 +362,21 @@ impl FetchNode {
                                 for values_path in
                                     inverted_paths.get(*i).iter().flat_map(|v| v.iter())
                                 {
-                                    errors.push(Error {
-                                        locations: error.locations.clone(),
-                                        // append to the entitiy's path the error's path without
-                                        //`_entities` and the index
-                                        path: Some(Path::from_iter(
-                                            values_path.0.iter().chain(&path.0[2..]).cloned(),
-                                        )),
-                                        message: error.message.clone(),
-                                        extensions: error.extensions.clone(),
-                                    })
+                                    errors.push(
+                                        Error::builder()
+                                            .locations(error.locations.clone())
+                                            // append to the entity's path the error's path without
+                                            //`_entities` and the index
+                                            .path(Path::from_iter(
+                                                values_path.0.iter().chain(&path.0[2..]).cloned(),
+                                            ))
+                                            .message(error.message.clone())
+                                            .and_extension_code(error.extension_code())
+                                            .extensions(error.extensions.clone())
+                                            // re-use the original ID so we don't double count this error
+                                            .apollo_id(error.apollo_id())
+                                            .build(),
+                                    )
                                 }
                             }
                             _ => {
@@ -593,30 +396,30 @@ impl FetchNode {
 
             // we have to nest conditions and do early returns here
             // because we need to take ownership of the inner value
-            if let Some(Value::Object(mut map)) = response.data {
-                if let Some(entities) = map.remove("_entities") {
-                    tracing::trace!("received entities: {:?}", &entities);
+            if let Some(Value::Object(mut map)) = response.data
+                && let Some(entities) = map.remove("_entities")
+            {
+                tracing::trace!("received entities: {:?}", &entities);
 
-                    if let Value::Array(array) = entities {
-                        let mut value = Value::default();
+                if let Value::Array(array) = entities {
+                    let mut value = Value::default();
 
-                        for (index, mut entity) in array.into_iter().enumerate() {
-                            rewrites::apply_rewrites(schema, &mut entity, &self.output_rewrites);
+                    for (index, mut entity) in array.into_iter().enumerate() {
+                        rewrites::apply_rewrites(schema, &mut entity, &self.output_rewrites);
 
-                            if let Some(paths) = inverted_paths.get(index) {
-                                if paths.len() > 1 {
-                                    for path in &paths[1..] {
-                                        let _ = value.insert(path, entity.clone());
-                                    }
-                                }
-
-                                if let Some(path) = paths.first() {
-                                    let _ = value.insert(path, entity);
+                        if let Some(paths) = inverted_paths.get(index) {
+                            if paths.len() > 1 {
+                                for path in &paths[1..] {
+                                    let _ = value.insert(path, entity.clone());
                                 }
                             }
+
+                            if let Some(path) = paths.first() {
+                                let _ = value.insert(path, entity);
+                            }
                         }
-                        return (value, errors);
                     }
+                    return (value, errors);
                 }
             }
 
@@ -652,12 +455,14 @@ impl FetchNode {
                         })
                         .unwrap_or_else(|| current_dir.clone());
 
-                    Error {
-                        locations: error.locations,
-                        path: Some(path),
-                        message: error.message,
-                        extensions: error.extensions,
-                    }
+                    Error::builder()
+                        .locations(error.locations.clone())
+                        .path(path)
+                        .message(error.message.clone())
+                        .and_extension_code(error.extension_code())
+                        .extensions(error.extensions.clone())
+                        .apollo_id(error.apollo_id())
+                        .build()
                 })
                 .collect();
             let mut data = response.data.unwrap_or_default();
@@ -680,26 +485,20 @@ impl FetchNode {
         subgraph_schemas: &SubgraphSchemas,
     ) -> Result<(), ValidationErrors> {
         let schema = &subgraph_schemas[self.service_name.as_ref()];
-        self.operation.init_parsed(schema)?;
+        self.operation.init_parsed(&schema.schema)?;
         Ok(())
     }
 
     pub(crate) fn init_parsed_operation_and_hash_subquery(
         &mut self,
         subgraph_schemas: &SubgraphSchemas,
-        supergraph_schema_hash: &str,
     ) -> Result<(), ValidationErrors> {
         let schema = &subgraph_schemas[self.service_name.as_ref()];
-        let doc = self.operation.init_parsed(schema)?;
-
-        if let Ok(hash) = QueryHashVisitor::hash_query(
-            schema,
-            supergraph_schema_hash,
-            doc,
+        self.operation.init_parsed(&schema.schema)?;
+        self.schema_aware_hash = Arc::new(schema.hash.operation_hash(
+            self.operation.as_serialized(),
             self.operation_name.as_deref(),
-        ) {
-            self.schema_aware_hash = Arc::new(QueryHash(hash));
-        }
+        ));
         Ok(())
     }
 

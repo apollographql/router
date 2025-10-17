@@ -1,3 +1,72 @@
+//! APIs for integrating with the router's metrics.
+//!
+//! The macros contained here are a replacement for the telemetry crate's `MetricsLayer`. We will
+//! eventually convert all metrics to use these macros and deprecate the `MetricsLayer`.
+//! The reason for this is that the `MetricsLayer` has:
+//!
+//! * No support for dynamic attributes
+//! * No support dynamic metrics.
+//! * Imperfect mapping to metrics API that can only be checked at runtime.
+//!
+//! New metrics should be added using these macros.
+//!
+//! Prefer using `_with_unit` types for all new macros. Units should conform to the
+//! [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/#units),
+//! some of which has been copied here for reference:
+//! * Instruments that measure a count of something should only use annotations with curly braces to
+//!   give additional meaning. For example, use `{packet}`, `{error}`, `{fault}`, etc., not `packet`,
+//!   `error`, `fault`, etc.
+//! * Other instrument units should be specified using the UCUM case sensitive (c/s) variant. For
+//!   example, Cel for the unit with full name degree Celsius.
+//! * When instruments are measuring durations, seconds (i.e. s) should be used.
+//! * Instruments should use non-prefixed units (i.e. By instead of MiBy) unless there is good
+//!   technical reason to not do so.
+//!
+//! NB: we have not yet modified the existing metrics because some metric exporters (notably
+//! Prometheus) include the unit in the metric name, and changing the metric name will be a breaking
+//! change for customers.
+//!
+//! ## Compatibility
+//! This module uses types from the [opentelemetry] crates. Since OpenTelemetry for Rust is not yet
+//! API-stable, we may update it in a minor version, which may require code changes to plugins.
+//!
+//!
+//! # Examples
+//! ```ignore
+//! // Count a thing:
+//! u64_counter!(
+//!     "apollo.router.operations.frobbles",
+//!     "The amount of frobbles we've operated on",
+//!     1
+//! );
+//! // Count a thing with attributes:
+//! u64_counter!(
+//!     "apollo.router.operations.frobbles",
+//!     "The amount of frobbles we've operated on",
+//!     1,
+//!     frobbles.color = "blue"
+//! );
+//! // Count a thing with dynamic attributes:
+//! let attributes = vec![];
+//! if (frobbled) {
+//!     attributes.push(opentelemetry::KeyValue::new("frobbles.color".to_string(), "blue".into()));
+//! }
+//! u64_counter!(
+//!     "apollo.router.operations.frobbles",
+//!     "The amount of frobbles we've operated on",
+//!     1,
+//!     attributes
+//! );
+//! // Measure a thing with units:
+//! f64_histogram_with_unit!(
+//!     "apollo.router.operation.frobbles.time",
+//!     "Duration to operate on frobbles",
+//!     "s",
+//!     1.0,
+//!     frobbles.color = "red"
+//! );
+//! ```
+
 #[cfg(test)]
 use std::future::Future;
 #[cfg(test)]
@@ -11,9 +80,6 @@ use crate::metrics::aggregation::AggregateMeterProvider;
 
 pub(crate) mod aggregation;
 pub(crate) mod filter;
-pub(crate) mod layer;
-
-// During tests this is a task local so that we can test metrics without having to worry about other tests interfering.
 
 #[cfg(test)]
 pub(crate) mod test_utils {
@@ -28,28 +94,27 @@ pub(crate) mod test_utils {
     use itertools::Itertools;
     use num_traits::NumCast;
     use num_traits::ToPrimitive;
-    use opentelemetry::sdk::metrics::data::DataPoint;
-    use opentelemetry::sdk::metrics::data::Gauge;
-    use opentelemetry::sdk::metrics::data::Histogram;
-    use opentelemetry::sdk::metrics::data::HistogramDataPoint;
-    use opentelemetry::sdk::metrics::data::Metric;
-    use opentelemetry::sdk::metrics::data::ResourceMetrics;
-    use opentelemetry::sdk::metrics::data::Sum;
-    use opentelemetry::sdk::metrics::data::Temporality;
-    use opentelemetry::sdk::metrics::reader::AggregationSelector;
-    use opentelemetry::sdk::metrics::reader::MetricProducer;
-    use opentelemetry::sdk::metrics::reader::MetricReader;
-    use opentelemetry::sdk::metrics::reader::TemporalitySelector;
-    use opentelemetry::sdk::metrics::Aggregation;
-    use opentelemetry::sdk::metrics::InstrumentKind;
-    use opentelemetry::sdk::metrics::ManualReader;
-    use opentelemetry::sdk::metrics::MeterProviderBuilder;
-    use opentelemetry::sdk::metrics::Pipeline;
-    use opentelemetry::sdk::AttributeSet;
     use opentelemetry::Array;
     use opentelemetry::KeyValue;
+    use opentelemetry::StringValue;
     use opentelemetry::Value;
-    use opentelemetry_api::Context;
+    use opentelemetry_sdk::metrics::Aggregation;
+    use opentelemetry_sdk::metrics::AttributeSet;
+    use opentelemetry_sdk::metrics::InstrumentKind;
+    use opentelemetry_sdk::metrics::ManualReader;
+    use opentelemetry_sdk::metrics::MeterProviderBuilder;
+    use opentelemetry_sdk::metrics::Pipeline;
+    use opentelemetry_sdk::metrics::data::DataPoint;
+    use opentelemetry_sdk::metrics::data::Gauge;
+    use opentelemetry_sdk::metrics::data::Histogram;
+    use opentelemetry_sdk::metrics::data::HistogramDataPoint;
+    use opentelemetry_sdk::metrics::data::Metric;
+    use opentelemetry_sdk::metrics::data::ResourceMetrics;
+    use opentelemetry_sdk::metrics::data::Sum;
+    use opentelemetry_sdk::metrics::data::Temporality;
+    use opentelemetry_sdk::metrics::reader::AggregationSelector;
+    use opentelemetry_sdk::metrics::reader::MetricReader;
+    use opentelemetry_sdk::metrics::reader::TemporalitySelector;
     use serde::Serialize;
     use tokio::task_local;
 
@@ -84,19 +149,15 @@ pub(crate) mod test_utils {
             self.reader.register_pipeline(pipeline)
         }
 
-        fn register_producer(&self, producer: Box<dyn MetricProducer>) {
-            self.reader.register_producer(producer)
-        }
-
         fn collect(&self, rm: &mut ResourceMetrics) -> opentelemetry::metrics::Result<()> {
             self.reader.collect(rm)
         }
 
-        fn force_flush(&self, cx: &Context) -> opentelemetry_api::metrics::Result<()> {
-            self.reader.force_flush(cx)
+        fn force_flush(&self) -> opentelemetry::metrics::Result<()> {
+            self.reader.force_flush()
         }
 
-        fn shutdown(&self) -> opentelemetry_api::metrics::Result<()> {
+        fn shutdown(&self) -> opentelemetry::metrics::Result<()> {
             self.reader.shutdown()
         }
     }
@@ -149,15 +210,14 @@ pub(crate) mod test_utils {
     pub(crate) fn collect_metrics() -> Metrics {
         let mut metrics = Metrics::default();
         let (_, reader) = meter_provider_and_readers();
-        reader.collect(&mut metrics.resource_metrics).unwrap();
+        reader
+            .collect(&mut metrics.resource_metrics)
+            .expect("Failed to collect metrics. Did you forget to use `async{}.with_metrics()`? See dev-docs/metrics.md");
         metrics
     }
 
     impl Metrics {
-        pub(crate) fn find(
-            &self,
-            name: &str,
-        ) -> Option<&opentelemetry::sdk::metrics::data::Metric> {
+        pub(crate) fn find(&self, name: &str) -> Option<&opentelemetry_sdk::metrics::data::Metric> {
             self.resource_metrics
                 .scope_metrics
                 .iter()
@@ -175,25 +235,27 @@ pub(crate) mod test_utils {
             name: &str,
             ty: MetricType,
             value: T,
+            // Useful for histogram to check the count and not the sum
+            count: bool,
             attributes: &[KeyValue],
         ) -> bool {
             let attributes = AttributeSet::from(attributes);
-            if let Some(value) = value.to_u64() {
-                if self.metric_matches(name, &ty, value, &attributes) {
-                    return true;
-                }
+            if let Some(value) = value.to_u64()
+                && self.metric_matches(name, &ty, value, count, &attributes)
+            {
+                return true;
             }
 
-            if let Some(value) = value.to_i64() {
-                if self.metric_matches(name, &ty, value, &attributes) {
-                    return true;
-                }
+            if let Some(value) = value.to_i64()
+                && self.metric_matches(name, &ty, value, count, &attributes)
+            {
+                return true;
             }
 
-            if let Some(value) = value.to_f64() {
-                if self.metric_matches(name, &ty, value, &attributes) {
-                    return true;
-                }
+            if let Some(value) = value.to_f64()
+                && self.metric_matches(name, &ty, value, count, &attributes)
+            {
+                return true;
             }
 
             false
@@ -204,6 +266,7 @@ pub(crate) mod test_utils {
             name: &str,
             ty: &MetricType,
             value: T,
+            count: bool,
             attributes: &AttributeSet,
         ) -> bool {
             if let Some(metric) = self.find(name) {
@@ -212,21 +275,30 @@ pub(crate) mod test_utils {
                     // Find the datapoint with the correct attributes.
                     if matches!(ty, MetricType::Gauge) {
                         return gauge.data_points.iter().any(|datapoint| {
-                            datapoint.attributes == *attributes && datapoint.value == value
+                            datapoint.value == value
+                                && Self::equal_attributes(attributes, &datapoint.attributes)
                         });
                     }
                 } else if let Some(sum) = metric.data.as_any().downcast_ref::<Sum<T>>() {
                     // Note that we can't actually tell if the sum is monotonic or not, so we just check if it's a sum.
                     if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) {
                         return sum.data_points.iter().any(|datapoint| {
-                            datapoint.attributes == *attributes && datapoint.value == value
+                            datapoint.value == value
+                                && Self::equal_attributes(attributes, &datapoint.attributes)
                         });
                     }
                 } else if let Some(histogram) = metric.data.as_any().downcast_ref::<Histogram<T>>()
+                    && matches!(ty, MetricType::Histogram)
                 {
-                    if matches!(ty, MetricType::Histogram) {
+                    if count {
                         return histogram.data_points.iter().any(|datapoint| {
-                            datapoint.attributes == *attributes && datapoint.sum == value
+                            datapoint.count == value.to_u64().unwrap()
+                                && Self::equal_attributes(attributes, &datapoint.attributes)
+                        });
+                    } else {
+                        return histogram.data_points.iter().any(|datapoint| {
+                            datapoint.sum == value
+                                && Self::equal_attributes(attributes, &datapoint.attributes)
                         });
                     }
                 }
@@ -246,27 +318,23 @@ pub(crate) mod test_utils {
                 if let Some(gauge) = metric.data.as_any().downcast_ref::<Gauge<T>>() {
                     // Find the datapoint with the correct attributes.
                     if matches!(ty, MetricType::Gauge) {
-                        return gauge
-                            .data_points
-                            .iter()
-                            .any(|datapoint| datapoint.attributes == attributes);
+                        return gauge.data_points.iter().any(|datapoint| {
+                            Self::equal_attributes(&attributes, &datapoint.attributes)
+                        });
                     }
                 } else if let Some(sum) = metric.data.as_any().downcast_ref::<Sum<T>>() {
                     // Note that we can't actually tell if the sum is monotonic or not, so we just check if it's a sum.
                     if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) {
-                        return sum
-                            .data_points
-                            .iter()
-                            .any(|datapoint| datapoint.attributes == attributes);
+                        return sum.data_points.iter().any(|datapoint| {
+                            Self::equal_attributes(&attributes, &datapoint.attributes)
+                        });
                     }
                 } else if let Some(histogram) = metric.data.as_any().downcast_ref::<Histogram<T>>()
+                    && matches!(ty, MetricType::Histogram)
                 {
-                    if matches!(ty, MetricType::Histogram) {
-                        return histogram
-                            .data_points
-                            .iter()
-                            .any(|datapoint| datapoint.attributes == attributes);
-                    }
+                    return histogram.data_points.iter().any(|datapoint| {
+                        Self::equal_attributes(&attributes, &datapoint.attributes)
+                    });
                 }
             }
             false
@@ -305,6 +373,20 @@ pub(crate) mod test_utils {
                 })
                 .collect()
         }
+
+        fn equal_attributes(expected: &AttributeSet, actual: &[KeyValue]) -> bool {
+            // If lengths are different, we can short circuit. This also accounts for a bug where
+            // an empty attributes list would always be considered "equal" due to zip capping at
+            // the shortest iter's length
+            if expected.iter().count() != actual.len() {
+                return false;
+            }
+            // This works because the attributes are always sorted
+            expected.iter().zip(actual.iter()).all(|((k, v), kv)| {
+                kv.key == *k
+                    && (kv.value == *v || kv.value == Value::String(StringValue::from("<any>")))
+            })
+        }
     }
 
     #[derive(Serialize, Eq, PartialEq)]
@@ -340,6 +422,8 @@ pub(crate) mod test_utils {
         pub(crate) value: Option<serde_json::Value>,
         #[serde(skip_serializing_if = "Option::is_none")]
         pub(crate) sum: Option<serde_json::Value>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub(crate) count: Option<u64>,
         pub(crate) attributes: BTreeMap<String, serde_json::Value>,
     }
 
@@ -361,7 +445,7 @@ pub(crate) mod test_utils {
     impl SerdeMetricData {
         fn extract_datapoints<T: Into<serde_json::Value> + Clone + 'static>(
             metric_data: &mut SerdeMetricData,
-            value: &dyn opentelemetry::sdk::metrics::data::Aggregation,
+            value: &dyn opentelemetry_sdk::metrics::data::Aggregation,
         ) {
             if let Some(gauge) = value.as_any().downcast_ref::<Gauge<T>>() {
                 gauge.data_points.iter().for_each(|datapoint| {
@@ -386,7 +470,7 @@ pub(crate) mod test_utils {
             let mut serde_metric = SerdeMetric {
                 name: value.name.into_owned(),
                 description: value.description.into_owned(),
-                unit: value.unit.as_str().to_string(),
+                unit: value.unit.to_string(),
                 data: value.data.into(),
             };
             // Sort the datapoints so that we can compare them
@@ -399,10 +483,10 @@ pub(crate) mod test_utils {
                     .datapoints
                     .iter_mut()
                     .for_each(|datapoint| {
-                        if let Some(sum) = &datapoint.sum {
-                            if sum.as_f64().unwrap_or_default() > 0.0 {
-                                datapoint.sum = Some(0.1.into());
-                            }
+                        if let Some(sum) = &datapoint.sum
+                            && sum.as_f64().unwrap_or_default() > 0.0
+                        {
+                            datapoint.sum = Some(0.1.into());
                         }
                     });
             }
@@ -418,10 +502,11 @@ pub(crate) mod test_utils {
             SerdeMetricDataPoint {
                 value: Some(value.value.clone().into()),
                 sum: None,
+                count: None,
                 attributes: value
                     .attributes
                     .iter()
-                    .map(|(k, v)| (k.as_str().to_string(), Self::convert(v)))
+                    .map(|kv| (kv.key.to_string(), Self::convert(&kv.value)))
                     .collect(),
             }
         }
@@ -452,17 +537,18 @@ pub(crate) mod test_utils {
             SerdeMetricDataPoint {
                 sum: Some(value.sum.clone().into()),
                 value: None,
+                count: Some(value.count),
                 attributes: value
                     .attributes
                     .iter()
-                    .map(|(k, v)| (k.as_str().to_string(), Self::convert(v)))
+                    .map(|kv| (kv.key.to_string(), Self::convert(&kv.value)))
                     .collect(),
             }
         }
     }
 
-    impl From<Box<dyn opentelemetry::sdk::metrics::data::Aggregation>> for SerdeMetricData {
-        fn from(value: Box<dyn opentelemetry::sdk::metrics::data::Aggregation>) -> Self {
+    impl From<Box<dyn opentelemetry_sdk::metrics::data::Aggregation>> for SerdeMetricData {
+        fn from(value: Box<dyn opentelemetry_sdk::metrics::data::Aggregation>) -> Self {
             let mut metric_data = SerdeMetricData::default();
             Self::extract_datapoints::<u64>(&mut metric_data, value.as_ref());
             Self::extract_datapoints::<f64>(&mut metric_data, value.as_ref());
@@ -478,8 +564,12 @@ pub(crate) mod test_utils {
         Gauge,
     }
 }
+
+/// Returns a MeterProvider, as a concrete type so we can use our own extensions.
+///
+/// During tests this is a task local so that we can test metrics without having to worry about other tests interfering.
 #[cfg(test)]
-pub(crate) fn meter_provider() -> AggregateMeterProvider {
+pub(crate) fn meter_provider_internal() -> AggregateMeterProvider {
     test_utils::meter_provider_and_readers().0
 }
 
@@ -488,78 +578,48 @@ pub(crate) use test_utils::collect_metrics;
 
 #[cfg(not(test))]
 static AGGREGATE_METER_PROVIDER: OnceLock<AggregateMeterProvider> = OnceLock::new();
+
+/// Returns the currently configured global MeterProvider, as a concrete type
+/// so we can use our own extensions.
 #[cfg(not(test))]
-pub(crate) fn meter_provider() -> AggregateMeterProvider {
+pub(crate) fn meter_provider_internal() -> AggregateMeterProvider {
     AGGREGATE_METER_PROVIDER
         .get_or_init(Default::default)
         .clone()
 }
 
-#[macro_export]
+/// Returns the currently configured global [`MeterProvider`].
+///
+/// See the [module-level documentation] for important details on the semver-compatibility guarantees of this API.
+///
+/// [`MeterProvider`]: opentelemetry::metrics::MeterProvider
+/// [module-level documentation]: crate::metrics
+pub fn meter_provider() -> impl opentelemetry::metrics::MeterProvider {
+    meter_provider_internal()
+}
+
+/// Parse key/value attributes into `opentelemetry::KeyValue` structs. Should only be used within
+/// this module, as a helper for the various metric macros (ie `u64_counter!`).
+macro_rules! parse_attributes {
+    ($($attr_key:literal = $attr_value:expr),+) => {[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+]};
+    ($($($attr_key:ident).+ = $attr_value:expr),+) => {[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+]};
+    ($attrs:expr) => {$attrs};
+}
+
 /// Get or create a `u64` monotonic counter metric and add a value to it.
+/// The metric must include a description.
 ///
-/// Each metric needs a description.
-///
-/// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
-/// The reason for this is that the MetricsLayer has:
-///
-/// * No support for dynamic attributes
-/// * No support dynamic metrics.
-/// * Imperfect mapping to metrics API that can only be checked at runtime.
-///
-/// New metrics should be added using these macros.
-///
-/// # Examples
-/// ```ignore
-/// // Count a thing:
-/// u64_counter!(
-///     "apollo.router.operations.frobbles",
-///     "The amount of frobbles we've operated on",
-///     1
-/// );
-/// // Count a thing with attributes:
-/// u64_counter!(
-///     "apollo.router.operations.frobbles",
-///     "The amount of frobbles we've operated on",
-///     1,
-///     frobbles.color = "blue"
-/// );
-/// // Count a thing with dynamic attributes:
-/// let attributes = vec![];
-/// if (frobbled) {
-///     attributes.push(opentelemetry::KeyValue::new("frobbles.color".to_string(), "blue".into()));
-/// }
-/// u64_counter!(
-///     "apollo.router.operations.frobbles",
-///     "The amount of frobbles we've operated on",
-///     1,
-///     attributes
-/// );
-/// ```
+/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
+/// behind this API.
 #[allow(unused_macros)]
+#[deprecated(since = "TBD", note = "use `u64_counter_with_unit` instead")]
 macro_rules! u64_counter {
-    ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(u64, counter, add, stringify!($($name).+), $description, $value, attributes);
+    ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(u64, counter, add, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*));
     };
 
-    ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(u64, counter, add, stringify!($($name).+), $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(u64, counter, add, $name, $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(u64, counter, add, $name, $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
-        metric!(u64, counter, add, $name, $description, $value, $attrs);
+    ($name:literal, $description:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(u64, counter, add, $name, $description, $value, parse_attributes!($($attrs)*));
     };
 
     ($name:literal, $description:literal, $value: expr) => {
@@ -567,39 +627,42 @@ macro_rules! u64_counter {
     }
 }
 
-/// Get or create a f64 monotonic counter metric and add a value to it
+/// Get or create a u64 monotonic counter metric and add a value to it.
+/// The metric must include a description and a unit.
 ///
-/// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
-/// The reason for this is that the MetricsLayer has:
+/// The units should conform to the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/#units).
 ///
-/// * No support for dynamic attributes
-/// * No support dynamic metrics.
-/// * Imperfect mapping to metrics API that can only be checked at runtime.
-///
-/// New metrics should be added using these macros.
+/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
+/// behind this API.
 #[allow(unused_macros)]
+macro_rules! u64_counter_with_unit {
+    ($($name:ident).+, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(u64, counter, add, stringify!($($name).+), $description, $unit, $value, parse_attributes!($($attrs)*));
+    };
+
+    ($name:literal, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(u64, counter, add, $name, $description, $unit, $value, parse_attributes!($($attrs)*));
+    };
+
+    ($name:literal, $description:literal, $unit:literal, $value: expr) => {
+        metric!(u64, counter, add, $name, $description, $unit, $value, []);
+    }
+}
+
+/// Get or create a f64 monotonic counter metric and add a value to it.
+/// The metric must include a description.
+///
+/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
+/// behind this API.
+#[allow(unused_macros)]
+#[deprecated(since = "TBD", note = "use `f64_counter_with_unit` instead")]
 macro_rules! f64_counter {
-    ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(f64, counter, add, stringify!($($name).+), $description, $value, attributes);
+    ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(f64, counter, add, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*));
     };
 
-    ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(f64, counter, add, stringify!($($name).+), $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(f64, counter, add, $name, $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(f64, counter, add, $name, $description, $value, attributes);
-    };
-    ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
-        metric!(f64, counter, add, $name, $description, $value, $attrs);
+    ($name:literal, $description:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(f64, counter, add, $name, $description, $value, parse_attributes!($($attrs)*));
     };
 
     ($name:literal, $description:literal, $value: expr) => {
@@ -607,41 +670,42 @@ macro_rules! f64_counter {
     }
 }
 
-/// Get or create an i64 up down counter metric and add a value to it
+/// Get or create an f64 monotonic counter metric and add a value to it.
+/// The metric must include a description and a unit.
 ///
-/// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
-/// The reason for this is that the MetricsLayer has:
+/// The units should conform to the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/#units).
 ///
-/// * No support for dynamic attributes
-/// * No support dynamic metrics.
-/// * Imperfect mapping to metrics API that can only be checked at runtime.
-///
-/// New metrics should be added using these macros.
-
+/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
+/// behind this API.
 #[allow(unused_macros)]
+macro_rules! f64_counter_with_unit {
+    ($($name:ident).+, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(f64, counter, add, stringify!($($name).+), $description, $unit, $value, parse_attributes!($($attrs)*));
+    };
+
+    ($name:literal, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(f64, counter, add, $name, $description, $unit, $value, parse_attributes!($($attrs)*));
+    };
+
+    ($name:literal, $description:literal, $unit:literal, $value: expr) => {
+        metric!(f64, counter, add, $name, $description, $unit, $value, []);
+    }
+}
+
+/// Get or create an i64 up down counter metric and add a value to it.
+/// The metric must include a description.
+///
+/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
+/// behind this API.
+#[allow(unused_macros)]
+#[deprecated(since = "TBD", note = "use `i64_up_down_counter_with_unit` instead")]
 macro_rules! i64_up_down_counter {
-    ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(i64, up_down_counter, add, stringify!($($name).+), $description, $value, attributes);
+    ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(i64, up_down_counter, add, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*));
     };
 
-    ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(i64, up_down_counter, add, stringify!($($name).+), $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(i64, up_down_counter, add, $name, $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(i64, up_down_counter, add, $name, $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
-        metric!(i64, up_down_counter, add, $name, $description, $value, $attrs);
+    ($name:literal, $description:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(i64, up_down_counter, add, $name, $description, $value, parse_attributes!($($attrs)*));
     };
 
     ($name:literal, $description:literal, $value: expr) => {
@@ -649,40 +713,42 @@ macro_rules! i64_up_down_counter {
     };
 }
 
-/// Get or create an f64 up down counter metric and add a value to it
+/// Get or create an i64 up down counter metric and add a value to it.
+/// The metric must include a description and a unit.
 ///
-/// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
-/// The reason for this is that the MetricsLayer has:
+/// The units should conform to the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/#units).
 ///
-/// * No support for dynamic attributes
-/// * No support dynamic metrics.
-/// * Imperfect mapping to metrics API that can only be checked at runtime.
-///
-/// New metrics should be added using these macros.
+/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
+/// behind this API.
 #[allow(unused_macros)]
+macro_rules! i64_up_down_counter_with_unit {
+    ($($name:ident).+, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(i64, up_down_counter, add, stringify!($($name).+), $description, $unit, $value, parse_attributes!($($attrs)*));
+    };
+
+    ($name:literal, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(i64, up_down_counter, add, $name, $description, $unit, $value, parse_attributes!($($attrs)*));
+    };
+
+    ($name:literal, $description:literal, $unit:literal, $value: expr) => {
+        metric!(i64, up_down_counter, add, $name, $description, $unit, $value, []);
+    }
+}
+
+/// Get or create an f64 up down counter metric and add a value to it.
+/// The metric must include a description.
+///
+/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
+/// behind this API.
+#[allow(unused_macros)]
+#[deprecated(since = "TBD", note = "use `f64_up_down_counter_with_unit` instead")]
 macro_rules! f64_up_down_counter {
-    ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(f64, up_down_counter, add, stringify!($($name).+), $description, $value, attributes);
+    ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(f64, up_down_counter, add, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*));
     };
 
-    ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(f64, up_down_counter, add, stringify!($($name).+), $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(f64, up_down_counter, add, $name, $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(f64, up_down_counter, add, $name, $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
-        metric!(f64, up_down_counter, add, $name, $description, $value, $attrs);
+    ($name:literal, $description:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(f64, up_down_counter, add, $name, $description, $value, parse_attributes!($($attrs)*));
     };
 
     ($name:literal, $description:literal, $value: expr) => {
@@ -690,40 +756,42 @@ macro_rules! f64_up_down_counter {
     };
 }
 
-/// Get or create an f64 histogram metric and add a value to it
+/// Get or create an f64 up down counter metric and add a value to it.
+/// The metric must include a description and a unit.
 ///
-/// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
-/// The reason for this is that the MetricsLayer has:
+/// The units should conform to the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/#units).
 ///
-/// * No support for dynamic attributes
-/// * No support dynamic metrics.
-/// * Imperfect mapping to metrics API that can only be checked at runtime.
-///
-/// New metrics should be added using these macros.
+/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
+/// behind this API.
 #[allow(unused_macros)]
+macro_rules! f64_up_down_counter_with_unit {
+    ($($name:ident).+, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(f64, up_down_counter, add, stringify!($($name).+), $description, $unit, $value, parse_attributes!($($attrs)*));
+    };
+
+    ($name:literal, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(f64, up_down_counter, add, $name, $description, $unit, $value, parse_attributes!($($attrs)*));
+    };
+
+    ($name:literal, $description:literal, $unit:literal, $value: expr) => {
+        metric!(f64, up_down_counter, add, $name, $description, $unit, $value, []);
+    }
+}
+
+/// Get or create an f64 histogram metric and add a value to it.
+/// The metric must include a description.
+///
+/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
+/// behind this API.
+#[allow(unused_macros)]
+#[deprecated(since = "TBD", note = "use `f64_histogram_with_unit` instead")]
 macro_rules! f64_histogram {
-    ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(f64, histogram, record, stringify!($($name).+), $description, $value, attributes);
+    ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(f64, histogram, record, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*));
     };
 
-    ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(f64, histogram, record, stringify!($($name).+), $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(f64, histogram, record, $name, $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(f64, histogram, record, $name, $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
-        metric!(f64, histogram, record, $name, $description, $value, $attrs);
+    ($name:literal, $description:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(f64, histogram, record, $name, $description, $value, parse_attributes!($($attrs)*));
     };
 
     ($name:literal, $description:literal, $value: expr) => {
@@ -731,40 +799,55 @@ macro_rules! f64_histogram {
     };
 }
 
-/// Get or create an u64 histogram metric and add a value to it
+/// Get or create an f64 histogram metric and add a value to it.
+/// The metric must include a description and a unit.
 ///
-/// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
-/// The reason for this is that the MetricsLayer has:
+/// The units should conform to the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/#units).
 ///
-/// * No support for dynamic attributes
-/// * No support dynamic metrics.
-/// * Imperfect mapping to metrics API that can only be checked at runtime.
+/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
+/// behind this API.
 ///
-/// New metrics should be added using these macros.
+/// ## Caveat
+///
+/// Two metrics with the same name but different descriptions and/or units will be created as
+/// _separate_ metrics.
+///
+/// ```ignore
+/// f64_histogram_with_unit!("test", "test description", "s", 1.0, "attr" = "val");
+/// assert_histogram_sum!("test", 1, "attr" = "val");
+///
+/// f64_histogram_with_unit!("test", "test description", "Hz", 1.0, "attr" = "val");
+/// assert_histogram_sum!("test", 1, "attr" = "val");
+/// ```
 #[allow(unused_macros)]
+macro_rules! f64_histogram_with_unit {
+    ($($name:ident).+, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(f64, histogram, record, stringify!($($name).+), $description, $unit, $value, parse_attributes!($($attrs)*));
+    };
+
+    ($name:literal, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(f64, histogram, record, $name, $description, $unit, $value, parse_attributes!($($attrs)*));
+    };
+
+    ($name:literal, $description:literal, $unit:literal, $value: expr) => {
+        metric!(f64, histogram, record, $name, $description, $unit, $value, []);
+    };
+}
+
+/// Get or create a u64 histogram metric and add a value to it.
+/// The metric must include a description.
+///
+/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
+/// behind this API.
+#[allow(unused_macros)]
+#[deprecated(since = "TBD", note = "use `u64_histogram_with_unit` instead")]
 macro_rules! u64_histogram {
-    ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(u64, histogram, record, stringify!($($name).+), $description, $value, attributes);
+    ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(u64, histogram, record, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*));
     };
 
-    ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(u64, histogram, record, stringify!($($name).+), $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(u64, histogram, record, $name, $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(u64, histogram, record, $name, $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
-        metric!(u64, histogram, record, $name, $description, $value, $attrs);
+    ($name:literal, $description:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(u64, histogram, record, $name, $description, $value, parse_attributes!($($attrs)*));
     };
 
     ($name:literal, $description:literal, $value: expr) => {
@@ -772,44 +855,25 @@ macro_rules! u64_histogram {
     };
 }
 
-/// Get or create an i64 histogram metric and add a value to it
+/// Get or create a u64 histogram metric and add a value to it.
+/// The metric must include a description and a unit.
 ///
-/// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
-/// The reason for this is that the MetricsLayer has:
+/// The units should conform to the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/#units).
 ///
-/// * No support for dynamic attributes
-/// * No support dynamic metrics.
-/// * Imperfect mapping to metrics API that can only be checked at runtime.
-///
-/// New metrics should be added using these macros.
+/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
+/// behind this API.
 #[allow(unused_macros)]
-macro_rules! i64_histogram {
-    ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(i64, histogram, record, stringify!($($name).+), $description, $value, attributes);
+macro_rules! u64_histogram_with_unit {
+    ($($name:ident).+, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(u64, histogram, record, stringify!($($name).+), $description, $unit, $value, parse_attributes!($($attrs)*));
     };
 
-    ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(i64, histogram, record, stringify!($($name).+), $description, $value, attributes);
+    ($name:literal, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(u64, histogram, record, $name, $description, $unit, $value, parse_attributes!($($attrs)*));
     };
 
-    ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(i64, histogram, record, $name, $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(i64, histogram, record, $name, $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
-        metric!(i64, histogram, record, $name, $description, $value, $attrs);
-    };
-
-    ($name:literal, $description:literal, $value: expr) => {
-        metric!(i64, histogram, record, $name, $description, $value, []);
+    ($name:literal, $description:literal, $unit:literal, $value: expr) => {
+        metric!(u64, histogram, record, $name, $description, $unit, $value, []);
     };
 }
 
@@ -819,8 +883,7 @@ thread_local! {
     pub(crate) static CACHE_CALLSITE: std::sync::atomic::AtomicBool = const {std::sync::atomic::AtomicBool::new(false)};
 }
 macro_rules! metric {
-    ($ty:ident, $instrument:ident, $mutation:ident, $name:expr, $description:literal, $value: expr, $attrs: expr) => {
-
+    ($ty:ident, $instrument:ident, $mutation:ident, $name:expr, $description:literal, $unit:literal, $value:expr, $attrs:expr) => {
         // The way this works is that we have a static at each call site that holds a weak reference to the instrument.
         // We make a call we try to upgrade the weak reference. If it succeeds we use the instrument.
         // Otherwise we create a new instrument and update the static.
@@ -839,25 +902,35 @@ macro_rules! metric {
                 #[cfg(not(test))]
                 let cache_callsite = true;
 
+                let create_instrument_fn = |meter: opentelemetry::metrics::Meter| {
+                    let mut builder = meter.[<$ty _ $instrument>]($name);
+                    builder = builder.with_description($description);
+
+                    if !$unit.is_empty() {
+                        builder = builder.with_unit($unit);
+                    }
+
+                    builder.init()
+                };
+
                 if cache_callsite {
-                    static INSTRUMENT_CACHE: std::sync::OnceLock<std::sync::Mutex<std::sync::Weak<opentelemetry_api::metrics::[<$instrument:camel>]<$ty>>>> = std::sync::OnceLock::new();
+                    static INSTRUMENT_CACHE: std::sync::OnceLock<parking_lot::Mutex<std::sync::Weak<opentelemetry::metrics::[<$instrument:camel>]<$ty>>>> = std::sync::OnceLock::new();
 
                     let mut instrument_guard = INSTRUMENT_CACHE
                         .get_or_init(|| {
-                            let meter_provider = crate::metrics::meter_provider();
-                            let instrument_ref = meter_provider.create_registered_instrument(|p| p.meter("apollo/router").[<$ty _ $instrument>]($name).with_description($description).init());
-                            std::sync::Mutex::new(std::sync::Arc::downgrade(&instrument_ref))
+                            let meter_provider = crate::metrics::meter_provider_internal();
+                            let instrument_ref = meter_provider.create_registered_instrument(|p| create_instrument_fn(p.meter("apollo/router")));
+                            parking_lot::Mutex::new(std::sync::Arc::downgrade(&instrument_ref))
                         })
-                        .lock()
-                        .expect("lock poisoned");
+                        .lock();
                     let instrument = if let Some(instrument) = instrument_guard.upgrade() {
                         // Fast path, we got the instrument, drop the mutex guard immediately.
                         drop(instrument_guard);
                         instrument
                     } else {
                         // Slow path, we need to obtain the instrument again.
-                        let meter_provider = crate::metrics::meter_provider();
-                        let instrument_ref = meter_provider.create_registered_instrument(|p| p.meter("apollo/router").[<$ty _ $instrument>]($name).with_description($description).init());
+                        let meter_provider = crate::metrics::meter_provider_internal();
+                        let instrument_ref = meter_provider.create_registered_instrument(|p| create_instrument_fn(p.meter("apollo/router")));
                         *instrument_guard = std::sync::Arc::downgrade(&instrument_ref);
                         // We've updated the instrument and got a strong reference to it. We can drop the mutex guard now.
                         drop(instrument_guard);
@@ -868,17 +941,20 @@ macro_rules! metric {
                 else {
                     let meter_provider = crate::metrics::meter_provider();
                     let meter = opentelemetry::metrics::MeterProvider::meter(&meter_provider, "apollo/router");
-                    let instrument = meter.[<$ty _ $instrument>]($name).with_description($description).init();
-                    instrument.$mutation($value, &$attrs);
+                    create_instrument_fn(meter).$mutation($value, &$attrs);
                 }
             }
         }
     };
+
+    ($ty:ident, $instrument:ident, $mutation:ident, $name:expr, $description:literal, $value: expr, $attrs: expr) => {
+        metric!($ty, $instrument, $mutation, $name, $description, "", $value, $attrs);
+    }
 }
 
 #[cfg(test)]
 macro_rules! assert_metric {
-    ($result:expr, $name:expr, $value:expr, $sum:expr, $attrs:expr) => {
+    ($result:expr, $name:expr, $value:expr, $sum:expr, $count:expr, $attrs:expr) => {
         if !$result {
             let metric = crate::metrics::test_utils::SerdeMetric {
                 name: $name.to_string(),
@@ -888,6 +964,7 @@ macro_rules! assert_metric {
                     datapoints: [crate::metrics::test_utils::SerdeMetricDataPoint {
                         value: $value,
                         sum: $sum,
+                        count: $count,
                         attributes: $attrs
                             .iter()
                             .map(|kv: &opentelemetry::KeyValue| {
@@ -913,209 +990,353 @@ macro_rules! assert_metric {
 }
 
 #[cfg(test)]
+macro_rules! assert_no_metric {
+    ($result:expr, $name:expr, $value:expr, $sum:expr, $count:expr, $attrs:expr) => {
+        if $result {
+            let metric = crate::metrics::test_utils::SerdeMetric {
+                name: $name.to_string(),
+                description: "".to_string(),
+                unit: "".to_string(),
+                data: crate::metrics::test_utils::SerdeMetricData {
+                    datapoints: [crate::metrics::test_utils::SerdeMetricDataPoint {
+                        value: $value,
+                        sum: $sum,
+                        count: $count,
+                        attributes: $attrs
+                            .iter()
+                            .map(|kv: &opentelemetry::KeyValue| {
+                                (
+                                    kv.key.to_string(),
+                                    crate::metrics::test_utils::SerdeMetricDataPoint::convert(
+                                        &kv.value,
+                                    ),
+                                )
+                            })
+                            .collect::<std::collections::BTreeMap<_, _>>(),
+                    }]
+                    .to_vec(),
+                },
+            };
+            panic!(
+                "unexpected metric found:\n{}\nmetrics present:\n{}",
+                serde_yaml::to_string(&metric).unwrap(),
+                serde_yaml::to_string(&crate::metrics::collect_metrics().all()).unwrap()
+            )
+        }
+    };
+}
+
+/// Assert the value of a counter metric that has the given name and attributes.
+///
+/// In asynchronous tests, you must use [`FutureMetricsExt::with_metrics`]. See dev-docs/metrics.md
+/// for details: <https://github.com/apollographql/router/blob/4fc63d55104c81c77e6e0a3cca615eac28e39dc3/dev-docs/metrics.md#testing>
+#[cfg(test)]
 macro_rules! assert_counter {
     ($($name:ident).+, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
         let name = stringify!($($name).+);
         let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert(name, crate::metrics::test_utils::MetricType::Counter, $value, attributes);
-        assert_metric!(result, name, Some($value.into()), None, &attributes);
+        let result = crate::metrics::collect_metrics().assert(name, crate::metrics::test_utils::MetricType::Counter, $value, false, attributes);
+        assert_metric!(result, name, Some($value.into()), None, None, &attributes);
     };
 
     ($($name:ident).+, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let name = stringify!($($name).+);
         let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert(name, crate::metrics::test_utils::MetricType::Counter, $value, attributes);
-        assert_metric!(result, name, Some($value.into()), None, &attributes);
+        let result = crate::metrics::collect_metrics().assert(name, crate::metrics::test_utils::MetricType::Counter, $value, false, attributes);
+        assert_metric!(result, name, Some($value.into()), None, None, &attributes);
     };
 
     ($name:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Counter, $value, attributes);
-        assert_metric!(result, $name, Some($value.into()), None, &attributes);
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Counter, $value, false, attributes);
+        assert_metric!(result, $name, Some($value.into()), None, None, &attributes);
     };
 
     ($name:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Counter, $value, attributes);
-        assert_metric!(result, $name, Some($value.into()), None, &attributes);
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Counter, $value, false, attributes);
+        assert_metric!(result, $name, Some($value.into()), None, None, &attributes);
     };
 
     ($name:literal, $value: expr, $attributes: expr) => {
-        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Counter, $value, $attributes);
-        assert_metric!(result, $name, Some($value.into()), None, &$attributes);
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Counter, $value, false, $attributes);
+        assert_metric!(result, $name, Some($value.into()), None, None, &$attributes);
     };
 
     ($name:literal, $value: expr) => {
-        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Counter, $value, &[]);
-        assert_metric!(result, $name, Some($value.into()), None, &[]);
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Counter, $value, false, &[]);
+        assert_metric!(result, $name, Some($value.into()), None, None, &[]);
     };
 }
 
+/// Assert that a counter metric does not exist with the given name and attributes.
+///
+/// In asynchronous tests, you must use [`FutureMetricsExt::with_metrics`]. See dev-docs/metrics.md
+/// for details: <https://github.com/apollographql/router/blob/4fc63d55104c81c77e6e0a3cca615eac28e39dc3/dev-docs/metrics.md#testing>
+#[cfg(test)]
+macro_rules! assert_counter_not_exists {
+
+    ($($name:ident).+, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
+        let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Counter, attributes);
+        assert_no_metric!(result, $name, None, None, None, attributes);
+    };
+
+    ($($name:ident).+, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Counter, attributes);
+        assert_no_metric!(result, $name, None, None, None, attributes);
+    };
+
+    ($name:literal, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
+        let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Counter, attributes);
+        assert_no_metric!(result, $name, None, None, None, attributes);
+    };
+
+    ($name:literal, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Counter, attributes);
+        assert_no_metric!(result, $name, None, None, None, attributes);
+    };
+
+
+    ($name:literal, $value: ty, $attributes: expr) => {
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Counter, $attributes);
+        assert_no_metric!(result, $name, None, None, None, &$attributes);
+    };
+
+    ($name:literal, $value: ty) => {
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Counter, &[]);
+        assert_no_metric!(result, $name, None, None, None, &[]);
+    };
+}
+
+/// Assert the value of a counter metric that has the given name and attributes.
+///
+/// In asynchronous tests, you must use [`FutureMetricsExt::with_metrics`]. See dev-docs/metrics.md
+/// for details: <https://github.com/apollographql/router/blob/4fc63d55104c81c77e6e0a3cca615eac28e39dc3/dev-docs/metrics.md#testing>
 #[cfg(test)]
 macro_rules! assert_up_down_counter {
 
     ($($name:ident).+, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::UpDownCounter, $value, attributes);
-        assert_metric!(result, $name, Some($value.into()), None, attributes);
+        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::UpDownCounter, $value, false, attributes);
+        assert_metric!(result, $name, Some($value.into()), None, None, attributes);
     };
 
     ($($name:ident).+, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::UpDownCounter, $value, attributes);
-        assert_metric!(result, $name, Some($value.into()), None, attributes);
+        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::UpDownCounter, $value, false, attributes);
+        assert_metric!(result, $name, Some($value.into()), None, None, attributes);
     };
 
     ($name:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::UpDownCounter, $value, attributes);
-        assert_metric!(result, $name, Some($value.into()), None, attributes);
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::UpDownCounter, $value, false, attributes);
+        assert_metric!(result, $name, Some($value.into()), None, None, attributes);
     };
 
     ($name:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::UpDownCounter, $value, attributes);
-        assert_metric!(result, $name, Some($value.into()), None, attributes);
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::UpDownCounter, $value, false, attributes);
+        assert_metric!(result, $name, Some($value.into()), None, None, attributes);
     };
 
     ($name:literal, $value: expr) => {
-        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::UpDownCounter, $value, &[]);
-        assert_metric!(result, $name, Some($value.into()), None, &[]);
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::UpDownCounter, $value, false, &[]);
+        assert_metric!(result, $name, Some($value.into()), None, None, &[]);
     };
 }
 
+/// Assert the value of a gauge metric that has the given name and attributes.
+///
+/// In asynchronous tests, you must use [`FutureMetricsExt::with_metrics`]. See dev-docs/metrics.md
+/// for details: <https://github.com/apollographql/router/blob/4fc63d55104c81c77e6e0a3cca615eac28e39dc3/dev-docs/metrics.md#testing>
 #[cfg(test)]
 macro_rules! assert_gauge {
 
     ($($name:ident).+, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Gauge, $value, attributes);
-        assert_metric!(result, $name, Some($value.into()), None, attributes);
+        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Gauge, $value, false, attributes);
+        assert_metric!(result, $name, Some($value.into()), None, None, attributes);
     };
 
     ($($name:ident).+, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Gauge, $value, attributes);
-        assert_metric!(result, $name, Some($value.into()), None, attributes);
+        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Gauge, $value, false, attributes);
+        assert_metric!(result, $name, Some($value.into()), None, None, attributes);
     };
 
     ($name:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Gauge, $value, attributes);
-        assert_metric!(result, $name, Some($value.into()), None, attributes);
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Gauge, $value, false, attributes);
+        assert_metric!(result, $name, Some($value.into()), None, None, attributes);
     };
 
     ($name:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Gauge, $value, attributes);
-        assert_metric!(result, $name, Some($value.into()), None, attributes);
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Gauge, $value, false, attributes);
+        assert_metric!(result, $name, Some($value.into()), None, None, attributes);
     };
 
     ($name:literal, $value: expr) => {
-        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Gauge, $value, &[]);
-        assert_metric!(result, $name, Some($value.into()), None, &[]);
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Gauge, $value, false, &[]);
+        assert_metric!(result, $name, Some($value.into()), None, None, &[]);
     };
 }
 
+#[cfg(test)]
+macro_rules! assert_histogram_count {
+
+    ($($name:ident).+, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
+        let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, $value, true, attributes);
+        assert_metric!(result, $name, None, Some($value.into()), Some(num_traits::ToPrimitive::to_u64(&$value).expect("count should be convertible to u64")), attributes);
+    };
+
+    ($($name:ident).+, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, $value, true, attributes);
+        assert_metric!(result, $name, None, Some($value.into()), Some(num_traits::ToPrimitive::to_u64(&$value).expect("count should be convertible to u64")), attributes);
+    };
+
+    ($name:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
+        let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Histogram, $value, true, attributes);
+        assert_metric!(result, $name, None, Some($value.into()), Some(num_traits::ToPrimitive::to_u64(&$value).expect("count should be convertible to u64")), attributes);
+    };
+
+    ($name:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Histogram, $value, attributes);
+        assert_metric!(result, $name, None, Some($value.into()), Some(num_traits::ToPrimitive::to_u64(&$value).expect("count should be convertible to u64")), attributes);
+    };
+
+    ($name:literal, $value: expr) => {
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Histogram, $value, true, &[]);
+        assert_metric!(result, $name, None, Some($value.into()), Some(num_traits::ToPrimitive::to_u64(&$value).expect("count should be convertible to u64")), &[]);
+    };
+}
+
+/// Assert the sum value of a histogram metric with the given name and attributes.
+///
+/// In asynchronous tests, you must use [`FutureMetricsExt::with_metrics`]. See dev-docs/metrics.md
+/// for details: <https://github.com/apollographql/router/blob/4fc63d55104c81c77e6e0a3cca615eac28e39dc3/dev-docs/metrics.md#testing>
 #[cfg(test)]
 macro_rules! assert_histogram_sum {
 
     ($($name:ident).+, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, $value, attributes);
-        assert_metric!(result, $name, None, Some($value.into()), attributes);
+        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, $value, false, attributes);
+        assert_metric!(result, $name, None, Some($value.into()), None, attributes);
     };
 
     ($($name:ident).+, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, $value, attributes);
-        assert_metric!(result, $name, None, Some($value.into()), attributes);
+        let result = crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, $value, false, attributes);
+        assert_metric!(result, $name, None, Some($value.into()), None, attributes);
     };
 
     ($name:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Histogram, $value, attributes);
-        assert_metric!(result, $name, None, Some($value.into()), attributes);
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Histogram, $value, false, attributes);
+        assert_metric!(result, $name, None, Some($value.into()), None, attributes);
     };
 
     ($name:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Histogram, $value, attributes);
-        assert_metric!(result, $name, None, Some($value.into()), attributes);
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Histogram, $value, false, attributes);
+        assert_metric!(result, $name, None, Some($value.into()), None, attributes);
     };
 
     ($name:literal, $value: expr) => {
-        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Histogram, $value, &[]);
-        assert_metric!(result, $name, None, Some($value.into()), &[]);
+        let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Histogram, $value, false, &[]);
+        assert_metric!(result, $name, None, Some($value.into()), None, &[]);
     };
 }
 
+/// Assert that a histogram metric exists with the given name and attributes.
+///
+/// In asynchronous tests, you must use [`FutureMetricsExt::with_metrics`]. See dev-docs/metrics.md
+/// for details: <https://github.com/apollographql/router/blob/4fc63d55104c81c77e6e0a3cca615eac28e39dc3/dev-docs/metrics.md#testing>
 #[cfg(test)]
 macro_rules! assert_histogram_exists {
 
     ($($name:ident).+, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
         let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, attributes);
-        assert_metric!(result, $name, None, None, attributes);
+        assert_metric!(result, $name, None, None, None, attributes);
     };
 
     ($($name:ident).+, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
         let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, attributes);
-        assert_metric!(result, $name, None, None, attributes);
+        assert_metric!(result, $name, None, None, None, attributes);
     };
 
     ($name:literal, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
         let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, attributes);
-        assert_metric!(result, $name, None, None, attributes);
+        assert_metric!(result, $name, None, None, None, attributes);
     };
 
     ($name:literal, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
         let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, attributes);
-        assert_metric!(result, $name, None, None, attributes);
+        assert_metric!(result, $name, None, None, None, attributes);
     };
 
     ($name:literal, $value: ty) => {
         let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, &[]);
-        assert_metric!(result, $name, None, None, &[]);
+        assert_metric!(result, $name, None, None, None, &[]);
     };
 }
 
+/// Assert that a histogram metric does not exist with the given name and attributes.
+///
+/// In asynchronous tests, you must use [`FutureMetricsExt::with_metrics`]. See dev-docs/metrics.md
+/// for details: <https://github.com/apollographql/router/blob/4fc63d55104c81c77e6e0a3cca615eac28e39dc3/dev-docs/metrics.md#testing>
 #[cfg(test)]
 macro_rules! assert_histogram_not_exists {
 
     ($($name:ident).+, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
         let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, attributes);
-        assert_metric!(!result, $name, None, None, attributes);
+        assert_no_metric!(result, $name, None, None, None, attributes);
     };
 
     ($($name:ident).+, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
         let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, attributes);
-        assert_metric!(!result, $name, None, None, attributes);
+        assert_no_metric!(result, $name, None, None, None, attributes);
     };
 
     ($name:literal, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
         let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, attributes);
-        assert_metric!(!result, $name, None, None, attributes);
+        assert_no_metric!(result, $name, None, None, None, attributes);
     };
 
     ($name:literal, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
         let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, attributes);
-        assert_metric!(!result, $name, None, None, attributes);
+        assert_no_metric!(result, $name, None, None, None, attributes);
     };
 
     ($name:literal, $value: ty) => {
         let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, &[]);
-        assert_metric!(!result, $name, None, None, &[]);
+        assert_no_metric!(result, $name, None, None, None, &[]);
     };
 }
 
+/// Assert that all metrics match an [insta] snapshot.
+///
+/// Consider using [assert_non_zero_metrics_snapshot] to produce more grokkable snapshots if
+/// zero-valued metrics are not relevant to your test.
+///
+/// In asynchronous tests, you must use [`FutureMetricsExt::with_metrics`]. See dev-docs/metrics.md
+/// for details: <https://github.com/apollographql/router/blob/4fc63d55104c81c77e6e0a3cca615eac28e39dc3/dev-docs/metrics.md#testing>
 #[cfg(test)]
 #[allow(unused_macros)]
 macro_rules! assert_metrics_snapshot {
@@ -1134,6 +1355,10 @@ macro_rules! assert_metrics_snapshot {
     };
 }
 
+/// Assert that all metrics with a non-zero value match an [insta] snapshot.
+///
+/// In asynchronous tests, you must use [`FutureMetricsExt::with_metrics`]. See dev-docs/metrics.md
+/// for details: <https://github.com/apollographql/router/blob/4fc63d55104c81c77e6e0a3cca615eac28e39dc3/dev-docs/metrics.md#testing>
 #[cfg(test)]
 #[allow(unused_macros)]
 macro_rules! assert_non_zero_metrics_snapshot {
@@ -1152,10 +1377,29 @@ macro_rules! assert_non_zero_metrics_snapshot {
 }
 
 #[cfg(test)]
-pub(crate) type MetricFuture<T> = Pin<Box<dyn Future<Output = <T as Future>::Output> + Send>>;
+pub(crate) type MetricFuture<T> = Pin<Box<dyn Future<Output = <T as Future>::Output>>>;
 
-#[cfg(test)]
+/// Extension trait for Futures that wish to test metrics.
 pub(crate) trait FutureMetricsExt<T> {
+    /// Wraps a Future with metrics collection capabilities.
+    ///
+    /// This method creates a new Future that will:
+    /// 1. Initialize the meter provider before executing the Future
+    /// 2. Execute the original Future
+    /// 3. Shutdown the meter provider after completion
+    ///
+    /// This is useful for testing scenarios where you need to ensure metrics are properly
+    /// collected throughout the entire Future's execution.
+    ///
+    /// # Example
+    /// ```rust
+    /// # use apollo_router::metrics::FutureMetricsExt;
+    /// # async fn example() {
+    /// let future = async { /* your async code that produces metrics */ };
+    /// let result = future.with_metrics().await;
+    /// # }
+    /// ```
+    #[cfg(test)]
     fn with_metrics(
         self,
     ) -> tokio::task::futures::TaskLocalFuture<
@@ -1163,35 +1407,88 @@ pub(crate) trait FutureMetricsExt<T> {
         MetricFuture<Self>,
     >
     where
-        Self: Sized + Future + Send + 'static,
-        <Self as Future>::Output: Send + 'static,
+        Self: Sized + Future + 'static,
+        <Self as Future>::Output: 'static,
     {
         test_utils::AGGREGATE_METER_PROVIDER_ASYNC.scope(
             Default::default(),
             async move {
+                // We want to eagerly create the meter provider, the reason is that this will be shared among subtasks that use `with_current_meter_provider`.
+                let _ = meter_provider_internal();
                 let result = self.await;
                 let _ = tokio::task::spawn_blocking(|| {
-                    meter_provider().shutdown();
+                    meter_provider_internal().shutdown();
                 })
                 .await;
                 result
             }
-            .boxed(),
+            .boxed_local(),
         )
+    }
+
+    /// Propagates the current meter provider to child tasks during test execution.
+    ///
+    /// This method ensures that the meter provider is properly shared across tasks
+    /// during test scenarios. In non-test contexts, it returns the original Future
+    /// unchanged.
+    ///
+    /// # Example
+    /// ```rust
+    /// # use apollo_router::metrics::FutureMetricsExt;
+    /// # async fn example() {
+    /// let result = tokio::task::spawn(async { /* your async code that produces metrics */ }.with_current_meter_provider()).await;
+    /// # }
+    /// ```
+    #[cfg(test)]
+    fn with_current_meter_provider(
+        self,
+    ) -> tokio::task::futures::TaskLocalFuture<
+        OnceLock<(AggregateMeterProvider, test_utils::ClonableManualReader)>,
+        Self,
+    >
+    where
+        Self: Sized + Future + 'static,
+        <Self as Future>::Output: 'static,
+    {
+        // We need to determine if the meter was set. If not then we can use default provider which is empty
+        let meter_provider_set = test_utils::AGGREGATE_METER_PROVIDER_ASYNC
+            .try_with(|_| {})
+            .is_ok();
+        if meter_provider_set {
+            test_utils::AGGREGATE_METER_PROVIDER_ASYNC
+                .scope(test_utils::AGGREGATE_METER_PROVIDER_ASYNC.get(), self)
+        } else {
+            test_utils::AGGREGATE_METER_PROVIDER_ASYNC.scope(Default::default(), self)
+        }
+    }
+
+    #[cfg(not(test))]
+    fn with_current_meter_provider(self) -> Self
+    where
+        Self: Sized + Future + 'static,
+    {
+        // This is intentionally a noop. In the real world meter provider is a global variable.
+        self
     }
 }
 
-#[cfg(test)]
 impl<T> FutureMetricsExt<T> for T where T: Future {}
 
 #[cfg(test)]
 mod test {
-    use opentelemetry_api::metrics::MeterProvider;
-    use opentelemetry_api::KeyValue;
+    use opentelemetry::KeyValue;
+    use opentelemetry::metrics::MeterProvider;
 
+    use crate::metrics::FutureMetricsExt;
     use crate::metrics::aggregation::MeterProviderType;
     use crate::metrics::meter_provider;
-    use crate::metrics::FutureMetricsExt;
+    use crate::metrics::meter_provider_internal;
+
+    fn assert_unit(name: &str, unit: &str) {
+        let collected_metrics = crate::metrics::collect_metrics();
+        let metric = collected_metrics.find(name).unwrap();
+        assert_eq!(metric.unit, unit);
+    }
 
     #[test]
     fn test_gauge() {
@@ -1201,6 +1498,13 @@ mod test {
             .u64_observable_gauge("test")
             .with_callback(|m| m.observe(5, &[]))
             .init();
+        assert_gauge!("test", 5);
+    }
+
+    #[test]
+    fn test_gauge_record() {
+        let gauge = meter_provider().meter("test").u64_gauge("test").init();
+        gauge.record(5, &[]);
         assert_gauge!("test", 5);
     }
 
@@ -1329,16 +1633,6 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_i64_histogram() {
-        async {
-            i64_histogram!("test", "test description", 1, "attr" = "val");
-            assert_histogram_sum!("test", 1, "attr" = "val");
-        }
-        .with_metrics()
-        .await;
-    }
-
-    #[tokio::test]
     async fn test_f64_histogram() {
         async {
             f64_histogram!("test", "test description", 1.0, "attr" = "val");
@@ -1397,6 +1691,21 @@ mod test {
     }
 
     #[test]
+    fn parse_attributes_should_handle_multiple_input_types() {
+        let variable = 123;
+        let parsed_idents = parse_attributes!(hello = "world", my.variable = variable);
+        let parsed_literals = parse_attributes!("hello" = "world", "my.variable" = variable);
+        let parsed_provided = parse_attributes!(vec![
+            KeyValue::new("hello", "world"),
+            KeyValue::new("my.variable", variable)
+        ]);
+
+        assert_eq!(parsed_idents, parsed_literals);
+        assert_eq!(parsed_idents.as_slice(), parsed_provided.as_slice());
+        assert_eq!(parsed_literals.as_slice(), parsed_provided.as_slice());
+    }
+
+    #[test]
     fn test_callsite_caching() {
         // Creating instruments may be slow due to multiple levels of locking that needs to happen through the various metrics layers.
         // Callsite caching is implemented to prevent this happening on every call.
@@ -1408,28 +1717,125 @@ mod test {
         }
 
         // Callsite hasn't been used yet, so there should be no metrics
-        assert_eq!(meter_provider().registered_instruments(), 0);
+        assert_eq!(meter_provider_internal().registered_instruments(), 0);
 
         // Call the metrics, it will be registered
         test();
         assert_counter!("test", 1, "attr" = "val");
-        assert_eq!(meter_provider().registered_instruments(), 1);
+        assert_eq!(meter_provider_internal().registered_instruments(), 1);
 
         // Call the metrics again, but the second call will not register a new metric because it will have be retrieved from the static
         test();
         assert_counter!("test", 2, "attr" = "val");
-        assert_eq!(meter_provider().registered_instruments(), 1);
+        assert_eq!(meter_provider_internal().registered_instruments(), 1);
 
         // Force invalidation of instruments
-        meter_provider().set(MeterProviderType::PublicPrometheus, None);
-        assert_eq!(meter_provider().registered_instruments(), 0);
+        meter_provider_internal().set(MeterProviderType::PublicPrometheus, None);
+        assert_eq!(meter_provider_internal().registered_instruments(), 0);
 
         // Slow path
         test();
-        assert_eq!(meter_provider().registered_instruments(), 1);
+        assert_eq!(meter_provider_internal().registered_instruments(), 1);
 
         // Fast path
         test();
-        assert_eq!(meter_provider().registered_instruments(), 1);
+        assert_eq!(meter_provider_internal().registered_instruments(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_f64_histogram_with_unit() {
+        async {
+            f64_histogram_with_unit!("test", "test description", "m/s", 1.0, "attr" = "val");
+            assert_histogram_sum!("test", 1, "attr" = "val");
+            assert_unit("test", "m/s");
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_u64_counter_with_unit() {
+        async {
+            u64_counter_with_unit!("test", "test description", "Hz", 1, attr = "val");
+            assert_counter!("test", 1, "attr" = "val");
+            assert_unit("test", "Hz");
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_i64_up_down_counter_with_unit() {
+        async {
+            i64_up_down_counter_with_unit!(
+                "test",
+                "test description",
+                "{request}",
+                1,
+                attr = "val"
+            );
+            assert_up_down_counter!("test", 1, "attr" = "val");
+            assert_unit("test", "{request}");
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_f64_up_down_counter_with_unit() {
+        async {
+            f64_up_down_counter_with_unit!("test", "test description", "kg", 1.5, "attr" = "val");
+            assert_up_down_counter!("test", 1.5, "attr" = "val");
+            assert_unit("test", "kg");
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_u64_histogram_with_unit() {
+        async {
+            u64_histogram_with_unit!("test", "test description", "{packet}", 1, "attr" = "val");
+            assert_histogram_sum!("test", 1, "attr" = "val");
+            assert_unit("test", "{packet}");
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_f64_counter_with_unit() {
+        async {
+            f64_counter_with_unit!("test", "test description", "s", 1.5, "attr" = "val");
+            assert_counter!("test", 1.5, "attr" = "val");
+            assert_unit("test", "s");
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_metrics_across_tasks() {
+        async {
+            // Initial metric in the main task
+            u64_counter!("apollo.router.test", "metric", 1);
+            assert_counter!("apollo.router.test", 1);
+
+            // Spawn a task that also records metrics
+            let handle = tokio::spawn(
+                async move {
+                    u64_counter!("apollo.router.test", "metric", 2);
+                }
+                .with_current_meter_provider(),
+            );
+
+            // Wait for the spawned task to complete
+            handle.await.unwrap();
+
+            // The metric should now be 3 since both tasks contributed
+            assert_counter!("apollo.router.test", 3);
+        }
+        .with_metrics()
+        .await;
     }
 }

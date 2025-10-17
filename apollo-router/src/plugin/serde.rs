@@ -3,15 +3,14 @@
 use std::fmt::Formatter;
 use std::str::FromStr;
 
-use access_json::JSONQuery;
-use http::header::HeaderName;
 use http::HeaderValue;
+use http::header::HeaderName;
 use regex::Regex;
+use serde::Deserializer;
 use serde::de;
 use serde::de::Error;
 use serde::de::SeqAccess;
 use serde::de::Visitor;
-use serde::Deserializer;
 
 /// De-serialize an optional [`HeaderName`].
 pub fn deserialize_option_header_name<'de, D>(
@@ -112,7 +111,7 @@ where
 #[derive(Default)]
 struct HeaderNameVisitor;
 
-impl<'de> Visitor<'de> for HeaderNameVisitor {
+impl Visitor<'_> for HeaderNameVisitor {
     type Value = HeaderName;
 
     fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
@@ -135,35 +134,9 @@ where
     deserializer.deserialize_str(HeaderNameVisitor)
 }
 
-struct JSONQueryVisitor;
-
-impl<'de> Visitor<'de> for JSONQueryVisitor {
-    type Value = JSONQuery;
-
-    fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
-        formatter.write_str("struct JSONQuery")
-    }
-
-    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-    where
-        E: Error,
-    {
-        JSONQuery::parse(v)
-            .map_err(|e| de::Error::custom(format!("Invalid JSON query path for '{v}' {e}")))
-    }
-}
-
-/// De-serialize a [`JSONQuery`].
-pub fn deserialize_json_query<'de, D>(deserializer: D) -> Result<JSONQuery, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    deserializer.deserialize_str(JSONQueryVisitor)
-}
-
 struct HeaderValueVisitor;
 
-impl<'de> Visitor<'de> for HeaderValueVisitor {
+impl Visitor<'_> for HeaderValueVisitor {
     type Value = HeaderValue;
 
     fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
@@ -193,7 +166,7 @@ where
 {
     struct RegexVisitor;
 
-    impl<'de> Visitor<'de> for RegexVisitor {
+    impl Visitor<'_> for RegexVisitor {
         type Value = Regex;
 
         fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
@@ -221,7 +194,7 @@ where
 
 struct JSONPathVisitor;
 
-impl<'de> serde::de::Visitor<'de> for JSONPathVisitor {
+impl serde::de::Visitor<'_> for JSONPathVisitor {
     type Value = serde_json_bytes::path::JsonPathInst;
 
     fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
