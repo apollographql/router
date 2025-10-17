@@ -590,6 +590,23 @@ fn tag_succeeds_if_imported_under_same_non_default_name() {
     .unwrap();
 
     let result = compose(vec![subgraph_a, subgraph_b]);
-    let _supergraph =
+    let supergraph =
         result.expect("Expected composition to succeed with consistent @tag import names");
+
+    let q1 = coord!(Query.q1)
+        .lookup_field(supergraph.schema().schema())
+        .unwrap();
+    assert!(
+        q1.directives
+            .iter()
+            .any(|d| d.to_string() == r#"@apolloTag(name: "t1")"#)
+    );
+    let q2 = coord!(Query.q2)
+        .lookup_field(supergraph.schema().schema())
+        .unwrap();
+    assert!(
+        q2.directives
+            .iter()
+            .any(|d| d.to_string() == r#"@apolloTag(name: "t2")"#)
+    );
 }
