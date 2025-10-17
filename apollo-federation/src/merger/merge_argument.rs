@@ -7,6 +7,8 @@ use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
+use tracing::instrument;
+use tracing::trace;
 
 use crate::error::CompositionError;
 use crate::error::FederationError;
@@ -66,13 +68,14 @@ pub(crate) trait HasDefaultValue {
 }
 
 impl Merger {
+    #[instrument(skip(self, sources))]
     pub(in crate::merger) fn add_arguments_shallow<T>(
         &mut self,
         sources: &Sources<T>,
         dest: &T,
     ) -> Result<IndexSet<Name>, FederationError>
     where
-        T: HasArguments + Display,
+        T: HasArguments + std::fmt::Debug + Display,
         <T as HasArguments>::ArgumentPosition: Display,
     {
         let mut arg_types: IndexMap<Name, Node<Type>> = Default::default();
@@ -89,16 +92,20 @@ impl Merger {
         for (arg_name, arg_type) in &arg_types {
             // We add the argument unconditionally even if we're going to remove it later on.
             // This enables consistent mismatch/hint reporting.
-            dest.insert_argument(
-                &mut self.merged,
-                Node::new(InputValueDefinition {
-                    description: None,
-                    name: arg_name.clone(),
-                    default_value: None,
-                    ty: arg_type.clone(),
-                    directives: Default::default(),
-                }),
-            )?;
+            trace!("Inserting shallow definition for argument \"{arg_name}\" in \"{dest}\"");
+            if dest.get_argument(&self.merged, arg_name).is_none() {
+                dest.insert_argument(
+                    &mut self.merged,
+                    Node::new(InputValueDefinition {
+                        description: None,
+                        name: arg_name.clone(),
+                        default_value: None,
+                        ty: arg_type.clone(),
+                        directives: Default::default(),
+                    }),
+                )?;
+            }
+
             let dest_arg_pos = dest.argument_position(arg_name.clone());
 
             // Record whether the argument comes from context in each subgraph.

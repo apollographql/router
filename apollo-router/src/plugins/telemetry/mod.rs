@@ -259,7 +259,6 @@ struct BuiltinInstruments {
     connector_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     apollo_connector_instruments: Arc<HashMap<String, StaticInstrument>>,
     cache_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
-    _pipeline_instruments: Arc<HashMap<String, StaticInstrument>>,
 }
 
 fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments {
@@ -272,7 +271,6 @@ fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments 
         connector_custom_instruments: Arc::new(config.new_builtin_connector_instruments()),
         apollo_connector_instruments: Arc::new(config.new_builtin_apollo_connector_instruments()),
         cache_custom_instruments: Arc::new(config.new_builtin_cache_instruments()),
-        _pipeline_instruments: Arc::new(config.new_pipeline_instruments()),
     }
 }
 
@@ -294,6 +292,12 @@ impl EnabledFeatures {
         .map(&|(name, _): &(&str, _)| name.to_string())
         .collect()
     }
+}
+
+// Struct to hold request attributes for the http client in context
+#[derive(Clone, Debug)]
+pub(crate) struct HttpClientAttributes {
+    pub(crate) attributes: Vec<KeyValue>,
 }
 
 #[async_trait::async_trait]
@@ -333,7 +337,6 @@ impl PluginPrivate for Telemetry {
         let (activation, custom_endpoints, apollo_metrics_sender) =
             reload::prepare(&init.previous_config, &config)?;
 
-        ::tracing::info!("custom endpoints {:?}", custom_endpoints);
         if config.instrumentation.spans.mode == SpanMode::Deprecated {
             ::tracing::warn!(
                 "telemetry.instrumentation.spans.mode is currently set to 'deprecated', either explicitly or via defaulting. Set telemetry.instrumentation.spans.mode explicitly in your router.yaml to 'spec_compliant' for log and span attributes that follow OpenTelemetry semantic conventions. This option will be defaulted to 'spec_compliant' in a future release and eventually removed altogether"
@@ -1091,6 +1094,45 @@ impl PluginPrivate for Telemetry {
                     }
                 },
             )
+            .service(service)
+            .boxed()
+    }
+
+    fn http_client_service(
+        &self,
+        _subgraph_name: &str,
+        service: crate::services::http::BoxService,
+    ) -> crate::services::http::BoxService {
+        let req_fn_config = self.config.clone();
+        let res_fn_config = self.config.clone();
+
+        ServiceBuilder::new()
+            .map_request(move |request: crate::services::http::HttpRequest| {
+                // Get and store attributes so that they can be applied later after the span is created
+                let client_attributes = HttpClientAttributes {
+                    attributes: req_fn_config
+                        .instrumentation
+                        .spans
+                        .http_client
+                        .attributes
+                        .on_request(&request),
+                };
+                request.context.extensions().with_lock(|lock| {
+                    lock.insert(client_attributes);
+                });
+
+                request
+            })
+            .map_response(move |response: crate::services::http::HttpResponse| {
+                let attributes = res_fn_config
+                    .instrumentation
+                    .spans
+                    .http_client
+                    .attributes
+                    .on_response(&response);
+                ::tracing::Span::current().set_span_dyn_attributes(attributes);
+                response
+            })
             .service(service)
             .boxed()
     }

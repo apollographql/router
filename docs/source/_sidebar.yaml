@@ -279,6 +279,12 @@ items:
         children:
           - label: "Google Cloud Run"
             href: "./self-hosted/containerization/gcp"
+      - label: "Managed Hosting"
+        children:
+          - label: "Railway"
+            href: "./self-hosted/managed-hosting/railway"
+          - label: "Render"
+            href: "./self-hosted/managed-hosting/render"
       - label: "Apollo Cloud Routing"
         children:
           - label: "Overview"

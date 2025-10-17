@@ -1,0 +1,18 @@
+---
+source: apollo-router/src/plugins/rhai/tests.rs
+expression: yaml
+---
+- fields: {}
+  level: ERROR
+  message: "map_request callback failed: ErrorDetails {\n    status: 500,\n    message: Some(\n        \"rhai execution error: 'Runtime error: An error occurred without a body (line 22, position 5)'\",\n    ),\n    position: Some(\n        Position {\n            line: Some(\n                22,\n            ),\n            pos: Some(\n                5,\n            ),\n        },\n    ),\n    body: None,\n}"
+  span:
+    name: rhai_plugin
+    otel.kind: INTERNAL
+    rhai service: "router :: Request"
+  spans:
+    - name: rhai_plugin
+      otel.kind: INTERNAL
+      rhai service: "router :: Request"
+- fields: {}
+  level: ERROR
+  message: "map_request callback failed: ErrorDetails {\n    status: 500,\n    message: Some(\n        \"rhai execution error: 'Runtime error: An error occurred without a body (line 26, position 5)'\",\n    ),\n    position: Some(\n        Position {\n            line: Some(\n                26,\n            ),\n            pos: Some(\n                5,\n            ),\n        },\n    ),\n    body: None,\n}"
