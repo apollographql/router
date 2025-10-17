@@ -467,8 +467,8 @@ async fn insert_with_requires() {
                     "representations": [
                         {
                             "weight": 5,
-                            "price": 150,
                             "upc": "1",
+                            "price": 150,
                             "__typename": "Product"
                         }
                     ]
