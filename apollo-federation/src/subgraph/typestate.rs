@@ -337,7 +337,7 @@ impl Subgraph<Expanded> {
         // Convert `ValidFederationSchema` to `FederationSchema`, so we can call
         // `normalize_root_types`.
         let mut schema: FederationSchema = self.state.schema.into();
-        let changed = normalize_root_types(&mut schema)
+        let changed = normalize_root_types_in_subgraph_schema(&mut schema)
             .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;
         if changed {
             Ok(Either::Right(Subgraph {
@@ -411,7 +411,9 @@ fn validate_subgraph_schema(
 }
 
 /// Shared by Subgraph<Expanded> and Subgraph<Upgraded>
-fn normalize_root_types(schema: &mut FederationSchema) -> Result<bool, FederationError> {
+fn normalize_root_types_in_subgraph_schema(
+    schema: &mut FederationSchema,
+) -> Result<bool, FederationError> {
     let mut operation_types_to_rename = HashMap::new();
     for (op_type, op_name) in schema.schema().schema_definition.iter_root_operations() {
         let default_name = default_operation_name(&op_type);
@@ -454,7 +456,7 @@ impl Subgraph<Upgraded> {
     }
 
     pub fn normalize_root_types(&mut self) -> Result<(), SubgraphError> {
-        normalize_root_types(&mut self.state.schema)
+        normalize_root_types_in_subgraph_schema(&mut self.state.schema)
             .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;
         Ok(())
     }

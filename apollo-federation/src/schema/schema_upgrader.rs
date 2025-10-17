@@ -961,7 +961,6 @@ fn inner_upgrade_subgraphs_if_necessary(
             ),
         }]);
     }
-
     Ok(upgraded_subgraphs)
 }
 
