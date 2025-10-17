@@ -20,7 +20,12 @@ Learn how GraphOS Router can cache subgraph query responses using Redis to impro
 
 An entity gets its fields from one or more subgraphs. To respond to a client request for an entity, GraphOS Router must make multiple subgraph requests. Different clients requesting the same entity can make redundant, identical subgraph requests.
 
-Response caching enables the router to respond to identical subgraph queries with cached subgraph responses. The router uses Redis to cache data from subgraph query responses. Because cached data is keyed per subgraph and entity, different clients making the same client query (with the same or different query arguments) hit the same cache entries of subgraph response data.
+Response caching enables the router to cache origin responses and reuse them across queries. (An _origin_ is a data source.) The router caches two kinds of data:
+
+- **Root query fields**: Cached as complete units (the entire response for that root field)
+- **Entity representations**: Cached independently—each origin's contribution to an entity is cached separately and can be reused across different queries. (See [_entities query](/federation/subgraph-spec/#understanding-query_entities).)
+
+The router uses Redis to cache data from origin query responses. The cache organizes data by origin and entity representation, so different clients requesting the same data hit shared cache entries. You can use the [cache debugger](/router/performance/caching/response-caching/observability#cache-debugger) to see exactly what's being cached during development.
 
 ### Goals
 
@@ -38,7 +43,7 @@ GraphQL responses present unique caching challenges that traditional HTTP cachin
 - **Personalized and public data**: Responses often mix public data (product details) with private data (user's cart, viewing history). This makes full-response caching either impossible or requires separate cache entries per user.
 - **High duplication**: Different queries requesting similar entities result in duplicate cached data. For example, a product list query and a product detail query both cache the same product name and price.
 
-Response caching solves these challenges by caching origin responses with flexible cache control. The router determines cache TTLs from the `Cache-Control` HTTP headers returned by your origins—these headers are derived from `@cacheControl` directives in your schema. When an origin response contains multiple entities, the router uses the minimum TTL value. Different responses can have different TTLs and visibility settings, and you can actively invalidate cached data when you know it has changed.
+Response caching solves these challenges by caching origin responses with flexible cache control. The router determines cache TTLs from the `Cache-Control` HTTP headers returned by your origins—these headers are derived from `@cacheControl` directives in your schema. When an origin response contains multiple entity representations, the router uses the minimum TTL value. Different responses can have different TTLs and visibility settings, and you can actively invalidate cached data when you know it has changed.
 
 ### Benefits of response caching
 

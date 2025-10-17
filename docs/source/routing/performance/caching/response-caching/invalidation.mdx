@@ -21,9 +21,9 @@ Time to live (TTL) determines how long the router keeps cached origin responses 
 
 ### How TTLs work
 
-The router caches origin query responses—specifically, root query fields as complete units and entities as independent reusable units. To determine how long to cache each response, the router reads the [`Cache-Control` header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control) that the origin returns. The router uses the `max-age` value from this header as the TTL for that cached data.
+The router caches origin query responses—specifically, root query fields as complete units and entity representations as independent reusable units. To determine how long to cache each response, the router reads the [`Cache-Control` header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control) that the origin returns. The router uses the `max-age` value from this header as the TTL for that cached data.
 
-The `Cache-Control` header itself is derived from `@cacheControl` directives in your origin schema. When an origin response contains multiple entities, the origin generates a `Cache-Control` header with the minimum TTL value across all entities in that response. (You can use the [cache debugger](/router/performance/caching/response-caching/observability#cache-debugger) to inspect these headers.)
+The `Cache-Control` header itself is derived from `@cacheControl` directives in your origin schema. When an origin response contains multiple entity representations, the origin generates a `Cache-Control` header with the minimum TTL value across all representations in that response. (You can use the [cache debugger](/router/performance/caching/response-caching/observability#cache-debugger) to inspect these headers.)
 
 When responding to client queries, the router:
 1. Calculates the overall response TTL by taking the minimum TTL from all cached origin responses included in the client response
