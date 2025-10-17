@@ -730,6 +730,7 @@ impl Query {
         // validate_variables should have already checked that
         // the variable is present and it is of the correct type
         for selection in selection_set {
+            println!("Applying selection set: {selection:?}");
             match selection {
                 Selection::Field {
                     name,
@@ -822,7 +823,8 @@ impl Query {
                         == type_condition.as_str()
                         || parameters
                             .schema
-                            .is_subtype(type_condition, current_type.inner_named_type().as_str());
+                            // NOTE(@TylerBloom): Were these in backwards order?
+                            .is_subtype(current_type.inner_named_type().as_str(), type_condition);
 
                     if is_apply {
                         // if this is the filtered query, we must keep the __typename field because the original query must know the type
