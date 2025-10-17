@@ -349,10 +349,10 @@ impl Query {
         match field_type {
             executable::Type::Named(name) => match name.as_str() {
                 "Int" => self.format_integer(parameters, path, input, output),
-                "Float" => self.format_float(input, output),
-                "Boolean" => self.format_boolean(input, output),
-                "String" => self.format_string(input, output),
-                "Id" => self.format_id(input, output),
+                "Float" => self.format_float(parameters, path, input, output),
+                "Boolean" => self.format_boolean(parameters, path, input, output),
+                "String" => self.format_string(parameters, path, input, output),
+                "Id" => self.format_id(parameters, path, input, output),
                 _ => self.format_named_type(
                     parameters,
                     field_type,
@@ -621,37 +621,97 @@ impl Query {
     }
 
     #[inline]
-    fn format_float(&self, input: &mut Value, output: &mut Value) {
+    fn format_float(
+        &self,
+        parameters: &mut FormatParameters,
+        path: &[ResponsePathElement<'_>],
+        input: &mut Value,
+        output: &mut Value,
+    ) {
         if input.as_f64().is_some() {
             *output = input.clone();
         } else {
+            if !input.is_null() {
+                parameters.coersion_errors.push(
+                    Error::builder()
+                        .message("Invalid value found for the type Float")
+                        .path(Path::from_response_slice(path))
+                        .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
+                        .build(),
+                );
+            }
             *output = Value::Null;
         }
     }
 
     #[inline]
-    fn format_boolean(&self, input: &mut Value, output: &mut Value) {
+    fn format_boolean(
+        &self,
+        parameters: &mut FormatParameters,
+        path: &[ResponsePathElement<'_>],
+        input: &mut Value,
+        output: &mut Value,
+    ) {
         if input.as_bool().is_some() {
             *output = input.clone();
         } else {
+            if !input.is_null() {
+                parameters.coersion_errors.push(
+                    Error::builder()
+                        .message("Invalid value found for the type Boolean")
+                        .path(Path::from_response_slice(path))
+                        .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
+                        .build(),
+                );
+            }
             *output = Value::Null;
         }
     }
 
     #[inline]
-    fn format_string(&self, input: &mut Value, output: &mut Value) {
+    fn format_string(
+        &self,
+        parameters: &mut FormatParameters,
+        path: &[ResponsePathElement<'_>],
+        input: &mut Value,
+        output: &mut Value,
+    ) {
         if input.as_str().is_some() {
             *output = input.clone();
         } else {
+            if !input.is_null() {
+                parameters.coersion_errors.push(
+                    Error::builder()
+                        .message("Invalid value found for the type String")
+                        .path(Path::from_response_slice(path))
+                        .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
+                        .build(),
+                );
+            }
             *output = Value::Null;
         }
     }
 
     #[inline]
-    fn format_id(&self, input: &mut Value, output: &mut Value) {
+    fn format_id(
+        &self,
+        parameters: &mut FormatParameters,
+        path: &[ResponsePathElement<'_>],
+        input: &mut Value,
+        output: &mut Value,
+    ) {
         if input.is_string() || input.is_i64() || input.is_u64() || input.is_f64() {
             *output = input.clone();
         } else {
+            if !input.is_null() {
+                parameters.coersion_errors.push(
+                    Error::builder()
+                        .message("Invalid value found for the type ID")
+                        .path(Path::from_response_slice(path))
+                        .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
+                        .build(),
+                );
+            }
             *output = Value::Null;
         }
     }
