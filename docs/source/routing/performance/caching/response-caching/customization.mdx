@@ -21,9 +21,8 @@ For basic response caching setup, see the [Quickstart](/router/performance/cachi
 
 ## Private data caching
 
-A subgraph can return a response with the header `Cache-Control: private`, indicating that it contains user-personalized data. Although this usually forbids intermediate servers from storing data, the router may be able to recognize different users and store their data in different parts of the cache.
+A subgraph can return a response with the header `Cache-Control: private`, indicating that it contains user-personalized data. Although this usually forbids intermediate servers from storing data, the router can recognize different users and store their data in different parts of the cache.
 
-### When to use private data caching
 
 Use private data caching when:
 
@@ -37,9 +36,9 @@ Don't use private data caching if:
 - You can't reliably identify users across requests
 - User-specific data changes too frequently to benefit from caching
 
-### Configure private_id
+### Configure `private_id`
 
-To set up private information caching, configure the `private_id` option. `private_id` is a string pointing at a field in the request context that contains data used to recognize users (for example, user id, or `sub` claim in JWT).
+To set up private information caching, configure the `private_id` option. This option is a string pointing at a field in the request context that contains data used to recognize users (for example, a user ID, or `sub` claim in JWT).
 
 As an example, if you are using the router's JWT authentication plugin, first configure the `private_id` option in the `accounts` subgraph to point to the `user_id` key in the context. Then, use a Rhai script to set that key from the JWT's `sub` claim:
 
@@ -78,20 +77,19 @@ fn supergraph_service(service) {
 
 ### How private data caching works
 
-The router implements the following sequence to determine whether a particular query returns private data:
+The router performs the following sequence to determine whether a particular query returns private data:
 
-- Upon seeing a query for the first time, the router requests the cache as if it were a public-only query.
-- When the subgraph returns the response with private data, the router recognizes it and stores the data in a user-specific part of the cache.
-- The router stores the query in a list of known queries with private data.
-- When the router subsequently sees a known query:
+1. Upon seeing a query for the first time, the router requests the cache as if it were a public-only query.
+2. When the subgraph returns the response with private data, the router recognizes it and stores the data in a user-specific part of the cache.
+3. The router stores the query in a list of known queries with private data.
+4. When the router subsequently sees a known query:
   - If the private ID isn't provided, the router doesn't check the cache and instead transmits the subgraph response directly.
-  - If the private id is provided, the router queries the part of the cache for the current user and checks the subgraph if nothing is available.
+  - If the private ID is provided, the router queries the part of the cache for the current user and checks the subgraph if nothing is available.
 
 ## Custom cache keys
 
 To store data for a particular request in different cache entries, configure the cache key through the `apollo::response_cache::key` context entry.
 
-### When to use custom cache keys
 
 Use custom cache keys when you need to:
 
@@ -164,7 +162,7 @@ fn supergraph_service(service) {
 
 ## Advanced Redis configuration
 
-The router provides several Redis options to ensure you can scale properly and achieve the best performance.
+The router provides multiple Redis options to ensure you can scale properly and achieve the best performance.
 
 For basic Redis setup, see the [Quickstart](/router/performance/caching/response-caching/quickstart) page.
 
@@ -185,7 +183,7 @@ preview_response_cache:
         fetch_timeout: 750ms # Optional, by default: 500ms
         insert_timeout: 750ms # Optional, by default: 500ms
         invalidate_timeout: 750ms # Optional, by default: 1s
-        ttl: 24h # Optional, by default no expiration. Default ttl for data saved in Redis
+        ttl: 24h # Optional, default: no expiration. Default TTL for data saved in Redis
     # Configure response caching per subgraph, overrides options from the "all" section
     subgraphs:
       products:
@@ -194,7 +192,7 @@ preview_response_cache:
           pool_size: 15 # Optional. Default: 5
           namespace: products_response_cache # Optional. Prefix all the cached entries in Redis with this prefix in Redis key
       inventory:
-        enabled: false # disable for a specific subgraph
+        enabled: false # Disable for a specific subgraph
 ```
 
 ### Redis URL formats
@@ -207,10 +205,10 @@ For comprehensive Redis URL configuration details, including authentication and 
 
 The response caching configuration must contain one or more URLs using different schemes depending on the expected deployment:
 
-* `redis` - TCP connected to a centralized server.
-* `rediss` - TLS connected to a centralized server.
-* `redis-cluster` - TCP connected to a cluster.
-* `rediss-cluster` - TLS connected to a cluster.
+- `redis` - TCP connected to a centralized server
+- `rediss` - TLS connected to a centralized server
+- `redis-cluster` - TCP connected to a cluster
+- `rediss-cluster` - TLS connected to a cluster
 
 The URLs must have the following format:
 
@@ -282,9 +280,9 @@ preview_response_cache:
 
 ### TTL for Redis entries
 
-The `ttl` option defines the default global expiration for Redis entries. By default it doesn't set any expiration for response caching.
+The `ttl` option defines the default global expiration for Redis entries. By default, it doesn't set any expiration for response caching.
 
-To prevent potential cache overflow, consider setting the TTL to 24 hours or twice the median publish interval (whichever's lesser), and monitor cache utilization in your environment, especially if you cache a lot of different data:
+To prevent potential cache overflow, consider setting the TTL to 24 hours or twice the median publish interval (whichever is less), and monitor cache utilization in your environment, especially if you cache a lot of different data:
 
 ```yaml title="router.yaml"
 preview_response_cache:
@@ -314,7 +312,7 @@ preview_response_cache:
 
 ### Required to start
 
-When active, the `required_to_start` option will prevent the router from starting if it cannot connect to Redis. By default, the router will still start without a connection to Redis, which would result in only using the in-memory cache for APQ and query planning, and entity caching sending the requests to subgraphs undisturbed:
+When active, the `required_to_start` option prevents the router from starting if it can't connect to Redis. By default, the router starts without a connection to Redis, which means it sends requests to subgraphs directly, bypassing the cache:
 
 ```yaml title="router.yaml"
 preview_response_cache:
@@ -329,7 +327,7 @@ preview_response_cache:
 
 ### Connection pool size
 
-The `pool_size` option defines the number of Redis connections the router opens. By default, the router opens five connections. If you have high traffic between the router and Redis, or if you observe latency in those requests, increase the pool size to reduce that latency. You can measure whether you need to increase this number by monitoring the `apollo.router.operations.response_cache.insert` and `apollo.router.operations.response_cache.fetch` [metrics](/router/performance/caching/response-caching/observability#fetchinsert). If the time to insert and fetch data from the cache is long, it might be because of delays in acquiring a connection from the pool:
+The `pool_size` option defines the number of Redis connections the router opens. By default, the router opens five connections. If you have high traffic between the router and Redis, or if you observe latency in those requests, increase the pool size to reduce that latency. You can measure whether you need to increase this number by monitoring the `apollo.router.operations.response_cache.insert` and `apollo.router.operations.response_cache.fetch` [response cache metrics](/router/performance/caching/response-caching/observability#fetchinsert). If the time to insert and fetch data from the cache is long, it might be because of delays in acquiring a connection from the pool:
 
 ```yaml title="router.yaml"
 preview_response_cache:

@@ -18,7 +18,7 @@ Learn how the GraphOS Router can cache subgraph query responses using Redis to i
 
 ## Overview
 
-An entity gets its fields from one or more subgraphs. To respond to a client request for an entity, the GraphOS Router must make multiple subgraph requests. Different clients requesting the same entity can make redundant, identical subgraph requests.
+An entity gets its fields from one or more subgraphs. To respond to a client request for an entity, GraphOS Router must make multiple subgraph requests. Different clients requesting the same entity can make redundant, identical subgraph requests.
 
 Entity caching enables the router to respond to identical subgraph queries with cached subgraph responses. The router uses Redis to cache data from subgraph query responses. Because cached data is keyed per subgraph and entity, different clients making the same client query&mdash;with the same or different query arguments&mdash;hit the same cache entries of subgraph response data.
 
@@ -367,7 +367,7 @@ Invalidation requests are defined as JSON objects with the following format:
 
 <Note>
 
-The key field is the same argument as defined in the subgraph's <code>@key</code> directive. If a subgraph has multiple keys defined and the entity is being invalidated, you need to send a request for each key definition.
+The key field is the same argument as defined in the subgraph's `@key` directive. If a subgraph has multiple keys defined and the entity is being invalidated, send a request for each key definition.
 
 </Note>
 
@@ -441,7 +441,7 @@ Entity caching will greatly reduce traffic to subgraphs. Should there be an avai
 
 #### Scalability and performance
 
-The scalability and performance of entity cache invalidation is based on its implementation with the Redis [`SCAN` command](https://redis.io/docs/latest/commands/scan/). The `SCAN` command provides a cursor for iterating over the entire key space and returns a list of keys matching a pattern. When executing an invalidation request, the router first runs a series of `SCAN` calls and then it runs [`DEL`](https://redis.io/docs/latest/commands/del/) calls for any matching keys.
+The scalability and performance of entity cache invalidation is based on its use of the Redis [`SCAN` command](https://redis.io/docs/latest/commands/scan/). The `SCAN` command provides a cursor for iterating over the entire key space and returns a list of keys matching a pattern. When executing an invalidation request, the router first runs a series of `SCAN` calls and then it runs [`DEL`](https://redis.io/docs/latest/commands/del/) calls for any matching keys.
 
 The time complexity of a single invalidation request grows linearly with the number of entries, as each entry requires `SCAN` to iterate over. The router can also execute multiple invalidation requests simultaneously. This lowers latency but might increase the load on Redis instances.
 

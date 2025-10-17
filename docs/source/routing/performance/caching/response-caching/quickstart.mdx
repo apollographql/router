@@ -14,15 +14,15 @@ Developer and Standard plans require Router v2.6.0 or later.
 
 </PlanRequired>
 
-Learn how the GraphOS Router can cache subgraph query responses using Redis to improve your query latency for entities in the supergraph.
+Learn how GraphOS Router can cache portions of query responses using Redis to improve your query latency in the supergraph.
 
 ## Quickstart
 
-Follow this guide to enable and add a minimal configuration for response caching in the GraphOS Router.
+Follow this guide to enable and add a minimal configuration for response caching in GraphOS Router.
 
 ### Prerequisites
 
-To use response caching in the GraphOS Router, you must set up:
+To use response caching in GraphOS Router, you must set up:
 
 - A Redis instance or cluster that your router instances can communicate with
 - A router that [connects to GraphOS](/router/configuration/overview/#environment-variables)
@@ -30,9 +30,9 @@ To use response caching in the GraphOS Router, you must set up:
 ### Configure router for response caching
 
 In `router.yaml`, configure `preview_response_cache`:
-- Enable response caching globally.
-- Configure Redis using the same conventions described in [distributed caching](/router/configuration/distributed-caching#redis-url-configuration).
-- Configure response caching per subgraph, with overrides per subgraph for disabling response caching and TTL.
+- Enable response caching globally
+- Configure Redis using the same conventions described in [distributed caching](/router/configuration/distributed-caching#redis-url-configuration)
+- Configure response caching per subgraph, with overrides per subgraph for disabling response caching and TTL
 
 For example:
 
@@ -40,7 +40,7 @@ For example:
 # Enable response caching globally
 preview_response_cache:
   enabled: true
-  debug: true # Enable the ability to return debugging data for caching debugger. It's better to not enable this in production.
+  debug: true # Enable the ability to return data to the cache debugger. Avoid enabling this in production.
   invalidation:
     listen: 0.0.0.0:4000
     path: /invalidation
@@ -65,7 +65,7 @@ preview_response_cache:
 
 ### Identify what data to cache
 
-To identify which subgraphs would benefit most from caching, you can enable metrics and increase their granularity. Keep in mind that more granularity leads to higher metric cardinality, which may increase costs in your APM.
+To identify which subgraphs would benefit most from caching, you can enable metrics and increase their granularity. Keep in mind that more granularity leads to higher metric cardinality, which might increase costs in your APM.
 
 Configure this metric as follows:
 
@@ -95,7 +95,7 @@ You can now use the `apollo.router.operations.response.cache` metric to create a
 The left chart shows cache hits per subgraph and type. No cache hits appear because your subgraphs don't return any `Cache-Control` headers. The right chart shows cache misses and potential cache hits. In this example, caching the `User` type from the `posts` subgraph would be beneficial given the high number of cache misses.
 
 
-### Schema integration
+### Integrate with your schema
 Consider an example with two subgraphs: users and posts.
 
 ```graphql title="users.graphql"
@@ -149,7 +149,7 @@ type Post @key(fields: "id") {
 Based on the metrics, caching the `User` type on the `posts` subgraph would provide significant benefits. Enable this using the `@cacheControl` directive.
 
 <Note>
-    This example using `@cacheControl` only works if you're using Apollo Server as a subgraph. If you're using another server implementation, update your codebase to return the correct `Cache-Control` header.
+    This example using `@cacheControl` only works if you're using a subgraph which supports `@cacheControl`, like Apollo Server. If you're using another server, update your codebase to return the correct `Cache-Control` header using the method provided by that server according to its documentation.
 </Note>
 
 Here is the new version of the schema for subgraph `posts`:
@@ -214,7 +214,7 @@ If you execute an example query twice in Apollo Sandbox with [cache debugger](./
 
 ### Invalidation
 
-With cached data based on TTL, you might want to increase these TTLs and automatically invalidate specific data when you know it has changed. Response caching provides several ways to invalidate data. For more details, see [Cache Expiration](./cache-expiration). For this quickstart, we'll use cache tags, which work like surrogate cache keys for REST APIs. You can tag data in your schema to enable targeted invalidation.
+With cached data based on TTL, you might want to increase these TTLs and automatically invalidate specific data when you know it has changed. Response caching provides multiple ways to invalidate data. For more details, see [Invalidation](./invalidation). This quickstart uses cache tags, which work like surrogate cache keys for REST APIs. You can tag data in your schema to enable targeted invalidation.
 
 Use the `@cacheTag` directive introduced in Federation v2.12. It takes a `format` argument to create your cache tag. For the `User` type and the `posts` root field, create different cache tags:
 
@@ -258,7 +258,7 @@ type Post @key(fields: "id") @cacheControl(maxAge: 60) {
 
 The `User` type is tagged with a static cache tag format `user` and a dynamic one with variable interpolation using the entity key `id` to generate the cache tag. For example, if the fetched `User` has an `id` of `42`, it generates `user-42` as a cache tag.
 
-With tagged data, you can invalidate it using a `curl` command to invalidate the user with id `42`:
+With tagged data, you can invalidate it using a `curl` command to invalidate the user with ID `42`:
 
 ```
 curl --request POST \
@@ -270,7 +270,7 @@ curl --request POST \
 
 `INVALIDATION_SHARED_KEY` is an environment variable containing a token for authenticating requests to this endpoint. This was configured in the router setup at the beginning of this page.
 
-The call returns the number of invalidated entries. For example, if only 1 entry was invalidated:
+The call returns the number of invalidated entries. For example, if only one entry was invalidated:
 
 ```json
 {
@@ -286,4 +286,4 @@ If you execute an example query twice in Apollo Sandbox with [cache debugger](./
   src="../../../../images/response-cache/debugger-cache-query-tags.png"
 />
 
-To explore response caching and see what data has been cached in a query, use the cache debugger documented [here](./observability#cache-debugger).
+To explore response caching and see what data has been cached in a query, use the [cache debugger](./observability#cache-debugger).

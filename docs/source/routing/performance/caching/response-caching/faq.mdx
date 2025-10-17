@@ -8,10 +8,6 @@ releaseStage: preview
 
 ## FAQ
 
-### Does response caching work with Apollo Connectors?
-
-Yes.
-
 ### Are cache tags compatible with CDN surrogate keys?
 
 Yes. Cache tags work like CDN surrogate key systems (used by Fastly, Cloudflare, and other CDN providers). Both approaches let you tag cached content and invalidate it by tag name. In the router, cache tags are set via the `@cacheTag` directive. In CDNs, surrogate keys are typically set via response headers like `Surrogate-Key` or `Cache-Tag`.
@@ -20,9 +16,9 @@ Yes. Cache tags work like CDN surrogate key systems (used by Fastly, Cloudflare,
 
 The router caches at the GraphQL operation level, storing reusable sections of the response tree. When multiple operations request the same entities or root fields, the router can serve them from cache instead of querying your subgraphs repeatedly. This reduces load on your subgraphs and backend services.
 
-### What's the minimal requirement at the subgraph level to benefit from response caching?
+### What's the minimal requirement at the origin level to benefit from response caching?
 
-Your subgraph needs to return a `Cache-Control` header in its HTTP response. The router uses this header to determine which types and fields should be cached.
+Your origin needs to return a `Cache-Control` header in its HTTP response. The router uses this header to determine TTLs for cached data.
 
 ### How does response caching work with authorization?
 
@@ -42,21 +38,21 @@ The router returns whatever cached data is available and populates the rest of t
 
 ### How do `@cacheControl` and `@cacheTag` work differently?
 
-`@cacheControl` is interpreted by your subgraph (like Apollo Server) to generate the `Cache-Control` HTTP header that tells the router how long to cache data. `@cacheTag` is interpreted by the router itself to assign tags for invalidation. This separation mirrors HTTP caching conventions—`Cache-Control` headers manage TTL, while separate headers (like `Surrogate-Key` in CDNs) manage invalidation tags.
+`@cacheControl` is interpreted by your subgraph (like Apollo Server) to generate the `Cache-Control` HTTP header that tells the router how long to cache data. `@cacheTag` is interpreted by the router itself to assign tags for invalidation. This separation mirrors HTTP caching conventions: `Cache-Control` headers manage TTL, and separate headers (like `Surrogate-Key` in CDNs) manage invalidation tags.
 
 ### Where is `@cacheTag` defined and where is it interpreted?
 
 The `@cacheTag` directive is defined in your subgraph schema, but it's only interpreted by the router—your subgraph doesn't use it at all. This is different from `@cacheControl`, which is both defined and interpreted at the subgraph level. The router reads `@cacheTag` from your composed schema to determine which cache tags to assign to cached data.
 
-### What are the requirements for using `@cacheTag`?
+### Where can the `@cacheTag` directive be applied?
 
-You can apply `@cacheTag` on root query fields or on resolvable entities (types marked with `@key` where `resolvable` is unset or `true`). 
+You can apply `@cacheTag` on root query fields or on resolvable entities (types marked with `@key` where `resolvable` is unset or `true`).
 
-For root fields, use `{$args.XXX}` to interpolate field arguments into the tag format—`args` is a map of all arguments for that field.
+For root fields, use `{$args.XXX}` to interpolate field arguments into the tag format—`args` is a map of all arguments for that field. The argument must be non-nullable.
 
-For entities, use `{$key.XXX}` where `key` is a map of the entity's key fields. When you have multiple `@key` directives on a type (like `@key(fields: "id")` and `@key(fields: "id name")`), you can only reference fields present in every `@key` directive. In this example, only `{$key.id}` would be valid since `id` appears in both keys.
+For entities, use `{$key.XXX}` where `key` is a map of the entity's key fields. The field must be non-nullable. When you have multiple `@key` directives on a type (like `@key(fields: "id")` and `@key(fields: "id name")`), you can only reference fields present in every `@key` directive. In this example, only `{$key.id}` would be valid because `id` appears in both keys.
 
-The tag format must always generate a valid string value. For nested objects in keys, reference the specific field you need—for example, use `{$key.country.name}` rather than `{$key.country}` when `country` is an object.
+The tag format must always generate a valid string value. For nested objects in keys, reference the specific field you need—for example, use `{$key.country.name}` instead of `{$key.country}` when `country` is an object.
 
 ### How does `@cacheControl` work?
 
@@ -72,7 +68,7 @@ The router caches the entire operation response as a single unit. This means ope
 
 ### When should I use invalidation vs. TTL-based caching?
 
-TTL-based caching works great for predictable data refresh patterns. Active invalidation becomes essential when you have event-driven architectures where data changes unpredictably—it lets you remove stale cache entries immediately when you know data has changed, rather than waiting for TTL expiration.
+TTL-based caching works great for predictable data refresh patterns. Active invalidation becomes essential when you have event-driven architectures where data changes unpredictably—it lets you remove stale cache entries immediately when you know data has changed, instead of waiting for TTL expiration.
 
 ### Why was "Entity Caching" renamed to "Response Caching"?
 
@@ -80,7 +76,7 @@ TTL-based caching works great for predictable data refresh patterns. Active inva
 
 ### What changed between the 2024 preview and the current implementation?
 
-The 2024 preview used a linear scan approach for active invalidation that scaled with total cache size rather than the number of invalidated entries. The current implementation uses an index-based approach that scales only with the entries you're actually invalidating, making it practical for production use at scale.
+The 2024 preview used a linear scan approach for active invalidation that scaled with total cache size instead of the number of invalidated entries. The current version uses an index-based approach that scales only with the entries you're actually invalidating, making it practical for production use at scale.
 
 ### How does the current release affect existing users?
 
