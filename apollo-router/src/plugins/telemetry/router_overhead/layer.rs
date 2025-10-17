@@ -176,9 +176,13 @@ mod tests {
         // Allow generous tolerance for timing imprecision in tests
         let result = tracker.calculate_overhead();
         // The guard should have been dropped when the future completed
-        assert!(!result.has_active_subgraph_requests);
-        assert!(result.overhead >= Duration::from_millis(10) && result.overhead <= Duration::from_millis(60),
-            "overhead was {:?}", result.overhead);
+        assert_eq!(result.active_subgraph_requests, 0);
+        assert!(
+            result.overhead >= Duration::from_millis(10)
+                && result.overhead <= Duration::from_millis(60),
+            "overhead was {:?}",
+            result.overhead
+        );
     }
 
     #[tokio::test]

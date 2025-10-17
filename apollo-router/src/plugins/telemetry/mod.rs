@@ -470,6 +470,11 @@ impl PluginPrivate for Telemetry {
                         ),
                     ));
 
+                    // Create and store router overhead tracker in context
+                    request.context.extensions().with_lock(|lock| {
+                        lock.insert(router_overhead::RouterOverheadTracker::new());
+                    });
+
                     let custom_instruments: RouterInstruments = config_request
                         .instrumentation
                         .instruments
@@ -1108,6 +1113,7 @@ impl PluginPrivate for Telemetry {
         let res_fn_config = self.config.clone();
 
         ServiceBuilder::new()
+            .layer(router_overhead::OverheadLayer::new())
             .map_request(move |request: crate::services::http::HttpRequest| {
                 // Get and store attributes so that they can be applied later after the span is created
                 let client_attributes = HttpClientAttributes {
