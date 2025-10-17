@@ -80,6 +80,7 @@ pub mod test_harness;
 pub mod tracer;
 mod uplink;
 
+pub(crate) mod allocator;
 #[doc(hidden)]
 pub mod otel_compat;
 mod registry;
