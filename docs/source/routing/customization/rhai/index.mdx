@@ -545,6 +545,50 @@ Syntax highlighting can make it easier to spot errors in a script. We recommend 
 
 For tracking down runtime errors, insert [logging](/graphos/reference/router/rhai#logging) statements to narrow down the issue.
 
+### Error logging behavior
+
+When a Rhai callback function throws an error, the router automatically logs the error details to help with debugging. However, the logging behavior depends on whether you provide a custom error body:
+
+#### Errors without custom body
+
+When a callback throws a simple error (a string), the router logs the full error details at <code>ERROR</code> level:
+
+```rhai
+fn supergraph_service(service) {
+    service.map_request(|request| {
+        throw "Something went wrong"; // This error will be logged
+    });
+}
+```
+
+The log output includes:
+- HTTP status code (defaults to <code>500</code>)
+- Error message
+- Line number and position where the error occurred
+
+#### Errors with custom body
+
+When a callback throws an error with a custom GraphQL response body, the router does _not_ log the error details:
+
+```rhai
+fn supergraph_service(service) {
+    service.map_request(|request| {
+        // This error will NOT be logged (to avoid duplication)
+        throw #{
+            status: 403,
+            body: #{
+                errors: [#{
+                    message: "Unauthorized",
+                    extensions: #{
+                        code: "UNAUTHORIZED"
+                    }
+                }]
+            }
+        };
+    });
+}
+```
+
 ## Additional resources
 
 You can use the Apollo Solutions [router extensibility load testing repository](https://github.com/apollosolutions/router-extensibility-load-testing) to load test Rhai scripts as well as router configurations.

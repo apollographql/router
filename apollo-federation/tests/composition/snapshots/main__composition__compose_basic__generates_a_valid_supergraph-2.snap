@@ -1,0 +1,24 @@
+---
+source: apollo-federation/tests/composition/compose_basic.rs
+expression: api_schema.schema()
+---
+type Query {
+  t: T
+}
+
+type T {
+  k: ID
+  a: Int
+  b: String
+}
+
+type S {
+  x: Int
+}
+
+union U = S | T
+
+enum E {
+  V1
+  V2
+}

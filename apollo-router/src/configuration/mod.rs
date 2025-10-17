@@ -50,7 +50,6 @@ use crate::ApolloRouterError;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::cooperative_cancellation::CooperativeCancellation;
 use crate::graphql;
-use crate::notification::Notify;
 use crate::plugin::plugins;
 use crate::plugins::chaos;
 use crate::plugins::chaos::Config;
@@ -61,6 +60,7 @@ use crate::plugins::limits;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
 use crate::plugins::subscription::SubscriptionConfig;
+use crate::plugins::subscription::notification::Notify;
 use crate::uplink::UplinkConfig;
 
 pub(crate) mod connector;
@@ -206,6 +206,8 @@ pub struct Configuration {
     #[serde(skip)]
     pub uplink: Option<UplinkConfig>,
 
+    // FIXME(@goto-bus-stop): Sticking this on Configuration is a serious hack just to have
+    // it available everywhere, it is actually not configuration at all
     #[serde(default, skip_serializing, skip_deserializing)]
     pub(crate) notify: Notify<String, graphql::Response>,
 

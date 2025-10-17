@@ -16,6 +16,7 @@ use apollo_compiler::schema::EnumType;
 use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::ty;
+use indexmap::IndexMap;
 use itertools::Itertools;
 
 use super::argument::directive_optional_list_argument;
@@ -1081,8 +1082,8 @@ impl JoinSpecDefinition {
         subgraphs: &[Subgraph<Validated>],
     ) -> Result<HashMap<String, Name>, FederationError> {
         // Collect sanitized names and group subgraphs by sanitized name (like JS MultiMap)
-        let mut sanitized_name_to_subgraphs: HashMap<String, Vec<&Subgraph<Validated>>> =
-            HashMap::new();
+        let mut sanitized_name_to_subgraphs: IndexMap<String, Vec<&Subgraph<Validated>>> =
+            IndexMap::with_capacity(subgraphs.len());
 
         for subgraph in subgraphs {
             let sanitized = sanitize_graphql_name(&subgraph.name);

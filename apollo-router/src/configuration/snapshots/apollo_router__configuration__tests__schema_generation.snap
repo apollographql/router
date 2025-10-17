@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -236,11 +237,6 @@ expression: "&schema"
           ],
           "description": "Percentage of traces to send via the OTel protocol when sending to Apollo Studio."
         },
-        "preview_subgraph_metrics": {
-          "default": false,
-          "description": "Enable sending additional subgraph metrics to Apollo Studio via OTLP",
-          "type": "boolean"
-        },
         "send_headers": {
           "allOf": [
             {
@@ -265,6 +261,11 @@ expression: "&schema"
           ],
           "default": "enhanced",
           "description": "Set the signature normalization algorithm to use when sending Apollo usage reports."
+        },
+        "subgraph_metrics": {
+          "default": false,
+          "description": "Enable sending additional subgraph metrics to Apollo Studio via OTLP",
+          "type": "boolean"
         },
         "tracing": {
           "allOf": [
@@ -1157,6 +1158,133 @@ expression: "&schema"
         }
       ]
     },
+    "ConditionHttpClientSelector": {
+      "description": "Specify a condition for when an [instrument][] should be mutated or an [event][] should be triggered.\n\n[instrument]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/instruments\n[event]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/events",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A condition to check a selection against a value.",
+          "properties": {
+            "eq": {
+              "items": {
+                "$ref": "#/definitions/HttpClientSelectorOrValue"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "eq"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The first selection must be greater than the second selection.",
+          "properties": {
+            "gt": {
+              "items": {
+                "$ref": "#/definitions/HttpClientSelectorOrValue"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "gt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The first selection must be less than the second selection.",
+          "properties": {
+            "lt": {
+              "items": {
+                "$ref": "#/definitions/HttpClientSelectorOrValue"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "lt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A condition to check a selection against a selector.",
+          "properties": {
+            "exists": {
+              "$ref": "#/definitions/HttpClientSelector"
+            }
+          },
+          "required": [
+            "exists"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "All sub-conditions must be true.",
+          "properties": {
+            "all": {
+              "items": {
+                "$ref": "#/definitions/ConditionHttpClientSelector"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "all"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "At least one sub-conditions must be true.",
+          "properties": {
+            "any": {
+              "items": {
+                "$ref": "#/definitions/ConditionHttpClientSelector"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "any"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The sub-condition must not be true",
+          "properties": {
+            "not": {
+              "$ref": "#/definitions/ConditionHttpClientSelector"
+            }
+          },
+          "required": [
+            "not"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "true",
+          "description": "Static true condition",
+          "type": "string"
+        },
+        {
+          "const": "false",
+          "description": "Static false condition",
+          "type": "string"
+        }
+      ]
+    },
     "ConditionRouterSelector": {
       "description": "Specify a condition for when an [instrument][] should be mutated or an [event][] should be triggered.\n\n[instrument]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/instruments\n[event]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/events",
       "oneOf": [
@@ -1547,6 +1675,21 @@ expression: "&schema"
           "properties": {
             "condition": {
               "$ref": "#/definitions/ConditionConnectorSelector"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    },
+    "ConditionalHttpClientSelector": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/HttpClientSelector"
+        },
+        {
+          "properties": {
+            "condition": {
+              "$ref": "#/definitions/ConditionHttpClientSelector"
             }
           },
           "type": "object"
@@ -2508,7 +2651,7 @@ expression: "&schema"
           "type": "string"
         },
         "url": {
-          "description": "The url you'd like to offload processing to",
+          "description": "The url you'd like to offload processing to (can be overridden per-stage)",
           "type": "string"
         }
       },
@@ -3322,6 +3465,14 @@ expression: "&schema"
           "default": false,
           "description": "Send the SDL",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -3357,6 +3508,14 @@ expression: "&schema"
           "default": false,
           "description": "Send the HTTP status",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -3748,6 +3907,12 @@ expression: "&schema"
           ],
           "description": "A histogram of the length of a selected field in the GraphQL response"
         }
+      },
+      "type": "object"
+    },
+    "ExtendedHttpClientAttributesWithConditionalHttpClientSelector": {
+      "additionalProperties": {
+        "$ref": "#/definitions/ConditionalHttpClientSelector"
       },
       "type": "object"
     },
@@ -5280,6 +5445,86 @@ expression: "&schema"
         }
       ]
     },
+    "HttpClientSelector": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "description": "A header from the HTTP request",
+          "properties": {
+            "default": {
+              "description": "Optional default value.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "request_header": {
+              "description": "The name of the request header.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_header"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A header from the HTTP response",
+          "properties": {
+            "default": {
+              "description": "Optional default value.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "response_header": {
+              "description": "The name of the response header.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "response_header"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "HttpClientSelectorOrValue": {
+      "anyOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AttributeValue"
+            }
+          ],
+          "description": "A constant value."
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/definitions/HttpClientSelector"
+            }
+          ],
+          "description": "Selector to extract a value from the pipeline."
+        }
+      ]
+    },
+    "HttpClientSpans": {
+      "additionalProperties": false,
+      "properties": {
+        "attributes": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ExtendedHttpClientAttributesWithConditionalHttpClientSelector"
+            }
+          ],
+          "description": "Custom attributes that are attached to the HTTP client span."
+        }
+      },
+      "type": "object"
+    },
     "HttpExporter": {
       "additionalProperties": false,
       "properties": {
@@ -6275,6 +6520,13 @@ expression: "&schema"
         "name": {
           "description": "The instrument name you're targeting",
           "type": "string"
+        },
+        "rename": {
+          "description": "Rename the metric to this name\n\nThis allows you to customize metric names for both OTLP and Prometheus exporters.\nNote: Prometheus will apply additional transformations (dots to underscores, unit suffixes).\nApollo metrics are not affected by this rename - they will retain original names.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "unit": {
           "description": "New unit to set to the instrument",
@@ -7638,6 +7890,14 @@ expression: "&schema"
           "default": false,
           "description": "Send the SDL",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -7681,6 +7941,14 @@ expression: "&schema"
           "default": false,
           "description": "Send the HTTP status",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -8278,6 +8546,14 @@ expression: "&schema"
             }
           ],
           "description": "The attributes to include by default in spans based on their level as specified in the otel semantic conventions and Apollo documentation."
+        },
+        "http_client": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/HttpClientSpans"
+            }
+          ],
+          "description": "Attributes to include on the HTTP client span.\nHTTP client spans contain information about HTTP requests made to subgraphs, including any changes made by Rhai scripts."
         },
         "mode": {
           "allOf": [
@@ -9128,6 +9404,14 @@ expression: "&schema"
           "default": false,
           "description": "Send the subgraph URI",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -9176,6 +9460,14 @@ expression: "&schema"
           "default": false,
           "description": "Send the subgraph request id",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -10192,6 +10484,14 @@ expression: "&schema"
           "default": false,
           "description": "Send the SDL",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -10235,6 +10535,14 @@ expression: "&schema"
           "default": false,
           "description": "Send the HTTP status",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -11165,11 +11473,18 @@ expression: "&schema"
       "type": "object"
     },
     "WebSocketProtocol": {
-      "enum": [
-        "graphql_ws",
-        "graphql_transport_ws"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "const": "graphql_ws",
+          "description": "The modern graphql-ws protocol. The subprotocol name is \"graphql-transport-ws\".\n\nSpec URL: https://github.com/enisdenjo/graphql-ws/blob/0c0eb499c3a0278c6d9cc799064f22c5d24d2f60/PROTOCOL.md",
+          "type": "string"
+        },
+        {
+          "const": "graphql_transport_ws",
+          "description": "The legacy subscriptions-transport-ws protocol. Confusingly, the subprotocol name is\n\"graphql-ws\".\n\nhttps://github.com/apollographql/subscriptions-transport-ws/blob/36f3f6f780acc1a458b768db13fd39c65e5e6518/PROTOCOL.md",
+          "type": "string"
+        }
+      ]
     },
     "ZipkinConfig": {
       "additionalProperties": false,
