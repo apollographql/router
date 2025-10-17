@@ -13,7 +13,6 @@ use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::ast::Type;
-use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
@@ -111,7 +110,6 @@ pub(crate) struct MergeResult {
 }
 
 pub(in crate::merger) struct MergedDirectiveInfo {
-    pub(in crate::merger) definition: DirectiveDefinition,
     pub(in crate::merger) arguments_merger: Option<ArgumentMerger>,
     pub(in crate::merger) static_argument_transform: Option<Rc<StaticArgumentsTransform>>,
 }
@@ -1178,43 +1176,6 @@ impl Merger {
                     message: "Query root is missing from the merged schema".to_string(),
                 });
         }
-    }
-
-    pub(in crate::merger) fn directive_applications_with_transformed_arguments(
-        pos: &DirectiveTargetPosition,
-        merge_info: &MergedDirectiveInfo,
-        subgraph: &Subgraph<Validated>,
-    ) -> Vec<Directive> {
-        let mut applications = Vec::new();
-        if let Some(arg_transform) = &merge_info.static_argument_transform {
-            for application in
-                pos.get_applied_directives(subgraph.schema(), &merge_info.definition.name)
-            {
-                let mut transformed_application = Directive::new(application.name.clone());
-                let indexed_args: IndexMap<Name, Value> = application
-                    .arguments
-                    .iter()
-                    .map(|a| (a.name.clone(), a.value.as_ref().clone()))
-                    .collect();
-                transformed_application.arguments = arg_transform(subgraph, indexed_args)
-                    .into_iter()
-                    .map(|(name, value)| {
-                        Node::new(Argument {
-                            name,
-                            value: Node::new(value),
-                        })
-                    })
-                    .collect();
-                applications.push(transformed_application);
-            }
-        } else {
-            applications.extend(
-                pos.get_applied_directives(subgraph.schema(), &merge_info.definition.name)
-                    .into_iter()
-                    .map(|n| (**n).clone()),
-            );
-        }
-        applications
     }
 
     fn add_missing_interface_object_fields_to_implementations(

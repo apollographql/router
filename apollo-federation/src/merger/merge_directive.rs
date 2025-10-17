@@ -4,10 +4,13 @@ use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::ast::DirectiveLocation;
+use apollo_compiler::collections::IndexMap;
 use indexmap::IndexSet;
 use itertools::Itertools;
+use tracing::instrument;
 use tracing::trace;
 
+use crate::bail;
 use crate::error::FederationError;
 use crate::merger::hints::HintCode;
 use crate::merger::merge::Merger;
@@ -16,6 +19,9 @@ use crate::merger::merge::map_sources;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::referencer::DirectiveReferencers;
+use crate::schema::type_and_directive_specification::StaticArgumentsTransform;
+use crate::subgraph::typestate::Subgraph;
+use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
 use crate::supergraph::EXECUTABLE_DIRECTIVE_LOCATIONS;
 
@@ -68,6 +74,10 @@ impl Merger {
         if names.is_empty() {
             trace!("No applied directives to merge at {dest}");
         } else {
+            trace!(
+                "Position {dest} has applied directives to merge: {}",
+                names.iter().join(", ")
+            );
             self.applied_directives_to_merge
                 .push(AppliedDirectiveToMergeEntry {
                     names,
@@ -78,19 +88,31 @@ impl Merger {
         Ok(())
     }
 
+    /// For a given directive name, merges all its applications at the given destination position.
+    /// Note that this logic relies on the fact that the directive must have the same name across
+    /// all subgraphs.
+    #[instrument(skip(self, sources))]
     fn merge_applied_directive<T>(
         &mut self,
         name: &Name,
         sources: &Sources<T>,
         dest: &DirectiveTargetPosition,
     ) -> Result<(), FederationError> {
-        let Some(directive_in_supergraph) = self
-            .merged_federation_directive_in_supergraph_by_directive_name
+        let Some(definition) = self
+            .merged
+            .schema()
+            .directive_definitions
             .get(name)
+            .cloned()
         else {
-            // Definition is missing, so we assume there is nothing to merge.
-            return Ok(());
+            // This should never happen as we only record directives to merge that we know are merged.
+            bail!(
+                "Cannot merge applied directive @{name} at {dest} as the directive is not defined in the supergraph schema"
+            );
         };
+        let directive_in_supergraph = self
+            .merged_federation_directive_in_supergraph_by_directive_name
+            .get(name);
 
         // Accumulate all positions of the directive in the source schemas
         let all_schema_referencers =
@@ -113,44 +135,53 @@ impl Merger {
             // argument transforms are only applied for repeatable directives. In this version, we rely on the `Eq`
             // and `Hash` implementations of `Directive` to deduplicate applications, and the argument transforms
             // are applied up front so they are available in all locations.
-            let mut directive_sources: Sources<Directive> = Default::default();
+            let directive_sources: Sources<Directive> = Default::default();
             let directive_counts = sources
                 .iter()
                 .flat_map(|(idx, source)| {
-                    if source.is_some() {
-                        let directives = Self::directive_applications_with_transformed_arguments(
-                            &pos,
-                            directive_in_supergraph,
-                            &self.subgraphs[*idx],
-                        );
-                        directive_sources.insert(*idx, directives.first().cloned());
-                        directives
-                    } else {
-                        vec![]
+                    if source.is_none() {
+                        return vec![];
                     }
+
+                    let subgraph = &self.subgraphs[*idx];
+                    let mut applications = pos
+                        .get_applied_directives(subgraph.schema(), name)
+                        .into_iter()
+                        .map(|d| (**d).clone())
+                        .collect_vec();
+                    if let Some(transform) =
+                        &directive_in_supergraph.and_then(|d| d.static_argument_transform.as_ref())
+                    {
+                        for application in &mut applications {
+                            self.transform_arguments(application, subgraph, transform.as_ref());
+                        }
+                    }
+                    applications
                 })
                 .counts();
 
-            if directive_in_supergraph.definition.repeatable {
+            if definition.repeatable {
                 trace!(
                     "Directive @{name} is repeatable, merging all {} applications at {pos}",
                     directive_counts.len()
                 );
-                for directive in directive_counts.keys() {
-                    dest.insert_directive(&mut self.merged, (*directive).clone())?;
+                for directive in directive_counts.into_keys() {
+                    dest.insert_directive(&mut self.merged, directive)?;
                 }
             } else if directive_counts.len() == 1 {
                 trace!(
                     "Directive @{name} is non-repeatable but only applied once, merging application at {pos}"
                 );
-                let only_application = directive_counts.iter().next().unwrap().0.clone();
+                let only_application = directive_counts.into_keys().next().unwrap();
                 dest.insert_directive(&mut self.merged, only_application)?;
-            } else if let Some(merger) = &directive_in_supergraph.arguments_merger {
+            } else if let Some(merger) =
+                &directive_in_supergraph.and_then(|d| d.arguments_merger.as_ref())
+            {
                 // When we have multiple unique applications of the directive, and there is a
                 // supplied argument merger, then we merge each of the arguments into a combined
                 // directive.
                 let mut merged_directive = Directive::new(name.clone());
-                for arg_def in &directive_in_supergraph.definition.arguments {
+                for arg_def in &definition.arguments {
                     let values = directive_counts
                         .keys()
                         .filter_map(|d| {
@@ -176,7 +207,7 @@ impl Merger {
                     code: HintCode::MergedNonRepeatableDirectiveArguments.code().to_string(),
                     message: format!(
                         "Directive @{name} is applied to \"{pos}\" in multiple subgraphs with different arguments. Merging strategies used by arguments: {}",
-                        directive_in_supergraph.arguments_merger.as_ref().map_or("undefined".to_string(), |m| (m.to_string)())
+                        directive_in_supergraph.and_then(|d| d.arguments_merger.as_ref()).map_or("undefined".to_string(), |m| (m.to_string)())
                     ),
                     locations: Default::default(), // PORT_NOTE: No locations in JS implementation.
                 });
@@ -225,6 +256,28 @@ impl Merger {
         }
 
         Ok(())
+    }
+
+    fn transform_arguments(
+        &self,
+        directive: &mut Directive,
+        subgraph: &Subgraph<Validated>,
+        transform: &StaticArgumentsTransform,
+    ) {
+        let indexed_args = directive
+            .arguments
+            .drain(..)
+            .map(|arg| (arg.name.clone(), (*arg.value).clone()))
+            .collect::<IndexMap<_, _>>();
+        directive.arguments = transform(subgraph, indexed_args)
+            .into_iter()
+            .map(|(name, value)| {
+                Node::new(Argument {
+                    name,
+                    value: Node::new(value),
+                })
+            })
+            .collect();
     }
 
     pub(crate) fn merge_directive_definition(

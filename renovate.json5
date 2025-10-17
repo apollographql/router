@@ -121,6 +121,12 @@
       matchManagers: ['cargo'],
       matchPackageNames: ['/^axum$/', '/^axum-extra$/'],
     },
+    {
+      groupName: 'jemalloc crates',
+      groupSlug: 'rust-jemalloc',
+      matchManagers: ['cargo'],
+      matchPackageNames: ['/^tikv-jemallocator$/', '/^tikv-jemalloc-/'],
+    },
     // Handle exact version pins (versions starting with =) in Cargo.toml files
     // separately. Put them in individual PRs and require dashboard approval
     // since they were explicitly pinned for a reason.

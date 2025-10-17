@@ -27,10 +27,6 @@ executors:
     docker:
       - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.19.0
       - image: cimg/redis:7.4.6
-      - image: cimg/postgres:17.6
-        environment:
-          POSTGRES_USER: root
-          POSTGRES_DB: root
       - image: openzipkin/zipkin:3.5.1
       - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.36.0
       # redis cluster - 3 primaries, 3 replicas
