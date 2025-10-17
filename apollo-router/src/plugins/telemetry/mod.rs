@@ -161,6 +161,7 @@ pub(crate) mod otel;
 mod otlp;
 pub(crate) mod reload;
 pub(crate) mod resource;
+pub(crate) mod router_overhead;
 pub(crate) mod span_ext;
 mod span_factory;
 pub(crate) mod tracing;
