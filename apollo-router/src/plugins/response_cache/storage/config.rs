@@ -6,6 +6,7 @@ use serde::Serialize;
 
 use crate::configuration::RedisCache;
 use crate::configuration::TlsClient;
+use crate::configuration::default_lazy_replica_connections;
 use crate::configuration::default_metrics_interval;
 use crate::configuration::default_required_to_start;
 
@@ -84,6 +85,11 @@ pub(crate) struct Config {
     #[schemars(with = "Option<String>", default)]
     /// Interval for collecting Redis metrics (default: 1s)
     pub(crate) metrics_interval: Duration,
+
+    #[serde(default = "default_lazy_replica_connections")]
+    /// Lazily connect to redis replicas (if redis-cluster enabled).
+    /// TODO: ideally we would just use true always - adding this config option to make testing easier
+    pub(crate) lazy_replica_connections: bool,
 }
 
 fn default_fetch_timeout() -> Duration {
@@ -125,6 +131,7 @@ impl From<&Config> for RedisCache {
             reset_ttl: false,
             pool_size: value.pool_size,
             metrics_interval: value.metrics_interval,
+            lazy_replica_connections: value.lazy_replica_connections,
         }
     }
 }

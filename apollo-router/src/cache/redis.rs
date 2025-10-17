@@ -24,6 +24,7 @@ use fred::types::Builder;
 use fred::types::Expiration;
 use fred::types::FromValue;
 use fred::types::cluster::ClusterRouting;
+use fred::types::config::ClusterDiscoveryPolicy;
 use fred::types::config::Config as RedisConfig;
 use fred::types::config::ReconnectPolicy;
 use fred::types::config::TlsConfig;
@@ -81,6 +82,7 @@ fn record_redis_error(error: &RedisError, caller: &'static str) {
         RedisErrorKind::Sentinel => "sentinel",
         RedisErrorKind::NotFound => "not_found",
         RedisErrorKind::Backpressure => "backpressure",
+        RedisErrorKind::Replica => "replica",
     };
 
     u64_counter_with_unit!(
@@ -245,9 +247,11 @@ where
 
 impl RedisCacheStorage {
     pub(crate) async fn new(config: RedisCache, caller: &'static str) -> Result<Self, BoxError> {
-        let url = Self::preprocess_urls(config.urls)?;
-        let mut client_config = RedisConfig::from_url(url.as_str())?;
-        let is_cluster = url.scheme() == "redis-cluster" || url.scheme() == "rediss-cluster";
+        let url = Self::preprocess_urls(config.urls)
+            .inspect_err(|err| record_redis_error(err, caller))?;
+        let mut client_config = RedisConfig::from_url(url.as_str())
+            .inspect_err(|err| record_redis_error(err, caller))?;
+        let is_cluster = client_config.server.is_clustered();
 
         if let Some(username) = config.username {
             client_config.username = Some(username);
@@ -283,6 +287,7 @@ impl RedisCacheStorage {
             caller,
             config.metrics_interval,
             config.required_to_start,
+            config.lazy_replica_connections,
         )
         .await
     }
@@ -301,6 +306,7 @@ impl RedisCacheStorage {
             reset_ttl: false,
             pool_size: 1,
             metrics_interval: Duration::from_millis(100),
+            lazy_replica_connections: false,
         };
 
         Self::from_mocks_and_config(mocks, config, "test", false).await
@@ -329,6 +335,7 @@ impl RedisCacheStorage {
             caller,
             config.metrics_interval,
             true,
+            config.lazy_replica_connections,
         )
         .await
     }
@@ -345,8 +352,19 @@ impl RedisCacheStorage {
         caller: &'static str,
         metrics_interval: Duration,
         required_to_start: bool,
+        lazy_replica_connections: bool,
     ) -> Result<Self, BoxError> {
         let pooled_client = Builder::from_config(client_config)
+            // TODO: comment
+            .with_config(|client_config| {
+                // TODO: comment
+                if is_cluster {
+                    let _ = client_config
+                        .server
+                        .set_cluster_discovery_policy(ClusterDiscoveryPolicy::ConfigEndpoint)
+                        .inspect_err(|err| tracing::error!("Redis running in a cluster but unable to set cluster-discovery-policy: {err}"));
+                }
+            })
             .with_connection_config(|config| {
                 config.internal_command_timeout = DEFAULT_INTERNAL_REDIS_TIMEOUT;
                 config.max_command_buffer_len = 10_000;
@@ -360,6 +378,8 @@ impl RedisCacheStorage {
                     max_timeout: Some(DEFAULT_INTERNAL_REDIS_TIMEOUT),
                     interval: Duration::from_secs(3),
                 };
+                // TODO: figure out why this is necessary and either document or remove it
+                config.replica.lazy_connections = lazy_replica_connections;
             })
             .with_performance_config(|config| {
                 config.default_command_timeout = timeout;
@@ -492,20 +512,8 @@ impl RedisCacheStorage {
                 "empty Redis URL list",
             )),
             Some(first) => {
-                if url_len == 1 {
-                    return Ok(first.clone());
-                }
-
-                let username = first.username();
-                let password = first.password();
-
                 let scheme = first.scheme();
-
-                let mut result = first.clone();
-
-                if SUPPORTED_REDIS_SCHEMES.contains(&scheme) {
-                    let _ = result.set_scheme(scheme);
-                } else {
+                if !SUPPORTED_REDIS_SCHEMES.contains(&scheme) {
                     return Err(RedisError::new(
                         RedisErrorKind::Config,
                         format!(
@@ -514,6 +522,14 @@ impl RedisCacheStorage {
                     ));
                 }
 
+                if url_len == 1 {
+                    return Ok(first.clone());
+                }
+
+                let username = first.username();
+                let password = first.password();
+
+                let mut result = first.clone();
                 for mut url in urls_iter {
                     if url.username() != username {
                         return Err(RedisError::new(
@@ -582,6 +598,11 @@ impl RedisCacheStorage {
         self.inner.next().pipeline()
     }
 
+    fn expiration(&self, ttl: Option<Duration>) -> Option<Expiration> {
+        let ttl = ttl.or(self.ttl)?;
+        Some(Expiration::EX(ttl.as_secs() as i64))
+    }
+
     pub(crate) fn make_key<K: KeyType>(&self, key: RedisKey<K>) -> String {
         match &self.namespace {
             Some(namespace) => format!("{namespace}:{key}"),
@@ -619,7 +640,7 @@ impl RedisCacheStorage {
                 Ok(value)
             }
             _ => {
-                let client = self.inner.next().with_options(&options);
+                let client = self.client().replicas().with_options(&options);
                 client.get(key).await.inspect_err(|e| self.record_error(e))
             }
         }
@@ -644,10 +665,10 @@ impl RedisCacheStorage {
         //    - https://redis.io/docs/latest/commands/mget/
 
         tracing::trace!("getting multiple values from redis: {:?}", keys);
+        let client = self.client().replicas().with_options(&options);
 
         if keys.len() == 1 {
-            let key = self.make_key(keys.remove(0));
-            let client = self.inner.next().with_options(&options);
+            let key = self.make_key(keys.swap_remove(0));
             let res = client
                 .get(key)
                 .await
@@ -671,7 +692,7 @@ impl RedisCacheStorage {
             // then we query all the key groups at the same time
             let mut tasks = Vec::new();
             for (_shard, (indexes, keys)) in h {
-                let client = self.inner.next().with_options(&options);
+                let client = client.clone();
                 tasks.push(async move {
                     let result: Result<Vec<Option<RedisValue<V>>>, _> = client.mget(keys).await;
                     (indexes, result)
@@ -701,7 +722,6 @@ impl RedisCacheStorage {
                 .into_iter()
                 .map(|k| self.make_key(k))
                 .collect::<Vec<_>>();
-            let client = self.inner.next().with_options(&options);
             client
                 .mget(keys)
                 .await
@@ -718,17 +738,13 @@ impl RedisCacheStorage {
     ) {
         let key = self.make_key(key);
         tracing::trace!("inserting into redis: {:?}, {:?}", key, value);
-        let expiration = ttl
-            .as_ref()
-            .or(self.ttl.as_ref())
-            .map(|ttl| Expiration::EX(ttl.as_secs() as i64));
 
-        let r = self
-            .inner
-            .set::<(), _, _>(key, value, expiration, None, false)
-            .await;
-        tracing::trace!("insert result {:?}", r);
-        if let Err(err) = r {
+        // NOTE: we need a writer, so don't use replicas() here
+        let expiration = self.expiration(ttl);
+        let result: Result<(), _> = self.client().set(key, value, expiration, None, false).await;
+        tracing::trace!("insert result {:?}", result);
+
+        if let Err(err) = result {
             self.record_error(&err);
         }
     }
@@ -739,17 +755,15 @@ impl RedisCacheStorage {
         ttl: Option<Duration>,
     ) {
         tracing::trace!("inserting into redis: {:#?}", data);
-        let expiration = ttl
-            .or(self.ttl)
-            .map(|ttl| Expiration::EX(ttl.as_secs() as i64));
+        let expiration = self.expiration(ttl);
 
         // NB: if we were using MSET here, we'd need to split the keys by hash slot. however, fred
         // seems to split the pipeline by hash slot in the background.
         let pipeline = self.pipeline();
         for (key, value) in data {
             let key = self.make_key(key.clone());
-            let _ = pipeline
-                .set::<(), _, _>(key, value.clone(), expiration.clone(), None, false)
+            let _: Result<(), _> = pipeline
+                .set(key, value.clone(), expiration.clone(), None, false)
                 .await;
         }
 
@@ -792,7 +806,7 @@ impl RedisCacheStorage {
 
         // then we query all the key groups at the same time
         let results: Vec<Result<u32, RedisError>> = join_all(h.into_values().map(|keys| async {
-            let client = self.inner.next().with_options(&options);
+            let client = self.client().with_options(&options);
             client.del(keys).await
         }))
         .await;
@@ -814,9 +828,11 @@ impl RedisCacheStorage {
     ) -> Pin<Box<dyn Stream<Item = Result<ScanResult, RedisError>> + Send>> {
         let pattern = self.make_key(RedisKey(pattern));
         if self.is_cluster {
-            Box::pin(self.inner.next().scan_cluster(pattern, count, None))
+            // NOTE: scans might be better send to only the read replicas, but the read-only client
+            // doesn't have a scan_cluster(), just a paginated version called scan_page()
+            Box::pin(self.client().scan_cluster(pattern, count, None))
         } else {
-            Box::pin(self.inner.next().scan(pattern, count, None))
+            Box::pin(self.client().scan(pattern, count, None))
         }
     }
 }
@@ -856,20 +872,10 @@ impl RedisCacheStorage {
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
     use std::time::SystemTime;
 
-    use fred::types::cluster::ClusterRouting;
-    use itertools::Itertools;
-    use rand::Rng;
-    use rand::RngCore;
-    use rand::distr::Alphanumeric;
-    use serde_json::json;
-    use tower::BoxError;
     use url::Url;
 
-    use crate::cache::redis::RedisKey;
-    use crate::cache::redis::RedisValue;
     use crate::cache::storage::ValueType;
 
     #[test]
@@ -900,16 +906,16 @@ mod test {
         for scheme in ["redis", "rediss"] {
             let url_s = format!("{scheme}://username:password@host:6666/database");
             let url = Url::parse(&url_s).expect("it's a valid url");
-            let urls = vec![url.clone(), url];
-            assert!(super::RedisCacheStorage::preprocess_urls(urls).is_ok());
+            assert!(super::RedisCacheStorage::preprocess_urls(vec![url.clone()]).is_ok());
+            assert!(super::RedisCacheStorage::preprocess_urls(vec![url.clone(), url]).is_ok());
         }
         // Cluster Format
         for scheme in ["redis-cluster", "rediss-cluster"] {
             let url_s =
                 format!("{scheme}://username:password@host:6666?node=host1:6667&node=host2:6668");
             let url = Url::parse(&url_s).expect("it's a valid url");
-            let urls = vec![url.clone(), url];
-            assert!(super::RedisCacheStorage::preprocess_urls(urls).is_ok());
+            assert!(super::RedisCacheStorage::preprocess_urls(vec![url.clone()]).is_ok());
+            assert!(super::RedisCacheStorage::preprocess_urls(vec![url.clone(), url]).is_ok());
         }
         // Sentinel Format
         for scheme in ["redis-sentinel", "rediss-sentinel"] {
@@ -917,15 +923,15 @@ mod test {
                 "{scheme}://username:password@host:6666?node=host1:6667&node=host2:6668&sentinelServiceName=myservice&sentinelUserName=username2&sentinelPassword=password2"
             );
             let url = Url::parse(&url_s).expect("it's a valid url");
-            let urls = vec![url.clone(), url];
-            assert!(super::RedisCacheStorage::preprocess_urls(urls).is_ok());
+            assert!(super::RedisCacheStorage::preprocess_urls(vec![url.clone()]).is_ok());
+            assert!(super::RedisCacheStorage::preprocess_urls(vec![url.clone(), url]).is_ok());
         }
         // Make sure it fails on sample invalid schemes
         for scheme in ["wrong", "something"] {
             let url_s = format!("{scheme}://username:password@host:6666/database");
             let url = Url::parse(&url_s).expect("it's a valid url");
-            let urls = vec![url.clone(), url];
-            assert!(super::RedisCacheStorage::preprocess_urls(urls).is_err());
+            assert!(super::RedisCacheStorage::preprocess_urls(vec![url.clone()]).is_err());
+            assert!(super::RedisCacheStorage::preprocess_urls(vec![url.clone(), url]).is_err());
         }
     }
 
@@ -939,161 +945,197 @@ mod test {
         let url_s1 = "redis://username:password@host:6666/database";
         let url_1 = Url::parse(url_s1).expect("it's a valid url");
         let urls = vec![url, url_1];
-        assert!(super::RedisCacheStorage::preprocess_urls(urls).is_ok());
+        assert!(super::RedisCacheStorage::preprocess_urls(urls.clone()).is_ok());
+        for url in urls {
+            assert!(super::RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
+        }
+
         // redis-cluster, redis
         let url_s = "redis-cluster://username:password@host:6666/database";
         let url = Url::parse(url_s).expect("it's a valid url");
         let url_s1 = "redis://username:password@host:6666/database";
         let url_1 = Url::parse(url_s1).expect("it's a valid url");
         let urls = vec![url, url_1];
-        assert!(super::RedisCacheStorage::preprocess_urls(urls).is_ok());
+        assert!(super::RedisCacheStorage::preprocess_urls(urls.clone()).is_ok());
+        for url in urls {
+            assert!(super::RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
+        }
+
         // redis, redis-cluster
         let url_s = "redis://username:password@host:6666/database";
         let url = Url::parse(url_s).expect("it's a valid url");
         let url_s1 = "redis-cluster://username:password@host:6666/database";
         let url_1 = Url::parse(url_s1).expect("it's a valid url");
         let urls = vec![url, url_1];
-        assert!(super::RedisCacheStorage::preprocess_urls(urls).is_err());
+        assert!(super::RedisCacheStorage::preprocess_urls(urls.clone()).is_err());
+        for url in urls {
+            assert!(super::RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
+        }
+
         // redis-sentinel, redis
         let url_s = "redis-sentinel://username:password@host:6666/database";
         let url = Url::parse(url_s).expect("it's a valid url");
         let url_s1 = "redis://username:password@host:6666/database";
         let url_1 = Url::parse(url_s1).expect("it's a valid url");
         let urls = vec![url, url_1];
-        assert!(super::RedisCacheStorage::preprocess_urls(urls).is_err());
+        assert!(super::RedisCacheStorage::preprocess_urls(urls.clone()).is_err());
+        for url in urls {
+            assert!(super::RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
+        }
+
         // redis, rediss
         let url_s = "redis://username:password@host:6666/database";
         let url = Url::parse(url_s).expect("it's a valid url");
         let url_s1 = "rediss://username:password@host:6666/database";
         let url_1 = Url::parse(url_s1).expect("it's a valid url");
         let urls = vec![url, url_1];
-        assert!(super::RedisCacheStorage::preprocess_urls(urls).is_err());
+        assert!(super::RedisCacheStorage::preprocess_urls(urls.clone()).is_err());
+        for url in urls {
+            assert!(super::RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
+        }
+
         // redis, rediss-cluster
         let url_s = "redis://username:password@host:6666/database";
         let url = Url::parse(url_s).expect("it's a valid url");
         let url_s1 = "rediss-cluster://username:password@host:6666/database";
         let url_1 = Url::parse(url_s1).expect("it's a valid url");
         let urls = vec![url, url_1];
-        assert!(super::RedisCacheStorage::preprocess_urls(urls).is_err());
+        assert!(super::RedisCacheStorage::preprocess_urls(urls.clone()).is_err());
+        for url in urls {
+            assert!(super::RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
+        }
     }
 
-    /// Tests that `insert_multiple` and `get_multiple` are successful when run against clustered Redis.
+    /// Module that collects tests which apply to a real cluster.
     ///
-    /// Clustered Redis works by hashing each key to one of 16384 hash slots, and assigning each hash
-    /// slot to a node. Operations which interact with multiple keys (`MGET`, `MSET`) *cannot* be
-    /// used on keys which map to different hash slots, even if those hash slots are on the same node.
-    ///
-    /// This test inserts data that is guaranteed to hash to different slots to verify that
-    /// `RedisCacheStorage` is well-behaved when operating against a cluster.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_redis_storage_avoids_common_cross_slot_errors() -> Result<(), BoxError> {
-        let config_json = json!({
-            "urls": ["redis-cluster://localhost:7000"],
-            "namespace": "test_redis_storage_avoids_common_cross_slot_errors",
-            "required_to_start": true,
-            "ttl": "60s"
-        });
-        let config = serde_json::from_value(config_json).unwrap();
-        let storage = super::RedisCacheStorage::new(config, "test_redis_cluster").await;
-
-        // only error for lack of storage when running in CI. otherwise, skip this test.
-        #[cfg(not(all(feature = "ci", all(target_arch = "x86_64", target_os = "linux"))))]
-        if storage.is_err() {
-            return Ok(());
-        }
-        let storage = storage?;
-
-        // insert values which reflect different cluster slots
-        let mut data = HashMap::default();
-        let expected_value = rand::rng().next_u32() as usize;
-        let unique_cluster_slot_count = |data: &HashMap<RedisKey<String>, _>| {
-            data.keys()
-                .map(|key| ClusterRouting::hash_key(key.0.as_bytes()))
-                .unique()
-                .count()
-        };
-
-        while unique_cluster_slot_count(&data) < 50 {
-            // NB: include {} around key so that this key is what determines the cluster hash slot - adding
-            // the namespace will otherwise change the slot
-            let key = rand::rng()
-                .sample_iter(&Alphanumeric)
-                .take(10)
-                .map(char::from)
-                .collect::<String>();
-            data.insert(RedisKey(format!("{{{}}}", key)), RedisValue(expected_value));
-        }
-
-        // insert values
-        let keys: Vec<_> = data.keys().cloned().collect();
-        let data: Vec<_> = data.into_iter().collect();
-        storage.insert_multiple(&data, None).await;
-
-        // make a `get` call for each key and ensure that it has the expected value. this tests both
-        // the `get` and `insert_multiple` functions
-        for key in &keys {
-            let value: RedisValue<usize> = storage.get(key.clone()).await?;
-            assert_eq!(value.0, expected_value);
-        }
-
-        // test the `mget` functionality
-        let values = storage.get_multiple(keys).await;
-        for value in values {
-            let value: RedisValue<usize> = value.ok_or("missing value")?;
-            assert_eq!(value.0, expected_value);
-        }
-
-        Ok(())
-    }
-
-    /// Test that `get_multiple` returns items in the correct order.
+    /// This allows us to put the insanely long #[cfg] line in one place and fixes linting issues
+    /// for unused imports.
     #[cfg(all(
         test,
         any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
     ))]
-    #[tokio::test]
-    async fn test_get_multiple_is_ordered() -> Result<(), BoxError> {
-        let config_json = json!({
-            "urls": ["redis://localhost:6379"],
-            "namespace": "test_get_multiple_is_ordered",
-            "required_to_start": true,
-            "ttl": "60s"
-        });
-        let config = serde_json::from_value(config_json).unwrap();
-        let storage = super::RedisCacheStorage::new(config, "test_get_multiple_is_ordered").await?;
+    mod test_against_cluster {
+        use std::collections::HashMap;
 
-        let data = [("a", "1"), ("b", "2"), ("c", "3")]
-            .map(|(k, v)| (RedisKey(k.to_string()), RedisValue(v.to_string())));
-        storage.insert_multiple(&data, None).await;
+        use fred::types::cluster::ClusterRouting;
+        use itertools::Itertools;
+        use rand::Rng;
+        use rand::RngCore;
+        use rand::distr::Alphanumeric;
+        use serde_json::json;
+        use tower::BoxError;
 
-        // check different orders of fetches to make everything is ordered correctly, including
-        // when some values are none
-        let test_cases = vec![
-            (vec!["a", "b", "c"], vec![Some("1"), Some("2"), Some("3")]),
-            (vec!["c", "b", "a"], vec![Some("3"), Some("2"), Some("1")]),
-            (vec!["d", "b", "c"], vec![None, Some("2"), Some("3")]),
-            (
-                vec!["d", "3", "s", "b", "s", "1", "c", "Y"],
-                vec![None, None, None, Some("2"), None, None, Some("3"), None],
-            ),
-        ];
+        use crate::cache::redis::RedisCacheStorage;
+        use crate::cache::redis::RedisKey;
+        use crate::cache::redis::RedisValue;
 
-        for (keys, expected_values) in test_cases {
-            let keys: Vec<RedisKey<_>> = keys
-                .into_iter()
-                .map(|key| RedisKey(key.to_string()))
-                .collect();
-            let expected_values: Vec<Option<String>> = expected_values
-                .into_iter()
-                .map(|value| value.map(ToString::to_string))
-                .collect();
+        /// Tests that `insert_multiple` and `get_multiple` are successful when run against clustered Redis.
+        ///
+        /// Clustered Redis works by hashing each key to one of 16384 hash slots, and assigning each hash
+        /// slot to a node. Operations which interact with multiple keys (`MGET`, `MSET`) *cannot* be
+        /// used on keys which map to different hash slots, even if those hash slots are on the same node.
+        ///
+        /// This test inserts data that is guaranteed to hash to different slots to verify that
+        /// `RedisCacheStorage` is well-behaved when operating against a cluster.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_redis_storage_avoids_common_cross_slot_errors() -> Result<(), BoxError> {
+            let config_json = json!({
+                "urls": ["redis-cluster://localhost:7000"],
+                "namespace": "test_redis_storage_avoids_common_cross_slot_errors",
+                "required_to_start": true,
+                "ttl": "60s"
+            });
+            let config = serde_json::from_value(config_json).unwrap();
+            let storage = RedisCacheStorage::new(config, "test_redis_cluster").await?;
 
+            // insert values which reflect different cluster slots
+            let mut data = HashMap::default();
+            let expected_value = rand::rng().next_u32() as usize;
+            let unique_cluster_slot_count = |data: &HashMap<RedisKey<String>, _>| {
+                data.keys()
+                    .map(|key| ClusterRouting::hash_key(key.0.as_bytes()))
+                    .unique()
+                    .count()
+            };
+
+            while unique_cluster_slot_count(&data) < 50 {
+                // NB: include {} around key so that this key is what determines the cluster hash slot - adding
+                // the namespace will otherwise change the slot
+                let key = rand::rng()
+                    .sample_iter(&Alphanumeric)
+                    .take(10)
+                    .map(char::from)
+                    .collect::<String>();
+                data.insert(RedisKey(format!("{{{}}}", key)), RedisValue(expected_value));
+            }
+
+            // insert values
+            let keys: Vec<_> = data.keys().cloned().collect();
+            let data: Vec<_> = data.into_iter().collect();
+            storage.insert_multiple(&data, None).await;
+
+            // make a `get` call for each key and ensure that it has the expected value. this tests both
+            // the `get` and `insert_multiple` functions
+            for key in &keys {
+                let value: RedisValue<usize> = storage.get(key.clone()).await?;
+                assert_eq!(value.0, expected_value);
+            }
+
+            // test the `mget` functionality
             let values = storage.get_multiple(keys).await;
-            let parsed_values: Vec<Option<String>> =
-                values.into_iter().map(|v| v.map(|v| v.0)).collect();
-            assert_eq!(parsed_values, expected_values);
+            for value in values {
+                let value: RedisValue<usize> = value.ok_or("missing value")?;
+                assert_eq!(value.0, expected_value);
+            }
+
+            Ok(())
         }
 
-        Ok(())
+        /// Test that `get_multiple` returns items in the correct order.
+        #[tokio::test]
+        async fn test_get_multiple_is_ordered() -> Result<(), BoxError> {
+            let config_json = json!({
+                "urls": ["redis://localhost:6379"],
+                "namespace": "test_get_multiple_is_ordered",
+                "required_to_start": true,
+                "ttl": "60s"
+            });
+            let config = serde_json::from_value(config_json).unwrap();
+            let storage = RedisCacheStorage::new(config, "test_get_multiple_is_ordered").await?;
+
+            let data = [("a", "1"), ("b", "2"), ("c", "3")]
+                .map(|(k, v)| (RedisKey(k.to_string()), RedisValue(v.to_string())));
+            storage.insert_multiple(&data, None).await;
+
+            // check different orders of fetches to make everything is ordered correctly, including
+            // when some values are none
+            let test_cases = vec![
+                (vec!["a", "b", "c"], vec![Some("1"), Some("2"), Some("3")]),
+                (vec!["c", "b", "a"], vec![Some("3"), Some("2"), Some("1")]),
+                (vec!["d", "b", "c"], vec![None, Some("2"), Some("3")]),
+                (
+                    vec!["d", "3", "s", "b", "s", "1", "c", "Y"],
+                    vec![None, None, None, Some("2"), None, None, Some("3"), None],
+                ),
+            ];
+
+            for (keys, expected_values) in test_cases {
+                let keys: Vec<RedisKey<_>> = keys
+                    .into_iter()
+                    .map(|key| RedisKey(key.to_string()))
+                    .collect();
+                let expected_values: Vec<Option<String>> = expected_values
+                    .into_iter()
+                    .map(|value| value.map(ToString::to_string))
+                    .collect();
+
+                let values = storage.get_multiple(keys).await;
+                let parsed_values: Vec<Option<String>> =
+                    values.into_iter().map(|v| v.map(|v| v.0)).collect();
+                assert_eq!(parsed_values, expected_values);
+            }
+
+            Ok(())
+        }
     }
 }

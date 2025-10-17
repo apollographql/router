@@ -1,0 +1,15 @@
+supergraph:
+  query_planning:
+    cache:
+      redis:
+        required_to_start: true
+        urls:
+          - redis-cluster://localhost:7000
+        pool_size: 4
+telemetry:
+  exporters:
+    metrics:
+      prometheus:
+        listen: 127.0.0.1:4000
+        enabled: true
+        path: /metrics
