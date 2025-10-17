@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::num::NonZeroUsize;
@@ -10,6 +11,8 @@ use apollo_compiler::Schema;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::parser::Parser;
+use apollo_compiler::resolvers;
+use apollo_compiler::schema::ObjectType;
 use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::StringTemplate;
 use http::HeaderValue;
@@ -58,7 +61,6 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::authorization::CacheKeyMetadata;
-use crate::plugins::mock_subgraphs::execution::input_coercion::coerce_argument_values;
 use crate::plugins::response_cache::cache_key::PrimaryCacheKeyEntity;
 use crate::plugins::response_cache::cache_key::PrimaryCacheKeyRoot;
 use crate::plugins::response_cache::cache_key::hash_additional_data;
@@ -1273,57 +1275,51 @@ fn get_invalidation_root_keys_from_schema(
     subgraph_enums: &HashMap<String, String>,
     supergraph_schema: Arc<Valid<Schema>>,
 ) -> Result<HashSet<String>, anyhow::Error> {
-    let subgraph_name = &request.subgraph_name;
-    let executable_document =
-        request
-            .executable_document
-            .as_ref()
-            .ok_or_else(|| FetchError::MalformedRequest {
-                reason: "cannot get the executable document for subgraph request".to_string(),
-            })?;
-    let root_operation_fields = executable_document
-        .operations
-        .get(request.subgraph_request.body().operation_name.as_deref())
-        .map_err(|_err| FetchError::MalformedRequest {
-            reason: "cannot get the operation from executable document for subgraph request"
-                .to_string(),
-        })?
-        .root_fields(executable_document);
-    let root_query_type = supergraph_schema
-        .root_operation(apollo_compiler::ast::OperationType::Query)
-        .ok_or_else(|| FetchError::MalformedRequest {
-            reason: "cannot get the root operation from supergraph schema".to_string(),
-        })?;
-    let query_object_type = supergraph_schema
-        .get_object(root_query_type.as_str())
-        .ok_or_else(|| FetchError::MalformedRequest {
-            reason: "cannot get the root query type from supergraph schema".to_string(),
-        })?;
+    struct Root<'a> {
+        subgraph_name: &'a str,
+        subgraph_enums: &'a HashMap<String, String>,
+        query_object_type: &'a ObjectType,
+        result: RefCell<Result<HashSet<String>, anyhow::Error>>,
+    }
 
-    let cache_keys = root_operation_fields
-        .map(|field| {
-            // We don't use field.definition because we need the directive set in supergraph schema not in the executable document
-            let field_def = query_object_type.fields.get(&field.name).ok_or_else(|| {
-                FetchError::MalformedRequest {
+    impl resolvers::ObjectValue for Root<'_> {
+        fn type_name(&self) -> &str {
+            "Query"
+        }
+
+        fn resolve_field<'a>(
+            &'a self,
+            info: &'a resolvers::ResolveInfo<'a>,
+        ) -> Result<resolvers::ResolvedValue<'a>, resolvers::FieldError> {
+            let mut result = self.result.borrow_mut();
+            let Ok(keys) = &mut *result else {
+                return Ok(resolvers::ResolvedValue::SkipForPartialExecution);
+            };
+            // We don't use info.field_definition() because we need the directive
+            // set in supergraph schema not in the executable document
+            let Some(field_def) = self.query_object_type.fields.get(info.field_name()) else {
+                *result = Err(FetchError::MalformedRequest {
                     reason: "cannot get the field definition from supergraph schema".to_string(),
                 }
-            })?;
-            let cache_keys = field_def
+                .into());
+                return Ok(resolvers::ResolvedValue::SkipForPartialExecution);
+            };
+            let templates = field_def
                 .directives
                 .get_all("join__directive")
                 .filter_map(|dir| {
-                    let name = dir.argument_by_name("name", &supergraph_schema).ok()?;
+                    let name = dir.argument_by_name("name", info.schema()).ok()?;
                     if name.as_str()? != CACHE_TAG_DIRECTIVE_NAME {
                         return None;
                     }
                     let is_current_subgraph =
-                        dir.argument_by_name("graphs", &supergraph_schema)
+                        dir.argument_by_name("graphs", info.schema())
                             .ok()
                             .and_then(|f| {
                                 Some(f.as_list()?.iter().filter_map(|graph| graph.as_enum()).any(
                                     |g| {
-                                        subgraph_enums.get(g.as_str()).map(|s| s.as_str())
-                                            == Some(subgraph_name)
+                                        self.subgraph_enums.get(g.as_str()).map(|s| s.as_str())
+                                            == Some(self.subgraph_name)
                                     },
                                 ))
                             })
@@ -1333,7 +1329,7 @@ fn get_invalidation_root_keys_from_schema(
                     }
                     let mut format = None;
                     for (field_name, value) in dir
-                        .argument_by_name("args", &supergraph_schema)
+                        .argument_by_name("args", info.schema())
                         .ok()?
                         .as_object()?
                     {
@@ -1345,44 +1341,59 @@ fn get_invalidation_root_keys_from_schema(
                     }
                     format
                 });
-            let mut errors = Vec::new();
-            // Query::validate_variables runs before this
-            let variable_values =
-                Valid::assume_valid_ref(&request.subgraph_request.body().variables);
-            let args = coerce_argument_values(
-                &supergraph_schema,
-                executable_document,
-                variable_values,
-                &mut errors,
-                Default::default(),
-                field_def,
-                field,
-            )
-            .map_err(|_| FetchError::MalformedRequest {
-                reason: format!("cannot argument values for root fields {:?}", field.name),
-            })?;
-
-            if !errors.is_empty() {
-                return Err(FetchError::MalformedRequest {
-                    reason: format!(
-                        "cannot coerce argument values for root fields {:?}, errors: {errors:?}",
-                        field.name,
-                    ),
-                }
-                .into());
-            }
 
             let mut vars = IndexMap::default();
-            vars.insert("$args".to_string(), Value::Object(args));
-            cache_keys
-                .map(|ck| Ok(ck.interpolate(&vars).map(|(res, _)| res)?))
-                .collect::<Result<Vec<String>, anyhow::Error>>()
-        })
-        .collect::<Result<Vec<Vec<String>>, anyhow::Error>>()?;
+            vars.insert("$args".to_string(), Value::Object(info.arguments().clone()));
 
-    let invalidation_cache_keys: HashSet<String> = cache_keys.into_iter().flatten().collect();
+            for template in templates {
+                match template.interpolate(&vars) {
+                    Ok((key, _)) => {
+                        keys.insert(key);
+                    }
+                    Err(e) => {
+                        *result = Err(e.into());
+                        break;
+                    }
+                }
+            }
+            Ok(resolvers::ResolvedValue::SkipForPartialExecution)
+        }
+    }
 
-    Ok(invalidation_cache_keys)
+    let executable_document =
+        request
+            .executable_document
+            .as_ref()
+            .ok_or_else(|| FetchError::MalformedRequest {
+                reason: "cannot get the executable document for subgraph request".to_string(),
+            })?;
+    let root_query_type = supergraph_schema
+        .root_operation(apollo_compiler::ast::OperationType::Query)
+        .ok_or_else(|| FetchError::MalformedRequest {
+            reason: "cannot get the root operation from supergraph schema".to_string(),
+        })?;
+    let query_object_type = supergraph_schema
+        .get_object(root_query_type.as_str())
+        .ok_or_else(|| FetchError::MalformedRequest {
+            reason: "cannot get the root query type from supergraph schema".to_string(),
+        })?;
+    let root = Root {
+        subgraph_name: &request.subgraph_name,
+        subgraph_enums,
+        query_object_type,
+        result: RefCell::new(Ok(HashSet::new())),
+    };
+    let subgraph_request = request.subgraph_request.body();
+    // FIXME: in principle we should use the subgraph schema here.
+    // Maybe this is good enough as far as finding root fields is concerned?
+    resolvers::Execution::new(&supergraph_schema, executable_document)
+        .operation_name(subgraph_request.operation_name.as_deref())
+        .unwrap()
+        .raw_variable_values(&subgraph_request.variables)
+        .execute_sync(&root)
+        .map_err(|e| anyhow::Error::msg(e.message().to_string()))?;
+
+    root.result.into_inner()
 }
 
 struct ResponseCacheResults(Vec<IntermediateResult>, Option<CacheControl>);
