@@ -113,7 +113,7 @@ fn merge_validations_errors_when_tag_definition_is_invalid() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
+#[ignore = "We might not reserve that anymore in the Rust implementation (check before merging)"]
 fn merge_validations_reject_subgraph_named_underscore() {
     let subgraph_a = ServiceDefinition {
         name: "_",
@@ -208,7 +208,6 @@ fn merge_validations_reject_type_defined_with_different_kinds() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn merge_validations_errors_if_external_field_not_defined_elsewhere() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -244,7 +243,6 @@ fn merge_validations_errors_if_external_field_not_defined_elsewhere() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn merge_validations_errors_if_mandatory_argument_not_in_all_subgraphs() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -275,7 +273,6 @@ fn merge_validations_errors_if_mandatory_argument_not_in_all_subgraphs() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn merge_validations_errors_if_subgraph_required_without_args_but_mandatory_in_supergraph() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -313,7 +310,6 @@ fn merge_validations_errors_if_subgraph_required_without_args_but_mandatory_in_s
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn merge_validations_errors_if_subgraph_required_with_arg_not_in_supergraph() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -355,7 +351,6 @@ fn merge_validations_errors_if_subgraph_required_with_arg_not_in_supergraph() {
 // =============================================================================
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn post_merge_errors_if_type_does_not_implement_interface_post_merge() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -399,7 +394,6 @@ fn post_merge_errors_if_type_does_not_implement_interface_post_merge() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn post_merge_errors_if_type_does_not_implement_interface_on_interface() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",

@@ -253,6 +253,12 @@ impl Merger {
             + HasType
             + Into<DirectiveTargetPosition>,
     {
+        if !dest.exists_in_schema(&self.merged) {
+            // If we encounter a required argument which is missing in some subgraphs, we skip it
+            // during the shallow addition phase. So, we early return here to keep collecting
+            // errors about other parts of the schema.
+            return Ok(());
+        }
         self.merge_description(sources, dest)?;
         self.record_applied_directives_to_merge(sources, dest)?;
         self.merge_type_reference(sources, dest, true)?;
