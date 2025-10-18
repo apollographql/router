@@ -86,9 +86,9 @@ impl<'a> PrimaryCacheKeyEntity<'a> {
         let hashed_representation = if representation.is_empty() {
             String::new()
         } else {
-            hash_representation(representation)
+            sort_and_hash_object(representation)
         };
-        let hashed_entity_key = hash_entity_key(entity_key);
+        let hashed_entity_key = sort_and_hash_object(entity_key);
 
         // - response cache version: current version of the hash
         // - subgraph name: caching is done per subgraph
@@ -155,14 +155,10 @@ pub(super) fn hash_additional_data(
     hasher.finalize().to_hex().to_string()
 }
 
-// Order-insensitive structural hash of the representation value
-pub(super) fn hash_representation(
-    representation: &serde_json_bytes::Map<ByteString, Value>,
-) -> String {
+// Order-insensitive structural hash of a map, ie a representation or entity key
+fn sort_and_hash_object(object: &Map<ByteString, Value>) -> String {
     let mut digest = blake3::Hasher::new();
-
-    hash(&mut digest, representation.iter());
-
+    hash(&mut digest, object.iter());
     digest.finalize().to_hex().to_string()
 }
 
@@ -172,13 +168,16 @@ where
     I: Iterator<Item = (&'a ByteString, &'a Value)>,
 {
     fields.sorted_by(|a, b| a.0.cmp(b.0)).for_each(|(k, v)| {
-        state.update(serde_json::to_string(k).unwrap().as_bytes());
+        state.update(k.as_str().as_bytes());
         state.update(":".as_bytes());
         match v {
-            serde_json_bytes::Value::Object(obj) => {
+            Value::Object(obj) => {
                 state.update("{".as_bytes());
                 hash(state, obj.iter());
                 state.update("}".as_bytes());
+            }
+            Value::String(s) => {
+                state.update(s.as_str().as_bytes());
             }
             _ => {
                 state.update(serde_json::to_string(v).unwrap().as_bytes());
@@ -187,11 +186,41 @@ where
     });
 }
 
-// Only hash the list of entity keys
-pub(super) fn hash_entity_key(
-    entity_keys: &serde_json_bytes::Map<ByteString, serde_json_bytes::Value>,
-) -> String {
-    tracing::trace!("entity keys: {entity_keys:?}");
-    // We have to hash the representation because it can contains PII
-    hash_representation(entity_keys)
+#[cfg(test)]
+mod tests {
+    use insta::assert_snapshot;
+
+    #[test]
+    fn top_level_hash_is_order_insensitive() {
+        // hash should not vary based on the order that the keys are provided.
+        // NB: this doesn't check any nested arrays, that's done in serde_blake3
+        let data = serde_json_bytes::json!({"hello": "world", "order": "doesn't matter"});
+        let data_obj = data.as_object().unwrap();
+
+        let mut hasher = blake3::Hasher::new();
+        super::hash(&mut hasher, data_obj.iter());
+        let value1 = hasher.finalize();
+
+        let mut hasher = blake3::Hasher::new();
+        super::hash(&mut hasher, data_obj.iter().rev());
+        let value2 = hasher.finalize();
+
+        assert_eq!(value1, value2);
+        assert_snapshot!(value1);
+    }
+
+    #[test]
+    fn nested_hash_is_order_sensitive() {
+        // hash does vary based on the order that the vec values are provided.
+        // NB: I'm not sure if this is intentional, but adding a test for the existing behavior.
+        let data = serde_json_bytes::json!({"nested": ["does", "order", "matter"]});
+        let value1 = super::sort_and_hash_object(data.as_object().unwrap());
+
+        let data = serde_json_bytes::json!({"nested": ["order", "does", "matter"]});
+        let value2 = super::sort_and_hash_object(data.as_object().unwrap());
+
+        assert_ne!(value1, value2);
+        assert_snapshot!(value1);
+        assert_snapshot!(value2);
+    }
 }
