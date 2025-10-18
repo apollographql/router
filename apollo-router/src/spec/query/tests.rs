@@ -1270,28 +1270,28 @@ fn reformat_response_expected_types() {
             },
         }})
         .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
             {
-                "message": "Invalid value found for field Thing.i",
+                "message": "Invalid value found for the type Int",
                 "path": ["get", "i"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Thing.s",
+                "message": "Invalid value found for the type String",
                 "path": ["get", "s"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Thing.f",
+                "message": "Invalid value found for the type Float",
                 "path": ["get", "f"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Thing.b",
+                "message": "Invalid value found for the type Boolean",
                 "path": ["get", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
+        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
+         * does not produce these errors.
             {
                 "message": "Expected a valid enum value for type E",
                 "path": ["get", "e"],
@@ -1350,39 +1350,36 @@ fn reformat_response_expected_int() {
             "g": null,
         }))
         .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
             {
-                "message": "Invalid value found for field Query.b",
+                "message": "Invalid value found for the type Int",
                 "path": ["b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.c",
+                "message": "Invalid value found for the type Int",
                 "path": ["c"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.d",
+                "message": "Invalid value found for the type Int",
                 "path": ["d"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.e",
+                "message": "Invalid value found for the type Int",
                 "path": ["e"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.f",
+                "message": "Invalid value found for the type Int",
                 "path": ["f"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.g",
+                "message": "Invalid value found for the type Int",
                 "path": ["g"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
-        */
         ]))
         .test();
 }
@@ -1421,14 +1418,11 @@ fn reformat_response_expected_int_range() {
             },
         }))
         .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
             {
-                "message": "Invalid value found for field User.someNumber",
+                "message": "Invalid value found for the type Int",
                 "path": ["me", "someNumber"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
             }
-        */
         ]))
         .test();
 
@@ -1448,14 +1442,16 @@ fn reformat_response_expected_int_range() {
             "me": null,
         }))
         .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
             {
-                "message": "Invalid value found for field User.someOtherNumber",
+                "message": "Invalid value found for the type Int",
                 "path": ["me", "someOtherNumber"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
             },
-        */
+            {
+                "message": "Cannot return null for non-nullable field User.someOtherNumber",
+                "path": ["me", "someOtherNumber"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
         ]))
         .test();
 }
@@ -1495,29 +1491,26 @@ fn reformat_response_expected_float() {
             "f": null,
         }))
         .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
             {
-                "message": "Invalid value found for field Query.c",
+                "message": "Invalid value found for the type Float",
                 "path": ["c"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.d",
+                "message": "Invalid value found for the type Float",
                 "path": ["d"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.e",
+                "message": "Invalid value found for the type Float",
                 "path": ["e"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.f",
+                "message": "Invalid value found for the type Float",
                 "path": ["f"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
-        */
         ]))
         .test();
 }
@@ -1555,33 +1548,33 @@ fn reformat_response_expected_string() {
             "f": null,
         }))
         .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
             {
-                "message": "Invalid value found for field Query.b",
+                "message": "Invalid value found for the type String",
                 "path": ["b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.c",
+                "message": "Invalid value found for the type String",
                 "path": ["c"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.d",
+                "message": "Invalid value found for the type String",
                 "path": ["d"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.e",
+                "message": "Invalid value found for the type String",
                 "path": ["e"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.f",
+                "message": "Invalid value found for the type String",
                 "path": ["f"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
+        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
+         * does not produce these errors.
         */
         ]))
         .test();
@@ -1676,19 +1669,16 @@ fn reformat_response_coersion_propagation_into_list() {
             }
         }))
         .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
             {
-                "message": "Invalid value found for field Query.thing.a",
-                "path": ["thing", "a", 0],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Invalid value found for field Query.thing.a",
+                "message": "Invalid value found for the type Int",
                 "path": ["thing", "a", 1],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
-        */
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "a", 2],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
         ]))
         .test();
 
@@ -1716,16 +1706,24 @@ fn reformat_response_coersion_propagation_into_list() {
             }
         }))
         .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
             {
-                "message": "Invalid value found for field Query.thing.a",
-                "path": ["thing", "a", 0],
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "a", 1],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.thing.a",
+                "message": "Cannot return null for non-nullable array element of type Int",
                 "path": ["thing", "a", 1],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "a", 2],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Cannot return null for non-nullable array element of type Int",
+                "path": ["thing", "a", 2],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
@@ -1733,7 +1731,6 @@ fn reformat_response_coersion_propagation_into_list() {
                 "path": ["thing", "a"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
-        */
         ]))
         .test();
 
@@ -1759,16 +1756,24 @@ fn reformat_response_coersion_propagation_into_list() {
             "thing": null
         }))
         .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
             {
-                "message": "Invalid value found for field Query.thing.a",
-                "path": ["thing", "a", 0],
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "a", 1],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.thing.a",
+                "message": "Cannot return null for non-nullable array element of type Int",
                 "path": ["thing", "a", 1],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "a", 2],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Cannot return null for non-nullable array element of type Int",
+                "path": ["thing", "a", 2],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
@@ -1777,11 +1782,10 @@ fn reformat_response_coersion_propagation_into_list() {
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.thing",
-                "path": ["thing"],
+                "message": "Cannot return null for non-nullable field Thing.a",
+                "path": ["thing", "a"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
-        */
         ]))
         .test();
 }
@@ -1818,19 +1822,16 @@ fn reformat_response_coersion_propagation_into_object() {
             }
         }))
         .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
             {
-                "message": "Invalid value found for field Query.thing.b",
+                "message": "Invalid value found for the type Int",
                 "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.thing.c",
+                "message": "Invalid value found for the type Int",
                 "path": ["thing", "c"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
-        */
         ]))
         .test();
 
@@ -1860,21 +1861,26 @@ fn reformat_response_coersion_propagation_into_object() {
             "thing": null
         }))
         .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
             {
-                "message": "Invalid value found for field Query.thing.b",
+                "message": "Invalid value found for the type Int",
                 "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.thing.c",
+                "message": "Cannot return null for non-nullable field Thing.b",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        /* FIXME: The first improperly nullified field causes an early exit, so the other fields
+         * are not validated. Do we want to keep with this behavior or report all error?
+            {
+                "message": "Invalid value found for the type Int",
                 "path": ["thing", "c"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.thing",
-                "path": ["thing"],
+                "message": "Cannot return null for non-nullable field Thing.c",
+                "path": ["thing", "c"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
         */
@@ -1897,30 +1903,46 @@ fn reformat_response_coersion_propagation_into_object() {
         )
         .query(r#"{ thing { a, b, c } }"#)
         .response(json!({}))
+        // FIXME: All of the errors are discarded
         .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
+        /* FIXME: The first improperly nullified field causes an early exit, so the other fields
+         * are not validated. Do we want to keep with this behavior or report all error?
             {
-                "message": "Invalid value found for field Query.thing.b",
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "a"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Cannot return null for non-nullable field Thing.b",
+                "path": ["thing", "a"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type Int",
                 "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.thing.c",
+                "message": "Cannot return null for non-nullable field Thing.b",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type Int",
                 "path": ["thing", "c"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.thing",
-                "path": ["thing"],
+                "message": "Cannot return null for non-nullable field Thing.c",
+                "path": ["thing", "c"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query",
-                "path": [],
+                "message": "Cannot return null for non-nullable field thing",
+                "path": ["thing"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
-        */
+            */
         ]))
         .test();
 }
@@ -1998,26 +2020,31 @@ fn reformat_response_coersion_propagation_into_union() {
         .schema(nullable_schema)
         .query(query_wo_type_info)
         .response(resp_wo_type_info.clone())
-        .expected(json!({ "thing": { } }))
+        .expected(json!({
+            "thing": {
+                "a": 1,
+                "b": null,
+                "c": null,
+            }
+        }))
         .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
             {
-                "message": "Invalid value found for field Query.thing.b",
+                "message": "Invalid value found for the type Int",
                 "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.thing.c",
+                "message": "Invalid value found for the type Int",
                 "path": ["thing", "c"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
+            /* NOTE: This is reliant on the `is_subtype` reordering being true
             {
                 "message": "Invalid values found for field of an abstract type without `__typename`, entire object must be nullified",
                 "path": ["thing"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
-        */
+            */
         ]))
         .test();
 
@@ -2027,19 +2054,26 @@ fn reformat_response_coersion_propagation_into_union() {
         .response(resp_wo_type_info.clone())
         // NOTE: This is seemingly strange behavior but is consistent. Because we can't *always*
         // resolve the type of `thing`, we can't determine if the result is valid or not.
-        .expected(json!({ "thing": { } }))
+        .expected(json!({ "thing": null }))
         .expected_errors(json!([
         /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
          * does not produce these errors.
          * FIXME(@TylerBloom): Should the `__typename` error be returned over the more general
          * result coersion error?
+         */
             {
-                "message": "Invalid value found for field Query.thing.b",
+                "message": "Invalid value found for the type Int",
                 "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.thing.c",
+                "message": "Cannot return null for non-nullable field Thing.b",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+            /*
+            {
+                "message": "Invalid value found for the type Int",
                 "path": ["thing", "c"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
@@ -2048,7 +2082,7 @@ fn reformat_response_coersion_propagation_into_union() {
                 "path": ["thing"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
-        */
+            */
         ]))
         .test();
 
@@ -2067,19 +2101,16 @@ fn reformat_response_coersion_propagation_into_union() {
             }
         }))
         .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
             {
-                "message": "Invalid value found for field Query.thing.b",
+                "message": "Invalid value found for the type Int",
                 "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.thing.c",
+                "message": "Invalid value found for the type Int",
                 "path": ["thing", "c"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
-        */
         ]))
         .test();
 
@@ -2089,19 +2120,23 @@ fn reformat_response_coersion_propagation_into_union() {
         .response(resp_with_type_info.clone())
         .expected(json!({ "thing": null }))
         .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
             {
-                "message": "Invalid value found for field Query.thing.b",
+                "message": "Invalid value found for the type Int",
                 "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.thing.c",
+                "message": "Cannot return null for non-nullable field Foo.b",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+            /*
+            {
+                "message": "Invalid value found for the type Int",
                 "path": ["thing", "c"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
-        */
+            */
         ]))
         .test();
 
@@ -2114,8 +2149,9 @@ fn reformat_response_coersion_propagation_into_union() {
         // `__typename` being queried.
         .expected(json!({ "thing": null }))
         .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
+            /* FIXME: Because __typename isn't here but maditory, so the rest is discarded. This is
+             * related to the `object` problem.
+             * At a minimun, an error for the lack of typename is needed
             {
                 "message": "Invalid value found for field Query.thing.b",
                 "path": ["thing", "b"],
@@ -2127,16 +2163,16 @@ fn reformat_response_coersion_propagation_into_union() {
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid values found for field of an abstract type without `__typename`
+                "message": "Invalid values found for field of an abstract type without __typename",
                 "path": ["thing"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "`__typename` was queried but not part of the response",
+                "message": "__typename was queried but not part of the response",
                 "path": ["thing"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
-        */
+            */
         ]))
         .test();
 
@@ -2152,6 +2188,7 @@ fn reformat_response_coersion_propagation_into_union() {
          * does not produce these errors.
          * FIXME(@TylerBloom): Should the `__typename` error be returned over the more general
          * result coersion error?
+         * NOTE: Same problem as above
             {
                 "message": "Invalid value found for field Query.thing.b",
                 "path": ["thing", "b"],
@@ -2190,19 +2227,16 @@ fn reformat_response_coersion_propagation_into_union() {
             }
         }))
         .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
             {
-                "message": "Invalid value found for field Query.thing.b",
+                "message": "Invalid value found for the type Int",
                 "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.thing.c",
+                "message": "Invalid value found for the type Int",
                 "path": ["thing", "c"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
-        */
         ]))
         .test();
 
@@ -2212,24 +2246,16 @@ fn reformat_response_coersion_propagation_into_union() {
         .response(resp_with_type_info.clone())
         .expected(json!({ "thing": null }))
         .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
             {
-                "message": "Invalid value found for field Query.thing.b",
+                "message": "Invalid value found for the type Int",
                 "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.thing.c",
-                "path": ["thing", "c"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Invalid values found for field of an abstract type without `__typename`, entire object must be nullified",
-                "path": ["thing"],
+                "message": "Cannot return null for non-nullable field Foo.b",
+                "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
-        */
         ]))
         .test();
 }
@@ -2310,26 +2336,24 @@ fn reformat_response_coersion_propagation_into_interfaces() {
         .schema(nullable_schema)
         .query(query_wo_type_info)
         .response(resp_wo_type_info.clone())
-        .expected(json!({ "thing": { "a": 1 } }))
+        .expected(json!({
+            "thing": {
+                "a": 1,
+                "b": null,
+                "c": null,
+            }
+        }))
         .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
             {
-                "message": "Invalid value found for field Query.thing.b",
+                "message": "Invalid value found for the type Int",
                 "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.thing.c",
+                "message": "Invalid value found for the type Int",
                 "path": ["thing", "c"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
-            {
-                "message": "Invalid values found for field of an abstract type without `__typename`
-                "path": ["thing"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            }
-        */
         ]))
         .test();
 
@@ -2341,28 +2365,23 @@ fn reformat_response_coersion_propagation_into_interfaces() {
         // resolve the type of `thing` with __typename, we can't determine if the result is valid
         // or not. Thus, the nullification of the fragment doesn't "bubble up" to nullifying the
         // either "thing".
-        .expected(json!({ "thing": { "a": 1 } }))
+        .expected(json!({ "thing": null }))
         .expected_errors(json!([
         /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
          * does not produce these errors.
          * FIXME(@TylerBloom): Should the `__typename` error be returned over the more general
          * result coersion error?
+        */
             {
-                "message": "Invalid value found for field Query.thing.b",
+                "message": "Invalid value found for the type Int",
                 "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.thing.c",
-                "path": ["thing", "c"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Invalid values found for field of an abstract type without `__typename`
-                "path": ["thing"],
+                "message": "Cannot return null for non-nullable field Thing.b",
+                "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
-        */
         ]))
         .test();
 
@@ -2371,26 +2390,24 @@ fn reformat_response_coersion_propagation_into_interfaces() {
         .schema(nullable_schema)
         .query(query_wo_type_info)
         .response(resp_with_type_info.clone())
-        .expected(json!({ "thing": { "a": 1, "b": null, "c": null } }))
+        .expected(json!({
+            "thing": {
+                "a": 1,
+                "b": null,
+                "c": null,
+            }
+        }))
         .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
             {
-                "message": "Invalid value found for field Query.thing.b",
+                "message": "Invalid value found for the type Int",
                 "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.thing.c",
+                "message": "Invalid value found for the type Int",
                 "path": ["thing", "c"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
-            {
-                "message": "Invalid values found for field of an abstract type without `__typename`
-                "path": ["thing"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            }
-        */
         ]))
         .test();
 
@@ -2400,26 +2417,16 @@ fn reformat_response_coersion_propagation_into_interfaces() {
         .response(resp_with_type_info.clone())
         .expected(json!({ "thing": null }))
         .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
-         * FIXME(@TylerBloom): Should the `__typename` error be returned over the more general
-         * result coersion error?
             {
-                "message": "Invalid value found for field Query.thing.b",
+                "message": "Invalid value found for the type Int",
                 "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.thing.c",
-                "path": ["thing", "c"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Invalid values found for field of an abstract type without `__typename`
-                "path": ["thing"],
+                "message": "Cannot return null for non-nullable field Foo.b",
+                "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
-        */
         ]))
         .test();
 
@@ -2487,26 +2494,25 @@ fn reformat_response_coersion_propagation_into_interfaces() {
         .schema(nullable_schema)
         .query(query_with_type_info)
         .response(resp_with_type_info.clone())
-        .expected(json!({ "thing": { "__typename": "Foo", "a": 1, "b": null, "c": null } }))
+        .expected(json!({
+            "thing": {
+                "__typename": "Foo",
+                "a": 1,
+                "b": null,
+                "c": null
+            }
+        }))
         .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
             {
-                "message": "Invalid value found for field Query.thing.b",
+                "message": "Invalid value found for the type Int",
                 "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.thing.c",
+                "message": "Invalid value found for the type Int",
                 "path": ["thing", "c"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Invalid values found for field of an abstract type without `__typename`
-                "path": ["thing"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
-        */
         ]))
         .test();
 
@@ -2516,26 +2522,16 @@ fn reformat_response_coersion_propagation_into_interfaces() {
         .response(resp_with_type_info.clone())
         .expected(json!({ "thing": null }))
         .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
-         * FIXME(@TylerBloom): Should the `__typename` error be returned over the more general
-         * result coersion error?
             {
-                "message": "Invalid value found for field Query.thing.b",
+                "message": "Invalid value found for the type Int",
                 "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for field Query.thing.c",
-                "path": ["thing", "c"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Invalid values found for field of an abstract type without `__typename`
-                "path": ["thing"],
+                "message": "Cannot return null for non-nullable field Foo.b",
+                "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
-        */
         ]))
         .test();
 }
@@ -3421,8 +3417,16 @@ fn filter_list_errors() {
         .expected_extensions(json! {{
             "valueCompletion": [
                 {
-                    "message": "Cannot return null for non-nullable array element of type String at index 1",
+                    "message": "Cannot return null for non-nullable array element of type String",
                     "path": ["list", "l2", 1]
+                },
+                {
+                    "message": "Cannot return null for non-nullable array element of type String",
+                    "path": ["list", "l2", 2]
+                },
+                {
+                    "message": "Cannot return null for non-nullable array element of type String",
+                    "path": ["list", "l2", 3]
                 }
             ]
         }},)
