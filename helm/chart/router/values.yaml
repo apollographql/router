@@ -4,7 +4,7 @@
 
 replicaCount: 1
 
-# -- See https://www.apollographql.com/docs/graphos/reference/router/configuration#yaml-config-file for yaml structure
+# -- For YAML structure, https://www.apollographql.com/docs/graphos/routing/configuration/yaml
 router:
   configuration:
     supergraph:
@@ -18,7 +18,7 @@ router:
 managedFederation:
   # -- If using managed federation, the graph API key to identify router to Studio
   apiKey:
-  # -- If using managed federation, use existing Secret which stores the graph API key instead of creating a new one.
+  # -- If using managed federation, use an existing Kubernetes Secret which stores the graph API key instead of creating a new one.
   # If set along `managedFederation.apiKey`, a secret with the graph API key will be created using this parameter as name
   existingSecret:
   # -- If using managed federation, the name of the key within the existing Secret which stores the graph API key.
@@ -225,7 +225,7 @@ autoscaling:
   #     type: cpu
   #     targetUtilizationPercentage: 75
 
-# -- Sets the [rolling update strategy parameters](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-update-deployment).  Can take absolute values or % values.
+# -- Sets the [rolling update strategy parameters](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-update-deployment). Can take absolute values or % values.
 rollingUpdate:
   {}
 # Defaults if not set are:
