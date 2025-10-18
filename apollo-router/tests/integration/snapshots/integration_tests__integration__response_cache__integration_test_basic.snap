@@ -85,7 +85,7 @@ expression: response
           }
         },
         {
-          "key": "version:1.0:subgraph:reviews:type:Product:entity:052fa800fa760b2ac78669a5b0b90f512158eddab8d01eabb4e65b286ff09ecd:representation::hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+          "key": "version:1.0:subgraph:reviews:type:Product:representation:052fa800fa760b2ac78669a5b0b90f512158eddab8d01eabb4e65b286ff09ecd:hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
           "invalidationKeys": [],
           "kind": {
             "typename": "Product",
@@ -130,7 +130,7 @@ expression: response
           }
         },
         {
-          "key": "version:1.0:subgraph:reviews:type:Product:entity:2c6d8b73241e1bc016ddc35bff648f693687d3181d18815493a32f69614f6507:representation::hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+          "key": "version:1.0:subgraph:reviews:type:Product:representation:2c6d8b73241e1bc016ddc35bff648f693687d3181d18815493a32f69614f6507:hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
           "invalidationKeys": [],
           "kind": {
             "typename": "Product",
@@ -178,7 +178,7 @@ expression: response
           }
         },
         {
-          "key": "version:1.0:subgraph:reviews:type:Product:entity:cf4952a1e511b1bf2561a6193b4cdfc95f265a79e5cae4fd3e46fd9e75bc512f:representation::hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+          "key": "version:1.0:subgraph:reviews:type:Product:representation:cf4952a1e511b1bf2561a6193b4cdfc95f265a79e5cae4fd3e46fd9e75bc512f:hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
           "invalidationKeys": [],
           "kind": {
             "typename": "Product",
