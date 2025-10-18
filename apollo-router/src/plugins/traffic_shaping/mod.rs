@@ -763,6 +763,7 @@ mod test {
         let context = Context::default();
         let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Default::default(),
             id: ConnectId::new(
                 "test_subgraph".into(),
                 Some(SourceName::cast("test_sourcename")),
@@ -815,6 +816,7 @@ mod test {
             key,
             mapping_problems,
             supergraph_request: Default::default(),
+            operation: Default::default(),
         }
     }
 
