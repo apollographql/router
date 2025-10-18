@@ -155,7 +155,6 @@ fn validate_tag_merging(supergraph: &Supergraph<Satisfiable>) {
 // =============================================================================
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn tag_propagates_to_supergraph_fed2_subgraphs() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -190,7 +189,6 @@ fn tag_propagates_to_supergraph_fed2_subgraphs() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn tag_propagates_to_supergraph_fed1_subgraphs() {
     let subgraph_a = Subgraph::parse(
         "subgraphA",
@@ -227,7 +225,6 @@ fn tag_propagates_to_supergraph_fed1_subgraphs() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn tag_propagates_to_supergraph_mixed_fed1_fed2_subgraphs() {
     let subgraph_a = Subgraph::parse(
         "subgraphA",
@@ -260,11 +257,8 @@ fn tag_propagates_to_supergraph_mixed_fed1_fed2_subgraphs() {
     .into_fed2_test_subgraph(true, false)
     .unwrap();
 
-    let supergraph = compose(vec![
-        subgraph_a,
-        subgraph_b.into_fed2_test_subgraph(true, false).unwrap(),
-    ])
-    .expect("Expected composition to succeed");
+    let supergraph =
+        compose(vec![subgraph_a, subgraph_b]).expect("Expected composition to succeed");
     validate_tag_propagation(&supergraph);
 }
 
@@ -273,7 +267,6 @@ fn tag_propagates_to_supergraph_mixed_fed1_fed2_subgraphs() {
 // =============================================================================
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn tag_merges_multiple_tags_fed2_subgraphs() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -287,7 +280,7 @@ fn tag_merges_multiple_tags_fed2_subgraphs() {
           name1: Name!
         }
 
-        type Name {
+        type Name @shareable {
           firstName: String @tag(name: "aTagOnFieldFromSubgraphA")
           lastName: String @tag(name: "aMergedTagOnField")
         }
@@ -302,7 +295,7 @@ fn tag_merges_multiple_tags_fed2_subgraphs() {
           name2: String!
         }
 
-        type Name {
+        type Name @shareable {
           firstName: String @tag(name: "aTagOnFieldFromSubgraphB")
           lastName: String @tag(name: "aMergedTagOnField")
         }
@@ -317,7 +310,6 @@ fn tag_merges_multiple_tags_fed2_subgraphs() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn tag_merges_multiple_tags_fed1_subgraphs() {
     let subgraph_a = Subgraph::parse("subgraphA", "", 
         r#"
@@ -357,7 +349,6 @@ fn tag_merges_multiple_tags_fed1_subgraphs() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn tag_merges_multiple_tags_mixed_fed1_fed2_subgraphs() {
     let subgraph_a = Subgraph::parse("subgraphA", "", 
         r#"
@@ -401,7 +392,6 @@ fn tag_merges_multiple_tags_mixed_fed1_fed2_subgraphs() {
 // =============================================================================
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn tag_rejects_tag_and_external_together_fed2_subgraphs() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -440,11 +430,11 @@ fn tag_rejects_tag_and_external_together_fed2_subgraphs() {
 }
 
 #[test]
-#[ignore = "until Fed1 composition mode is implemented"]
 fn tag_rejects_tag_and_external_together_fed1_subgraphs() {
-    let _subgraph_a = ServiceDefinition {
-        name: "subgraphA",
-        type_defs: r#"
+    let subgraph_a = Subgraph::parse(
+        "subgraphA",
+        "",
+        r#"
         type Query {
           user: [User]
         }
@@ -456,31 +446,37 @@ fn tag_rejects_tag_and_external_together_fed1_subgraphs() {
           age: Int! @requires(fields: "birthdate")
         }
         "#,
-    };
+    )
+    .unwrap();
 
-    let _subgraph_b = ServiceDefinition {
-        name: "subgraphB",
-        type_defs: r#"
+    let subgraph_b = Subgraph::parse(
+        "subgraphB",
+        "",
+        r#"
         type User @key(fields: "id") {
           id: ID!
           birthdate: Int!
         }
         "#,
-    };
+    )
+    .unwrap();
 
-    // TODO: Implement Fed1 composition mode - this should use composeServices() equivalent
-    // and should produce MERGED_DIRECTIVE_APPLICATION_ON_EXTERNAL error
-    panic!(
-        "Fed1 composition mode not yet implemented - need compose_services() function equivalent to JS composeServices([subgraphA, subgraphB]) that validates @tag+@external conflicts"
+    let result = compose(vec![subgraph_a, subgraph_b]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "MERGED_DIRECTIVE_APPLICATION_ON_EXTERNAL",
+            r#"[subgraphA] Cannot apply merged directive @tag(name: "myTag") to external field "User.birthdate""#,
+        )],
     );
 }
 
 #[test]
-#[ignore = "until mixed Fed1/Fed2 composition mode is implemented"]
 fn tag_rejects_tag_and_external_together_mixed_fed1_fed2_subgraphs() {
-    let _subgraph_a = ServiceDefinition {
-        name: "subgraphA",
-        type_defs: r#"
+    let subgraph_a = Subgraph::parse(
+        "subgraphA",
+        "",
+        r#"
         type Query {
           user: [User]
         }
@@ -492,22 +488,30 @@ fn tag_rejects_tag_and_external_together_mixed_fed1_fed2_subgraphs() {
           age: Int! @requires(fields: "birthdate")
         }
         "#,
-    };
+    )
+    .unwrap();
 
-    let _subgraph_b = ServiceDefinition {
-        name: "subgraphB",
-        type_defs: r#"
+    let subgraph_b = Subgraph::parse(
+        "subgraphB",
+        "",
+        r#"
         type User @key(fields: "id") {
           id: ID!
           birthdate: Int!
         }
         "#,
-    };
+    )
+    .unwrap()
+    .into_fed2_test_subgraph(true, false)
+    .unwrap();
 
-    // TODO: Implement mixed Fed1/Fed2 composition mode - this should use composeServices([subgraphA, asFed2Service(subgraphB)]) equivalent
-    // and should produce MERGED_DIRECTIVE_APPLICATION_ON_EXTERNAL error
-    panic!(
-        "Mixed Fed1/Fed2 composition mode not yet implemented - need compose_services() function equivalent to JS composeServices([subgraphA, asFed2Service(subgraphB)]) that validates @tag+@external conflicts"
+    let result = compose(vec![subgraph_a, subgraph_b]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "MERGED_DIRECTIVE_APPLICATION_ON_EXTERNAL",
+            r#"[subgraphA] Cannot apply merged directive @tag(name: "myTag") to external field "User.birthdate""#,
+        )],
     );
 }
 
@@ -516,11 +520,11 @@ fn tag_rejects_tag_and_external_together_mixed_fed1_fed2_subgraphs() {
 // =============================================================================
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn tag_errors_if_imported_under_mismatched_names() {
-    let subgraph_a = ServiceDefinition {
-        name: "subgraphA",
-        type_defs: r#"
+    let subgraph_a = Subgraph::parse(
+        "subgraphA",
+        "",
+        r#"
         extend schema
           @link(url: "https://specs.apollo.dev/federation/v2.0", import: [{name: "@tag", as: "@apolloTag"}])
 
@@ -528,11 +532,13 @@ fn tag_errors_if_imported_under_mismatched_names() {
           q1: Int @apolloTag(name: "t1")
         }
         "#,
-    };
+    )
+    .unwrap();
 
-    let subgraph_b = ServiceDefinition {
-        name: "subgraphB",
-        type_defs: r#"
+    let subgraph_b = Subgraph::parse(
+        "subgraphB",
+        "",
+        r#"
         extend schema
           @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@tag"])
 
@@ -540,9 +546,10 @@ fn tag_errors_if_imported_under_mismatched_names() {
           q2: Int @tag(name: "t2")
         }
         "#,
-    };
+    )
+    .unwrap();
 
-    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    let result = compose(vec![subgraph_a, subgraph_b]);
     assert_composition_errors(
         &result,
         &[(
@@ -553,11 +560,11 @@ fn tag_errors_if_imported_under_mismatched_names() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn tag_succeeds_if_imported_under_same_non_default_name() {
-    let subgraph_a = ServiceDefinition {
-        name: "subgraphA",
-        type_defs: r#"
+    let subgraph_a = Subgraph::parse(
+        "subgraphA",
+        "",
+        r#"
         extend schema
           @link(url: "https://specs.apollo.dev/federation/v2.0", import: [{name: "@tag", as: "@apolloTag"}])
 
@@ -565,11 +572,13 @@ fn tag_succeeds_if_imported_under_same_non_default_name() {
           q1: Int @apolloTag(name: "t1")
         }
         "#,
-    };
+    )
+    .unwrap();
 
-    let subgraph_b = ServiceDefinition {
-        name: "subgraphB",
-        type_defs: r#"
+    let subgraph_b = Subgraph::parse(
+        "subgraphB",
+        "",
+        r#"
         extend schema
           @link(url: "https://specs.apollo.dev/federation/v2.0", import: [{name: "@tag", as: "@apolloTag"}])
 
@@ -577,9 +586,27 @@ fn tag_succeeds_if_imported_under_same_non_default_name() {
           q2: Int @apolloTag(name: "t2")
         }
         "#,
-    };
+    )
+    .unwrap();
 
-    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
-    let _supergraph =
+    let result = compose(vec![subgraph_a, subgraph_b]);
+    let supergraph =
         result.expect("Expected composition to succeed with consistent @tag import names");
+
+    let q1 = coord!(Query.q1)
+        .lookup_field(supergraph.schema().schema())
+        .unwrap();
+    assert!(
+        q1.directives
+            .iter()
+            .any(|d| d.to_string() == r#"@apolloTag(name: "t1")"#)
+    );
+    let q2 = coord!(Query.q2)
+        .lookup_field(supergraph.schema().schema())
+        .unwrap();
+    assert!(
+        q2.directives
+            .iter()
+            .any(|d| d.to_string() == r#"@apolloTag(name: "t2")"#)
+    );
 }
