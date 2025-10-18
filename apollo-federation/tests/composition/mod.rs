@@ -9,6 +9,7 @@ mod compose_tag;
 mod compose_type_merging;
 mod compose_types;
 mod compose_validation;
+mod connectors;
 mod demand_control;
 // TODO: remove #[ignore] from tests once all fns called by Merger::merge() are implemented
 mod external;
