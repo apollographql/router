@@ -593,3 +593,78 @@ async fn test_cache_error_metrics() {
 
     router.graceful_shutdown().await;
 }
+
+#[tokio::test]
+async fn complex_entity_key_cache() {
+    // GIVEN:
+    //   * that graphOS is enabled
+    //   * that we have a supergraph with:
+    //     * join__type with a complex key (ie, using an array)
+    //     * two subgraphs that both have the
+    //       type Status, but with an extra field given by those subgraphs
+    //       (ie, stuffDetails and statusDetails)
+    //   * a router running the above
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let subgraphs = json!({
+        "stuff": {
+            "query": {
+                "getStatus": {
+                    "id": "1",
+                    "items": [{"id": "i1", "name": "Item"}],
+                    "stuffDetails": "stuff we have"
+                }
+            }
+        },
+        "status": {
+            "entities": [{
+                "__typename": "Status",
+                "id": "1",
+                "items": [{"id": "i1", "name": "Item"}],
+                "statusDetails": "status details"
+            }]
+        }
+    });
+
+    let mut config = base_config();
+    config
+        .as_object_mut()
+        .unwrap()
+        .insert("experimental_mock_subgraphs".into(), subgraphs);
+
+    let router = apollo_router::TestHarness::builder()
+        .schema(include_str!("./fixtures/entity_key_complex.graphql"))
+        .configuration_json(config)
+        .unwrap()
+        .build_http_service()
+        .await
+        .unwrap();
+
+    let mut router = router;
+
+    // WHEN:
+    //   * a query for the Status type but with data from both the stuff and
+    //     status subgraphs
+
+    let query = r#"{
+        getStatus(id: "1") {
+            id
+            items { id name }
+            stuffDetails
+            statusDetails
+        }
+    }"#;
+    let (_, body) =
+        make_http_request::<graphql::Response>(&mut router, graphql_request(query).into()).await;
+
+    // THEN:
+    //   * no errors emitted! This means that the key was parsed correctly, or
+    //     else we'd see malformed request errors
+    //   * we get data from both subgraphs
+    //
+    assert!(body.errors.is_empty());
+    let expectation: serde_json_bytes::Value = json!({"getStatus":{"id":"1","items":[{"id":"i1","name":"Item"}],"stuffDetails":"stuff we have","statusDetails":"status details"}}).into();
+    assert_eq!(body.data, Some(expectation));
+}

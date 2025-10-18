@@ -1526,71 +1526,148 @@ fn collect_key_field_sets(
         }))
 }
 
-// Does the shape of `representation`  match the `selection_set`?
+/// Whether the entity, represented as JSON, matches the parsed @key fields (`selection_set`)
+// WARN: if you make changes to this fn, make the same changes to the one in response_cache/plugin.rs!
 fn matches_selection_set(
+    // the JSON representation of the entity data
     representation: &serde_json_bytes::Map<ByteString, Value>,
+    // the parsed @key fields to use for matching
     selection_set: &apollo_compiler::executable::SelectionSet,
 ) -> bool {
     for field in selection_set.root_fields(&Default::default()) {
-        // Note: field sets can't have aliases.
+        // the heart of finding the match: we take the field from the selection
+        // set and try to find it in the entity representation;
         let Some(value) = representation.get(field.name.as_str()) else {
             return false;
         };
-
+        // selection sets are empty when we're at the terminus (leaf) of the query, either
+        // bottoming out in a scalar (happy path) or an object with no fields (sad path--this
+        // _shouldn't_ happen)
         if field.selection_set.is_empty() {
-            // `value` must be a scalar.
             if matches!(value, Value::Object(_)) {
+                // we've hit the sad path somehow; return false to denote no match found
+                tracing::trace!(
+                    "encounterd an object with no selection sets while trying to find an entity key match: {value}"
+                );
                 return false;
             }
+            // otherwise, continue
             continue;
         }
 
-        // Check the sub-selection set.
-        let Value::Object(sub_value) = value else {
-            return false;
-        };
-        if !matches_selection_set(sub_value, &field.selection_set) {
-            return false;
+        // we're not at the terminus (leaf) of the query and we don't have a scalar, so we need to
+        // decide how we're going to continue searching for a match in the JSON representation
+        match value {
+            // objects have selection sets, so recurse!
+            Value::Object(sub_value) => {
+                if !matches_selection_set(sub_value, &field.selection_set) {
+                    return false;
+                }
+            }
+            // arrays can be used in complex `@key`s, both arrays of scalars (eg, ["a", "b", "c"],
+            // which are handled above when we check whether the selection set is empty and it will be
+            // because scalars have no selection set; we would have matched in virtue of finding
+            // the scalar in the JSON representation) and arrays of objects (eg, [ObjectA, ObjectB,
+            // ObjectC], which we handle below)
+            Value::Array(arr) => {
+                for item in arr {
+                    // arrays of scalars are handled above; so, we know we have an object--if this
+                    // fails, we've hit a bug
+                    let Value::Object(obj) = item else {
+                        tracing::trace!(
+                            "encounterd an array filled with neither scalars or objects while trying to find an entity key match: {item}"
+                        );
+                        return false;
+                    };
+                    if !matches_selection_set(obj, &field.selection_set) {
+                        return false;
+                    }
+                }
+            }
+            // this should never be hit; we should only have JSON objects and arrays
+            other => {
+                tracing::trace!(
+                    "encounterd something other than an array or object while trying to find an entity key match: {other}"
+                );
+                return false;
+            }
         }
     }
     true
 }
 
-// Removes the selection set from `representation` and returns the value corresponding to it.
-// - Returns None if the representation doesn't match the selection set.
+/// Removes the selection set from `representation` and returns the value(s) corresponding
+/// to the selection set. If no match is found, `None` is returned
+///
+/// The primary role of this function is to find the entity we're after so that we can eventually
+/// create a hashed cache key using it
+// WARN: any changes made to this fn should have the same done to the one in
+// response_cache/plugin.rs
 fn take_selection_set(
     representation: &mut serde_json_bytes::Map<ByteString, Value>,
     selection_set: &apollo_compiler::executable::SelectionSet,
 ) -> Option<serde_json_bytes::Map<ByteString, Value>> {
     let mut result = serde_json_bytes::Map::new();
     for field in selection_set.root_fields(&Default::default()) {
-        // Note: field sets can't have aliases.
+        // selection sets are empty when we're at the terminus (leaf) of the query, either
+        // bottoming out in a scalar (happy path) or an object with no fields (sad path--this
+        // _shouldn't_ happen)
         if field.selection_set.is_empty() {
             let value = representation.remove(field.name.as_str())?;
             // `value` must be a scalar.
             if matches!(value, Value::Object(_)) {
+                // we've hit the sad path somehow; return None to denote no match found
+                tracing::trace!(
+                    "encounterd an object with no selection sets while trying to find and return values from the selection set: {value}"
+                );
                 return None;
             }
-            // Move the scalar field to the `result`.
+            // move the scalar field to the `result`
             result.insert(ByteString::from(field.name.as_str()), value);
             continue;
-        } else {
-            let value = representation.get_mut(field.name.as_str())?;
-            // Update the sub-selection set.
-            let Value::Object(sub_value) = value else {
+        }
+
+        // we're not at the terminus (leaf) of the query and we don't have a scalar
+        let value = representation.get_mut(field.name.as_str())?;
+        // so, decide how we're going to continue searching for a match in the JSON representation
+        match value {
+            // objects have selection sets, so recurse!
+            Value::Object(sub_value) => {
+                let removed = take_selection_set(sub_value, &field.selection_set)?;
+                result.insert(
+                    ByteString::from(field.name.as_str()),
+                    Value::Object(removed),
+                );
+            }
+            // see the note on the matches_selection_set fn for details on handling
+            // arrays of scalars; the following handles arrays of objects
+            Value::Array(arr) => {
+                let mut results = Vec::new();
+                for item in arr {
+                    let Value::Object(obj) = item else {
+                        return None;
+                    };
+                    let removed = take_selection_set(obj, &field.selection_set)?;
+                    results.push(Value::Object(removed));
+                }
+                result.insert(ByteString::from(field.name.as_str()), Value::Array(results));
+            }
+            // this should never be hit; we should only have JSON objects and arrays
+            other => {
+                tracing::trace!(
+                    "encounterd something other than an array or object while trying to take an entity from the representation: {other}"
+                );
                 return None;
-            };
-            let removed = take_selection_set(sub_value, &field.selection_set)?;
-            result.insert(
-                ByteString::from(field.name.as_str()),
-                Value::Object(removed),
-            );
+            }
         }
     }
     Some(result)
 }
 
-// The inverse of `take_selection_set`.
+/// The inverse of `take_selection_set`
+// BUG: there's likely a bug here in handling only objects; we probably need to add support for
+// merging array representations too, but this is unconfirmed and we'd need to figure out under
+// what conditions we'd merge arrays
 fn merge_representation(
     dest: &mut serde_json_bytes::Map<ByteString, Value>,
     source: serde_json_bytes::Map<ByteString, Value>,
@@ -1903,6 +1980,9 @@ impl Ord for CacheKeyStatus {
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::parser::Parser;
+    use serde_json_bytes::json;
+
     use super::*;
     use crate::plugins::cache::tests::MockStore;
     use crate::plugins::cache::tests::SCHEMA;
@@ -2021,5 +2101,170 @@ mod tests {
             entity_cache.subgraph_ttl("archive", &redis_cache),
             Some(Duration::from_millis(5000))
         );
+    }
+
+    #[test]
+    fn test_matches_selection_set_handles_arrays() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                locale: String!
+                lists: [List!]!
+                list: [List!]!
+            }
+            type List {
+                id: ID!
+                date: Int!
+                quantity: Int!
+                location: String!
+            }
+        "#;
+        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity location } list { id date quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        // Test with complex nested array structure
+        let representation = json!({
+            "id": "TEST123",
+            "locale": "en_US",
+            "lists": [
+                {
+                    "id": "LIST1",
+                    "date": 20240101,
+                    "quantity": 50,
+                    "location": "WAREHOUSE_A"
+                }
+            ],
+            "list": [
+                {
+                    "id": "LIST2",
+                    "date": 20240101,
+                    "quantity": 100,
+                    "location": "WAREHOUSE_A"
+                },
+                {
+                    "id": "LIST3",
+                    "date": 20240102,
+                    "quantity": 75,
+                    "location": "WAREHOUSE_B"
+                }
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        assert!(
+            matches_selection_set(&representation, &field_set.selection_set),
+            "complex nested arrays should match"
+        );
+    }
+
+    #[test]
+    fn test_take_selection_set_handles_arrays() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                locale: String!
+                lists: [List!]!
+                list: [List!]!
+            }
+            type List {
+                id: ID!
+                date: Int!
+                quantity: Int!
+                location: String!
+            }
+        "#;
+        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity location } list { id date quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        // Test with complex nested array structure
+        let mut representation = json!({
+            "id": "TEST123",
+            "locale": "en_US",
+            "lists": [
+                {
+                    "id": "LIST1",
+                    "date": 20240101,
+                    "quantity": 50,
+                    "location": "WAREHOUSE_A"
+                }
+            ],
+            "list": [
+                {
+                    "id": "LIST2",
+                    "date": 20240101,
+                    "quantity": 100,
+                    "location": "WAREHOUSE_A"
+                },
+                {
+                    "id": "LIST3",
+                    "date": 20240102,
+                    "quantity": 75,
+                    "location": "WAREHOUSE_B"
+                }
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        let taken = take_selection_set(&mut representation, &field_set.selection_set);
+        let expectation = json!({
+            "id": "TEST123",
+            "locale": "en_US",
+            "lists": [
+                {
+                    "id": "LIST1",
+                    "date": 20240101,
+                    "quantity": 50,
+                    "location": "WAREHOUSE_A"
+                }
+            ],
+            "list": [
+                {
+                    "id": "LIST2",
+                    "date": 20240101,
+                    "quantity": 100,
+                    "location": "WAREHOUSE_A"
+                },
+                {
+                    "id": "LIST3",
+                    "date": 20240102,
+                    "quantity": 75,
+                    "location": "WAREHOUSE_B"
+                }
+            ]
+        })
+        .as_object()
+        .cloned();
+
+        assert_eq!(taken, expectation);
     }
 }
