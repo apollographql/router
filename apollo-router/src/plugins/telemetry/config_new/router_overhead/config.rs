@@ -26,12 +26,12 @@ impl Selectors<router::Request, router::Response, ()> for RouterOverheadAttribut
             .context
             .extensions()
             .with_lock(|ext| ext.get::<RouterOverheadTracker>().cloned())
-            .and_then(|tracker| {
+            .map(|tracker| {
                 let result = tracker.calculate_overhead();
-                Some(vec![KeyValue::new(
+                vec![KeyValue::new(
                     "subgraph.active_requests",
                     result.active_subgraph_requests > 0,
-                )])
+                )]
             })
             .unwrap_or_default()
     }

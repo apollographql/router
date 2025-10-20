@@ -17,7 +17,7 @@ pub(crate) struct SubgraphRequestGuard {
 }
 
 impl SubgraphRequestGuard {
-    pub(super) fn new(inner: Arc<Mutex<TrackerInner>>) -> Self {
+    pub(in crate::plugins::telemetry) fn new(inner: Arc<Mutex<TrackerInner>>) -> Self {
         let mut inner_lock = inner.lock();
 
         // Increment the active count
@@ -45,11 +45,11 @@ impl Drop for SubgraphRequestGuard {
             .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
 
         // If this was the last active subgraph request, accumulate the time
-        if prev_count == 1 {
-            if let Some(period_start) = inner.current_period_start.take() {
-                let elapsed = period_start.elapsed();
-                inner.accumulated_subgraph_time += elapsed;
-            }
+        if prev_count == 1
+            && let Some(period_start) = inner.current_period_start.take()
+        {
+            let elapsed = period_start.elapsed();
+            inner.accumulated_subgraph_time += elapsed;
         }
     }
 }

@@ -19,12 +19,12 @@ use crate::plugins::telemetry::config_new::get_baggage;
 use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
 use crate::plugins::telemetry::config_new::instruments::Standard;
 use crate::plugins::telemetry::config_new::router::events::RouterResponseBodyExtensionType;
+use crate::plugins::telemetry::config_new::router_overhead::RouterOverheadTracker;
 use crate::plugins::telemetry::config_new::selectors::ActiveSubgraphRequests;
 use crate::plugins::telemetry::config_new::selectors::ErrorRepr;
 use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
 use crate::plugins::telemetry::config_new::trace_id;
-use crate::plugins::telemetry::router_overhead::RouterOverheadTracker;
 use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::services::router;
 
@@ -325,15 +325,15 @@ impl Selector for RouterSelector {
                 .context
                 .extensions()
                 .with_lock(|ext| ext.get::<RouterOverheadTracker>().cloned())
-                .and_then(|tracker| {
+                .map(|tracker| {
                     let result = tracker.calculate_overhead();
                     match active_subgraph_requests {
-                        ActiveSubgraphRequests::Count => Some(opentelemetry::Value::I64(
-                            result.active_subgraph_requests as i64,
-                        )),
-                        ActiveSubgraphRequests::Bool => Some(opentelemetry::Value::Bool(
-                            result.active_subgraph_requests > 0,
-                        )),
+                        ActiveSubgraphRequests::Count => {
+                            opentelemetry::Value::I64(result.active_subgraph_requests as i64)
+                        }
+                        ActiveSubgraphRequests::Bool => {
+                            opentelemetry::Value::Bool(result.active_subgraph_requests > 0)
+                        }
                     }
                 }),
             RouterSelector::ResponseContext {

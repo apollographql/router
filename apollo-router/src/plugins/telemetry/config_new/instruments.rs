@@ -1903,10 +1903,10 @@ where
                 return;
             }
         } {
-            if let Some(counter) = &inner.counter {
-                if let Some(value) = value_to_f64(&increment) {
-                    counter.add(value, &inner.attributes);
-                }
+            if let Some(counter) = &inner.counter
+                && let Some(value) = value_to_f64(&increment)
+            {
+                counter.add(value, &inner.attributes);
             }
             inner.incremented = true;
         }
@@ -1999,10 +1999,10 @@ where
             }
         };
 
-        if let Some(counter) = inner.counter.take() {
-            if let Some(value) = value_to_f64(&increment) {
-                counter.add(value, &attrs);
-            }
+        if let Some(counter) = inner.counter.take()
+            && let Some(value) = value_to_f64(&increment)
+        {
+            counter.add(value, &attrs);
         }
     }
 
@@ -2041,10 +2041,7 @@ where
 
         let increment: Option<opentelemetry::Value> = match &mut inner.increment {
             Increment::FieldUnit => Some(opentelemetry::Value::F64(1.0)),
-            Increment::FieldCustom(val) => {
-                let incr = val.take();
-                incr
-            }
+            Increment::FieldCustom(val) => val.take(),
             Increment::Unit
             | Increment::Duration(_, _)
             | Increment::Custom(_)
@@ -2093,8 +2090,8 @@ where
             if inner.incremented || matches!(inner.condition.evaluate_drop(), Some(false) | None) {
                 return;
             }
-            if let Some(counter) = inner.counter.take() {
-                if let Some(incr) = match &inner.increment {
+            if let Some(counter) = inner.counter.take()
+                && let Some(incr) = match &inner.increment {
                     Increment::Unit | Increment::EventUnit => Some(1f64),
                     Increment::Duration(instant, unit)
                     | Increment::EventDuration(instant, unit) => {
@@ -2110,9 +2107,9 @@ where
                         // with the data that we know so far if the request stops.
                         return;
                     }
-                } {
-                    counter.add(incr, &inner.attributes);
                 }
+            {
+                counter.add(incr, &inner.attributes);
             }
         }
     }
@@ -2394,10 +2391,7 @@ where
                 *instant = Instant::now();
                 incr
             }
-            Increment::EventCustom(val) => {
-                let incr = val.take();
-                incr
-            }
+            Increment::EventCustom(val) => val.take(),
             Increment::Unit
             | Increment::Duration(_, _)
             | Increment::Custom(_)
@@ -2436,10 +2430,10 @@ where
             }
         };
 
-        if let (Some(histogram), Some(increment)) = (inner.histogram.take(), increment.as_ref()) {
-            if let Some(value) = value_to_f64(increment) {
-                histogram.record(value, &attrs);
-            }
+        if let (Some(histogram), Some(increment)) = (inner.histogram.take(), increment.as_ref())
+            && let Some(value) = value_to_f64(increment)
+        {
+            histogram.record(value, &attrs);
         }
     }
 
@@ -2478,10 +2472,7 @@ where
 
         let increment: Option<opentelemetry::Value> = match &mut inner.increment {
             Increment::FieldUnit => Some(opentelemetry::Value::F64(1.0)),
-            Increment::FieldCustom(val) => {
-                let incr = val.take();
-                incr
-            }
+            Increment::FieldCustom(val) => val.take(),
             Increment::Unit
             | Increment::Duration(_, _)
             | Increment::Custom(_)
@@ -2546,10 +2537,10 @@ where
                     }
                 };
 
-                if let Some(increment) = increment.as_ref() {
-                    if let Some(value) = value_to_f64(increment) {
-                        histogram.record(value, &inner.attributes);
-                    }
+                if let Some(increment) = increment.as_ref()
+                    && let Some(value) = value_to_f64(increment)
+                {
+                    histogram.record(value, &inner.attributes);
                 }
             }
         }

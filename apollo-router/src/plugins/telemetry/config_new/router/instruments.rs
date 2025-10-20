@@ -17,8 +17,8 @@ use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
 use crate::plugins::telemetry::config_new::instruments::CustomInstruments;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
 use crate::plugins::telemetry::config_new::router::attributes::RouterAttributes;
+use crate::plugins::telemetry::config_new::router_overhead::RouterOverheadAttributes;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
-use crate::plugins::telemetry::router_overhead::RouterOverheadAttributes;
 use crate::services::router;
 
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]

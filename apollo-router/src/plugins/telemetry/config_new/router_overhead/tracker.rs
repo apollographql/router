@@ -35,16 +35,16 @@ pub(crate) struct RouterOverheadTracker {
 }
 
 #[derive(Debug)]
-pub(super) struct TrackerInner {
+pub(in crate::plugins::telemetry) struct TrackerInner {
     /// Accumulated time when one or more subgraph requests were in flight
-    pub(super) accumulated_subgraph_time: Duration,
+    pub(in crate::plugins::telemetry) accumulated_subgraph_time: Duration,
 
     /// When the most recent period of subgraph activity started
     /// (None if no subgraph requests are currently active)
-    pub(super) current_period_start: Option<Instant>,
+    pub(in crate::plugins::telemetry) current_period_start: Option<Instant>,
 
     /// Count of active subgraph requests
-    pub(super) active_count: AtomicU64,
+    pub(in crate::plugins::telemetry) active_count: AtomicU64,
 }
 
 impl RouterOverheadTracker {
