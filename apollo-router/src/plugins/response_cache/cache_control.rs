@@ -382,6 +382,7 @@ impl CacheControl {
 
     // Export this for tests to avoid exporting field in pub(super) and create mistakes
     #[cfg(test)]
+    #[allow(dead_code)] //False positive in clippy
     pub(crate) fn set_created(&mut self, created: u64) {
         self.created = created;
     }
