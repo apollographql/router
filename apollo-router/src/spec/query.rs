@@ -146,7 +146,7 @@ impl Query {
                                 variables: &variables,
                                 schema,
                                 errors: Vec::new(),
-                                coersion_errors: Vec::new(),
+                                coercion_errors: Vec::new(),
                                 nullified: Vec::new(),
                             };
 
@@ -204,7 +204,7 @@ impl Query {
                         variables: &all_variables,
                         schema,
                         errors: Vec::new(),
-                        coersion_errors: Vec::new(),
+                        coercion_errors: Vec::new(),
                         nullified: Vec::new(),
                     };
 
@@ -229,8 +229,8 @@ impl Query {
                             .insert(EXTENSIONS_VALUE_COMPLETION_KEY, value);
                     }
 
-                    if !parameters.coersion_errors.is_empty() {
-                        response.errors.append(&mut parameters.coersion_errors);
+                    if !parameters.coercion_errors.is_empty() {
+                        response.errors.append(&mut parameters.coercion_errors);
                     }
 
                     return parameters.nullified;
@@ -398,7 +398,11 @@ impl Query {
             executable::Type::NonNullList(ty) => ty.clone().list(),
             executable::Type::NonNullNamed(name) => executable::Type::Named(name.clone()),
             // This function should never be called for non-nullable types
-            _ => unreachable!(),
+            _ => {
+                tracing::error!("`format_non_nullable_value` was called with a nullable type!!");
+                debug_assert!(field_type.is_non_null());
+                return Err(InvalidValue);
+            }
         };
 
         self.format_value(parameters, &inner_type, input, output, path, selection_set)?;
@@ -411,7 +415,7 @@ impl Query {
                     .path(Path::from_response_slice(path))
                     .build(),
             );
-            parameters.coersion_errors.push(
+            parameters.coercion_errors.push(
                 Error::builder()
                     .message(message)
                     .path(Path::from_response_slice(path))
@@ -464,7 +468,7 @@ impl Query {
             // invalid value.
             path.pop();
             parameters.nullified.push(Path::from_response_slice(path));
-            parameters.coersion_errors.push(
+            parameters.coercion_errors.push(
                 Error::builder()
                     .message(format!(
                         "Invalid value found inside the array of type [{inner_type}]"
@@ -583,7 +587,7 @@ impl Query {
             *output = input.clone();
         } else {
             if !input.is_null() {
-                parameters.coersion_errors.push(
+                parameters.coercion_errors.push(
                     Error::builder()
                         .message("Invalid value found for the type Int")
                         .path(Path::from_response_slice(path))
@@ -607,7 +611,7 @@ impl Query {
             *output = input.clone();
         } else {
             if !input.is_null() {
-                parameters.coersion_errors.push(
+                parameters.coercion_errors.push(
                     Error::builder()
                         .message("Invalid value found for the type Float")
                         .path(Path::from_response_slice(path))
@@ -631,7 +635,7 @@ impl Query {
             *output = input.clone();
         } else {
             if !input.is_null() {
-                parameters.coersion_errors.push(
+                parameters.coercion_errors.push(
                     Error::builder()
                         .message("Invalid value found for the type Boolean")
                         .path(Path::from_response_slice(path))
@@ -655,7 +659,7 @@ impl Query {
             *output = input.clone();
         } else {
             if !input.is_null() {
-                parameters.coersion_errors.push(
+                parameters.coercion_errors.push(
                     Error::builder()
                         .message("Invalid value found for the type String")
                         .path(Path::from_response_slice(path))
@@ -679,7 +683,7 @@ impl Query {
             *output = input.clone();
         } else {
             if !input.is_null() {
-                parameters.coersion_errors.push(
+                parameters.coercion_errors.push(
                     Error::builder()
                         .message("Invalid value found for the type ID")
                         .path(Path::from_response_slice(path))
@@ -1167,7 +1171,7 @@ impl Query {
 struct FormatParameters<'a> {
     variables: &'a Object,
     errors: Vec<Error>,
-    coersion_errors: Vec<Error>,
+    coercion_errors: Vec<Error>,
     nullified: Vec<Path>,
     schema: &'a ApiSchema,
 }
