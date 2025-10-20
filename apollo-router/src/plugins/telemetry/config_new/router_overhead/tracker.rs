@@ -1,6 +1,4 @@
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -44,7 +42,7 @@ pub(in crate::plugins::telemetry) struct TrackerInner {
     pub(in crate::plugins::telemetry) current_period_start: Option<Instant>,
 
     /// Count of active subgraph requests
-    pub(in crate::plugins::telemetry) active_count: AtomicU64,
+    pub(in crate::plugins::telemetry) active_count: u64,
 }
 
 impl RouterOverheadTracker {
@@ -55,7 +53,7 @@ impl RouterOverheadTracker {
             inner: Arc::new(Mutex::new(TrackerInner {
                 accumulated_subgraph_time: Duration::ZERO,
                 current_period_start: None,
-                active_count: AtomicU64::new(0),
+                active_count: 0,
             })),
         }
     }
@@ -75,7 +73,7 @@ impl RouterOverheadTracker {
         let total_elapsed = self.request_start.elapsed();
 
         let inner = self.inner.lock();
-        let active_count = inner.active_count.load(Ordering::SeqCst);
+        let active_count = inner.active_count;
         let has_active_subgraph_requests = active_count > 0;
 
         // If there are still active subgraph requests, accumulate the current period

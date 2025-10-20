@@ -21,9 +21,8 @@ impl SubgraphRequestGuard {
         let mut inner_lock = inner.lock();
 
         // Increment the active count
-        let prev_count = inner_lock
-            .active_count
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let prev_count = inner_lock.active_count;
+        inner_lock.active_count += 1;
 
         // If this is the first active subgraph request, start timing
         if prev_count == 0 {
@@ -40,9 +39,8 @@ impl Drop for SubgraphRequestGuard {
     fn drop(&mut self) {
         let mut inner = self.inner.lock();
 
-        let prev_count = inner
-            .active_count
-            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        let prev_count = inner.active_count;
+        inner.active_count -= 1;
 
         // If this was the last active subgraph request, accumulate the time
         if prev_count == 1
