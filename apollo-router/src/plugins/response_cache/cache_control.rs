@@ -11,38 +11,38 @@ use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CacheControl {
-    pub(super) created: u64,
+    created: u64,
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub(super) max_age: Option<u32>,
+    max_age: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub(super) age: Option<u32>,
+    age: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub(super) s_max_age: Option<u32>,
+    s_max_age: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub(super) stale_while_revalidate: Option<u32>,
+    stale_while_revalidate: Option<u64>,
     #[serde(skip_serializing_if = "is_false", default)]
-    pub(super) no_cache: bool,
+    no_cache: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    pub(super) must_revalidate: bool,
+    must_revalidate: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    pub(super) proxy_revalidate: bool,
+    proxy_revalidate: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    pub(super) no_store: bool,
+    no_store: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    pub(super) private: bool,
+    private: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    pub(super) public: bool,
+    public: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    pub(super) must_understand: bool,
+    must_understand: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    pub(super) no_transform: bool,
+    no_transform: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    pub(super) immutable: bool,
+    immutable: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    pub(super) stale_if_error: bool,
+    stale_if_error: bool,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -85,7 +85,7 @@ impl CacheControl {
     ) -> Result<Self, BoxError> {
         let mut result = CacheControl::default();
         if let Some(duration) = default_ttl {
-            result.max_age = Some(duration.as_secs() as u32);
+            result.max_age = Some(duration.as_secs());
         }
 
         let mut found = false;
@@ -149,7 +149,7 @@ impl CacheControl {
             result.no_store = true;
         }
 
-        if let Some(value) = headers.get("Age") {
+        if let Some(value) = headers.get(http::header::AGE) {
             result.age = Some(value.to_str()?.trim().parse()?);
         }
 
@@ -251,16 +251,20 @@ impl CacheControl {
         Ok(s)
     }
 
-    pub(super) fn no_store() -> Self {
+    pub(crate) fn no_store() -> Self {
         CacheControl {
             no_store: true,
             ..Default::default()
         }
     }
 
-    fn update_ttl(&self, ttl: u32, now: u64) -> u32 {
+    fn update_ttl(&self, ttl: u64, now: u64) -> u64 {
         let elapsed = self.elapsed_inner(now);
-        ttl.saturating_sub(elapsed)
+        if elapsed < 0 {
+            0
+        } else {
+            ttl.saturating_sub(elapsed as u64)
+        }
     }
 
     pub(crate) fn merge(&self, other: &CacheControl) -> CacheControl {
@@ -318,29 +322,29 @@ impl CacheControl {
         }
     }
 
-    pub(crate) fn elapsed(&self) -> u32 {
+    pub(crate) fn elapsed(&self) -> i128 {
         self.elapsed_inner(now_epoch_seconds())
     }
 
-    pub(crate) fn elapsed_inner(&self, now: u64) -> u32 {
-        (now - self.created) as u32
+    pub(crate) fn elapsed_inner(&self, now: u64) -> i128 {
+        now as i128 - self.created as i128
     }
 
-    pub(crate) fn ttl(&self) -> Option<u32> {
+    pub(crate) fn ttl(&self) -> Option<u64> {
         match (
             self.s_max_age.as_ref().or(self.max_age.as_ref()),
             self.age.as_ref(),
         ) {
             (None, _) => None,
             (Some(max_age), None) => Some(*max_age),
-            (Some(max_age), Some(age)) => Some(max_age - age),
+            (Some(max_age), Some(age)) => Some(max_age.saturating_sub(*age)),
         }
     }
 
     pub(crate) fn should_store(&self) -> bool {
         // FIXME: should we add support for must-understand?
         // public will be the default case
-        !self.no_store
+        !self.no_store && self.ttl().map(|ttl| ttl > 0).unwrap_or(true)
     }
 
     pub(crate) fn private(&self) -> bool {
@@ -353,7 +357,11 @@ impl CacheControl {
 
     pub(crate) fn can_use(&self) -> bool {
         let elapsed = self.elapsed();
-        let expired = self.ttl().map(|ttl| ttl < elapsed).unwrap_or(false);
+        let expired = if elapsed < 0 {
+            true
+        } else {
+            self.ttl().map(|ttl| ttl < elapsed as u64).unwrap_or(false)
+        };
 
         // FIXME: we don't honor stale-while-revalidate yet
         // !expired || self.stale_while_revalidate
@@ -361,11 +369,21 @@ impl CacheControl {
     }
 
     #[cfg(test)]
-    pub(crate) fn remaining_time(&self, now: u64) -> Option<u32> {
+    pub(crate) fn remaining_time(&self, now: u64) -> Option<u64> {
         self.ttl().map(|ttl| {
             let elapsed = self.elapsed_inner(now);
-            ttl.saturating_sub(elapsed)
+            if elapsed < 0 {
+                0
+            } else {
+                ttl.saturating_sub(elapsed as u64)
+            }
         })
+    }
+
+    // Export this for tests to avoid exporting field in pub(super) and create mistakes
+    #[cfg(test)]
+    pub(crate) fn set_created(&mut self, created: u64) {
+        self.created = created;
     }
 }
 
@@ -466,5 +484,30 @@ mod tests {
         assert!(!merged.public);
         assert!(merged.private);
         assert!(merged.can_use());
+    }
+
+    #[test]
+    fn create_expired_cache_control() {
+        let now = now_epoch_seconds();
+        let cc = CacheControl {
+            created: now,
+            max_age: Some(40),
+            age: Some(50),
+            public: true,
+            private: false,
+            ..Default::default()
+        };
+        assert!(!cc.should_store()); // Because age is bigger than max_age
+
+        let cc = CacheControl {
+            created: now + 1000,
+            max_age: Some(40),
+            age: Some(50),
+            public: true,
+            private: false,
+            ..Default::default()
+        };
+        assert!(!cc.can_use()); // Because created is bigger than now
+        assert!(!cc.should_store()); // Because age is bigger than max_age
     }
 }

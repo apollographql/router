@@ -730,7 +730,7 @@ impl CacheService {
                         .build());
                 }
             };
-            if cache_control.no_store {
+            if !cache_control.should_store() {
                 let mut resp = self.service.call(request).await?;
                 cache_control.to_headers(resp.response.headers_mut())?;
                 return Ok(resp);
@@ -893,10 +893,7 @@ impl CacheService {
                                     self.subgraph_ttl.into(),
                                 )?
                             } else {
-                                CacheControl {
-                                    no_store: true,
-                                    ..Default::default()
-                                }
+                                CacheControl::no_store()
                             };
 
                         if cache_control.private() {
@@ -1570,7 +1567,7 @@ async fn cache_store_root_from_response(
     if let Some(data) = response.response.body().data.as_ref() {
         let ttl = cache_control
             .ttl()
-            .map(|secs| Duration::from_secs(secs as u64))
+            .map(Duration::from_secs)
             .unwrap_or(default_subgraph_ttl);
 
         if response.response.body().errors.is_empty() && cache_control.should_store() {
@@ -2178,7 +2175,7 @@ async fn insert_entities_in_result(
 ) -> Result<(Vec<Value>, Vec<Error>), BoxError> {
     let ttl = cache_control
         .ttl()
-        .map(|secs| Duration::from_secs(secs as u64))
+        .map(Duration::from_secs)
         .unwrap_or(default_subgraph_ttl);
 
     let mut new_entities = Vec::new();

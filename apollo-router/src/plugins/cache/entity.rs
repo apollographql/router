@@ -675,9 +675,7 @@ impl CacheService {
                             if response.response.headers().contains_key(CACHE_CONTROL) {
                                 CacheControl::new(response.response.headers(), self.storage.ttl)?
                             } else {
-                                let mut c = CacheControl::default();
-                                c.no_store = true;
-                                c
+                                CacheControl::no_store()
                             };
 
                         if cache_control.private() {
@@ -1149,7 +1147,7 @@ async fn cache_store_root_from_response(
     if let Some(data) = response.response.body().data.as_ref() {
         let ttl: Option<Duration> = cache_control
             .ttl()
-            .map(|secs| Duration::from_secs(secs as u64))
+            .map(Duration::from_secs)
             .or(subgraph_ttl);
 
         if response.response.body().errors.is_empty() && cache_control.should_store() {
@@ -1740,7 +1738,7 @@ async fn insert_entities_in_result(
 ) -> Result<(Vec<Value>, Vec<Error>), BoxError> {
     let ttl: Option<Duration> = cache_control
         .ttl()
-        .map(|secs| Duration::from_secs(secs as u64))
+        .map(Duration::from_secs)
         .or(subgraph_ttl);
 
     let mut new_entities = Vec::new();
