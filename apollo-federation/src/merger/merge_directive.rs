@@ -224,7 +224,7 @@ impl Merger {
                     HintCode::InconsistentNonRepeatableDirectiveArguments,
                     format!("Non-repeatable directive @{name} is applied to \"{dest}\" in multiple subgraphs but with incompatible arguments. "),
                     &most_used_directive,
-                    &sources,
+                    sources,
                     print_arguments,
                     |pos, idx| {
                         pos.get_applied_directives(self.subgraphs[idx].schema(), name)
