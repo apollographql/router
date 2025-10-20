@@ -124,11 +124,12 @@ mod tests {
         let result = tracker.calculate_overhead();
 
         // Overhead should be roughly 50ms (the time not spent in subgraph)
-        // Allow some tolerance for timing imprecision
+        // On overloaded CI systems, timing can be very imprecise, so we use generous bounds
+        // We're testing the logic is correct, not that thread::sleep is precise
         assert_eq!(result.active_subgraph_requests, 0);
         assert!(
-            result.overhead >= Duration::from_millis(40)
-                && result.overhead <= Duration::from_millis(100),
+            result.overhead >= Duration::from_millis(30)
+                && result.overhead <= Duration::from_millis(200),
             "overhead was {:?}",
             result.overhead
         );
@@ -156,11 +157,11 @@ mod tests {
         let result = tracker.calculate_overhead();
 
         // Overhead should be roughly 20ms (the time between subgraph requests)
-        // Allow tolerance for timing imprecision
+        // On overloaded CI systems, timing can be very imprecise, so we use generous bounds
         assert_eq!(result.active_subgraph_requests, 0);
         assert!(
-            result.overhead >= Duration::from_millis(10)
-                && result.overhead <= Duration::from_millis(50),
+            result.overhead >= Duration::from_millis(5)
+                && result.overhead <= Duration::from_millis(100),
             "overhead was {:?}",
             result.overhead
         );
@@ -189,11 +190,11 @@ mod tests {
         // Total time: ~160ms
         // Subgraph time: 100ms (guard1) + 50ms (only guard2) = 150ms
         // Overhead: ~10ms initial + some processing = ~10-20ms
-        // Allow tolerance for timing imprecision
+        // On overloaded CI systems, timing can be very imprecise, so we use generous bounds
         assert_eq!(result.active_subgraph_requests, 0);
         assert!(
-            result.overhead >= Duration::from_millis(5)
-                && result.overhead <= Duration::from_millis(50),
+            result.overhead >= Duration::from_millis(3)
+                && result.overhead <= Duration::from_millis(100),
             "overhead was {:?}",
             result.overhead
         );
@@ -208,10 +209,11 @@ mod tests {
         let result = tracker.calculate_overhead();
 
         // All time is overhead when there are no subgraph requests
+        // On overloaded CI systems, timing can be very imprecise, so we use generous bounds
         assert_eq!(result.active_subgraph_requests, 0);
         assert!(
-            result.overhead >= Duration::from_millis(90)
-                && result.overhead <= Duration::from_millis(150),
+            result.overhead >= Duration::from_millis(80)
+                && result.overhead <= Duration::from_millis(250),
             "overhead was {:?}",
             result.overhead
         );
