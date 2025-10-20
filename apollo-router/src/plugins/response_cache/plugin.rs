@@ -799,19 +799,23 @@ impl CacheService {
                 resp.context.upsert::<_, CacheKeysContext>(
                     CONTEXT_DEBUG_CACHE_KEYS,
                     |mut val| {
-                        val.push(CacheKeyContext {
-                            key: "-".to_string(),
-                            invalidation_keys: vec![],
-                            kind,
-                            hashed_private_id: private_id.clone(),
-                            subgraph_name: self.name.clone(),
-                            subgraph_request: debug_subgraph_request.unwrap_or_default(),
-                            source: CacheKeySource::Subgraph,
-                            cache_control,
-                            data: serde_json_bytes::to_value(resp.response.body().clone())
-                                .unwrap_or_default(),
-                            warnings: Vec::new(),
-                        });
+                        val.push(
+                            CacheKeyContext {
+                                key: "-".to_string(),
+                                invalidation_keys: vec![],
+                                kind,
+                                hashed_private_id: private_id.clone(),
+                                subgraph_name: self.name.clone(),
+                                subgraph_request: debug_subgraph_request.unwrap_or_default(),
+                                source: CacheKeySource::Subgraph,
+                                cache_control,
+                                data: serde_json_bytes::to_value(resp.response.body().clone())
+                                    .unwrap_or_default(),
+                                warnings: Vec::new(),
+                                should_store: false,
+                            }
+                            .update_metadata(),
+                        );
 
                         val
                     },
@@ -923,7 +927,51 @@ impl CacheService {
                                 response.context.upsert::<_, CacheKeysContext>(
                                     CONTEXT_DEBUG_CACHE_KEYS,
                                     |mut val| {
-                                        val.push(CacheKeyContext {
+                                        val.push(
+                                            CacheKeyContext {
+                                                key: root_cache_key.clone(),
+                                                hashed_private_id: private_id.clone(),
+                                                invalidation_keys: invalidation_keys
+                                                    .clone()
+                                                    .into_iter()
+                                                    .filter(|k| {
+                                                        !k.starts_with(INTERNAL_CACHE_TAG_PREFIX)
+                                                    })
+                                                    .collect(),
+                                                kind: CacheEntryKind::RootFields {
+                                                    root_fields: root_operation_fields,
+                                                },
+                                                subgraph_name: self.name.clone(),
+                                                subgraph_request: debug_subgraph_request
+                                                    .unwrap_or_default(),
+                                                source: CacheKeySource::Subgraph,
+                                                cache_control: cache_control.clone(),
+                                                data: serde_json_bytes::to_value(
+                                                    response.response.body().clone(),
+                                                )
+                                                .unwrap_or_default(),
+                                                warnings: Vec::new(),
+                                                should_store: false,
+                                            }
+                                            .update_metadata(),
+                                        );
+
+                                        val
+                                    },
+                                )?;
+                            }
+
+                            if private_id.is_none() {
+                                // the response has a private scope but we don't have a way to differentiate users, so we do not store the response in cache
+                                // We don't need to fill the context with this cache key as it will never be cached
+                                return Ok(response);
+                            }
+                        } else if self.debug {
+                            response.context.upsert::<_, CacheKeysContext>(
+                                CONTEXT_DEBUG_CACHE_KEYS,
+                                |mut val| {
+                                    val.push(
+                                        CacheKeyContext {
                                             key: root_cache_key.clone(),
                                             hashed_private_id: private_id.clone(),
                                             invalidation_keys: invalidation_keys
@@ -946,44 +994,10 @@ impl CacheService {
                                             )
                                             .unwrap_or_default(),
                                             warnings: Vec::new(),
-                                        });
-
-                                        val
-                                    },
-                                )?;
-                            }
-
-                            if private_id.is_none() {
-                                // the response has a private scope but we don't have a way to differentiate users, so we do not store the response in cache
-                                // We don't need to fill the context with this cache key as it will never be cached
-                                return Ok(response);
-                            }
-                        } else if self.debug {
-                            response.context.upsert::<_, CacheKeysContext>(
-                                CONTEXT_DEBUG_CACHE_KEYS,
-                                |mut val| {
-                                    val.push(CacheKeyContext {
-                                        key: root_cache_key.clone(),
-                                        hashed_private_id: private_id.clone(),
-                                        invalidation_keys: invalidation_keys
-                                            .clone()
-                                            .into_iter()
-                                            .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
-                                            .collect(),
-                                        kind: CacheEntryKind::RootFields {
-                                            root_fields: root_operation_fields,
-                                        },
-                                        subgraph_name: self.name.clone(),
-                                        subgraph_request: debug_subgraph_request
-                                            .unwrap_or_default(),
-                                        source: CacheKeySource::Subgraph,
-                                        cache_control: cache_control.clone(),
-                                        data: serde_json_bytes::to_value(
-                                            response.response.body().clone(),
-                                        )
-                                        .unwrap_or_default(),
-                                        warnings: Vec::new(),
-                                    });
+                                            should_store: true,
+                                        }
+                                        .update_metadata(),
+                                    );
 
                                     val
                                 },
@@ -1057,7 +1071,8 @@ impl CacheService {
                                     "data": serde_json_bytes::to_value(cache_entry.data.clone()).unwrap_or_default()
                                 }),
                                 warnings: Vec::new(),
-                            })
+                                should_store: false,
+                            }.update_metadata())
                         });
                         request.context.upsert::<_, CacheKeysContext>(
                             CONTEXT_DEBUG_CACHE_KEYS,
@@ -1221,24 +1236,28 @@ async fn cache_lookup_root(
                     request.context.upsert::<_, CacheKeysContext>(
                         CONTEXT_DEBUG_CACHE_KEYS,
                         |mut val| {
-                            val.push(CacheKeyContext {
-                                key: value.key.clone(),
-                                hashed_private_id: private_id.map(ToString::to_string),
-                                invalidation_keys: invalidation_keys
-                                    .clone()
-                                    .into_iter()
-                                    .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
-                                    .collect(),
-                                kind: CacheEntryKind::RootFields {
-                                    root_fields: root_operation_fields,
-                                },
-                                subgraph_name: request.subgraph_name.clone(),
-                                subgraph_request: request.subgraph_request.body().clone(),
-                                source: CacheKeySource::Cache,
-                                cache_control: value.control.clone(),
-                                data: serde_json_bytes::json!({"data": value.data.clone()}),
-                                warnings: Vec::new(),
-                            });
+                            val.push(
+                                CacheKeyContext {
+                                    key: value.key.clone(),
+                                    hashed_private_id: private_id.map(ToString::to_string),
+                                    invalidation_keys: invalidation_keys
+                                        .clone()
+                                        .into_iter()
+                                        .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
+                                        .collect(),
+                                    kind: CacheEntryKind::RootFields {
+                                        root_fields: root_operation_fields,
+                                    },
+                                    subgraph_name: request.subgraph_name.clone(),
+                                    subgraph_request: request.subgraph_request.body().clone(),
+                                    source: CacheKeySource::Cache,
+                                    cache_control: value.control.clone(),
+                                    data: serde_json_bytes::json!({"data": value.data.clone()}),
+                                    warnings: Vec::new(),
+                                    should_store: false,
+                                }
+                                .update_metadata(),
+                            );
 
                             val
                         },
@@ -1496,25 +1515,29 @@ async fn cache_lookup_entities(
     } else {
         if debug {
             let debug_cache_keys_ctx = cache_result.iter().filter_map(|ir| {
-                ir.cache_entry.as_ref().map(|cache_entry| CacheKeyContext {
-                    key: ir.key.clone(),
-                    hashed_private_id: private_id.map(ToString::to_string),
-                    invalidation_keys: ir
-                        .invalidation_keys
-                        .clone()
-                        .into_iter()
-                        .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
-                        .collect(),
-                    kind: CacheEntryKind::Entity {
-                        typename: ir.typename.clone(),
-                        entity_key: ir.entity_key.clone(),
-                    },
-                    subgraph_name: name.clone(),
-                    subgraph_request: request.subgraph_request.body().clone(),
-                    source: CacheKeySource::Cache,
-                    cache_control: cache_entry.control.clone(),
-                    data: serde_json_bytes::json!({"data": cache_entry.data.clone()}),
-                    warnings: Vec::new(),
+                ir.cache_entry.as_ref().map(|cache_entry| {
+                    CacheKeyContext {
+                        key: ir.key.clone(),
+                        hashed_private_id: private_id.map(ToString::to_string),
+                        invalidation_keys: ir
+                            .invalidation_keys
+                            .clone()
+                            .into_iter()
+                            .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
+                            .collect(),
+                        kind: CacheEntryKind::Entity {
+                            typename: ir.typename.clone(),
+                            entity_key: ir.entity_key.clone(),
+                        },
+                        subgraph_name: name.clone(),
+                        subgraph_request: request.subgraph_request.body().clone(),
+                        source: CacheKeySource::Cache,
+                        cache_control: cache_entry.control.clone(),
+                        data: serde_json_bytes::json!({"data": cache_entry.data.clone()}),
+                        warnings: Vec::new(),
+                        should_store: false,
+                    }
+                    .update_metadata()
                 })
             });
             request.context.upsert::<_, CacheKeysContext>(
@@ -2256,25 +2279,29 @@ async fn insert_entities_in_result(
 
                 // Only in debug mode
                 if let Some(subgraph_request) = &subgraph_request {
-                    debug_ctx_entries.push(CacheKeyContext {
-                        key: key.clone(),
-                        hashed_private_id: update_key_private.clone(),
-                        invalidation_keys: invalidation_keys
-                            .clone()
-                            .into_iter()
-                            .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
-                            .collect(),
-                        kind: CacheEntryKind::Entity {
-                            typename: typename.clone(),
-                            entity_key: entity_key.clone(),
-                        },
-                        subgraph_name: subgraph_name.to_string(),
-                        subgraph_request: subgraph_request.clone(),
-                        source: CacheKeySource::Subgraph,
-                        cache_control: cache_control.clone(),
-                        data: serde_json_bytes::json!({"data": value.clone()}),
-                        warnings: Vec::new(),
-                    });
+                    debug_ctx_entries.push(
+                        CacheKeyContext {
+                            key: key.clone(),
+                            hashed_private_id: update_key_private.clone(),
+                            invalidation_keys: invalidation_keys
+                                .clone()
+                                .into_iter()
+                                .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
+                                .collect(),
+                            kind: CacheEntryKind::Entity {
+                                typename: typename.clone(),
+                                entity_key: entity_key.clone(),
+                            },
+                            subgraph_name: subgraph_name.to_string(),
+                            subgraph_request: subgraph_request.clone(),
+                            source: CacheKeySource::Subgraph,
+                            cache_control: cache_control.clone(),
+                            data: serde_json_bytes::json!({"data": value.clone()}),
+                            warnings: Vec::new(),
+                            should_store: false,
+                        }
+                        .update_metadata(),
+                    );
                 }
                 if !has_errors && cache_control.should_store() && should_cache_private {
                     if let Some(Value::Array(keys)) = specific_surrogate_keys {
