@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use parking_lot::Mutex;
 
@@ -18,18 +19,19 @@ pub(crate) struct SubgraphRequestGuard {
 
 impl SubgraphRequestGuard {
     pub(in crate::plugins::telemetry) fn new(inner: Arc<Mutex<TrackerInner>>) -> Self {
-        let mut inner_lock = inner.lock();
+        // Acquire lock in a separate scope to ensure it's dropped before moving `inner`
+        {
+            let mut inner_lock = inner.lock();
 
-        // Increment the active count
-        let prev_count = inner_lock.active_count;
-        inner_lock.active_count += 1;
+            // Increment the active count
+            let prev_count = inner_lock.active_count;
+            inner_lock.active_count += 1;
 
-        // If this is the first active subgraph request, start timing
-        if prev_count == 0 {
-            inner_lock.current_period_start = Some(std::time::Instant::now());
+            // If this is the first active subgraph request, start timing
+            if prev_count == 0 {
+                inner_lock.current_period_start = Some(Instant::now());
+            }
         }
-
-        drop(inner_lock);
 
         Self { inner }
     }

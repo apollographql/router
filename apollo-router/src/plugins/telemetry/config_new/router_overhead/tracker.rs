@@ -45,9 +45,8 @@ pub(in crate::plugins::telemetry) struct TrackerInner {
     pub(in crate::plugins::telemetry) active_count: u64,
 }
 
-impl RouterOverheadTracker {
-    /// Creates a new tracker for a request
-    pub(crate) fn new() -> Self {
+impl Default for RouterOverheadTracker {
+    fn default() -> Self {
         Self {
             request_start: Instant::now(),
             inner: Arc::new(Mutex::new(TrackerInner {
@@ -56,6 +55,13 @@ impl RouterOverheadTracker {
                 active_count: 0,
             })),
         }
+    }
+}
+
+impl RouterOverheadTracker {
+    /// Creates a new tracker for a request
+    pub(crate) fn new() -> Self {
+        Self::default()
     }
 
     /// Creates a guard for a subgraph request.
@@ -74,10 +80,9 @@ impl RouterOverheadTracker {
 
         let inner = self.inner.lock();
         let active_count = inner.active_count;
-        let has_active_subgraph_requests = active_count > 0;
 
         // If there are still active subgraph requests, accumulate the current period
-        let accumulated_time = if has_active_subgraph_requests {
+        let accumulated_time = if active_count > 0 {
             if let Some(period_start) = inner.current_period_start {
                 inner.accumulated_subgraph_time + period_start.elapsed()
             } else {

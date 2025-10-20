@@ -21,7 +21,7 @@ pub(crate) struct OverheadLayer;
 
 impl OverheadLayer {
     pub(crate) fn new() -> Self {
-        Self
+        OverheadLayer
     }
 }
 
