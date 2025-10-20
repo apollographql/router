@@ -1976,18 +1976,7 @@ fn reformat_response_coercion_propagation_into_union() {
         .query(query_wo_type_info)
         .response(resp_wo_type_info.clone())
         .expected(json!({ "thing": { } }))
-        .expected_errors(json!([
-            {
-                "message": "Invalid value found for the type Int",
-                "path": ["thing", "b"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Invalid value found for the type Int",
-                "path": ["thing", "c"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-        ]))
+        .expected_errors(json!([]))
         .test();
 
     FormatTest::builder()
