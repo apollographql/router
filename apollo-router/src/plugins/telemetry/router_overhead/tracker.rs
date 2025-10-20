@@ -1,9 +1,12 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
+use std::time::Instant;
+
+use parking_lot::Mutex;
 
 use super::guard::SubgraphRequestGuard;
-use parking_lot::Mutex;
 
 /// Result of calculating router overhead.
 #[derive(Debug, Clone, Copy)]

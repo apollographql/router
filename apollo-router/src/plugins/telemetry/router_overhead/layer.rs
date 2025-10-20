@@ -1,6 +1,7 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::task::{Context, Poll};
+use std::task::Context;
+use std::task::Poll;
 
 use pin_project_lite::pin_project;
 use tower::Layer;
@@ -8,7 +9,8 @@ use tower_service::Service;
 
 use super::guard::SubgraphRequestGuard;
 use super::tracker::RouterOverheadTracker;
-use crate::services::http::{HttpRequest, HttpResponse};
+use crate::services::http::HttpRequest;
+use crate::services::http::HttpResponse;
 
 /// Tower layer that tracks router overhead by creating guards for HTTP client requests.
 ///
@@ -107,11 +109,14 @@ where
 mod tests {
     use std::time::Duration;
 
-    use tower::{Service, ServiceBuilder, ServiceExt};
+    use tower::Service;
+    use tower::ServiceBuilder;
+    use tower::ServiceExt;
 
     use super::*;
     use crate::Context;
-    use crate::services::http::{HttpRequest, HttpResponse};
+    use crate::services::http::HttpRequest;
+    use crate::services::http::HttpResponse;
     use crate::services::router::body;
 
     // Mock service for testing
