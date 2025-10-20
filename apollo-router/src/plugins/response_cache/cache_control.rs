@@ -368,6 +368,14 @@ impl CacheControl {
         !expired && !self.no_store
     }
 
+    pub(crate) fn get_no_store(&self) -> bool {
+        self.no_store
+    }
+
+    pub(crate) fn get_age(&self) -> Option<u64> {
+        self.age
+    }
+
     #[cfg(test)]
     pub(crate) fn remaining_time(&self, now: u64) -> Option<u64> {
         self.ttl().map(|ttl| {
