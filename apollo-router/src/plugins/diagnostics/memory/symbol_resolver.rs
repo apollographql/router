@@ -61,6 +61,7 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::path::PathBuf;
 
 use regex::Regex;
 
@@ -69,13 +70,13 @@ use crate::plugins::diagnostics::DiagnosticsResult;
 
 /// Enhanced heap profile processor that embeds symbols for standalone analysis
 pub(crate) struct SymbolResolver {
-    binary_path: String,
+    binary_path: PathBuf,
     content: String,
 }
 
 impl SymbolResolver {
     /// Create a new enhanced heap processor for the given binary and heap profile
-    pub(crate) async fn new(binary_path: String, input_path: &str) -> DiagnosticsResult<Self> {
+    pub(crate) async fn new(binary_path: PathBuf, input_path: &str) -> DiagnosticsResult<Self> {
         let content = std::fs::read_to_string(input_path).map_err(|e| {
             DiagnosticsError::Internal(format!("Failed to read heap profile {}: {}", input_path, e))
         })?;
@@ -134,7 +135,7 @@ impl SymbolResolver {
         // Regex to find the first hex address on lines containing our binary path
         let base_regex = Regex::new(&format!(
             r"(?m)^([0-9a-fA-F]+)-[0-9a-fA-F]+\s+.*\s+{}",
-            regex::escape(&self.binary_path)
+            regex::escape(&self.binary_path.to_string_lossy())
         ))
         .expect("regex must be valid");
 
@@ -144,7 +145,7 @@ impl SymbolResolver {
             tracing::debug!(
                 "Parsed binary base address: 0x{:x} for binary: {}",
                 addr,
-                self.binary_path
+                self.binary_path.to_string_lossy()
             );
             return Ok(Some(addr));
         }
@@ -161,7 +162,7 @@ impl SymbolResolver {
         tracing::debug!(
             "Creating symbol table for {} addresses from: {}",
             addresses.len(),
-            self.binary_path
+            self.binary_path.to_string_lossy()
         );
 
         if let Some(base) = base_address {
@@ -297,7 +298,7 @@ impl SymbolResolver {
         symbol_content.push_str("--- symbol\n");
 
         // Write binary path
-        symbol_content.push_str(&format!("binary={}\n", self.binary_path));
+        symbol_content.push_str(&format!("binary={}\n", self.binary_path.to_string_lossy()));
 
         // Write symbol entries (sorted by address for consistency)
         let mut sorted_symbols: Vec<_> = symbols.iter().collect();
@@ -340,7 +341,10 @@ impl SymbolResolver {
                 DiagnosticsError::Internal(format!("Failed to open file for appending: {}", e))
             })?;
 
-        let symbol_content = format!("--- symbol\nbinary={}\n---\n--- heap\n", self.binary_path);
+        let symbol_content = format!(
+            "--- symbol\nbinary={}\n---\n--- heap\n",
+            self.binary_path.to_string_lossy()
+        );
 
         // Append the basic symbol section to the original file
         file.write_all(symbol_content.as_bytes())
@@ -361,11 +365,9 @@ impl SymbolResolver {
     /// SECURITY NOTE: This exposes the filesystem path of the running binary
     /// which may reveal deployment structure, usernames, or directory layouts.
     /// Only used for symbol resolution in heap profile enhancement.
-    pub(crate) fn current_binary_path() -> DiagnosticsResult<String> {
-        std::env::current_exe()
-            .map(|p| p.to_string_lossy().to_string())
-            .map_err(|e| {
-                DiagnosticsError::Internal(format!("Failed to get current binary path: {}", e))
-            })
+    pub(crate) fn current_binary_path() -> DiagnosticsResult<PathBuf> {
+        std::env::current_exe().map_err(|e| {
+            DiagnosticsError::Internal(format!("Failed to get current binary path: {}", e))
+        })
     }
 }
