@@ -372,6 +372,8 @@ pub(crate) trait HasType {
         &self,
         schema: &FederationSchema,
     ) -> Result<EnumExampleAst, FederationError>;
+
+    fn is_argument() -> bool;
 }
 
 impl HasType for DirectiveArgumentDefinitionPosition {
@@ -398,6 +400,10 @@ impl HasType for DirectiveArgumentDefinitionPosition {
         let node = self.get(schema.schema())?.clone();
         Ok(EnumExampleAst::Input(node))
     }
+
+    fn is_argument() -> bool {
+        true
+    }
 }
 
 impl HasType for FieldArgumentDefinitionPosition {
@@ -423,6 +429,10 @@ impl HasType for FieldArgumentDefinitionPosition {
     ) -> Result<EnumExampleAst, FederationError> {
         let node = self.get(schema.schema())?.clone();
         Ok(EnumExampleAst::Input(node))
+    }
+
+    fn is_argument() -> bool {
+        true
     }
 }
 
@@ -451,6 +461,10 @@ impl HasType for InputObjectFieldDefinitionPosition {
             self.get(schema.schema())?.clone().node,
         ))
     }
+
+    fn is_argument() -> bool {
+        false
+    }
 }
 
 impl HasType for ObjectFieldDefinitionPosition {
@@ -477,6 +491,10 @@ impl HasType for ObjectFieldDefinitionPosition {
         let node = self.get(schema.schema())?.clone().node;
         Ok(EnumExampleAst::Field(node))
     }
+
+    fn is_argument() -> bool {
+        false
+    }
 }
 
 impl HasType for InterfaceFieldDefinitionPosition {
@@ -502,6 +520,10 @@ impl HasType for InterfaceFieldDefinitionPosition {
     ) -> Result<EnumExampleAst, FederationError> {
         let node = self.get(schema.schema())?.clone().node;
         Ok(EnumExampleAst::Field(node))
+    }
+
+    fn is_argument() -> bool {
+        false
     }
 }
 
@@ -535,6 +557,10 @@ impl HasType for ObjectOrInterfaceFieldDefinitionPosition {
             Self::Object(field) => field.enum_example_ast(schema),
             Self::Interface(field) => field.enum_example_ast(schema),
         }
+    }
+
+    fn is_argument() -> bool {
+        false
     }
 }
 
@@ -6717,7 +6743,9 @@ impl InputObjectFieldDefinitionPosition {
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if is_graphql_reserved_name(&self.field_name) {
-            bail!(r#"Cannot insert reserved input object field "{self}""#);
+            // Skip invalid fields using a reserved name.
+            // - GraphQL validation will catch them later.
+            return Ok(());
         }
         validate_node_directives(field.directives.deref())?;
         for directive_reference in field.directives.iter() {

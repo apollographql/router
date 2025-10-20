@@ -36,7 +36,7 @@ This project uses CircleCI as its continuous integration pipeline.   At the curr
 
 XTASKs:
 
-- **Tests**: The CI will run `cargo xtask test` which will test each relevant permutation of the available features and run the demo subgraphs.
+- **Tests**: The CI will run `cargo xtask test --no-fail-fast` which will test each relevant permutation of the available features and run the demo subgraphs.
 - **Lints**: The CI will check for lints and clippy compliance.
 - **Checks**: The CI will run cargo-deny to make sure the router doesn't suffer an existing CVE, and that each dependency used by the router is compatible with our license.
 
