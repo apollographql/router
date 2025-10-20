@@ -36,6 +36,7 @@ use http::StatusCode;
 use serde_json::json;
 
 use crate::plugins::diagnostics::DiagnosticsResult;
+use crate::plugins::diagnostics::archive_utils::ArchiveUtils;
 use crate::plugins::diagnostics::response_builder::CacheControl;
 use crate::plugins::diagnostics::response_builder::ResponseBuilder;
 
@@ -131,7 +132,6 @@ impl MemoryService {
             std::env::consts::OS
         );
 
-        use crate::plugins::diagnostics::archive_utils::ArchiveUtils;
         ArchiveUtils::add_text_file(tar, "memory/README.txt", &readme_content)
             .await
             .map_err(|e| format!("Failed to add README.txt: {}", e))?;

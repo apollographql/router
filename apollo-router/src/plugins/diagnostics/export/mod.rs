@@ -56,7 +56,6 @@
 //! **Platform Support**: This module is available on all platforms.
 //! Memory heap dumps are only available on Unix platforms.
 
-use std::path::Path;
 use std::sync::Arc;
 
 use async_compression::tokio::write::GzipEncoder;
@@ -200,7 +199,7 @@ impl Exporter {
         Self::add_router_config_to_archive(&mut tar, router_config).await?;
         Self::add_supergraph_schema_to_archive(&mut tar, supergraph_schema).await?;
         Self::add_system_info_to_archive(&mut tar).await?;
-        Self::add_memory_data_to_archive(&mut tar, &config.output_directory).await?;
+        Self::add_memory_data_to_archive(&mut tar, config).await?;
         Self::add_html_report_to_archive(&mut tar, config, router_config, supergraph_schema)
             .await?;
 
@@ -253,10 +252,10 @@ impl Exporter {
     /// Add memory profiling data to the archive with async I/O
     async fn add_memory_data_to_archive<W: tokio::io::AsyncWrite + Unpin + Send + Sync>(
         tar: &mut tokio_tar::Builder<W>,
-        output_directory: &Path,
+        config: &Config,
     ) -> DiagnosticsResult<()> {
         // The memory module now handles platform differences internally
-        memory::MemoryService::add_to_archive(tar, output_directory).await
+        memory::MemoryService::add_to_archive(tar, &config.output_directory).await
     }
 
     /// Add the HTML diagnostic report to the archive
