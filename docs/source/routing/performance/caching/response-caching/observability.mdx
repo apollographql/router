@@ -256,7 +256,7 @@ preview_response_cache:
 
 - Your origin doesn't return a `Cache-Control` header or returns it with the `no-store` directive.
 
-- Your origin returns a `Age` header with a value greater than `max-age` contained in `Cache-Control` header or the default TTL you set in your router configuration when you don't set `max-age` in your `Cache-control` header.
+- Your origin returns an <code>Age</code> header with a value greater than the <code>max-age</code> in the <code>Cache-Control</code> header, or the default TTL from your router configuration if <code>max-age</code> isn't set.
 
 - Your origin returns a `Cache-Control` header with the `private` directive, but you haven't configured a `private_id` in your response cache configuration. Private data requires a `private_id` to differentiate cache entries between users.
 
