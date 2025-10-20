@@ -56,6 +56,7 @@
 //! **Platform Support**: This module is available on all platforms.
 //! Memory heap dumps are only available on Unix platforms.
 
+use std::path::Path;
 use std::sync::Arc;
 
 use async_compression::tokio::write::GzipEncoder;
@@ -254,7 +255,7 @@ impl Exporter {
     /// Add memory profiling data to the archive with async I/O
     async fn add_memory_data_to_archive_async<W: tokio::io::AsyncWrite + Unpin + Send + Sync>(
         tar: &mut tokio_tar::Builder<W>,
-        output_directory: &str,
+        output_directory: &Path,
     ) -> DiagnosticsResult<()> {
         // The memory module now handles platform differences internally
         memory::MemoryService::add_to_archive(tar, output_directory).await
@@ -322,7 +323,7 @@ impl Exporter {
             timestamp,
             env!("CARGO_PKG_VERSION"),
             std::env::consts::OS,
-            config.output_directory,
+            config.output_directory.to_string_lossy(),
             memory_profiling_info
         );
 

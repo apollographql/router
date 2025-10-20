@@ -22,12 +22,6 @@ pub(crate) mod network {
     }
 }
 
-/// File and directory constants
-pub(crate) mod files {
-    /// Default output directory for diagnostics files on Unix systems
-    pub(crate) const DEFAULT_OUTPUT_DIR_UNIX: &str = "/tmp/router-diagnostics";
-}
-
 /// Route path constants
 pub(crate) mod routes {
     /// JavaScript resource files
@@ -60,14 +54,6 @@ mod tests {
             addr.ip().is_loopback(),
             "Diagnostics endpoint MUST bind to localhost (127.0.0.1) for security, got: {}",
             addr.ip()
-        );
-    }
-
-    #[test]
-    fn test_default_output_dir_is_absolute() {
-        assert!(
-            files::DEFAULT_OUTPUT_DIR_UNIX.starts_with('/'),
-            "Output directory must be an absolute path for consistency"
         );
     }
 

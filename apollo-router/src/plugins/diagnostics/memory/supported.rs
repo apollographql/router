@@ -33,6 +33,7 @@ use std::ffi::CString;
 use std::fs;
 use std::mem;
 use std::path::Path;
+use std::path::PathBuf;
 use std::ptr;
 
 use axum::body::Body;
@@ -50,12 +51,14 @@ use crate::plugins::diagnostics::security::SecurityValidator;
 /// Memory profiling service that handles memory operations
 #[derive(Clone)]
 pub(crate) struct MemoryService {
-    pub output_directory: String,
+    pub output_directory: PathBuf,
 }
 
 impl MemoryService {
-    pub(crate) fn new(output_directory: String) -> Self {
-        Self { output_directory }
+    pub(crate) fn new(output_directory: &Path) -> Self {
+        Self {
+            output_directory: output_directory.to_owned(),
+        }
     }
 
     /// Helper to build JSON responses
@@ -153,7 +156,7 @@ impl MemoryService {
         let dump_result = self.create_heap_dump(&base_output_directory).await;
 
         let (status_code, response) = match dump_result {
-            Ok(dump_path) => self.process_successful_dump(dump_path).await,
+            Ok(dump_path) => self.process_successful_dump(&dump_path).await,
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 json!({
@@ -169,18 +172,20 @@ impl MemoryService {
     /// Create a heap dump using jemalloc profiling
     async fn create_heap_dump(
         &self,
-        base_output_directory: &str,
-    ) -> Result<String, DiagnosticsError> {
+        base_output_directory: &Path,
+    ) -> Result<PathBuf, DiagnosticsError> {
         // Create the dump path (async directory creation)
         let dump_path = Self::create_dump_path(base_output_directory)
             .await
             .map_err(DiagnosticsError::Memory)?;
 
-        let dump_path_clone = dump_path.clone();
-        tokio::task::spawn_blocking(move || -> Result<String, String> {
-            Self::call_jemalloc_dump(&dump_path_clone)?;
-            tracing::info!("Memory heap dump generated at: {}", dump_path_clone);
-            Ok(dump_path_clone)
+        tokio::task::spawn_blocking(move || -> Result<PathBuf, String> {
+            Self::call_jemalloc_dump(&dump_path)?;
+            tracing::info!(
+                "Memory heap dump generated at: {}",
+                dump_path.to_string_lossy()
+            );
+            Ok(dump_path)
         })
         .await
         .map_err(|e| DiagnosticsError::Internal(format!("Task failed: {}", e)))
@@ -188,7 +193,7 @@ impl MemoryService {
     }
 
     /// Create the dump file path with timestamp and ensure directory exists
-    async fn create_dump_path(base_output_directory: &str) -> Result<String, String> {
+    async fn create_dump_path(base_path: &Path) -> Result<PathBuf, String> {
         // Generate timestamp for the dump file
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -196,7 +201,6 @@ impl MemoryService {
             .as_secs();
 
         // Create memory subdirectory structure to mirror archive
-        let base_path = Path::new(base_output_directory);
         let memory_path = base_path.join("memory");
         tokio::fs::create_dir_all(&memory_path).await.map_err(|e| {
             format!(
@@ -206,19 +210,16 @@ impl MemoryService {
             )
         })?;
 
-        let dump_path = memory_path
-            .join(format!("router_heap_dump_{}.prof", timestamp))
-            .to_string_lossy()
-            .to_string();
+        let dump_path = memory_path.join(format!("router_heap_dump_{}.prof", timestamp));
 
         Ok(dump_path)
     }
 
     /// Call jemalloc's prof.dump to create the heap dump
-    fn call_jemalloc_dump(dump_path: &str) -> Result<(), String> {
+    fn call_jemalloc_dump(dump_path: &Path) -> Result<(), String> {
         // Create CString for the dump path
-        let value =
-            CString::new(dump_path).map_err(|e| format!("Failed to create CString: {}", e))?;
+        let value = CString::new(dump_path.to_string_lossy().as_bytes())
+            .map_err(|e| format!("Failed to create CString: {}", e))?;
 
         // Call jemalloc to dump heap profile
         let mut value_ptr = value.as_ptr();
@@ -240,9 +241,9 @@ impl MemoryService {
     }
 
     /// Process a successful dump by enhancing it and creating the response
-    async fn process_successful_dump(&self, dump_path: String) -> (StatusCode, serde_json::Value) {
+    async fn process_successful_dump(&self, dump_path: &Path) -> (StatusCode, serde_json::Value) {
         // Enhance the dump in-place with embedded symbols
-        let enhancement_result = self.enhance_dump(&dump_path).await;
+        let enhancement_result = self.enhance_dump(dump_path).await;
 
         match enhancement_result {
             Ok(()) => (
@@ -269,7 +270,7 @@ impl MemoryService {
     }
 
     /// Enhance a heap profile by appending symbols in-place
-    async fn enhance_dump(&self, dump_path: &str) -> DiagnosticsResult<()> {
+    async fn enhance_dump(&self, dump_path: &Path) -> DiagnosticsResult<()> {
         // Get the current binary path
         let binary_path = SymbolResolver::current_binary_path()?;
 
@@ -285,10 +286,10 @@ impl MemoryService {
     /// Adds memory diagnostic data to an existing tar archive with async streaming I/O
     pub(crate) async fn add_to_archive<W: tokio::io::AsyncWrite + Unpin + Send + Sync>(
         tar: &mut tokio_tar::Builder<W>,
-        output_directory: &str,
+        output_directory: &Path,
     ) -> DiagnosticsResult<()> {
         // The memory files are stored in output_directory/memory/
-        let memory_directory = Path::new(output_directory).join("memory");
+        let memory_directory = output_directory.join("memory");
 
         if memory_directory.exists() {
             tracing::info!(
@@ -388,7 +389,7 @@ impl MemoryService {
 
         let dumps =
             tokio::task::spawn_blocking(move || -> Result<Vec<serde_json::Value>, String> {
-                let memory_path = Path::new(&output_directory).join("memory");
+                let memory_path = output_directory.join("memory");
                 let mut dumps = Vec::new();
 
                 if memory_path.exists() {
@@ -450,9 +451,7 @@ impl MemoryService {
             return Err(security_error.into());
         }
 
-        let memory_path = Path::new(&self.output_directory)
-            .join("memory")
-            .join(filename);
+        let memory_path = self.output_directory.join("memory").join(filename);
 
         // SECURITY: File existence validation
         if let Err(security_error) =
@@ -485,9 +484,7 @@ impl MemoryService {
         &self,
         filename: &str,
     ) -> DiagnosticsResult<Response<Body>> {
-        let memory_path = Path::new(&self.output_directory)
-            .join("memory")
-            .join(filename);
+        let memory_path = self.output_directory.join("memory").join(filename);
 
         // SECURITY: Critical security validation for file deletion
         if let Err(security_error) =
@@ -523,7 +520,7 @@ impl MemoryService {
 
     /// Handle DELETE /diagnostics/memory/dumps - clear all heap dump files
     pub(crate) async fn handle_clear_all_dumps(&self) -> DiagnosticsResult<Response<Body>> {
-        let memory_path = Path::new(&self.output_directory).join("memory");
+        let memory_path = self.output_directory.join("memory");
 
         // Create memory directory if it doesn't exist
         if let Err(e) = tokio::fs::create_dir_all(&memory_path).await {

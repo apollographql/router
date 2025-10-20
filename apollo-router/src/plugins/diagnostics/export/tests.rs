@@ -3,6 +3,7 @@
 use std::fs;
 use std::net::SocketAddr;
 use std::path::Path;
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use async_compression::tokio::bufread::GzipDecoder;
@@ -44,7 +45,7 @@ async fn test_export_service_creation() {
     let config = Config {
         enabled: true,
         listen: SocketAddr::from_str("127.0.0.1:8089").unwrap().into(),
-        output_directory: "/tmp/router-diagnostics".to_string(),
+        output_directory: PathBuf::from("/tmp/router-diagnostics"),
     };
 
     let test_config_json = Arc::new(serde_json::json!({
@@ -65,12 +66,12 @@ async fn test_export_service_creation() {
 async fn test_create_archive() {
     // Create a temporary directory for test files
     let temp_dir = tempdir().expect("Failed to create temp dir");
-    let output_path = temp_dir.path().to_str().unwrap().to_string();
+    let output_path = temp_dir.path();
 
     // On Linux, create memory files; on other platforms, the directory will be handled by the archive function
     #[cfg(target_family = "unix")]
     {
-        let memory_path = format!("{}/memory", output_path);
+        let memory_path = format!("{}/memory", output_path.to_string_lossy());
         fs::create_dir_all(&memory_path).expect("Failed to create memory directory");
         fs::write(
             format!("{}/test_heap.prof", memory_path),
@@ -87,7 +88,7 @@ async fn test_create_archive() {
     let config = Config {
         enabled: true,
         listen: SocketAddr::from_str("127.0.0.1:8089").unwrap().into(),
-        output_directory: output_path,
+        output_directory: output_path.to_path_buf(),
     };
 
     // Create the archive with test configuration
@@ -161,7 +162,7 @@ async fn test_create_main_manifest() {
     let config = Config {
         enabled: true,
         listen: SocketAddr::from_str("127.0.0.1:8089").unwrap().into(),
-        output_directory: "/tmp/test-diagnostics".to_string(),
+        output_directory: PathBuf::from("/tmp/test-diagnostics"),
     };
 
     let result = Exporter::create_main_manifest(&config);
@@ -236,7 +237,7 @@ async fn test_archive_with_empty_output_directory() {
         enabled: true,
         listen: SocketAddr::from_str("127.0.0.1:8089").unwrap().into(),
 
-        output_directory: "/tmp/nonexistent-diagnostics-dir".to_string(),
+        output_directory: PathBuf::from("/tmp/nonexistent-diagnostics-dir"),
     };
 
     // Ensure the directory doesn't exist
@@ -290,12 +291,12 @@ async fn test_archive_with_empty_output_directory() {
 async fn test_create_archive_sync() {
     // Test for archive creation - works on all platforms
     let temp_dir = tempdir().expect("Failed to create temp dir");
-    let output_path = temp_dir.path().to_str().unwrap().to_string();
+    let output_path = temp_dir.path();
 
     let config = Config {
         enabled: true,
         listen: SocketAddr::from_str("127.0.0.1:8089").unwrap().into(),
-        output_directory: output_path,
+        output_directory: output_path.to_path_buf(),
     };
 
     let test_full_config = serde_json::json!({"test": "config"});
@@ -315,10 +316,10 @@ async fn test_tar_gz_format_compatibility() {
     // This test verifies that our archives are proper tar.gz format
     // that can be extracted with standard tools
     let temp_dir = tempdir().expect("Failed to create temp dir");
-    let output_path = temp_dir.path().to_str().unwrap().to_string();
+    let output_path = temp_dir.path();
 
     // Create test files in memory subdirectory
-    let memory_path = format!("{}/memory", output_path);
+    let memory_path = format!("{}/memory", output_path.to_string_lossy());
     fs::create_dir_all(&memory_path).expect("Failed to create memory directory");
     fs::write(
         format!("{}/heap_dump_1.prof", memory_path),
@@ -334,7 +335,7 @@ async fn test_tar_gz_format_compatibility() {
     let config = Config {
         enabled: true,
         listen: SocketAddr::from_str("127.0.0.1:8089").unwrap().into(),
-        output_directory: output_path,
+        output_directory: output_path.to_path_buf(),
     };
 
     // Create the archive with test configuration
@@ -453,10 +454,10 @@ async fn test_tar_gz_format_compatibility() {
 async fn test_manual_archive_inspection() {
     // Manual test to debug archive issues - outputs to /tmp for inspection
     let temp_dir = tempdir().expect("Failed to create temp dir");
-    let output_path = temp_dir.path().to_str().unwrap().to_string();
+    let output_path = temp_dir.path();
 
     // Create some test data
-    let memory_path = format!("{}/memory", output_path);
+    let memory_path = format!("{}/memory", output_path.to_string_lossy());
     fs::create_dir_all(&memory_path).expect("Failed to create memory directory");
     fs::write(format!("{}/test.prof", memory_path), b"test profile data")
         .expect("Failed to write test file");
@@ -464,7 +465,7 @@ async fn test_manual_archive_inspection() {
     let config = Config {
         enabled: true,
         listen: SocketAddr::from_str("127.0.0.1:8089").unwrap().into(),
-        output_directory: output_path,
+        output_directory: output_path.to_path_buf(),
     };
 
     let test_full_config = serde_json::json!({
@@ -528,12 +529,12 @@ async fn test_manual_archive_inspection() {
 async fn test_archive_format_with_system_tar() {
     // Test that verifies our archives work with system tar command
     let temp_dir = tempdir().expect("Failed to create temp dir");
-    let output_path = temp_dir.path().to_str().unwrap().to_string();
+    let output_path = temp_dir.path();
 
     let config = Config {
         enabled: true,
         listen: SocketAddr::from_str("127.0.0.1:8089").unwrap().into(),
-        output_directory: output_path,
+        output_directory: output_path.to_path_buf(),
     };
 
     let test_full_config = serde_json::json!({
@@ -584,12 +585,12 @@ async fn test_archive_format_with_system_tar() {
 async fn test_tar_gz_structure_validation() {
     // Test that ensures our tar.gz has the correct internal structure
     let temp_dir = tempdir().expect("Failed to create temp dir");
-    let output_path = temp_dir.path().to_str().unwrap().to_string();
+    let output_path = temp_dir.path();
 
     let config = Config {
         enabled: true,
         listen: SocketAddr::from_str("127.0.0.1:8089").unwrap().into(),
-        output_directory: output_path,
+        output_directory: output_path.to_path_buf(),
     };
 
     let test_full_config = serde_json::json!({"test": "configuration"});
@@ -675,12 +676,12 @@ async fn test_tar_gz_structure_validation() {
 async fn test_non_unix_memory_handling() {
     // Test specifically for non-Linux platforms to ensure they get the README file
     let temp_dir = tempdir().expect("Failed to create temp dir");
-    let output_path = temp_dir.path().to_str().unwrap().to_string();
+    let output_path = temp_dir.path();
 
     let config = Config {
         enabled: true,
         listen: SocketAddr::from_str("127.0.0.1:8089").unwrap().into(),
-        output_directory: output_path,
+        output_directory: output_path.to_path_buf(),
     };
 
     let test_full_config = serde_json::json!({"test": "config"});
@@ -803,12 +804,12 @@ async fn test_system_info_collection() {
 async fn test_system_info_in_archive_extraction() {
     // Test that system info is properly included in archive and can be extracted
     let temp_dir = tempdir().expect("Failed to create temp dir");
-    let output_path = temp_dir.path().to_str().unwrap().to_string();
+    let output_path = temp_dir.path();
 
     let config = Config {
         enabled: true,
         listen: SocketAddr::from_str("127.0.0.1:8089").unwrap().into(),
-        output_directory: output_path,
+        output_directory: output_path.to_path_buf(),
     };
 
     let test_full_config = serde_json::json!({"test": "config"});
@@ -936,12 +937,12 @@ async fn test_system_info_cpu_count() {
 async fn test_html_report_in_archive() {
     // Test that diagnostics_report.html is included in the archive
     let temp_dir = tempdir().expect("Failed to create temp dir");
-    let output_path = temp_dir.path().to_str().unwrap().to_string();
+    let output_path = temp_dir.path();
 
     let config = Config {
         enabled: true,
         listen: SocketAddr::from_str("127.0.0.1:8089").unwrap().into(),
-        output_directory: output_path,
+        output_directory: output_path.to_path_buf(),
     };
 
     let test_full_config = serde_json::json!({"test": "config"});

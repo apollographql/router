@@ -16,7 +16,7 @@ use super::*;
 /// Helper function to create a test router with the diagnostics service
 fn create_test_router() -> Router {
     let temp_dir = tempdir().expect("Failed to create temp dir");
-    let output_directory = temp_dir.path().to_str().unwrap().to_string();
+    let output_directory = temp_dir.path();
 
     create_router(
         output_directory,
@@ -401,11 +401,7 @@ fn test_not_found_response() {
 #[tokio::test]
 async fn test_router_with_empty_config() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
-    let router = create_router(
-        temp_dir.path().to_str().unwrap().to_string(),
-        Arc::from(""),
-        Arc::new(String::new()),
-    );
+    let router = create_router(temp_dir.path(), Arc::from(""), Arc::new(String::new()));
 
     let mut router_service = router;
     let (status, body, _) =

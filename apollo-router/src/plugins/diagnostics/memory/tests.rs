@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::path::Path;
+use std::path::PathBuf;
 
 use futures::TryStreamExt;
 use http::StatusCode;
@@ -16,7 +17,7 @@ use super::*;
 #[tokio::test]
 async fn test_handle_status() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
-    let output_path = temp_dir.path().to_str().unwrap().to_string();
+    let output_path = temp_dir.path();
 
     let service = MemoryService::new(output_path);
 
@@ -43,7 +44,7 @@ async fn test_handle_status() {
 #[tokio::test]
 async fn test_handle_start() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
-    let output_path = temp_dir.path().to_str().unwrap().to_string();
+    let output_path = temp_dir.path();
 
     let service = MemoryService::new(output_path);
 
@@ -88,7 +89,7 @@ async fn test_handle_start() {
 #[tokio::test]
 async fn test_handle_stop() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
-    let output_path = temp_dir.path().to_str().unwrap().to_string();
+    let output_path = temp_dir.path();
 
     let service = MemoryService::new(output_path);
 
@@ -131,12 +132,12 @@ async fn test_handle_stop() {
 #[tokio::test]
 async fn test_handle_dump_creates_directory() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
-    let output_path = temp_dir.path().to_str().unwrap().to_string();
+    let output_path = temp_dir.path();
 
-    let service = MemoryService::new(output_path.clone());
+    let service = MemoryService::new(output_path);
 
     // Ensure memory directory doesn't exist initially
-    let memory_path = Path::new(&output_path).join("memory");
+    let memory_path = output_path.join("memory");
     assert!(
         !memory_path.exists(),
         "Memory directory should not exist initially"
@@ -220,7 +221,7 @@ async fn test_handle_dump_creates_directory() {
 #[tokio::test]
 async fn test_add_to_archive_with_files() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
-    let output_path = temp_dir.path().to_str().unwrap().to_string();
+    let output_path = temp_dir.path();
 
     // Create memory subdirectory and test files
     let memory_path = Path::new(&output_path).join("memory");
@@ -235,7 +236,7 @@ async fn test_add_to_archive_with_files() {
     let mut tar = tokio_tar::Builder::new(writer);
 
     // Add memory files to archive
-    let result = MemoryService::add_to_archive(&mut tar, &output_path).await;
+    let result = MemoryService::add_to_archive(&mut tar, output_path).await;
     assert!(result.is_ok(), "Adding to archive should succeed");
 
     // Finish the archive
@@ -277,14 +278,14 @@ async fn test_add_to_archive_with_files() {
 #[tokio::test]
 async fn test_add_to_archive_empty_directory() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
-    let output_path = temp_dir.path().to_str().unwrap().to_string();
+    let output_path = temp_dir.path();
 
     // Don't create the memory directory - test empty case
 
     let (mut reader, writer) = tokio::io::duplex(1024 * 1024);
     let mut tar = tokio_tar::Builder::new(writer);
 
-    let result = MemoryService::add_to_archive(&mut tar, &output_path).await;
+    let result = MemoryService::add_to_archive(&mut tar, output_path).await;
     assert!(result.is_ok(), "Adding empty directory should succeed");
 
     tar.finish().await.expect("Should be able to finish tar");
@@ -328,7 +329,7 @@ async fn test_add_to_archive_empty_directory() {
 #[cfg(target_family = "unix")]
 #[test]
 fn test_memory_service_clone() {
-    let service1 = MemoryService::new("/tmp/test1".to_string());
+    let service1 = MemoryService::new(&PathBuf::from("/tmp/test1"));
     let service2 = service1.clone();
 
     assert_eq!(service1.output_directory, service2.output_directory);

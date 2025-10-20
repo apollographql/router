@@ -27,6 +27,9 @@
 //!
 //! - [`super::supported`] - Full implementation for Unix + global-allocator platforms
 
+use std::path::Path;
+use std::path::PathBuf;
+
 use axum::body::Body;
 use http::Response;
 use http::StatusCode;
@@ -40,12 +43,14 @@ use crate::plugins::diagnostics::response_builder::ResponseBuilder;
 #[derive(Clone)]
 pub(crate) struct MemoryService {
     #[allow(dead_code)]
-    pub output_directory: String,
+    pub output_directory: PathBuf,
 }
 
 impl MemoryService {
-    pub(crate) fn new(output_directory: String) -> Self {
-        Self { output_directory }
+    pub(crate) fn new(output_directory: &Path) -> Self {
+        Self {
+            output_directory: output_directory.to_path_buf(),
+        }
     }
 
     /// Helper to build JSON responses
@@ -106,7 +111,7 @@ impl MemoryService {
     /// Adds memory diagnostic data to an existing tar archive (stub implementation)
     pub(crate) async fn add_to_archive<W: tokio::io::AsyncWrite + Unpin + Send + Sync>(
         tar: &mut tokio_tar::Builder<W>,
-        _output_directory: &str,
+        _output_directory: &Path,
     ) -> DiagnosticsResult<()> {
         tracing::warn!("Memory diagnostic archiving not supported on this platform");
 

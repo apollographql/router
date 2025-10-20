@@ -17,7 +17,7 @@ async fn test_diagnostics() {
     let config = Config {
         enabled: true,
         listen: SocketAddr::from_str("127.0.0.1:8089").unwrap().into(),
-        output_directory: "/tmp/router-diagnostics".to_string(),
+        output_directory: PathBuf::from("/tmp/router-diagnostics"),
     };
 
     let init = PluginInit {
@@ -53,7 +53,7 @@ async fn test_diagnostics_disabled() {
     let config = Config {
         enabled: false,
         listen: SocketAddr::from_str("127.0.0.1:8089").unwrap().into(),
-        output_directory: "/tmp/router-diagnostics".to_string(),
+        output_directory: PathBuf::from("/tmp/router-diagnostics"),
     };
 
     let init = PluginInit {

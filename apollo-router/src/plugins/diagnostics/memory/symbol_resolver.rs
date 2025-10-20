@@ -61,6 +61,7 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::path::Path;
 use std::path::PathBuf;
 
 use regex::Regex;
@@ -76,9 +77,13 @@ pub(crate) struct SymbolResolver {
 
 impl SymbolResolver {
     /// Create a new enhanced heap processor for the given binary and heap profile
-    pub(crate) async fn new(binary_path: PathBuf, input_path: &str) -> DiagnosticsResult<Self> {
+    pub(crate) async fn new(binary_path: PathBuf, input_path: &Path) -> DiagnosticsResult<Self> {
         let content = std::fs::read_to_string(input_path).map_err(|e| {
-            DiagnosticsError::Internal(format!("Failed to read heap profile {}: {}", input_path, e))
+            DiagnosticsError::Internal(format!(
+                "Failed to read heap profile {}: {}",
+                input_path.to_string_lossy(),
+                e
+            ))
         })?;
 
         Ok(Self {
@@ -88,7 +93,7 @@ impl SymbolResolver {
     }
 
     /// Process a raw heap profile and append symbols for in-place enhancement
-    pub(crate) async fn enhance_heap_profile(&self, input_path: &str) -> DiagnosticsResult<()> {
+    pub(crate) async fn enhance_heap_profile(&self, input_path: &Path) -> DiagnosticsResult<()> {
         // Parse the heap profile to extract addresses and base address
         let (addresses, base_address) = self.extract_addresses_from_heap_profile()?;
 
@@ -276,7 +281,7 @@ impl SymbolResolver {
     /// Append symbol section to the original heap profile file
     async fn append_symbol_section(
         &self,
-        input_path: &str,
+        input_path: &Path,
         symbols: &HashMap<u64, String>,
     ) -> DiagnosticsResult<()> {
         use tokio::fs::OpenOptions;
@@ -329,7 +334,7 @@ impl SymbolResolver {
     }
 
     /// Append basic symbol section when no addresses are found
-    async fn append_basic_symbol_section(&self, input_path: &str) -> DiagnosticsResult<()> {
+    async fn append_basic_symbol_section(&self, input_path: &Path) -> DiagnosticsResult<()> {
         use tokio::fs::OpenOptions;
         use tokio::io::AsyncWriteExt;
 

@@ -34,6 +34,7 @@
 //! Available on all platforms. Memory profiling features require Linux with jemalloc allocator
 //! (enabled via `global-allocator` feature). Other diagnostic features work cross-platform.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use multimap::MultiMap;
@@ -120,7 +121,7 @@ pub(crate) struct Config {
     ///
     /// This directory will be created automatically if it doesn't exist.
     /// Note: Memory dumps are only generated on Linux platforms.
-    pub(crate) output_directory: String,
+    pub(crate) output_directory: PathBuf,
 }
 
 impl Default for Config {
@@ -136,7 +137,7 @@ impl Default for Config {
             // are only accessible from the local machine, not from the network
             listen: constants::network::default_listen_addr().into(),
 
-            output_directory: constants::files::DEFAULT_OUTPUT_DIR_UNIX.to_string(),
+            output_directory: PathBuf::from("/tmp/router-diagnostics"),
         }
     }
 }
@@ -167,7 +168,7 @@ impl Plugin for DiagnosticsPlugin {
         }
 
         let router = service::create_router(
-            self.config.output_directory.clone(),
+            &self.config.output_directory,
             self.router_config.clone(),
             self.supergraph_schema.clone(),
         );

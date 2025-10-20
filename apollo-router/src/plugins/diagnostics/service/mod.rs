@@ -32,6 +32,7 @@
 //! Available on all platforms. Memory profiling endpoints return "not supported" responses
 //! on non-Linux platforms or when jemalloc is not enabled.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::Extension;
@@ -64,21 +65,21 @@ struct DiagnosticsState {
     static_resources: StaticResourceHandler,
     router_config: Arc<str>,
     supergraph_schema: Arc<String>,
-    output_directory: String,
+    output_directory: PathBuf,
 }
 
 /// Creates the diagnostics router with all routes configured
 pub(super) fn create_router(
-    output_directory: String,
+    output_directory: &std::path::Path,
     router_config: Arc<str>,
     supergraph_schema: Arc<String>,
 ) -> Router {
     let state = DiagnosticsState {
-        memory: MemoryService::new(output_directory.clone()),
+        memory: MemoryService::new(output_directory),
         static_resources: StaticResourceHandler::new(),
         router_config,
         supergraph_schema,
-        output_directory,
+        output_directory: output_directory.to_path_buf(),
     };
 
     Router::new()
