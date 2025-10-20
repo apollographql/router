@@ -1644,7 +1644,7 @@ fn reformat_response_expected_id() {
 }
 
 #[test]
-fn reformat_response_coersion_propagation_into_list() {
+fn reformat_response_coercion_propagation_into_list() {
     FormatTest::builder()
         .schema(
             r#"
@@ -1775,7 +1775,7 @@ fn reformat_response_coersion_propagation_into_list() {
 }
 
 #[test]
-fn reformat_response_coersion_propagation_into_object() {
+fn reformat_response_coercion_propagation_into_object() {
     FormatTest::builder()
         .schema(
             r#"
@@ -1916,7 +1916,7 @@ fn reformat_response_coersion_propagation_into_object() {
 // router-QP boundary and needs to be tested elsewhere. This test is just for ensuring we can
 // follow the spec as closely as possible.
 #[test]
-fn reformat_response_coersion_propagation_into_union() {
+fn reformat_response_coercion_propagation_into_union() {
     let nullable_schema = r#"
         type Query {
             thing: Thing
@@ -1974,14 +1974,8 @@ fn reformat_response_coersion_propagation_into_union() {
     FormatTest::builder()
         .schema(nullable_schema)
         .query(query_wo_type_info)
-        .response(resp_with_type_info.clone())
-        .expected(json!({
-            "thing": {
-                "a": 1,
-                "b": null,
-                "c": null,
-            }
-        }))
+        .response(resp_wo_type_info.clone())
+        .expected(json!({ "thing": { } }))
         .expected_errors(json!([
             {
                 "message": "Invalid value found for the type Int",
@@ -2133,7 +2127,7 @@ fn reformat_response_coersion_propagation_into_union() {
 // Unlike the union tests, if a fragment is part of the query but type info is not
 // returned, the return fragment data is ignored, regardless of validity.
 #[test]
-fn reformat_response_coersion_propagation_into_interfaces() {
+fn reformat_response_coercion_propagation_into_interfaces() {
     let nullable_schema = r#"
         type Query {
             thing: Thing
@@ -2320,8 +2314,6 @@ fn reformat_response_coersion_propagation_into_interfaces() {
         .query(query_with_type_info)
         .response(resp_with_type_info.clone())
         .expected(json!({ "thing": null }))
-        // FIXME(@TylerBloom): This is not expected. This should behave the same with(out)
-        // `__typename` being queried.
         .expected_errors(json!([
             {
                 "message": "Invalid value found for the type Int",
