@@ -64,7 +64,7 @@ async function showDOTGraph() {
     header.className = 'flex justify-between items-center mb-4';
     header.innerHTML = `
         <h3 class="text-lg font-semibold">Generated DOT Graph</h3>
-        <button onclick="this.parentElement.parentElement.parentElement.remove()" class="text-gray-500 hover:text-gray-700">✕</button>
+        <button onclick="this.parentElement.parentElement.parentElement.remove()" class="text-gray-500 hover:text-gray-700">&times;</button>
     `;
     
     const preElement = document.createElement('pre');

@@ -132,7 +132,7 @@ async function loadAllData() {
         }
     } else {
         // Check if we have usable embedded data (static report mode) or should use API (dashboard mode)
-        if (typeof EMBEDDED_DATA !== 'undefined' && EMBEDDED_DATA && 
+        if (typeof EMBEDDED_DATA !== 'undefined' && EMBEDDED_DATA &&
             (EMBEDDED_DATA.systemInfo || EMBEDDED_DATA.routerConfig || EMBEDDED_DATA.schema)) {
             return await loadEmbeddedData();
         } else {
@@ -145,7 +145,7 @@ async function loadAllData() {
 async function loadEmbeddedData() {
     // Decode any base64 encoded data in embedded mode
     const decodedData = {
-        systemInfo: EMBEDDED_DATA.systemInfo ? 
+        systemInfo: EMBEDDED_DATA.systemInfo ?
             (typeof EMBEDDED_DATA.systemInfo === 'string' && EMBEDDED_DATA.systemInfo.match(/^[A-Za-z0-9+/]+=*$/) ?
                 base64Decode(EMBEDDED_DATA.systemInfo) : EMBEDDED_DATA.systemInfo) : null,
         routerConfig: EMBEDDED_DATA.routerConfig ?
@@ -156,7 +156,7 @@ async function loadEmbeddedData() {
                 base64Decode(EMBEDDED_DATA.schema) : EMBEDDED_DATA.schema) : null,
         memoryDumps: EMBEDDED_DATA.memoryDumps || []
     };
-    
+
     // Set global data
     window.LOADED_DATA = decodedData;
     return decodedData;
@@ -164,35 +164,24 @@ async function loadEmbeddedData() {
 
 async function loadApiData() {
     try {
-        console.log('🌐 Loading data from API endpoints...');
-        console.log('🔗 API_BASE:', API_BASE);
-        
         // Fetch data from API endpoints
-        console.log('📞 Making parallel API calls...');
         const [systemInfoResponse, routerConfigResponse, schemaResponse, dumpsResponse] = await Promise.all([
             fetch(API_BASE + 'system_info.txt'),
-            fetch(API_BASE + 'router_config.yaml'), 
+            fetch(API_BASE + 'router_config.yaml'),
             fetch(API_BASE + 'supergraph.graphql'),
             fetch(API_BASE + 'memory/dumps')
         ]);
-        
-        console.log('📊 API responses received:', {
-            systemInfo: systemInfoResponse.ok,
-            routerConfig: routerConfigResponse.ok,
-            schema: schemaResponse.ok,
-            dumps: dumpsResponse.ok
-        });
-        
+
         // Get text content
         const [systemInfo, routerConfig, schema] = await Promise.all([
             systemInfoResponse.text(),
             routerConfigResponse.text(),
             schemaResponse.text()
         ]);
-        
+
         // Get memory dumps
         const dumps = dumpsResponse.ok ? await dumpsResponse.json() : [];
-        
+
         // Set global data for other functions to use
         const loadedData = {
             systemInfo: systemInfo,
@@ -200,17 +189,10 @@ async function loadApiData() {
             schema: schema,
             memoryDumps: dumps
         };
-        
+
         window.LOADED_DATA = loadedData;
-        console.log('✅ Successfully loaded data from API endpoints');
-        console.log('📋 Final data object:', {
-            systemInfoLength: loadedData.systemInfo?.length || 0,
-            routerConfigLength: loadedData.routerConfig?.length || 0,
-            schemaLength: loadedData.schema?.length || 0,
-            dumpsCount: loadedData.memoryDumps?.length || 0
-        });
         return loadedData;
-        
+
     } catch (error) {
         console.error('Failed to load data from API:', error);
         throw error;
@@ -232,13 +214,13 @@ async function fetchProfilingStatus() {
 
 async function startProfiling() {
     try {
-        const response = await fetch(API_BASE + 'memory/start', { method: 'POST' });
+        const response = await fetch(API_BASE + 'memory/start', {method: 'POST'});
         const data = await response.json();
-        
+
         if (!response.ok) {
             throw new Error(data.message || 'Failed to start profiling');
         }
-        
+
         return data;
     } catch (error) {
         console.error('Failed to start profiling:', error);
@@ -248,13 +230,13 @@ async function startProfiling() {
 
 async function stopProfiling() {
     try {
-        const response = await fetch(API_BASE + 'memory/stop', { method: 'POST' });
+        const response = await fetch(API_BASE + 'memory/stop', {method: 'POST'});
         const data = await response.json();
-        
+
         if (!response.ok) {
             throw new Error(data.message || 'Failed to stop profiling');
         }
-        
+
         return data;
     } catch (error) {
         console.error('Failed to stop profiling:', error);
@@ -264,13 +246,13 @@ async function stopProfiling() {
 
 async function triggerDump() {
     try {
-        const response = await fetch(API_BASE + 'memory/dump', { method: 'POST' });
+        const response = await fetch(API_BASE + 'memory/dump', {method: 'POST'});
         const data = await response.json();
-        
+
         if (!response.ok) {
             throw new Error(data.message || 'Failed to trigger dump');
         }
-        
+
         return data;
     } catch (error) {
         console.error('Failed to trigger dump:', error);
@@ -295,7 +277,7 @@ async function downloadDump(filename) {
         if (!response.ok) {
             throw new Error(`Failed to download dump: ${response.status}`);
         }
-        
+
         const blob = await response.blob();
         return blob;
     } catch (error) {
@@ -306,13 +288,13 @@ async function downloadDump(filename) {
 
 async function deleteDump(filename) {
     try {
-        const response = await fetch(API_BASE + `memory/dumps/${filename}`, { method: 'DELETE' });
+        const response = await fetch(API_BASE + `memory/dumps/${filename}`, {method: 'DELETE'});
         const data = await response.json();
-        
+
         if (!response.ok) {
             throw new Error(data.message || 'Failed to delete dump');
         }
-        
+
         return data;
     } catch (error) {
         console.error('Failed to delete dump:', error);
@@ -322,13 +304,13 @@ async function deleteDump(filename) {
 
 async function clearAllDumps() {
     try {
-        const response = await fetch(API_BASE + 'memory/dumps', { method: 'DELETE' });
+        const response = await fetch(API_BASE + 'memory/dumps', {method: 'DELETE'});
         const data = await response.json();
-        
+
         if (!response.ok) {
             throw new Error(data.message || 'Failed to clear dumps');
         }
-        
+
         return data;
     } catch (error) {
         console.error('Failed to clear dumps:', error);
@@ -339,12 +321,12 @@ async function clearAllDumps() {
 async function exportDiagnostics() {
     try {
         const response = await fetch(API_BASE + 'export');
-        
+
         if (!response.ok) {
             const errorData = await response.json();
             throw new Error(errorData.message || 'Export failed');
         }
-        
+
         const blob = await response.blob();
         return blob;
     } catch (error) {
@@ -385,7 +367,7 @@ const DataAccess = {
                     throw new Error(`Failed to fetch dump: ${response.status}`);
                 }
                 const dumpContent = await response.text();
-                dump = { name: dumpName, data: dumpContent };
+                dump = {name: dumpName, data: dumpContent};
             } catch (error) {
                 console.error('Failed to fetch dump:', error);
                 throw error;
@@ -398,7 +380,7 @@ const DataAccess = {
                 throw new Error(`Dump not found: ${dumpName}`);
             }
         }
-        
+
         // Handle base64 decoding if needed (centralized here)
         if (typeof dump.data === 'string' && dump.data.match(/^[A-Za-z0-9+/]+=*$/)) {
             return {
@@ -406,7 +388,7 @@ const DataAccess = {
                 data: base64Decode(dump.data)
             };
         }
-        
+
         return dump;
     },
 
@@ -416,18 +398,18 @@ const DataAccess = {
         if (typeof IS_DASHBOARD_MODE !== 'undefined') {
             return IS_DASHBOARD_MODE;
         }
-        
+
         // Fallback: If we have embedded data with actual content, we're definitely in static export mode
-        if (typeof EMBEDDED_DATA !== 'undefined' && EMBEDDED_DATA && 
+        if (typeof EMBEDDED_DATA !== 'undefined' && EMBEDDED_DATA &&
             (EMBEDDED_DATA.systemInfo || EMBEDDED_DATA.routerConfig || EMBEDDED_DATA.schema || EMBEDDED_DATA.memoryDumps)) {
             return false;
         }
-        
+
         // If useLocalFiles is true, we're in file-based development mode (not dashboard mode)
         if (typeof DATA_CONFIG !== 'undefined' && DATA_CONFIG && DATA_CONFIG.useLocalFiles === true) {
             return false;
         }
-        
+
         // Otherwise, we're in dashboard mode (live API mode)
         return true;
     }

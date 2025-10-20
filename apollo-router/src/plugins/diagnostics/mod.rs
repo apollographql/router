@@ -24,7 +24,7 @@
 //!
 //! ## Security
 //!
-//! **⚠️ This plugin is disabled by default.** When enabled, it binds to `127.0.0.1:8089` to prevent
+//! **WARNING: This plugin is disabled by default.** When enabled, it binds to `127.0.0.1:8089` to prevent
 //! network exposure. Only enable in trusted environments with network isolation, as endpoints
 //! expose sensitive configuration data and memory contents.
 //! Do not expose this endpoint directly to the internet.

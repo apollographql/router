@@ -47,11 +47,11 @@
 //! 4. **Flow control**: Automatic rate matching between producer and consumer
 //!
 //! This ensures:
-//! - ✅ Memory usage stays bounded regardless of network speed
-//! - ✅ Large archives stream efficiently without blocking
-//! - ✅ Automatic cancellation when HTTP client disconnects
-//! - ✅ No temporary files or memory accumulation
-//! - ✅ Optimal performance with unidirectional data flow
+//! - Memory usage stays bounded regardless of network speed
+//! - Large archives stream efficiently without blocking
+//! - Automatic cancellation when HTTP client disconnects
+//! - No temporary files or memory accumulation
+//! - Optimal performance with unidirectional data flow
 //!
 //! **Platform Support**: This module is available on all platforms.
 //! Memory heap dumps are only available on Unix platforms.

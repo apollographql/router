@@ -159,10 +159,6 @@ async function populateChartSelectors() {
             actualOption2.textContent = displayText;
             flamegraphActualSelect.appendChild(actualOption2);
         });
-        
-        console.log(`Populated chart selectors with ${dumps.length} memory dumps`);
-    } else {
-        console.log('No memory dumps available for chart selectors');
     }
 }
 
@@ -212,9 +208,8 @@ async function updateCallGraph() {
                 console.error('Failed to fetch base dump:', error);
                 baseDump = null;
             }
-            
+
             if (baseDump) {
-                console.log('Computing differential call graph against base:', baseDumpName);
                 
                 // Parse base profile and generate its call graph data (base64 decoding handled by DataAccess)
                 const baseProfile = parser.parse(baseDump.data);
@@ -294,9 +289,8 @@ async function updateFlameGraph() {
                 console.error('Failed to fetch base dump:', error);
                 baseDump = null;
             }
-            
+
             if (baseDump) {
-                console.log('Computing differential flame graph against base:', baseDumpName);
                 
                 // Parse base profile and generate flame data (base64 decoding handled by DataAccess)
                 const baseProfile = parser.parse(baseDump.data);
@@ -344,31 +338,25 @@ async function updateFlameGraph() {
 
 // Unified differential computation for call graph data (similar to flamegraph approach)
 function computeCallGraphDifferential(actualData, baseData) {
-    console.log('Computing call graph differential...');
-    console.log('Actual call graph nodes:', actualData.nodes.length);
-    console.log('Base call graph nodes:', baseData.nodes.length);
-    
     // Create maps for quick lookup by node/link identifiers
     const baseNodeMap = new Map();
     const baseLinkMap = new Map();
     const baseReverseLinkMap = new Map();
-    
+
     // Build base data maps
     baseData.nodes.forEach(node => {
         baseNodeMap.set(node.id, node);
     });
-    
+
     baseData.links?.forEach(link => {
         const key = `${link.source}->${link.target}`;
         baseLinkMap.set(key, link);
     });
-    
+
     baseData.reverseLinks?.forEach(link => {
         const key = `${link.source}->${link.target}`;
         baseReverseLinkMap.set(key, link);
     });
-    
-    console.log('Base nodes mapped:', baseNodeMap.size);
     
     // Process actual data and subtract base data
     const differentialNodes = [];
@@ -444,13 +432,8 @@ function computeCallGraphDifferential(actualData, baseData) {
             }
         }
     });
-    
-    console.log('Differential call graph data points:', differentialNodes.length);
-    console.log('Differential links:', differentialLinks.length);
-    console.log('Differential reverse links:', differentialReverseLinks.length);
-    
+
     if (differentialNodes.length === 0) {
-        console.log('No significant differential found - returning empty data');
         return { nodes: [], links: [], reverseLinks: [] };
     }
     
@@ -598,19 +581,12 @@ async function handleTriggerDump() {
 
 // Load and display dumps list
 async function refreshDumpsDisplay() {
-    console.log('🔄 Starting refreshDumpsDisplay...');
     try {
-        console.log('📡 Calling listDumps()...');
         const dumps = await listDumps();
-        console.log('✅ listDumps() returned:', dumps);
-        console.log('📊 Number of dumps:', dumps ? dumps.length : 'null/undefined');
-
         await updateDumpsList(dumps);
-        console.log('✅ updateDumpsList completed');
         return dumps;
     } catch (error) {
-        console.error('❌ Error in refreshDumpsDisplay:', error);
-        console.error('❌ Error stack:', error.stack);
+        console.error('Error in refreshDumpsDisplay:', error);
         showNotification('Failed to list dumps', 'error');
         return [];
     }
@@ -618,17 +594,14 @@ async function refreshDumpsDisplay() {
 
 // Update dumps list UI
 async function updateDumpsList(dumps) {
-    console.log('🎨 Starting updateDumpsList with dumps:', dumps);
     const dumpsListElement = document.getElementById('dumps-list');
-    console.log('🎯 Found dumps-list element:', !!dumpsListElement);
 
     if (!dumpsListElement) {
-        console.error('❌ dumps-list element not found in DOM');
+        console.error('dumps-list element not found in DOM');
         return;
     }
 
     if (!dumps || dumps.length === 0) {
-        console.log('📭 No dumps to display, showing empty message');
         const noDumpsDiv = document.createElement('div');
         noDumpsDiv.className = 'text-center text-gray-500';
         noDumpsDiv.textContent = 'No memory dumps available';
@@ -638,8 +611,6 @@ async function updateDumpsList(dumps) {
         await populateChartSelectors();
         return;
     }
-
-    console.log(`📋 Displaying ${dumps.length} dumps`);
 
     // Sort dumps by creation time (most recent first)
     const sortedDumps = [...dumps].sort((a, b) => {
@@ -651,10 +622,8 @@ async function updateDumpsList(dumps) {
 
     // Clear dumps list and rebuild using custom elements (XSS-safe)
     dumpsListElement.innerHTML = '';
-    console.log('🧹 Cleared dumps list container');
 
     sortedDumps.forEach((dump, index) => {
-        console.log(`🏗️ Creating dump item ${index + 1}:`, dump.name);
         try {
             // Format Unix timestamp in user's local timezone
             const timestampDisplay = dump.timestamp
@@ -667,20 +636,16 @@ async function updateDumpsList(dumps) {
             );
             if (dumpElement) {
                 dumpsListElement.appendChild(dumpElement);
-                console.log(`✅ Added dump item ${index + 1} to DOM`);
             } else {
-                console.error(`❌ Failed to create dump item ${index + 1}: createDumpItem returned null`);
+                console.error(`Failed to create dump item ${index + 1}: createDumpItem returned null`);
             }
         } catch (error) {
-            console.error(`❌ Error creating dump item ${index + 1}:`, error);
+            console.error(`Error creating dump item ${index + 1}:`, error);
         }
     });
 
-    console.log('✅ All dump items added to DOM');
-
     // Update chart selectors when dumps list changes
     await populateChartSelectors();
-    console.log('✅ Chart selectors populated');
 }
 
 // Download dump UI handler
@@ -768,23 +733,17 @@ function startDumpPolling() {
     
     // Poll every 3 seconds
     dumpPollingInterval = setInterval(async () => {
-        console.log('⏰ Polling dumps...');
         try {
             const dumps = await DataAccess.getMemoryDumps();
             const currentCount = dumps ? dumps.length : 0;
-            console.log(`⏰ Poll result: ${currentCount} dumps (was ${lastDumpCount})`);
 
             // If dump count changed, refresh the display
             if (currentCount !== lastDumpCount) {
-                console.log(`🔄 Dump count changed from ${lastDumpCount} to ${currentCount}, refreshing...`);
                 lastDumpCount = currentCount;
                 await refreshDumpsDisplay();
-            } else {
-                console.log('⏰ No change in dump count, skipping refresh');
             }
         } catch (error) {
-            console.error('❌ Error during dump polling:', error);
-            console.error('❌ Polling error stack:', error.stack);
+            console.error('Error during dump polling:', error);
         }
     }, 3000);
 }
@@ -828,19 +787,11 @@ window.addEventListener('beforeunload', function() {
 
 // Initialize application data and UI
 async function initializeApplicationData() {
-    console.log('🚀 Starting application initialization...');
-    
     const loadingElements = {
         system: document.getElementById('system-info-content'),
         config: document.getElementById('router-config-content'),
         schema: document.getElementById('schema-content')
     };
-    
-    console.log('📱 Found UI elements:', {
-        system: !!loadingElements.system,
-        config: !!loadingElements.config,
-        schema: !!loadingElements.schema
-    });
 
     // Set loading states
     Object.values(loadingElements).forEach(el => {
@@ -848,45 +799,20 @@ async function initializeApplicationData() {
     });
 
     try {
-        console.log('💾 Checking dashboard mode...');
-        console.log('🔍 DataAccess.isDashboardMode():', DataAccess.isDashboardMode());
-        
         // Load data using data access layer
-        console.log('📡 Starting data load...');
         const data = await loadAllData();
-        console.log('✅ Data loaded:', data);
-        
+
         // Update UI with loaded data for both dashboard and static modes
-        console.log('🖥️ Updating UI elements with loaded data...');
-        
         if (data.systemInfo && loadingElements.system) {
-            console.log('📝 Setting system info content (length: ' + data.systemInfo.length + ')');
             loadingElements.system.textContent = data.systemInfo;
-        } else {
-            console.warn('⚠️ System info not available:', {
-                hasData: !!data.systemInfo,
-                hasElement: !!loadingElements.system
-            });
         }
-        
+
         if (data.routerConfig && loadingElements.config) {
-            console.log('⚙️ Setting router config content (length: ' + data.routerConfig.length + ')');
             loadingElements.config.textContent = data.routerConfig;
-        } else {
-            console.warn('⚠️ Router config not available:', {
-                hasData: !!data.routerConfig,
-                hasElement: !!loadingElements.config
-            });
         }
-        
+
         if (data.schema && loadingElements.schema) {
-            console.log('📊 Setting schema content (length: ' + data.schema.length + ')');
             loadingElements.schema.textContent = data.schema;
-        } else {
-            console.warn('⚠️ Schema not available:', {
-                hasData: !!data.schema,
-                hasElement: !!loadingElements.schema
-            });
         }
 
         // Handle mode-specific UI adjustments
@@ -896,27 +822,25 @@ async function initializeApplicationData() {
             if (dashboardTab) {
                 dashboardTab.style.display = 'none';
             }
-            
+
             // Show System tab as default instead of Dashboard
             showTab('system');
         }
-        
+
         // Populate chart selectors
         await populateChartSelectors();
-        
+
         // Initialize dashboard-specific features (only in dashboard mode)
         if (DataAccess.isDashboardMode()) {
             // Initialize memory profiling status and periodic updates
-            console.log('🔧 Initializing dashboard features...');
             initializeSummaryTab();
-            
+
             // Initialize dump polling
             const dumps = await DataAccess.getMemoryDumps();
             lastDumpCount = dumps.length;
             startDumpPolling();
-            console.log('Started dump polling - initial count:', lastDumpCount);
         }
-        
+
     } catch (error) {
         console.error('Failed to initialize application data:', error);
         // Set error messages
