@@ -196,12 +196,12 @@ impl Exporter {
         // Files are processed in order of increasing size to start the download quickly:
         // 1. Small metadata files first (manifest, config, schema, system info)
         // 2. Potentially large files last (memory dumps)
-        Self::add_manifest_to_archive_async(&mut tar, config).await?;
-        Self::add_router_config_to_archive_async(&mut tar, router_config).await?;
-        Self::add_supergraph_schema_to_archive_async(&mut tar, supergraph_schema).await?;
-        Self::add_system_info_to_archive_async(&mut tar).await?;
-        Self::add_memory_data_to_archive_async(&mut tar, &config.output_directory).await?;
-        Self::add_html_report_to_archive_async(&mut tar, config, router_config, supergraph_schema)
+        Self::add_manifest_to_archive(&mut tar, config).await?;
+        Self::add_router_config_to_archive(&mut tar, router_config).await?;
+        Self::add_supergraph_schema_to_archive(&mut tar, supergraph_schema).await?;
+        Self::add_system_info_to_archive(&mut tar).await?;
+        Self::add_memory_data_to_archive(&mut tar, &config.output_directory).await?;
+        Self::add_html_report_to_archive(&mut tar, config, router_config, supergraph_schema)
             .await?;
 
         // Finalize the archive and ensure all buffered data is flushed
@@ -218,7 +218,7 @@ impl Exporter {
     }
 
     /// Add the manifest file to the archive with async I/O
-    async fn add_manifest_to_archive_async<W: tokio::io::AsyncWrite + Unpin + Send + Sync>(
+    async fn add_manifest_to_archive<W: tokio::io::AsyncWrite + Unpin + Send + Sync>(
         tar: &mut tokio_tar::Builder<W>,
         config: &Config,
     ) -> DiagnosticsResult<()> {
@@ -227,7 +227,7 @@ impl Exporter {
     }
 
     /// Add the router configuration to the archive with async I/O
-    async fn add_router_config_to_archive_async<W: tokio::io::AsyncWrite + Unpin + Send + Sync>(
+    async fn add_router_config_to_archive<W: tokio::io::AsyncWrite + Unpin + Send + Sync>(
         tar: &mut tokio_tar::Builder<W>,
         router_config: &str,
     ) -> DiagnosticsResult<()> {
@@ -235,7 +235,7 @@ impl Exporter {
     }
 
     /// Add the supergraph schema to the archive with async I/O
-    async fn add_supergraph_schema_to_archive_async<
+    async fn add_supergraph_schema_to_archive<
         W: tokio::io::AsyncWrite + Unpin + Send + Sync,
     >(
         tar: &mut tokio_tar::Builder<W>,
@@ -245,7 +245,7 @@ impl Exporter {
     }
 
     /// Add system information to the archive with async I/O
-    async fn add_system_info_to_archive_async<W: tokio::io::AsyncWrite + Unpin + Send + Sync>(
+    async fn add_system_info_to_archive<W: tokio::io::AsyncWrite + Unpin + Send + Sync>(
         tar: &mut tokio_tar::Builder<W>,
     ) -> DiagnosticsResult<()> {
         let system_info = crate::plugins::diagnostics::system_info::collect().await?;
@@ -253,7 +253,7 @@ impl Exporter {
     }
 
     /// Add memory profiling data to the archive with async I/O
-    async fn add_memory_data_to_archive_async<W: tokio::io::AsyncWrite + Unpin + Send + Sync>(
+    async fn add_memory_data_to_archive<W: tokio::io::AsyncWrite + Unpin + Send + Sync>(
         tar: &mut tokio_tar::Builder<W>,
         output_directory: &Path,
     ) -> DiagnosticsResult<()> {
@@ -262,7 +262,7 @@ impl Exporter {
     }
 
     /// Add the HTML diagnostic report to the archive
-    async fn add_html_report_to_archive_async<W: tokio::io::AsyncWrite + Unpin + Send + Sync>(
+    async fn add_html_report_to_archive<W: tokio::io::AsyncWrite + Unpin + Send + Sync>(
         tar: &mut tokio_tar::Builder<W>,
         config: &Config,
         router_config: &str,
