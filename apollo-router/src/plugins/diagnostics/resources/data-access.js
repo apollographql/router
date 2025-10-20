@@ -83,7 +83,7 @@ async function loadBinaryFile(filepath) {
         return new Uint8Array(arrayBuffer);
     } catch (error) {
         console.error(`Failed to load ${filepath}:`, error);
-        return null;
+        return `Error: Could not load ${filepath}`;
     }
 }
 
