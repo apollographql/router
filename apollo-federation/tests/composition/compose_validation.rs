@@ -113,7 +113,6 @@ fn merge_validations_errors_when_tag_definition_is_invalid() {
 }
 
 #[test]
-#[ignore = "We might not reserve that anymore in the Rust implementation (check before merging)"]
 fn merge_validations_reject_subgraph_named_underscore() {
     let subgraph_a = ServiceDefinition {
         name: "_",

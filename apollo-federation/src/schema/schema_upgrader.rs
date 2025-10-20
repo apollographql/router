@@ -157,6 +157,7 @@ impl SchemaUpgrader {
 
         let upgraded_subgraph =
             Subgraph::new(subgraph.name.as_str(), subgraph.url.as_str(), schema.schema)
+                .map_err(|e| e.into_federation_error())?
                 // This error will be wrapped up as a SubgraphError in `Self::upgrade`
                 .assume_expanded()
                 .map_err(|err| err.into_federation_error())?

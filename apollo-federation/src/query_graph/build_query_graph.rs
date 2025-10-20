@@ -2316,7 +2316,7 @@ impl FederatedQueryGraphBuilder {
     }
 }
 
-const FEDERATED_GRAPH_ROOT_SOURCE: &str = "_";
+pub(crate) const FEDERATED_GRAPH_ROOT_SOURCE: &str = "_";
 
 struct FederatedQueryGraphBuilderSubgraphs {
     map: IndexMap<Arc<str>, FederatedQueryGraphBuilderSubgraphData>,
