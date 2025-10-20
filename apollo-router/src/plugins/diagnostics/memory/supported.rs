@@ -451,7 +451,7 @@ impl MemoryService {
             return Err(security_error.into());
         }
 
-        let memory_path = self.output_directory.join("memory").join(filename);
+        let memory_path = self.memory_directory().join(filename);
 
         // SECURITY: File existence validation
         if let Err(security_error) =
@@ -479,39 +479,49 @@ impl MemoryService {
         }
     }
 
+    /// Get the path to the memory directory
+    fn memory_directory(&self) -> PathBuf {
+        self.output_directory.join("memory")
+    }
+
+    /// Delete a single heap dump file with validation
+    /// Returns Ok(()) on success, Err with error message on failure
+    async fn delete_single_dump(&self, filename: &str) -> Result<(), String> {
+        let memory_path = self.memory_directory().join(filename);
+
+        // SECURITY: Critical security validation for file deletion
+        SecurityValidator::validate_file_deletion(&memory_path, filename, &[".prof"])
+            .map_err(|e| e.to_string())?;
+
+        // Delete the file
+        tokio::fs::remove_file(&memory_path)
+            .await
+            .map_err(|e| format!("Failed to delete {}: {}", filename, e))?;
+
+        tracing::info!("Deleted heap dump: {}", filename);
+        Ok(())
+    }
+
     /// Handle DELETE /diagnostics/memory/dumps/{filename} - Delete a specific heap dump file
     pub(crate) async fn handle_delete_dump(
         &self,
         filename: &str,
     ) -> DiagnosticsResult<Response<Body>> {
-        let memory_path = self.output_directory.join("memory").join(filename);
-
-        // SECURITY: Critical security validation for file deletion
-        if let Err(security_error) =
-            SecurityValidator::validate_file_deletion(&memory_path, filename, &[".prof"])
-        {
-            return Err(security_error.into());
-        }
-
-        // Delete the file
-        match tokio::fs::remove_file(&memory_path).await {
-            Ok(()) => {
-                tracing::info!("Deleted heap dump: {}", filename);
-                self.json_response(
-                    StatusCode::OK,
-                    serde_json::json!({
-                        "status": "deleted",
-                        "message": format!("Heap dump '{}' deleted successfully", filename)
-                    }),
-                )
-            }
+        match self.delete_single_dump(filename).await {
+            Ok(()) => self.json_response(
+                StatusCode::OK,
+                serde_json::json!({
+                    "status": "deleted",
+                    "message": format!("Heap dump '{}' deleted successfully", filename)
+                }),
+            ),
             Err(e) => {
                 tracing::error!("Failed to delete heap dump {}: {}", filename, e);
                 self.json_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     serde_json::json!({
                         "error": "Failed to delete file",
-                        "message": e.to_string()
+                        "message": e
                     }),
                 )
             }
@@ -520,7 +530,7 @@ impl MemoryService {
 
     /// Handle DELETE /diagnostics/memory/dumps - clear all heap dump files
     pub(crate) async fn handle_clear_all_dumps(&self) -> DiagnosticsResult<Response<Body>> {
-        let memory_path = self.output_directory.join("memory");
+        let memory_path = self.memory_directory();
 
         // Create memory directory if it doesn't exist
         if let Err(e) = tokio::fs::create_dir_all(&memory_path).await {
@@ -535,16 +545,19 @@ impl MemoryService {
         }
 
         // Find all .prof files in the memory directory
-        let prof_files = match tokio::fs::read_dir(&memory_path).await {
+        let prof_filenames = match tokio::fs::read_dir(&memory_path).await {
             Ok(mut entries) => {
-                let mut files = Vec::new();
+                let mut filenames = Vec::new();
                 while let Ok(Some(entry)) = entries.next_entry().await {
                     let path = entry.path();
-                    if path.is_file() && path.extension().is_some_and(|e| e == "prof") {
-                        files.push(path);
+                    if path.is_file()
+                        && path.extension().is_some_and(|e| e == "prof")
+                        && let Some(filename) = path.file_name().and_then(|n| n.to_str())
+                    {
+                        filenames.push(filename.to_string());
                     }
                 }
-                files
+                filenames
             }
             Err(e) => {
                 tracing::error!("Failed to read memory directory: {}", e);
@@ -561,23 +574,15 @@ impl MemoryService {
         let mut deleted_count = 0;
         let mut errors = Vec::new();
 
-        // Delete each .prof file
-        for prof_file in prof_files {
-            match tokio::fs::remove_file(&prof_file).await {
+        // Delete each .prof file using the shared deletion logic
+        for filename in prof_filenames {
+            match self.delete_single_dump(&filename).await {
                 Ok(()) => {
                     deleted_count += 1;
-                    if let Some(filename) = prof_file.file_name() {
-                        tracing::info!("Deleted heap dump: {:?}", filename);
-                    }
                 }
                 Err(e) => {
-                    let filename = prof_file
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("unknown");
-                    let error_msg = format!("Failed to delete {}: {}", filename, e);
-                    tracing::error!("{}", error_msg);
-                    errors.push(error_msg);
+                    tracing::error!("{}", e);
+                    errors.push(e);
                 }
             }
         }
