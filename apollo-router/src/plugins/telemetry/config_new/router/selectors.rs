@@ -19,10 +19,12 @@ use crate::plugins::telemetry::config_new::get_baggage;
 use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
 use crate::plugins::telemetry::config_new::instruments::Standard;
 use crate::plugins::telemetry::config_new::router::events::RouterResponseBodyExtensionType;
+use crate::plugins::telemetry::config_new::selectors::ActiveSubgraphRequests;
 use crate::plugins::telemetry::config_new::selectors::ErrorRepr;
 use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
 use crate::plugins::telemetry::config_new::trace_id;
+use crate::plugins::telemetry::router_overhead::RouterOverheadTracker;
 use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::services::router;
 
@@ -156,6 +158,16 @@ pub(crate) enum RouterSelector {
     ResponseStatus {
         /// The http response status code.
         response_status: ResponseStatus,
+    },
+    /// Router overhead duration (time not spent in subgraph requests)
+    RouterOverhead {
+        /// Extract router overhead duration in seconds
+        router_overhead: bool,
+    },
+    /// Number of active subgraph requests at the time of overhead calculation
+    ActiveSubgraphRequests {
+        /// The mode for extracting active subgraph request information
+        active_subgraph_requests: ActiveSubgraphRequests,
     },
     /// Deprecated, should not be used anymore, use static field instead
     Static(String),
@@ -299,6 +311,31 @@ impl Selector for RouterSelector {
                     .canonical_reason()
                     .map(|reason| reason.to_string().into()),
             },
+            RouterSelector::RouterOverhead { router_overhead } if *router_overhead => response
+                .context
+                .extensions()
+                .with_lock(|ext| ext.get::<RouterOverheadTracker>().cloned())
+                .map(|tracker| {
+                    let result = tracker.calculate_overhead();
+                    opentelemetry::Value::F64(result.overhead.as_secs_f64())
+                }),
+            RouterSelector::ActiveSubgraphRequests {
+                active_subgraph_requests,
+            } => response
+                .context
+                .extensions()
+                .with_lock(|ext| ext.get::<RouterOverheadTracker>().cloned())
+                .and_then(|tracker| {
+                    let result = tracker.calculate_overhead();
+                    match active_subgraph_requests {
+                        ActiveSubgraphRequests::Count => Some(opentelemetry::Value::I64(
+                            result.active_subgraph_requests as i64,
+                        )),
+                        ActiveSubgraphRequests::Bool => Some(opentelemetry::Value::Bool(
+                            result.active_subgraph_requests > 0,
+                        )),
+                    }
+                }),
             RouterSelector::ResponseContext {
                 response_context,
                 default,
@@ -422,6 +459,8 @@ impl Selector for RouterSelector {
                     | RouterSelector::ResponseHeader { .. }
                     | RouterSelector::ResponseContext { .. }
                     | RouterSelector::ResponseStatus { .. }
+                    | RouterSelector::RouterOverhead { .. }
+                    | RouterSelector::ActiveSubgraphRequests { .. }
                     | RouterSelector::OnGraphQLError { .. }
             ),
             Stage::ResponseField => false,

@@ -1,18 +1,17 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use parking_lot::Mutex;
-
 use super::guard::SubgraphRequestGuard;
+use parking_lot::Mutex;
 
 /// Result of calculating router overhead.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct OverheadResult {
     /// The calculated router overhead (total time - subgraph time)
     pub(crate) overhead: Duration,
-    /// Whether there are active subgraph requests that haven't completed
-    pub(crate) has_active_subgraph_requests: bool,
+    /// The number of active subgraph requests
+    pub(crate) active_subgraph_requests: u64,
 }
 
 /// Tracks router overhead by measuring time NOT spent waiting for subgraph requests.
@@ -92,7 +91,7 @@ impl RouterOverheadTracker {
 
         OverheadResult {
             overhead,
-            has_active_subgraph_requests,
+            active_subgraph_requests: active_count,
         }
     }
 }
@@ -120,7 +119,7 @@ mod tests {
 
         // Overhead should be roughly 50ms (the time not spent in subgraph)
         // Allow some tolerance for timing imprecision
-        assert!(!result.has_active_subgraph_requests);
+        assert_eq!(result.active_subgraph_requests, 0);
         assert!(
             result.overhead >= Duration::from_millis(40)
                 && result.overhead <= Duration::from_millis(100),
@@ -152,7 +151,7 @@ mod tests {
 
         // Overhead should be roughly 20ms (the time between subgraph requests)
         // Allow tolerance for timing imprecision
-        assert!(!result.has_active_subgraph_requests);
+        assert_eq!(result.active_subgraph_requests, 0);
         assert!(
             result.overhead >= Duration::from_millis(10)
                 && result.overhead <= Duration::from_millis(50),
@@ -185,7 +184,7 @@ mod tests {
         // Subgraph time: 100ms (guard1) + 50ms (only guard2) = 150ms
         // Overhead: ~10ms initial + some processing = ~10-20ms
         // Allow tolerance for timing imprecision
-        assert!(!result.has_active_subgraph_requests);
+        assert_eq!(result.active_subgraph_requests, 0);
         assert!(
             result.overhead >= Duration::from_millis(5)
                 && result.overhead <= Duration::from_millis(50),
@@ -203,7 +202,7 @@ mod tests {
         let result = tracker.calculate_overhead();
 
         // All time is overhead when there are no subgraph requests
-        assert!(!result.has_active_subgraph_requests);
+        assert_eq!(result.active_subgraph_requests, 0);
         assert!(
             result.overhead >= Duration::from_millis(90)
                 && result.overhead <= Duration::from_millis(150),
@@ -231,7 +230,7 @@ mod tests {
 
         // Tracker should still work and calculate overhead correctly
         let result = tracker.calculate_overhead();
-        assert!(!result.has_active_subgraph_requests);
+        assert_eq!(result.active_subgraph_requests, 0);
         assert!(result.overhead >= Duration::ZERO);
     }
 
@@ -257,7 +256,7 @@ mod tests {
 
         // Tracker should still be in a valid state
         let result = tracker.calculate_overhead();
-        assert!(!result.has_active_subgraph_requests);
+        assert_eq!(result.active_subgraph_requests, 0);
         assert!(result.overhead >= Duration::ZERO);
     }
 
@@ -269,7 +268,7 @@ mod tests {
 
         // No active requests initially
         let result = tracker.calculate_overhead();
-        assert!(!result.has_active_subgraph_requests);
+        assert_eq!(result.active_subgraph_requests, 0);
 
         // Create a guard (active request)
         let _guard = tracker.create_guard();
@@ -277,8 +276,8 @@ mod tests {
 
         // Should signal active requests
         let result = tracker.calculate_overhead();
-        assert!(
-            result.has_active_subgraph_requests,
+        assert_eq!(
+            result.active_subgraph_requests, 1,
             "Should have active subgraph requests"
         );
 
@@ -288,8 +287,8 @@ mod tests {
 
         // Should no longer have active requests
         let result = tracker.calculate_overhead();
-        assert!(
-            !result.has_active_subgraph_requests,
+        assert_eq!(
+            result.active_subgraph_requests, 0,
             "Should not have active subgraph requests"
         );
     }

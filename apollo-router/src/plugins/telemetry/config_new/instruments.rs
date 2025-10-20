@@ -115,6 +115,7 @@ const HTTP_SERVER_REQUEST_DURATION_METRIC: &str = "http.server.request.duration"
 const HTTP_SERVER_REQUEST_BODY_SIZE_METRIC: &str = "http.server.request.body.size";
 const HTTP_SERVER_RESPONSE_BODY_SIZE_METRIC: &str = "http.server.response.body.size";
 const HTTP_SERVER_ACTIVE_REQUESTS: &str = "http.server.active_requests";
+const ROUTER_OVERHEAD_METRIC: &str = "apollo.router.overhead";
 
 pub(super) const HTTP_CLIENT_REQUEST_DURATION_METRIC: &str = "http.client.request.duration";
 pub(super) const HTTP_CLIENT_REQUEST_BODY_SIZE_METRIC: &str = "http.client.request.body.size";
@@ -244,6 +245,21 @@ impl InstrumentsConfig {
                         .i64_up_down_counter(HTTP_SERVER_ACTIVE_REQUESTS)
                         .with_unit("request")
                         .with_description("Number of active HTTP server requests.")
+                        .init(),
+                ),
+            );
+        }
+
+        if self.router.attributes.router_overhead.is_enabled() {
+            static_instruments.insert(
+                ROUTER_OVERHEAD_METRIC.to_string(),
+                StaticInstrument::Histogram(
+                    meter
+                        .f64_histogram(ROUTER_OVERHEAD_METRIC)
+                        .with_unit("s")
+                        .with_description(
+                            "Router processing overhead (time not spent waiting for subgraphs).",
+                        )
                         .init(),
                 ),
             );
@@ -435,11 +451,46 @@ impl InstrumentsConfig {
                 }),
             });
 
+        let router_overhead = self.router.attributes.router_overhead.is_enabled().then(|| {
+            let mut nb_attributes = 0;
+            let selectors = match &self.router.attributes.router_overhead {
+                DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => None,
+                DefaultedStandardInstrument::Extendable { attributes } => {
+                    nb_attributes = attributes.custom.len();
+                    Some(attributes.clone())
+                }
+            };
+            CustomHistogram {
+                inner: Mutex::new(CustomHistogramInner {
+                    increment: Increment::Custom(None),
+                    condition: Condition::True,
+                    histogram: Some(
+                        static_instruments
+                            .get(ROUTER_OVERHEAD_METRIC)
+                            .expect("cannot get static instrument for router overhead; this should not happen")
+                            .as_histogram()
+                            .cloned()
+                            .expect("cannot convert instrument to histogram for router overhead; this should not happen"),
+                    ),
+                    attributes: Vec::with_capacity(nb_attributes),
+                    selector: Some(Arc::new(
+                        crate::plugins::telemetry::config_new::router::selectors::RouterSelector::RouterOverhead {
+                            router_overhead: true,
+                        }
+                    )),
+                    selectors,
+                    updated: false,
+                    _phantom: PhantomData,
+                }),
+            }
+        });
+
         RouterInstruments {
             http_server_request_duration,
             http_server_request_body_size,
             http_server_response_body_size,
             http_server_active_requests,
+            router_overhead,
             custom: CustomInstruments::new(&self.router.custom, static_instruments),
         }
     }
