@@ -1,0 +1,52 @@
+### `preview_response_cache`
+
+<ExpansionPanel title="preview_response_cache YAML snippet">
+
+```yaml title="preview_response_cache"
+preview_response_cache:
+  enabled: false
+  debug: false
+  private_queries_buffer_size: 2048
+  invalidation:
+    listen: 127.0.0.1:4000
+    path: /invalidation
+  subgraph:
+    all:
+      enabled: true
+      ttl: 30s
+      private_id: null
+      redis:
+        urls:
+        - redis://127.0.0.1:6379
+        username: example_username
+        password: example_password
+        fetch_timeout: 150ms
+        insert_timeout: 500ms
+        invalidate_timeout: 1s
+        maintenance_timeout: 500ms
+        ttl: null
+        namespace: example_namespace
+        tls:
+          certificate_authorities: null
+          client_authentication:
+            certificate_chain: example_certificate_chain
+            key: example_key
+        required_to_start: false
+        pool_size: 5
+        metrics_interval: 1s
+      invalidation:
+        enabled: false
+        shared_key: ''
+    subgraphs: {}
+```
+
+</ExpansionPanel>
+
+When using Redis as the cache backend, the router emits additional Redis-specific metrics to help monitor cache performance:
+
+- **Connection metrics**: Track Redis connection establishment and health
+- **Command metrics**: Monitor Redis command execution, queue length, and redelivery counts
+- **Performance metrics**: Measure average latency, network latency, and request/response sizes
+- **Operational metrics**: Help identify connection issues, network problems, or performance bottlenecks
+
+These metrics use the `kind` attribute to distinguish between different Redis cache uses (e.g., `response`). For the complete list of Redis metrics and their descriptions, see the [Redis Cache metrics documentation](/router/configuration/telemetry/instrumentation/standard-instruments/#redis-cache).
