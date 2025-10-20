@@ -1448,7 +1448,7 @@ fn reformat_response_expected_int_range() {
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
             },
             {
-                "message": "Cannot return null for non-nullable field User.someOtherNumber",
+                "message": "Null value found for non-nullable type Int",
                 "path": ["me", "someOtherNumber"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
@@ -1705,6 +1705,8 @@ fn reformat_response_coersion_propagation_into_list() {
                 "a": null
             }
         }))
+        // NOTE: The array validation stops at its first invalid value and "bubbles" up the
+        // nullification from there
         .expected_errors(json!([
             {
                 "message": "Invalid value found for the type Int",
@@ -1712,22 +1714,12 @@ fn reformat_response_coersion_propagation_into_list() {
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Cannot return null for non-nullable array element of type Int",
+                "message": "Null value found for non-nullable type Int",
                 "path": ["thing", "a", 1],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for the type Int",
-                "path": ["thing", "a", 2],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Cannot return null for non-nullable array element of type Int",
-                "path": ["thing", "a", 2],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Invalid value found for field Query.thing.a",
+                "message": "Invalid value found inside the array of type [Int!]",
                 "path": ["thing", "a"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
@@ -1755,6 +1747,8 @@ fn reformat_response_coersion_propagation_into_list() {
         .expected(json!({
             "thing": null
         }))
+        // NOTE: The array validation stops at its first invalid value and "bubbles" up the
+        // nullification from there
         .expected_errors(json!([
             {
                 "message": "Invalid value found for the type Int",
@@ -1762,27 +1756,17 @@ fn reformat_response_coersion_propagation_into_list() {
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Cannot return null for non-nullable array element of type Int",
+                "message": "Null value found for non-nullable type Int",
                 "path": ["thing", "a", 1],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Invalid value found for the type Int",
-                "path": ["thing", "a", 2],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Cannot return null for non-nullable array element of type Int",
-                "path": ["thing", "a", 2],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Invalid value found for field Query.thing.a",
+                "message": "Invalid value found inside the array of type [Int!]",
                 "path": ["thing", "a"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Cannot return null for non-nullable field Thing.a",
+                "message": "Null value found for non-nullable type [Int!]",
                 "path": ["thing", "a"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
@@ -1860,6 +1844,8 @@ fn reformat_response_coersion_propagation_into_object() {
         .expected(json!({
             "thing": null
         }))
+        // NOTE: The array validation stops at its first invalid value and "bubbles" up the
+        // nullification from there
         .expected_errors(json!([
             {
                 "message": "Invalid value found for the type Int",
@@ -1867,23 +1853,10 @@ fn reformat_response_coersion_propagation_into_object() {
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Cannot return null for non-nullable field Thing.b",
+                "message": "Null value found for non-nullable type Int",
                 "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
-        /* FIXME: The first improperly nullified field causes an early exit, so the other fields
-         * are not validated. Do we want to keep with this behavior or report all error?
-            {
-                "message": "Invalid value found for the type Int",
-                "path": ["thing", "c"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Cannot return null for non-nullable field Thing.c",
-                "path": ["thing", "c"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            }
-        */
         ]))
         .test();
 
@@ -1902,47 +1875,29 @@ fn reformat_response_coersion_propagation_into_object() {
             "#,
         )
         .query(r#"{ thing { a, b, c } }"#)
-        .response(json!({}))
-        // FIXME: All of the errors are discarded
-        .expected_errors(json!([
-        /* FIXME: The first improperly nullified field causes an early exit, so the other fields
-         * are not validated. Do we want to keep with this behavior or report all error?
-            {
-                "message": "Invalid value found for the type Int",
-                "path": ["thing", "a"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Cannot return null for non-nullable field Thing.b",
-                "path": ["thing", "a"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
+        .response(json!({
+            "thing": {
+                "a": 1,
+                "b": 1.1,
+                "c": 1.2
+            }
+        }))
+        // NOTE: The array validation stops at its first invalid value and "bubbles" up the
+        // nullification from there
+        .expected_errors(json!([            {
                 "message": "Invalid value found for the type Int",
                 "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Cannot return null for non-nullable field Thing.b",
+                "message": "Null value found for non-nullable type Int",
                 "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Invalid value found for the type Int",
-                "path": ["thing", "c"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Cannot return null for non-nullable field Thing.c",
-                "path": ["thing", "c"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Cannot return null for non-nullable field thing",
+            },            {
+                "message": "Null value found for non-nullable type Thing",
                 "path": ["thing"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
-            */
         ]))
         .test();
 }
@@ -1996,8 +1951,8 @@ fn reformat_response_coersion_propagation_into_union() {
             bar: String
         }"#;
 
-    let query_wo_type_info = r#"{ thing { ... on Foo { a, b } ... on Bar { bar } } }"#;
-    let query_with_type_info = r#"{ thing { __typename ... on Foo { a, b, c } ... on Bar { bar} } }"#;
+    let query_wo_type_info = r#"{ thing { ... on Foo { a, b, c } } }"#;
+    let query_with_type_info = r#"{ thing { __typename ... on Foo { a, b, c } } }"#;
 
     let resp_wo_type_info = json!({
         "thing": {
@@ -2018,14 +1973,13 @@ fn reformat_response_coersion_propagation_into_union() {
     // Case 1: __typename isn't queried and isn't returned
     FormatTest::builder()
         .schema(nullable_schema)
-        .query(query_with_type_info)
+        .query(query_wo_type_info)
         .response(resp_with_type_info.clone())
         .expected(json!({
             "thing": {
                 "a": 1,
                 "b": null,
                 "c": null,
-                "bar": null,
             }
         }))
         .expected_errors(json!([
@@ -2039,16 +1993,8 @@ fn reformat_response_coersion_propagation_into_union() {
                 "path": ["thing", "c"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
-            /* NOTE: This is reliant on the `is_subtype` reordering being true
-            {
-                "message": "Invalid values found for field of an abstract type without `__typename`, entire object must be nullified",
-                "path": ["thing"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            }
-            */
         ]))
         .test();
-    panic!();
 
     FormatTest::builder()
         .schema(non_nullable_schema)
@@ -2056,36 +2002,9 @@ fn reformat_response_coersion_propagation_into_union() {
         .response(resp_wo_type_info.clone())
         // NOTE: This is seemingly strange behavior but is consistent. Because we can't *always*
         // resolve the type of `thing`, we can't determine if the result is valid or not.
-        .expected(json!({ "thing": null }))
-        .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
-         * FIXME(@TylerBloom): Should the `__typename` error be returned over the more general
-         * result coersion error?
-         */
-            {
-                "message": "Invalid value found for the type Int",
-                "path": ["thing", "b"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Cannot return null for non-nullable field Thing.b",
-                "path": ["thing", "b"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            }
-            /*
-            {
-                "message": "Invalid value found for the type Int",
-                "path": ["thing", "c"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Invalid values found for field of an abstract type without `__typename`, entire object must be nullified",
-                "path": ["thing"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            }
-            */
-        ]))
+        .expected(json!({ "thing": { } }))
+        // NOTE: Same issue. We can not *always* know what type was intented, so we drop the data.
+        .expected_errors(json!([]))
         .test();
 
     // Case 2: __typename isn't queried but is returned
@@ -2121,6 +2040,8 @@ fn reformat_response_coersion_propagation_into_union() {
         .query(query_wo_type_info)
         .response(resp_with_type_info.clone())
         .expected(json!({ "thing": null }))
+        // NOTE: The array validation stops at its first invalid value and "bubbles" up the
+        // nullification from there
         .expected_errors(json!([
             {
                 "message": "Invalid value found for the type Int",
@@ -2128,17 +2049,10 @@ fn reformat_response_coersion_propagation_into_union() {
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Cannot return null for non-nullable field Foo.b",
+                "message": "Null value found for non-nullable type Int",
                 "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
-            /*
-            {
-                "message": "Invalid value found for the type Int",
-                "path": ["thing", "c"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            }
-            */
         ]))
         .test();
 
@@ -2147,72 +2061,16 @@ fn reformat_response_coersion_propagation_into_union() {
         .schema(nullable_schema)
         .query(query_with_type_info)
         .response(resp_wo_type_info.clone())
-        // FIXME(@TylerBloom): This is not expected. This should behave the same with(out)
-        // `__typename` being queried.
         .expected(json!({ "thing": null }))
-        .expected_errors(json!([
-            /* FIXME: Because __typename isn't here but maditory, so the rest is discarded. This is
-             * related to the `object` problem.
-             * At a minimun, an error for the lack of typename is needed
-            {
-                "message": "Invalid value found for field Query.thing.b",
-                "path": ["thing", "b"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Invalid value found for field Query.thing.c",
-                "path": ["thing", "c"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Invalid values found for field of an abstract type without __typename",
-                "path": ["thing"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "__typename was queried but not part of the response",
-                "path": ["thing"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            }
-            */
-        ]))
+        .expected_errors(json!([]))
         .test();
 
     FormatTest::builder()
         .schema(non_nullable_schema)
         .query(query_with_type_info)
         .response(resp_wo_type_info.clone())
-        // FIXME(@TylerBloom): This is not expected. This should behave the same with(out)
-        // `__typename` being queried.
         .expected(json!({ "thing": null }))
-        .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
-         * FIXME(@TylerBloom): Should the `__typename` error be returned over the more general
-         * result coersion error?
-         * NOTE: Same problem as above
-            {
-                "message": "Invalid value found for field Query.thing.b",
-                "path": ["thing", "b"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Invalid value found for field Query.thing.c",
-                "path": ["thing", "c"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Invalid values found for field of an abstract type without `__typename`, entire object must be nullified",
-                "path": ["thing"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "`__typename` was queried but not part of the response",
-                "path": ["thing"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            }
-        */
-        ]))
+        .expected_errors(json!([]))
         .test();
 
     // Case 4: __typename is queried and is returned
@@ -2247,6 +2105,8 @@ fn reformat_response_coersion_propagation_into_union() {
         .query(query_with_type_info)
         .response(resp_with_type_info.clone())
         .expected(json!({ "thing": null }))
+        // NOTE: The array validation stops at its first invalid value and "bubbles" up the
+        // nullification from there
         .expected_errors(json!([
             {
                 "message": "Invalid value found for the type Int",
@@ -2254,7 +2114,7 @@ fn reformat_response_coersion_propagation_into_union() {
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Cannot return null for non-nullable field Foo.b",
+                "message": "Null value found for non-nullable type Int",
                 "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
@@ -2341,22 +2201,9 @@ fn reformat_response_coersion_propagation_into_interfaces() {
         .expected(json!({
             "thing": {
                 "a": 1,
-                "b": null,
-                "c": null,
             }
         }))
-        .expected_errors(json!([
-            {
-                "message": "Invalid value found for the type Int",
-                "path": ["thing", "b"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Invalid value found for the type Int",
-                "path": ["thing", "c"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-        ]))
+        .expected_errors(json!([]))
         .test();
 
     FormatTest::builder()
@@ -2367,24 +2214,12 @@ fn reformat_response_coersion_propagation_into_interfaces() {
         // resolve the type of `thing` with __typename, we can't determine if the result is valid
         // or not. Thus, the nullification of the fragment doesn't "bubble up" to nullifying the
         // either "thing".
-        .expected(json!({ "thing": null }))
-        .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
-         * FIXME(@TylerBloom): Should the `__typename` error be returned over the more general
-         * result coersion error?
-        */
-            {
-                "message": "Invalid value found for the type Int",
-                "path": ["thing", "b"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Cannot return null for non-nullable field Thing.b",
-                "path": ["thing", "b"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+        .expected(json!({
+            "thing": {
+                "a": 1
             }
-        ]))
+        }))
+        .expected_errors(json!([]))
         .test();
 
     // Case 2: __typename isn't queried but is returned
@@ -2418,6 +2253,8 @@ fn reformat_response_coersion_propagation_into_interfaces() {
         .query(query_wo_type_info)
         .response(resp_with_type_info.clone())
         .expected(json!({ "thing": null }))
+        // NOTE: The array validation stops at its first invalid value and "bubbles" up the
+        // nullification from there
         .expected_errors(json!([
             {
                 "message": "Invalid value found for the type Int",
@@ -2425,7 +2262,7 @@ fn reformat_response_coersion_propagation_into_interfaces() {
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Cannot return null for non-nullable field Foo.b",
+                "message": "Null value found for non-nullable type Int",
                 "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
@@ -2440,26 +2277,7 @@ fn reformat_response_coersion_propagation_into_interfaces() {
         // FIXME(@TylerBloom): This is not expected. This should behave the same with(out)
         // `__typename` being queried.
         .expected(json!({ "thing": null }))
-        .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
-            {
-                "message": "Invalid value found for field Query.thing.b",
-                "path": ["thing", "b"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Invalid value found for field Query.thing.c",
-                "path": ["thing", "c"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Invalid values found for field of an abstract type without `__typename`
-                "path": ["thing"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            }
-        */
-        ]))
+        .expected_errors(json!([]))
         .test();
 
     FormatTest::builder()
@@ -2467,28 +2285,7 @@ fn reformat_response_coersion_propagation_into_interfaces() {
         .query(query_with_type_info)
         .response(resp_wo_type_info.clone())
         .expected(json!({ "thing": null }))
-        .expected_errors(json!([
-        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
-         * does not produce these errors.
-         * FIXME(@TylerBloom): Should the `__typename` error be returned over the more general
-         * result coersion error?
-            {
-                "message": "Invalid value found for field Query.thing.b",
-                "path": ["thing", "b"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Invalid value found for field Query.thing.c",
-                "path": ["thing", "c"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            },
-            {
-                "message": "Invalid values found for field of an abstract type without `__typename`
-                "path": ["thing"],
-                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
-            }
-        */
-        ]))
+        .expected_errors(json!([]))
         .test();
 
     // Case 4: __typename is queried and is returned
@@ -2523,6 +2320,8 @@ fn reformat_response_coersion_propagation_into_interfaces() {
         .query(query_with_type_info)
         .response(resp_with_type_info.clone())
         .expected(json!({ "thing": null }))
+        // FIXME(@TylerBloom): This is not expected. This should behave the same with(out)
+        // `__typename` being queried.
         .expected_errors(json!([
             {
                 "message": "Invalid value found for the type Int",
@@ -2530,7 +2329,7 @@ fn reformat_response_coersion_propagation_into_interfaces() {
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Cannot return null for non-nullable field Foo.b",
+                "message": "Null value found for non-nullable type Int",
                 "path": ["thing", "b"],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
@@ -3419,19 +3218,11 @@ fn filter_list_errors() {
         .expected_extensions(json! {{
             "valueCompletion": [
                 {
-                    "message": "Cannot return null for non-nullable array element of type String",
+                    "message": "Null value found for non-nullable type String",
                     "path": ["list", "l2", 1]
                 },
-                {
-                    "message": "Cannot return null for non-nullable array element of type String",
-                    "path": ["list", "l2", 2]
-                },
-                {
-                    "message": "Cannot return null for non-nullable array element of type String",
-                    "path": ["list", "l2", 3]
-                }
             ]
-        }},)
+        }})
         .test();
 
     FormatTest::builder()
@@ -3630,7 +3421,7 @@ fn filter_nested_object_errors() {
         .expected_extensions(json! {{
             "valueCompletion": [
                 {
-                    "message": "Cannot return null for non-nullable field Review.text2",
+                    "message": "Null value found for non-nullable type String",
                     "path": ["me", "reviews1", 0]
                 }
             ]

@@ -333,7 +333,6 @@ impl Query {
         Ok((fragments, operation, defer_stats, hash))
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn format_value<'a: 'b, 'b>(
         &'a self,
         parameters: &mut FormatParameters,
@@ -386,7 +385,6 @@ impl Query {
     }
 
     #[inline]
-    #[allow(clippy::too_many_arguments)]
     fn format_non_nullable_value<'a: 'b, 'b>(
         &'a self,
         parameters: &mut FormatParameters,
@@ -428,7 +426,6 @@ impl Query {
     }
 
     #[inline]
-    #[allow(clippy::too_many_arguments)]
     fn format_list<'a: 'b, 'b>(
         &'a self,
         parameters: &mut FormatParameters,
@@ -463,6 +460,9 @@ impl Query {
                     Ok(())
                 })
         {
+            // We pop here because, if an error is found, the path still contains the index of the
+            // invalid value.
+            path.pop();
             parameters.nullified.push(Path::from_response_slice(path));
             parameters.coersion_errors.push(
                 Error::builder()
@@ -473,9 +473,6 @@ impl Query {
                     .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
                     .build(),
             );
-            // We pop here because, if an error is found, the path still contains the index of the
-            // invalid value and that needs to be removed.
-            path.pop();
             *output = Value::Null;
         }
         Ok(())
@@ -772,11 +769,11 @@ impl Query {
                             parameters.errors.push(
                                 Error::builder()
                                     .message(format!(
-                                        "Cannot return null for non-nullable field {current_type}.{}",
-                                        field_name.as_str()
+                                        "Null value found for non-nullable type {}",
+                                        field_type.0.inner_named_type()
                                     ))
                                     .path(Path::from_response_slice(path))
-                                    .build()
+                                    .build(),
                             );
 
                             return Err(InvalidValue);
