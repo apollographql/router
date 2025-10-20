@@ -32,9 +32,9 @@ These attributes represent how a span spends time (in nanoseconds) over its life
 
 #### Router overhead metric
 
-The `apollo.router.overhead` histogram provides a more direct measurement of router processing overhead. This metric tracks the time the router spends on tasks other than waiting for subgraph requests—including GraphQL parsing, validation, query planning, response composition, and plugin execution.
+The `apollo.router.overhead` histogram provides a more direct measurement of router processing overhead. This metric tracks the time the router spends on tasks other than waiting for downstream HTTP requests—including GraphQL parsing, validation, query planning, response composition, and plugin execution.
 
-The overhead calculation excludes time spent waiting for subgraph responses, giving you visibility into the router's actual processing time versus subgraph latency. This metric helps identify when the router itself is a bottleneck versus when delays are caused by downstream services.
+The overhead calculation excludes time spent waiting for downstream HTTP services (subgraphs and connectors), giving you visibility into the router's actual processing time versus downstream latency. This metric helps identify when the router itself is a bottleneck versus when delays are caused by downstream services.
 
 <Note>
 
@@ -45,6 +45,8 @@ Important considerations for router overhead metrics:
 - **Configuration requirements**: For meaningful overhead measurements, configure [operation limits](/router/configuration/operation-limits) and [traffic shaping](/router/configuration/traffic-shaping). Without these controls, unbounded request complexity or traffic spikes can skew overhead measurements.
 
 - **CPU saturation**: High overhead values often indicate CPU saturation. When the router's CPU resources are exhausted, processing time increases significantly. Monitor CPU utilization alongside overhead metrics to identify resource constraints.
+
+- **Coprocessor requests:** Coprocessor request time is currently included in the overhead calculation. In a future release, coprocessor time may be excluded similar to subgraphs and connectors.
 
 </Note>
 

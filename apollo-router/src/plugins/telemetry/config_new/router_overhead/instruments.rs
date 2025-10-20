@@ -34,7 +34,7 @@ pub(crate) fn create_static_instrument(enabled: bool) -> Option<(String, StaticI
                 .f64_histogram(ROUTER_OVERHEAD_METRIC)
                 .with_unit("s")
                 .with_description(
-                    "Router processing overhead (time not spent waiting for subgraphs).",
+                    "Router processing overhead (time not spent waiting for subgraphs or connectors to respond).",
                 )
                 .init(),
         ),
