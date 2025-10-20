@@ -1,5 +1,6 @@
 mod config;
 mod guard;
+pub(crate) mod instruments;
 mod layer;
 mod tracker;
 
