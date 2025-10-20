@@ -30,6 +30,41 @@ You can find the activity of a particular request in its trace spans. Spans have
 
 These attributes represent how a span spends time (in nanoseconds) over its lifetime. Your APM provider can likely use this trace data to generate synthetic metrics which you can then create an approximation of.
 
+#### Router overhead metric
+
+The `apollo.router.overhead` histogram provides a more direct measurement of router processing overhead. This metric tracks the time the router spends on tasks other than waiting for subgraph requests—including GraphQL parsing, validation, query planning, response composition, and plugin execution.
+
+The overhead calculation excludes time spent waiting for subgraph responses, giving you visibility into the router's actual processing time versus subgraph latency. This metric helps identify when the router itself is a bottleneck versus when delays are caused by downstream services.
+
+<Note>
+
+**Important considerations for router overhead metrics:**
+
+- **Version variability**: Router overhead may vary between router versions. For example, a correctness fix or security improvement may result in higher overhead. Always compare overhead measurements within the same router version.
+
+- **Configuration requirements**: For meaningful overhead measurements, configure [operation limits](/router/configuration/operation-limits) and [traffic shaping](/router/configuration/traffic-shaping). Without these controls, unbounded request complexity or traffic spikes can skew overhead measurements.
+
+- **CPU saturation**: High overhead values often indicate CPU saturation. When the router's CPU resources are exhausted, processing time increases significantly. Monitor CPU utilization alongside overhead metrics to identify resource constraints.
+
+</Note>
+
+Available attributes:
+- `subgraph.active_requests`: A boolean indicating whether any subgraph requests were active at the time the overhead was calculated. This attribute is critical for filtering meaningful overhead measurements.
+
+  **For operations that stream results (such as queries with `@defer`), the overhead metric becomes less meaningful since the router is in a waiting state rather than actively processing. When analyzing overhead to identify router processing bottlenecks, **exclude measurements where `subgraph.active_requests: true`** to focus only on pure router processing time without subgraph wait time interference.
+
+Configuration example:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        apollo.router.overhead: true
+```
+
+You can attach custom attributes using [selectors](/router/configuration/telemetry/instrumentation/selectors#router), documented in the [selectors reference](/router/configuration/telemetry/instrumentation/selectors#router).
+
 ### GraphQL
 
 - `apollo.router.graphql_error` - counts GraphQL errors in responses. Also counts errors which occur during the response validation phase, which are represented in client responses as `extensions.valueCompletion` instead of actual GraphQL errors. Attributes:

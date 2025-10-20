@@ -50,6 +50,8 @@ The router service is the initial entrypoint for all requests. It is HTTP centri
 | `on_graphql_error`    | No          | `true` \| `false`             | Boolean set to true if the response payload contains a GraphQL error |
 | `static`              | No          |                             | A static string value                                                |
 | `error`               | No          | `reason`                    | a string value containing error reason when it's a critical error    |
+| `router_overhead`     | No          | `true` \| `false`             | Router processing overhead duration in seconds (excludes subgraph wait time) |
+| `active_subgraph_requests` | No     | `count` \| `bool`            | The number of active subgraph requests (`count`) or whether any are active (`bool`) |
 
 ### Supergraph
 
@@ -241,6 +243,44 @@ telemetry:
               # response_errors: "$.[0].message"
               # response_errors: "$.[0].locations"
               # response_errors: "$.[0].extensions"
+```
+
+### Router overhead selectors
+
+The `router_overhead` and `active_subgraph_requests` selectors allow you to extract router processing overhead metrics. These selectors are available on the router service and can be used with custom instruments to create detailed overhead metrics with custom attributes.
+
+Example using `router_overhead` selector to track overhead as a custom metric value:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        # Create a custom histogram with router overhead as the value
+        my.router.overhead:
+          value:
+            router_overhead: true
+          type: histogram
+          unit: s
+          description: "Router processing overhead duration"
+```
+
+Example using `active_subgraph_requests` selector to add context to overhead metrics:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        apollo.router.overhead:
+          attributes:
+            custom:
+              # Add the count of active subgraph requests as an attribute
+              active_requests_count:
+                active_subgraph_requests: count
+              # Add a boolean indicating if any subgraph requests were active
+              has_active_requests:
+                active_subgraph_requests: bool
 ```
 
 ### Getting GraphQL operation info
