@@ -235,9 +235,7 @@ impl Exporter {
     }
 
     /// Add the supergraph schema to the archive with async I/O
-    async fn add_supergraph_schema_to_archive<
-        W: tokio::io::AsyncWrite + Unpin + Send + Sync,
-    >(
+    async fn add_supergraph_schema_to_archive<W: tokio::io::AsyncWrite + Unpin + Send + Sync>(
         tar: &mut tokio_tar::Builder<W>,
         supergraph_schema: &str,
     ) -> DiagnosticsResult<()> {
