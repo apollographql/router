@@ -6521,6 +6521,13 @@ expression: "&schema"
           "description": "The instrument name you're targeting",
           "type": "string"
         },
+        "rename": {
+          "description": "Rename the metric to this name\n\nThis allows you to customize metric names for both OTLP and Prometheus exporters.\nNote: Prometheus will apply additional transformations (dots to underscores, unit suffixes).\nApollo metrics are not affected by this rename - they will retain original names.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "unit": {
           "description": "New unit to set to the instrument",
           "type": [

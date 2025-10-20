@@ -45,7 +45,6 @@
       ],
       matchManagers: 'regex',
       groupName: 'rustc',
-      branchName: '{{{branchPrefix}}}rustc',
     },
     // Keep serde_yaml at 0.8.x - version 0.9.x has breaking changes and the
     // underlying package is deprecated. The package works as-is and we can
@@ -121,6 +120,12 @@
       groupSlug: 'rust-axum',
       matchManagers: ['cargo'],
       matchPackageNames: ['/^axum$/', '/^axum-extra$/'],
+    },
+    {
+      groupName: 'jemalloc crates',
+      groupSlug: 'rust-jemalloc',
+      matchManagers: ['cargo'],
+      matchPackageNames: ['/^tikv-jemallocator$/', '/^tikv-jemalloc-/'],
     },
     // Handle exact version pins (versions starting with =) in Cargo.toml files
     // separately. Put them in individual PRs and require dashboard approval
