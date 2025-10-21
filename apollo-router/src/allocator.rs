@@ -58,7 +58,7 @@ extern "C" fn drop_ad_hoc_profiler() {
 #[unsafe(export_name = "_rjem_malloc_conf")]
 static malloc_conf: Option<&'static libc::c_char> = Some(unsafe {
     let data: &'static CStr = c"prof:true,prof_active:false";
-    let ptr: *const i8 = data.as_ptr();
+    let ptr: *const libc::c_char = data.as_ptr();
     let output: &'static libc::c_char = &*ptr;
     output
 });
