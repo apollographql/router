@@ -561,6 +561,7 @@ impl PluggableSupergraphServiceBuilder {
             subgraph_schemas: query_planner_service.subgraph_schemas(),
             plugins: self.plugins.clone(),
             fetch_service_factory,
+            configuration: configuration.clone(),
         };
 
         let execution_service: execution::BoxCloneService = ServiceBuilder::new()

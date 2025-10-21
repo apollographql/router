@@ -128,6 +128,7 @@ impl Query {
         variables: Object,
         schema: &ApiSchema,
         defer_conditions: BooleanValues,
+        include_coercion_errors: bool,
     ) -> Vec<Path> {
         let data = std::mem::take(&mut response.data);
 
@@ -146,7 +147,7 @@ impl Query {
                                 variables: &variables,
                                 schema,
                                 errors: Vec::new(),
-                                coercion_errors: Vec::new(),
+                                coercion_errors: include_coercion_errors.then(Vec::new),
                                 nullified: Vec::new(),
                             };
 
@@ -204,7 +205,7 @@ impl Query {
                         variables: &all_variables,
                         schema,
                         errors: Vec::new(),
-                        coercion_errors: Vec::new(),
+                        coercion_errors: include_coercion_errors.then(Vec::new),
                         nullified: Vec::new(),
                     };
 
@@ -229,8 +230,10 @@ impl Query {
                             .insert(EXTENSIONS_VALUE_COMPLETION_KEY, value);
                     }
 
-                    if !parameters.coercion_errors.is_empty() {
-                        response.errors.append(&mut parameters.coercion_errors);
+                    if let Some(errors) = parameters.coercion_errors.as_mut()
+                        && !errors.is_empty()
+                    {
+                        response.errors.append(errors);
                     }
 
                     return parameters.nullified;
@@ -415,7 +418,7 @@ impl Query {
                     .path(Path::from_response_slice(path))
                     .build(),
             );
-            parameters.coercion_errors.push(
+            parameters.insert_coercion_error(
                 Error::builder()
                     .message(message)
                     .path(Path::from_response_slice(path))
@@ -468,7 +471,7 @@ impl Query {
             // invalid value.
             path.pop();
             parameters.nullified.push(Path::from_response_slice(path));
-            parameters.coercion_errors.push(
+            parameters.insert_coercion_error(
                 Error::builder()
                     .message(format!(
                         "Invalid value found inside the array of type [{inner_type}]"
@@ -587,7 +590,7 @@ impl Query {
             *output = input.clone();
         } else {
             if !input.is_null() {
-                parameters.coercion_errors.push(
+                parameters.insert_coercion_error(
                     Error::builder()
                         .message("Invalid value found for the type Int")
                         .path(Path::from_response_slice(path))
@@ -611,7 +614,7 @@ impl Query {
             *output = input.clone();
         } else {
             if !input.is_null() {
-                parameters.coercion_errors.push(
+                parameters.insert_coercion_error(
                     Error::builder()
                         .message("Invalid value found for the type Float")
                         .path(Path::from_response_slice(path))
@@ -635,7 +638,7 @@ impl Query {
             *output = input.clone();
         } else {
             if !input.is_null() {
-                parameters.coercion_errors.push(
+                parameters.insert_coercion_error(
                     Error::builder()
                         .message("Invalid value found for the type Boolean")
                         .path(Path::from_response_slice(path))
@@ -659,7 +662,7 @@ impl Query {
             *output = input.clone();
         } else {
             if !input.is_null() {
-                parameters.coercion_errors.push(
+                parameters.insert_coercion_error(
                     Error::builder()
                         .message("Invalid value found for the type String")
                         .path(Path::from_response_slice(path))
@@ -683,7 +686,7 @@ impl Query {
             *output = input.clone();
         } else {
             if !input.is_null() {
-                parameters.coercion_errors.push(
+                parameters.insert_coercion_error(
                     Error::builder()
                         .message("Invalid value found for the type ID")
                         .path(Path::from_response_slice(path))
@@ -1171,9 +1174,17 @@ impl Query {
 struct FormatParameters<'a> {
     variables: &'a Object,
     errors: Vec<Error>,
-    coercion_errors: Vec<Error>,
+    coercion_errors: Option<Vec<Error>>,
     nullified: Vec<Path>,
     schema: &'a ApiSchema,
+}
+
+impl FormatParameters<'_> {
+    fn insert_coercion_error(&mut self, error: Error) {
+        if let Some(errors) = self.coercion_errors.as_mut() {
+            errors.push(error)
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -144,6 +144,7 @@ impl FormatTest {
                 .clone(),
             api_schema,
             BooleanValues { bits: 0 },
+            true,
         );
 
         if let Some(e) = self.expected {
@@ -6254,6 +6255,7 @@ fn fragment_on_interface_on_query() {
         Default::default(),
         api_schema,
         BooleanValues { bits: 0 },
+        true,
     );
     assert_eq_and_ordered!(
         response.data.as_ref().unwrap(),
@@ -6965,6 +6967,7 @@ fn filtered_defer_fragment() {
         Object::new(),
         schema.api_schema(),
         BooleanValues { bits: 0 },
+        true,
     );
 
     assert_json_snapshot!(response);
@@ -6974,6 +6977,7 @@ fn filtered_defer_fragment() {
         Object::new(),
         schema.api_schema(),
         BooleanValues { bits: 0 },
+        true,
     );
 
     assert_json_snapshot!(response);

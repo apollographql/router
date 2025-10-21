@@ -732,6 +732,14 @@ pub(crate) struct Supergraph {
     /// but request handling will stop immediately when the client connection is closed.
     pub(crate) early_cancel: bool,
 
+    /// Enable errors generated during response reformatting and result coercion to be return in
+    /// responses.
+    /// Default: false
+    /// All subgraph responses are checked and corrected to ensure alignment with the schema and
+    /// query. When enabled, misaligned values will generate errors which are included in the
+    /// response.
+    pub(crate) insert_result_coercion_errors: bool,
+
     /// Log a message if the client closes the connection before the response is sent.
     /// Default: false.
     pub(crate) experimental_log_on_broken_pipe: bool,
@@ -758,6 +766,7 @@ impl Supergraph {
         generate_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
+        insert_result_coercion_errors: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -771,6 +780,7 @@ impl Supergraph {
                 .unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
+            insert_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
         }
     }
 }
@@ -789,6 +799,7 @@ impl Supergraph {
         generate_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
+        insert_result_coercion_errors: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -802,6 +813,7 @@ impl Supergraph {
                 .unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
+            insert_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
         }
     }
 }
