@@ -195,7 +195,7 @@ impl ExecutionService {
 
         let execution_span = Span::current();
         let insert_result_coercion_errors =
-            self.configuration.supergraph.insert_result_coercion_errors;
+            self.configuration.supergraph.enable_result_coercion_errors;
 
         let stream = stream
             .map(move |mut response: Response| {
@@ -672,7 +672,7 @@ impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
                         subscription_config: subscription_plugin_conf,
                         subgraph_schemas: self.subgraph_schemas.clone(),
                         apollo_telemetry_config: apollo_telemetry_conf,
-                        configuration: self.configuration.clone(),
+                        configuration: Arc::clone(&self.configuration),
                     }
                     .boxed(),
                     |acc, (_, e)| e.execution_service(acc),
