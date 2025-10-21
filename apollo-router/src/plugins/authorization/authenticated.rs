@@ -6,8 +6,10 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast;
 use apollo_compiler::executable;
+use apollo_compiler::name;
 use apollo_compiler::schema;
 use apollo_compiler::schema::Implementers;
+use apollo_federation::link::spec::Identity;
 use tower::BoxError;
 
 use crate::json_ext::Path;
@@ -18,8 +20,7 @@ use crate::spec::query::transform;
 use crate::spec::query::transform::TransformState;
 use crate::spec::query::traverse;
 
-pub(crate) const AUTHENTICATED_DIRECTIVE_NAME: &str = "authenticated";
-pub(crate) const AUTHENTICATED_SPEC_BASE_URL: &str = "https://specs.apollo.dev/authenticated";
+pub(crate) const AUTHENTICATED_DIRECTIVE_NAME: Name = name!("authenticated");
 pub(crate) const AUTHENTICATED_SPEC_VERSION_RANGE: &str = ">=0.1.0, <=0.1.0";
 
 pub(crate) struct AuthenticatedCheckVisitor<'a> {
@@ -43,9 +44,9 @@ impl<'a> AuthenticatedCheckVisitor<'a> {
             found: false,
             authenticated_directive_name: Schema::directive_name(
                 schema,
-                AUTHENTICATED_SPEC_BASE_URL,
+                &Identity::authenticated_identity(),
                 AUTHENTICATED_SPEC_VERSION_RANGE,
-                AUTHENTICATED_DIRECTIVE_NAME,
+                &AUTHENTICATED_DIRECTIVE_NAME,
             )?,
         })
     }
@@ -205,9 +206,9 @@ impl<'a> AuthenticatedVisitor<'a> {
             current_path: Path::default(),
             authenticated_directive_name: Schema::directive_name(
                 schema,
-                AUTHENTICATED_SPEC_BASE_URL,
+                &Identity::authenticated_identity(),
                 AUTHENTICATED_SPEC_VERSION_RANGE,
-                AUTHENTICATED_DIRECTIVE_NAME,
+                &AUTHENTICATED_DIRECTIVE_NAME,
             )?,
         })
     }
@@ -1104,7 +1105,11 @@ mod tests {
     schema
       @link(url: "https://specs.apollo.dev/link/v1.0")
       @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
-      @link(url: "https://specs.apollo.dev/authenticated/v0.1", as: "auth", for: SECURITY)
+      @link(
+        url: "https://specs.apollo.dev/authenticated/v0.1"
+        import: [{ name: "@authenticated", as: "@auth" }]
+        for: SECURITY
+      )
     {
       query: Query
       mutation: Mutation

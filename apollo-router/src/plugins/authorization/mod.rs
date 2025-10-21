@@ -6,6 +6,7 @@ use std::ops::ControlFlow;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::ast;
+use apollo_federation::link::spec::Identity;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -15,15 +16,12 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
-use self::authenticated::AUTHENTICATED_SPEC_BASE_URL;
 use self::authenticated::AUTHENTICATED_SPEC_VERSION_RANGE;
 use self::authenticated::AuthenticatedCheckVisitor;
 use self::authenticated::AuthenticatedVisitor;
-use self::policy::POLICY_SPEC_BASE_URL;
 use self::policy::POLICY_SPEC_VERSION_RANGE;
 use self::policy::PolicyExtractionVisitor;
 use self::policy::PolicyFilteringVisitor;
-use self::scopes::REQUIRES_SCOPES_SPEC_BASE_URL;
 use self::scopes::REQUIRES_SCOPES_SPEC_VERSION_RANGE;
 use self::scopes::ScopeExtractionVisitor;
 use self::scopes::ScopeFilteringVisitor;
@@ -149,13 +147,13 @@ impl AuthorizationPlugin {
             .and_then(|v| v.get("enabled").and_then(|v| v.as_bool()));
 
         let has_authorization_directives = schema.has_spec(
-            AUTHENTICATED_SPEC_BASE_URL,
+            &Identity::authenticated_identity(),
             AUTHENTICATED_SPEC_VERSION_RANGE,
         ) || schema.has_spec(
-            REQUIRES_SCOPES_SPEC_BASE_URL,
+            &Identity::requires_scopes_identity(),
             REQUIRES_SCOPES_SPEC_VERSION_RANGE,
         ) || schema
-            .has_spec(POLICY_SPEC_BASE_URL, POLICY_SPEC_VERSION_RANGE);
+            .has_spec(&Identity::policy_identity(), POLICY_SPEC_VERSION_RANGE);
 
         Ok(has_config.unwrap_or(true) && has_authorization_directives)
     }
