@@ -374,10 +374,6 @@ pub(crate) trait HasType {
     ) -> Result<EnumExampleAst, FederationError>;
 
     fn is_argument() -> bool;
-
-    fn exists_in_schema(&self, schema: &FederationSchema) -> bool {
-        self.get_type(schema).is_ok()
-    }
 }
 
 impl HasType for DirectiveArgumentDefinitionPosition {
