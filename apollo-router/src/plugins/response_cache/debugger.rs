@@ -3,7 +3,7 @@ use serde::Serialize;
 
 use crate::graphql;
 use crate::json_ext::Object;
-use plugins::response_cache::cache_control::CacheControl};
+use crate::plugins::response_cache::cache_control::CacheControl;
 
 pub(super) type CacheKeysContext = Vec<CacheKeyContext>;
 
@@ -108,19 +108,19 @@ impl CacheKeyContext {
             });
         }
         // TTL
-        match self.cache_control.ttl() {
-            Some(ttl) => {
-                // Small TTL less than a minute
-                if ttl < 60 {
+        match self.cache_control.get_s_max_age_or_max_age() {
+            Some(maxage) => {
+                // Small maxage less than a minute
+                if maxage < 60 {
                     self.warnings.push(Warning {
                         code: "CACHE_CONTROL_SMALL_MAX_AGE".to_string(),
-                        links: vec![Link { url: String::from("https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/observability"), title: "Monitor with telemetry".to_string() }],
+                        links: vec![Link { url: String::from("https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/observability"), title: "Monitor with telemetry".to_string() }, cache_control_mdn_docs.clone()],
                         message: "Your subgraph returns a 'Cache-Control' header with a small max-age (less than a minute) which could end up with less cache hits".to_string(),
                     });
                 }
                 // Age header value bigger than max-age in cache-control header
                 if let Some(age) = self.cache_control.get_age()
-                    && ttl < age
+                    && maxage < age
                 {
                     self.warnings.push(Warning {
                         code: "CACHE_CONTROLL_MAX_AGE_SMALLER_AGE".to_string(),

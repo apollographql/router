@@ -372,6 +372,10 @@ impl CacheControl {
         self.no_store
     }
 
+    pub(crate) fn get_s_max_age_or_max_age(&self) -> Option<u64> {
+        self.s_max_age.or(self.max_age)
+    }
+
     pub(crate) fn get_age(&self) -> Option<u64> {
         self.age
     }

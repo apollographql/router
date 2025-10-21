@@ -371,7 +371,7 @@ impl PluginPrivate for ResponseCache {
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         let subgraph_ttl = self
             .subgraph_ttl(name)
-            .unwrap_or_else(|| Duration::from_secs(60 * 60 * 24)); // The unwrap should not happen because it's checked when creating the plugin
+            .unwrap_or_else(|| Duration::from_secs(60 * 60 * 24)); // The unwrap should not happen because it's checked when creating the plugin (except for tests)
         let subgraph_enabled = self.subgraph_enabled(name);
         let private_id = self.subgraphs.get(name).private_id.clone();
 
@@ -383,7 +383,7 @@ impl PluginPrivate for ResponseCache {
                 .map_response(move |response: subgraph::Response| {
                     update_cache_control(
                         &response.context,
-                        &CacheControl::new(response.response.headers(), None)
+                        &CacheControl::new(response.response.headers(), subgraph_ttl.into())
                             .ok()
                             .unwrap_or_else(CacheControl::no_store),
                     );
@@ -412,7 +412,7 @@ impl PluginPrivate for ResponseCache {
                 .map_response(move |response: subgraph::Response| {
                     update_cache_control(
                         &response.context,
-                        &CacheControl::new(response.response.headers(), None)
+                        &CacheControl::new(response.response.headers(), subgraph_ttl.into())
                             .ok()
                             .unwrap_or_else(CacheControl::no_store),
                     );
@@ -785,7 +785,8 @@ impl CacheService {
                 .contains_key(REPRESENTATIONS);
             let resp = self.service.call(request).await?;
             if self.debug {
-                let cache_control = CacheControl::new(resp.response.headers(), None)?;
+                let cache_control =
+                    CacheControl::new(resp.response.headers(), self.subgraph_ttl.into())?;
                 let kind = if is_entity {
                     CacheEntryKind::Entity {
                         typename: "".to_string(),
@@ -1665,8 +1666,9 @@ async fn cache_store_entities_from_response(
         // if the scope is private but we do not have a way to differentiate users, do not store anything in the cache
         let should_cache_private = !cache_control.private() || private_id.is_some();
 
+        // We check it's not known as a private query because if it's known as a private query that means the private id is already part of the hash
         let update_key_private = if !is_known_private && cache_control.private() {
-            private_id
+            private_id.clone()
         } else {
             None
         };
@@ -1692,6 +1694,7 @@ async fn cache_store_entities_from_response(
             default_subgraph_ttl,
             cache_control,
             &mut result_from_cache,
+            private_id,
             update_key_private,
             should_cache_private,
             &response.subgraph_name,
@@ -2198,6 +2201,8 @@ async fn insert_entities_in_result(
     default_subgraph_ttl: Duration,
     cache_control: CacheControl,
     result: &mut Vec<IntermediateResult>,
+    // The original private id fetched from context and hashed to put it in the debug entry
+    private_id_for_dbg: Option<String>,
     update_key_private: Option<String>,
     should_cache_private: bool,
     subgraph_name: &str,
@@ -2279,7 +2284,7 @@ async fn insert_entities_in_result(
                     debug_ctx_entries.push(
                         CacheKeyContext {
                             key: key.clone(),
-                            hashed_private_id: update_key_private.clone(),
+                            hashed_private_id: private_id_for_dbg.clone(),
                             invalidation_keys: invalidation_keys
                                 .clone()
                                 .into_iter()

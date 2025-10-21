@@ -23,6 +23,7 @@ expression: cache_keys
       "maxAge": 86400,
       "private": true
     },
+    "shouldStore": false,
     "data": {
       "data": {
         "currentUser": {
@@ -32,7 +33,23 @@ expression: cache_keys
           }
         }
       }
-    }
+    },
+    "warnings": [
+      {
+        "code": "CACHE_CONTROL_PRIVATE_WITHOUT_PRIVATE_ID",
+        "links": [
+          {
+            "url": "https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/customization#private-data-caching",
+            "title": "Configure private data caching in the Router"
+          },
+          {
+            "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cache-Control",
+            "title": "Cache-Control header documentation"
+          }
+        ],
+        "message": "Your subgraph returns a 'Cache-Control' header containing private but you didn't provide a context entry to get the private data (token, username, ...) related to the current user"
+      }
+    ]
   },
   {
     "key": "version:1.0:subgraph:orga:type:Organization:entity:07f0ad9351c409fd3acfae0be59e64f218dc486d6dbe0081e68794673b96df73:representation::hash:f6acbaaee10175327fa6a7882704a4e85b732d7561e7c399fd49069486da68b8:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
@@ -64,6 +81,7 @@ expression: cache_keys
       "maxAge": 86400,
       "private": true
     },
+    "shouldStore": false,
     "data": {
       "data": {
         "creatorUser": {
@@ -71,6 +89,22 @@ expression: cache_keys
           "id": 2
         }
       }
-    }
+    },
+    "warnings": [
+      {
+        "code": "CACHE_CONTROL_PRIVATE_WITHOUT_PRIVATE_ID",
+        "links": [
+          {
+            "url": "https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/customization#private-data-caching",
+            "title": "Configure private data caching in the Router"
+          },
+          {
+            "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cache-Control",
+            "title": "Cache-Control header documentation"
+          }
+        ],
+        "message": "Your subgraph returns a 'Cache-Control' header containing private but you didn't provide a context entry to get the private data (token, username, ...) related to the current user"
+      }
+    ]
   }
 ]

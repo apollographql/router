@@ -18,8 +18,10 @@ expression: cache_keys
     "source": "subgraph",
     "cacheControl": {
       "created": 0,
+      "maxAge": 86400,
       "private": true
     },
+    "shouldStore": false,
     "data": {
       "data": {
         "currentUser": {
@@ -29,7 +31,33 @@ expression: cache_keys
           }
         }
       }
-    }
+    },
+    "warnings": [
+      {
+        "code": "CACHE_CONTROL_PRIVATE_WITHOUT_PRIVATE_ID",
+        "links": [
+          {
+            "url": "https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/customization#private-data-caching",
+            "title": "Configure private data caching in the Router"
+          },
+          {
+            "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cache-Control",
+            "title": "Cache-Control header documentation"
+          }
+        ],
+        "message": "Your subgraph returns a 'Cache-Control' header containing private but you didn't provide a context entry to get the private data (token, username, ...) related to the current user"
+      },
+      {
+        "code": "NO_CACHE_TAG_ON_ROOT_FIELD",
+        "links": [
+          {
+            "url": "https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#invalidation-methods",
+            "title": "Add '@cacheTag' in your schema"
+          }
+        ],
+        "message": "No cache tags are specified on your root fields query, if you want to use active invalidation you'll need to add cache tags on your root fields to actively invalidate cached data"
+      }
+    ]
   },
   {
     "key": "-",
@@ -53,8 +81,10 @@ expression: cache_keys
     "source": "subgraph",
     "cacheControl": {
       "created": 0,
+      "maxAge": 86400,
       "private": true
     },
+    "shouldStore": false,
     "data": {
       "data": {
         "_entities": [
@@ -66,6 +96,22 @@ expression: cache_keys
           }
         ]
       }
-    }
+    },
+    "warnings": [
+      {
+        "code": "CACHE_CONTROL_PRIVATE_WITHOUT_PRIVATE_ID",
+        "links": [
+          {
+            "url": "https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/customization#private-data-caching",
+            "title": "Configure private data caching in the Router"
+          },
+          {
+            "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cache-Control",
+            "title": "Cache-Control header documentation"
+          }
+        ],
+        "message": "Your subgraph returns a 'Cache-Control' header containing private but you didn't provide a context entry to get the private data (token, username, ...) related to the current user"
+      }
+    ]
   }
 ]
