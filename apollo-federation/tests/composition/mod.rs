@@ -12,6 +12,7 @@ mod compose_validation;
 mod demand_control;
 // TODO: remove #[ignore] from tests once all fns called by Merger::merge() are implemented
 mod external;
+mod hints;
 mod override_directive;
 mod subscription;
 mod supergraph_reversibility;
