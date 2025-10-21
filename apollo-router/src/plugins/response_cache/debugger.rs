@@ -1,6 +1,9 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
-use crate::{graphql, json_ext::Object, plugins::response_cache::cache_control::CacheControl};
+use crate::graphql;
+use crate::json_ext::Object;
+use plugins::response_cache::cache_control::CacheControl};
 
 pub(super) type CacheKeysContext = Vec<CacheKeyContext>;
 
@@ -145,12 +148,13 @@ impl CacheKeyContext {
                 });
             }
 
+            let root_fields_len = root_fields.len();
             // Several root fields cached in the same entry
-            if root_fields.len() > 1 {
+            if root_fields_len > 1 {
                 self.warnings.push(Warning {
                     code: "SEVERAL_ROOT_FIELDS".to_string(),
                     links: vec![Link { url: String::from("https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/faq#how-does-caching-work-for-operations-with-multiple-root-fields"), title: "Caching for operations with multiple root fields".to_string() }],
-                    message: "Your query contains several root fields query, even if you set separate cache tags on each root fields you won't be able to only invalidate the specific root fields because we cache these {} root fields in the same cache entry per subgraph. It will invalidate this cache entry and so the data for these {} root fields you'll invalidate the data for all these root fields.".to_string(),
+                    message: format!("Your query contains several root fields query, even if you set separate cache tags on each root fields you won't be able to only invalidate the specific root fields because we cache these {root_fields_len} root fields in the same cache entry per subgraph. It will invalidate this cache entry and so the data for these {root_fields_len} root fields you'll invalidate the data for all these root fields."),
                 });
             }
         }
