@@ -736,8 +736,8 @@ pub(crate) struct Supergraph {
     /// responses.
     /// Default: false
     /// All subgraph responses are checked and corrected to ensure alignment with the schema and
-    /// query. When enabled, misaligned values will generate errors which are included in the
-    /// response.
+    /// query. When enabled, misaligned values will generate errors which are included in errors
+    /// array in the response.
     pub(crate) enable_result_coercion_errors: bool,
 
     /// Log a message if the client closes the connection before the response is sent.
