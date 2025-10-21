@@ -732,7 +732,7 @@ pub(crate) struct Supergraph {
     /// but request handling will stop immediately when the client connection is closed.
     pub(crate) early_cancel: bool,
 
-    /// Enable errors generated during response reformatting and result coercion to be return in
+    /// Enable errors generated during response reformatting and result coercion to be returned in
     /// responses.
     /// Default: false
     /// All subgraph responses are checked and corrected to ensure alignment with the schema and
