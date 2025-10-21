@@ -25,9 +25,6 @@ filtered:
   topProducts {
     type
   }
-  itf {
-    id
-  }
 }
 
 paths: ["/itf"]
