@@ -13,8 +13,10 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast;
 use apollo_compiler::executable;
+use apollo_compiler::name;
 use apollo_compiler::schema;
 use apollo_compiler::schema::Implementers;
+use apollo_federation::link::spec::Identity;
 use tower::BoxError;
 
 use crate::json_ext::Path;
@@ -33,8 +35,7 @@ pub(crate) struct PolicyExtractionVisitor<'a> {
     entity_query: bool,
 }
 
-pub(crate) const POLICY_DIRECTIVE_NAME: &str = "policy";
-pub(crate) const POLICY_SPEC_BASE_URL: &str = "https://specs.apollo.dev/policy";
+pub(crate) const POLICY_DIRECTIVE_NAME: Name = name!("policy");
 pub(crate) const POLICY_SPEC_VERSION_RANGE: &str = ">=0.1.0, <=0.1.0";
 
 impl<'a> PolicyExtractionVisitor<'a> {
@@ -51,9 +52,9 @@ impl<'a> PolicyExtractionVisitor<'a> {
             extracted_policies: HashSet::new(),
             policy_directive_name: Schema::directive_name(
                 schema,
-                POLICY_SPEC_BASE_URL,
+                &Identity::policy_identity(),
                 POLICY_SPEC_VERSION_RANGE,
-                POLICY_DIRECTIVE_NAME,
+                &POLICY_DIRECTIVE_NAME,
             )?,
         })
     }
@@ -238,9 +239,9 @@ impl<'a> PolicyFilteringVisitor<'a> {
             current_path: Path::default(),
             policy_directive_name: Schema::directive_name(
                 schema,
-                POLICY_SPEC_BASE_URL,
+                &Identity::policy_identity(),
                 POLICY_SPEC_VERSION_RANGE,
-                POLICY_DIRECTIVE_NAME,
+                &POLICY_DIRECTIVE_NAME,
             )?,
         })
     }
@@ -1526,7 +1527,11 @@ mod tests {
       schema
         @link(url: "https://specs.apollo.dev/link/v1.0")
         @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
-        @link(url: "https://specs.apollo.dev/policy/v0.1", as: "policies" for: SECURITY)
+        @link(
+          url: "https://specs.apollo.dev/policy/v0.1"
+          import: [{ name: "@policy", as: "@policies" }]
+          for: SECURITY
+        )
       {
           query: Query
           mutation: Mutation

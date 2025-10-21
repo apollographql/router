@@ -13,8 +13,10 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast;
 use apollo_compiler::executable;
+use apollo_compiler::name;
 use apollo_compiler::schema;
 use apollo_compiler::schema::Implementers;
+use apollo_federation::link::spec::Identity;
 use tower::BoxError;
 
 use crate::json_ext::Path;
@@ -33,8 +35,7 @@ pub(crate) struct ScopeExtractionVisitor<'a> {
     entity_query: bool,
 }
 
-pub(crate) const REQUIRES_SCOPES_DIRECTIVE_NAME: &str = "requiresScopes";
-pub(crate) const REQUIRES_SCOPES_SPEC_BASE_URL: &str = "https://specs.apollo.dev/requiresScopes";
+pub(crate) const REQUIRES_SCOPES_DIRECTIVE_NAME: Name = name!("requiresScopes");
 pub(crate) const REQUIRES_SCOPES_SPEC_VERSION_RANGE: &str = ">=0.1.0, <=0.1.0";
 
 impl<'a> ScopeExtractionVisitor<'a> {
@@ -51,9 +52,9 @@ impl<'a> ScopeExtractionVisitor<'a> {
             extracted_scopes: HashSet::new(),
             requires_scopes_directive_name: Schema::directive_name(
                 schema,
-                REQUIRES_SCOPES_SPEC_BASE_URL,
+                &Identity::requires_scopes_identity(),
                 REQUIRES_SCOPES_SPEC_VERSION_RANGE,
-                REQUIRES_SCOPES_DIRECTIVE_NAME,
+                &REQUIRES_SCOPES_DIRECTIVE_NAME,
             )?,
         })
     }
@@ -237,9 +238,9 @@ impl<'a> ScopeFilteringVisitor<'a> {
             current_path: Path::default(),
             requires_scopes_directive_name: Schema::directive_name(
                 schema,
-                REQUIRES_SCOPES_SPEC_BASE_URL,
+                &Identity::requires_scopes_identity(),
                 REQUIRES_SCOPES_SPEC_VERSION_RANGE,
-                REQUIRES_SCOPES_DIRECTIVE_NAME,
+                &REQUIRES_SCOPES_DIRECTIVE_NAME,
             )?,
         })
     }
@@ -1384,7 +1385,11 @@ mod tests {
     schema
       @link(url: "https://specs.apollo.dev/link/v1.0")
       @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
-      @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", as: "scopes" for: SECURITY)
+      @link(
+        url: "https://specs.apollo.dev/requiresScopes/v0.1"
+        import: [{ name: "@requiresScopes", as: "@scopes" }]
+        for: SECURITY
+      )
     {
         query: Query
         mutation: Mutation
