@@ -45,7 +45,7 @@ expression: cache_keys
             "title": "Cache-Control header documentation"
           }
         ],
-        "message": "Your subgraph returns a 'Cache-Control' header containing private but you didn't provide a context entry to get the private data (token, username, ...) related to the current user"
+        "message": "Your subgraph returns a 'Cache-Control' header containing private but you didn't provide a context entry to get the private data (token, username, ...) related to the current user."
       },
       {
         "code": "NO_CACHE_TAG_ON_ROOT_FIELD",
@@ -55,7 +55,7 @@ expression: cache_keys
             "title": "Add '@cacheTag' in your schema"
           }
         ],
-        "message": "No cache tags are specified on your root fields query, if you want to use active invalidation you'll need to add cache tags on your root fields to actively invalidate cached data"
+        "message": "No cache tags are specified on your root fields query, if you want to use active invalidation you'll need to add cache tags on your root fields to actively invalidate cached data."
       }
     ]
   },
@@ -110,7 +110,7 @@ expression: cache_keys
             "title": "Cache-Control header documentation"
           }
         ],
-        "message": "Your subgraph returns a 'Cache-Control' header containing private but you didn't provide a context entry to get the private data (token, username, ...) related to the current user"
+        "message": "Your subgraph returns a 'Cache-Control' header containing private but you didn't provide a context entry to get the private data (token, username, ...) related to the current user."
       }
     ]
   }

@@ -93,7 +93,7 @@ expression: response
                   "title": "Add '@cacheTag' in your schema"
                 }
               ],
-              "message": "No cache tags are specified on your root fields query, if you want to use active invalidation you'll need to add cache tags on your root fields to actively invalidate cached data"
+              "message": "No cache tags are specified on your root fields query, if you want to use active invalidation you'll need to add cache tags on your root fields to actively invalidate cached data."
             }
           ]
         },
@@ -142,7 +142,7 @@ expression: response
                   "title": "Cache-Control header documentation"
                 }
               ],
-              "message": "Your subgraph returns a 'Cache-Control' header with a small max-age (less than a minute) which could end up with less cache hits"
+              "message": "Your subgraph returns a 'Cache-Control' header with a small max-age (less than a minute) which could end up with less cache hits."
             }
           ]
         },
@@ -194,7 +194,7 @@ expression: response
                   "title": "Cache-Control header documentation"
                 }
               ],
-              "message": "Your subgraph returns a 'Cache-Control' header with a small max-age (less than a minute) which could end up with less cache hits"
+              "message": "Your subgraph returns a 'Cache-Control' header with a small max-age (less than a minute) which could end up with less cache hits."
             }
           ]
         },
@@ -249,7 +249,7 @@ expression: response
                   "title": "Cache-Control header documentation"
                 }
               ],
-              "message": "Your subgraph returns a 'Cache-Control' header with a small max-age (less than a minute) which could end up with less cache hits"
+              "message": "Your subgraph returns a 'Cache-Control' header with a small max-age (less than a minute) which could end up with less cache hits."
             }
           ]
         }

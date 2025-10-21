@@ -96,7 +96,7 @@ impl CacheKeyContext {
             self.warnings.push(Warning {
                 code: "CACHE_CONTROL_NO_STORE".to_string(),
                 links: vec![cache_control_mdn_docs.clone()],
-                message: "Your subgraph returns a Cache-Control header containing no-store which means don't cache this data".to_string(),
+                message: "Your subgraph returns a Cache-Control header containing no-store which means don't cache this data.".to_string(),
             });
         }
         // Not cached because private in cache-control header and no private_id found in the context
@@ -104,7 +104,7 @@ impl CacheKeyContext {
             self.warnings.push(Warning {
                 code: "CACHE_CONTROL_PRIVATE_WITHOUT_PRIVATE_ID".to_string(),
                 links: vec![Link { url: String::from("https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/customization#private-data-caching"), title: "Configure private data caching in the Router".to_string() }, cache_control_mdn_docs.clone()],
-                message: "Your subgraph returns a 'Cache-Control' header containing private but you didn't provide a context entry to get the private data (token, username, ...) related to the current user".to_string(),
+                message: "Your subgraph returns a 'Cache-Control' header containing private but you didn't provide a context entry to get the private data (token, username, ...) related to the current user.".to_string(),
             });
         }
         // TTL
@@ -115,7 +115,7 @@ impl CacheKeyContext {
                     self.warnings.push(Warning {
                         code: "CACHE_CONTROL_SMALL_MAX_AGE".to_string(),
                         links: vec![Link { url: String::from("https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/observability"), title: "Monitor with telemetry".to_string() }, cache_control_mdn_docs.clone()],
-                        message: "Your subgraph returns a 'Cache-Control' header with a small max-age (less than a minute) which could end up with less cache hits".to_string(),
+                        message: "Your subgraph returns a 'Cache-Control' header with a small max-age (less than a minute) which could end up with less cache hits.".to_string(),
                     });
                 }
                 // Age header value bigger than max-age in cache-control header
@@ -125,7 +125,7 @@ impl CacheKeyContext {
                     self.warnings.push(Warning {
                         code: "CACHE_CONTROLL_MAX_AGE_SMALLER_AGE".to_string(),
                         links: vec![Link { url: String::from("https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Caching#fresh_and_stale_based_on_age"), title: "Fresh and stale data based on age".to_string() }, cache_control_mdn_docs.clone()],
-                        message: "Your subgraph returns a 'Cache-Control' header with a max-age smaller than the value of 'Age' header which means it's already expired, the Router won't cache this data".to_string(),
+                        message: "Your subgraph returns a 'Cache-Control' header with a max-age smaller than the value of 'Age' header which means it's already expired, the Router won't cache this data.".to_string(),
                     });
                 }
             }
@@ -134,7 +134,7 @@ impl CacheKeyContext {
                 self.warnings.push(Warning {
                     code: "CACHE_CONTROL_WITHOUT_MAX_AGE".to_string(),
                     links: vec![Link { url: String::from("https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#configure-default-ttl"), title: "Configure default TTL in the Router".to_string() }, cache_control_mdn_docs.clone()],
-                    message: "Your subgraph returns a 'Cache-Control' header without any max-age set so the Router will use the one configured in Router's configuration".to_string(),
+                    message: "Your subgraph returns a 'Cache-Control' header without any max-age set so the Router will use the one configured in Router's configuration.".to_string(),
                 });
             }
         }
@@ -144,7 +144,7 @@ impl CacheKeyContext {
                 self.warnings.push(Warning {
                     code: "NO_CACHE_TAG_ON_ROOT_FIELD".to_string(),
                     links: vec![Link { url: String::from("https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#invalidation-methods"), title: "Add '@cacheTag' in your schema".to_string() }],
-                    message: "No cache tags are specified on your root fields query, if you want to use active invalidation you'll need to add cache tags on your root fields to actively invalidate cached data".to_string(),
+                    message: "No cache tags are specified on your root fields query, if you want to use active invalidation you'll need to add cache tags on your root fields to actively invalidate cached data.".to_string(),
                 });
             }
 
