@@ -33,7 +33,7 @@ use crate::utils::human_readable::human_readable_subgraph_names;
 // merged/supergraph schema). We could try to avoid that duplication in the future.
 pub(crate) fn validate_merged_schema(
     supergraph_schema: &FederationSchema,
-    subgraphs: &Vec<Subgraph<Validated>>,
+    subgraphs: &[Subgraph<Validated>],
     errors: &mut Vec<CompositionError>,
 ) -> Result<(), FederationError> {
     for type_pos in supergraph_schema.get_types() {
@@ -116,7 +116,7 @@ pub(crate) fn validate_merged_schema(
         let requires_directive_definition_name = &subgraph
             .metadata()
             .federation_spec_definition()
-            .requires_directive_definition(&subgraph.schema())?
+            .requires_directive_definition(subgraph.schema())?
             .name;
         let requires_referencers = subgraph
             .schema()
@@ -309,7 +309,7 @@ fn add_requires_error(
     argument_name: &str,
     is_field_incompatible: impl Fn(&FieldDefinition) -> Result<bool, FederationError>,
     message_for_incompatible_subgraphs: impl Fn(&str) -> Result<String, FederationError>,
-    subgraphs: &Vec<Subgraph<Validated>>,
+    subgraphs: &[Subgraph<Validated>],
     errors: &mut Vec<CompositionError>,
 ) -> Result<(), FederationError> {
     let type_name = Name::new(type_name)?;
