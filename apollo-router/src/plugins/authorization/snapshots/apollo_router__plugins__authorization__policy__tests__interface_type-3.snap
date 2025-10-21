@@ -1,6 +1,7 @@
 ---
 source: apollo-router/src/plugins/authorization/policy.rs
-expression: "TestResult {\n    query: QUERY2,\n    extracted_policies: &extracted_policies,\n    successful_policies: Vec::new(),\n    result: doc,\n    paths,\n}"
+assertion_line: 1237
+expression: "TestResult\n{\n    query: QUERY2, extracted_policies: &extracted_policies,\n    successful_policies:\n    [\"itf\".to_string(), \"a\".to_string()].into_iter().collect(), result: doc,\n    paths\n}"
 ---
 query:
 
@@ -16,11 +17,16 @@ query:
             }
         }
         
-extracted_policies: {"a", "b", "itf"}
-successful policies: []
+extracted_policies: {"a", "b"}
+successful policies: ["a"]
 filtered:
 {
   test
+  itf {
+    ... on A {
+      id
+    }
+  }
 }
 
-paths: ["/itf"]
+paths: ["/itf/... on B"]

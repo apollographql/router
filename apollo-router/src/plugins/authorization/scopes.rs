@@ -244,7 +244,7 @@ impl<'a> ScopeFilteringVisitor<'a> {
         })
     }
 
-    fn is_field_authorized(&mut self, field: &schema::FieldDefinition) -> bool {
+    fn is_field_authorized(&self, field: &schema::FieldDefinition) -> bool {
         if let Some(directive) = field.directives.get(&self.requires_scopes_directive_name) {
             let mut field_scopes_sets = scopes_sets_argument(directive);
 
@@ -296,7 +296,7 @@ impl<'a> ScopeFilteringVisitor<'a> {
             .flatten()
     }
 
-    fn implementors_with_different_requirements(
+    fn implementors_with_missing_requirements(
         &self,
         field_def: &ast::FieldDefinition,
         node: &ast::Field,
@@ -316,54 +316,27 @@ impl<'a> ScopeFilteringVisitor<'a> {
             return false;
         }
 
-        let field_type = field_def.ty.inner_named_type();
-        if let Some(type_definition) = self.schema.types.get(field_type) {
-            if self.implementors_with_different_type_requirements(field_def, type_definition) {
+        let type_name = field_def.ty.inner_named_type();
+        if let Some(type_definition) = self.schema.types.get(type_name) {
+            if self.implementors_with_missing_type_requirements(type_name, type_definition) {
                 return true;
             }
         }
         false
     }
 
-    fn implementors_with_different_type_requirements(
+    fn implementors_with_missing_type_requirements(
         &self,
-        field_def: &ast::FieldDefinition,
+        type_name: &str,
         t: &schema::ExtendedType,
     ) -> bool {
         if t.is_interface() {
-            let mut scope_sets = None;
-            let type_name = field_def.ty.inner_named_type();
-
             for ty in self
                 .implementors(type_name)
                 .filter_map(|ty| self.schema.types.get(ty))
             {
-                // aggregate the list of scope sets
-                // we transform to a common representation of sorted vectors because the element order
-                // of hashsets is not stable
-                let ty_scope_sets = ty
-                    .directives()
-                    .get(&self.requires_scopes_directive_name)
-                    .map(|directive| {
-                        let mut v = scopes_sets_argument(directive)
-                            .map(|h| {
-                                let mut v = h.into_iter().collect::<Vec<_>>();
-                                v.sort();
-                                v
-                            })
-                            .collect::<Vec<_>>();
-                        v.sort();
-                        v
-                    })
-                    .unwrap_or_default();
-
-                match &scope_sets {
-                    None => scope_sets = Some(ty_scope_sets),
-                    Some(other_scope_sets) => {
-                        if ty_scope_sets != *other_scope_sets {
-                            return true;
-                        }
-                    }
+                if !self.is_type_authorized(ty) {
+                    return true;
                 }
             }
         }
@@ -371,43 +344,17 @@ impl<'a> ScopeFilteringVisitor<'a> {
         false
     }
 
-    fn implementors_with_different_field_requirements(
+    fn implementors_with_missing_field_requirements(
         &self,
         parent_type: &str,
         field: &ast::Field,
     ) -> bool {
         if let Some(t) = self.schema.types.get(parent_type) {
             if t.is_interface() {
-                let mut scope_sets = None;
-
                 for ty in self.implementors(parent_type) {
                     if let Ok(f) = self.schema.type_field(ty, &field.name) {
-                        // aggregate the list of scope sets
-                        // we transform to a common representation of sorted vectors because the element order
-                        // of hashsets is not stable
-                        let field_scope_sets = f
-                            .directives
-                            .get(&self.requires_scopes_directive_name)
-                            .map(|directive| {
-                                let mut v = scopes_sets_argument(directive)
-                                    .map(|h| {
-                                        let mut v = h.into_iter().collect::<Vec<_>>();
-                                        v.sort();
-                                        v
-                                    })
-                                    .collect::<Vec<_>>();
-                                v.sort();
-                                v
-                            })
-                            .unwrap_or_default();
-
-                        match &scope_sets {
-                            None => scope_sets = Some(field_scope_sets),
-                            Some(other_scope_sets) => {
-                                if field_scope_sets != *other_scope_sets {
-                                    return true;
-                                }
-                            }
+                        if !self.is_field_authorized(f) {
+                            return true;
                         }
                     }
                 }
@@ -472,23 +419,21 @@ impl transform::Visitor for ScopeFilteringVisitor<'_> {
 
         let is_authorized = self.is_field_authorized(field_def);
 
-        let implementors_with_different_requirements =
-            self.implementors_with_different_requirements(field_def, node);
+        let implementors_with_missing_requirements =
+            self.implementors_with_missing_requirements(field_def, node);
 
-        let implementors_with_different_field_requirements =
-            self.implementors_with_different_field_requirements(parent_type, node);
+        let implementors_with_missing_field_requirements =
+            self.implementors_with_missing_field_requirements(parent_type, node);
         self.current_path
             .push(PathElement::Key(field_name.as_str().into(), None));
         if is_field_list {
             self.current_path.push(PathElement::Flatten(None));
         }
 
-        let res = if is_authorized
-            && !implementors_with_different_requirements
-            && !implementors_with_different_field_requirements
+        let res = if !is_authorized
+            || implementors_with_missing_requirements
+            || implementors_with_missing_field_requirements
         {
-            transform::field(self, field_def, node)
-        } else {
             self.unauthorized_paths.push(self.current_path.clone());
             self.query_requires_scopes = true;
 
@@ -497,6 +442,8 @@ impl transform::Visitor for ScopeFilteringVisitor<'_> {
             } else {
                 Ok(None)
             }
+        } else {
+            transform::field(self, field_def, node)
         };
 
         if is_field_list {
@@ -1192,7 +1139,7 @@ mod tests {
         test: String
         itf: I!
     }
-    interface I @requiresScopes(scopes: [["itf"]]) {
+    interface I {
         id: ID
     }
     type A implements I @requiresScopes(scopes: [["a", "b"]]) {
@@ -1227,20 +1174,6 @@ mod tests {
             paths
         });
 
-        let (doc, paths) = filter(
-            INTERFACE_SCHEMA,
-            QUERY,
-            ["itf".to_string()].into_iter().collect(),
-        );
-
-        insta::assert_snapshot!(TestResult {
-            query: QUERY,
-            extracted_scopes: &extracted_scopes,
-            scopes: ["itf".to_string()].into_iter().collect(),
-            result: doc,
-            paths
-        });
-
         static QUERY2: &str = r#"
         query {
             test
@@ -1269,31 +1202,13 @@ mod tests {
         let (doc, paths) = filter(
             INTERFACE_SCHEMA,
             QUERY2,
-            ["itf".to_string()].into_iter().collect(),
+            ["a".to_string(), "b".to_string()].into_iter().collect(),
         );
 
         insta::assert_snapshot!(TestResult {
             query: QUERY2,
             extracted_scopes: &extracted_scopes,
-            scopes: ["itf".to_string()].into_iter().collect(),
-            result: doc,
-            paths
-        });
-
-        let (doc, paths) = filter(
-            INTERFACE_SCHEMA,
-            QUERY2,
-            ["itf".to_string(), "a".to_string(), "b".to_string()]
-                .into_iter()
-                .collect(),
-        );
-
-        insta::assert_snapshot!(TestResult {
-            query: QUERY2,
-            extracted_scopes: &extracted_scopes,
-            scopes: ["itf".to_string(), "a".to_string(), "b".to_string()]
-                .into_iter()
-                .collect(),
+            scopes: ["a".to_string(), "b".to_string()].into_iter().collect(),
             result: doc,
             paths
         });
@@ -1654,6 +1569,221 @@ mod tests {
             query: QUERY2,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
+            result: doc,
+            paths
+        });
+    }
+
+    #[test]
+    fn implementations_with_same_scopes() {
+        static SCHEMA: &str = r#"
+      schema
+        @link(url: "https://specs.apollo.dev/link/v1.0")
+        @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+        @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY)
+      {
+        query: Query
+      }
+      directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+      directive @requiresScopes(scopes: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+      directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+      scalar link__Import
+      enum link__Purpose {
+        """
+        `SECURITY` features provide metadata necessary to securely resolve fields.
+        """
+        SECURITY
+
+        """
+        `EXECUTION` features provide metadata necessary for operation execution.
+        """
+        EXECUTION
+      }
+      type Query {
+        test: String
+        itf: I!
+      }
+      interface I {
+        id: ID
+        other: String
+      }
+      type A implements I {
+        id: ID @requiresScopes(scopes: [["a", "b"]])
+        other: String
+        a: String
+      }
+      type B implements I {
+        id: ID @requiresScopes(scopes: [["a", "b"]])
+        other: String
+        b: String
+      }
+      "#;
+
+        static QUERY: &str = r#"
+    query {
+        test
+        itf {
+            id
+            other
+        }
+    }
+    "#;
+
+        let extracted_scopes: BTreeSet<String> = extract(SCHEMA, QUERY);
+        let (doc, paths) = filter(SCHEMA, QUERY, HashSet::new());
+
+        insta::assert_snapshot!(TestResult {
+            query: QUERY,
+            extracted_scopes: &extracted_scopes,
+            scopes: Vec::new(),
+            result: doc,
+            paths
+        });
+    }
+
+    #[test]
+    fn implementations_with_different_field_scopes() {
+        static SCHEMA: &str = r#"
+          schema
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+            @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY)
+          {
+            query: Query
+          }
+          directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+          directive @requiresScopes(scopes: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+          directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+          scalar link__Import
+          enum link__Purpose {
+            """
+            `SECURITY` features provide metadata necessary to securely resolve fields.
+            """
+            SECURITY
+
+            """
+            `EXECUTION` features provide metadata necessary for operation execution.
+            """
+            EXECUTION
+          }
+          type Query {
+            test: String
+            itf: I!
+          }
+          interface I {
+            id: ID
+          }
+          type A implements I {
+            id: ID @requiresScopes(scopes: [["read"]])
+            a: String
+          }
+          # does not have field level @requiresScopes
+          type B implements I {
+            id: ID
+            b: String
+          }
+          "#;
+
+        static QUERY: &str = r#"
+          query TestIssue {
+            test
+            itf {
+              id
+            }
+          }
+        "#;
+        let extracted_scopes = extract(SCHEMA, QUERY);
+        // an empty set of scopes represents a request with _no_ scopes
+        let (doc, paths) = filter(SCHEMA, QUERY, HashSet::new());
+        insta::assert_snapshot!(TestResult {
+            query: QUERY,
+            extracted_scopes: &extracted_scopes,
+            scopes: vec![],
+            result: doc,
+            paths
+        });
+
+        let read_scope: HashSet<String> = ["read".to_string()].into_iter().collect();
+        let (doc, paths) = filter(SCHEMA, QUERY, read_scope);
+        insta::assert_snapshot!(TestResult {
+            query: QUERY,
+            // this should have `read` as the extracted policy
+            extracted_scopes: &extracted_scopes,
+            scopes: vec!["read".to_string()],
+            result: doc,
+            paths
+        });
+    }
+
+    #[test]
+    fn implementations_with_different_type_scopes() {
+        static SCHEMA: &str = r#"
+          schema
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+            @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY)
+          {
+            query: Query
+          }
+          directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+          directive @requiresScopes(scopes: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+          directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+          scalar link__Import
+          enum link__Purpose {
+            """
+            `SECURITY` features provide metadata necessary to securely resolve fields.
+            """
+            SECURITY
+
+            """
+            `EXECUTION` features provide metadata necessary for operation execution.
+            """
+            EXECUTION
+          }
+          type Query {
+            test: String
+            itf: I!
+          }
+          interface I {
+            id: ID
+          }
+          type A implements I @requiresScopes(scopes: [["read"]]) {
+            id: ID
+            a: String
+          }
+          # does not have type level @requiresScopes
+          type B implements I {
+            id: ID
+            b: String
+          }
+          "#;
+
+        static QUERY: &str = r#"
+          query TestIssue {
+            test
+            itf {
+              id
+            }
+          }
+        "#;
+        let extracted_scopes = extract(SCHEMA, QUERY);
+        let (doc, paths) = filter(SCHEMA, QUERY, HashSet::default());
+        insta::assert_snapshot!(TestResult {
+            query: QUERY,
+            // this should have `read` as the extracted policy
+            extracted_scopes: &extracted_scopes,
+            scopes: Vec::new(),
+            result: doc,
+            paths
+        });
+
+        let read_scope: HashSet<String> = ["read".to_string()].into_iter().collect();
+        let (doc, paths) = filter(SCHEMA, QUERY, read_scope);
+        insta::assert_snapshot!(TestResult {
+            query: QUERY,
+            // this should have `read` as the extracted policy
+            extracted_scopes: &extracted_scopes,
+            scopes: vec!["read".to_string()],
             result: doc,
             paths
         });
