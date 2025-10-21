@@ -26,7 +26,7 @@ When you use the router's [authorization directives](/router/configuration/autho
 
 ### How do schema updates affect my cache?
 
-Cached data remains valid across schema updates. When a new schema is deployed, the router immediately invalidates cache entries that depend on changed portions of the schema, ensuring responses always comply with the current schema. Cache entries for unchanged schema portions remain available.
+Cached data remains valid across schema updates. When a new schema is deployed, the router immediately invalidates cache entries that depend on changed portions of the schema, ensuring responses always match the current schema. Cache entries for unchanged schema portions remain available.
 
 ### Does the router cache error responses?
 
@@ -46,7 +46,7 @@ The `@cacheTag` directive is defined in your subgraph schema, but it's only inte
 
 ### Where can the `@cacheTag` directive be applied?
 
-You can apply `@cacheTag` on root query fields or on resolvable entities (types marked with `@key` where `resolvable` is unset or `true`).
+Apply `@cacheTag` on root query fields or on resolvable entities (types marked with `@key` where `resolvable` is unset or `true`).
 
 For root fields, use `{$args.XXX}` to interpolate field arguments into the tag format—`args` is a map of all arguments for that field. The argument must be non-nullable.
 
@@ -73,6 +73,12 @@ TTL-based caching works great for predictable data refresh patterns. Active inva
 ### Why was "Entity Caching" renamed to "Response Caching"?
 
 "Response Caching" more accurately describes what the feature does—caching portions of GraphQL responses—and gives us room to evolve the feature over time.
+
+### Where can I find information about entity caching?
+
+Entity caching was the previous approach to caching in the router and has been superseded by response caching. If you're looking for information about entity caching, you can find it in the [router v1.x documentation](/graphos/routing/v1/performance/caching/entity).
+
+Response caching provides more flexible caching at the GraphQL operation level, with better control over TTLs and cache invalidation through tags.
 
 ### What changed between the 2024 preview and the current implementation?
 
