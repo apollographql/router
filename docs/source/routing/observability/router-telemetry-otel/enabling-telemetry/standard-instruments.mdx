@@ -40,20 +40,20 @@ The overhead calculation excludes time spent waiting for downstream HTTP service
 
 Important considerations for router overhead metrics:
 
-- **Version variability**: Router overhead may vary between router versions. For example, a correctness fix or security improvement may result in higher overhead. Always compare overhead measurements within the same router version.
+- **Version variability**: Router overhead might vary between router versions. For example, a correctness fix or security improvement might result in higher overhead. Always compare overhead measurements within the same router version.
 
 - **Configuration requirements**: For meaningful overhead measurements, configure [operation limits](/router/configuration/operation-limits) and [traffic shaping](/router/configuration/traffic-shaping). Without these controls, unbounded request complexity or traffic spikes can skew overhead measurements.
 
 - **CPU saturation**: High overhead values often indicate CPU saturation. When the router's CPU resources are exhausted, processing time increases significantly. Monitor CPU utilization alongside overhead metrics to identify resource constraints.
 
-- **Coprocessor requests:** Coprocessor request time is currently included in the overhead calculation. In a future release, coprocessor time may be excluded similar to subgraphs and connectors.
+- **Coprocessor requests:** Coprocessor request time is currently included in the overhead calculation. In a future release, coprocessor time might be excluded similar to subgraphs and connectors.
 
 </Note>
 
 Default attributes:
 - `subgraph.active_requests`: A boolean indicating whether any subgraph requests were active at the time the overhead was calculated. This attribute is critical for filtering meaningful overhead measurements.
 
-  For operations that stream results (such as queries with `@defer`), the overhead metric becomes less meaningful because the router is in a waiting state rather than actively processing. When analyzing overhead to identify router processing bottlenecks, exclude measurements where `subgraph.active_requests: true` to focus only on pure router processing time without subgraph wait time interference.
+  For operations that stream results (such as queries with `@defer`), the overhead metric becomes less meaningful because the router is in a waiting state instead of actively processing. When analyzing overhead to identify router processing bottlenecks, exclude measurements where `subgraph.active_requests: true` to focus only on pure router processing time without subgraph wait time interference.
 
 Configuration example:
 
@@ -65,7 +65,7 @@ telemetry:
         apollo.router.overhead: true
 ```
 
-You can attach custom attributes using [selectors](/router/configuration/telemetry/instrumentation/selectors#router).
+You can attach custom attributes using [router selectors](/router/configuration/telemetry/instrumentation/selectors#router).
 
 ### GraphQL
 
