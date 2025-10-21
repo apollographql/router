@@ -101,6 +101,20 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "ActiveSubgraphRequests": {
+      "oneOf": [
+        {
+          "const": "count",
+          "description": "The number of active subgraph requests as a count.",
+          "type": "string"
+        },
+        {
+          "const": "bool",
+          "description": "Whether there are any active subgraph requests as a boolean.",
+          "type": "string"
+        }
+      ]
+    },
     "All": {
       "enum": [
         "all"
@@ -4496,6 +4510,14 @@ expression: "&schema"
         "$ref": "#/definitions/Instrument"
       },
       "properties": {
+        "apollo.router.overhead": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/StandardInstrumentExtendedRouterOverheadAttributesWithRouterSelector"
+            }
+          ],
+          "description": "Histogram of router overhead (time not spent in subgraph requests)"
+        },
         "http.server.active_requests": {
           "allOf": [
             {
@@ -4529,6 +4551,13 @@ expression: "&schema"
           "description": "Histogram of server response body size"
         }
       },
+      "type": "object"
+    },
+    "ExtendedRouterOverheadAttributesWithRouterSelector": {
+      "additionalProperties": {
+        "$ref": "#/definitions/RouterSelector"
+      },
+      "description": "Empty attributes struct for router overhead - no standard attributes, only custom selectors",
       "type": "object"
     },
     "ExtendedSubgraphAttributesWithConditionalSubgraphSelector": {
@@ -8238,6 +8267,38 @@ expression: "&schema"
           "type": "object"
         },
         {
+          "additionalProperties": false,
+          "description": "Router overhead duration (time not spent in subgraph requests)",
+          "properties": {
+            "router_overhead": {
+              "description": "Extract router overhead duration in seconds",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "router_overhead"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Number of active subgraph requests at the time of overhead calculation",
+          "properties": {
+            "active_subgraph_requests": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ActiveSubgraphRequests"
+                }
+              ],
+              "description": "The mode for extracting active subgraph request information"
+            }
+          },
+          "required": [
+            "active_subgraph_requests"
+          ],
+          "type": "object"
+        },
+        {
           "description": "Deprecated, should not be used anymore, use static field instead",
           "type": "string"
         },
@@ -8830,6 +8891,28 @@ expression: "&schema"
           "properties": {
             "attributes": {
               "$ref": "#/definitions/ExtendedRouterAttributesWithRouterSelector"
+            }
+          },
+          "required": [
+            "attributes"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "StandardInstrumentExtendedRouterOverheadAttributesWithRouterSelector": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attributes": {
+              "$ref": "#/definitions/ExtendedRouterOverheadAttributesWithRouterSelector"
             }
           },
           "required": [

@@ -33,6 +33,7 @@ use super::graphql::selectors::ListLength;
 use super::http_server::attributes::HttpServerAttributes;
 use super::router::instruments::RouterInstruments;
 use super::router::instruments::RouterInstrumentsConfig;
+use super::router_overhead;
 use super::selectors::CacheKind;
 use super::subgraph::instruments::SubgraphInstruments;
 use super::subgraph::instruments::SubgraphInstrumentsConfig;
@@ -249,6 +250,12 @@ impl InstrumentsConfig {
             );
         }
 
+        if let Some((name, instrument)) = router_overhead::instruments::create_static_instrument(
+            self.router.attributes.router_overhead.is_enabled(),
+        ) {
+            static_instruments.insert(name, instrument);
+        }
+
         for (instrument_name, instrument) in &self.router.custom {
             match instrument.ty {
                 InstrumentType::Counter => {
@@ -434,11 +441,18 @@ impl InstrumentsConfig {
                     attributes: Vec::new(),
                 }),
             });
+
+        let router_overhead = router_overhead::instruments::initialize_custom_histogram(
+            &self.router.attributes.router_overhead,
+            &static_instruments,
+        );
+
         RouterInstruments {
             http_server_request_duration,
             http_server_request_body_size,
             http_server_response_body_size,
             http_server_active_requests,
+            router_overhead,
             custom: CustomInstruments::new(&self.router.custom, static_instruments),
         }
     }
@@ -1672,16 +1686,16 @@ pub(crate) enum Increment {
     FieldUnit,
     Duration(Instant, String),
     EventDuration(Instant, String),
-    Custom(Option<i64>),
-    EventCustom(Option<i64>),
-    FieldCustom(Option<i64>),
+    Custom(Option<opentelemetry::Value>),
+    EventCustom(Option<opentelemetry::Value>),
+    FieldCustom(Option<opentelemetry::Value>),
 }
 
-fn to_i64(value: opentelemetry::Value) -> Option<i64> {
+fn value_to_f64(value: &opentelemetry::Value) -> Option<f64> {
     match value {
-        opentelemetry::Value::I64(i) => Some(i),
-        opentelemetry::Value::String(s) => s.as_str().parse::<i64>().ok(),
-        opentelemetry::Value::F64(f) => Some(f.floor() as i64),
+        opentelemetry::Value::F64(f) => Some(*f),
+        opentelemetry::Value::I64(i) => Some(*i as f64),
+        opentelemetry::Value::String(s) => s.as_str().parse::<f64>().ok(),
         opentelemetry::Value::Bool(_) => None,
         opentelemetry::Value::Array(_) => None,
     }
@@ -1697,6 +1711,10 @@ fn duration_to_f64(duration: std::time::Duration, unit: &str) -> f64 {
         "ns" => duration.as_nanos() as f64,
         _ => duration.as_secs_f64(), // Default to seconds for "s" or any other unit
     }
+}
+
+fn duration_to_value(duration: std::time::Duration, unit: &str) -> opentelemetry::Value {
+    opentelemetry::Value::F64(duration_to_f64(duration, unit))
 }
 
 pub(crate) struct CustomCounter<Request, Response, EventResponse, A, T>
@@ -1780,8 +1798,8 @@ where
 
         if let Some(selected_value) = inner.selector.as_ref().and_then(|s| s.on_request(request)) {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
-                Increment::Custom(None) => Increment::Custom(to_i64(selected_value)),
+                Increment::EventCustom(None) => Increment::EventCustom(Some(selected_value)),
+                Increment::Custom(None) => Increment::Custom(Some(selected_value)),
                 other => {
                     failfast_error!(
                         "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
@@ -1822,8 +1840,8 @@ where
             .and_then(|s| s.on_response(response))
         {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => Increment::Custom(to_i64(selected_value)),
-                Increment::Custom(None) => Increment::Custom(to_i64(selected_value)),
+                Increment::EventCustom(None) => Increment::Custom(Some(selected_value)),
+                Increment::Custom(None) => Increment::Custom(Some(selected_value)),
                 other => {
                     failfast_error!(
                         "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
@@ -1834,13 +1852,10 @@ where
             inner.increment = new_incr;
         }
 
-        let increment = match inner.increment {
-            Increment::Unit => 1f64,
-            Increment::Duration(instant, ref unit) => duration_to_f64(instant.elapsed(), unit),
-            Increment::Custom(val) => match val {
-                Some(incr) => incr as f64,
-                None => 0f64,
-            },
+        if let Some(increment) = match &inner.increment {
+            Increment::Unit => Some(opentelemetry::Value::F64(1.0)),
+            Increment::Duration(instant, unit) => Some(duration_to_value(instant.elapsed(), unit)),
+            Increment::Custom(val) => val.clone(),
             Increment::EventUnit
             | Increment::EventDuration(_, _)
             | Increment::EventCustom(_)
@@ -1849,11 +1864,11 @@ where
                 // Nothing to do because we're incrementing on events or fields
                 return;
             }
-        };
-
-        if increment != 0.0 {
-            if let Some(counter) = &inner.counter {
-                counter.add(increment, &inner.attributes);
+        } {
+            if let Some(counter) = &inner.counter
+                && let Some(value) = value_to_f64(&increment)
+            {
+                counter.add(value, &inner.attributes);
             }
             inner.incremented = true;
         }
@@ -1881,8 +1896,8 @@ where
             .and_then(|s| s.on_response_event(response, ctx))
         {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
-                Increment::Custom(None) => Increment::EventCustom(to_i64(selected_value)),
+                Increment::EventCustom(None) => Increment::EventCustom(Some(selected_value)),
+                Increment::Custom(None) => Increment::EventCustom(Some(selected_value)),
                 other => {
                     failfast_error!(
                         "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
@@ -1903,7 +1918,7 @@ where
             }
             Increment::Custom(val) | Increment::EventCustom(val) => {
                 let incr = match val {
-                    Some(incr) => *incr as f64,
+                    Some(incr) => value_to_f64(incr).unwrap_or(0f64),
                     None => 0f64,
                 };
                 // Set it to None again for the next event
@@ -1932,22 +1947,24 @@ where
             );
         }
 
-        let increment = match inner.increment {
-            Increment::Unit | Increment::EventUnit | Increment::FieldUnit => 1f64,
-            Increment::Duration(instant, ref unit)
-            | Increment::EventDuration(instant, ref unit) => {
-                duration_to_f64(instant.elapsed(), unit)
+        let increment = match &inner.increment {
+            Increment::Unit | Increment::EventUnit | Increment::FieldUnit => {
+                opentelemetry::Value::F64(1.0)
+            }
+            Increment::Duration(instant, unit) | Increment::EventDuration(instant, unit) => {
+                duration_to_value(instant.elapsed(), unit)
             }
             Increment::Custom(val) | Increment::EventCustom(val) | Increment::FieldCustom(val) => {
-                match val {
-                    Some(incr) => incr as f64,
-                    None => 0f64,
-                }
+                val.as_ref()
+                    .cloned()
+                    .unwrap_or(opentelemetry::Value::F64(0.0))
             }
         };
 
-        if let Some(counter) = inner.counter.take() {
-            counter.add(increment, &attrs);
+        if let Some(counter) = inner.counter.take()
+            && let Some(value) = value_to_f64(&increment)
+        {
+            counter.add(value, &attrs);
         }
     }
 
@@ -1972,8 +1989,8 @@ where
             .and_then(|s| s.on_response_field(ty, field, value, ctx))
         {
             let new_incr = match &inner.increment {
-                Increment::FieldCustom(None) => Increment::FieldCustom(to_i64(selected_value)),
-                Increment::Custom(None) => Increment::FieldCustom(to_i64(selected_value)),
+                Increment::FieldCustom(None) => Increment::FieldCustom(Some(selected_value)),
+                Increment::Custom(None) => Increment::FieldCustom(Some(selected_value)),
                 other => {
                     failfast_error!(
                         "this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}"
@@ -1984,14 +2001,9 @@ where
             inner.increment = new_incr;
         }
 
-        let increment: Option<f64> = match &mut inner.increment {
-            Increment::FieldUnit => Some(1f64),
-            Increment::FieldCustom(val) => {
-                let incr = val.map(|incr| incr as f64);
-                // Set it to None again
-                *val = None;
-                incr
-            }
+        let increment: Option<opentelemetry::Value> = match &mut inner.increment {
+            Increment::FieldUnit => Some(opentelemetry::Value::F64(1.0)),
+            Increment::FieldCustom(val) => val.take(),
             Increment::Unit
             | Increment::Duration(_, _)
             | Increment::Custom(_)
@@ -2016,8 +2028,10 @@ where
             }
         }
 
-        if let (Some(counter), Some(increment)) = (&inner.counter, increment) {
-            counter.add(increment, &inner.attributes);
+        if let (Some(counter), Some(increment)) = (&inner.counter, increment.as_ref()) {
+            if let Some(value) = value_to_f64(increment) {
+                counter.add(value, &inner.attributes);
+            }
             // Reset the attributes to the original length, this will discard the new attributes added from selectors.
             inner.attributes.truncate(original_length);
         }
@@ -2038,17 +2052,16 @@ where
             if inner.incremented || matches!(inner.condition.evaluate_drop(), Some(false) | None) {
                 return;
             }
-            if let Some(counter) = inner.counter.take() {
-                let incr: f64 = match &inner.increment {
-                    Increment::Unit | Increment::EventUnit => 1f64,
+            if let Some(counter) = inner.counter.take()
+                && let Some(incr) = match &inner.increment {
+                    Increment::Unit | Increment::EventUnit => Some(1f64),
                     Increment::Duration(instant, unit)
                     | Increment::EventDuration(instant, unit) => {
-                        duration_to_f64(instant.elapsed(), unit)
+                        Some(duration_to_f64(instant.elapsed(), unit))
                     }
-                    Increment::Custom(val) | Increment::EventCustom(val) => match val {
-                        Some(incr) => *incr as f64,
-                        None => 0f64,
-                    },
+                    Increment::Custom(val) | Increment::EventCustom(val) => {
+                        val.as_ref().and_then(value_to_f64)
+                    }
                     Increment::FieldUnit | Increment::FieldCustom(_) => {
                         // Dropping a metric on a field will never increment.
                         // We can't increment graphql metrics unless we actually process the result.
@@ -2056,7 +2069,8 @@ where
                         // with the data that we know so far if the request stops.
                         return;
                     }
-                };
+                }
+            {
                 counter.add(incr, &inner.attributes);
             }
         }
@@ -2220,9 +2234,9 @@ where
         }
         if let Some(selected_value) = inner.selector.as_ref().and_then(|s| s.on_request(request)) {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
-                Increment::FieldCustom(None) => Increment::FieldCustom(to_i64(selected_value)),
-                Increment::Custom(None) => Increment::Custom(to_i64(selected_value)),
+                Increment::EventCustom(None) => Increment::EventCustom(Some(selected_value)),
+                Increment::FieldCustom(None) => Increment::FieldCustom(Some(selected_value)),
+                Increment::Custom(None) => Increment::Custom(Some(selected_value)),
                 other => {
                     failfast_error!(
                         "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
@@ -2261,9 +2275,9 @@ where
             .and_then(|s| s.on_response(response))
         {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
-                Increment::FieldCustom(None) => Increment::FieldCustom(to_i64(selected_value)),
-                Increment::Custom(None) => Increment::Custom(to_i64(selected_value)),
+                Increment::EventCustom(None) => Increment::EventCustom(Some(selected_value)),
+                Increment::FieldCustom(None) => Increment::FieldCustom(Some(selected_value)),
+                Increment::Custom(None) => Increment::Custom(Some(selected_value)),
                 other => {
                     failfast_error!(
                         "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
@@ -2274,12 +2288,10 @@ where
             inner.increment = new_incr;
         }
 
-        let increment = match inner.increment {
-            Increment::Unit => Some(1f64),
-            Increment::Duration(instant, ref unit) => {
-                Some(duration_to_f64(instant.elapsed(), unit))
-            }
-            Increment::Custom(val) => val.map(|incr| incr as f64),
+        let increment = match &inner.increment {
+            Increment::Unit => Some(opentelemetry::Value::F64(1.0)),
+            Increment::Duration(instant, unit) => Some(duration_to_value(instant.elapsed(), unit)),
+            Increment::Custom(val) => val.clone(),
             Increment::EventUnit
             | Increment::EventDuration(_, _)
             | Increment::EventCustom(_)
@@ -2290,8 +2302,10 @@ where
             }
         };
 
-        if let (Some(histogram), Some(increment)) = (&inner.histogram, increment) {
-            histogram.record(increment, &inner.attributes);
+        if let (Some(histogram), Some(increment)) = (&inner.histogram, increment.as_ref()) {
+            if let Some(value) = value_to_f64(increment) {
+                histogram.record(value, &inner.attributes);
+            }
             inner.updated = true;
         }
     }
@@ -2319,8 +2333,8 @@ where
             .and_then(|s| s.on_response_event(response, ctx))
         {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
-                Increment::Custom(None) => Increment::EventCustom(to_i64(selected_value)),
+                Increment::EventCustom(None) => Increment::EventCustom(Some(selected_value)),
+                Increment::Custom(None) => Increment::EventCustom(Some(selected_value)),
                 other => {
                     failfast_error!(
                         "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
@@ -2331,20 +2345,15 @@ where
             inner.increment = new_incr;
         }
 
-        let increment: Option<f64> = match &mut inner.increment {
-            Increment::EventUnit => Some(1f64),
+        let increment: Option<opentelemetry::Value> = match &mut inner.increment {
+            Increment::EventUnit => Some(opentelemetry::Value::F64(1.0)),
             Increment::EventDuration(instant, unit) => {
-                let incr = Some(duration_to_f64(instant.elapsed(), unit));
+                let incr = Some(duration_to_value(instant.elapsed(), unit));
                 // Need a new instant for the next event
                 *instant = Instant::now();
                 incr
             }
-            Increment::EventCustom(val) => {
-                let incr = val.map(|incr| incr as f64);
-                // Set it to None again
-                *val = None;
-                incr
-            }
+            Increment::EventCustom(val) => val.take(),
             Increment::Unit
             | Increment::Duration(_, _)
             | Increment::Custom(_)
@@ -2354,8 +2363,10 @@ where
                 return;
             }
         };
-        if let (Some(histogram), Some(increment)) = (&inner.histogram, increment) {
-            histogram.record(increment, &attrs);
+        if let (Some(histogram), Some(increment)) = (&inner.histogram, increment.as_ref()) {
+            if let Some(value) = value_to_f64(increment) {
+                histogram.record(value, &attrs);
+            }
             inner.updated = true;
         }
     }
@@ -2369,19 +2380,22 @@ where
             .unwrap_or_default();
         attrs.append(&mut inner.attributes);
 
-        let increment = match inner.increment {
-            Increment::Unit | Increment::EventUnit | Increment::FieldUnit => Some(1f64),
-            Increment::Duration(instant, ref unit)
-            | Increment::EventDuration(instant, ref unit) => {
-                Some(duration_to_f64(instant.elapsed(), unit))
+        let increment = match &inner.increment {
+            Increment::Unit | Increment::EventUnit | Increment::FieldUnit => {
+                Some(opentelemetry::Value::F64(1.0))
+            }
+            Increment::Duration(instant, unit) | Increment::EventDuration(instant, unit) => {
+                Some(duration_to_value(instant.elapsed(), unit))
             }
             Increment::Custom(val) | Increment::EventCustom(val) | Increment::FieldCustom(val) => {
-                val.map(|incr| incr as f64)
+                val.clone()
             }
         };
 
-        if let (Some(histogram), Some(increment)) = (inner.histogram.take(), increment) {
-            histogram.record(increment, &attrs);
+        if let (Some(histogram), Some(increment)) = (inner.histogram.take(), increment.as_ref())
+            && let Some(value) = value_to_f64(increment)
+        {
+            histogram.record(value, &attrs);
         }
     }
 
@@ -2406,8 +2420,8 @@ where
             .and_then(|s| s.on_response_field(ty, field, value, ctx))
         {
             let new_incr = match &inner.increment {
-                Increment::FieldCustom(None) => Increment::FieldCustom(to_i64(selected_value)),
-                Increment::Custom(None) => Increment::FieldCustom(to_i64(selected_value)),
+                Increment::FieldCustom(None) => Increment::FieldCustom(Some(selected_value)),
+                Increment::Custom(None) => Increment::FieldCustom(Some(selected_value)),
                 other => {
                     failfast_error!(
                         "this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}"
@@ -2418,14 +2432,9 @@ where
             inner.increment = new_incr;
         }
 
-        let increment: Option<f64> = match &mut inner.increment {
-            Increment::FieldUnit => Some(1f64),
-            Increment::FieldCustom(val) => {
-                let incr = val.map(|incr| incr as f64);
-                // Set it to None again
-                *val = None;
-                incr
-            }
+        let increment: Option<opentelemetry::Value> = match &mut inner.increment {
+            Increment::FieldUnit => Some(opentelemetry::Value::F64(1.0)),
+            Increment::FieldCustom(val) => val.take(),
             Increment::Unit
             | Increment::Duration(_, _)
             | Increment::Custom(_)
@@ -2450,8 +2459,10 @@ where
             }
         }
 
-        if let (Some(histogram), Some(increment)) = (&inner.histogram, increment) {
-            histogram.record(increment, &inner.attributes);
+        if let (Some(histogram), Some(increment)) = (&inner.histogram, increment.as_ref()) {
+            if let Some(value) = value_to_f64(increment) {
+                histogram.record(value, &inner.attributes);
+            }
             // Reset the attributes to the original length, this will discard the new attributes added from selectors.
             inner.attributes.truncate(original_length);
         }
@@ -2473,14 +2484,12 @@ where
             }
             if let Some(histogram) = inner.histogram.take() {
                 let increment = match &inner.increment {
-                    Increment::Unit | Increment::EventUnit => Some(1f64),
+                    Increment::Unit | Increment::EventUnit => Some(opentelemetry::Value::F64(1.0)),
                     Increment::Duration(instant, unit)
                     | Increment::EventDuration(instant, unit) => {
-                        Some(duration_to_f64(instant.elapsed(), unit))
+                        Some(duration_to_value(instant.elapsed(), unit))
                     }
-                    Increment::Custom(val) | Increment::EventCustom(val) => {
-                        val.map(|incr| incr as f64)
-                    }
+                    Increment::Custom(val) | Increment::EventCustom(val) => val.clone(),
                     Increment::FieldUnit | Increment::FieldCustom(_) => {
                         // Dropping a metric on a field will never increment.
                         // We can't increment graphql metrics unless we actually process the result.
@@ -2490,8 +2499,10 @@ where
                     }
                 };
 
-                if let Some(increment) = increment {
-                    histogram.record(increment, &inner.attributes);
+                if let Some(increment) = increment.as_ref()
+                    && let Some(value) = value_to_f64(increment)
+                {
+                    histogram.record(value, &inner.attributes);
                 }
             }
         }

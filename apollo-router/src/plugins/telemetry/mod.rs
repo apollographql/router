@@ -15,6 +15,7 @@ use config_new::cache::CacheInstruments;
 use config_new::connector::instruments::ConnectorInstruments;
 use config_new::instruments::InstrumentsConfig;
 use config_new::instruments::StaticInstrument;
+use config_new::router_overhead;
 use error_handler::handle_error;
 use futures::StreamExt;
 use futures::future::BoxFuture;
@@ -468,6 +469,11 @@ impl PluginPrivate for Telemetry {
                             &config_request.apollo.send_headers,
                         ),
                     ));
+
+                    // Create and store router overhead tracker in context
+                    request.context.extensions().with_lock(|lock| {
+                        lock.insert(router_overhead::RouterOverheadTracker::new());
+                    });
 
                     let custom_instruments: RouterInstruments = config_request
                         .instrumentation
@@ -1107,6 +1113,7 @@ impl PluginPrivate for Telemetry {
         let res_fn_config = self.config.clone();
 
         ServiceBuilder::new()
+            .layer(router_overhead::OverheadLayer::new())
             .map_request(move |request: crate::services::http::HttpRequest| {
                 // Get and store attributes so that they can be applied later after the span is created
                 let client_attributes = HttpClientAttributes {
