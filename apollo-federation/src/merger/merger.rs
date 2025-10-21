@@ -70,6 +70,7 @@ use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::schema::type_and_directive_specification::ArgumentMerger;
 use crate::schema::type_and_directive_specification::StaticArgumentsTransform;
+use crate::schema::validators::merged::validate_merged_schema;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
@@ -489,7 +490,7 @@ impl Merger {
         self.add_missing_interface_object_fields_to_implementations()?;
 
         // Return result
-        let (errors, hints) = self.error_reporter.into_errors_and_hints();
+        let (mut errors, hints) = self.error_reporter.into_errors_and_hints();
         if !errors.is_empty() {
             Ok(MergeResult {
                 supergraph: None,
@@ -497,6 +498,14 @@ impl Merger {
                 hints,
             })
         } else {
+            validate_merged_schema(&self.merged, &self.subgraphs, &mut errors)?;
+            if !errors.is_empty() {
+                return Ok(MergeResult {
+                    supergraph: None,
+                    errors,
+                    hints,
+                });
+            }
             let valid_schema = Valid::assume_valid(self.merged);
             Ok(MergeResult {
                 supergraph: Some(valid_schema),
