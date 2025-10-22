@@ -903,7 +903,7 @@ impl Merger {
         obj: ObjectTypeDefinitionPosition,
     ) -> Result<(), FederationError> {
         let is_entity = self.hint_on_inconsistent_entity(&obj)?;
-        let is_value_type = !is_entity && self.merged.is_root_type(&obj.type_name);
+        let is_value_type = !is_entity && !self.merged.is_root_type(&obj.type_name);
         let is_subscription = self.merged.is_subscription_root_type(&obj.type_name);
 
         let added = self.add_fields_shallow(obj.clone())?;
@@ -914,8 +914,22 @@ impl Merger {
         } else {
             for (field, subgraph_fields) in added {
                 if is_value_type {
+                    let subgraph_types = self
+                        .subgraphs
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, subgraph)| {
+                            let maybe_ty: Option<ObjectOrInterfaceTypeDefinitionPosition> =
+                                subgraph
+                                    .schema()
+                                    .get_type(obj.type_name.clone())
+                                    .ok()
+                                    .and_then(|ty| ty.try_into().ok());
+                            (idx, maybe_ty)
+                        })
+                        .collect();
                     self.hint_on_inconsistent_value_type_field(
-                        &subgraph_fields,
+                        &subgraph_types,
                         &ObjectOrInterfaceTypeDefinitionPosition::Object(obj.clone()),
                         &field,
                     )?;
@@ -988,9 +1002,9 @@ impl Merger {
         }))
     }
 
-    pub(crate) fn hint_on_inconsistent_value_type_field<T>(
+    pub(crate) fn hint_on_inconsistent_value_type_field(
         &mut self,
-        sources: &Sources<T>,
+        sources: &Sources<ObjectOrInterfaceTypeDefinitionPosition>,
         dest: &ObjectOrInterfaceTypeDefinitionPosition,
         field: &ObjectOrInterfaceFieldDefinitionPosition,
     ) -> Result<(), FederationError> {
@@ -999,82 +1013,60 @@ impl Merger {
                 HintCode::InconsistentObjectValueTypeField,
                 "non-entity object",
             ),
-            ObjectOrInterfaceFieldDefinitionPosition::Interface(_) => (
-                HintCode::InconsistentInterfaceValueTypeField,
-                "non-entity interface",
-            ),
+            ObjectOrInterfaceFieldDefinitionPosition::Interface(_) => {
+                (HintCode::InconsistentInterfaceValueTypeField, "interface")
+            }
         };
-        for (idx, unit) in sources.iter() {
-            if unit.is_some() {
-                let subgraph = &self.subgraphs[*idx];
-                let field_pos = dest.field(field.field_name().clone());
-                let field = field_pos.try_get(self.merged.schema());
-                if field.is_none() && !self.are_all_fields_external(*idx, dest)? {
-                    // transform sources to ExtendedType sources
-                    let printable_sources = sources
-                        .iter()
-                        .map(|(idx, pos)| match pos {
-                            None => (*idx, None),
-                            Some(_) => {
-                                let extended_type = subgraph
-                                    .schema()
-                                    .schema()
-                                    .types
-                                    .get(dest.type_name())
-                                    .cloned();
-                                (*idx, extended_type)
-                            }
-                        })
-                        .collect::<IndexMap<usize, Option<ExtendedType>>>();
-                    let dest_in_supergraph = match dest {
-                        ObjectOrInterfaceTypeDefinitionPosition::Object(obj) => {
-                            ExtendedType::Object(obj.get(self.merged.schema())?.clone())
-                        }
-                        ObjectOrInterfaceTypeDefinitionPosition::Interface(itf) => {
-                            ExtendedType::Interface(itf.get(self.merged.schema())?.clone())
-                        }
-                    };
-                    fn print_ty_has_field(
-                        ty: &ExtendedType,
-                        field_pos: &ObjectOrInterfaceFieldDefinitionPosition,
-                    ) -> Option<String> {
-                        match ty {
-                            ExtendedType::Object(obj) => {
-                                if obj.fields.contains_key(field_pos.field_name()) {
-                                    Some("yes".to_string())
-                                } else {
-                                    Some("no".to_string())
-                                }
-                            }
-                            ExtendedType::Interface(itf) => {
-                                if itf.fields.contains_key(field_pos.field_name()) {
-                                    Some("yes".to_string())
-                                } else {
-                                    Some("no".to_string())
-                                }
-                            }
-                            _ => Some("no".to_string()),
-                        }
-                    }
-                    self.error_reporter.report_mismatch_hint::<ExtendedType, ExtendedType, ()>(
+        for (idx, source) in sources.iter() {
+            let Some(source) = source else {
+                trace!(
+                    "Subgraph {} does not provide source for {}",
+                    self.names[*idx], dest
+                );
+                continue;
+            };
+            let subgraph = &self.subgraphs[*idx];
+            if subgraph
+                .schema()
+                .schema()
+                .types
+                .get(dest.type_name())
+                .is_none()
+            {
+                trace!(
+                    "Subgraph {} does not define type {}",
+                    self.names[*idx], source
+                );
+                continue;
+            }
+            let field_is_defined = source
+                .field(field.field_name().clone())
+                .try_get(subgraph.schema().schema())
+                .is_some();
+            if !field_is_defined && !self.are_all_fields_external(*idx, source)? {
+                self.error_reporter.report_mismatch_hint::<
+                    ObjectOrInterfaceTypeDefinitionPosition,
+                    ObjectOrInterfaceTypeDefinitionPosition,
+                    ()>(
                         hint_id.clone(),
-                        format!("Field \"{}.{}\" of {} type \"{}\" is defined in some but not all subgraphs that define \"{}\"",
-                            dest.type_name(),
-                            field_pos.field_name(),
+format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subgraphs that define \"{}\": ",
                             type_description,
                             dest.type_name(),
                             dest.type_name(),
                         ),
-                        &dest_in_supergraph,
-                        &printable_sources,
-                        |ty| print_ty_has_field(ty, &field_pos),
-                        |ty, _| print_ty_has_field(ty, &field_pos),
-                        |_, subgraphs| format!("\"{}.{}\" is defined in {}", field_pos.type_name(), field_pos.field_name(), subgraphs.unwrap_or_default()),
+                        dest,
+                        sources,
+                        |_| Some("yes".to_string()),
+                        |pos, idx| pos.field(field.field_name().clone())
+                            .try_get(self.subgraphs[idx].schema().schema())
+                            .map(|_| "yes".to_string())
+                            .or(Some("no".to_string())),
+                                                |_, subgraphs| format!("\"{field}\" is defined in {}", subgraphs.unwrap_or_default()),
                         |_, subgraphs| format!(" but not in {}", subgraphs),
+
                         false,
                         false,
-                    );
-                }
+                    )
             }
         }
         Ok(())

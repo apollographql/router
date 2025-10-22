@@ -249,6 +249,8 @@ mod entity_consistency {
 
 // Tests for value type field presence
 mod value_type_fields {
+    use test_log::test;
+
     use super::*;
 
     #[test]
