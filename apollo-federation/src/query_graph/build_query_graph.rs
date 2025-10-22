@@ -427,8 +427,12 @@ impl SchemaQueryGraphBuilder {
         if self.for_query_planning {
             self.add_additional_abstract_type_edges()?;
         }
-        // This method adds no nodes/edges, but just precomputes followup edge information.
-        self.base.precompute_non_trivial_followup_edges()?;
+        // This method adds no nodes/edges, but just precomputes followup edge information. We don't
+        // need this when building subgraph query graphs (since federated query graph building takes
+        // care of it), so we accordingly skip precomputation in that case.
+        if self.subgraph.is_none() {
+            self.base.precompute_non_trivial_followup_edges()?;
+        }
         Ok(self.base.build())
     }
 

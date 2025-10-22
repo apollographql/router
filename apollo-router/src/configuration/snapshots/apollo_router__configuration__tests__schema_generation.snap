@@ -10496,6 +10496,11 @@ expression: "&schema"
           "description": "abort request handling when the client drops the connection.\nDefault: false.\nWhen set to true, some parts of the request pipeline like telemetry will not work properly,\nbut request handling will stop immediately when the client connection is closed.",
           "type": "boolean"
         },
+        "enable_result_coercion_errors": {
+          "default": false,
+          "description": "Enable errors generated during response reformatting and result coercion to be returned in\nresponses.\nDefault: false\nAll subgraph responses are checked and corrected to ensure alignment with the schema and\nquery. When enabled, misaligned values will generate errors which are included in errors\narray in the response.",
+          "type": "boolean"
+        },
         "experimental_log_on_broken_pipe": {
           "default": false,
           "description": "Log a message if the client closes the connection before the response is sent.\nDefault: false.",
@@ -12076,6 +12081,7 @@ expression: "&schema"
         },
         "defer_support": true,
         "early_cancel": false,
+        "enable_result_coercion_errors": false,
         "experimental_log_on_broken_pipe": false,
         "generate_query_fragments": true,
         "introspection": false,
