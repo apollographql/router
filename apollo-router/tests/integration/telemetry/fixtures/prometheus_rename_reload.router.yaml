@@ -1,0 +1,28 @@
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: required
+      router:
+        http.server.request.duration:
+          attributes:
+            server.port: false
+            server.address: false
+            http.response.status_code:
+              alias: status
+  exporters:
+    metrics:
+      prometheus:
+        listen: 127.0.0.1:4000
+        enabled: true
+        path: /metrics
+      common:
+        views:
+          # Different rename than the original config
+          - name: http.server.request.duration
+            rename: reloaded.http.duration
+override_subgraph_url:
+  products: http://localhost:4005
+include_subgraph_errors:
+  all: true
+supergraph:
+  introspection: true

@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::iter::Extend;
@@ -5,13 +6,14 @@ use std::sync::Arc;
 
 use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::resolvers;
+use apollo_compiler::schema::ObjectType;
 use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::StringTemplate;
 use serde_json_bytes::Value;
 use tower::BoxError;
 
 use crate::error::FetchError;
-use crate::plugins::mock_subgraphs::execution::input_coercion::coerce_argument_values;
 use crate::plugins::response_cache::invalidation::Invalidation;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
 use crate::services::subgraph;
@@ -22,60 +24,53 @@ pub(crate) fn get_invalidations_from_mutation(
     request: &subgraph::Request,
     subgraph_enums: &HashMap<String, String>,
     supergraph_schema: Arc<Valid<Schema>>,
-) -> Result<HashSet<Invalidations>, anyhow::Error> {
-    let subgraph_name = &request.subgraph_name;
-    let executable_document =
-        request
-            .executable_document
-            .as_ref()
-            .ok_or_else(|| FetchError::MalformedRequest {
-                reason: "cannot get the executable document for subgraph request".to_string(),
-            })?;
-    let root_operation_fields = executable_document
-        .operations
-        .get(request.subgraph_request.body().operation_name.as_deref())
-        .map_err(|_err| FetchError::MalformedRequest {
-            reason: "cannot get the operation from executable document for subgraph request"
-                .to_string(),
-        })?
-        .root_fields(executable_document);
-    let root_mutation_type = supergraph_schema
-        .root_operation(apollo_compiler::ast::OperationType::Mutation)
-        .ok_or_else(|| FetchError::MalformedRequest {
-            reason: "cannot get the root operation from supergraph schema".to_string(),
-        })?;
-    let mutation_object_type = supergraph_schema
-        .get_object(root_mutation_type.as_str())
-        .ok_or_else(|| FetchError::MalformedRequest {
-            reason: "cannot get the root query type from supergraph schema".to_string(),
-        })?;
+) -> Result<Invalidations, anyhow::Error> {
+    struct Root<'a> {
+        subgraph_name: &'a str,
+        subgraph_enums: &'a HashMap<String, String>,
+        mutation_object_type: &'a ObjectType,
+        result: RefCell<Result<Invalidations, anyhow::Error>>,
+    }
 
-    let invalidations = root_operation_fields
-        .map(|field| {
-            // We don't use field.definition because we need the directive set in supergraph schema not in the executable document
-            let field_def = mutation_object_type
-                .fields
-                .get(&field.name)
-                .ok_or_else(|| FetchError::MalformedRequest {
+    impl resolvers::ObjectValue for Root<'_> {
+        fn type_name(&self) -> &str {
+            "Mutation"
+        }
+
+        fn resolve_field<'a>(
+            &'a self,
+            info: &'a resolvers::ResolveInfo<'a>,
+        ) -> Result<resolvers::ResolvedValue<'a>, resolvers::FieldError> {
+            let mut result = self.result.borrow_mut();
+            let Ok(invalidation_keys) = &mut *result else {
+                return Ok(resolvers::ResolvedValue::SkipForPartialExecution);
+            };
+            // We don't use info.field_definition() because we need the directive
+            // set in supergraph schema not in the executable document
+            let Some(field_def) = self.mutation_object_type.fields.get(info.field_name()) else {
+                *result = Err(FetchError::MalformedRequest {
                     reason: "cannot get the field definition from supergraph schema".to_string(),
-                })?;
+                }
+                .into());
+                return Ok(resolvers::ResolvedValue::SkipForPartialExecution);
+            };
 
             let invalidations = field_def
                 .directives
                 .get_all("join__directive")
                 .filter_map(|dir| {
-                    let name = dir.argument_by_name("name", &supergraph_schema).ok()?;
+                    let name = dir.argument_by_name("name", info.schema()).ok()?;
                     if name.as_str()? != CACHE_INVALIDATION_DIRECTIVE_NAME {
                         return None;
                     }
                     let is_current_subgraph =
-                        dir.argument_by_name("graphs", &supergraph_schema)
+                        dir.argument_by_name("graphs", info.schema())
                             .ok()
                             .and_then(|f| {
                                 Some(f.as_list()?.iter().filter_map(|graph| graph.as_enum()).any(
                                     |g| {
-                                        subgraph_enums.get(g.as_str()).map(|s| s.as_str())
-                                            == Some(subgraph_name)
+                                        self.subgraph_enums.get(g.as_str()).map(|s| s.as_str())
+                                            == Some(self.subgraph_name)
                                     },
                                 ))
                             })
@@ -86,7 +81,7 @@ pub(crate) fn get_invalidations_from_mutation(
                     let mut cache_tag = None;
                     let mut entity_type = None;
                     for (field_name, value) in dir
-                        .argument_by_name("args", &supergraph_schema)
+                        .argument_by_name("args", info.schema())
                         .ok()?
                         .as_object()?
                     {
@@ -106,91 +101,111 @@ pub(crate) fn get_invalidations_from_mutation(
                         Some((entity_type, cache_tag))
                     }
                 });
-            let mut errors = Vec::new();
-            // Query::validate_variables runs before this
-            let variable_values =
-                Valid::assume_valid_ref(&request.subgraph_request.body().variables);
-            let args = coerce_argument_values(
-                &supergraph_schema,
-                executable_document,
-                variable_values,
-                &mut errors,
-                Default::default(),
-                field_def,
-                field,
-            )
-            .map_err(|_| FetchError::MalformedRequest {
-                reason: format!("cannot argument values for root fields {:?}", field.name),
-            })?;
-
-            if !errors.is_empty() {
-                return Err(FetchError::MalformedRequest {
-                    reason: format!(
-                        "cannot coerce argument values for root fields {:?}, errors: {errors:?}",
-                        field.name,
-                    ),
-                }
-                .into());
-            }
-
             let mut vars = IndexMap::default();
-            vars.insert("$args".to_string(), Value::Object(args));
+            vars.insert("$args".to_string(), Value::Object(info.arguments().clone()));
             let (entity_type_invalidations, cache_tag_invalidations): (Vec<_>, Vec<_>) =
                 invalidations.unzip();
-            let entity_types = entity_type_invalidations
+            match entity_type_invalidations
                 .into_iter()
                 .flatten()
                 .map(|entity_type| Ok(entity_type.interpolate(&vars).map(|(res, _)| res)?))
-                .collect::<Result<Vec<String>, anyhow::Error>>()?;
-            let cache_tags = cache_tag_invalidations
+                .collect::<Result<HashSet<String>, anyhow::Error>>()
+            {
+                Ok(entity_types) => {
+                    invalidation_keys.entity_types = entity_types;
+                }
+                Err(err) => {
+                    *result = Err(err);
+                    return Ok(resolvers::ResolvedValue::SkipForPartialExecution);
+                }
+            }
+            match cache_tag_invalidations
                 .into_iter()
                 .flatten()
                 .map(|cache_tag| Ok(cache_tag.interpolate(&vars).map(|(res, _)| res)?))
-                .collect::<Result<Vec<String>, anyhow::Error>>()?;
+                .collect::<Result<HashSet<String>, anyhow::Error>>()
+            {
+                Ok(cache_tags) => {
+                    invalidation_keys.cache_tags = cache_tags;
+                }
+                Err(err) => {
+                    *result = Err(err);
+                    return Ok(resolvers::ResolvedValue::SkipForPartialExecution);
+                }
+            }
 
-            Ok(Invalidations {
-                cache_tags,
-                entity_types,
-                subgraph_name: subgraph_name.clone(),
-            })
-        })
-        .collect::<Result<HashSet<Invalidations>, anyhow::Error>>()?;
+            Ok(resolvers::ResolvedValue::SkipForPartialExecution)
+        }
+    }
+    let executable_document =
+        request
+            .executable_document
+            .as_ref()
+            .ok_or_else(|| FetchError::MalformedRequest {
+                reason: "cannot get the executable document for subgraph request".to_string(),
+            })?;
+    let root_mutation_type = supergraph_schema
+        .root_operation(apollo_compiler::ast::OperationType::Mutation)
+        .ok_or_else(|| FetchError::MalformedRequest {
+            reason: "cannot get the root operation from supergraph schema".to_string(),
+        })?;
+    let mutation_object_type = supergraph_schema
+        .get_object(root_mutation_type.as_str())
+        .ok_or_else(|| FetchError::MalformedRequest {
+            reason: "cannot get the root query type from supergraph schema".to_string(),
+        })?;
+    let root = Root {
+        subgraph_name: &request.subgraph_name,
+        subgraph_enums,
+        mutation_object_type,
+        result: RefCell::new(Ok(Invalidations {
+            subgraph_name: request.subgraph_name.to_string(),
+            ..Default::default()
+        })),
+    };
+    let subgraph_request = request.subgraph_request.body();
+    // FIXME: in principle we should use the subgraph schema here.
+    // Maybe this is good enough as far as finding root fields is concerned?
+    resolvers::Execution::new(&supergraph_schema, executable_document)
+        .operation_name(subgraph_request.operation_name.as_deref())
+        .unwrap()
+        .raw_variable_values(&subgraph_request.variables)
+        .execute_sync(&root)
+        .map_err(|e| anyhow::Error::msg(e.message().to_string()))?;
 
-    Ok(invalidations)
+    root.result.into_inner()
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct Invalidations {
-    cache_tags: Vec<String>,
-    entity_types: Vec<String>,
+    cache_tags: HashSet<String>,
+    entity_types: HashSet<String>,
     subgraph_name: String,
 }
 
 pub(crate) async fn automatic_invalidation(
     invalidation: Invalidation,
-    invalidations_to_execute: HashSet<Invalidations>,
+    invalidations_to_execute: Invalidations,
 ) -> Result<u64, BoxError> {
     // Call invalidations
-    let invalidation_reqs = invalidations_to_execute.into_iter().flat_map(|inv| {
-        let mut invalidation_reqs: Vec<_> = inv
-            .cache_tags
-            .into_iter()
-            .map(|ct| InvalidationRequest::CacheTag {
-                subgraphs: vec![inv.subgraph_name.clone()].into_iter().collect(),
-                cache_tag: ct,
-            })
-            .collect();
-        invalidation_reqs.extend(inv.entity_types.into_iter().map(|et| {
-            InvalidationRequest::Type {
-                subgraph: inv.subgraph_name.clone(),
-                r#type: et,
-            }
-        }));
+    let mut invalidation_reqs: Vec<_> = invalidations_to_execute
+        .cache_tags
+        .into_iter()
+        .map(|ct| InvalidationRequest::CacheTag {
+            subgraphs: vec![invalidations_to_execute.subgraph_name.clone()]
+                .into_iter()
+                .collect(),
+            cache_tag: ct,
+        })
+        .collect();
+    invalidation_reqs.extend(invalidations_to_execute.entity_types.into_iter().map(|et| {
+        InvalidationRequest::Type {
+            subgraph: invalidations_to_execute.subgraph_name.clone(),
+            r#type: et,
+        }
+    }));
 
-        invalidation_reqs
-    });
-
-    let count = invalidation.invalidate(invalidation_reqs.collect()).await?;
+    let count = invalidation.invalidate(invalidation_reqs).await?;
 
     Ok(count)
 }

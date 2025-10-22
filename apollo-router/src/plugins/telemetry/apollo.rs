@@ -130,7 +130,7 @@ pub(crate) struct Config {
     pub(crate) experimental_local_field_metrics: bool,
 
     /// Enable sending additional subgraph metrics to Apollo Studio via OTLP
-    pub(crate) preview_subgraph_metrics: bool,
+    pub(crate) subgraph_metrics: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default, PartialEq)]
@@ -382,7 +382,7 @@ impl Default for Config {
             signature_normalization_algorithm: ApolloSignatureNormalizationAlgorithm::default(),
             experimental_local_field_metrics: false,
             metrics_reference_mode: ApolloMetricsReferenceMode::default(),
-            preview_subgraph_metrics: false,
+            subgraph_metrics: false,
         }
     }
 }

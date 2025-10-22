@@ -29,6 +29,7 @@ import OverrideSubUrl from '../../../shared/config/override_subgraph_url.mdx';
 import PersistedQueries from '../../../shared/config/persisted_queries.mdx';
 import Plugins from '../../../shared/config/plugins.mdx';
 import PreviewEntityCache from '../../../shared/config/preview_entity_cache.mdx';
+import PreviewResponseCache from '../../../shared/config/preview_response_cache.mdx';
 import PreviewFileUploads from '../../../shared/config/preview_file_uploads.mdx';
 import Rhai from '../../../shared/config/rhai.mdx';
 import Sandbox from '../../../shared/config/sandbox.mdx';
@@ -72,7 +73,7 @@ Expand the code block to view an example YAML config file containing all propert
 
 <Apq />
 
-Learn more in [Caching Automatic Persisted Queries](/graphos/routing/performance/caching/in-memory#caching-automatic-persisted-queries-apq).
+Learn more in [Automatic Persisted Queries](/graphos/routing/operations/apq).
 
 ---
 
@@ -251,7 +252,19 @@ Learn more in [Native Plugins for router](/graphos/routing/customization/native-
 
 <PreviewEntityCache /> 
 
-Learn more in [Entity Caching](/graphos/routing/performance/caching/entity).
+<Note>
+
+For new projects, Apollo recommends using [Response Caching](/graphos/routing/performance/caching/response-caching) instead.
+
+</Note>
+
+Learn more in [Entity Caching](/graphos/routing/v1/performance/caching/entity).
+
+---
+
+<PreviewResponseCache />
+
+Learn more in [Response Caching](/graphos/routing/performance/caching/response-caching).
 
 ---
 

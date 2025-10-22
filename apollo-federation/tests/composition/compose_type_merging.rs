@@ -1,4 +1,6 @@
+use apollo_compiler::coord;
 use insta::assert_snapshot;
+use test_log::test;
 
 use super::ServiceDefinition;
 use super::assert_composition_errors;
@@ -11,7 +13,6 @@ use super::print_sdl;
 // =============================================================================
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn field_types_errors_on_incompatible_types() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -48,7 +49,6 @@ fn field_types_errors_on_incompatible_types() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn field_types_errors_on_merging_list_with_non_list() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -85,7 +85,6 @@ fn field_types_errors_on_merging_list_with_non_list() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn field_types_merges_nullable_and_non_nullable() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -131,7 +130,6 @@ fn field_types_merges_nullable_and_non_nullable() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn field_types_merges_interface_subtypes() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -189,19 +187,25 @@ fn field_types_merges_interface_subtypes() {
     let extracted_subgraphs = extract_subgraphs_from_supergraph_result(&supergraph)
         .expect("Expected subgraph extraction to succeed");
 
+    // Ensure we properly extract the original field types in each subgraph
     let subgraph_a_extracted = extracted_subgraphs
         .get("subgraphA")
         .expect("Expected subgraphA to be present in extracted subgraphs");
-    assert_snapshot!(print_sdl(subgraph_a_extracted.schema.schema()));
+    let f = coord!(T.f)
+        .lookup_field(subgraph_a_extracted.schema.schema())
+        .expect("Expected T.f to be present in subgraphA");
+    assert_eq!(f.ty.to_string(), "I");
 
     let subgraph_b_extracted = extracted_subgraphs
         .get("subgraphB")
         .expect("Expected subgraphB to be present in extracted subgraphs");
-    assert_snapshot!(print_sdl(subgraph_b_extracted.schema.schema()));
+    let f = coord!(T.f)
+        .lookup_field(subgraph_b_extracted.schema.schema())
+        .expect("Expected T.f to be present in subgraphB");
+    assert_eq!(f.ty.to_string(), "A");
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn field_types_merges_union_subtypes() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -254,19 +258,25 @@ fn field_types_merges_union_subtypes() {
     let extracted_subgraphs = extract_subgraphs_from_supergraph_result(&supergraph)
         .expect("Expected subgraph extraction to succeed");
 
+    // Ensure we properly extract the original field types in each subgraph
     let subgraph_a_extracted = extracted_subgraphs
         .get("subgraphA")
         .expect("Expected subgraphA to be present in extracted subgraphs");
-    assert_snapshot!(print_sdl(subgraph_a_extracted.schema.schema()));
+    let f = coord!(T.f)
+        .lookup_field(subgraph_a_extracted.schema.schema())
+        .expect("Expected T.f to be present in subgraphA");
+    assert_eq!(f.ty.to_string(), "U");
 
     let subgraph_b_extracted = extracted_subgraphs
         .get("subgraphB")
         .expect("Expected subgraphB to be present in extracted subgraphs");
-    assert_snapshot!(print_sdl(subgraph_b_extracted.schema.schema()));
+    let f = coord!(T.f)
+        .lookup_field(subgraph_b_extracted.schema.schema())
+        .expect("Expected T.f to be present in subgraphB");
+    assert_eq!(f.ty.to_string(), "A");
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn field_types_merges_complex_subtypes() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -321,7 +331,6 @@ fn field_types_merges_complex_subtypes() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn field_types_merges_subtypes_within_lists() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -377,7 +386,6 @@ fn field_types_merges_subtypes_within_lists() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn field_types_merges_subtypes_within_non_nullable() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -433,7 +441,6 @@ fn field_types_merges_subtypes_within_non_nullable() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn field_types_errors_on_incompatible_input_field_types_first() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -468,7 +475,6 @@ fn field_types_errors_on_incompatible_input_field_types_first() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn field_types_errors_on_incompatible_input_field_types_second() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -507,7 +513,6 @@ fn field_types_errors_on_incompatible_input_field_types_second() {
 // =============================================================================
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn arguments_errors_on_incompatible_types() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -544,7 +549,6 @@ fn arguments_errors_on_incompatible_types() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn arguments_errors_on_incompatible_argument_default() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -581,7 +585,6 @@ fn arguments_errors_on_incompatible_argument_default() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn arguments_errors_on_incompatible_argument_default_in_external_declaration() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -622,7 +625,6 @@ fn arguments_errors_on_incompatible_argument_default_in_external_declaration() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn arguments_errors_on_merging_list_with_non_list() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -659,7 +661,6 @@ fn arguments_errors_on_merging_list_with_non_list() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn arguments_merges_nullable_and_non_nullable() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -705,7 +706,6 @@ fn arguments_merges_nullable_and_non_nullable() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn arguments_merges_subtypes_within_lists() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",

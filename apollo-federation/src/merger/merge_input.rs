@@ -7,6 +7,8 @@ use apollo_compiler::ast::Type;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::InputObjectType;
+use tracing::instrument;
+use tracing::trace;
 
 use crate::error::CompositionError;
 use crate::error::FederationError;
@@ -21,7 +23,7 @@ use crate::schema::position::InputObjectTypeDefinitionPosition;
 use crate::utils::human_readable::human_readable_subgraph_names;
 
 impl Merger {
-    #[allow(dead_code)]
+    #[instrument(skip(self, sources, dest))]
     pub(crate) fn merge_input(
         &mut self,
         sources: &Sources<Node<InputObjectType>>,
@@ -30,6 +32,7 @@ impl Merger {
         // Like for other inputs, we add all the fields found in any subgraphs initially as a simple mean to have a complete list of
         // field to iterate over, but we will remove those that are not in all subgraphs.
         let added = self.add_input_fields_shallow(sources, dest)?;
+        trace!("Shallow added input fields: {:#?}", added.values());
 
         for (dest_field, subgraph_fields) in added {
             // We merge the details of the field first, even if we may remove it afterwards because 1) this ensure we always checks type
@@ -88,7 +91,7 @@ impl Merger {
                     self.error_reporter.add_error(CompositionError::RequiredInputFieldMissingInSomeSubgraph {
                         message: format!(
                             "Input object field \"{}\" is required in some subgraphs but does not appear in all subgraphs: it is required in {} but does not appear in {}",
-                            dest_field.field_name,
+                            dest_field,
                             non_optional_subgraphs_str,
                             missing_subgraphs_str
                         ),
@@ -243,11 +246,13 @@ impl Merger {
         Ok(added)
     }
 
+    #[instrument(skip(self, dest_field, sources))]
     fn merge_input_field(
         &mut self,
         dest_field: &InputObjectFieldDefinitionPosition,
         sources: &Sources<InputObjectFieldDefinitionPosition>,
     ) -> Result<(), FederationError> {
+        trace!("Deep merging input field: {:#?}", dest_field);
         self.merge_description(sources, dest_field)?;
         self.record_applied_directives_to_merge(sources, dest_field)?;
         let all_types_equal = self.merge_type_reference(sources, dest_field, true)?;

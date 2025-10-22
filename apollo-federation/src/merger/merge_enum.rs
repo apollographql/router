@@ -169,19 +169,27 @@ impl Merger {
                 input_example,
                 output_example,
             } if violates_intersection_requirement => {
-                self.report_mismatch_error_with_specifics(
+                self.error_reporter.report_mismatch_error_with_specifics::<_, _, ()>(
                     CompositionError::EnumValueMismatch {
                         message: format!(
                             "Enum type \"{}\" is used as both input type (for example, as type of \"{}\") and output type (for example, as type of \"{}\"), but value \"{}\" is not defined in all the subgraphs defining \"{}\": ",
                             &value_pos.type_name, input_example.coordinate, output_example.coordinate, &value_pos.value_name, &value_pos.type_name
                         ),
                     },
+                    &value_pos,
                     sources,
-                    |source| {
-                        source.as_ref().map_or("no", |enum_type| {
-                            if enum_type.values.contains_key(&value_pos.value_name) { "yes" } else { "no" }
-                        })
+                    |_| Some("yes".to_string()),
+                    |source, _| {
+                        if source.values.contains_key(&value_pos.value_name) {
+                            Some("yes".to_string())
+                        } else {
+                            Some("no".to_string())
+                        }
                     },
+                    |_, subgraphs| format!("\"{}\" is defined in {}", value_pos.value_name, subgraphs.unwrap_or_else(|| "no subgraphs".to_string())),
+                    |_, subgraphs| format!(" but not in {subgraphs}"),
+                    false,
+
                 );
             }
             EnumTypeUsage::Input { .. } if violates_intersection_requirement => {

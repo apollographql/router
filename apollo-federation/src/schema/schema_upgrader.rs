@@ -9,6 +9,7 @@ use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
+use either::Either;
 use tracing::instrument;
 
 use super::FederationSchema;
@@ -32,6 +33,7 @@ use crate::subgraph::SubgraphError;
 use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Upgraded;
+use crate::subgraph::typestate::Validated;
 use crate::subgraph::typestate::expand_schema;
 use crate::subgraph::typestate::schema_as_fed2_subgraph;
 use crate::supergraph::GRAPHQL_SUBSCRIPTION_TYPE_NAME;
@@ -894,37 +896,36 @@ impl SchemaUpgrader {
     }
 }
 
-// PORT_NOTE: In JS, this returns upgraded subgraphs along with a set of messages about what changed.
-// However, those messages were never used, so we have omitted them here.
+/// Upgrade subgraphs if necessary without validation.
+// PORT_NOTE: This corresponds to `upgradeSubgraphsIfNecessary` function in JS.
 #[instrument(skip(subgraphs))]
-pub fn upgrade_subgraphs_if_necessary(
+#[allow(clippy::type_complexity)]
+fn inner_upgrade_subgraphs_if_necessary(
     subgraphs: Vec<Subgraph<Expanded>>,
-) -> Result<Vec<Subgraph<Upgraded>>, Vec<CompositionError>> {
-    // if all subgraphs are fed 2, there is no upgrade to be done
-    if subgraphs
+) -> Result<Vec<Either<Subgraph<Expanded>, Subgraph<Upgraded>>>, Vec<CompositionError>> {
+    let all_fed_2 = subgraphs
         .iter()
-        .all(|subgraph| subgraph.metadata().is_fed_2_schema())
-    {
-        return Ok(subgraphs.into_iter().map(|s| s.assume_upgraded()).collect());
-    }
-
+        .all(|subgraph| subgraph.metadata().is_fed_2_schema());
     let mut subgraphs_using_interface_object = vec![];
     let mut fed_1_subgraphs = vec![];
     let mut errors: Vec<CompositionError> = vec![];
     let schema_upgrader: SchemaUpgrader = SchemaUpgrader::new(&subgraphs);
-    let upgraded_subgraphs: Vec<Subgraph<Upgraded>> = subgraphs
+    let upgraded_subgraphs = subgraphs
         .into_iter()
         .map(|subgraph| {
             if !subgraph.metadata().is_fed_2_schema() {
                 fed_1_subgraphs.push(subgraph.name.clone());
-                schema_upgrader.upgrade(subgraph)
+                schema_upgrader.upgrade(subgraph).map(Either::Right)
             } else {
-                if is_interface_object_used(&subgraph)
-                    .map_err(|e| SubgraphError::new_without_locations(subgraph.name.clone(), e))?
+                if !all_fed_2
+                    && is_interface_object_used(&subgraph).map_err(|e| {
+                        SubgraphError::new_without_locations(subgraph.name.clone(), e)
+                    })?
                 {
+                    // If not all subgraphs are fed 2, we report all use of @interfaceObject below.
                     subgraphs_using_interface_object.push(subgraph.name.clone())
                 };
-                Ok(subgraph.assume_upgraded())
+                Ok(Either::Left(subgraph))
             }
         })
         .filter_map(|r| r.map_err(|e| errors.extend(e.to_composition_errors())).ok())
@@ -961,6 +962,73 @@ pub fn upgrade_subgraphs_if_necessary(
         }]);
     }
     Ok(upgraded_subgraphs)
+}
+
+/// Upgrade subgraphs if necessary and validate the result.
+/// - Fed 2 input subgraphs are not upgraded.
+/// - Also, normalizes root types if necessary.
+/// - Unchanged subgraphs are returned as-is.
+// PORT_NOTE: In JS, this returns upgraded subgraphs along with a set of messages about what changed.
+// However, those messages were never used, so we have omitted them here.
+#[instrument(skip(subgraphs))]
+pub fn upgrade_subgraphs_if_necessary(
+    subgraphs: Vec<Subgraph<Expanded>>,
+) -> Result<Vec<Subgraph<Validated>>, Vec<CompositionError>> {
+    // Upgrade subgraphs (if necessary)
+    let upgraded = inner_upgrade_subgraphs_if_necessary(subgraphs)?;
+
+    let mut errors: Vec<CompositionError> = vec![];
+
+    // Normalize root types (if necessary)
+    let normalized: Vec<_> = upgraded
+        .into_iter()
+        .filter_map(|subgraph| match subgraph {
+            Either::Left(s) => match s.normalize_root_types() {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    errors.extend(e.to_composition_errors());
+                    None
+                }
+            },
+            Either::Right(mut s) => {
+                match s.normalize_root_types() {
+                    Ok(()) => {}
+                    Err(e) => {
+                        errors.extend(e.to_composition_errors());
+                        return None;
+                    }
+                }
+                Some(Either::Right(s))
+            }
+        })
+        .collect();
+
+    // Validate subgraphs (if either upgraded or normalized)
+    let validated: Vec<Subgraph<Validated>> = normalized
+        .into_iter()
+        .filter_map(|subgraph| match subgraph {
+            Either::Left(s) => {
+                // This subgraph was not upgraded nor normalized in this function, which implies
+                // this subgraph is originally Fed v2. Since Fed v2 schemas are already fully
+                // validated in the `expand_links` method, it's safe to transition to the
+                // `Validated` state.
+                Some(s.assume_validated())
+            }
+            Either::Right(s) => match s.validate() {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    errors.extend(e.to_composition_errors());
+                    None
+                }
+            },
+        })
+        .collect();
+
+    if errors.is_empty() {
+        Ok(validated)
+    } else {
+        Err(errors)
+    }
 }
 
 fn is_interface_object_used(subgraph: &Subgraph<Expanded>) -> Result<bool, FederationError> {
@@ -1039,7 +1107,7 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        let [s1, _s2]: [Subgraph<Upgraded>; 2] = upgrade_subgraphs_if_necessary(vec![s1, s2])
+        let [s1, _s2]: [Subgraph<_>; 2] = upgrade_subgraphs_if_necessary(vec![s1, s2])
             .expect("upgrades schema")
             .try_into()
             .expect("Expected 2 elements");
@@ -1146,7 +1214,7 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        let [s]: [Subgraph<Upgraded>; 1] = upgrade_subgraphs_if_necessary(vec![s])
+        let [s]: [Subgraph<_>; 1] = upgrade_subgraphs_if_necessary(vec![s])
             .expect("upgrades schema")
             .try_into()
             .expect("Expected 1 element");
@@ -1211,11 +1279,13 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        let [s1, s2]: [Subgraph<Upgraded>; 2] = upgrade_subgraphs_if_necessary(vec![s1, s2])
+        let [s1, s2]: [Either<_, _>; 2] = inner_upgrade_subgraphs_if_necessary(vec![s1, s2])
             .expect("upgrades schema")
             .try_into()
             .expect("Expected 2 elements");
 
+        let s1 = s1.expect_right("to be upgraded");
+        let s2 = s2.expect_right("to be upgraded");
         let type_a_in_s1 = s1
             .schema()
             .schema()
@@ -1333,7 +1403,7 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        let [s1, s2]: [Subgraph<Upgraded>; 2] = upgrade_subgraphs_if_necessary(vec![s1, s2])
+        let [s1, s2]: [Subgraph<_>; 2] = upgrade_subgraphs_if_necessary(vec![s1, s2])
             .expect("upgrades schema")
             .try_into()
             .expect("Expected 2 elements");
@@ -1371,7 +1441,7 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        let [subgraph]: [Subgraph<Upgraded>; 1] = upgrade_subgraphs_if_necessary(vec![subgraph])
+        let [subgraph]: [Subgraph<_>; 1] = upgrade_subgraphs_if_necessary(vec![subgraph])
             .expect("upgrades schema")
             .try_into()
             .expect("Expected 1 element");
@@ -1488,7 +1558,7 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        let [subgraph1, subgraph2]: [Subgraph<Upgraded>; 2] =
+        let [subgraph1, subgraph2]: [Subgraph<_>; 2] =
             upgrade_subgraphs_if_necessary(vec![subgraph1, subgraph2])
                 .expect("upgrades schema")
                 .try_into()
@@ -1624,8 +1694,7 @@ mod tests {
 
     #[test]
     fn ignore_error_for_provides_field_set_on_scalar_field() {
-        // This used to panic.
-        // Note: The actual error in the subgraph will be generated in later steps.
+        // This used to generate a wrong error.
         let subgraphs = vec![
             (
                 "subgraph1",
@@ -1660,6 +1729,11 @@ mod tests {
                     .expect("expands schema")
             })
             .collect::<Vec<_>>();
-        upgrade_subgraphs_if_necessary(expanded).expect("upgrades schema");
+        let errors = upgrade_subgraphs_if_necessary(expanded).expect_err("fails to upgrade schema");
+        assert_eq!(errors.len(), 1);
+        assert_eq!(
+            errors[0].to_string(),
+            r#"[subgraph1] Cannot have both @provides and @external on field "User.id""#
+        );
     }
 }

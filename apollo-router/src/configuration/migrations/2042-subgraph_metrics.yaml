@@ -1,0 +1,5 @@
+description: Subgraph metrics are now GA
+actions:
+  - type: move
+    from: telemetry.apollo.preview_subgraph_metrics
+    to: telemetry.apollo.subgraph_metrics

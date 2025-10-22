@@ -227,10 +227,10 @@ macro_rules! handle_connection {
                     if let Err(_) = connection.timeout(connection_shutdown_timeout).await {
                         tracing::warn!(
                             timeout = connection_shutdown_timeout.as_secs(),
-                            server.address = connection_handle.connection_ref.address.to_string(),
-                            schema.id = connection_handle.connection_ref.pipeline_ref.schema_id,
-                            config.hash = connection_handle.connection_ref.pipeline_ref.config_hash,
-                            launch.id = connection_handle.connection_ref.pipeline_ref.launch_id,
+                            server.address = connection_handle.address.to_string(),
+                            schema.id = connection_handle.pipeline_ref.schema_id,
+                            config.hash = connection_handle.pipeline_ref.config_hash,
+                            launch.id = connection_handle.pipeline_ref.launch_id,
                             "connection shutdown exceeded, forcing close",
                         );
                     }

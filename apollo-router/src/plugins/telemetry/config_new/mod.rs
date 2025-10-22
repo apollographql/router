@@ -32,6 +32,7 @@ pub(crate) mod http_server;
 pub(crate) mod instruments;
 pub(crate) mod logging;
 pub(crate) mod router;
+pub(crate) mod router_overhead;
 pub(crate) mod selectors;
 pub(crate) mod spans;
 pub(crate) mod subgraph;

@@ -1,0 +1,59 @@
+---
+title: Performance and Scaling
+subtitle: Optimize your router for high-performance production workloads
+description: Learn about performance optimization strategies for GraphOS Router including response caching, traffic shaping, and query batching.
+---
+
+GraphOS Router is built for high performance and scalability. This section covers strategies and features to optimize your router for production workloads.
+
+## Response caching
+
+[Response caching](/graphos/routing/performance/caching/response-caching) lets you cache GraphQL operation responses at the router level. The router stores reusable sections of the response tree—when multiple operations request the same entities or root fields, the router serves them from cache instead of querying your subgraphs repeatedly.
+
+This reduces load on your subgraphs and backend services while improving response times for clients.
+
+Response caching includes:
+- **TTL-based expiration** via `Cache-Control` headers from your subgraphs
+- **Tag-based invalidation** using the `@cacheTag` directive
+- **Authorization-aware caching** that automatically separates cache entries by authorization context
+- **Redis-backed distributed caching** to share cached data across router instances
+
+[Get started with response caching →](/graphos/routing/performance/caching/response-caching)
+
+## Traffic shaping
+
+[Traffic shaping](/graphos/routing/performance/traffic-shaping) helps you control how your router handles concurrent requests and rate limits. You can configure:
+
+- **Global limits** on concurrent requests
+- **Per-subgraph limits** to protect individual services
+- **Timeout configurations** to prevent slow queries from blocking resources
+- **Rate limiting** to control request volume
+
+Traffic shaping ensures your router and subgraphs remain stable under heavy load.
+
+[Learn about traffic shaping →](/graphos/routing/performance/traffic-shaping)
+
+## Query batching
+
+[Query batching](/graphos/routing/performance/query-batching) allows clients to send multiple GraphQL operations in a single HTTP request. The router processes them efficiently and returns all results in one response.
+
+This is particularly useful for:
+- Reducing network overhead when making multiple related queries
+- Optimizing mobile and low-bandwidth scenarios
+- Coordinating multiple client-side data requirements
+
+[Explore query batching →](/graphos/routing/performance/query-batching)
+
+## Related topics
+
+### Query planning
+
+The router caches generated query plans to avoid recomputing them for identical operations. You can configure both in-memory and Redis-backed distributed caching for query plans.
+
+[Learn about query plan caching →](/graphos/routing/query-planning/caching)
+
+### Automatic persisted queries
+
+Automatic persisted queries (APQ) reduce network usage by allowing clients to send a hash of their query string instead of the full operation. The router caches these mappings between clients and subgraphs.
+
+[Configure APQ →](/graphos/routing/operations/apq)

@@ -1,0 +1,3 @@
+telemetry:
+  apollo:
+    preview_subgraph_metrics: true

@@ -1,6 +1,6 @@
 telemetry:
   apollo:
-    preview_subgraph_metrics: true
+    subgraph_metrics: true
   instrumentation:
     instruments:
       connector:

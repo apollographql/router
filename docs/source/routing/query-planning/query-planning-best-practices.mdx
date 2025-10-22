@@ -5,19 +5,19 @@ description: Learn best practices in GraphQL schema design to achieve efficient 
 ---
 
 When working with Apollo Federation, changes in your schema can have unexpected impact on the complexity and performance of your graph. Adding one field or changing one directive may create a new supergraph that has hundreds, or even thousands, of new possible paths and edges to connect entities and resolve client operations. Consequently, query planning throughput and latency may degrade.
-While validation errors can be found at build time with [schema composition](https://www.apollographql.com/docs/graphos/schema-design/federated-schemas/composition), other changes may lead to issues that only arise at runtime, during query plan generation or execution.
+While you can find validation errors at build time with [schema composition](https://www.apollographql.com/docs/graphos/schema-design/federated-schemas/composition), other changes may lead to issues that only arise at runtime, during query plan generation or execution.
 
 Examples of changes that can impact query planning include:
 * Adding or modifying `@key`, `@requires`, `@provides`, or `@shareable` directive usage
 * Adding or removing a type implementation from an interface
 * Using `interfaceObject` and adding new fields to an interface
 
-To help alleviate these issues as much as possible, we recommend following some of these best practices for your federated graph.
+To help alleviate these issues as much as possible, Apollo recommends following some of these best practices for your federated graph.
 
 ## Use shared types and fields judiciously
 
 The [`@shareable` directive](https://www.apollographql.com/docs/graphos/schema-design/federated-schemas/sharing-types) allows multiple subgraphs to resolve the same types or fields on entities, giving the query planner options for potentially shorter query paths. However, it's important to use it judiciously.
-- Extensive `@shareable` use can exponentially increase the number of possible query plans generated as the query planner will find the shortest path to the desired result. This can then potentially lead to performance degradation at runtime as we generate plans.
+- Extensive `@shareable` use can exponentially increase the number of possible query plans generated as the query planner will find the shortest path to the desired result. This can then potentially lead to performance degradation at runtime as the router generates plans.
 - Using `@shareable` at root fields on the `Query`, `Mutation`, and `Subscription` types indicates that any subgraph can resolve a given entry point. While query plans can be deterministic for a given version of Router + Federation, there are no guarantees across versions, meaning that your plans may change if new services get added or deleted. This could cause an unexpected change in traffic for a given service, even there were no changes in the operations.
   - Using shared root types also implies that the fields return the same data in the same order across all subgraphs, even if the data is a list, which is often not the case for dynamic applications.
 
@@ -76,10 +76,10 @@ To perform this migration in place:
 
 1. Modify the `Products` subgraph to add the new field using `rover subgraph publish` to push the new subgraph schema.
 2. Deploy a new version of the `Reviews` subgraph with a resolver that accepts either `nameLowercase` or `name` in the source object.
-3. Modify the Reviews subgraph's schema in the registry so that it `@requires(fields: "name")`.
+3. Modify the `Reviews` subgraph's schema in the registry so that it `@requires(fields: "name")`.
 4. Deploy a new version of the `Reviews` subgraph with a resolver that only accepts the `name` in its source object.
 
-Alternatively, you can perform this operation with an atomic migration at the subgraph level by modifying the subgraph's URL:
+Alternatively, perform this operation with an atomic migration at the subgraph level by modifying the subgraph's URL:
 
 1. Modify the `Products` subgraph to add the `name` field (as usual, first deploy all replicas, then use `rover subgraph publish` to push the new subgraph schema).
 2. Deploy a new set of `Reviews` replicas to a new URL that reads from `name`.
@@ -91,7 +91,7 @@ With this atomic strategy, the query planner resolves all outstanding requests t
 
 Interfaces are an essential part of GraphQL schema design, offering flexibility in defining polymorphic types. However, they can also be open for implementation across service boundaries, allowing subgraphs to contribute a new type that changes how existing operations execute.
 
-- Approach interface migrations similar to database migrations. Ensure that changes to interface implementations are performed safely, avoiding disruptions to query operations.
+- Approach interface migrations similar to database migrations. Ensure you perform changes to interface implementations safely, avoiding disruptions to query operations.
 
 
 ### Example
@@ -163,7 +163,7 @@ generates two queries, one to each subgraph, like so:
 
 </CodeColumns>
 
-Currently, the router expands all interfaces into implementing types.
+The router expands all interfaces into implementing types.
 
 ## Use recommended features
 
@@ -180,7 +180,7 @@ GraphOS and router provide many features that help monitor and improve query pla
 In the [router configuration](https://www.apollographql.com/docs/graphos/routing/configuration) there are many settings to help monitor and improve performance impacts. Here are some features all production graphs should consider:
 
 * Monitor your query planner performance with the [standard instruments](https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/standard-instruments#query-planning)
-* Enabling and configuring the [in-memory cache for query plans](https://www.apollographql.com/docs/graphos/routing/performance/caching/in-memory)
-* Using the cache [warm up features](https://www.apollographql.com/docs/graphos/routing/performance/caching/in-memory#cache-warm-up) included out of the box and using the `dry-run` headers for operations
-* Enabling and configuring [distributed caches for query plans](https://www.apollographql.com/docs/graphos/routing/performance/caching/distributed) to share across router instances
+* Enabling and configuring the [in-memory cache for query plans](https://www.apollographql.com/docs/graphos/routing/query-planning/caching)
+* Using the cache [warm up features](https://www.apollographql.com/docs/graphos/routing/query-planning/caching#cache-warm-up) included out of the box and using the `dry-run` headers for operations
+* Enabling and configuring [distributed caches for query plans](https://www.apollographql.com/docs/graphos/routing/query-planning/caching#distributed-caching-with-redis) to share across router instances
 * Limiting the size of operations (and therefore their query plans) with [request limits](https://www.apollographql.com/docs/graphos/routing/security/request-limits) and the cost with [demand control](https://www.apollographql.com/docs/graphos/routing/security/demand-control)

@@ -247,7 +247,7 @@ async fn insert() {
     );
     let hashed_entity_key = hash_representation(&entity_key);
     let prefix_key =
-        format!("version:1.0:subgraph:orga:type:Organization:entity:{hashed_entity_key}");
+        format!("version:1.1:subgraph:orga:type:Organization:entity:{hashed_entity_key}");
     assert!(
         cache_keys
             .iter()
@@ -387,7 +387,7 @@ async fn insert_with_requires() {
     );
     let hashed_entity_key = hash_representation(&entity_key);
     let prefix_key =
-        format!("version:1.0:subgraph:inventory:type:Product:entity:{hashed_entity_key}");
+        format!("version:1.1:subgraph:inventory:type:Product:entity:{hashed_entity_key}");
     assert!(
         cache_keys
             .iter()
@@ -522,7 +522,7 @@ async fn insert_with_nested_field_set() {
     );
 
     let hashed_entity_key = hash_representation(&entity_key);
-    let prefix_key = format!("version:1.0:subgraph:users:type:User:entity:{hashed_entity_key}");
+    let prefix_key = format!("version:1.1:subgraph:users:type:User:entity:{hashed_entity_key}");
     assert!(
         cache_keys
             .iter()

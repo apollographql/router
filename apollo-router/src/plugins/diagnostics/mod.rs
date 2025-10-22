@@ -1,0 +1,188 @@
+//! Runtime diagnostics plugin for the Apollo Router
+//!
+//! Provides an interactive web dashboard and API endpoints for debugging and profiling router
+//! behavior in production or development environments. Useful for investigating performance issues,
+//! memory leaks, and understanding router configuration.
+//!
+//! ## Use Cases
+//!
+//! - **Memory profiling**: Track heap allocations and identify memory leaks in long-running routers
+//! - **Configuration debugging**: Inspect active router configuration and supergraph schema
+//! - **System diagnostics**: Collect system information (OS, CPU, memory, network) for support tickets
+//! - **Diagnostic export**: Generate comprehensive snapshot archives for offline analysis
+//!
+//! ## Architecture
+//!
+//! The plugin exposes a nested Axum router under `/diagnostics` with three main subsystems:
+//!
+//! - **Dashboard** (`html_generator`): Interactive web UI for visualizing router state
+//! - **Memory Service** (`memory`): Jemalloc heap profiling with start/stop/dump control
+//! - **Export Service** (`export`): Bundles configuration, schema, system info, and memory dumps
+//!
+//! All endpoints return structured JSON or serve static resources. The memory service uses
+//! jemalloc's profiling API (Linux-only) with graceful degradation on other platforms.
+//!
+//! ## Security
+//!
+//! **WARNING: This plugin is disabled by default.** When enabled, it binds to `127.0.0.1:8089` to prevent
+//! network exposure. Only enable in trusted environments with network isolation, as endpoints
+//! expose sensitive configuration data and memory contents.
+//! Do not expose this endpoint directly to the internet.
+//!
+//! ## Platform Support
+//!
+//! Available on all platforms. Memory profiling features require Linux with jemalloc allocator
+//! (enabled via `global-allocator` feature). Other diagnostic features work cross-platform.
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use multimap::MultiMap;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
+use tower::BoxError;
+
+use crate::Endpoint;
+use crate::configuration::ListenAddr;
+use crate::plugin::Plugin;
+use crate::plugin::PluginInit;
+
+mod archive_utils;
+mod constants;
+mod export;
+mod html_generator;
+mod memory;
+mod response_builder;
+mod security;
+mod service;
+mod static_resources;
+pub(crate) mod system_info;
+
+#[cfg(test)]
+mod tests;
+
+/// Simplified error types for the diagnostics plugin
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum DiagnosticsError {
+    /// I/O operation errors
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
+    /// HTTP response errors
+    #[error("HTTP error: {0}")]
+    Http(#[from] http::Error),
+
+    /// JSON serialization/deserialization errors
+    #[error("JSON error: {0}")]
+    Json(#[from] serde_json::Error),
+
+    /// Jemalloc/memory profiling errors
+    #[error("Memory profiling error: {0}")]
+    #[cfg_attr(
+        not(all(target_family = "unix", feature = "global-allocator")),
+        allow(dead_code)
+    )]
+    Memory(String),
+
+    /// Internal errors (catch-all)
+    #[error("Internal error: {0}")]
+    Internal(String),
+}
+
+/// Result type alias for diagnostics operations
+pub(crate) type DiagnosticsResult<T> = Result<T, DiagnosticsError>;
+
+impl From<String> for DiagnosticsError {
+    fn from(error: String) -> Self {
+        DiagnosticsError::Internal(error)
+    }
+}
+
+/// Configuration for the diagnostics plugin
+///
+/// **Platform Requirements**: This plugin is supported on all platforms.
+/// Heap dump functionality is only available on Linux platforms due to
+/// jemalloc requirements. Other diagnostic features work across platforms.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[serde(default)]
+pub(crate) struct Config {
+    /// Enable the diagnostics plugin
+    pub(crate) enabled: bool,
+
+    /// The socket address and port to listen on
+    /// Defaults to 127.0.0.1:8089
+    /// Do not expose this endpoint to the internet as it exposes sensitive information.
+    pub(crate) listen: ListenAddr,
+
+    /// Directory path for memory dump files
+    /// Defaults to "/tmp/router-diagnostics" on Unix, or temp directory on other platforms
+    ///
+    /// This directory will be created automatically if it doesn't exist.
+    /// Note: Memory dumps are only generated on Linux platforms.
+    pub(crate) output_directory: PathBuf,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            // SECURITY: Plugin disabled by default to prevent accidental exposure
+            // Diagnostics endpoints expose sensitive information and should only be enabled
+            // during development/debugging with network isolation.
+            enabled: false,
+
+            // SECURITY: Bind to localhost only by default to prevent network exposure
+            // Using 127.0.0.1 instead of 0.0.0.0 ensures the diagnostic endpoints
+            // are only accessible from the local machine, not from the network
+            listen: constants::network::default_listen_addr().into(),
+
+            output_directory: PathBuf::from("/tmp/router-diagnostics"),
+        }
+    }
+}
+
+/// The diagnostics plugin
+#[derive(Debug, Clone)]
+struct DiagnosticsPlugin {
+    config: Config,
+    router_config: Arc<str>,
+    supergraph_schema: Arc<String>,
+}
+
+#[async_trait::async_trait]
+impl Plugin for DiagnosticsPlugin {
+    type Config = Config;
+
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        Ok(Self {
+            config: init.config,
+            supergraph_schema: init.supergraph_sdl,
+            router_config: init.raw_yaml.unwrap_or(Arc::from("")),
+        })
+    }
+
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
+        if !self.config.enabled {
+            return MultiMap::new();
+        }
+
+        let router = service::create_router(
+            &self.config.output_directory,
+            self.router_config.clone(),
+            self.supergraph_schema.clone(),
+        );
+
+        let mut map = MultiMap::new();
+        let endpoint = Endpoint::from_router("/diagnostics".to_string(), router);
+
+        tracing::info!(
+            "Diagnostics endpoints at {}/diagnostics",
+            self.config.listen
+        );
+        map.insert(self.config.listen.clone(), endpoint);
+        map
+    }
+}
+
+register_plugin!("apollo", "experimental_diagnostics", DiagnosticsPlugin);

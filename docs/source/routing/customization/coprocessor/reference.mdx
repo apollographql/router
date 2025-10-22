@@ -342,6 +342,90 @@ When `stage` is `ExecutionRequest`, this contains the query plan for the client 
 </tbody>
 </table>
 
+## Context key reference
+
+List of context keys available from the router's request context, which is shared across stages of the processing pipeline.
+
+### Core operation
+
+- `apollo::supergraph::operation_name` - Name of the operation
+- `apollo::supergraph::operation_kind` - Operation kind: `query`, `mutation`, or `subscription`
+- `apollo::supergraph::operation_id` - Apollo operation ID
+- `apollo::supergraph::first_event` - First event marker for subscriptions. `false` if the current response chunk is not the first response in the stream, `none` otherwise
+- `apollo::supergraph_schema_id` - Supergraph schema ID
+
+### Authentication and authorization
+
+#### Authentication
+- `apollo::authentication::jwt_claims` - Claims extracted from a JWT if present in the request
+- `apollo::authentication::jwt_status` - JWT validation status (internal only)
+
+#### Authorization
+- `apollo::authorization::authentication_required` - `true` if the operation contains fields marked with `@authenticated`
+- `apollo::authorization::required_scopes` - If the operation contains fields marked with `@requiresScopes`, it contains the list of scopes used
+- `apollo::authorization::required_policies` - If the query contains fields marked with `@policy`, it contains a map of `policy name -> Option<bool>`. A coprocessor or Rhai script can edit this map to mark `true` on authorization policies that succeed or `false` on ones that fail
+
+### Telemetry
+
+#### Client information
+- `apollo::telemetry::client_name` - Client name extracted from the client name header
+- `apollo::telemetry::client_version` - Client version extracted from the client version header
+- `apollo::telemetry::client_library_name` - Client library name
+- `apollo::telemetry::client_library_version` - Client library version
+
+#### Telemetry control
+- `apollo::telemetry::subgraph_ftv1` - JSON-serialized trace data returned by the subgraph when FTV1 is enabled
+- `apollo::telemetry::studio_exclude` - `true` if the current request's trace details should be excluded from Studio
+- `apollo::telemetry::contains_graphql_error` - `true` if the response contains at least one error
+- `apollo::telemetry::counted_errors` - Map of already-counted errors (internal)
+- `apollo::telemetry::http_request_resend_count_{subgraph_req_id}` - HTTP retry count (dynamic key with subgraph request ID suffix)
+
+### Demand and cost control
+
+The following keys are populated by the demand control plugin:
+
+- `apollo::demand_control::estimated_cost` - Estimated cost of the requests to be sent to the subgraphs
+- `apollo::demand_control::actual_cost` - Actual calculated cost of the responses returned by the subgraphs
+- `apollo::demand_control::result` - `COST_OK` if allowed, and `COST_TOO_EXPENSIVE` if rejected due to cost limits
+- `apollo::demand_control::strategy` - Name of the cost calculation strategy used
+
+### Caching
+
+#### Response cache
+- `apollo::response_cache::key` - Response cache key
+- `apollo::response_cache::debug_cached_keys` - Debug info for cached keys
+- `apollo::router::response_cache::cache_info_subgraph_{subgraph_name}` - Response cache info per subgraph (dynamic key with subgraph name suffix)
+
+#### Automatic persisted queries (APQ)
+- `apollo::apq::cache_hit` - Present if the request used APQ; true if we got a cache hit for the query ID, false otherwise
+- `apollo::apq::registered` - `true` if the request registered a query in APQ
+
+### Query plan exposure
+
+- `apollo::expose_query_plan::plan` - Contains the query plan serialized as JSON (editing it has no effect on execution)
+- `apollo::expose_query_plan::formatted_plan` - Query plan formatted as text string
+- `apollo::expose_query_plan::enabled` - `true` if query plan exposure is enabled
+
+### Progressive override
+
+- `apollo::progressive_override::unresolved_labels` - List of unresolved labels
+- `apollo::progressive_override::labels_to_override` - List of labels for which overrides are needed
+
+### Subscriptions
+
+- `apollo::subscriptions::fatal_error` - Fatal subscription error flag
+
+### Persisted queries
+
+- `apollo_persisted_queries::client_name` - Client name for PQ operations
+- `apollo_persisted_queries::safelist::skip_enforcement` - Skip safelist enforcement
+
+### Connectors
+
+- `apollo_connectors::sources_in_query_plan` - List of connector sources in query plan
+
+---
+
 ## Example requests by stage
 
 ### `RouterRequest`

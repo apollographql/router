@@ -22,6 +22,9 @@
 //! External exporters may perform blocking I/O during construction, so the entire build process
 //! runs in [`block_in_place`] to avoid blocking the async runtime.
 
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+
 use multimap::MultiMap;
 use tokio::task::block_in_place;
 use tower::BoxError;
@@ -45,6 +48,9 @@ use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
 use crate::plugins::telemetry::reload::tracing::create_propagator;
 use crate::plugins::telemetry::tracing::datadog;
 use crate::plugins::telemetry::tracing::zipkin;
+
+/// Static counter for tracking Prometheus reload calls.
+static PROMETHEUS_CALL_COUNT: AtomicUsize = AtomicUsize::new(1);
 
 /// Orchestrates telemetry reload preparation by detecting configuration changes
 /// and constructing new providers as needed.
@@ -85,6 +91,7 @@ impl<'a> Builder<'a> {
     fn setup_public_metrics(&mut self) -> Result<(), BoxError> {
         if self.is_metrics_config_changed::<metrics::prometheus::Config>()
             || self.is_metrics_config_changed::<otlp::Config>()
+            || self.prometheus_force_change()
         {
             ::tracing::debug!("configuring metrics");
             let mut builder = MetricsBuilder::new(self.config);
@@ -103,6 +110,7 @@ impl<'a> Builder<'a> {
         if let Some(prometheus_registry) = self.activation.prometheus_registry() {
             let listen = self.config.exporters.metrics.prometheus.listen.clone();
             let path = self.config.exporters.metrics.prometheus.path.clone();
+            tracing::info!("Prometheus endpoint exposed at {}{}", &listen, &path);
             self.endpoints.insert(
                 listen,
                 Endpoint::from_router_service(
@@ -187,6 +195,24 @@ impl<'a> Builder<'a> {
     fn setup_logging(&mut self) {
         ::tracing::debug!("configuring logging");
         self.activation.with_logging(create_fmt_layer(self.config));
+    }
+
+    /// Returns true every 20 calls when Prometheus is enabled.
+    ///
+    /// This helps prevent accumulation of stale metrics in the Prometheus registry.
+    /// Once a series enters the Prometheus registry it is never dropped, so metrics
+    /// with labels that are unique (like launch_id) can accumulate as zeroed
+    /// out series that will never be incremented again.
+    ///
+    /// The true solution for this is to drop Prometheus support as this has been dropped in upstream OTEL.
+    /// Note that this doesn't actually hurt Prometheus metrics as these are OK to be recreated at any time,
+    /// but things like connections won't be visible across reloads.
+    fn prometheus_force_change(&self) -> bool {
+        if !metrics::prometheus::Config::config(self.config).enabled {
+            return false;
+        }
+        let count = PROMETHEUS_CALL_COUNT.fetch_add(1, Ordering::Relaxed);
+        count.is_multiple_of(20)
     }
 }
 
