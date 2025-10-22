@@ -1418,8 +1418,7 @@ fn extract_cache_keys(
                 reason: "__typename in representation is not a string".to_string(),
             })?;
 
-        // Split `representation` into two parts: the entity key part and the rest.
-        let representation_entity_key = take_matching_key_field_set(
+        let key_field_set = find_matching_key_field_set(
             representation,
             typename,
             subgraph_name,
@@ -1432,7 +1431,7 @@ fn extract_cache_keys(
         } else {
             hash_other_representation(representation)
         };
-        let hashed_entity_key = hash_entity_key(&representation_entity_key);
+        let hashed_entity_key = hash_entity_key(representation, &key_field_set);
 
         // the cache key is written to easily find keys matching a prefix for deletion:
         // - entity cache version: current version of the hash
@@ -1450,37 +1449,31 @@ fn extract_cache_keys(
 
         // Restore the `representation` back whole again
         representation.insert(TYPENAME, typename_value);
-        merge_representation(representation, representation_entity_key);
 
         res.push(key);
     }
     Ok(res)
 }
 
-fn take_matching_key_field_set(
-    representation: &mut serde_json_bytes::Map<ByteString, Value>,
+fn find_matching_key_field_set(
+    representation: &serde_json_bytes::Map<ByteString, Value>,
     typename: &str,
     subgraph_name: &str,
     supergraph_schema: &Valid<Schema>,
     subgraph_enums: &HashMap<String, String>,
-) -> Result<serde_json_bytes::Map<ByteString, Value>, FetchError> {
+) -> Result<apollo_compiler::executable::SelectionSet, FetchError> {
     // find an entry in the `key_field_sets` that matches the `representation`.
-    let matched_key_field_set =
-        collect_key_field_sets(typename, subgraph_name, supergraph_schema, subgraph_enums)?
+    collect_key_field_sets(typename, subgraph_name, supergraph_schema, subgraph_enums)?
         .find(|field_set| {
             matches_selection_set(representation, &field_set.selection_set)
         })
+        .map(|field_set| field_set.selection_set)
         .ok_or_else(|| {
             tracing::trace!("representation does not match any key field set for typename {typename} in subgraph {subgraph_name}");
             FetchError::MalformedRequest {
                 reason: format!("unexpected critical internal error for typename {typename} in subgraph {subgraph_name}"),
             }
-        })?;
-    take_selection_set(representation, &matched_key_field_set.selection_set).ok_or_else(|| {
-        FetchError::MalformedRequest {
-            reason: format!("representation does not match the field set {matched_key_field_set}"),
-        }
-    })
+        })
 }
 
 // Collect `@key` field sets on a `typename` in a `subgraph_name`.
@@ -1527,6 +1520,11 @@ fn collect_key_field_sets(
 }
 
 /// Whether the entity, represented as JSON, matches the parsed @key fields (`selection_set`)
+/// * This function mirrors `take_selection_set` and make sure the representation matches the
+///   the shape of `selection_set`.
+/// * This function and `take_selection_set` are separate because this is called for multiple
+///   possible `@key` fields to find the matching one, while `take_selection_set` is only called
+///   once the matching `@key` fields is found.
 // WARN: if you make changes to this fn, make the same changes to the one in response_cache/plugin.rs!
 fn matches_selection_set(
     // the JSON representation of the entity data
@@ -1540,161 +1538,78 @@ fn matches_selection_set(
         let Some(value) = representation.get(field.name.as_str()) else {
             return false;
         };
-        // selection sets are empty when we're at the terminus (leaf) of the query, either
-        // bottoming out in a scalar (happy path) or an object with no fields (sad path--this
-        // _shouldn't_ happen)
+
+        // This field selection is not expecting any subdata.
         if field.selection_set.is_empty() {
-            if matches!(value, Value::Object(_)) {
-                // we've hit the sad path somehow; return false to denote no match found
-                tracing::trace!(
-                    "encounterd an object with no selection sets while trying to find an entity key match: {value}"
-                );
+            // Scalar (or array of scalars) fields are always a match.
+            if !is_scalar_or_array_of_scalar(value) {
+                // Mismatch: Scalar value was expected.
                 return false;
             }
-            // otherwise, continue
             continue;
         }
 
-        // we're not at the terminus (leaf) of the query and we don't have a scalar, so we need to
-        // decide how we're going to continue searching for a match in the JSON representation
-        match value {
-            // objects have selection sets, so recurse!
-            Value::Object(sub_value) => {
-                if !matches_selection_set(sub_value, &field.selection_set) {
-                    return false;
-                }
+        // The field selection is expecting a subdata. See if given `value` matches the shape of
+        // its sub-selection set.
+        let result = match value {
+            Value::Object(obj) => {
+                // Recurse into object value
+                matches_selection_set(obj, &field.selection_set)
             }
-            // arrays can be used in complex `@key`s, both arrays of scalars (eg, ["a", "b", "c"],
-            // which are handled above when we check whether the selection set is empty and it will be
-            // because scalars have no selection set; we would have matched in virtue of finding
-            // the scalar in the JSON representation) and arrays of objects (eg, [ObjectA, ObjectB,
-            // ObjectC], which we handle below)
+
             Value::Array(arr) => {
-                for item in arr {
-                    // arrays of scalars are handled above; so, we know we have an object--if this
-                    // fails, we've hit a bug
-                    let Value::Object(obj) = item else {
-                        tracing::trace!(
-                            "encounterd an array filled with neither scalars or objects while trying to find an entity key match: {item}"
-                        );
-                        return false;
-                    };
-                    if !matches_selection_set(obj, &field.selection_set) {
-                        return false;
-                    }
-                }
+                // Recurse into array values
+                matches_array_of_objects(arr, &field.selection_set)
             }
-            // this should never be hit; we should only have JSON objects and arrays
-            other => {
-                tracing::trace!(
-                    "encounterd something other than an array or object while trying to find an entity key match: {other}"
-                );
-                return false;
+
+            // scalar values
+            _other => {
+                // Mismatch: object or array value was expected.
+                false
             }
+        };
+        if !result {
+            return false;
         }
     }
     true
 }
 
-/// Removes the selection set from `representation` and returns the value(s) corresponding
-/// to the selection set. If no match is found, `None` is returned
-///
-/// The primary role of this function is to find the entity we're after so that we can eventually
-/// create a hashed cache key using it
-// WARN: any changes made to this fn should have the same done to the one in
-// response_cache/plugin.rs
-fn take_selection_set(
-    representation: &mut serde_json_bytes::Map<ByteString, Value>,
-    selection_set: &apollo_compiler::executable::SelectionSet,
-) -> Option<serde_json_bytes::Map<ByteString, Value>> {
-    let mut result = serde_json_bytes::Map::new();
-    for field in selection_set.root_fields(&Default::default()) {
-        // selection sets are empty when we're at the terminus (leaf) of the query, either
-        // bottoming out in a scalar (happy path) or an object with no fields (sad path--this
-        // _shouldn't_ happen)
-        if field.selection_set.is_empty() {
-            let value = representation.remove(field.name.as_str())?;
-            // `value` must be a scalar.
-            if matches!(value, Value::Object(_)) {
-                // we've hit the sad path somehow; return None to denote no match found
-                tracing::trace!(
-                    "encounterd an object with no selection sets while trying to find and return values from the selection set: {value}"
-                );
-                return None;
-            }
-            // move the scalar field to the `result`
-            result.insert(ByteString::from(field.name.as_str()), value);
-            continue;
-        }
-
-        // we're not at the terminus (leaf) of the query and we don't have a scalar
-        let value = representation.get_mut(field.name.as_str())?;
-        // so, decide how we're going to continue searching for a match in the JSON representation
-        match value {
-            // objects have selection sets, so recurse!
-            Value::Object(sub_value) => {
-                let removed = take_selection_set(sub_value, &field.selection_set)?;
-                result.insert(
-                    ByteString::from(field.name.as_str()),
-                    Value::Object(removed),
-                );
-            }
-            // see the note on the matches_selection_set fn for details on handling
-            // arrays of scalars; the following handles arrays of objects
-            Value::Array(arr) => {
-                let mut results = Vec::new();
-                for item in arr {
-                    let Value::Object(obj) = item else {
-                        return None;
-                    };
-                    let removed = take_selection_set(obj, &field.selection_set)?;
-                    results.push(Value::Object(removed));
-                }
-                result.insert(ByteString::from(field.name.as_str()), Value::Array(results));
-            }
-            // this should never be hit; we should only have JSON objects and arrays
-            other => {
-                tracing::trace!(
-                    "encounterd something other than an array or object while trying to take an entity from the representation: {other}"
-                );
-                return None;
-            }
-        }
+fn is_scalar_or_array_of_scalar(value: &Value) -> bool {
+    match value {
+        Value::Object(_) => false,
+        Value::Array(arr) => arr.iter().all(is_scalar_or_array_of_scalar),
+        _ => true,
     }
-    Some(result)
 }
 
-/// The inverse of `take_selection_set`
-// BUG: there's likely a bug here in handling only objects; we probably need to add support for
-// merging array representations too, but this is unconfirmed and we'd need to figure out under
-// what conditions we'd merge arrays
-fn merge_representation(
-    dest: &mut serde_json_bytes::Map<ByteString, Value>,
-    source: serde_json_bytes::Map<ByteString, Value>,
-) {
-    source.into_iter().for_each(|(key, src_value)| {
-        // Note: field sets can't have aliases.
-        let Some(dest_value) = dest.get_mut(&key) else {
-            dest.insert(key, src_value);
-            return;
+/// See if all array items match the shape of the `selection_set`.
+/// * Note: The array can be multi-dimensional. (the @key field set can match any levels of nested
+///   arrays)
+/// * Precondition: `selection_set` must be non-empty.
+fn matches_array_of_objects(
+    arr: &[Value],
+    selection_set: &apollo_compiler::executable::SelectionSet,
+) -> bool {
+    for item in arr.iter() {
+        let result = match item {
+            Value::Object(obj) => matches_selection_set(obj, selection_set),
+            Value::Array(arr) => matches_array_of_objects(arr, selection_set),
+            _other => false,
         };
-
-        // Overlapping fields must be objects.
-        if let (Value::Object(dest_sub_value), Value::Object(src_sub_value)) =
-            (dest_value, src_value)
-        {
-            // Merge sub-values
-            merge_representation(dest_sub_value, src_sub_value);
+        if !result {
+            return false;
         }
-    });
+    }
+    true
 }
 
 // Order-insensitive structural hash of the representation value
 pub(crate) fn hash_representation(
     representation: &serde_json_bytes::Map<ByteString, Value>,
 ) -> String {
-    let mut digest = Sha256::new();
-    fn hash(state: &mut Sha256, fields: &serde_json_bytes::Map<ByteString, Value>) {
+    fn hash_object(state: &mut Sha256, fields: &serde_json_bytes::Map<ByteString, Value>) {
+        state.update("{".as_bytes());
         fields
             .iter()
             .sorted_by(|a, b| a.0.cmp(b.0))
@@ -1703,31 +1618,118 @@ pub(crate) fn hash_representation(
                 state.update(":".as_bytes());
                 match v {
                     serde_json_bytes::Value::Object(obj) => {
-                        state.update("{".as_bytes());
-                        hash(state, obj);
-                        state.update("}".as_bytes());
+                        hash_object(state, obj);
                     }
+                    Value::Array(arr) => {
+                        hash_array(state, arr);
+                    }
+                    // scalar value
                     _ => state.update(serde_json::to_string(v).unwrap().as_bytes()),
                 }
+                state.update(",".as_bytes());
             });
+        state.update("}".as_bytes());
     }
-    hash(&mut digest, representation);
+
+    fn hash_array(state: &mut Sha256, items: &[Value]) {
+        state.update("[".as_bytes());
+        items.iter().for_each(|v| {
+            match v {
+                serde_json_bytes::Value::Object(obj) => {
+                    hash_object(state, obj);
+                }
+                Value::Array(arr) => {
+                    hash_array(state, arr);
+                }
+                // scalar value
+                _ => state.update(serde_json::to_string(v).unwrap().as_bytes()),
+            }
+            state.update(",".as_bytes());
+        });
+        state.update("]".as_bytes());
+    }
+
+    let mut digest = Sha256::new();
+    hash_object(&mut digest, representation);
+    hex::encode(digest.finalize().as_slice())
+}
+
+pub(crate) fn hash_representation_filtered(
+    representation: &serde_json_bytes::Map<ByteString, Value>,
+    selection_set: &apollo_compiler::executable::SelectionSet,
+) -> String {
+    fn hash_object(
+        state: &mut Sha256,
+        fields: &serde_json_bytes::Map<ByteString, Value>,
+        selection_set: &apollo_compiler::executable::SelectionSet,
+    ) {
+        state.update("{".as_bytes());
+        let default_document = Default::default();
+        let sorted_selections = selection_set
+            .root_fields(&default_document)
+            .sorted_by(|a, b| a.name.cmp(&b.name));
+        for field in sorted_selections {
+            let key = field.name.as_str();
+            let Some(val) = fields.get(key) else {
+                continue;
+            };
+            state.update(serde_json::to_string(key).unwrap().as_bytes());
+            state.update(":".as_bytes());
+            match val {
+                serde_json_bytes::Value::Object(obj) => {
+                    hash_object(state, obj, &field.selection_set);
+                }
+                Value::Array(arr) => {
+                    hash_array(state, arr, &field.selection_set);
+                }
+                // scalar value
+                _ => state.update(serde_json::to_string(val).unwrap().as_bytes()),
+            }
+            state.update(",".as_bytes());
+        }
+        state.update("}".as_bytes());
+    }
+
+    fn hash_array(
+        state: &mut Sha256,
+        items: &[Value],
+        selection_set: &apollo_compiler::executable::SelectionSet,
+    ) {
+        state.update("[".as_bytes());
+        items.iter().for_each(|v| {
+            match v {
+                serde_json_bytes::Value::Object(obj) => {
+                    hash_object(state, obj, selection_set);
+                }
+                Value::Array(arr) => {
+                    hash_array(state, arr, selection_set);
+                }
+                // scalar value
+                _ => state.update(serde_json::to_string(v).unwrap().as_bytes()),
+            }
+            state.update(",".as_bytes());
+        });
+        state.update("]".as_bytes());
+    }
+
+    let mut digest = Sha256::new();
+    hash_object(&mut digest, representation, selection_set);
     hex::encode(digest.finalize().as_slice())
 }
 
 // Only hash the list of entity keys
+// * full representation: key fields & other required fields
+// * selection_set: key fields selection set
 pub(crate) fn hash_entity_key(
-    entity_keys: &serde_json_bytes::Map<ByteString, serde_json_bytes::Value>,
+    representation: &serde_json_bytes::Map<ByteString, serde_json_bytes::Value>,
+    selection_set: &apollo_compiler::executable::SelectionSet,
 ) -> String {
-    tracing::trace!("entity keys: {entity_keys:?}");
     // We have to hash the representation because it can contains PII
-    hash_representation(entity_keys)
+    hash_representation_filtered(representation, selection_set)
 }
 
 // Hash other representation variables except __typename and entity keys
-fn hash_other_representation(
-    representation: &mut serde_json_bytes::Map<ByteString, Value>,
-) -> String {
+fn hash_other_representation(representation: &serde_json_bytes::Map<ByteString, Value>) -> String {
     hash_representation(representation)
 }
 
@@ -2205,7 +2207,7 @@ mod tests {
             .unwrap();
 
         // Test with complex nested array structure
-        let mut representation = json!({
+        let representation = json!({
             "id": "TEST123",
             "locale": "en_US",
             "lists": [
@@ -2235,36 +2237,14 @@ mod tests {
         .unwrap()
         .clone();
 
-        let taken = take_selection_set(&mut representation, &field_set.selection_set);
-        let expectation = json!({
-            "id": "TEST123",
-            "locale": "en_US",
-            "lists": [
-                {
-                    "id": "LIST1",
-                    "date": 20240101,
-                    "quantity": 50,
-                    "location": "WAREHOUSE_A"
-                }
-            ],
-            "list": [
-                {
-                    "id": "LIST2",
-                    "date": 20240101,
-                    "quantity": 100,
-                    "location": "WAREHOUSE_A"
-                },
-                {
-                    "id": "LIST3",
-                    "date": 20240102,
-                    "quantity": 75,
-                    "location": "WAREHOUSE_B"
-                }
-            ]
-        })
-        .as_object()
-        .cloned();
-
-        assert_eq!(taken, expectation);
+        assert!(matches_selection_set(
+            &representation,
+            &field_set.selection_set
+        ));
+        let hash = hash_representation_filtered(&representation, &field_set.selection_set);
+        assert_eq!(
+            hash,
+            "e5faa4c491214ed07f53acc65189e6efacc8b7eedc0d88055d86a5307671f0e3"
+        );
     }
 }
