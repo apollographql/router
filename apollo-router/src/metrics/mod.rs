@@ -226,7 +226,6 @@ pub(crate) mod test_utils {
             count: bool,
             attributes: &[KeyValue],
         ) -> bool {
-            let attributes = AttributeSet::from(attributes);
             if let Some(value) = value.to_u64()
                 && self.metric_matches(name, &ty, value, count, &attributes)
             {
@@ -541,7 +540,7 @@ pub(crate) mod test_utils {
     impl SerdeMetricData {
         fn extract_datapoints<T: Into<serde_json::Value> + Copy + 'static>(
             metric_data: &mut SerdeMetricData,
-            value: MetricData<T>,
+            value: &MetricData<T>,
         ) {
             use MetricData::*;
             match value {
@@ -560,16 +559,16 @@ pub(crate) mod test_utils {
         }
     }
 
-    impl From<Metric> for SerdeMetric {
-        fn from(value: Metric) -> Self {
+    impl From<&Metric> for SerdeMetric {
+        fn from(value: &Metric) -> Self {
             let mut serde_metric = SerdeMetric {
                 name: value.name().to_string(),
                 description: value.description().to_string(),
                 unit: value.unit().to_string(),
                 data: match value.data() {
-                    opentelemetry_sdk::metrics::data::AggregatedMetrics::F64(metric_data) => metric_data.clone().into(),
-                    opentelemetry_sdk::metrics::data::AggregatedMetrics::U64(metric_data) => metric_data.clone().into(),
-                    opentelemetry_sdk::metrics::data::AggregatedMetrics::I64(metric_data) => metric_data.clone().into(),
+                    opentelemetry_sdk::metrics::data::AggregatedMetrics::F64(metric_data) => metric_data.into(),
+                    opentelemetry_sdk::metrics::data::AggregatedMetrics::U64(metric_data) => metric_data.into(),
+                    opentelemetry_sdk::metrics::data::AggregatedMetrics::I64(metric_data) => metric_data.into(),
                 },
             };
             // Sort the datapoints so that we can compare them
@@ -680,11 +679,11 @@ pub(crate) mod test_utils {
         }
     }
 
-    impl<T> From<MetricData<T>> for SerdeMetricData 
+    impl<T> From<&MetricData<T>> for SerdeMetricData
     where
         T: Into<serde_json::Value> + Copy + 'static,
     {
-        fn from(value: opentelemetry_sdk::metrics::data::MetricData<T>) -> Self {
+        fn from(value: &MetricData<T>) -> Self {
             let mut metric_data = SerdeMetricData::default();
             Self::extract_datapoints(&mut metric_data, value);
             metric_data

@@ -327,12 +327,11 @@ mod test {
 
         meter_provider.force_flush().unwrap();
 
-        let metrics: Vec<_> = exporter
-            .get_finished_metrics()
-            .unwrap()
-            .into_iter()
-            .flat_map(|m: opentelemetry_sdk::metrics::data::ResourceMetrics| m.scope_metrics().collect())
-            .flat_map(|m| m.metrics().into_iter())
+        let resource_metrics = exporter.get_finished_metrics().unwrap();
+        let metrics: Vec<_> = resource_metrics
+            .iter()
+            .flat_map(|rm| rm.scope_metrics())
+            .flat_map(|sm| sm.metrics())
             .collect();
 
         // Matches allow
@@ -403,12 +402,11 @@ mod test {
             .add(1, &[]);
         meter_provider.force_flush().unwrap();
 
-        let metrics: Vec<_> = exporter
-            .get_finished_metrics()
-            .unwrap()
-            .into_iter()
-            .flat_map(|m: opentelemetry_sdk::metrics::data::ResourceMetrics| m.scope_metrics())
-            .flat_map(|m: &opentelemetry_sdk::metrics::data::ScopeMetrics| m.metrics())
+        let resource_metrics = exporter.get_finished_metrics().unwrap();
+        let metrics: Vec<_> = resource_metrics
+            .iter()
+            .flat_map(|rm| rm.scope_metrics())
+            .flat_map(|sm| sm.metrics())
             .collect();
         assert!(
             metrics
@@ -528,12 +526,11 @@ mod test {
             .add(1, &[]);
         meter_provider.force_flush().unwrap();
 
-        let metrics: Vec<_> = exporter
-            .get_finished_metrics()
-            .unwrap()
-            .into_iter()
-            .flat_map(|m: opentelemetry_sdk::metrics::data::ResourceMetrics| m.scope_metrics().collect())
-            .flat_map(|m| m.metrics().into_iter())
+        let resource_metrics = exporter.get_finished_metrics().unwrap();
+        let metrics: Vec<_> = resource_metrics
+            .iter()
+            .flat_map(|rm| rm.scope_metrics())
+            .flat_map(|sm| sm.metrics())
             .collect();
         // Matches
         assert!(
