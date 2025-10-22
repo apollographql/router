@@ -1895,47 +1895,6 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         self.error_reporter.add_error(enhanced_error);
     }
 
-    pub(crate) fn report_mismatch_hint<T>(
-        &mut self,
-        code: HintCode,
-        message: String,
-        sources: &Sources<Node<T>>,
-        accessor: impl Fn(&Option<Node<T>>) -> bool,
-    ) {
-        // Build detailed hint message showing which subgraphs have/don't have the element
-        let mut has_subgraphs = Vec::new();
-        let mut missing_subgraphs = Vec::new();
-
-        for (&idx, source) in sources.iter() {
-            let subgraph_name = if idx < self.names.len() {
-                &self.names[idx]
-            } else {
-                "unknown"
-            };
-            let result = accessor(source);
-            if result {
-                has_subgraphs.push(subgraph_name);
-            } else {
-                missing_subgraphs.push(subgraph_name);
-            }
-        }
-
-        let detailed_message = format!(
-            "{}defined in {} but not in {}",
-            message,
-            has_subgraphs.join(", "),
-            missing_subgraphs.join(", ")
-        );
-
-        // Add the hint to the error reporter
-        let hint = CompositionHint {
-            code: code.definition().code().to_string(),
-            message: detailed_message,
-            locations: self.source_locations(sources),
-        };
-        self.error_reporter.add_hint(hint);
-    }
-
     pub(crate) fn source_locations<T>(&self, sources: &Sources<Node<T>>) -> Vec<SubgraphLocation> {
         let mut result = Vec::new();
         for (subgraph_id, node) in sources {

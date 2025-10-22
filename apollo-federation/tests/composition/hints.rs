@@ -1,6 +1,9 @@
-use apollo_federation::supergraph::{CompositionHint, Satisfiable, Supergraph};
+use apollo_federation::supergraph::CompositionHint;
+use apollo_federation::supergraph::Satisfiable;
+use apollo_federation::supergraph::Supergraph;
 
-use crate::composition::{ServiceDefinition, compose_as_fed2_subgraphs};
+use crate::composition::ServiceDefinition;
+use crate::composition::compose_as_fed2_subgraphs;
 
 /// Helper to assert that a supergraph has no hints
 fn assert_no_hints(supergraph: &Supergraph<Satisfiable>) {
@@ -408,6 +411,8 @@ mod union_member_inconsistencies {
 
 // Tests for enum-related hints
 mod enum_hints {
+    use test_log::test;
+
     use super::*;
 
     #[test]
