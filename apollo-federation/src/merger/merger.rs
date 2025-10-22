@@ -1714,10 +1714,10 @@ impl Merger {
         // arguments in multiple subgraphs is merged with a single `@join__directive` that
         // specifies both graphs. If two applications have different arguments, each application
         // gets its own `@join__directive` specifying the different arugments per graph.
-        let mut joins_by_directive_name: HashMap<
+        let mut joins_by_directive_name: IndexMap<
             Name,
-            HashMap<Vec<Node<Argument>>, IndexSet<Name>>,
-        > = HashMap::new();
+            IndexMap<Vec<Node<Argument>>, IndexSet<Name>>,
+        > = IndexMap::default();
         let mut links_to_persist: Vec<(Url, Directive)> = Vec::new();
 
         for (idx, source) in sources.iter() {
