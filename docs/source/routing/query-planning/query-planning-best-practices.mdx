@@ -178,7 +178,7 @@ The Apollo Router considers several inputs when generating query plans:
 - The GraphQL operation - The specific query, mutation, or subscription being executed
 - Supergraph schema - The composed schema from all your subgraphs
 - Query planner version - Tied to your specific router version
-- Router configuration - Including URL overrides, coprocessor logic, and other runtime config settings
+- Router configuration - Including progressive overrides, coprocessor logic, and other runtime config settings
 - Directive usage - How `@shareable`, `@requires`, progressive `@override`, `@provides`, and other directives are implemented across subgraphs.
 
 Changes to any of these inputs can result in different query plans, even for identical operations.
@@ -189,12 +189,12 @@ To troubleshoot query plan issues effectively, you need to generate plans using 
 
 Recommended approaches in order of accuracy:
 
-- Existing environment - Simply use the router (in whichever environment you're investigating) to generate plans with one of the `Apollo-Expose-Query-Plan` headers.
+- Existing environment - Use the router (in whichever environment you're investigating) to generate plans with one of the <code>Apollo-Expose-Query-Plan</code> headers.
 - Environment mirror - Use a configuration that mirrors the environment you're investigating as closely as possible.
 - CI/CD pipeline integration - Generate plans as part of your deployment pipeline.
 - Local development workflow - Run operations locally with production-like configuration.
 
-The higher on this list, the more accurate your query plans will likley be compared to the behavior in your target environment.
+The higher on this list, the more accurate your query plans will likely be compared to the behavior in your target environment.
 
 ### Using the router's query plan exposure features
 
@@ -211,18 +211,18 @@ plugins:
 ```
 
 <Note>
-If the router is started in `--dev` mode or being used via `rover dev`, this plugin is automatically enabled.
+If you start the router in <code>--dev</code> mode or use <code>rover dev</code>, this plugin is automatically enabled.
 </Note>
 
 #### Using the Apollo-Expose-Query-Plan header
 
-Once enabled, you can control query plan exposure using the `Apollo-Expose-Query-Plan` header with your requests:
+After you enable the plugin, you can control query plan exposure using the <code>Apollo-Expose-Query-Plan</code> header with your requests:
 
 ##### Option 1: Include plans with response data
 
 `Apollo-Expose-Query-Plan: true`
 
-This returns the query plan in the response under the extensions.queryPlan key alongside your actual data.
+This returns the query plan in the response under the <code>extensions.queryPlan</code> key alongside your actual data.
 
 ##### Option 2: Dry-run mode
 
@@ -231,7 +231,7 @@ This returns the query plan in the response under the extensions.queryPlan key a
 This generates the query plan but short-circuits execution before fetching data from subgraphs. The response contains only the query plan, making it ideal for analysis without impacting downstream services.
 
 <Note>
-The router `dry-run` mode requires Apollo GraphOS Router or Apollo Router Core v1.61.0+ or v2.x+
+To use the router's <code>dry-run</code> mode, you need Apollo GraphOS Router or Apollo Router Core v1.61.0+ or v2.x+.
 </Note>
 
 Example dry-run response
@@ -268,19 +268,19 @@ Example dry-run response
 
 This approach ensures you're analyzing the most similar query plans your router generates in your specific environment configuration, eliminating discrepancies that can arise from standalone tools or simplified reproductions.
 
-For more info on debugging subgraph requests, see [Debugging Subgraph Requests](/graphos/routing/observability/debugging-subgraph-requests).
+For more information on debugging subgraph requests, see [Debugging Subgraph Requests](/graphos/routing/observability/debugging-subgraph-requests).
 
-## How the router handles conditional client side directives (@skip and @include)
+## Handling conditional client-side directives (<code>@Skip</code> and <code>@include</code>)
 
-The @skip and @include directives allow clients to conditionally include or exclude fields based on variable values. The Apollo Router provides intelligent handling of these client-side directives to optimize query execution while ensuring GraphQL specification compliance.
+With the <code>@Skip</code> and <code>@include</code> directives, clients can conditionally include or exclude fields based on variable values. The Apollo Router provides intelligent handling of these client-side directives to optimize query execution while ensuring GraphQL specification compliance.
 
-The router handles @skip and @include directives through a two-phase process:
+The router handles <code>@Skip</code> and <code>@include</code> directives through a two-phase process:
 
-**Query Planning Phase**: When the router receives an operation containing conditional directives, it analyzes whether entire subgraph calls can be avoided. If a conditional directive can eliminate the need to query a subgraph entirely, the router creates conditional query plan fetch nodes. This optimization prevents unnecessary network calls and reduces overall query execution time. See [Conditional Nodes](/graphos/schema-design/federated-schemas/reference/query-plans#condition-nodes) for more info about how the router calculates this.
+**Query Planning Phase**: When the router receives an operation containing conditional directives, it analyzes whether entire subgraph calls can be avoided. If a conditional directive can eliminate the need to query a subgraph entirely, the router creates conditional query plan fetch nodes. This optimization prevents unnecessary network calls and reduces overall query execution time. To learn how the router calculates this, see [Conditional Nodes](/graphos/schema-design/federated-schemas/reference/query-plans#condition-nodes).
 
 **Response Formatting and Validation Phase**: For conditional directives that cannot be optimized at the query planning level, the router delegates their execution to the appropriate subgraphs by including the directives in the subgraph requests. However, the router maintains responsibility for ensuring GraphQL specification compliance by validating and reformatting responses from subgraphs.
 
-During response processing, the router's [`Query::format_response`](https://github.com/apollographql/router/blob/115d7a1a170c415a5a3dfa03fa9261406c7e7868/apollo-router/src/spec/query.rs#L124) logic validates that subgraphs properly handled the conditional directives. If a subgraph fails to correctly apply @skip or @include logic, the router automatically prunes unrequested fields and reorders the response to match the expected shape. This dual-layer approach ensures reliable execution even when subgraphs have inconsistent directive handling.
+During response processing, the router's [<code>Query::format_response</code>](https://github.com/apollographql/router/blob/115d7a1a170c415a5a3dfa03fa9261406c7e7868/apollo-router/src/spec/query.rs#L124) logic validates that subgraphs properly handled the conditional directives. If a subgraph fails to correctly apply <code>@Skip</code> or <code>@include</code> logic, the router automatically prunes unrequested fields and reorders the response to match the expected shape. This dual-layer approach ensures reliable execution even when subgraphs have inconsistent directive handling.
 
 ## Use recommended features
 
