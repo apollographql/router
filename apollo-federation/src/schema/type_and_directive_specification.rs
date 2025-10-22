@@ -839,7 +839,7 @@ fn ensure_same_arguments(
             if expected_arg.ty.is_non_null() && expected_arg.default_value.is_none() {
                 let expected_arg_name = &expected_arg.name;
                 errors.push(generate_error(&format!(
-                        r#"Invalid definition for {what}: Missing required argument "{expected_arg_name}""#
+                        r#"Invalid definition for {what}: missing required argument "{expected_arg_name}""#
                     )));
             }
             continue;

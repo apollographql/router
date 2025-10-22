@@ -70,6 +70,7 @@ use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::schema::type_and_directive_specification::ArgumentMerger;
 use crate::schema::type_and_directive_specification::StaticArgumentsTransform;
+use crate::schema::validators::merged::validate_merged_schema;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
@@ -489,7 +490,7 @@ impl Merger {
         self.add_missing_interface_object_fields_to_implementations()?;
 
         // Return result
-        let (errors, hints) = self.error_reporter.into_errors_and_hints();
+        let (mut errors, hints) = self.error_reporter.into_errors_and_hints();
         if !errors.is_empty() {
             Ok(MergeResult {
                 supergraph: None,
@@ -497,6 +498,14 @@ impl Merger {
                 hints,
             })
         } else {
+            validate_merged_schema(&self.merged, &self.subgraphs, &mut errors)?;
+            if !errors.is_empty() {
+                return Ok(MergeResult {
+                    supergraph: None,
+                    errors,
+                    hints,
+                });
+            }
             let valid_schema = Valid::assume_valid(self.merged);
             Ok(MergeResult {
                 supergraph: Some(valid_schema),
@@ -549,8 +558,8 @@ impl Merger {
     }
 
     fn add_types_shallow(&mut self) -> Result<(), FederationError> {
-        let mut mismatched_types = HashSet::new();
-        let mut types_with_interface_object = HashSet::new();
+        let mut mismatched_types = IndexSet::new();
+        let mut types_with_interface_object = IndexSet::new();
 
         for subgraph in &self.subgraphs {
             for pos in subgraph.schema().get_types() {
@@ -567,10 +576,10 @@ impl Merger {
                     if expects_interface
                         && !matches!(previous, TypeDefinitionPosition::Interface(_))
                     {
-                        mismatched_types.insert(pos.clone());
+                        mismatched_types.insert(previous.clone());
                     }
                     if !expects_interface && previous != pos {
-                        mismatched_types.insert(pos.clone());
+                        mismatched_types.insert(previous.clone());
                     }
                 } else if expects_interface {
                     let itf_pos = InterfaceTypeDefinitionPosition {
@@ -646,7 +655,7 @@ impl Merger {
     fn report_mismatched_type_definitions(
         &mut self,
         mismatched_type: &TypeDefinitionPosition,
-        types_with_interface_object: &HashSet<TypeDefinitionPosition>,
+        types_with_interface_object: &IndexSet<TypeDefinitionPosition>,
     ) {
         let sources = self
             .subgraphs
@@ -1131,9 +1140,12 @@ impl Merger {
                 let Some(source) = source else {
                     continue;
                 };
-                if let Some(root_type) =
-                    source.get_root_type(self.subgraphs[*idx].schema(), root_kind)
-                {
+                let subgraph = &self.subgraphs[*idx];
+                if let Some(root_type) = source.get_root_type(subgraph.schema(), root_kind) {
+                    trace!(
+                        "Setting supergraph root {} to type named {} (from subgraph {})",
+                        root_kind, root_type, subgraph.name
+                    );
                     dest.set_root_type(&mut self.merged, root_kind, root_type.clone())?;
                     break;
                 }
@@ -1173,8 +1185,10 @@ impl Merger {
         if self.merged.schema().schema_definition.query.is_none() {
             self.error_reporter_mut()
                 .add_error(CompositionError::QueryRootMissing {
-                    message: "Query root is missing from the merged schema".to_string(),
-                });
+                message:
+                    "No queries found in any subgraph: a supergraph must have a query root type."
+                        .to_string(),
+            });
         }
     }
 
