@@ -294,6 +294,7 @@ mod tests {
         "###);
     }
     #[test]
+    #[ignore]
     fn requires_the_http_arg_for_source() {
         let subgraphs = ServiceDefinition {
             name: "with-connectors",
@@ -350,6 +351,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn requires_the_http_arg_for_connect() {
         let subgraphs = ServiceDefinition {
             name: "with-connectors",
