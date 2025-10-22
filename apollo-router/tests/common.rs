@@ -19,7 +19,6 @@ use fred::prelude::Config as RedisConfig;
 use fred::types::scan::ScanType;
 use fred::types::scan::Scanner;
 use futures::StreamExt;
-use futures::future::join_all;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use mime::APPLICATION_JSON;
@@ -90,6 +89,25 @@ pub static TEST_JWKS_ENDPOINT: LazyLock<PathBuf> = LazyLock::new(|| {
         .join("testdata")
         .join("license.jwks.json")
 });
+
+#[allow(dead_code)]
+pub enum TestRedisMode {
+    Standalone,
+    Cluster,
+}
+
+// WARN: this assumes that the docker-compose file is being used to setup the standalone redis
+// instance and the redis cluster
+impl ToString for TestRedisMode {
+    fn to_string(&self) -> String {
+        match self {
+            Self::Standalone => "redis://127.0.0.1:6379".to_string(),
+            // this uses the insecure protocol, redis-cluster
+            // TODO: add support for rediss-cluster, the secure protocol
+            Self::Cluster => "redis-cluster://127.0.0.1:7000".to_string(),
+        }
+    }
+}
 
 fn get_allocated_ports() -> &'static Arc<Mutex<HashMap<u16, String>>> {
     ALLOCATED_PORTS.get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
@@ -329,8 +347,8 @@ impl IntegrationTest {
     }
 }
 
-struct TracedResponder {
-    response_template: ResponseTemplate,
+pub(crate) struct TracedResponder {
+    pub(crate) response_template: ResponseTemplate,
     telemetry: Telemetry,
     extra_propagator: Telemetry,
     subscriber_subgraph: Dispatch,
@@ -561,8 +579,9 @@ impl IntegrationTest {
         http_method: Option<String>,
         jwt: Option<String>,
         env: Option<HashMap<String, OsString>>,
+        redis_namespace: Option<String>,
     ) -> Self {
-        let redis_namespace = Uuid::new_v4().to_string();
+        let redis_namespace = redis_namespace.unwrap_or(Uuid::new_v4().to_string());
         let telemetry = telemetry.unwrap_or_default();
         let extra_propagator = extra_propagator.unwrap_or_default();
         let tracer_provider_client = telemetry.tracer_provider("client");
@@ -604,6 +623,7 @@ impl IntegrationTest {
             "graphql",
             "local.graphql",
         ]));
+
         let subgraphs = wiremock::MockServer::builder()
             .listener(listener)
             .start()
@@ -615,20 +635,24 @@ impl IntegrationTest {
             "POST" => Method::POST,
             _ => panic!("Unknown http method specified"),
         };
+
         let subgraph_context = Arc::new(Mutex::new(None));
+
         Mock::given(method(http_method))
             .and(path_regex(".*")) // Match any path so that connectors functions
             .respond_with(TracedResponder {
                 response_template: responder.unwrap_or_else(|| {
-                    ResponseTemplate::new(200).set_body_json(json!({
-                        "data": {
-                            "topProducts": [
-                                { "name": "Table" },
-                                { "name": "Couch" },
-                                { "name": "Chair" },
-                            ],
-                        },
-                    }))
+                    ResponseTemplate::new(200)
+                        .set_body_json(json!({
+                            "data": {
+                                "topProducts": [
+                                    { "name": "Table" },
+                                    { "name": "Couch" },
+                                    { "name": "Chair" },
+                                ],
+                            },
+                        }))
+                        .insert_header("cache-control", "public")
                 }),
                 telemetry: telemetry.clone(),
                 extra_propagator: extra_propagator.clone(),
@@ -641,11 +665,15 @@ impl IntegrationTest {
 
         let mut test_config_location = std::env::temp_dir();
         let mut test_schema_location = test_config_location.clone();
+
         let location = format!("apollo-router-test-{}.yaml", Uuid::new_v4());
+
         test_config_location.push(location);
         test_schema_location.push(format!("apollo-router-test-{}.graphql", Uuid::new_v4()));
 
         fs::write(&test_config_location, &config_str).expect("could not write config");
+
+        println!("config: {config_str}");
         fs::copy(&supergraph, &test_schema_location).expect("could not write schema");
 
         let (stdio_tx, stdio_rx) = tokio::sync::mpsc::channel(2000);
@@ -659,6 +687,7 @@ impl IntegrationTest {
             .listener(apollo_otlp_listener)
             .start()
             .await;
+
         Mock::given(method(Method::POST))
             .and(path("/v1/metrics"))
             .and(move |req: &wiremock::Request| {
@@ -1525,8 +1554,8 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    pub async fn clear_redis_cache(&self) {
-        let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
+    pub async fn clear_redis_cache(&self, redis_url: &str) {
+        let config = RedisConfig::from_url(redis_url).unwrap();
 
         let client = RedisClient::new(config, None, None, None);
         let connection_task = client.connect();
@@ -1614,7 +1643,7 @@ impl IntegrationTest {
                 }
 
                 if let Ok(Some((port, line))) = res {
-                    println!(
+                    tracing::debug!(
                         "\n\nredis-cli MONITOR result: \n\nline: {line}\n\nnode port: {port}\n\n"
                     );
                 } else {
@@ -1632,18 +1661,41 @@ impl IntegrationTest {
         }
     }
 
+    /// Assert that the values represented by a key or set of keys exists in redis
+    ///
+    /// Example use for a single key: `assert_redis_cache_contains("some:cache:key", "127.0.0.1:6379").await;`
+    /// Example use for multiple keys: `assert_redis_cache_contains("some:cache:key another:cache:key etc:etc:etc", "127.0.0.1:6379").await;`
     #[allow(dead_code)]
-    pub async fn assert_redis_cache_contains(&self, key: &str, ignore: Option<&str>) -> String {
-        let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
+    pub async fn assert_redis_cache_contains(
+        &self,
+        key: &str,
+        redis_mode: &TestRedisMode,
+    ) -> String {
+        let redis_url = redis_mode.to_string();
+        let mut config = RedisConfig::from_url(&redis_url).unwrap();
+        if let TestRedisMode::Cluster = redis_mode {
+            let _ = config
+                .server
+                .set_cluster_discovery_policy(
+                    fred::types::config::ClusterDiscoveryPolicy::ConfigEndpoint,
+                )
+                .inspect_err(|e| {
+                    tracing::error!("failed to set ConfigEndpoint as ClusterDiscoveryPolicy: {e}")
+                });
+        }
+
         let client = RedisClient::new(config, None, None, None);
         let connection_task = client.connect();
         client.wait_for_connect().await.unwrap();
         let redis_namespace = &self.redis_namespace;
         let namespaced_key = format!("{redis_namespace}:{key}");
-        let s = match client.get(&namespaced_key).await {
+
+        let s = match client.mget(&namespaced_key).await {
             Ok(s) => s,
             Err(e) => {
-                println!("non-ignored keys in the same namespace in Redis:");
+                // We'll collect keys found in the same namespace to report back if we don't find the
+                // target key(s)
+                let mut same_namespaced_keys: Vec<_> = vec![];
 
                 let mut scan = client.scan(
                     format!("{redis_namespace}:*"),
@@ -1652,17 +1704,33 @@ impl IntegrationTest {
                 );
 
                 while let Some(result) = scan.next().await {
-                    let keys = result.as_ref().unwrap().results().as_ref().unwrap();
-                    for key in keys {
-                        let key = key.as_str().expect("key should be a string");
-                        let unnamespaced_key = key.replace(&format!("{redis_namespace}:"), "");
-                        if Some(unnamespaced_key.as_str()) != ignore {
-                            println!("\t{unnamespaced_key}");
-                        }
-                    }
+                    let keys: Vec<_> = result
+                        .inspect_err(|e| {
+                            tracing::error!("Error scanning redis at {redis_url}: {e}")
+                        })
+                        .unwrap()
+                        .results()
+                        .as_ref()
+                        .unwrap()
+                        .iter()
+                        .map(|k| k.clone().into_string().expect("key should be a String"))
+                        .collect();
+
+                    same_namespaced_keys.extend(keys);
                 }
+
+                if !same_namespaced_keys.is_empty() {
+                    tracing::debug!(
+                        "non-ignored keys in the same namespace in Redis:\n\n{}",
+                        same_namespaced_keys.join("\n")
+                    );
+                }
+
+                // WARN: keep the namespaced key in the panic message because that's what we actually
+                // search for; it's confusing to see only the `key`, which doesn't represent what was
+                // actually searched for
                 panic!(
-                    "key {key} not found: {e}\n This may be caused by a number of things including federation version changes"
+                    "key {namespaced_key} not found: {e}\n This may be caused by a number of things including federation version changes"
                 );
             }
         };
@@ -1832,6 +1900,21 @@ fn merge_overrides(
         .and_then(|o| o.as_object_mut())
     {
         query_plan.insert("namespace".to_string(), redis_namespace.into());
+    }
+
+    // Set response cache redis namespace
+    if let Some(response_cache) = config
+        .as_object_mut()
+        .and_then(|o| o.get_mut("preview_response_cache"))
+        .and_then(|o| o.as_object_mut())
+        .and_then(|o| o.get_mut("subgraph"))
+        .and_then(|o| o.as_object_mut())
+        .and_then(|o| o.get_mut("all"))
+        .and_then(|o| o.as_object_mut())
+        .and_then(|o| o.get_mut("redis"))
+        .and_then(|o| o.as_object_mut())
+    {
+        response_cache.insert("namespace".to_string(), redis_namespace.into());
     }
 
     serde_yaml::to_string(&config).unwrap()

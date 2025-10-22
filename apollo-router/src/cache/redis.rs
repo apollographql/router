@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::error::Error;
 use std::fmt;
 use std::ops::Deref;
 use std::pin::Pin;
@@ -34,6 +33,10 @@ use fred::types::config::UnresponsiveConfig;
 use fred::types::scan::ScanResult;
 use futures::Stream;
 use futures::future::join_all;
+use rhai::Variant;
+use serde::Deserialize;
+use serde::Serialize;
+use serde_json::Value;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::task::AbortHandle;
 use tower::BoxError;
@@ -43,6 +46,7 @@ use super::KeyType;
 use super::ValueType;
 use super::metrics::RedisMetricsCollector;
 use crate::configuration::RedisCache;
+use crate::plugins::response_cache::cache_control::CacheControl;
 use crate::services::generate_tls_client_config;
 
 pub(super) static ACTIVE_CLIENT_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -86,7 +90,14 @@ fn record_redis_error(error: &RedisError, caller: &'static str) {
         RedisErrorKind::Replica => "replica",
     };
 
-    tracing::error!("AWA :: redis error: {error:?}");
+    //let _ = std::fs::write(
+    //    "/tmp/fred-error.txt",
+    //    format!(
+    //        "{}\n{:?}\n---\n",
+    //        std::fs::read_to_string("/tmp/fred-error.txt").unwrap_or_default(),
+    //        error
+    //    ),
+    //);
 
     u64_counter_with_unit!(
         "apollo.router.cache.redis.errors",
@@ -150,7 +161,7 @@ impl Drop for DropSafeRedisPool {
             let result = inner.quit().await;
             if let Err(err) = result {
                 tracing::warn!("Caught error while closing unused Redis connections: {err:?}");
-                record_redis_error(&err, caller);
+                //record_redis_error(&err, caller);
             }
         });
         self.heartbeat_abort_handle.abort();
@@ -246,6 +257,12 @@ where
 
         Ok(fred::types::Value::Bytes(v.into()))
     }
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize)]
+pub struct CacheValue {
+    data: serde_json_bytes::Value,
+    cache_control: CacheControl,
 }
 
 impl RedisCacheStorage {
@@ -392,29 +409,16 @@ impl RedisCacheStorage {
 
             ACTIVE_CLIENT_COUNT.fetch_add(1, Ordering::Relaxed);
 
-            client.on_error(|e| async move {
-                let _ = std::fs::write(
-                    "/tmp/fred-error.txt",
-                    format!(
-                        "{}\n{:?}\n---\n",
-                        std::fs::read_to_string("/tmp/fred-error.txt").unwrap_or_default(),
-                        e
-                    ),
-                );
-
-                Ok(())
-            });
-
             tokio::spawn(async move {
                 loop {
                     match error_rx.recv().await {
                         Ok((error, Some(server))) => {
                             tracing::error!("Redis client ({server:?}) error: {error:?}",);
-                            record_redis_error(&error, caller);
+                            //record_redis_error(&error, caller);
                         }
                         Ok((error, None)) => {
                             tracing::error!("Redis client error: {error:?}",);
-                            record_redis_error(&error, caller);
+                            //record_redis_error(&error, caller);
                         }
                         Err(RecvError::Lagged(_)) => continue,
                         Err(RecvError::Closed) => break,
@@ -633,12 +637,9 @@ impl RedisCacheStorage {
     ) -> Result<RedisValue<V>, RedisError> {
         let key = self.make_key(key);
 
-        let replica_client = self.client().with_options(&options);
-        //let replica_client = self.inner.replicas().with_options(&options);
-        let id = replica_client.id();
+        let replica_client = self.inner.replicas().with_options(&options);
         let clustered = replica_client.is_clustered();
         let pipeline = replica_client.pipeline();
-        //let pipeline_id = pipeline.id();
 
         u64_counter_with_unit!(
             "apollo.router.cache.redis.get",
@@ -646,42 +647,31 @@ impl RedisCacheStorage {
             "{event}",
             1,
             kind = self.inner.caller,
-            clustered = clustered //pipeline_id = pipeline_id
+            clustered = clustered
         );
 
         match self.ttl {
             Some(ttl) if self.reset_ttl => {
-                let _: () = pipeline.get(&key).await.inspect_err(|e| {
-                    eprintln!("FRED ERROR: {:?}", e);
-                    self.record_error(e)
-                })?;
+                let _: () = pipeline.get(&key).await?;
+                //.inspect_err(|e| self.record_error(e))?;
 
-                let _: () = pipeline
-                    .expire(&key, ttl.as_secs() as i64, None)
-                    .await
-                    .inspect_err(|e| {
-                        eprintln!("FRED ERROR: {:?}", e);
-                        self.record_error(e)
-                    })?;
+                let _: () = pipeline.expire(&key, ttl.as_secs() as i64, None).await?;
+                //.inspect_err(|e| self.record_error(e))?;
 
-                let (value, _timeout_set): (RedisValue<V>, bool) =
-                    pipeline.all().await.inspect_err(|e| {
-                        eprintln!("FRED ERROR: {:?}", e);
-                        self.record_error(e)
-                    })?;
+                let (value, _timeout_set): (RedisValue<V>, bool) = pipeline.all().await?; //.inspect_err(|e| self.record_error(e))?;
                 Ok(value)
             }
-            _ => pipeline
-                .get::<RedisValue<V>, _>(key)
-                .await
-                .inspect_err(|e| {
-                    eprintln!("FRED ERROR: {:?}", e);
-                    self.record_error(e)
-                }),
+            _ => {
+                let res = replica_client
+                    .get(key.clone())
+                    .await
+                    .inspect_err(|e| self.record_error(e));
+                res
+            }
         }
     }
 
-    async fn get_multiple<K: KeyType, V: ValueType>(
+    pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
         &self,
         keys: Vec<RedisKey<K>>,
     ) -> Vec<Option<RedisValue<V>>> {
@@ -703,7 +693,27 @@ impl RedisCacheStorage {
 
         // TODO: figure out if this client is alright for non-replica use
         let replica_client = self.inner.replicas().with_options(&options);
-        //let replica_client = self.inner.next().with_options(&options);
+        let clustered = replica_client.is_clustered();
+
+        u64_counter_with_unit!(
+            "apollo.router.cache.redis.mget",
+            "Counter for Redis client MGET requests",
+            "{event}",
+            1,
+            kind = self.inner.caller,
+            clustered = clustered
+        );
+
+        u64_counter_with_unit!(
+            "apollo.router.cache.redis.mget.keys",
+            "Counter for Redis client MGET request keys",
+            "{event}",
+            1,
+            kind = self.inner.caller,
+            clustered = clustered,
+            // TODO: can't be a string
+            keys = keys.len().to_string()
+        );
 
         if keys.len() == 1 {
             let res = replica_client
@@ -729,11 +739,9 @@ impl RedisCacheStorage {
             // then we query all the key groups at the same time
             let mut tasks = Vec::new();
             for (_shard, (indexes, keys)) in h {
-                let options = options.clone();
+                //let options = options.clone();
+                let replica_client = replica_client.clone();
                 tasks.push(async move {
-                    // TODO: figure out if this client is good for non-replica use
-                    let replica_client = self.inner.replicas().with_options(&options);
-                    //let replica_client = self.inner.next().with_options(&options);
                     let result: Result<Vec<Option<RedisValue<V>>>, _> =
                         replica_client.mget(keys).await;
                     (indexes, result)

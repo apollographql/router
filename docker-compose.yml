@@ -173,6 +173,11 @@ services:
         redis-cli -h redis-cluster-7004 -p 7004 CONFIG SET cluster-announce-hostname 127.0.0.1 
         redis-cli -h redis-cluster-7005 -p 7005 CONFIG SET cluster-announce-hostname 127.0.0.1  
 
+        for port in 7000 7001 7002 7003 7004 7005; do
+          redis-cli -p $port CLUSTER NODES | grep -v myself | cut -d' ' -f1 | xargs -I {} redis-cli -p $port CLUSTER FORGET {} &
+        done
+        wait
+
         redis-cli -h redis-cluster-7000 -p 7000 CLUSTER MEET 127.0.0.1 7000 
         redis-cli -h redis-cluster-7000 -p 7000 CLUSTER MEET 127.0.0.1 7001 
         redis-cli -h redis-cluster-7000 -p 7000 CLUSTER MEET 127.0.0.1 7002 

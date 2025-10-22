@@ -39,7 +39,7 @@ use crate::plugins::response_cache::metrics::record_maintenance_success;
 pub(crate) type Config = super::config::Config;
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
-struct CacheValue {
+pub struct CacheValue {
     data: serde_json_bytes::Value,
     cache_control: CacheControl,
 }
@@ -245,11 +245,21 @@ impl CacheStorage for Storage {
             .await
     }
 
+    // TODO: move to cache/redis?
     async fn internal_insert_in_batch(
         &self,
         mut batch_docs: Vec<Document>,
         subgraph_name: &str,
     ) -> StorageResult<()> {
+        u64_counter_with_unit!(
+            "apollo.router.cache.redis.insert",
+            "Counter for Redis client INSERT requests",
+            "{event}",
+            1,
+            kind = "response-cache",
+            subgraph_name = subgraph_name.to_string()
+        );
+
         // three phases:
         //   1 - update keys, cache tags to include namespace so that we don't have to do it in each phase
         //   2 - update each cache tag with new keys

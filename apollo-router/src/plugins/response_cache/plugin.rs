@@ -706,6 +706,11 @@ impl CacheService {
         {
             return self.service.call(request).await;
         }
+        let blah = request
+            .subgraph_request
+            .headers()
+            .contains_key(&CACHE_CONTROL);
+
         // Don't use cache at all if no-store is set in cache-control header
         if request
             .subgraph_request
