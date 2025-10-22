@@ -318,27 +318,35 @@ mod tests {
         };
 
         let result = compose_as_fed2_subgraphs(&[subgraphs]);
-        
+
         // This should fail with error: [with-connectors] Directive "@source" argument "http"
         // of type "connect__SourceHTTP!" is required, but it was not provided.
-        assert!(result.is_err(), "Composition should fail due to missing http argument in @source directive");
-        
+        assert!(
+            result.is_err(),
+            "Composition should fail due to missing http argument in @source directive"
+        );
+
         let errors = result.unwrap_err();
         // Check that we have exactly 1 error
         assert_eq!(errors.len(), 1, "Should have exactly 1 error");
-        
+
         let error = &errors[0];
         let error_message = format!("{:?}", error);
-        
+
         // Check for the specific error message
         let expected_message = "[with-connectors] Directive \"@source\" argument \"http\" of type \"connect__SourceHTTP!\" is required, but it was not provided.";
-        assert!(error_message.contains(expected_message), 
-                "Error message should match expected format. Got: {}", error_message);
-        
+        assert!(
+            error_message.contains(expected_message),
+            "Error message should match expected format. Got: {}",
+            error_message
+        );
+
         // Check for the error code (if available in the error structure)
         // Note: The exact error code structure may vary depending on the error type
-        assert!(error_message.contains("@source") && error_message.contains("http"), 
-                "Error message should mention @source and http");
+        assert!(
+            error_message.contains("@source") && error_message.contains("http"),
+            "Error message should mention @source and http"
+        );
     }
 
     #[test]
@@ -366,27 +374,35 @@ mod tests {
         };
 
         let result = compose_as_fed2_subgraphs(&[subgraphs]);
-        
+
         // This should fail with error: [with-connectors] Directive "@connect" argument "http"
         // of type "connect__ConnectHTTP!" is required, but it was not provided.
-        assert!(result.is_err(), "Composition should fail due to missing http argument in @connect directive");
-        
+        assert!(
+            result.is_err(),
+            "Composition should fail due to missing http argument in @connect directive"
+        );
+
         let errors = result.unwrap_err();
         // Check that we have exactly 1 error
         assert_eq!(errors.len(), 1, "Should have exactly 1 error");
-        
+
         let error = &errors[0];
         let error_message = format!("{:?}", error);
-        
+
         // Check for the specific error message
         let expected_message = "[with-connectors] Directive \"@connect\" argument \"http\" of type \"connect__ConnectHTTP!\" is required, but it was not provided.";
-        assert!(error_message.contains(expected_message), 
-                "Error message should match expected format. Got: {}", error_message);
-        
+        assert!(
+            error_message.contains(expected_message),
+            "Error message should match expected format. Got: {}",
+            error_message
+        );
+
         // Check for the error code (if available in the error structure)
         // Note: The exact error code structure may vary depending on the error type
-        assert!(error_message.contains("@connect") && error_message.contains("http"), 
-                "Error message should mention @connect and http");
+        assert!(
+            error_message.contains("@connect") && error_message.contains("http"),
+            "Error message should mention @connect and http"
+        );
     }
 
     #[test]
