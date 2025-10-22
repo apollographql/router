@@ -294,7 +294,6 @@ mod tests {
         "###);
     }
     #[test]
-    #[ignore]
     fn requires_the_http_arg_for_source() {
         let subgraphs = ServiceDefinition {
             name: "with-connectors",
@@ -319,17 +318,30 @@ mod tests {
         };
 
         let result = compose_as_fed2_subgraphs(&[subgraphs]);
-        // TODO: This should fail with error: [with-connectors] Directive "@source" argument "http"
+        
+        // This should fail with error: [with-connectors] Directive "@source" argument "http"
         // of type "connect__SourceHTTP!" is required, but it was not provided.
-        let supergraph = result.expect("Composition currently succeeds (but shouldn't)");
-        let schema_string = supergraph.schema().schema().to_string();
-
-        // For now, just snapshot the current behavior to document it
-        assert_snapshot!(schema_string);
+        assert!(result.is_err(), "Composition should fail due to missing http argument in @source directive");
+        
+        let errors = result.unwrap_err();
+        // Check that we have exactly 1 error
+        assert_eq!(errors.len(), 1, "Should have exactly 1 error");
+        
+        let error = &errors[0];
+        let error_message = format!("{:?}", error);
+        
+        // Check for the specific error message
+        let expected_message = "[with-connectors] Directive \"@source\" argument \"http\" of type \"connect__SourceHTTP!\" is required, but it was not provided.";
+        assert!(error_message.contains(expected_message), 
+                "Error message should match expected format. Got: {}", error_message);
+        
+        // Check for the error code (if available in the error structure)
+        // Note: The exact error code structure may vary depending on the error type
+        assert!(error_message.contains("@source") && error_message.contains("http"), 
+                "Error message should mention @source and http");
     }
 
     #[test]
-    #[ignore]
     fn requires_the_http_arg_for_connect() {
         let subgraphs = ServiceDefinition {
             name: "with-connectors",
@@ -354,13 +366,27 @@ mod tests {
         };
 
         let result = compose_as_fed2_subgraphs(&[subgraphs]);
-        // TODO: This should fail with error: [with-connectors] Directive "@connect" argument "http"
+        
+        // This should fail with error: [with-connectors] Directive "@connect" argument "http"
         // of type "connect__ConnectHTTP!" is required, but it was not provided.
-        let supergraph = result.expect("Composition currently succeeds (but shouldn't)");
-        let schema_string = supergraph.schema().schema().to_string();
-
-        // For now, just snapshot the current behavior to document it
-        assert_snapshot!(schema_string);
+        assert!(result.is_err(), "Composition should fail due to missing http argument in @connect directive");
+        
+        let errors = result.unwrap_err();
+        // Check that we have exactly 1 error
+        assert_eq!(errors.len(), 1, "Should have exactly 1 error");
+        
+        let error = &errors[0];
+        let error_message = format!("{:?}", error);
+        
+        // Check for the specific error message
+        let expected_message = "[with-connectors] Directive \"@connect\" argument \"http\" of type \"connect__ConnectHTTP!\" is required, but it was not provided.";
+        assert!(error_message.contains(expected_message), 
+                "Error message should match expected format. Got: {}", error_message);
+        
+        // Check for the error code (if available in the error structure)
+        // Note: The exact error code structure may vary depending on the error type
+        assert!(error_message.contains("@connect") && error_message.contains("http"), 
+                "Error message should mention @connect and http");
     }
 
     #[test]
