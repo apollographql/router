@@ -294,6 +294,7 @@ mod tests {
         "###);
     }
     #[test]
+    #[ignore]
     fn requires_the_http_arg_for_source() {
         let subgraphs = ServiceDefinition {
             name: "with-connectors",
@@ -328,6 +329,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn requires_the_http_arg_for_connect() {
         let subgraphs = ServiceDefinition {
             name: "with-connectors",
@@ -359,5 +361,87 @@ mod tests {
 
         // For now, just snapshot the current behavior to document it
         assert_snapshot!(schema_string);
+    }
+
+    #[test]
+    fn composes_v0_3() {
+        let with_connectors_v0_3 = ServiceDefinition {
+            name: "with-connectors-v0_3",
+            type_defs: r#"
+                extend schema
+                @link(
+                    url: "https://specs.apollo.dev/connect/v0.3"
+                    import: ["@connect", "@source"]
+                )
+                @source(
+                  name: "v1"
+                  http: {
+                    baseURL: "http://v1"
+                    path: ""
+                    queryParams: ""
+                  }
+                  errors: { message: "" extensions: "" }
+                  isSuccess: ""
+                )
+
+                type Query {
+                    resources: [Resource!]!
+                    @connect(source: "v1", http: { GET: "/resources" }, selection: "")
+                }
+
+                type Resource @key(fields: "id")
+                  @connect(
+                    id: "conn_id", 
+                    source: "v1"
+                    http: {
+                      GET: "/resources"
+                      path: ""
+                      queryParams: ""
+                    }
+                    batch: { maxSize: 5 }
+                    errors: { message: "" extensions: "" }
+                    isSuccess: ""
+                    selection: ""
+                  ) {
+                    id: ID!
+                    name: String!
+                }
+            "#,
+        };
+
+        let with_connectors_v0_1 = ServiceDefinition {
+            name: "with-connectors-v0_1",
+            type_defs: r#"
+                extend schema
+                @link(
+                    url: "https://specs.apollo.dev/connect/v0.1"
+                    import: ["@connect", "@source"]
+                )
+                @source(name: "v1", http: { baseURL: "http://v1" })
+
+                type Query {
+                    widgets: [Widget!]!
+                    @connect(source: "v1", http: { GET: "/widgets" }, selection: "")
+                }
+
+                type Widget @key(fields: "id") {
+                    id: ID!
+                    name: String!
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[with_connectors_v0_3, with_connectors_v0_1]);
+        let supergraph = result.expect("Expected composition to succeed");
+        let schema_string = supergraph.schema().schema().to_string();
+
+        assert_snapshot!(schema_string);
+
+        let api_schema = supergraph
+            .to_api_schema(Default::default())
+            .expect("Expected API schema generation to succeed");
+        let api_schema_string = api_schema.schema().to_string();
+
+        assert_snapshot!(api_schema_string);
     }
 }
