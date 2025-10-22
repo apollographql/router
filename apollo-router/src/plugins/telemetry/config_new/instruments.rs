@@ -946,7 +946,9 @@ impl InstrumentsConfig {
                     meter
                         .f64_counter(CACHE_METRIC)
                         .with_unit("ops")
-                        .with_description("Entity cache hit/miss operations at the subgraph level (deprecated)")
+                        .with_description(
+                            "Entity cache hit/miss operations at the subgraph level (deprecated)",
+                        )
                         .build(),
                 ),
             );

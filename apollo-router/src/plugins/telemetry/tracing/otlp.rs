@@ -12,9 +12,9 @@ use tower::BoxError;
 
 use crate::plugins::telemetry::config::TracingCommon;
 use crate::plugins::telemetry::config_new::spans::Spans;
-use crate::plugins::telemetry::otlp::process_endpoint;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::plugins::telemetry::otlp::process_endpoint;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 
@@ -50,14 +50,14 @@ impl TracingConfigurator for super::super::otlp::Config {
                     .with_protocol(opentelemetry_otlp::Protocol::Grpc)
                     .with_timeout(self.batch_processor.max_export_timeout)
                     .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()));
-                
+
                 if let Some(endpoint) = endpoint_opt {
                     exporter_builder = exporter_builder.with_endpoint(endpoint);
                 }
                 if let Some(tls_config) = tls_config_opt {
                     exporter_builder = exporter_builder.with_tls_config(tls_config);
                 }
-                    
+
                 exporter_builder.build()?
             }
             Protocol::Http => {
@@ -75,9 +75,9 @@ impl TracingConfigurator for super::super::otlp::Config {
         };
 
         let batch_span_processor = BatchSpanProcessor::builder(exporter)
-        .with_batch_config(self.batch_processor.clone().into())
-        .build()
-        .filtered();
+            .with_batch_config(self.batch_processor.clone().into())
+            .build()
+            .filtered();
         Ok(
             if common.preview_datadog_agent_sampling.unwrap_or_default() {
                 builder.with_span_processor(batch_span_processor.always_sampled())

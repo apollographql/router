@@ -11,9 +11,9 @@ use tower::BoxError;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
-use crate::plugins::telemetry::otlp::process_endpoint;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::plugins::telemetry::otlp::process_endpoint;
 
 impl MetricsConfigurator for super::super::otlp::Config {
     fn enabled(&self) -> bool {
@@ -49,19 +49,18 @@ impl MetricsConfigurator for super::super::otlp::Config {
                     .with_protocol(opentelemetry_otlp::Protocol::Grpc)
                     .with_timeout(self.batch_processor.max_export_timeout)
                     .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()));
-                
+
                 if let Some(endpoint) = endpoint_opt {
                     exporter_builder = exporter_builder.with_endpoint(endpoint);
                 }
                 if let Some(tls_config) = tls_config_opt {
                     exporter_builder = exporter_builder.with_tls_config(tls_config);
                 }
-                    
+
                 exporter_builder.build()?
             }
             Protocol::Http => {
-                let endpoint_opt =
-                    process_endpoint(&self.endpoint, &kind, &self.protocol)?;
+                let endpoint_opt = process_endpoint(&self.endpoint, &kind, &self.protocol)?;
                 let headers = self.http.headers.clone();
                 let mut exporter = opentelemetry_otlp::HttpExporterBuilder::default()
                     .with_protocol(opentelemetry_otlp::Protocol::Grpc)
@@ -71,8 +70,12 @@ impl MetricsConfigurator for super::super::otlp::Config {
                     exporter = exporter.with_endpoint(endpoint);
                 }
                 let temporality = match self.temporality {
-                    crate::plugins::telemetry::otlp::Temporality::Cumulative => opentelemetry_sdk::metrics::Temporality::Cumulative,
-                    crate::plugins::telemetry::otlp::Temporality::Delta => opentelemetry_sdk::metrics::Temporality::Delta,
+                    crate::plugins::telemetry::otlp::Temporality::Cumulative => {
+                        opentelemetry_sdk::metrics::Temporality::Cumulative
+                    }
+                    crate::plugins::telemetry::otlp::Temporality::Delta => {
+                        opentelemetry_sdk::metrics::Temporality::Delta
+                    }
                 };
                 exporter.build_metrics_exporter(temporality)?
             }

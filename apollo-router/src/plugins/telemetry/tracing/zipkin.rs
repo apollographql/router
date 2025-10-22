@@ -54,9 +54,7 @@ impl TracingConfigurator for Config {
             .with_collector_endpoint(endpoint.to_string())
             .with(
                 &common.resource.get(&Key::from(SERVICE_NAME)),
-                |builder, _service_name| {
-                    builder
-                },
+                |builder, _service_name| builder,
             )
             .build()?;
 

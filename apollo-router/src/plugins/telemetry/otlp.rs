@@ -25,7 +25,7 @@ pub(crate) struct Config {
     #[serde(default)]
     pub(crate) protocol: Protocol,
 
-        /// gRPC configuration settings
+    /// gRPC configuration settings
     #[serde(default)]
     pub(crate) grpc: GrpcExporter,
 
@@ -177,7 +177,6 @@ pub(crate) struct GrpcExporter {
 fn header_map(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
     HashMap::<String, Value>::json_schema(generator)
 }
-
 
 impl GrpcExporter {
     pub(crate) fn to_tls_config(&self, endpoint: &Uri) -> Result<ClientTlsConfig, BoxError> {

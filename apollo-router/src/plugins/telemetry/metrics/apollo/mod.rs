@@ -5,9 +5,12 @@ use std::time::Duration;
 
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::MetricExporterBuilder;
-use opentelemetry_otlp::{WithExportConfig, WithTonicConfig};
+use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_otlp::WithTonicConfig;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::metrics::{Aggregation, Instrument, Stream};
+use opentelemetry_sdk::metrics::Aggregation;
+use opentelemetry_sdk::metrics::Instrument;
+use opentelemetry_sdk::metrics::Stream;
 use opentelemetry_sdk::runtime;
 use prometheus::exponential_buckets;
 use sys_info::hostname;
@@ -183,23 +186,23 @@ impl Config {
             .with_timeout(batch_processor.max_export_timeout)
             .build();
 
-        let resource = Resource::builder().with_attributes
-        ([
-            KeyValue::new("apollo.router.id", router_id()),
-            KeyValue::new("apollo.graph.ref", reference.to_string()),
-            KeyValue::new("apollo.schema.id", schema_id.to_string()),
-            KeyValue::new(
-                "apollo.user.agent",
-                format!(
-                    "{}@{}",
-                    std::env!("CARGO_PKG_NAME"),
-                    std::env!("CARGO_PKG_VERSION")
+        let resource = Resource::builder()
+            .with_attributes([
+                KeyValue::new("apollo.router.id", router_id()),
+                KeyValue::new("apollo.graph.ref", reference.to_string()),
+                KeyValue::new("apollo.schema.id", schema_id.to_string()),
+                KeyValue::new(
+                    "apollo.user.agent",
+                    format!(
+                        "{}@{}",
+                        std::env!("CARGO_PKG_NAME"),
+                        std::env!("CARGO_PKG_VERSION")
+                    ),
                 ),
-            ),
-            KeyValue::new("apollo.client.host", hostname()?),
-            KeyValue::new("apollo.client.uname", get_uname()?),
-        ])
-        .build();
+                KeyValue::new("apollo.client.host", hostname()?),
+                KeyValue::new("apollo.client.uname", get_uname()?),
+            ])
+            .build();
 
         let view_default_aggregation = |_i: &Instrument| {
             Some(

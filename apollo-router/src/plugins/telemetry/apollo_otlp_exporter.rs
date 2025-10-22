@@ -6,12 +6,11 @@ use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::Status;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
-use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::trace::SpanData;
-use opentelemetry_sdk::trace::SpanExporter;
 use opentelemetry_sdk::trace::SpanEvents;
+use opentelemetry_sdk::trace::SpanExporter;
 use opentelemetry_sdk::trace::SpanLinks;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
@@ -66,34 +65,34 @@ impl ApolloOtlpExporter {
         let mut metadata = MetadataMap::new();
         metadata.insert("apollo.api.key", MetadataValue::try_from(apollo_key)?);
         let mut otlp_exporter = match protocol {
-            Protocol::Grpc => SpanExporterBuilder::from(
-                opentelemetry_otlp::SpanExporter::builder()
-        )
-            .with_tonic()
-            .build()?,
+            Protocol::Grpc => opentelemetry_otlp::SpanExporter::builder()
+                .with_tonic()
+                .build()?,
             // So far only using HTTP path for testing - the Studio backend only accepts GRPC today.
-            Protocol::Http => SpanExporterBuilder::from(
-                opentelemetry_otlp::SpanExporter::builder()
-            )
-            .with_http()
-            .build()?,
+            Protocol::Http => opentelemetry_otlp::SpanExporter::builder()
+                .with_http()
+                .build()?,
         };
 
-        otlp_exporter.set_resource(&Resource::builder().with_attributes([
-            KeyValue::new("apollo.router.id", router_id()),
-            KeyValue::new("apollo.graph.ref", apollo_graph_ref.to_string()),
-            KeyValue::new("apollo.schema.id", schema_id.to_string()),
-            KeyValue::new(
-                "apollo.user.agent",
-                format!(
-                    "{}@{}",
-                    std::env!("CARGO_PKG_NAME"),
-                    std::env!("CARGO_PKG_VERSION")
-                ),
-            ),
-            KeyValue::new("apollo.client.host", hostname()?),
-            KeyValue::new("apollo.client.uname", get_uname()?),
-        ]).build());
+        otlp_exporter.set_resource(
+            &Resource::builder()
+                .with_attributes([
+                    KeyValue::new("apollo.router.id", router_id()),
+                    KeyValue::new("apollo.graph.ref", apollo_graph_ref.to_string()),
+                    KeyValue::new("apollo.schema.id", schema_id.to_string()),
+                    KeyValue::new(
+                        "apollo.user.agent",
+                        format!(
+                            "{}@{}",
+                            std::env!("CARGO_PKG_NAME"),
+                            std::env!("CARGO_PKG_VERSION")
+                        ),
+                    ),
+                    KeyValue::new("apollo.client.host", hostname()?),
+                    KeyValue::new("apollo.client.uname", get_uname()?),
+                ])
+                .build(),
+        );
 
         Ok(Self {
             endpoint: endpoint.clone(),

@@ -241,7 +241,7 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
         let mut next_err = value.source();
 
         while let Some(err) = next_err {
-            chain.push(err.to_string().into());
+            chain.push(err.to_string());
             next_err = err.source();
         }
 
@@ -258,12 +258,12 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
             // of the callsites in the code that led to the error happening.
             // `std::error::Error::backtrace` is a nightly-only API and cannot be
             // used here until the feature is stabilized.
-            self.event_builder
-                .attributes
-                .push(KeyValue::new(FIELD_EXCEPTION_STACKTRACE, 
-                    opentelemetry::Value::Array(opentelemetry::Array::String(
-                        chain.clone().into_iter().map(|s| s.into()).collect()
-                    ))));
+            self.event_builder.attributes.push(KeyValue::new(
+                FIELD_EXCEPTION_STACKTRACE,
+                opentelemetry::Value::Array(opentelemetry::Array::String(
+                    chain.clone().into_iter().map(|s| s.into()).collect(),
+                )),
+            ));
         }
 
         if self.exception_config.propagate
@@ -272,30 +272,30 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
         {
             attrs.push(KeyValue::new(FIELD_EXCEPTION_MESSAGE, error_msg.clone()));
 
-                    // NOTE: This is actually not the stacktrace of the exception. This is
-                    // the "source chain". It represents the hierarchy of errors from the
-                    // app level to the lowest level such as IO. It does not represent all
-                    // of the callsites in the code that led to the error happening.
-                    // `std::error::Error::backtrace` is a nightly-only API and cannot be
-                    // used here until the feature is stabilized.
-                    attrs.push(KeyValue::new(
-                        FIELD_EXCEPTION_STACKTRACE,
-                        Value::Array(opentelemetry::Array::String(
-                            chain.clone().into_iter().map(|s| s.into()).collect()
-                        )),
-                    ));
-                }
-                        self.event_builder
-            .attributes
-            .push(KeyValue::new(field.name(), error_msg));
+            // NOTE: This is actually not the stacktrace of the exception. This is
+            // the "source chain". It represents the hierarchy of errors from the
+            // app level to the lowest level such as IO. It does not represent all
+            // of the callsites in the code that led to the error happening.
+            // `std::error::Error::backtrace` is a nightly-only API and cannot be
+            // used here until the feature is stabilized.
+            attrs.push(KeyValue::new(
+                FIELD_EXCEPTION_STACKTRACE,
+                Value::Array(opentelemetry::Array::String(
+                    chain.clone().into_iter().map(|s| s.into()).collect(),
+                )),
+            ));
+        }
         self.event_builder
             .attributes
-            .push(KeyValue::new(format!("{}.chain", field.name()), 
-                opentelemetry::Value::Array(opentelemetry::Array::String(
-                    chain.clone().into_iter().map(|s| s.into()).collect()
-                ))));
-            }
-        }
+            .push(KeyValue::new(field.name(), error_msg));
+        self.event_builder.attributes.push(KeyValue::new(
+            format!("{}.chain", field.name()),
+            opentelemetry::Value::Array(opentelemetry::Array::String(
+                chain.clone().into_iter().map(|s| s.into()).collect(),
+            )),
+        ));
+    }
+}
 
 /// Control over opentelemetry conventional exception fields
 #[derive(Clone, Copy)]
@@ -406,17 +406,24 @@ impl field::Visit for SpanAttributeVisitor<'_> {
             // of the callsites in the code that led to the error happening.
             // `std::error::Error::backtrace` is a nightly-only API and cannot be
             // used here until the feature is stabilized.
-            self.record(KeyValue::new(FIELD_EXCEPTION_STACKTRACE, 
+            self.record(KeyValue::new(
+                FIELD_EXCEPTION_STACKTRACE,
                 opentelemetry::Value::Array(opentelemetry::Array::String(
-                    chain.iter().map(|s| s.as_str().to_string().into()).collect()
-                ))));
+                    chain
+                        .iter()
+                        .map(|s| s.as_str().to_string().into())
+                        .collect(),
+                )),
+            ));
         }
 
         self.record(KeyValue::new(field.name(), error_msg));
-        self.record(KeyValue::new(format!("{}.chain", field.name()), 
+        self.record(KeyValue::new(
+            format!("{}.chain", field.name()),
             opentelemetry::Value::Array(opentelemetry::Array::String(
-                chain.clone().into_iter().map(|s| s.into()).collect()
-            ))));
+                chain.clone().into_iter().collect(),
+            )),
+        ));
     }
 }
 

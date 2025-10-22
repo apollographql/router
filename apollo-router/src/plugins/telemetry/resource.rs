@@ -28,7 +28,9 @@ impl ResourceDetector for StaticResourceDetector {
                 executable_name,
             ));
         }
-        Resource::builder().with_attributes(config_resources).build()
+        Resource::builder()
+            .with_attributes(config_resources)
+            .build()
     }
 }
 
@@ -37,10 +39,12 @@ struct EnvServiceNameDetector;
 impl ResourceDetector for EnvServiceNameDetector {
     fn detect(&self) -> Resource {
         match env::var(OTEL_SERVICE_NAME) {
-            Ok(service_name) if !service_name.is_empty() => Resource::builder().with_attribute(KeyValue::new(
-                opentelemetry_semantic_conventions::resource::SERVICE_NAME,
-                service_name,
-            )).build(),
+            Ok(service_name) if !service_name.is_empty() => Resource::builder()
+                .with_attribute(KeyValue::new(
+                    opentelemetry_semantic_conventions::resource::SERVICE_NAME,
+                    service_name,
+                ))
+                .build(),
             Ok(_) | Err(_) => Resource::builder_empty().build(), // return empty resource
         }
     }
@@ -71,16 +75,21 @@ pub trait ConfigResource {
 
         // Default service name
         if resource
-            .get(&opentelemetry::Key::from(opentelemetry_semantic_conventions::resource::SERVICE_NAME))
+            .get(&opentelemetry::Key::from(
+                opentelemetry_semantic_conventions::resource::SERVICE_NAME,
+            ))
             .is_none()
         {
             let executable_name = executable_name();
-            Resource::builder().with_detectors(&detectors).with_attribute(KeyValue::new(
-                opentelemetry_semantic_conventions::resource::SERVICE_NAME,
-                executable_name
-                    .map(|executable_name| format!("{UNKNOWN_SERVICE}:{executable_name}"))
-                    .unwrap_or_else(|| UNKNOWN_SERVICE.to_string()),
-            )).build()
+            Resource::builder()
+                .with_detectors(&detectors)
+                .with_attribute(KeyValue::new(
+                    opentelemetry_semantic_conventions::resource::SERVICE_NAME,
+                    executable_name
+                        .map(|executable_name| format!("{UNKNOWN_SERVICE}:{executable_name}"))
+                        .unwrap_or_else(|| UNKNOWN_SERVICE.to_string()),
+                ))
+                .build()
         } else {
             resource
         }
@@ -133,7 +142,9 @@ impl ResourceDetector for ConfigResourceDetector {
                 service_name.to_string(),
             ));
         }
-        Resource::builder().with_attributes(config_resources).build()
+        Resource::builder()
+            .with_attributes(config_resources)
+            .build()
     }
 }
 

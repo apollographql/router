@@ -5,8 +5,8 @@ use futures::future::BoxFuture;
 use http::StatusCode;
 use once_cell::sync::Lazy;
 use opentelemetry_prometheus::ResourceSelector;
-use opentelemetry_sdk::metrics::Instrument;
 use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::metrics::Instrument;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::metrics::StreamBuilder;
 use parking_lot::Mutex;
@@ -151,7 +151,7 @@ impl MetricsConfigurator for Config {
         let mut meter_provider_builder = SdkMeterProvider::builder()
             .with_reader(exporter)
             .with_resource(builder.resource.clone());
-        for metric_view in metrics_config.views.clone() {            
+        for metric_view in metrics_config.views.clone() {
             let view = move |i: &Instrument| {
                 let stream_builder: Result<StreamBuilder, String> = metric_view.clone().try_into();
                 if i.name() == metric_view.name {

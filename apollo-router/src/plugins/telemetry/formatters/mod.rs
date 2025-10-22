@@ -251,7 +251,7 @@ pub(crate) fn to_list(resource: Resource) -> Vec<(String, serde_json::Value)> {
                                 .collect(),
                         ),
                         _ => unreachable!(),
-                    }
+                    },
                     _ => unreachable!(),
                 },
             )

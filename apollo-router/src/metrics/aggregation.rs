@@ -397,9 +397,6 @@ mod test {
     use std::sync::atomic::AtomicI64;
     use std::time::Duration;
 
-    use crate::metrics::aggregation::AggregateMeterProvider;
-    use crate::metrics::aggregation::MeterProviderType;
-    use crate::metrics::filter::FilterMeterProvider;
     use async_trait::async_trait;
     use opentelemetry::InstrumentationScope;
     use opentelemetry::metrics::MeterProvider;
@@ -412,6 +409,10 @@ mod test {
     use opentelemetry_sdk::metrics::data::ResourceMetrics;
     use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
     use opentelemetry_sdk::metrics::reader::MetricReader;
+
+    use crate::metrics::aggregation::AggregateMeterProvider;
+    use crate::metrics::aggregation::MeterProviderType;
+    use crate::metrics::filter::FilterMeterProvider;
 
     #[derive(Clone, Debug)]
     struct SharedReader(Arc<ManualReader>);
@@ -555,12 +556,20 @@ mod test {
         let metric = metrics.first().unwrap();
 
         match metric.data() {
-            opentelemetry_sdk::metrics::data::AggregatedMetrics::F64(_metric_data) => panic!("Expected i64 gauge metric"),
-            opentelemetry_sdk::metrics::data::AggregatedMetrics::U64(_metric_data) => panic!("Expected i64 gauge metric"),
-            opentelemetry_sdk::metrics::data::AggregatedMetrics::I64(metric_data) => match metric_data {
-                opentelemetry_sdk::metrics::data::MetricData::Gauge(gauge) => gauge.data_points().next().unwrap().value(),
-                _ => panic!("Expected gauge metric")
-            },
+            opentelemetry_sdk::metrics::data::AggregatedMetrics::F64(_metric_data) => {
+                panic!("Expected i64 gauge metric")
+            }
+            opentelemetry_sdk::metrics::data::AggregatedMetrics::U64(_metric_data) => {
+                panic!("Expected i64 gauge metric")
+            }
+            opentelemetry_sdk::metrics::data::AggregatedMetrics::I64(metric_data) => {
+                match metric_data {
+                    opentelemetry_sdk::metrics::data::MetricData::Gauge(gauge) => {
+                        gauge.data_points().next().unwrap().value()
+                    }
+                    _ => panic!("Expected gauge metric"),
+                }
+            }
         }
     }
 

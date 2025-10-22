@@ -3,11 +3,9 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::Cursor;
 use std::num::NonZeroUsize;
+use std::sync::Mutex;
 use std::time::SystemTime;
 use std::time::SystemTimeError;
-use std::sync::Mutex;
-use tokio::sync::Mutex as TokioMutex;
-use rhai::Shared;
 
 use async_trait::async_trait;
 use base64::Engine as _;
@@ -28,9 +26,11 @@ use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::SpanExporter;
 use prost::Message;
 use rand::Rng;
+use rhai::Shared;
 use serde::de::DeserializeOwned;
 use serde_json::Value as JSONValue;
 use thiserror::Error;
+use tokio::sync::Mutex as TokioMutex;
 use tracing::Level;
 use url::Url;
 
@@ -566,16 +566,18 @@ impl Exporter {
     /// all spans in the tree.
     fn pop_spans_for_tree(&self, root_span: LightSpanData) -> Result<Vec<LightSpanData>, String> {
         let root_span_id = root_span.span_id;
-        
+
         // Acquire lock once and work with it
-        let mut cache_guard = self.spans_by_parent_id.lock()
+        let mut cache_guard = self
+            .spans_by_parent_id
+            .lock()
             .map_err(|_| "Failed to acquire spans cache lock")?;
-        
+
         let child_spans = match cache_guard.pop(&root_span_id) {
             Some(spans) => {
                 // Release the lock before recursion to avoid deadlocks
                 drop(cache_guard);
-                
+
                 // Recursively collect child spans
                 let mut all_child_spans = Vec::new();
                 for (_, span) in spans {
@@ -613,7 +615,7 @@ impl Exporter {
                     Some((_, spans)) => {
                         // Release the lock before recursion to avoid deadlocks
                         drop(cache_guard);
-                        
+
                         spans
                             .into_iter()
                             .map(|(_, span)| {
@@ -1173,7 +1175,10 @@ fn extract_http_data(span: &LightSpanData) -> Http {
 #[async_trait]
 impl SpanExporter for Exporter {
     /// Export spans to apollo telemetry
-    fn export(&self, batch: Vec<SpanData>) -> impl std::future::Future<Output = OTelSdkResult> + Send {
+    fn export(
+        &self,
+        batch: Vec<SpanData>,
+    ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
         // Exporting to apollo means that we must have complete trace as the entire trace must be built.
         // We do what we can, and if there are any traces that are not complete then we keep them for the next export event.
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
@@ -1197,20 +1202,24 @@ impl SpanExporter for Exporter {
                     &self.include_attr_names,
                     &self.include_attr_event_names,
                 );
-                
+
                 if send_otlp {
                     let grouped_trace_spans = self.group_by_trace(root_span);
-                    
+
                     // Safe mutex access for otlp_exporter
                     if let Some(exporter_mutex) = &self.otlp_exporter {
                         match exporter_mutex.try_lock() {
                             Ok(exporter) => {
-                                if let Some(trace) = exporter.prepare_for_export(grouped_trace_spans) {
+                                if let Some(trace) =
+                                    exporter.prepare_for_export(grouped_trace_spans)
+                                {
                                     otlp_trace_spans.push(trace);
                                 }
                             }
                             Err(_) => {
-                                tracing::error!("Failed to acquire OTLP exporter lock for preparation");
+                                tracing::error!(
+                                    "Failed to acquire OTLP exporter lock for preparation"
+                                );
                                 // Skip this span if we can't acquire the lock
                                 continue;
                             }
@@ -1242,16 +1251,19 @@ impl SpanExporter for Exporter {
                 // Not a root span, we may need it later so stash it.
 
                 // This is sad, but with LRU there is no `get_insert_mut` so a double lookup is required
-                // It is safe to expect the entry to exist as we just inserted it, however capacity of the LRU must not be 0.         
+                // It is safe to expect the entry to exist as we just inserted it, however capacity of the LRU must not be 0.
 
                 // Thread-safe cache access with proper error handling
                 match self.spans_by_parent_id.lock() {
                     Ok(mut cache_guard) => {
                         // Ensure the inner cache exists
                         if !cache_guard.contains(&span.parent_span_id) {
-                            cache_guard.put(span.parent_span_id, LruCache::new(NonZeroUsize::new(50).unwrap()));
+                            cache_guard.put(
+                                span.parent_span_id,
+                                LruCache::new(NonZeroUsize::new(50).unwrap()),
+                            );
                         }
-                        
+
                         // Now get mutable access to the inner cache
                         if let Some(inner_cache) = cache_guard.get_mut(&span.parent_span_id) {
                             let len = inner_cache.len();
@@ -1286,17 +1298,18 @@ impl SpanExporter for Exporter {
             if send_otlp && !otlp_trace_spans.is_empty() {
                 if let Some(exporter_mutex) = &self.otlp_exporter {
                     let mut exporter = exporter_mutex.lock().await;
-                    return exporter.export(otlp_trace_spans.into_iter().flatten().collect()).await;
+                    return exporter
+                        .export(otlp_trace_spans.into_iter().flatten().collect())
+                        .await;
                 }
             } else if send_reports && !traces.is_empty() {
                 let mut report = telemetry::apollo::Report::default();
                 report += SingleReport::Traces(TracesReport { traces });
-                
+
                 if let Some(exporter) = &self.report_exporter {
-                    return exporter
-                        .submit_report(report)
-                        .await
-                        .map_err(|e| opentelemetry_sdk::error::OTelSdkError::InternalFailure(e.to_string()));
+                    return exporter.submit_report(report).await.map_err(|e| {
+                        opentelemetry_sdk::error::OTelSdkError::InternalFailure(e.to_string())
+                    });
                 }
             }
 

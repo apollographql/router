@@ -87,7 +87,10 @@ pub(crate) mod test_utils {
     use std::collections::BTreeMap;
     use std::fmt::Debug;
     use std::fmt::Display;
+    use std::sync::Arc;
     use std::sync::OnceLock;
+    use std::sync::Weak;
+    use std::time::Duration;
 
     use itertools::Itertools;
     use num_traits::NumCast;
@@ -96,29 +99,27 @@ pub(crate) mod test_utils {
     use opentelemetry::KeyValue;
     use opentelemetry::StringValue;
     use opentelemetry::Value;
-    use opentelemetry_sdk::metrics::Temporality;
+    use opentelemetry_sdk::metrics::InstrumentKind;
     use opentelemetry_sdk::metrics::ManualReader;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
-    use opentelemetry_sdk::metrics::data::{SumDataPoint, GaugeDataPoint};
-    use opentelemetry_sdk::metrics::data::HistogramDataPoint;
+    use opentelemetry_sdk::metrics::Pipeline;
+    use opentelemetry_sdk::metrics::Temporality;
     use opentelemetry_sdk::metrics::data::ExponentialHistogramDataPoint;
-    use opentelemetry_sdk::metrics::InstrumentKind;
+    use opentelemetry_sdk::metrics::data::GaugeDataPoint;
+    use opentelemetry_sdk::metrics::data::HistogramDataPoint;
     use opentelemetry_sdk::metrics::data::Metric;
     use opentelemetry_sdk::metrics::data::MetricData;
     use opentelemetry_sdk::metrics::data::ResourceMetrics;
-    use opentelemetry_sdk::metrics::Pipeline;
+    use opentelemetry_sdk::metrics::data::SumDataPoint;
     use opentelemetry_sdk::metrics::reader::MetricReader;
     use serde::Serialize;
-    use std::sync::Weak;
-    use std::sync::Arc;
-    use std::time::Duration;
     use tokio::task_local;
 
     use crate::metrics::aggregation::AggregateMeterProvider;
     use crate::metrics::aggregation::MeterProviderType;
     use crate::metrics::filter::FilterMeterProvider;
 
-        #[derive(Debug, Clone, Default)]
+    #[derive(Debug, Clone, Default)]
     pub(crate) struct ClonableManualReader {
         reader: Arc<ManualReader>,
     }
@@ -140,7 +141,10 @@ pub(crate) mod test_utils {
             self.reader.shutdown()
         }
 
-        fn shutdown_with_timeout(&self, timeout: Duration) -> opentelemetry_sdk::error::OTelSdkResult {
+        fn shutdown_with_timeout(
+            &self,
+            timeout: Duration,
+        ) -> opentelemetry_sdk::error::OTelSdkResult {
             self.reader.shutdown_with_timeout(timeout)
         }
 
@@ -212,7 +216,9 @@ pub(crate) mod test_utils {
             self.resource_metrics
                 .scope_metrics()
                 .flat_map(|scope_metrics| {
-                    scope_metrics.metrics().filter(|metric| metric.name() == name)
+                    scope_metrics
+                        .metrics()
+                        .filter(|metric| metric.name() == name)
                 })
                 .next()
         }
@@ -257,96 +263,171 @@ pub(crate) mod test_utils {
         ) -> bool {
             if let Some(metric) = self.find(name) {
                 match metric.data() {
-                    opentelemetry_sdk::metrics::data::AggregatedMetrics::F64(metric_data) if value.to_f64().is_some() => {
+                    opentelemetry_sdk::metrics::data::AggregatedMetrics::F64(metric_data)
+                        if value.to_f64().is_some() =>
+                    {
                         let value = value.to_f64().unwrap();
                         use opentelemetry_sdk::metrics::data::MetricData::*;
                         match metric_data {
                             Gauge(gauge) if matches!(ty, MetricType::Gauge) => {
                                 return gauge.data_points().any(|datapoint| {
                                     datapoint.value() == value
-                                        && Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                        && Self::equal_attributes(
+                                            attributes,
+                                            &datapoint.attributes().cloned().collect::<Vec<_>>(),
+                                        )
                                 });
                             }
-                            Sum(sum) if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) => {
+                            Sum(sum)
+                                if matches!(
+                                    ty,
+                                    MetricType::Counter | MetricType::UpDownCounter
+                                ) =>
+                            {
                                 return sum.data_points().any(|datapoint| {
                                     datapoint.value() == value
-                                        && Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                        && Self::equal_attributes(
+                                            attributes,
+                                            &datapoint.attributes().cloned().collect::<Vec<_>>(),
+                                        )
                                 });
                             }
                             Histogram(histogram) if matches!(ty, MetricType::Histogram) => {
                                 if count {
                                     return histogram.data_points().any(|datapoint| {
                                         datapoint.count() == value as u64
-                                            && Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                            && Self::equal_attributes(
+                                                attributes,
+                                                &datapoint
+                                                    .attributes()
+                                                    .cloned()
+                                                    .collect::<Vec<_>>(),
+                                            )
                                     });
                                 } else {
                                     return histogram.data_points().any(|datapoint| {
                                         datapoint.sum() == value
-                                            && Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                            && Self::equal_attributes(
+                                                attributes,
+                                                &datapoint
+                                                    .attributes()
+                                                    .cloned()
+                                                    .collect::<Vec<_>>(),
+                                            )
                                     });
                                 }
                             }
                             _ => {}
                         }
                     }
-                    opentelemetry_sdk::metrics::data::AggregatedMetrics::U64(metric_data) if value.to_u64().is_some() => {
+                    opentelemetry_sdk::metrics::data::AggregatedMetrics::U64(metric_data)
+                        if value.to_u64().is_some() =>
+                    {
                         let value = value.to_u64().unwrap();
                         use opentelemetry_sdk::metrics::data::MetricData::*;
                         match metric_data {
                             Gauge(gauge) if matches!(ty, MetricType::Gauge) => {
                                 return gauge.data_points().any(|datapoint| {
                                     datapoint.value() == value
-                                        && Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                        && Self::equal_attributes(
+                                            attributes,
+                                            &datapoint.attributes().cloned().collect::<Vec<_>>(),
+                                        )
                                 });
                             }
-                            Sum(sum) if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) => {
+                            Sum(sum)
+                                if matches!(
+                                    ty,
+                                    MetricType::Counter | MetricType::UpDownCounter
+                                ) =>
+                            {
                                 return sum.data_points().any(|datapoint| {
                                     datapoint.value() == value
-                                        && Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                        && Self::equal_attributes(
+                                            attributes,
+                                            &datapoint.attributes().cloned().collect::<Vec<_>>(),
+                                        )
                                 });
                             }
                             Histogram(histogram) if matches!(ty, MetricType::Histogram) => {
                                 if count {
                                     return histogram.data_points().any(|datapoint| {
                                         datapoint.count() == value
-                                            && Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                            && Self::equal_attributes(
+                                                attributes,
+                                                &datapoint
+                                                    .attributes()
+                                                    .cloned()
+                                                    .collect::<Vec<_>>(),
+                                            )
                                     });
                                 } else {
                                     return histogram.data_points().any(|datapoint| {
                                         datapoint.sum() == value
-                                            && Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                            && Self::equal_attributes(
+                                                attributes,
+                                                &datapoint
+                                                    .attributes()
+                                                    .cloned()
+                                                    .collect::<Vec<_>>(),
+                                            )
                                     });
                                 }
                             }
                             _ => {}
                         }
                     }
-                    opentelemetry_sdk::metrics::data::AggregatedMetrics::I64(metric_data) if value.to_i64().is_some() => {
+                    opentelemetry_sdk::metrics::data::AggregatedMetrics::I64(metric_data)
+                        if value.to_i64().is_some() =>
+                    {
                         let value = value.to_i64().unwrap();
                         use opentelemetry_sdk::metrics::data::MetricData::*;
                         match metric_data {
                             Gauge(gauge) if matches!(ty, MetricType::Gauge) => {
                                 return gauge.data_points().any(|datapoint| {
                                     datapoint.value() == value
-                                        && Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                        && Self::equal_attributes(
+                                            attributes,
+                                            &datapoint.attributes().cloned().collect::<Vec<_>>(),
+                                        )
                                 });
                             }
-                            Sum(sum) if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) => {
+                            Sum(sum)
+                                if matches!(
+                                    ty,
+                                    MetricType::Counter | MetricType::UpDownCounter
+                                ) =>
+                            {
                                 return sum.data_points().any(|datapoint| {
                                     datapoint.value() == value
-                                        && Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                        && Self::equal_attributes(
+                                            attributes,
+                                            &datapoint.attributes().cloned().collect::<Vec<_>>(),
+                                        )
                                 });
                             }
                             Histogram(histogram) if matches!(ty, MetricType::Histogram) => {
                                 if count {
                                     return histogram.data_points().any(|datapoint| {
                                         datapoint.count() == value as u64
-                                            && Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                            && Self::equal_attributes(
+                                                attributes,
+                                                &datapoint
+                                                    .attributes()
+                                                    .cloned()
+                                                    .collect::<Vec<_>>(),
+                                            )
                                     });
                                 } else {
                                     return histogram.data_points().any(|datapoint| {
                                         datapoint.sum() == value
-                                            && Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                            && Self::equal_attributes(
+                                                attributes,
+                                                &datapoint
+                                                    .attributes()
+                                                    .cloned()
+                                                    .collect::<Vec<_>>(),
+                                            )
                                     });
                                 }
                             }
@@ -372,17 +453,31 @@ pub(crate) mod test_utils {
                         match metric_data {
                             Gauge(gauge) if matches!(ty, MetricType::Gauge) => {
                                 return gauge.data_points().any(|datapoint| {
-                                    Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                    Self::equal_attributes(
+                                        attributes,
+                                        &datapoint.attributes().cloned().collect::<Vec<_>>(),
+                                    )
                                 });
                             }
-                            Sum(sum) if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) => {
+                            Sum(sum)
+                                if matches!(
+                                    ty,
+                                    MetricType::Counter | MetricType::UpDownCounter
+                                ) =>
+                            {
                                 return sum.data_points().any(|datapoint| {
-                                    Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                    Self::equal_attributes(
+                                        attributes,
+                                        &datapoint.attributes().cloned().collect::<Vec<_>>(),
+                                    )
                                 });
                             }
                             Histogram(histogram) if matches!(ty, MetricType::Histogram) => {
                                 return histogram.data_points().any(|datapoint| {
-                                    Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                    Self::equal_attributes(
+                                        attributes,
+                                        &datapoint.attributes().cloned().collect::<Vec<_>>(),
+                                    )
                                 });
                             }
                             _ => {}
@@ -393,17 +488,31 @@ pub(crate) mod test_utils {
                         match metric_data {
                             Gauge(gauge) if matches!(ty, MetricType::Gauge) => {
                                 return gauge.data_points().any(|datapoint| {
-                                    Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                    Self::equal_attributes(
+                                        attributes,
+                                        &datapoint.attributes().cloned().collect::<Vec<_>>(),
+                                    )
                                 });
                             }
-                            Sum(sum) if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) => {
+                            Sum(sum)
+                                if matches!(
+                                    ty,
+                                    MetricType::Counter | MetricType::UpDownCounter
+                                ) =>
+                            {
                                 return sum.data_points().any(|datapoint| {
-                                    Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                    Self::equal_attributes(
+                                        attributes,
+                                        &datapoint.attributes().cloned().collect::<Vec<_>>(),
+                                    )
                                 });
                             }
                             Histogram(histogram) if matches!(ty, MetricType::Histogram) => {
                                 return histogram.data_points().any(|datapoint| {
-                                    Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                    Self::equal_attributes(
+                                        attributes,
+                                        &datapoint.attributes().cloned().collect::<Vec<_>>(),
+                                    )
                                 });
                             }
                             _ => {}
@@ -414,17 +523,31 @@ pub(crate) mod test_utils {
                         match metric_data {
                             Gauge(gauge) if matches!(ty, MetricType::Gauge) => {
                                 return gauge.data_points().any(|datapoint| {
-                                    Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                    Self::equal_attributes(
+                                        attributes,
+                                        &datapoint.attributes().cloned().collect::<Vec<_>>(),
+                                    )
                                 });
                             }
-                            Sum(sum) if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) => {
+                            Sum(sum)
+                                if matches!(
+                                    ty,
+                                    MetricType::Counter | MetricType::UpDownCounter
+                                ) =>
+                            {
                                 return sum.data_points().any(|datapoint| {
-                                    Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                    Self::equal_attributes(
+                                        attributes,
+                                        &datapoint.attributes().cloned().collect::<Vec<_>>(),
+                                    )
                                 });
                             }
                             Histogram(histogram) if matches!(ty, MetricType::Histogram) => {
                                 return histogram.data_points().any(|datapoint| {
-                                    Self::equal_attributes(attributes, &datapoint.attributes().cloned().collect::<Vec<_>>())
+                                    Self::equal_attributes(
+                                        attributes,
+                                        &datapoint.attributes().cloned().collect::<Vec<_>>(),
+                                    )
                                 });
                             }
                             _ => {}
@@ -477,10 +600,14 @@ pub(crate) mod test_utils {
                 return false;
             }
             // This works because the attributes are always sorted
-            expected.iter().zip(actual.iter()).all(|(expected_kv, actual_kv)| {
-                actual_kv.key == expected_kv.key
-                    && (actual_kv.value == expected_kv.value || actual_kv.value == Value::String(StringValue::from("<any>")))
-            })
+            expected
+                .iter()
+                .zip(actual.iter())
+                .all(|(expected_kv, actual_kv)| {
+                    actual_kv.key == expected_kv.key
+                        && (actual_kv.value == expected_kv.value
+                            || actual_kv.value == Value::String(StringValue::from("<any>")))
+                })
         }
     }
 
@@ -544,17 +671,20 @@ pub(crate) mod test_utils {
         ) {
             use MetricData::*;
             match value {
-                Gauge(gauge) => 
-                    metric_data.datapoints.extend(gauge.data_points().map(Into::into)),
-                Sum(sum) => 
-                metric_data.datapoints.extend(sum.data_points().map(Into::into)),
+                Gauge(gauge) => metric_data
+                    .datapoints
+                    .extend(gauge.data_points().map(Into::into)),
+                Sum(sum) => metric_data
+                    .datapoints
+                    .extend(sum.data_points().map(Into::into)),
 
-                Histogram(histogram) => 
-                metric_data.datapoints.extend(histogram.data_points().map(Into::into)),
+                Histogram(histogram) => metric_data
+                    .datapoints
+                    .extend(histogram.data_points().map(Into::into)),
 
-                ExponentialHistogram(exponential_histogram) =>                     
-                metric_data.datapoints.extend(exponential_histogram.data_points().map(Into::into)),
-
+                ExponentialHistogram(exponential_histogram) => metric_data
+                    .datapoints
+                    .extend(exponential_histogram.data_points().map(Into::into)),
             }
         }
     }
@@ -566,9 +696,15 @@ pub(crate) mod test_utils {
                 description: value.description().to_string(),
                 unit: value.unit().to_string(),
                 data: match value.data() {
-                    opentelemetry_sdk::metrics::data::AggregatedMetrics::F64(metric_data) => metric_data.into(),
-                    opentelemetry_sdk::metrics::data::AggregatedMetrics::U64(metric_data) => metric_data.into(),
-                    opentelemetry_sdk::metrics::data::AggregatedMetrics::I64(metric_data) => metric_data.into(),
+                    opentelemetry_sdk::metrics::data::AggregatedMetrics::F64(metric_data) => {
+                        metric_data.into()
+                    }
+                    opentelemetry_sdk::metrics::data::AggregatedMetrics::U64(metric_data) => {
+                        metric_data.into()
+                    }
+                    opentelemetry_sdk::metrics::data::AggregatedMetrics::I64(metric_data) => {
+                        metric_data.into()
+                    }
                 },
             };
             // Sort the datapoints so that we can compare them
@@ -640,7 +776,7 @@ pub(crate) mod test_utils {
                     Array::String(v) => v.iter().map(|v| v.to_string()).collect::<Vec<_>>().into(),
                     _ => unreachable!(),
                 },
-                _ => unreachable!()
+                _ => unreachable!(),
             }
         }
     }

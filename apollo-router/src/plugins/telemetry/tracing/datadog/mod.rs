@@ -13,6 +13,7 @@ use opentelemetry::KeyValue;
 use opentelemetry::Value;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::SpanKind;
+use opentelemetry_datadog::DatadogTraceState;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::trace::SpanData;
@@ -41,7 +42,6 @@ use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
-use opentelemetry_datadog::DatadogTraceState;
 
 fn default_resource_mappings() -> HashMap<String, String> {
     let mut map = HashMap::with_capacity(7);
@@ -214,15 +214,14 @@ impl TracingConfigurator for Config {
         let mut span_metrics = default_span_metrics();
         span_metrics.extend(self.span_metrics.clone());
 
-        let batch_processor = opentelemetry_sdk::trace::BatchSpanProcessor::builder(
-            ExporterWrapper {
+        let batch_processor =
+            opentelemetry_sdk::trace::BatchSpanProcessor::builder(ExporterWrapper {
                 delegate: exporter,
                 span_metrics,
-            },
-        )
-        .with_batch_config(self.batch_processor.clone().into())
-        .build()
-        .filtered();
+            })
+            .with_batch_config(self.batch_processor.clone().into())
+            .build()
+            .filtered();
 
         Ok(
             if trace.preview_datadog_agent_sampling.unwrap_or_default() {
@@ -246,7 +245,10 @@ impl Debug for ExporterWrapper {
 }
 
 impl SpanExporter for ExporterWrapper {
-    fn export(&self, mut batch: Vec<SpanData>) -> impl std::future::Future<Output = OTelSdkResult> + Send {
+    fn export(
+        &self,
+        mut batch: Vec<SpanData>,
+    ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
         // Here we do some special processing of the spans before passing them to the delegate
         // In particular we default the span.kind to the span kind, and also override the trace measure status if we need to.
         for span in &mut batch {

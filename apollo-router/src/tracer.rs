@@ -119,9 +119,7 @@ mod test {
         // Create a tracing layer with the configured tracer
 
         let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
-            .with_simple_exporter(
-                opentelemetry_stdout::SpanExporter::default()
-            )
+            .with_simple_exporter(opentelemetry_stdout::SpanExporter::default())
             .build();
         let tracer = provider.tracer("noop");
 

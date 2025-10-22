@@ -1,9 +1,9 @@
 use opentelemetry::Context;
 use opentelemetry::trace::SpanContext;
-use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::trace::SpanData;
+use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::trace::Span;
+use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::SpanProcessor;
 
 /// When using the Datadog agent we need spans to always be exported. However, the batch span processor will only export spans that are sampled.
@@ -100,7 +100,7 @@ mod tests {
         fn shutdown(&self) -> OTelSdkResult {
             Ok(())
         }
-        
+
         fn shutdown_with_timeout(&self, _timeout: std::time::Duration) -> OTelSdkResult {
             Ok(())
         }

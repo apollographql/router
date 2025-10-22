@@ -30,7 +30,8 @@ use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId;
 use opentelemetry::trace::TracerProvider as OtherTracerProvider;
-use opentelemetry_otlp::{Protocol, SpanExporterBuilder};
+use opentelemetry_otlp::Protocol;
+use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_sdk::Resource;
@@ -366,11 +367,10 @@ pub enum Telemetry {
 
 impl Telemetry {
     fn tracer_provider(&self, service_name: &str) -> SdkTracerProvider {
-        let resource = Resource::builder().with_attributes(vec![KeyValue::new(
-            SERVICE_NAME,
-            service_name.to_string(),
-        )]).build();
-        
+        let resource = Resource::builder()
+            .with_attributes(vec![KeyValue::new(SERVICE_NAME, service_name.to_string())])
+            .build();
+
         match self {
             Telemetry::Otlp {
                 endpoint: Some(endpoint),
@@ -378,14 +378,12 @@ impl Telemetry {
                 .with_resource(resource)
                 .with_span_processor(
                     BatchSpanProcessor::builder(
-                        SpanExporterBuilder::from(
-                            opentelemetry_otlp::SpanExporter::builder()
-                        )
-                        .with_http()
-                        .with_endpoint(endpoint)
-                        .with_protocol(Protocol::HttpBinary)
-                        .build()
-                        .expect("otlp pipeline failed"),
+                        SpanExporterBuilder::from(opentelemetry_otlp::SpanExporter::builder())
+                            .with_http()
+                            .with_endpoint(endpoint)
+                            .with_protocol(Protocol::HttpBinary)
+                            .build()
+                            .expect("otlp pipeline failed"),
                     )
                     .with_batch_config(
                         BatchConfigBuilder::default()

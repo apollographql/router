@@ -7,7 +7,6 @@ use derivative::Derivative;
 use num_traits::ToPrimitive;
 use opentelemetry::Array;
 use opentelemetry::Value;
-
 use opentelemetry_sdk::metrics::Stream;
 use opentelemetry_sdk::metrics::StreamBuilder;
 use opentelemetry_sdk::trace::SpanLimits;
@@ -155,10 +154,12 @@ impl TryInto<StreamBuilder> for MetricView {
 
     fn try_into(self) -> Result<StreamBuilder, Self::Error> {
         let aggregation = self.aggregation.map(|aggregation| match aggregation {
-            MetricAggregation::Histogram { buckets } => opentelemetry_sdk::metrics::Aggregation::ExplicitBucketHistogram {
-                boundaries: buckets,
-                record_min_max: true,
-            },
+            MetricAggregation::Histogram { buckets } => {
+                opentelemetry_sdk::metrics::Aggregation::ExplicitBucketHistogram {
+                    boundaries: buckets,
+                    record_min_max: true,
+                }
+            }
             MetricAggregation::Drop => opentelemetry_sdk::metrics::Aggregation::Drop,
         });
         let mut mask = Stream::builder().with_name(self.name);
@@ -172,7 +173,8 @@ impl TryInto<StreamBuilder> for MetricView {
             mask = mask.with_aggregation(aggregation);
         }
         if let Some(allowed_attribute_keys) = self.allowed_attribute_keys {
-            mask = mask.with_allowed_attribute_keys(allowed_attribute_keys.into_iter().map(Key::new));
+            mask =
+                mask.with_allowed_attribute_keys(allowed_attribute_keys.into_iter().map(Key::new));
         }
 
         Ok(mask)

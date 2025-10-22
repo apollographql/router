@@ -9,8 +9,8 @@ use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
-use opentelemetry_sdk::trace::Tracer;
 use opentelemetry::trace::TracerProvider;
+use opentelemetry_sdk::trace::Tracer;
 use tower::BoxError;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
@@ -47,10 +47,8 @@ static FMT_LAYER_HANDLE: OnceCell<
 > = OnceCell::new();
 
 pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
-    let hot_tracer = ReloadTracer::new(
-        opentelemetry_sdk::trace::SdkTracerProvider::default()
-            .tracer("noop")
-    );
+    let hot_tracer =
+        ReloadTracer::new(opentelemetry_sdk::trace::SdkTracerProvider::default().tracer("noop"));
     let opentelemetry_layer = otel::layer().with_tracer(hot_tracer.clone());
 
     // We choose json or plain based on tty
