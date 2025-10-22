@@ -1573,3 +1573,194 @@ mod executable_directives {
         );
     }
 }
+
+// Tests for external type handling
+mod external_types {
+    use super::*;
+
+    #[test]
+    fn with_type_marked_external() {
+        let me_subgraph = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    me: Account
+                }
+
+                type Account @key(fields: "id") {
+                    id: ID!
+                    name: String
+                    permissions: Permissions
+                }
+
+                type Permissions {
+                    canView: Boolean
+                    canEdit: Boolean
+                }
+            "#,
+        };
+
+        let account_subgraph = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                type Query {
+                    account: Account
+                }
+
+                type Account @key(fields: "id") {
+                    id: ID!
+                    permissions: Permissions @external
+                    isViewer: Boolean @requires(fields: "permissions { canView }")
+                }
+
+                type Permissions @external {
+                    canView: Boolean
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[me_subgraph, account_subgraph]);
+        assert!(result.is_ok(), "Expected composition to succeed");
+        let composition_result = result.unwrap();
+        
+        // Should not raise hints when type is properly marked @external
+        assert_no_hints(&composition_result);
+    }
+
+    #[test]
+    fn with_all_fields_marked_external() {
+        let me_subgraph = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    me: Account
+                }
+
+                type Account @key(fields: "id") {
+                    id: ID!
+                    name: String
+                    permissions: Permissions
+                }
+
+                type Permissions {
+                    canView: Boolean
+                    canEdit: Boolean
+                    canDelete: Boolean
+                }
+            "#,
+        };
+
+        let account_subgraph = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                type Query {
+                    account: Account
+                }
+
+                type Account @key(fields: "id") {
+                    id: ID!
+                    permissions: Permissions @external
+                    isViewer: Boolean @requires(fields: "permissions { canView canEdit }")
+                }
+
+                type Permissions {
+                    canView: Boolean @external
+                    canEdit: Boolean @external
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[me_subgraph, account_subgraph]);
+        assert!(result.is_ok(), "Expected composition to succeed");
+        let composition_result = result.unwrap();
+        
+        // Should not raise hints when all fields are properly marked @external
+        assert_no_hints(&composition_result);
+    }
+}
+
+// Tests for federation__key usage
+mod federation_key_tests {
+    use super::*;
+
+    #[test]
+    fn use_of_federation_key_does_not_raise_hint() {
+        let subgraph1 = ServiceDefinition {
+            name: "subgraph1",
+            type_defs: r#"
+                extend schema
+                  @link(url: "https://specs.apollo.dev/federation/v2.7")
+
+                type Query {
+                    a: Int
+                }
+
+                union U = T
+                
+                type T @federation__key(fields:"id") {
+                    id: ID!
+                    b: Int
+                }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "subgraph2",
+            type_defs: r#"
+                extend schema
+                  @link(url: "https://specs.apollo.dev/federation/v2.7")
+
+                type Query {
+                    b: Int
+                }
+                
+                type T @federation__key(fields:"id") {
+                    id: ID!
+                    c: Int
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        assert!(result.is_ok(), "Expected composition to succeed");
+        let composition_result = result.unwrap();
+        
+        // Should not raise hints when using federation__key
+        assert_no_hints(&composition_result);
+    }
+
+    #[test]
+    fn no_hint_on_field_of_interface_with_key_not_being_in_all_subgraphs() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    a: Int
+                }
+
+                interface T @key(fields: "id") {
+                    id: ID!
+                    a: Int
+                    b: Int
+                }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                type T @interfaceObject @key(fields: "id") {
+                    id: ID!
+                    a: Int
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        assert!(result.is_ok(), "Expected composition to succeed");
+        let composition_result = result.unwrap();
+        
+        // Should not raise hints when interface has @key
+        assert_no_hints(&composition_result);
+    }
+}
