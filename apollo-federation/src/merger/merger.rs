@@ -1336,17 +1336,17 @@ impl Merger {
                 trace!("Types are identical");
                 continue;
             } else if let Ok(true) = self.is_strict_subtype(ty, source_ty) {
-                trace!("Current {ty} is a strict subtype of source {source_ty}");
+                trace!("Source {source_ty} is a strict subtype of current {ty}");
                 has_subtypes = true;
                 if is_input_position {
-                    // For input: upgrade to the supertype
+                    // For inputs, update to the more specific subtype
                     *ty = source_ty.clone();
                 }
             } else if let Ok(true) = self.is_strict_subtype(source_ty, ty) {
-                trace!("Source {source_ty} is a strict subtype of current {ty}");
+                trace!("Current {ty} is a strict subtype of source {source_ty}");
                 has_subtypes = true;
                 if !is_input_position {
-                    // For output: keep the supertype; for input: adopt the subtype
+                    // For outputs, update to the more general supertype
                     *ty = source_ty.clone();
                 }
             } else {
@@ -1366,6 +1366,7 @@ impl Merger {
         self.track_enum_usage(&ty, dest.to_string(), ast_node, is_input_position);
 
         if has_incompatible {
+            trace!("Type has incompatible sources, reporting mismatch error");
             let error = if T::is_argument() {
                 CompositionError::FieldArgumentTypeMismatch {
                     message: format!(
@@ -1394,6 +1395,7 @@ impl Merger {
 
             Ok(false)
         } else if has_subtypes {
+            trace!("Type has different but compatible sources, reporting mismatch hint");
             // Report compatibility hint for subtype relationships
             let hint_code = if T::is_argument() {
                 HintCode::InconsistentButCompatibleArgumentType
@@ -1410,22 +1412,21 @@ impl Merger {
             let type_class = if is_input_position {
                 "supertype"
             } else {
-                "subtypes"
+                "subtype"
             };
 
             self.error_reporter.report_mismatch_hint::<Type, T, ()>(
                 hint_code,
                 format!(
-                    "Type of {element_kind} \"{dest}\" is inconsistent but compatible across subgraphs:",
-
+                    "Type of {element_kind} \"{dest}\" is inconsistent but compatible across subgraphs: ",
                 ),
                 &ty,
                 sources,
-                |d| Some(format!("type \"{d}\"")),
+                |d| Some(d.to_string()),
                 |s, idx| {
                     s.get_type(self.subgraphs[idx].schema())
                         .ok()
-                        .map(|t| format!("type \"{t}\""))
+                        .map(|t| t.to_string())
                 },
                 |elt, subgraphs| {
                     format!(

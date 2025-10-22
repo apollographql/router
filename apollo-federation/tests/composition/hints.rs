@@ -32,63 +32,35 @@ fn assert_has_hint(
         hints.iter().map(|h| h.code()).collect::<Vec<_>>()
     );
 
-    // Find a hint with matching message (can be substring match for flexibility)
-    let found_match = matching_hints
-        .iter()
-        .any(|hint| hint.message().contains(expected_message));
-
-    assert!(
-        found_match,
-        "Found hint(s) with code '{}' but none contained expected message.\nExpected message containing: {}\nActual messages: {:?}",
-        expected_code_str,
-        expected_message,
-        matching_hints
-            .iter()
-            .map(|h| h.message())
-            .collect::<Vec<_>>()
-    );
-}
-
-/// Helper to assert exact hint match with code and message
-fn assert_has_exact_hint(
-    supergraph: &Supergraph<Satisfiable>,
-    expected_code: &str,
-    expected_message: &str,
-) {
-    let hints = supergraph.hints();
-    let expected_code_str = expected_code;
-
-    let matching_hints: Vec<&CompositionHint> = hints
-        .iter()
-        .filter(|hint| hint.code() == expected_code_str)
-        .collect();
-
-    assert!(
-        !matching_hints.is_empty(),
-        "Expected hint with code '{}' but found hints with codes: {:?}",
-        expected_code_str,
-        hints.iter().map(|h| h.code()).collect::<Vec<_>>()
-    );
-
-    // Find a hint with exact message match
     let found_match = matching_hints
         .iter()
         .any(|hint| hint.message() == expected_message);
 
-    assert!(
-        found_match,
-        "Found hint(s) with code '{}' but none had exact expected message.\nExpected message: {}\nActual messages: {:?}",
-        expected_code_str,
-        expected_message,
-        matching_hints
-            .iter()
-            .map(|h| h.message())
-            .collect::<Vec<_>>()
-    );
+    if matching_hints.len() == 1 {
+        assert_eq!(
+            expected_message,
+            matching_hints[0].message(),
+            "Mismatched messages for hint with code '{}'",
+            expected_code_str,
+        );
+    } else {
+        assert!(
+            found_match,
+            "Found hints with code '{}' but none contained expected message.\nExpected message: {}\nActual messages: {:?}",
+            expected_code_str,
+            expected_message,
+            matching_hints
+                .iter()
+                .map(|h| h.message())
+                .collect::<Vec<_>>()
+        );
+    }
 }
 
 // Tests for field/argument type inconsistencies
 mod field_type_inconsistencies {
+    use test_log::test;
+
     use super::*;
 
     #[test]
@@ -1263,12 +1235,12 @@ type Resource {
             name: "already-newest",
             type_defs: newer_federation_schema,
         };
-        
+
         let old_but_not_upgraded = ServiceDefinition {
-            name: "old-but-not-upgraded", 
+            name: "old-but-not-upgraded",
             type_defs: older_federation_schema,
         };
-        
+
         let upgraded = ServiceDefinition {
             name: "upgraded",
             type_defs: auto_upgraded_schema,
@@ -1278,11 +1250,11 @@ type Resource {
 
         assert!(result.is_ok(), "Expected composition to succeed");
         let composition_result = result.unwrap();
-        
+
         assert_has_hint(
             &composition_result,
             "IMPLICITLY_UPGRADED_FEDERATION_VERSION",
-            "Subgraph upgraded has been implicitly upgraded from federation v2.5 to v2.10"
+            "Subgraph upgraded has been implicitly upgraded from federation v2.5 to v2.10",
         );
     }
 
@@ -1316,7 +1288,7 @@ type Resource {
             name: "upgraded-1",
             type_defs: auto_upgraded_schema,
         };
-        
+
         let upgraded_2 = ServiceDefinition {
             name: "upgraded-2",
             type_defs: auto_upgraded_schema,
@@ -1326,16 +1298,16 @@ type Resource {
 
         assert!(result.is_ok(), "Expected composition to succeed");
         let composition_result = result.unwrap();
-        
+
         assert_has_hint(
             &composition_result,
             "IMPLICITLY_UPGRADED_FEDERATION_VERSION",
-            "Subgraph upgraded-1 has been implicitly upgraded from federation v2.5 to v2.10"
+            "Subgraph upgraded-1 has been implicitly upgraded from federation v2.5 to v2.10",
         );
         assert_has_hint(
             &composition_result,
             "IMPLICITLY_UPGRADED_FEDERATION_VERSION",
-            "Subgraph upgraded-2 has been implicitly upgraded from federation v2.5 to v2.10"
+            "Subgraph upgraded-2 has been implicitly upgraded from federation v2.5 to v2.10",
         );
     }
 
@@ -1363,7 +1335,7 @@ type Query {
             name: "already-newest",
             type_defs: newer_federation_schema,
         };
-        
+
         let old_but_not_upgraded = ServiceDefinition {
             name: "old-but-not-upgraded",
             type_defs: older_federation_schema,
@@ -1373,7 +1345,7 @@ type Query {
 
         assert!(result.is_ok(), "Expected composition to succeed");
         let composition_result = result.unwrap();
-        
+
         // Should not have any hints since no upgrades were caused by non-federation directives
         assert!(
             composition_result.hints().is_empty(),
@@ -1401,7 +1373,7 @@ mod executable_directives {
         };
 
         let subgraph2 = ServiceDefinition {
-            name: "Subgraph2", 
+            name: "Subgraph2",
             type_defs: r#"
                 scalar s
             "#,
@@ -1410,11 +1382,11 @@ mod executable_directives {
         let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
         assert!(result.is_ok(), "Expected composition to succeed");
         let composition_result = result.unwrap();
-        
+
         assert_has_hint(
             &composition_result,
             "INCONSISTENT_EXECUTABLE_DIRECTIVE_PRESENCE",
-            r#"Executable directive "@t" will not be part of the supergraph as it does not appear in all subgraphs: it is defined in subgraph "Subgraph1" but not in subgraph "Subgraph2"."#
+            r#"Executable directive "@t" will not be part of the supergraph as it does not appear in all subgraphs: it is defined in subgraph "Subgraph1" but not in subgraph "Subgraph2"."#,
         );
     }
 
@@ -1441,11 +1413,11 @@ mod executable_directives {
         let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
         assert!(result.is_ok(), "Expected composition to succeed");
         let composition_result = result.unwrap();
-        
+
         assert_has_hint(
             &composition_result,
             "NO_EXECUTABLE_DIRECTIVE_LOCATIONS_INTERSECTION",
-            r#"Executable directive "@t" has no location that is common to all subgraphs: it will not appear in the supergraph as there no intersection between location "QUERY" in subgraph "Subgraph1" and location "FIELD" in subgraph "Subgraph2"."#
+            r#"Executable directive "@t" has no location that is common to all subgraphs: it will not appear in the supergraph as there no intersection between location "QUERY" in subgraph "Subgraph1" and location "FIELD" in subgraph "Subgraph2"."#,
         );
     }
 
@@ -1472,11 +1444,11 @@ mod executable_directives {
         let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
         assert!(result.is_ok(), "Expected composition to succeed");
         let composition_result = result.unwrap();
-        
+
         assert_has_hint(
             &composition_result,
             "INCONSISTENT_EXECUTABLE_DIRECTIVE_REPEATABLE",
-            r#"Executable directive "@t" will not be marked repeatable in the supergraph as it is inconsistently marked repeatable in subgraphs: it is not repeatable in subgraph "Subgraph2" but is repeatable in subgraph "Subgraph1"."#
+            r#"Executable directive "@t" will not be marked repeatable in the supergraph as it is inconsistently marked repeatable in subgraphs: it is not repeatable in subgraph "Subgraph2" but is repeatable in subgraph "Subgraph1"."#,
         );
     }
 
@@ -1503,11 +1475,11 @@ mod executable_directives {
         let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
         assert!(result.is_ok(), "Expected composition to succeed");
         let composition_result = result.unwrap();
-        
+
         assert_has_hint(
             &composition_result,
             "INCONSISTENT_EXECUTABLE_DIRECTIVE_LOCATIONS",
-            r#"Executable directive "@t" has inconsistent locations across subgraphs and will use location "FIELD" (intersection of all subgraphs) in the supergraph, but has: location "FIELD" in subgraph "Subgraph2" and locations "FIELD, QUERY" in subgraph "Subgraph1"."#
+            r#"Executable directive "@t" has inconsistent locations across subgraphs and will use location "FIELD" (intersection of all subgraphs) in the supergraph, but has: location "FIELD" in subgraph "Subgraph2" and locations "FIELD, QUERY" in subgraph "Subgraph1"."#,
         );
     }
 
@@ -1534,11 +1506,11 @@ mod executable_directives {
         let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
         assert!(result.is_ok(), "Expected composition to succeed");
         let composition_result = result.unwrap();
-        
+
         assert_has_hint(
             &composition_result,
             "INCONSISTENT_ARGUMENT_PRESENCE",
-            r#"Optional argument "@t(a:)" will not be included in the supergraph as it does not appear in all subgraphs: it is defined in subgraph "Subgraph1" but not in subgraph "Subgraph2"."#
+            r#"Optional argument "@t(a:)" will not be included in the supergraph as it does not appear in all subgraphs: it is defined in subgraph "Subgraph1" but not in subgraph "Subgraph2"."#,
         );
     }
 
@@ -1565,11 +1537,11 @@ mod executable_directives {
         let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
         assert!(result.is_ok(), "Expected composition to succeed");
         let composition_result = result.unwrap();
-        
+
         assert_has_hint(
             &composition_result,
             "INCONSISTENT_ARGUMENT_PRESENCE",
-            r#"Optional argument "Query.f(a:)" will not be included in the supergraph as it does not appear in all subgraphs: it is defined in subgraph "Subgraph1" but not in subgraph "Subgraph2"."#
+            r#"Optional argument "Query.f(a:)" will not be included in the supergraph as it does not appear in all subgraphs: it is defined in subgraph "Subgraph1" but not in subgraph "Subgraph2"."#,
         );
     }
 }
@@ -1622,7 +1594,7 @@ mod external_types {
         let result = compose_as_fed2_subgraphs(&[me_subgraph, account_subgraph]);
         assert!(result.is_ok(), "Expected composition to succeed");
         let composition_result = result.unwrap();
-        
+
         // Should not raise hints when type is properly marked @external
         assert_no_hints(&composition_result);
     }
@@ -1673,7 +1645,7 @@ mod external_types {
         let result = compose_as_fed2_subgraphs(&[me_subgraph, account_subgraph]);
         assert!(result.is_ok(), "Expected composition to succeed");
         let composition_result = result.unwrap();
-        
+
         // Should not raise hints when all fields are properly marked @external
         assert_no_hints(&composition_result);
     }
@@ -1724,7 +1696,7 @@ mod federation_key_tests {
         let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
         assert!(result.is_ok(), "Expected composition to succeed");
         let composition_result = result.unwrap();
-        
+
         // Should not raise hints when using federation__key
         assert_no_hints(&composition_result);
     }
@@ -1759,7 +1731,7 @@ mod federation_key_tests {
         let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
         assert!(result.is_ok(), "Expected composition to succeed");
         let composition_result = result.unwrap();
-        
+
         // Should not raise hints when interface has @key
         assert_no_hints(&composition_result);
     }

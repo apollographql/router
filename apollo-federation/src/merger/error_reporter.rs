@@ -187,16 +187,17 @@ impl ErrorReporter {
             subgraph_element_to_string,
             supergraph_element_printer,
             other_elements_printer,
-            |myself, distribution, _| {
-                let distribution_str = join_strings(
+            |myself, mut distribution, _| {
+                let mut distribution_str = distribution.remove(0);
+                distribution_str.push_str(&join_strings(
                     distribution.iter(),
                     JoinStringsOptions {
-                        first_separator: Some(" and "),
-                        separator: ", ",
-                        last_separator: Some(" but "),
+                        first_separator: None,
+                        separator: " and ",
+                        last_separator: None,
                         output_length_limit: None,
                     },
-                );
+                ));
                 let suffix = if no_end_of_message_dot { "" } else { "." };
                 myself.add_hint(CompositionHint {
                     code: code.code().to_string(),

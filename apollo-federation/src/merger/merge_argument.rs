@@ -247,6 +247,7 @@ impl Merger {
             .collect())
     }
 
+    #[instrument(skip(self, sources, dest))]
     pub(in crate::merger) fn merge_argument<T>(
         &mut self,
         sources: &Sources<T>,
@@ -260,6 +261,7 @@ impl Merger {
             + HasType
             + Into<DirectiveTargetPosition>,
     {
+        trace!("Merging argument \"{dest}\"");
         self.merge_description(sources, dest)?;
         self.record_applied_directives_to_merge(sources, dest)?;
         self.merge_type_reference(sources, dest, true)?;
@@ -275,6 +277,7 @@ impl Merger {
     where
         T: Display + HasDefaultValue,
     {
+        trace!("Merging default value for \"{dest}\"");
         let mut dest_default: Option<Node<Value>> = None;
         let mut locations = Locations::with_capacity(sources.len());
         let mut has_seen_source = false;
@@ -325,6 +328,7 @@ impl Merger {
         // Note that we set the default if is_incompatible mostly to help the building of the error message. But
         // as we'll error out, it doesn't really matter.
         if !is_inconsistent || is_incompatible {
+            trace!("Setting merged default value for \"{dest}\" to {dest_default:?}");
             dest.set_default_value(&mut self.merged, dest_default.clone())?;
         }
 
@@ -361,8 +365,12 @@ impl Merger {
                 format!("Argument \"{dest}\" has a default value in only some subgraphs: "),
                 dest_default,
                 sources,
-                |v| Some(format!("default value {v}")),
-                |pos, idx| pos.get_default_value(self.subgraphs[idx].schema()).map(|v| v.to_string()),
+                // When inconsistent, we set no default. So, the supergraph element should always
+                // be "no default value". The matching strings drive the ordering in the message.
+                |_| Some("no default value".to_string()),
+                |pos, idx| Some(pos.get_default_value(self.subgraphs[idx].schema())
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| "no default value".to_string())),
                 |_, subgraphs| {
                     let subgraphs = subgraphs.unwrap_or_default();
                     format!("will not use a default in the supergraph (there is no default in {subgraphs}) but ")
