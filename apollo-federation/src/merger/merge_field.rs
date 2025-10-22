@@ -258,7 +258,7 @@ impl Merger {
                 message: format!(
                     "Field \"{}\" is marked @external on all the subgraphs in which it is listed ({}).",
                     dest,
-                    defining_subgraphs.join(", ")
+                    human_readable_subgraph_names(defining_subgraphs.iter())
                 ),
             };
 

@@ -1797,7 +1797,9 @@ impl SchemaDefinitionPosition {
     ) -> Result<(), FederationError> {
         let schema_definition = self.make_mut(&mut schema.schema);
         match kind {
-            SchemaRootDefinitionKind::Query => schema_definition.make_mut().query = Some(type_name),
+            SchemaRootDefinitionKind::Query => {
+                schema_definition.make_mut().query = Some(type_name);
+            }
             SchemaRootDefinitionKind::Mutation => {
                 schema_definition.make_mut().mutation = Some(type_name)
             }
@@ -1805,6 +1807,10 @@ impl SchemaDefinitionPosition {
                 schema_definition.make_mut().subscription = Some(type_name)
             }
         }
+
+        let schema_definition = self.get(&schema.schema);
+        self.insert_references(schema_definition, &schema.schema, &mut schema.referencers)?;
+
         Ok(())
     }
 }

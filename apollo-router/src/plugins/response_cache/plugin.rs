@@ -1037,7 +1037,7 @@ impl CacheService {
                                 .collect(),
                                 kind: CacheEntryKind::Entity {
                                     typename: ir.typename.clone(),
-                                    entity_key: ir.entity_key.clone(),
+                                    entity_key: ir.entity_key.clone().unwrap_or_default(),
                                 },
                                 subgraph_name: self.name.clone(),
                                 subgraph_request: request.subgraph_request.body().clone(),
@@ -1415,6 +1415,7 @@ async fn cache_lookup_entities(
         &mut request,
         is_known_private,
         private_id,
+        debug,
     )?;
     let keys_len = cache_metadata.len();
 
@@ -1495,7 +1496,7 @@ async fn cache_lookup_entities(
                         .collect(),
                     kind: CacheEntryKind::Entity {
                         typename: ir.typename.clone(),
-                        entity_key: ir.entity_key.clone(),
+                        entity_key: ir.entity_key.clone().unwrap_or_default(),
                     },
                     subgraph_name: name.clone(),
                     subgraph_request: request.subgraph_request.body().clone(),
@@ -1721,7 +1722,8 @@ fn extract_cache_key_root(
 struct CacheMetadata {
     cache_key: String,
     invalidation_keys: Vec<String>,
-    entity_key: serde_json_bytes::Map<ByteString, Value>,
+    // Only set when debug mode is enabled
+    entity_key: Option<serde_json_bytes::Map<ByteString, Value>>,
 }
 
 // build a list of keys to get from the cache in one query
@@ -1733,6 +1735,7 @@ fn extract_cache_keys(
     request: &mut subgraph::Request,
     is_known_private: bool,
     private_id: Option<&str>,
+    debug: bool,
 ) -> Result<Vec<CacheMetadata>, BoxError> {
     let context = &request.context;
     let authorization = &request.authorization;
@@ -1781,21 +1784,25 @@ fn extract_cache_keys(
             }
         }
 
-        // Split `representation` into two parts: the entity key part and the rest.
-        let representation_entity_key = take_matching_key_field_set(
-            representation,
-            typename,
-            subgraph_name,
-            &supergraph_schema,
-            subgraph_enums,
-        )?;
+        // Get the entity key from `representation`, only needed in debug for the cache debugger
+        let representation_entity_key = if debug {
+            get_matching_key_field_set(
+                representation,
+                typename,
+                subgraph_name,
+                &supergraph_schema,
+                subgraph_enums,
+            )?
+            .into()
+        } else {
+            None
+        };
 
         // Create primary cache key for an entity
         let key = PrimaryCacheKeyEntity {
             subgraph_name,
             entity_type: typename,
             representation,
-            entity_key: &representation_entity_key,
             subgraph_query_hash: &query_hash,
             additional_data_hash: &additional_data_hash,
             private_id: if is_known_private { private_id } else { None },
@@ -1813,12 +1820,11 @@ fn extract_cache_keys(
             subgraph_name,
             subgraph_enums,
             typename,
-            &representation_entity_key,
+            representation,
         )?;
 
         // Restore the `representation` back whole again
         representation.insert(TYPENAME, typename_value);
-        merge_representation(representation, representation_entity_key.clone()); //FIXME: not always clone, only on debug
         invalidation_keys.extend(invalidation_cache_keys);
         let cache_key_metadata = CacheMetadata {
             cache_key: key,
@@ -1859,7 +1865,7 @@ fn get_invalidation_entity_keys_from_schema(
     subgraph_name: &str,
     subgraph_enums: &HashMap<String, String>,
     typename: &str,
-    entity_keys: &serde_json_bytes::Map<ByteString, Value>,
+    representations: &serde_json_bytes::Map<ByteString, Value>,
 ) -> Result<HashSet<String>, anyhow::Error> {
     let field_def =
         supergraph_schema
@@ -1906,15 +1912,16 @@ fn get_invalidation_entity_keys_from_schema(
                 })
         });
     let mut vars = IndexMap::default();
-    vars.insert("$key".to_string(), Value::Object(entity_keys.clone()));
+    // It's safe to use representations variables (not only entity keys) because at the composition level we already checked if it was only using entity keys
+    vars.insert("$key".to_string(), Value::Object(representations.clone()));
     let invalidation_cache_keys = cache_keys
         .map(|ck| ck.interpolate(&vars).map(|(res, _)| res))
         .collect::<Result<HashSet<String>, apollo_federation::connectors::StringTemplateError>>()?;
     Ok(invalidation_cache_keys)
 }
 
-fn take_matching_key_field_set(
-    representation: &mut serde_json_bytes::Map<ByteString, Value>,
+fn get_matching_key_field_set(
+    representation: &serde_json_bytes::Map<ByteString, Value>,
     typename: &str,
     subgraph_name: &str,
     supergraph_schema: &Valid<Schema>,
@@ -1932,7 +1939,7 @@ fn take_matching_key_field_set(
                 reason: format!("unexpected critical internal error for typename {typename} in subgraph {subgraph_name}"),
             }
         })?;
-    take_selection_set(representation, &matched_key_field_set.selection_set).ok_or_else(|| {
+    get_selection_set(representation, &matched_key_field_set.selection_set).ok_or_else(|| {
         FetchError::MalformedRequest {
             reason: format!("representation does not match the field set {matched_key_field_set}"),
         }
@@ -2012,31 +2019,31 @@ fn matches_selection_set(
     true
 }
 
-// Removes the selection set from `representation` and returns the value corresponding to it.
+// Get the selection set from `representation` and returns the value corresponding to it.
 // - Returns None if the representation doesn't match the selection set.
-fn take_selection_set(
-    representation: &mut serde_json_bytes::Map<ByteString, Value>,
+fn get_selection_set(
+    representation: &serde_json_bytes::Map<ByteString, Value>,
     selection_set: &apollo_compiler::executable::SelectionSet,
 ) -> Option<serde_json_bytes::Map<ByteString, Value>> {
     let mut result = serde_json_bytes::Map::new();
     for field in selection_set.root_fields(&Default::default()) {
         // Note: field sets can't have aliases.
         if field.selection_set.is_empty() {
-            let value = representation.remove(field.name.as_str())?;
+            let value = representation.get(field.name.as_str())?;
             // `value` must be a scalar.
             if matches!(value, Value::Object(_)) {
                 return None;
             }
             // Move the scalar field to the `result`.
-            result.insert(ByteString::from(field.name.as_str()), value);
+            result.insert(ByteString::from(field.name.as_str()), value.clone());
             continue;
         } else {
-            let value = representation.get_mut(field.name.as_str())?;
+            let value = representation.get(field.name.as_str())?;
             // Update the sub-selection set.
             let Value::Object(sub_value) = value else {
                 return None;
             };
-            let removed = take_selection_set(sub_value, &field.selection_set)?;
+            let removed = get_selection_set(sub_value, &field.selection_set)?;
             result.insert(
                 ByteString::from(field.name.as_str()),
                 Value::Object(removed),
@@ -2046,34 +2053,13 @@ fn take_selection_set(
     Some(result)
 }
 
-// The inverse of `take_selection_set`.
-fn merge_representation(
-    dest: &mut serde_json_bytes::Map<ByteString, Value>,
-    source: serde_json_bytes::Map<ByteString, Value>,
-) {
-    source.into_iter().for_each(|(key, src_value)| {
-        // Note: field sets can't have aliases.
-        let Some(dest_value) = dest.get_mut(&key) else {
-            dest.insert(key, src_value);
-            return;
-        };
-
-        // Overlapping fields must be objects.
-        if let (Value::Object(dest_sub_value), Value::Object(src_sub_value)) =
-            (dest_value, src_value)
-        {
-            // Merge sub-values
-            merge_representation(dest_sub_value, src_sub_value);
-        }
-    });
-}
-
 /// represents the result of a cache lookup for an entity type and key
 struct IntermediateResult {
     key: String,
     invalidation_keys: Vec<String>,
     typename: String,
-    entity_key: serde_json_bytes::Map<ByteString, Value>,
+    // Only set when debug mode is enabled
+    entity_key: Option<serde_json_bytes::Map<ByteString, Value>>,
     cache_entry: Option<CacheEntry>,
 }
 
@@ -2253,7 +2239,7 @@ async fn insert_entities_in_result(
                             .collect(),
                         kind: CacheEntryKind::Entity {
                             typename: typename.clone(),
-                            entity_key: entity_key.clone(),
+                            entity_key: entity_key.clone().unwrap_or_default(),
                         },
                         subgraph_name: subgraph_name.to_string(),
                         subgraph_request: subgraph_request.clone(),
