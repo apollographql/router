@@ -1101,17 +1101,18 @@ impl Merger {
                 }
             }
         }
-        let supergraph = 0;
         if !source_as_entity.is_empty() && !source_as_non_entity.is_empty() {
-            self.error_reporter.report_mismatch_hint::<usize, usize, ()>(
+            self.error_reporter.report_mismatch_hint::<ObjectTypeDefinitionPosition, usize, ()>(
                 HintCode::InconsistentEntity,
-                format!("Type \"{}\" is declared as an entity (has a @key applied) in some but all defining subgraphs: ",
+                format!("Type \"{}\" is declared as an entity (has a @key applied) in some but not all defining subgraphs: ",
                     &obj.type_name,
                 ),
-                &supergraph,
+                obj,
                 &sources,
-                |idx| if source_as_entity.contains(idx) { Some("yes".to_string()) } else { Some("no".to_string()) },
+                // Categorize whether the source has a @key or not.
+                |_| Some("no".to_string()),
                 |idx, _| if source_as_entity.contains(idx) { Some("yes".to_string()) } else { Some("no".to_string()) },
+                // Note that the first callback is for elements that are "like the supergraph". In this case the supergraph has no @key.
                 |_, subgraphs| format!("it has no @key in {}", subgraphs.unwrap_or_default()),
                 |_, subgraphs| format!(" but has some @key in {}", subgraphs),
                 false,
@@ -1396,7 +1397,6 @@ impl Merger {
             Ok(false)
         } else if has_subtypes {
             trace!("Type has different but compatible sources, reporting mismatch hint");
-            // Report compatibility hint for subtype relationships
             let hint_code = if T::is_argument() {
                 HintCode::InconsistentButCompatibleArgumentType
             } else {
