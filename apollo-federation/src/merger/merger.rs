@@ -1666,7 +1666,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                     sources,
                     |elem| elem.description(&self.merged).map(|desc| desc.to_string()),
                     |elem, idx| {
-                        elem.description(&self.subgraphs[idx].schema())
+                        elem.description(self.subgraphs[idx].schema())
                             .map(|desc| desc.to_string())
                     },
                     |desc, subgraphs| {

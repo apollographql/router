@@ -258,14 +258,14 @@ impl Merger {
             .map(|arg| arg.name.clone())
             .collect::<IndexSet<_>>();
         for arg_def in &definition.arguments {
-            if !existing_arg_names.contains(&arg_def.name) {
-                if let Some(default_value) = &arg_def.default_value {
-                    let arg = Argument {
-                        name: arg_def.name.clone(),
-                        value: default_value.clone(),
-                    };
-                    directive.arguments.push(Node::new(arg));
-                }
+            if !existing_arg_names.contains(&arg_def.name)
+                && let Some(default_value) = &arg_def.default_value
+            {
+                let arg = Argument {
+                    name: arg_def.name.clone(),
+                    value: default_value.clone(),
+                };
+                directive.arguments.push(Node::new(arg));
             }
         }
     }
