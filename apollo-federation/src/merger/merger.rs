@@ -1647,19 +1647,21 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 // should decide if we want to bother here: maybe we can leave
                 // it to studio so handle a better experience (as it can more UX
                 // wise).
-                let coordinate = dest.to_string();
-                let name = if !coordinate.is_empty() {
-                    "Element {coordinate}"
+                let name = if T::is_schema_definition() {
+                    "The schema definition".to_string()
                 } else {
-                    "The schema definition"
+                    format!("Element \"{dest}\"")
                 };
                 self.error_reporter.report_mismatch_hint::<T, T, ()>(
                     HintCode::InconsistentDescription,
-                    format!("{name} has inconsistent descriptions across the subgraphs. "),
+                    format!("{name} has inconsistent descriptions across subgraphs. "),
                     dest,
                     sources,
                     |elem| elem.description(&self.merged).map(|desc| desc.to_string()),
-                    |elem, _| elem.description(&self.merged).map(|desc| desc.to_string()),
+                    |elem, idx| {
+                        elem.description(&self.subgraphs[idx].schema())
+                            .map(|desc| desc.to_string())
+                    },
                     |desc, subgraphs| {
                         format!(
                             "The supergraph will use description (from {}):\n{}",

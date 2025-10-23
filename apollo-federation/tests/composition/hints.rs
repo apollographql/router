@@ -517,6 +517,8 @@ mod enum_hints {
 
 // Tests for description inconsistencies
 mod description_inconsistencies {
+    use test_log::test;
+
     use super::*;
 
     #[test]

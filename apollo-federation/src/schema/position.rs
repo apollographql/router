@@ -160,11 +160,14 @@ macro_rules! infallible_conversions {
 pub(crate) trait HasDescription {
     fn description<'schema>(&self, schema: &'schema FederationSchema)
     -> Option<&'schema Node<str>>;
+
     fn set_description(
         &self,
         schema: &mut FederationSchema,
         description: Option<Node<str>>,
     ) -> Result<(), FederationError>;
+
+    fn is_schema_definition() -> bool;
 }
 
 macro_rules! impl_has_description_for {
@@ -184,6 +187,10 @@ macro_rules! impl_has_description_for {
             ) -> Result<(), FederationError> {
                 self.make_mut(&mut schema.schema)?.make_mut().description = description;
                 Ok(())
+            }
+
+            fn is_schema_definition() -> bool {
+                false
             }
         }
     };
@@ -221,6 +228,10 @@ impl HasDescription for SchemaDefinitionPosition {
         self.make_mut(&mut schema.schema).make_mut().description = description;
         Ok(())
     }
+
+    fn is_schema_definition() -> bool {
+        true
+    }
 }
 
 impl HasDescription for ObjectOrInterfaceFieldDefinitionPosition {
@@ -243,6 +254,10 @@ impl HasDescription for ObjectOrInterfaceFieldDefinitionPosition {
             Self::Object(field) => field.set_description(schema, description),
             Self::Interface(field) => field.set_description(schema, description),
         }
+    }
+
+    fn is_schema_definition() -> bool {
+        false
     }
 }
 
@@ -269,6 +284,10 @@ impl HasDescription for FieldDefinitionPosition {
             FieldDefinitionPosition::Union(field) => field.set_description(schema, description),
         }
     }
+
+    fn is_schema_definition() -> bool {
+        false
+    }
 }
 
 impl HasDescription for UnionTypenameFieldDefinitionPosition {
@@ -286,6 +305,10 @@ impl HasDescription for UnionTypenameFieldDefinitionPosition {
         _description: Option<Node<str>>,
     ) -> Result<(), FederationError> {
         bail!("Description is immutable for union typename fields")
+    }
+
+    fn is_schema_definition() -> bool {
+        false
     }
 }
 
@@ -334,6 +357,10 @@ impl HasDescription for DirectiveTargetPosition {
             )),
         }
     }
+
+    fn is_schema_definition() -> bool {
+        false
+    }
 }
 
 impl HasDescription for FieldArgumentDefinitionPosition {
@@ -356,6 +383,10 @@ impl HasDescription for FieldArgumentDefinitionPosition {
             Self::Object(field) => field.set_description(schema, description),
             Self::Interface(field) => field.set_description(schema, description),
         }
+    }
+
+    fn is_schema_definition() -> bool {
+        false
     }
 }
 
@@ -957,6 +988,10 @@ impl HasDescription for TypeDefinitionPosition {
             Self::Enum(ty) => ty.set_description(schema, description),
             Self::InputObject(ty) => ty.set_description(schema, description),
         }
+    }
+
+    fn is_schema_definition() -> bool {
+        false
     }
 }
 
