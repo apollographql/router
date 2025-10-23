@@ -178,10 +178,10 @@ subgraphs:
     assert_eq!(
         error.to_string(),
         String::from(
-            r#"configuration had errors:
+            r#"configuration had errors: 
 1. at line 4
 
-
+  
   supergraph:
     path: /
 ┌ subgraphs:
