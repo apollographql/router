@@ -1,8 +1,8 @@
-use std::collections::HashMap;
 use std::fmt::Display;
 use std::ops::Range;
 
 use apollo_compiler::parser::LineColumn;
+use indexmap::IndexMap;
 
 use crate::error::CompositionError;
 use crate::error::SingleFederationError;
@@ -230,14 +230,14 @@ impl ErrorReporter {
         reporter: impl FnOnce(&mut Self, Vec<String>, Vec<L>),
         include_missing_sources: bool,
     ) {
-        let mut distribution_map = HashMap::new();
+        let mut distribution_map = Default::default();
         #[allow(unused_mut)] // We need this to be mutable when we decide how to handle AST nodes
         let mut locations: Vec<L> = Vec::new();
         let process_subgraph_element =
             |name: &str,
              idx: usize,
              subgraph_element: &S,
-             distribution_map: &mut HashMap<String, Vec<String>>| {
+             distribution_map: &mut IndexMap<String, Vec<String>>| {
                 if let Some(element) = subgraph_mismatch_accessor(subgraph_element, idx) {
                     distribution_map
                         .entry(element)

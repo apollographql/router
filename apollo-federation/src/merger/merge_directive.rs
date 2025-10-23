@@ -130,6 +130,11 @@ impl Merger {
                     .into_iter()
                     .map(|d| (**d).clone())
                     .collect_vec();
+                for application in &mut applications {
+                    // When we deduplicate directives below, we want to treat applications which
+                    // explicitly pass the default the same as applications which omit it.
+                    self.fill_argument_defaults(application, &definition);
+                }
                 if let Some(transform) =
                     &directive_in_supergraph.and_then(|d| d.static_argument_transform.as_ref())
                 {
@@ -197,7 +202,19 @@ impl Merger {
                 });
         } else if let Some(most_used_directive) = directive_counts
             .into_iter()
-            .max_by_key(|(_, count)| *count)
+            .fold(
+                None,
+                |acc: Option<(Directive, usize)>, (directive, count)| {
+                    // Finds the most used directive application. If there is a tie, returns the first
+                    // one with that count. Unfortunately, Itertools `max_by_key` breaks ties by picking
+                    // the last one.
+                    match acc {
+                        Some((_, max_count)) if count > max_count => Some((directive, count)),
+                        Some((dir, max_count)) => Some((dir, max_count)),
+                        None => Some((directive, count)),
+                    }
+                },
+            )
             .map(|(directive, _)| directive)
         {
             trace!(
@@ -212,7 +229,8 @@ impl Merger {
                     Some("no arguments".to_string())
                 } else {
                     Some(format!(
-                        "arguments: [{}]",
+                        // This is a single set of curly braces with a value interpolated in the middle.
+                        "arguments {{{}}}",
                         elt.arguments
                             .iter()
                             .map(|arg| format!("{}: {}", arg.name, arg.value))
@@ -243,6 +261,25 @@ impl Merger {
         }
 
         Ok(())
+    }
+
+    fn fill_argument_defaults(&self, directive: &mut Directive, definition: &DirectiveDefinition) {
+        let existing_arg_names = directive
+            .arguments
+            .iter()
+            .map(|arg| arg.name.clone())
+            .collect::<IndexSet<_>>();
+        for arg_def in &definition.arguments {
+            if !existing_arg_names.contains(&arg_def.name) {
+                if let Some(default_value) = &arg_def.default_value {
+                    let arg = Argument {
+                        name: arg_def.name.clone(),
+                        value: default_value.clone(),
+                    };
+                    directive.arguments.push(Node::new(arg));
+                }
+            }
+        }
     }
 
     fn transform_arguments(
