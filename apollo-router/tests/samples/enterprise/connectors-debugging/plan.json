@@ -72,7 +72,7 @@
                     },
                     "selection": {
                       "source": "id\ntitle: postTitle\nbody\nauthor: {\n  id: userId\n}",
-                      "transformed": "id\ntitle: postTitle\nauthor: {\n  __typename: $->echo(\"User\")\n  id: userId\n}",
+                      "transformed": "id\ntitle: postTitle\nauthor: {\n  __typename: $(\"User\")\n  id: userId\n}",
                       "result": { "id": 1, "author": { "__typename": "User", "id": 1 } }
                     }
                   },
