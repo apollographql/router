@@ -1786,14 +1786,15 @@ fn extract_cache_keys(
 
         // Get the entity key from `representation`, only needed in debug for the cache debugger
         let representation_entity_key = if debug {
-            get_matching_key_field_set(
+            let selection_set = find_matching_key_field_set(
                 representation,
                 typename,
                 subgraph_name,
                 &supergraph_schema,
                 subgraph_enums,
-            )?
-            .into()
+            )?;
+
+            get_entity_key_from_selection_set(representation, &selection_set)
         } else {
             None
         };
@@ -1920,30 +1921,25 @@ fn get_invalidation_entity_keys_from_schema(
     Ok(invalidation_cache_keys)
 }
 
-fn get_matching_key_field_set(
+fn find_matching_key_field_set(
     representation: &serde_json_bytes::Map<ByteString, Value>,
     typename: &str,
     subgraph_name: &str,
     supergraph_schema: &Valid<Schema>,
     subgraph_enums: &HashMap<String, String>,
-) -> Result<serde_json_bytes::Map<ByteString, Value>, FetchError> {
+) -> Result<apollo_compiler::executable::SelectionSet, FetchError> {
     // find an entry in the `key_field_sets` that matches the `representation`.
-    let matched_key_field_set =
-        collect_key_field_sets(typename, subgraph_name, supergraph_schema, subgraph_enums)?
+    collect_key_field_sets(typename, subgraph_name, supergraph_schema, subgraph_enums)?
         .find(|field_set| {
             matches_selection_set(representation, &field_set.selection_set)
         })
+        .map(|field_set| field_set.selection_set)
         .ok_or_else(|| {
             tracing::trace!("representation does not match any key field set for typename {typename} in subgraph {subgraph_name}");
             FetchError::MalformedRequest {
                 reason: format!("unexpected critical internal error for typename {typename} in subgraph {subgraph_name}"),
             }
-        })?;
-    get_selection_set(representation, &matched_key_field_set.selection_set).ok_or_else(|| {
-        FetchError::MalformedRequest {
-            reason: format!("representation does not match the field set {matched_key_field_set}"),
-        }
-    })
+        })
 }
 
 // Collect `@key` field sets on a `typename` in a `subgraph_name`.
@@ -1979,7 +1975,7 @@ fn collect_key_field_sets(
                                 supergraph_schema,
                                 NamedType::new(typename).ok()?,
                                 arg,
-                                "response_caching.graphql",
+                                "entity_caching.graphql",
                             )
                             .ok()
                     })
@@ -1990,7 +1986,12 @@ fn collect_key_field_sets(
 }
 
 /// Whether the entity, represented as JSON, matches the parsed @key fields (`selection_set`)
-// WARN: if you make changes to this fn, make the same changes to the one in cache/entity.rs!
+/// * This function mirrors `take_selection_set` and make sure the representation matches the
+///   the shape of `selection_set`.
+/// * This function and `take_selection_set` are separate because this is called for multiple
+///   possible `@key` fields to find the matching one, while `take_selection_set` is only called
+///   once the matching `@key` fields is found.
+// WARN: if you make changes to this fn, make the same changes to the one in response_cache/plugin.rs!
 fn matches_selection_set(
     // the JSON representation of the entity data
     representation: &serde_json_bytes::Map<ByteString, Value>,
@@ -2003,57 +2004,67 @@ fn matches_selection_set(
         let Some(value) = representation.get(field.name.as_str()) else {
             return false;
         };
-        // selection sets are empty when we're at the terminus (leaf) of the the query, either
-        // bottoming out in a scalar (happy path) or an object with no fields (sad path--this
-        // _shouldn't_ happen)
+
+        // This field selection is not expecting any subdata.
         if field.selection_set.is_empty() {
-            if matches!(value, Value::Object(_)) {
-                // we've hit the sad path somehow; return false to denote no match is found
-                tracing::trace!(
-                    "encounterd an object with no selection sets while trying to find an entity key match: {value}"
-                );
+            // Scalar (or array of scalars) fields are always a match.
+            if !is_scalar_or_array_of_scalar(value) {
+                // Mismatch: Scalar value was expected.
                 return false;
             }
-            // otherwise, continue
             continue;
         }
 
-        // we're not at the terminus (leaf) of the query and we don't have a scalar, so we need to
-        // decide how we're going to continue searching for a match in the JSON representation
-        match value {
-            // objects have selection sets, so recurse!
-            Value::Object(sub_value) => {
-                if !matches_selection_set(sub_value, &field.selection_set) {
-                    return false;
-                }
+        // The field selection is expecting a subdata. See if given `value` matches the shape of
+        // its sub-selection set.
+        let result = match value {
+            Value::Object(obj) => {
+                // Recurse into object value
+                matches_selection_set(obj, &field.selection_set)
             }
-            // arrays can be used in complex `@key`s, both arrays of scalars (eg, ["a", "b", "c"],
-            // which are handled above when we check whether the selection set is empty and it will be
-            // because scalars have no selection set; we would have matched in virtue of finding
-            // the scalar in the JSON representation) and arrays of objects (eg, [ObjectA, ObjectB,
-            // ObjectC], which we handle below)
+
             Value::Array(arr) => {
-                for item in arr {
-                    // arrays of scalars are handled above; so, we know we have an object--if this
-                    // fails, we've hit a bug
-                    let Value::Object(obj) = item else {
-                        tracing::trace!(
-                            "encounterd an array filled with neither scalars or objects while trying to find an entity key match: {item}"
-                        );
-                        return false;
-                    };
-                    if !matches_selection_set(obj, &field.selection_set) {
-                        return false;
-                    }
-                }
+                // Recurse into array values
+                matches_array_of_objects(arr, &field.selection_set)
             }
-            // this should never be hit; we should only have JSON objects and arrays
-            other => {
-                tracing::trace!(
-                    "encounterd something other than an array or object while trying to find an entity key match: {other}"
-                );
-                return false;
+
+            // scalar values
+            _other => {
+                // Mismatch: object or array value was expected.
+                false
             }
+        };
+        if !result {
+            return false;
+        }
+    }
+    true
+}
+
+fn is_scalar_or_array_of_scalar(value: &Value) -> bool {
+    match value {
+        Value::Object(_) => false,
+        Value::Array(arr) => arr.iter().all(is_scalar_or_array_of_scalar),
+        _ => true,
+    }
+}
+
+/// See if all array items match the shape of the `selection_set`.
+/// * Note: The array can be multi-dimensional. (the @key field set can match any levels of nested
+///   arrays)
+/// * Precondition: `selection_set` must be non-empty.
+fn matches_array_of_objects(
+    arr: &[Value],
+    selection_set: &apollo_compiler::executable::SelectionSet,
+) -> bool {
+    for item in arr.iter() {
+        let result = match item {
+            Value::Object(obj) => matches_selection_set(obj, selection_set),
+            Value::Array(arr) => matches_array_of_objects(arr, selection_set),
+            _other => false,
+        };
+        if !result {
+            return false;
         }
     }
     true
@@ -2061,23 +2072,17 @@ fn matches_selection_set(
 
 // Get the selection set from `representation` and returns the value corresponding to it.
 // - Returns None if the representation doesn't match the selection set.
-fn get_selection_set(
+fn get_entity_key_from_selection_set(
     representation: &serde_json_bytes::Map<ByteString, Value>,
     selection_set: &apollo_compiler::executable::SelectionSet,
 ) -> Option<serde_json_bytes::Map<ByteString, Value>> {
     let mut result = serde_json_bytes::Map::new();
     for field in selection_set.root_fields(&Default::default()) {
-        // selection sets are empty when we're at the terminus (leaf) of the query, either
-        // bottoming out in a scalar (happy path) or an object with no fields (sad path--this
-        // _shouldn't_ happen)
+        // Note: field sets can't have aliases.
         if field.selection_set.is_empty() {
             let value = representation.get(field.name.as_str())?;
             // `value` must be a scalar.
             if matches!(value, Value::Object(_)) {
-                // we've hit the sad path somehow; return None to denote no match found
-                tracing::trace!(
-                    "encounterd an object with no selection sets while trying to find and return values from the selection set: {value}"
-                );
                 return None;
             }
             // Move the scalar field to the `result`.
@@ -2089,7 +2094,7 @@ fn get_selection_set(
             let Value::Object(sub_value) = value else {
                 return None;
             };
-            let removed = get_selection_set(sub_value, &field.selection_set)?;
+            let removed = get_entity_key_from_selection_set(sub_value, &field.selection_set)?;
             result.insert(
                 ByteString::from(field.name.as_str()),
                 Value::Object(removed),

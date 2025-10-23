@@ -1444,7 +1444,6 @@ fn extract_cache_keys(
         if is_known_private && let Some(id) = private_id {
             let _ = write!(&mut key, ":{id}");
         }
-        dbg!(&key);
 
         // Restore the `representation` back whole again
         representation.insert(TYPENAME, typename_value);
