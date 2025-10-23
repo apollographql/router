@@ -1,0 +1,26 @@
+---
+source: apollo-federation/tests/composition/compose_type_merging.rs
+expression: print_sdl(api_schema.schema())
+---
+type A implements I {
+  a: Int
+  b: Int
+}
+
+type B implements I {
+  a: Int
+  c: Int
+}
+
+interface I {
+  a: Int
+}
+
+type Query {
+  T: T!
+}
+
+type T {
+  id: ID!
+  f: I!
+}

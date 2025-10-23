@@ -101,6 +101,20 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "ActiveSubgraphRequests": {
+      "oneOf": [
+        {
+          "const": "count",
+          "description": "The number of active subgraph requests as a count.",
+          "type": "string"
+        },
+        {
+          "const": "bool",
+          "description": "Whether there are any active subgraph requests as a boolean.",
+          "type": "string"
+        }
+      ]
+    },
     "All": {
       "enum": [
         "all"
@@ -236,11 +250,6 @@ expression: "&schema"
           ],
           "description": "Percentage of traces to send via the OTel protocol when sending to Apollo Studio."
         },
-        "preview_subgraph_metrics": {
-          "default": false,
-          "description": "Enable sending additional subgraph metrics to Apollo Studio via OTLP",
-          "type": "boolean"
-        },
         "send_headers": {
           "allOf": [
             {
@@ -265,6 +274,11 @@ expression: "&schema"
           ],
           "default": "enhanced",
           "description": "Set the signature normalization algorithm to use when sending Apollo usage reports."
+        },
+        "subgraph_metrics": {
+          "default": false,
+          "description": "Enable sending additional subgraph metrics to Apollo Studio via OTLP",
+          "type": "boolean"
         },
         "tracing": {
           "allOf": [
@@ -1157,6 +1171,133 @@ expression: "&schema"
         }
       ]
     },
+    "ConditionHttpClientSelector": {
+      "description": "Specify a condition for when an [instrument][] should be mutated or an [event][] should be triggered.\n\n[instrument]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/instruments\n[event]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/events",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A condition to check a selection against a value.",
+          "properties": {
+            "eq": {
+              "items": {
+                "$ref": "#/definitions/HttpClientSelectorOrValue"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "eq"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The first selection must be greater than the second selection.",
+          "properties": {
+            "gt": {
+              "items": {
+                "$ref": "#/definitions/HttpClientSelectorOrValue"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "gt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The first selection must be less than the second selection.",
+          "properties": {
+            "lt": {
+              "items": {
+                "$ref": "#/definitions/HttpClientSelectorOrValue"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "lt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A condition to check a selection against a selector.",
+          "properties": {
+            "exists": {
+              "$ref": "#/definitions/HttpClientSelector"
+            }
+          },
+          "required": [
+            "exists"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "All sub-conditions must be true.",
+          "properties": {
+            "all": {
+              "items": {
+                "$ref": "#/definitions/ConditionHttpClientSelector"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "all"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "At least one sub-conditions must be true.",
+          "properties": {
+            "any": {
+              "items": {
+                "$ref": "#/definitions/ConditionHttpClientSelector"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "any"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The sub-condition must not be true",
+          "properties": {
+            "not": {
+              "$ref": "#/definitions/ConditionHttpClientSelector"
+            }
+          },
+          "required": [
+            "not"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "true",
+          "description": "Static true condition",
+          "type": "string"
+        },
+        {
+          "const": "false",
+          "description": "Static false condition",
+          "type": "string"
+        }
+      ]
+    },
     "ConditionRouterSelector": {
       "description": "Specify a condition for when an [instrument][] should be mutated or an [event][] should be triggered.\n\n[instrument]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/instruments\n[event]: https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/events",
       "oneOf": [
@@ -1553,6 +1694,21 @@ expression: "&schema"
         }
       ]
     },
+    "ConditionalHttpClientSelector": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/HttpClientSelector"
+        },
+        {
+          "properties": {
+            "condition": {
+              "$ref": "#/definitions/ConditionHttpClientSelector"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    },
     "ConditionalRouterSelector": {
       "anyOf": [
         {
@@ -1682,6 +1838,32 @@ expression: "&schema"
     },
     "Config5": {
       "additionalProperties": false,
+      "description": "Configuration for the diagnostics plugin\n\n**Platform Requirements**: This plugin is supported on all platforms.\nHeap dump functionality is only available on Linux platforms due to\njemalloc requirements. Other diagnostic features work across platforms.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Enable the diagnostics plugin",
+          "type": "boolean"
+        },
+        "listen": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ListenAddr"
+            }
+          ],
+          "default": "127.0.0.1:8089",
+          "description": "The socket address and port to listen on\nDefaults to 127.0.0.1:8089\nDo not expose this endpoint to the internet as it exposes sensitive information."
+        },
+        "output_directory": {
+          "default": "/tmp/router-diagnostics",
+          "description": "Directory path for memory dump files\nDefaults to \"/tmp/router-diagnostics\" on Unix, or temp directory on other platforms\n\nThis directory will be created automatically if it doesn't exist.\nNote: Memory dumps are only generated on Linux platforms.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "Config6": {
+      "additionalProperties": false,
       "description": "Configuration for entity caching",
       "properties": {
         "enabled": {
@@ -1727,7 +1909,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config6": {
+    "Config7": {
       "additionalProperties": false,
       "description": "Configuration for response caching",
       "properties": {
@@ -1773,7 +1955,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config7": {
+    "Config8": {
       "additionalProperties": false,
       "description": "Redis cache configuration",
       "properties": {
@@ -1899,7 +2081,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config8": {
+    "Config9": {
       "description": "Configuration for the progressive override plugin",
       "type": "object"
     },
@@ -2508,7 +2690,7 @@ expression: "&schema"
           "type": "string"
         },
         "url": {
-          "description": "The url you'd like to offload processing to",
+          "description": "The url you'd like to offload processing to (can be overridden per-stage)",
           "type": "string"
         }
       },
@@ -3322,6 +3504,14 @@ expression: "&schema"
           "default": false,
           "description": "Send the SDL",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -3357,6 +3547,14 @@ expression: "&schema"
           "default": false,
           "description": "Send the HTTP status",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -3748,6 +3946,12 @@ expression: "&schema"
           ],
           "description": "A histogram of the length of a selected field in the GraphQL response"
         }
+      },
+      "type": "object"
+    },
+    "ExtendedHttpClientAttributesWithConditionalHttpClientSelector": {
+      "additionalProperties": {
+        "$ref": "#/definitions/ConditionalHttpClientSelector"
       },
       "type": "object"
     },
@@ -4306,6 +4510,14 @@ expression: "&schema"
         "$ref": "#/definitions/Instrument"
       },
       "properties": {
+        "apollo.router.overhead": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/StandardInstrumentExtendedRouterOverheadAttributesWithRouterSelector"
+            }
+          ],
+          "description": "Histogram of router overhead (time not spent in subgraph requests)"
+        },
         "http.server.active_requests": {
           "allOf": [
             {
@@ -4339,6 +4551,13 @@ expression: "&schema"
           "description": "Histogram of server response body size"
         }
       },
+      "type": "object"
+    },
+    "ExtendedRouterOverheadAttributesWithRouterSelector": {
+      "additionalProperties": {
+        "$ref": "#/definitions/RouterSelector"
+      },
+      "description": "Empty attributes struct for router overhead - no standard attributes, only custom selectors",
       "type": "object"
     },
     "ExtendedSubgraphAttributesWithConditionalSubgraphSelector": {
@@ -5279,6 +5498,86 @@ expression: "&schema"
           "type": "string"
         }
       ]
+    },
+    "HttpClientSelector": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "description": "A header from the HTTP request",
+          "properties": {
+            "default": {
+              "description": "Optional default value.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "request_header": {
+              "description": "The name of the request header.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_header"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A header from the HTTP response",
+          "properties": {
+            "default": {
+              "description": "Optional default value.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "response_header": {
+              "description": "The name of the response header.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "response_header"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "HttpClientSelectorOrValue": {
+      "anyOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AttributeValue"
+            }
+          ],
+          "description": "A constant value."
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/definitions/HttpClientSelector"
+            }
+          ],
+          "description": "Selector to extract a value from the pipeline."
+        }
+      ]
+    },
+    "HttpClientSpans": {
+      "additionalProperties": false,
+      "properties": {
+        "attributes": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ExtendedHttpClientAttributesWithConditionalHttpClientSelector"
+            }
+          ],
+          "description": "Custom attributes that are attached to the HTTP client span."
+        }
+      },
+      "type": "object"
     },
     "HttpExporter": {
       "additionalProperties": false,
@@ -6275,6 +6574,13 @@ expression: "&schema"
         "name": {
           "description": "The instrument name you're targeting",
           "type": "string"
+        },
+        "rename": {
+          "description": "Rename the metric to this name\n\nThis allows you to customize metric names for both OTLP and Prometheus exporters.\nNote: Prometheus will apply additional transformations (dots to underscores, unit suffixes).\nApollo metrics are not affected by this rename - they will retain original names.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "unit": {
           "description": "New unit to set to the instrument",
@@ -7638,6 +7944,14 @@ expression: "&schema"
           "default": false,
           "description": "Send the SDL",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -7681,6 +7995,14 @@ expression: "&schema"
           "default": false,
           "description": "Send the HTTP status",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -7941,6 +8263,38 @@ expression: "&schema"
           },
           "required": [
             "response_status"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Router overhead duration (time not spent in subgraph requests)",
+          "properties": {
+            "router_overhead": {
+              "description": "Extract router overhead duration in seconds",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "router_overhead"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Number of active subgraph requests at the time of overhead calculation",
+          "properties": {
+            "active_subgraph_requests": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ActiveSubgraphRequests"
+                }
+              ],
+              "description": "The mode for extracting active subgraph request information"
+            }
+          },
+          "required": [
+            "active_subgraph_requests"
           ],
           "type": "object"
         },
@@ -8279,6 +8633,14 @@ expression: "&schema"
           ],
           "description": "The attributes to include by default in spans based on their level as specified in the otel semantic conventions and Apollo documentation."
         },
+        "http_client": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/HttpClientSpans"
+            }
+          ],
+          "description": "Attributes to include on the HTTP client span.\nHTTP client spans contain information about HTTP requests made to subgraphs, including any changes made by Rhai scripts."
+        },
         "mode": {
           "allOf": [
             {
@@ -8538,6 +8900,28 @@ expression: "&schema"
         }
       ]
     },
+    "StandardInstrumentExtendedRouterOverheadAttributesWithRouterSelector": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attributes": {
+              "$ref": "#/definitions/ExtendedRouterOverheadAttributesWithRouterSelector"
+            }
+          },
+          "required": [
+            "attributes"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "StandardInstrumentExtendedSubgraphAttributesWithSubgraphSelector": {
       "anyOf": [
         {
@@ -8781,7 +9165,7 @@ expression: "&schema"
         "redis": {
           "anyOf": [
             {
-              "$ref": "#/definitions/Config7"
+              "$ref": "#/definitions/Config8"
             },
             {
               "type": "null"
@@ -9128,6 +9512,14 @@ expression: "&schema"
           "default": false,
           "description": "Send the subgraph URI",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -9176,6 +9568,14 @@ expression: "&schema"
           "default": false,
           "description": "Send the subgraph request id",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -10096,6 +10496,11 @@ expression: "&schema"
           "description": "abort request handling when the client drops the connection.\nDefault: false.\nWhen set to true, some parts of the request pipeline like telemetry will not work properly,\nbut request handling will stop immediately when the client connection is closed.",
           "type": "boolean"
         },
+        "enable_result_coercion_errors": {
+          "default": false,
+          "description": "Enable errors generated during response reformatting and result coercion to be returned in\nresponses.\nDefault: false\nAll subgraph responses are checked and corrected to ensure alignment with the schema and\nquery. When enabled, misaligned values will generate errors which are included in errors\narray in the response.",
+          "type": "boolean"
+        },
         "experimental_log_on_broken_pipe": {
           "default": false,
           "description": "Log a message if the client closes the connection before the response is sent.\nDefault: false.",
@@ -10192,6 +10597,14 @@ expression: "&schema"
           "default": false,
           "description": "Send the SDL",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -10235,6 +10648,14 @@ expression: "&schema"
           "default": false,
           "description": "Send the HTTP status",
           "type": "boolean"
+        },
+        "url": {
+          "default": null,
+          "description": "The coprocessor URL for this stage (overrides the global URL if specified)",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -11165,11 +11586,18 @@ expression: "&schema"
       "type": "object"
     },
     "WebSocketProtocol": {
-      "enum": [
-        "graphql_ws",
-        "graphql_transport_ws"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "const": "graphql_ws",
+          "description": "The modern graphql-ws protocol. The subprotocol name is \"graphql-transport-ws\".\n\nSpec URL: https://github.com/enisdenjo/graphql-ws/blob/0c0eb499c3a0278c6d9cc799064f22c5d24d2f60/PROTOCOL.md",
+          "type": "string"
+        },
+        {
+          "const": "graphql_transport_ws",
+          "description": "The legacy subscriptions-transport-ws protocol. Confusingly, the subprotocol name is\n\"graphql-ws\".\n\nhttps://github.com/apollographql/subscriptions-transport-ws/blob/36f3f6f780acc1a458b768db13fd39c65e5e6518/PROTOCOL.md",
+          "type": "string"
+        }
+      ]
     },
     "ZipkinConfig": {
       "additionalProperties": false,
@@ -11410,7 +11838,7 @@ expression: "&schema"
       "type": "object"
     },
     "^preview_response_cache$": {
-      "$ref": "#/definitions/Config6"
+      "$ref": "#/definitions/Config7"
     }
   },
   "properties": {
@@ -11523,6 +11951,9 @@ expression: "&schema"
       },
       "description": "Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.\nYou probably don’t want this in production!"
     },
+    "experimental_diagnostics": {
+      "$ref": "#/definitions/Config5"
+    },
     "experimental_type_conditioned_fetching": {
       "default": false,
       "description": "Type conditioned fetching configuration.",
@@ -11596,13 +12027,13 @@ expression: "&schema"
       "description": "Plugin configuration"
     },
     "preview_entity_cache": {
-      "$ref": "#/definitions/Config5"
+      "$ref": "#/definitions/Config6"
     },
     "preview_file_uploads": {
       "$ref": "#/definitions/FileUploadsConfig"
     },
     "progressive_override": {
-      "$ref": "#/definitions/Config8"
+      "$ref": "#/definitions/Config9"
     },
     "rhai": {
       "$ref": "#/definitions/RhaiConfig"
@@ -11650,6 +12081,7 @@ expression: "&schema"
         },
         "defer_support": true,
         "early_cancel": false,
+        "enable_result_coercion_errors": false,
         "experimental_log_on_broken_pipe": false,
         "generate_query_fragments": true,
         "introspection": false,

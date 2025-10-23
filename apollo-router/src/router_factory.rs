@@ -28,9 +28,8 @@ use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
 use crate::plugin::PluginInit;
-use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
-use crate::plugins::subscription::Subscription;
-use crate::plugins::telemetry::reload::apollo_opentelemetry_initialized;
+use crate::plugins::subscription::notification::Notify;
+use crate::plugins::telemetry::reload::otel::apollo_opentelemetry_initialized;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::query_planner::QueryPlannerService;
@@ -59,7 +58,15 @@ pub struct Endpoint {
     pub(crate) path: String,
     // Plugins need to be Send + Sync
     // BoxCloneService isn't enough
-    handler: Handler,
+    handler: EndpointHandler,
+}
+
+#[derive(Clone)]
+enum EndpointHandler {
+    /// Legacy handler wrapping a router service
+    Service(Handler),
+    /// Direct axum router (bypasses service conversion)
+    Router(axum::Router),
 }
 
 impl std::fmt::Debug for Endpoint {
@@ -75,23 +82,62 @@ impl Endpoint {
     pub fn from_router_service(path: String, handler: router::BoxService) -> Self {
         Self {
             path,
-            handler: Handler::new(handler),
+            handler: EndpointHandler::Service(Handler::new(handler)),
+        }
+    }
+
+    /// Creates an Endpoint given a path and an axum Router
+    ///
+    /// This is the preferred method for plugins that use axum internally,
+    /// as it avoids unnecessary service wrapping and path manipulation.
+    ///
+    /// The router will be automatically nested at the specified path, allowing
+    /// it to handle all sub-routes. For example, a router registered at `/diagnostics`
+    /// will handle `/diagnostics/`, `/diagnostics/memory/status`, etc.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use axum::{Router, routing::get};
+    ///
+    /// let router = Router::new()
+    ///     .route("/", get(handle_dashboard))
+    ///     .route("/status", get(handle_status));
+    ///
+    /// let endpoint = Endpoint::from_router("/diagnostics".to_string(), router);
+    /// // This will handle:
+    /// // - /diagnostics/
+    /// // - /diagnostics/status
+    /// ```
+    pub(crate) fn from_router(path: String, router: axum::Router) -> Self {
+        Self {
+            path,
+            handler: EndpointHandler::Router(router),
         }
     }
 
     pub(crate) fn into_router(self) -> axum::Router {
-        let handler = move |req: http::Request<axum::body::Body>| {
-            let endpoint = self.handler.clone();
-            async move {
-                Ok(endpoint
-                    .oneshot(req.into())
-                    .await
-                    .map(|res| res.response)
-                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
-                    .into_response())
+        match self.handler {
+            // If we already have a router, just nest it at the path
+            EndpointHandler::Router(router) => axum::Router::new().nest(&self.path, router),
+            // Legacy service handling with path-based routing
+            EndpointHandler::Service(handler) => {
+                let handler_clone = handler.clone();
+                let handler = move |req: http::Request<axum::body::Body>| {
+                    let endpoint = handler_clone.clone();
+                    async move {
+                        Ok(endpoint
+                            .oneshot(req.into())
+                            .await
+                            .map(|res| res.response)
+                            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+                            .into_response())
+                    }
+                };
+
+                axum::Router::new().route_service(self.path.as_str(), service_fn(handler))
             }
-        };
-        axum::Router::new().route_service(self.path.as_str(), service_fn(handler))
+        }
     }
 }
 /// Factory for creating a RouterService
@@ -187,6 +233,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                     .notify(configuration.notify.clone())
                     .license(license.clone())
                     .full_config(configuration.validated_yaml.clone())
+                    .and_original_config_yaml(configuration.raw_yaml.clone())
                     .build();
 
                 match factory.create_instance(telemetry_init).await {
@@ -337,7 +384,7 @@ impl YamlRouterFactory {
             let http_service_factory =
                 create_http_services(&plugins, &schema, &configuration).await?;
             let subgraph_services =
-                create_subgraph_services(&http_service_factory, &plugins, &configuration).await?;
+                create_subgraph_services(&http_service_factory, &configuration).await?;
             builder = builder.with_http_service_factory(http_service_factory);
             for (name, subgraph_service) in subgraph_services {
                 builder = builder.with_subgraph_service(&name, subgraph_service);
@@ -355,21 +402,13 @@ impl YamlRouterFactory {
 
 pub(crate) async fn create_subgraph_services(
     http_service_factory: &IndexMap<String, HttpClientServiceFactory>,
-    plugins: &Arc<Plugins>,
     configuration: &Configuration,
 ) -> Result<IndexMap<String, SubgraphService>, BoxError> {
-    let subscription_plugin_conf = plugins
-        .iter()
-        .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
-        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
-        .map(|p| p.config.clone());
-
     let mut subgraph_services = IndexMap::default();
     for (name, http_service_factory) in http_service_factory.iter() {
         let subgraph_service = SubgraphService::from_config(
             name.clone(),
             configuration,
-            subscription_plugin_conf.clone(),
             http_service_factory.clone(),
         )?;
         subgraph_services.insert(name.clone(), subgraph_service);
@@ -539,11 +578,12 @@ pub(crate) async fn add_plugin(
     supergraph_schema: Arc<Valid<apollo_compiler::Schema>>,
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     launch_id: Option<Arc<String>>,
-    notify: &crate::notification::Notify<String, crate::graphql::Response>,
+    notify: &Notify<String, crate::graphql::Response>,
     plugin_instances: &mut Plugins,
     errors: &mut Vec<ConfigurationError>,
     license: Arc<LicenseState>,
     full_config: Option<Value>,
+    original_config_yaml: Option<Arc<str>>,
 ) {
     let plugin_init = PluginInit::builder()
         .config(plugin_config.clone())
@@ -556,6 +596,7 @@ pub(crate) async fn add_plugin(
         .notify(notify.clone())
         .license(license)
         .and_full_config(full_config)
+        .and_original_config_yaml(original_config_yaml)
         .build();
 
     match factory.create_instance(plugin_init).await {
@@ -646,6 +687,7 @@ pub(crate) async fn create_plugins(
                 &mut errors,
                 license.clone(),
                 $maybe_full_config,
+                configuration.raw_yaml.clone(),
             )
             .await;
         }};
@@ -837,6 +879,7 @@ pub(crate) async fn create_plugins(
     add_mandatory_apollo_plugin!("csrf");
     add_mandatory_apollo_plugin!("fleet_detector");
     add_mandatory_apollo_plugin!("enhanced_client_awareness");
+    add_mandatory_apollo_plugin!("experimental_diagnostics");
 
     add_oss_apollo_plugin!("forbid_mutations");
     add_optional_apollo_plugin!("subscription");

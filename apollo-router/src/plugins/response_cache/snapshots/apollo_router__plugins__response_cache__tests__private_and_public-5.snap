@@ -63,7 +63,7 @@ expression: cache_keys
     }
   },
   {
-    "key": "version:1.0:subgraph:orga:type:Organization:entity:07f0ad9351c409fd3acfae0be59e64f218dc486d6dbe0081e68794673b96df73:representation::hash:f6acbaaee10175327fa6a7882704a4e85b732d7561e7c399fd49069486da68b8:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6:e5f2f41088e29e53b255bb3555658905ddbabeefa5b37f6aa36f7e102511df2c",
+    "key": "version:1.0:subgraph:orga:type:Organization:representation:07f0ad9351c409fd3acfae0be59e64f218dc486d6dbe0081e68794673b96df73:hash:f6acbaaee10175327fa6a7882704a4e85b732d7561e7c399fd49069486da68b8:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6:e5f2f41088e29e53b255bb3555658905ddbabeefa5b37f6aa36f7e102511df2c",
     "invalidationKeys": [
       "organization",
       "organization-1"

@@ -17,10 +17,7 @@ use crate::connectors::string_template::StringTemplate;
 pub struct HeaderValue(StringTemplate);
 
 impl HeaderValue {
-    pub(crate) fn parse_with_spec(
-        s: &str,
-        spec: ConnectSpec,
-    ) -> Result<Self, string_template::Error> {
+    pub fn parse_with_spec(s: &str, spec: ConnectSpec) -> Result<Self, string_template::Error> {
         let template = StringTemplate::parse_with_spec(s, spec)?;
         // Validate that any constant parts are valid header values.
         for part in &template.parts {

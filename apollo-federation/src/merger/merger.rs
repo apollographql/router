@@ -13,15 +13,15 @@ use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::ast::Type;
-use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::Component;
-use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
-use countmap::CountMap;
 use indexmap::IndexSet;
 use itertools::Itertools;
+use strum::IntoEnumIterator as _;
+use tracing::instrument;
+use tracing::trace;
 
 use crate::LinkSpecDefinition;
 use crate::bail;
@@ -34,7 +34,6 @@ use crate::link::Import;
 use crate::link::Link;
 use crate::link::federation_spec_definition::FEDERATION_OPERATION_TYPES;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
-use crate::link::join_spec_definition::EnumValue;
 use crate::link::join_spec_definition::JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
@@ -52,6 +51,7 @@ use crate::merger::merge_enum::EnumExample;
 use crate::merger::merge_enum::EnumExampleAst;
 use crate::merger::merge_enum::EnumTypeUsage;
 use crate::merger::merge_field::FieldMergeContext;
+use crate::merger::merge_field::JoinFieldBuilder;
 use crate::schema::FederationSchema;
 use crate::schema::directive_location::DirectiveLocationExt;
 use crate::schema::position::DirectiveDefinitionPosition;
@@ -59,16 +59,18 @@ use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::HasDescription;
 use crate::schema::position::HasType;
-use crate::schema::position::InputObjectTypeDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::SchemaDefinitionPosition;
+use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::schema::type_and_directive_specification::ArgumentMerger;
 use crate::schema::type_and_directive_specification::StaticArgumentsTransform;
+use crate::schema::validators::merged::validate_merged_schema;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
@@ -109,7 +111,6 @@ pub(crate) struct MergeResult {
 }
 
 pub(in crate::merger) struct MergedDirectiveInfo {
-    pub(in crate::merger) definition: DirectiveDefinition,
     pub(in crate::merger) arguments_merger: Option<ArgumentMerger>,
     pub(in crate::merger) static_argument_transform: Option<Rc<StaticArgumentsTransform>>,
 }
@@ -136,7 +137,6 @@ pub(crate) struct Merger {
     pub(in crate::merger) enum_usages: HashMap<String, EnumTypeUsage>,
     pub(in crate::merger) fields_with_from_context: DirectiveReferencers,
     pub(in crate::merger) fields_with_override: DirectiveReferencers,
-    pub(in crate::merger) subgraph_enum_values: Vec<EnumValue>,
     pub(in crate::merger) inaccessible_directive_name_in_supergraph: Option<Name>,
     pub(in crate::merger) schema_to_import_to_feature_url: HashMap<String, HashMap<String, Url>>,
     pub(in crate::merger) link_spec_definition: &'static LinkSpecDefinition,
@@ -157,7 +157,7 @@ impl Merger {
         let latest_federation_version_used =
             Self::get_latest_federation_version_used(&subgraphs, &mut error_reporter).clone();
         let Some(join_spec) =
-            JOIN_VERSIONS.get_minimum_required_version(&latest_federation_version_used)
+            JOIN_VERSIONS.get_maximum_allowed_version(&latest_federation_version_used)
         else {
             bail!(
                 "No join spec version found for federation version {}",
@@ -190,6 +190,12 @@ impl Merger {
         let merged = FederationSchema::new(Schema::new())?;
         let join_directive_identities = HashSet::from([Identity::connect_identity()]);
 
+        trace!(
+            "Preparing to merge supergraph with federation {latest_federation_version_used}, join {}, and link {}",
+            join_spec.version(),
+            link_spec_definition.version()
+        );
+
         let mut merger = Self {
             subgraphs,
             options,
@@ -208,7 +214,6 @@ impl Merger {
             join_directive_identities,
             inaccessible_directive_name_in_supergraph: None,
             join_spec_definition: join_spec,
-            subgraph_enum_values: Vec::new(),
             latest_federation_version_used,
             applied_directives_to_merge: Vec::new(),
         };
@@ -394,6 +399,7 @@ impl Merger {
     /// a supergraph will be returned along with any hints collected during the merge process.
     pub(crate) fn merge(mut self) -> Result<MergeResult, FederationError> {
         // Validate and record usages of @composeDirective
+        trace!("Validating @composeDirective applications");
         self.compose_directive_manager
             .validate(&self.subgraphs, &mut self.error_reporter)?;
         // TODO: JS doesn't include this, but we're bailing here to test error generation while the
@@ -409,9 +415,11 @@ impl Merger {
         }
 
         // Add core features to the merged schema
+        trace!("Adding core features to merged schema");
         self.add_core_features()?;
 
         // Create empty objects for all types and directive definitions
+        trace!("Adding shallow types and directives to merged schema");
         self.add_types_shallow()?;
         self.add_directives_shallow()?;
 
@@ -423,54 +431,66 @@ impl Merger {
         let input_object_types = self.get_merged_input_object_type_names();
 
         // Merge implements relationships for object and interface types
+        trace!("Merging implements relationships");
         for object_type in &object_types {
             self.merge_implements(object_type)?;
         }
-
         for interface_type in &interface_types {
             self.merge_implements(interface_type)?;
         }
 
         // Merge union types
+        trace!("Merging union types");
         for union_type in &union_types {
             self.merge_type(union_type)?;
         }
 
         // Merge schema definition (root types)
+        trace!("Merging schema definition");
         self.merge_schema_definition()?;
 
         // Merge non-union and non-enum types
+        trace!("Merging object types");
+        for type_def in &object_types {
+            self.merge_type(type_def)?;
+        }
+        trace!("Merging interface types");
+        for type_def in &interface_types {
+            self.merge_type(type_def)?;
+        }
+        trace!("Merging scalar types");
         for type_def in &scalar_types {
             self.merge_type(type_def)?;
         }
+        trace!("Merging input object types");
         for type_def in &input_object_types {
             self.merge_type(type_def)?;
         }
 
         // Merge directive definitions
+        trace!("Merging directive definitions");
         self.merge_directive_definitions()?;
 
         // Merge enum types last
+        trace!("Merging enum types");
         for enum_type in &enum_types {
             self.merge_type(enum_type)?;
         }
 
         // Validate that we have a query root type
+        trace!("Validating query root type");
         self.validate_query_root();
 
         // Merge all applied directives
+        trace!("Merging applied directives");
         self.merge_all_applied_directives()?;
 
         // Add missing interface object fields to implementations
-        self.add_missing_interface_object_fields_to_implementations();
-
-        // Post-merge validations if no errors so far
-        if !self.error_reporter.has_errors() {
-            self.post_merge_validations();
-        }
+        trace!("Adding missing interface object fields to implementations");
+        self.add_missing_interface_object_fields_to_implementations()?;
 
         // Return result
-        let (errors, hints) = self.error_reporter.into_errors_and_hints();
+        let (mut errors, hints) = self.error_reporter.into_errors_and_hints();
         if !errors.is_empty() {
             Ok(MergeResult {
                 supergraph: None,
@@ -478,6 +498,14 @@ impl Merger {
                 hints,
             })
         } else {
+            validate_merged_schema(&self.merged, &self.subgraphs, &mut errors)?;
+            if !errors.is_empty() {
+                return Ok(MergeResult {
+                    supergraph: None,
+                    errors,
+                    hints,
+                });
+            }
             let valid_schema = Valid::assume_valid(self.merged);
             Ok(MergeResult {
                 supergraph: Some(valid_schema),
@@ -530,8 +558,8 @@ impl Merger {
     }
 
     fn add_types_shallow(&mut self) -> Result<(), FederationError> {
-        let mut mismatched_types = HashSet::new();
-        let mut types_with_interface_object = HashSet::new();
+        let mut mismatched_types = IndexSet::new();
+        let mut types_with_interface_object = IndexSet::new();
 
         for subgraph in &self.subgraphs {
             for pos in subgraph.schema().get_types() {
@@ -548,10 +576,10 @@ impl Merger {
                     if expects_interface
                         && !matches!(previous, TypeDefinitionPosition::Interface(_))
                     {
-                        mismatched_types.insert(pos.clone());
+                        mismatched_types.insert(previous.clone());
                     }
                     if !expects_interface && previous != pos {
-                        mismatched_types.insert(pos.clone());
+                        mismatched_types.insert(previous.clone());
                     }
                 } else if expects_interface {
                     let itf_pos = InterfaceTypeDefinitionPosition {
@@ -627,7 +655,7 @@ impl Merger {
     fn report_mismatched_type_definitions(
         &mut self,
         mismatched_type: &TypeDefinitionPosition,
-        types_with_interface_object: &HashSet<TypeDefinitionPosition>,
+        types_with_interface_object: &IndexSet<TypeDefinitionPosition>,
     ) {
         let sources = self
             .subgraphs
@@ -798,14 +826,30 @@ impl Merger {
     }
 
     fn should_merge_type(&self, name: &Name) -> bool {
-        !self
+        if self
+            .merged
+            .schema()
+            .types
+            .get(name)
+            .is_some_and(|ty| ty.is_built_in())
+        {
+            return false;
+        }
+        if self
             .link_spec_definition
             .is_spec_type_name(&self.merged, name)
             .unwrap_or(false)
-            && !self
-                .join_spec_definition
-                .is_spec_type_name(&self.merged, name)
-                .unwrap_or(false)
+        {
+            return false;
+        }
+        if self
+            .join_spec_definition
+            .is_spec_type_name(&self.merged, name)
+            .unwrap_or(false)
+        {
+            return false;
+        }
+        true
     }
 
     fn merge_implements(&mut self, type_def: &Name) -> Result<(), FederationError> {
@@ -826,18 +870,22 @@ impl Merger {
                 ExtendedType::Object(obj) => {
                     for implemented_itf in obj.implements_interfaces.iter() {
                         implemented.insert(implemented_itf.clone());
-                        let join_implements = self
-                            .join_spec_definition
-                            .implements_directive(graph_name.clone(), implemented_itf);
+                        let join_implements = self.join_spec_definition.implements_directive(
+                            &self.merged,
+                            graph_name.clone(),
+                            implemented_itf,
+                        )?;
                         dest.insert_directive(&mut self.merged, Component::new(join_implements))?;
                     }
                 }
                 ExtendedType::Interface(itf) => {
                     for implemented_itf in itf.implements_interfaces.iter() {
                         implemented.insert(implemented_itf.clone());
-                        let join_implements = self
-                            .join_spec_definition
-                            .implements_directive(graph_name.clone(), implemented_itf);
+                        let join_implements = self.join_spec_definition.implements_directive(
+                            &self.merged,
+                            graph_name.clone(),
+                            implemented_itf,
+                        )?;
                         dest.insert_directive(&mut self.merged, Component::new(join_implements))?;
                     }
                 }
@@ -859,7 +907,9 @@ impl Merger {
         let is_subscription = self.merged.is_subscription_root_type(&obj.type_name);
 
         let added = self.add_fields_shallow(obj.clone())?;
+
         if added.is_empty() {
+            trace!("Object has no fields to merge, removing from schema");
             obj.remove(&mut self.merged)?;
         } else {
             for (field, subgraph_fields) in added {
@@ -888,7 +938,8 @@ impl Merger {
         _sources: &Sources<T>,
         _dest: &ObjectOrInterfaceFieldDefinitionPosition,
     ) -> Result<FieldMergeContext, FederationError> {
-        todo!("Implement validate_override")
+        // TODO(FED-555)
+        Ok(Default::default())
     }
 
     fn validate_subscription_field<T>(
@@ -1070,10 +1121,6 @@ impl Merger {
         Ok(!source_as_entity.is_empty())
     }
 
-    pub(crate) fn merge_input_object(&mut self, _io: InputObjectTypeDefinitionPosition) {
-        todo!("Implement merge_input_object")
-    }
-
     fn merge_schema_definition(&mut self) -> Result<(), FederationError> {
         let sources: Sources<SchemaDefinitionPosition> = self
             .subgraphs
@@ -1084,7 +1131,26 @@ impl Merger {
         let dest = SchemaDefinitionPosition {};
 
         self.merge_description(&sources, &dest)?;
-        self.record_applied_directives_to_merge(&sources, &dest);
+        self.record_applied_directives_to_merge(&sources, &dest)?;
+
+        // Root types are already validated to be consistent across subgraphs. See
+        // [crate::schema::validators::::validate_consistent_root_fields].
+        for root_kind in SchemaRootDefinitionKind::iter() {
+            for (idx, source) in sources.iter() {
+                let Some(source) = source else {
+                    continue;
+                };
+                let subgraph = &self.subgraphs[*idx];
+                if let Some(root_type) = source.get_root_type(subgraph.schema(), root_kind) {
+                    trace!(
+                        "Setting supergraph root {} to type named {} (from subgraph {})",
+                        root_kind, root_type, subgraph.name
+                    );
+                    dest.set_root_type(&mut self.merged, root_kind, root_type.clone())?;
+                    break;
+                }
+            }
+        }
         self.add_join_directive_directives(&sources, &dest)?;
         Ok(())
     }
@@ -1119,48 +1185,110 @@ impl Merger {
         if self.merged.schema().schema_definition.query.is_none() {
             self.error_reporter_mut()
                 .add_error(CompositionError::QueryRootMissing {
-                    message: "Query root is missing from the merged schema".to_string(),
-                });
+                message:
+                    "No queries found in any subgraph: a supergraph must have a query root type."
+                        .to_string(),
+            });
         }
     }
 
-    pub(in crate::merger) fn directive_applications_with_transformed_arguments(
-        pos: &DirectiveTargetPosition,
-        merge_info: &MergedDirectiveInfo,
-        subgraph: &Subgraph<Validated>,
-    ) -> Vec<Directive> {
-        let mut applications = Vec::new();
-        if let Some(arg_transform) = &merge_info.static_argument_transform {
-            for application in
-                pos.get_applied_directives(subgraph.schema(), &merge_info.definition.name)
-            {
-                let mut transformed_application = Directive::new(application.name.clone());
-                let indexed_args: IndexMap<Name, Value> = application
-                    .arguments
-                    .iter()
-                    .map(|a| (a.name.clone(), a.value.as_ref().clone()))
-                    .collect();
-                transformed_application.arguments = arg_transform(subgraph, indexed_args)
-                    .into_iter()
-                    .map(|(name, value)| {
-                        Node::new(Argument {
-                            name,
-                            value: Node::new(value),
-                        })
-                    })
-                    .collect();
-                applications.push(transformed_application);
+    fn add_missing_interface_object_fields_to_implementations(
+        &mut self,
+    ) -> Result<(), FederationError> {
+        let mut fields_to_insert = HashMap::new();
+        // For each merged object types, we check if we're missing a field from one of the implemented interface.
+        // If we do, then we look if one of the subgraph provides that field as a (non-external) interface object
+        // type, and if that's the case, we add the field to the object.
+        for obj_ty_name in self.merged.referencers().object_types.keys() {
+            let Some(obj_ty) = self.merged.schema().get_object(obj_ty_name) else {
+                bail!(
+                    "Referencers contains Object type named \"{obj_ty_name}\", but that Object type does not exist in the schema."
+                )
+            };
+            for implemented_itf_name in obj_ty.implements_interfaces.iter() {
+                let Some(implemented_itf) =
+                    self.merged.schema().get_interface(implemented_itf_name)
+                else {
+                    bail!(
+                        "Object type \"{obj_ty_name}\" implements interface \"{implemented_itf_name}\", but that Interface type does not exist in the schema."
+                    )
+                };
+                for itf_field in implemented_itf.fields.values() {
+                    if obj_ty.fields.contains_key(&itf_field.name) {
+                        continue;
+                    }
+
+                    // Note that we don't blindly add the field yet, that would be incorrect in many cases (and we
+                    // have a specific validation that return a user-friendly error in such incorrect cases, see
+                    // `postMergeValidations`). We must first check that there is some subgraph that implement
+                    // that field as an "interface object", since in that case the field will genuinely be provided
+                    // by that subgraph at runtime.
+                    if self.is_field_provided_by_an_interface_object(
+                        &itf_field.name,
+                        implemented_itf_name,
+                    ) {
+                        // Note it's possible that interface is abstracted away (as an interface object) in multiple
+                        // subgraphs, so we don't bother with the field definition in those subgraphs, but rather
+                        // just copy the merged definition from the interface.
+                        //
+                        // Cases could probably be made for both either copying or not copying the description
+                        // and applied directives from the interface field, but we copy both here as it feels
+                        // more likely to be what user expects.
+                        let mut new_field = itf_field.as_ref().clone();
+                        new_field.directives.retain(|d| {
+                            self.join_spec_definition
+                                .is_spec_directive_name(&self.merged, &d.name)
+                                .is_ok_and(|from_join_spec| !from_join_spec)
+                        });
+                        for arg in new_field.arguments.iter_mut() {
+                            arg.make_mut().directives.retain(|d| {
+                                self.join_spec_definition
+                                    .is_spec_directive_name(&self.merged, &d.name)
+                                    .is_ok_and(|from_join_spec| !from_join_spec)
+                            });
+                        }
+                        // We add a special @join__field for those added field with no `graph` target. This
+                        // clarify to the later extraction process that this particular field doesn't come
+                        // from any particular subgraph.
+                        new_field.directives.push(JoinFieldBuilder::new().build());
+                        fields_to_insert.insert(
+                            ObjectFieldDefinitionPosition {
+                                type_name: obj_ty_name.clone(),
+                                field_name: itf_field.name.clone(),
+                            },
+                            new_field,
+                        );
+                    }
+                }
             }
         }
-        applications
+
+        let sources: Sources<()> = (0..self.subgraphs.len()).map(|idx| (idx, None)).collect();
+        for (pos, field) in fields_to_insert {
+            pos.insert(&mut self.merged, Component::new(field))?;
+            // If we had to add a field here, it means that, for this particular implementation, the
+            // field is only provided through the @interfaceObject. But because the field wasn't
+            // merged, it also mean we haven't validated field sharing for that field, and we could
+            // have field sharing concerns if the field is provided by multiple @interfaceObject.
+            // So we validate field sharing now (it's convenient to wait until now as now that
+            // the field is part of the supergraph, we can just call `validateFieldSharing` with
+            // all sources `undefined` and it wil still find and check the `@interfaceObject`).
+            self.validate_field_sharing(&sources, &pos.into(), &FieldMergeContext::default())?;
+        }
+        Ok(())
     }
 
-    fn add_missing_interface_object_fields_to_implementations(&mut self) {
-        todo!("Implement adding missing interface object fields to implementations")
-    }
+    fn is_field_provided_by_an_interface_object(&self, field_name: &Name, itf_name: &Name) -> bool {
+        self.subgraphs.iter().any(|subgraph| {
+            let obj_pos = ObjectTypeDefinitionPosition {
+                type_name: itf_name.clone(),
+            };
+            let field_pos = obj_pos.field(field_name.clone());
 
-    fn post_merge_validations(&mut self) {
-        todo!("Implement post-merge validations")
+            subgraph.is_interface_object_type(&obj_pos.into())
+                && field_pos.try_get(subgraph.schema().schema()).is_some()
+                && !subgraph.metadata().is_field_external(&field_pos.into())
+        })
     }
 
     /// Core type merging logic for GraphQL Federation composition.
@@ -1170,6 +1298,7 @@ impl Merger {
     /// - For input positions: uses the most specific (subtype) when types are compatible
     /// - Reports errors for incompatible types, hints for compatible but inconsistent types
     /// - Tracks enum usage for validation purposes
+    #[instrument(skip(self, sources, dest))]
     pub(crate) fn merge_type_reference<T>(
         &mut self,
         sources: &Sources<T>,
@@ -1197,29 +1326,31 @@ impl Merger {
             };
             let subgraph = &self.subgraphs[*idx];
             let source_ty = source.get_type(subgraph.schema())?;
+            trace!("Subgraph {} has type {}", subgraph.name, source_ty);
             let Some(ty) = ty.as_mut() else {
                 ty = Some(source_ty.clone());
                 continue;
             };
 
             if Self::same_type(ty, source_ty) {
-                // Types are identical
+                trace!("Types are identical");
                 continue;
-            } else if let Ok(true) = self.is_strict_subtype(source_ty, ty) {
-                // current typ is a subtype of source_type (source_type is more general)
+            } else if let Ok(true) = self.is_strict_subtype(ty, source_ty) {
+                trace!("Current {ty} is a strict subtype of source {source_ty}");
                 has_subtypes = true;
                 if is_input_position {
                     // For input: upgrade to the supertype
                     *ty = source_ty.clone();
                 }
-            } else if let Ok(true) = self.is_strict_subtype(ty, source_ty) {
-                // source_type is a subtype of current typ (current typ is more general)
+            } else if let Ok(true) = self.is_strict_subtype(source_ty, ty) {
+                trace!("Source {source_ty} is a strict subtype of current {ty}");
                 has_subtypes = true;
                 if !is_input_position {
                     // For output: keep the supertype; for input: adopt the subtype
                     *ty = source_ty.clone();
                 }
             } else {
+                trace!("Types {ty} and source {source_ty} are incompatible");
                 has_incompatible = true;
             }
         }
@@ -1228,27 +1359,24 @@ impl Merger {
             bail!("No type sources provided for merging {dest}");
         };
 
+        trace!("Setting merged type of {dest} to {ty}");
         dest.set_type(&mut self.merged, ty.clone())?;
 
         let ast_node = dest.enum_example_ast(&self.merged).ok();
         self.track_enum_usage(&ty, dest.to_string(), ast_node, is_input_position);
 
-        let element_kind = if is_input_position {
-            "argument"
-        } else {
-            "field"
-        };
-
         if has_incompatible {
-            let error = if is_input_position {
+            let error = if T::is_argument() {
                 CompositionError::FieldArgumentTypeMismatch {
                     message: format!(
-                        "Type of argument \"{dest}\" is incompatible across subgraphs",
+                        "Type of argument \"{dest}\" is incompatible across subgraphs: it has ",
                     ),
                 }
             } else {
                 CompositionError::FieldTypeMismatch {
-                    message: format!("Type of field \"{dest}\" is incompatible across subgraphs",),
+                    message: format!(
+                        "Type of field \"{dest}\" is incompatible across subgraphs: it has ",
+                    ),
                 }
             };
 
@@ -1267,10 +1395,16 @@ impl Merger {
             Ok(false)
         } else if has_subtypes {
             // Report compatibility hint for subtype relationships
-            let hint_code = if is_input_position {
+            let hint_code = if T::is_argument() {
                 HintCode::InconsistentButCompatibleArgumentType
             } else {
                 HintCode::InconsistentButCompatibleFieldType
+            };
+
+            let element_kind = if T::is_argument() {
+                "argument"
+            } else {
+                "field"
             };
 
             let type_class = if is_input_position {
@@ -1478,21 +1612,18 @@ impl Merger {
     where
         T: HasDescription + Display,
     {
-        let mut descriptions: CountMap<String, usize> = CountMap::new();
-
-        for (idx, source) in sources {
-            // Skip if source has no description
-            let Some(source_desc) = source
-                .as_ref()
-                .and_then(|s| s.description(self.subgraphs[*idx].schema()))
-            else {
-                continue;
-            };
-
-            descriptions.insert_or_increment(source_desc.trim().to_string());
-        }
+        let mut descriptions = sources
+            .iter()
+            .map(|(idx, source)| {
+                source
+                    .as_ref()
+                    .and_then(|s| s.description(self.subgraphs[*idx].schema()))
+                    .map(|d| d.trim().to_string())
+                    .unwrap_or_default()
+            })
+            .counts();
         // we don't want to raise a hint if a description is ""
-        descriptions.remove(&String::new());
+        descriptions.remove("");
 
         if !descriptions.is_empty() {
             if let Some((description, _)) = iter_into_single_item(descriptions.iter()) {
@@ -1583,10 +1714,10 @@ impl Merger {
         // arguments in multiple subgraphs is merged with a single `@join__directive` that
         // specifies both graphs. If two applications have different arguments, each application
         // gets its own `@join__directive` specifying the different arugments per graph.
-        let mut joins_by_directive_name: HashMap<
+        let mut joins_by_directive_name: IndexMap<
             Name,
-            HashMap<Vec<Node<Argument>>, IndexSet<Name>>,
-        > = HashMap::new();
+            IndexMap<Vec<Node<Argument>>, IndexSet<Name>>,
+        > = IndexMap::default();
         let mut links_to_persist: Vec<(Url, Directive)> = Vec::new();
 
         for (idx, source) in sources.iter() {
@@ -1697,11 +1828,13 @@ impl Merger {
 
         for (name, args_to_graphs_map) in joins_by_directive_name {
             for (args, graphs) in args_to_graphs_map {
-                dest.insert_directive(
-                    &mut self.merged,
-                    self.join_spec_definition
-                        .directive_directive(&name, graphs, args),
+                let join_directive = self.join_spec_definition.directive_directive(
+                    &self.merged,
+                    &name,
+                    graphs,
+                    args,
                 )?;
+                dest.insert_directive(&mut self.merged, join_directive)?;
             }
         }
 
@@ -1710,18 +1843,6 @@ impl Merger {
 
     fn should_use_join_directive_for_url(&self, url: &Url) -> bool {
         self.join_directive_identities.contains(&url.identity)
-    }
-
-    pub(in crate::merger) fn record_applied_directives_to_merge<T>(
-        &mut self,
-        _sources: &Sources<T>,
-        _dest: &T,
-    ) {
-        todo!("Implement record_applied_directives_to_merge")
-    }
-
-    fn is_inaccessible_directive_in_supergraph(&self, _value: &EnumValueDefinition) -> bool {
-        todo!("Implement is_inaccessible_directive_in_supergraph")
     }
 
     /// Like Iterator::any, but for Sources<T> maps - checks if any source satisfies the predicate

@@ -43,6 +43,7 @@ fn get_configuration() -> serde_json::Value {
             "all": true
         },
         "supergraph": {
+            "enable_result_coercion_errors": true,
             // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
             "generate_query_fragments": false,
         }

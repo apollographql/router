@@ -619,10 +619,6 @@ fn directive_argument_merger(
             let strategy = arg.composition_strategy.as_ref().unwrap();
             let arg_name = &arg.base_spec.name;
             let arg_type = (arg.base_spec.get_type)(schema, link)?;
-            assert!(
-                !arg_type.is_list(),
-                "Should have gotten error getting type for @{directive_name}({arg_name}:), but got {arg_type}"
-            );
             strategy.is_type_supported(schema, &arg_type).map_err(|support_msg| {
                 let strategy_name = strategy.name();
                 SingleFederationError::DirectiveDefinitionInvalid {
@@ -843,7 +839,7 @@ fn ensure_same_arguments(
             if expected_arg.ty.is_non_null() && expected_arg.default_value.is_none() {
                 let expected_arg_name = &expected_arg.name;
                 errors.push(generate_error(&format!(
-                        r#"Invalid definition for {what}: Missing required argument "{expected_arg_name}""#
+                        r#"Invalid definition for {what}: missing required argument "{expected_arg_name}""#
                     )));
             }
             continue;

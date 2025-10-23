@@ -65,7 +65,7 @@ use crate::spec::QueryHash;
 use crate::spec::TYPENAME;
 
 /// Change this key if you introduce a breaking change in entity caching algorithm to make sure it won't take the previous entries
-pub(crate) const ENTITY_CACHE_VERSION: &str = "1.0";
+pub(crate) const ENTITY_CACHE_VERSION: &str = "1.1";
 pub(crate) const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
 pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_entity_cache::key";
@@ -675,9 +675,7 @@ impl CacheService {
                             if response.response.headers().contains_key(CACHE_CONTROL) {
                                 CacheControl::new(response.response.headers(), self.storage.ttl)?
                             } else {
-                                let mut c = CacheControl::default();
-                                c.no_store = true;
-                                c
+                                CacheControl::no_store()
                             };
 
                         if cache_control.private() {
@@ -1149,7 +1147,7 @@ async fn cache_store_root_from_response(
     if let Some(data) = response.response.body().data.as_ref() {
         let ttl: Option<Duration> = cache_control
             .ttl()
-            .map(|secs| Duration::from_secs(secs as u64))
+            .map(Duration::from_secs)
             .or(subgraph_ttl);
 
         if response.response.body().errors.is_empty() && cache_control.should_store() {
@@ -1812,7 +1810,7 @@ async fn insert_entities_in_result(
 ) -> Result<(Vec<Value>, Vec<Error>), BoxError> {
     let ttl: Option<Duration> = cache_control
         .ttl()
-        .map(|secs| Duration::from_secs(secs as u64))
+        .map(Duration::from_secs)
         .or(subgraph_ttl);
 
     let mut new_entities = Vec::new();

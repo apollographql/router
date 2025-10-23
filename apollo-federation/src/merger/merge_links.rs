@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use apollo_compiler::Name;
 use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::collections::IndexMap;
+use itertools::Itertools;
+use tracing::trace;
 
 use crate::bail;
 use crate::error::CompositionError;
@@ -17,7 +19,6 @@ use crate::merger::merge::MergedDirectiveInfo;
 use crate::merger::merge::Merger;
 use crate::schema::type_and_directive_specification::DirectiveCompositionSpecification;
 
-#[allow(dead_code)]
 pub(crate) struct CoreDirectiveInSubgraphs {
     url: Url,
     name: Name,
@@ -25,7 +26,16 @@ pub(crate) struct CoreDirectiveInSubgraphs {
     composition_spec: DirectiveCompositionSpecification,
 }
 
-#[allow(dead_code)]
+impl std::fmt::Debug for CoreDirectiveInSubgraphs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CoreDirectiveInSubgraphs")
+            .field("url", &self.url)
+            .field("name", &self.name)
+            .field("definitions_per_subgraph", &self.definitions_per_subgraph)
+            .finish()
+    }
+}
+
 struct CoreDirectiveInSupergraph {
     spec_in_supergraph: &'static dyn SpecDefinition,
     name_in_feature: Name,
@@ -37,6 +47,7 @@ impl Merger {
     pub(crate) fn collect_core_directives_to_compose(
         &self,
     ) -> Result<Vec<CoreDirectiveInSubgraphs>, FederationError> {
+        trace!("Collecting core directives used in subgraphs");
         // Groups directives by their feature and major version (we use negative numbers for
         // pre-1.0 version numbers on the minor, since all minors are incompatible).
         let mut directives_per_feature_and_version: HashMap<
@@ -52,6 +63,7 @@ impl Merger {
             for (directive, referencers) in &subgraph.schema().referencers().directives {
                 let Some((source, import)) = features.directives_by_imported_name.get(directive)
                 else {
+                    trace!("Directive @{directive} has no @link, skipping");
                     continue;
                 };
                 if referencers.len() == 0 {
@@ -59,6 +71,10 @@ impl Merger {
                 }
                 let Some(composition_spec) = SPEC_REGISTRY.get_composition_spec(source, import)
                 else {
+                    trace!(
+                        "Directive @{directive} from {} has no registered composition spec, skipping",
+                        source.url
+                    );
                     continue;
                 };
                 let Some(definition) = subgraph
@@ -110,7 +126,6 @@ impl Merger {
             .collect())
     }
 
-    #[allow(dead_code)]
     pub(crate) fn validate_and_maybe_add_specs(
         &mut self,
         directives_merge_info: &[CoreDirectiveInSubgraphs],
@@ -118,6 +133,7 @@ impl Merger {
         let mut supergraph_info_by_identity: HashMap<Identity, Vec<CoreDirectiveInSupergraph>> =
             HashMap::new();
 
+        trace!("Determining supergraph names for directives used in subgraphs");
         for subgraph_core_directive in directives_merge_info {
             let mut name_in_supergraph: Option<&Name> = None;
             for subgraph in &self.subgraphs {
@@ -130,7 +146,7 @@ impl Merger {
 
                 if name_in_supergraph.is_none() {
                     name_in_supergraph = Some(&directive.name);
-                } else if name_in_supergraph.is_some_and(|n| *n != subgraph_core_directive.name) {
+                } else if name_in_supergraph.is_some_and(|n| *n != directive.name) {
                     let definition_sources: IndexMap<_, _> = self
                         .subgraphs
                         .iter()
@@ -146,7 +162,7 @@ impl Merger {
                         .collect();
                     self.error_reporter.report_mismatch_error::<_, _, ()>(
                         CompositionError::LinkImportNameMismatch {
-                            message: format!("The \"@{}\" directive (from {}) is imported with mismatched name between subgraphs: it is imported as", directive.name, subgraph_core_directive.url),
+                            message: format!("The \"@{}\" directive (from {}) is imported with mismatched name between subgraphs: it is imported as ", directive.name, subgraph_core_directive.url),
                         },
                         &directive,
                         &definition_sources,
@@ -160,6 +176,10 @@ impl Merger {
             // If we get here with `name_in_supergraph` unset, it means there is no usage for the
             // directive at all, and we don't bother adding the spec to the supergraph.
             let Some(name_in_supergraph) = name_in_supergraph else {
+                trace!(
+                    "Directive @{} is not used in any subgraph, skipping",
+                    subgraph_core_directive.name
+                );
                 continue;
             };
             let Some(spec_in_supergraph) =
@@ -167,6 +187,9 @@ impl Merger {
                     .composition_spec
                     .supergraph_specification)(&self.latest_federation_version_used)
             else {
+                trace!(
+                    "Directive @{name_in_supergraph} has no registered composition spec, skipping"
+                );
                 continue;
             };
             let supergraph_info = supergraph_info_by_identity
@@ -214,6 +237,7 @@ impl Merger {
                     });
                 }
             }
+
             self.link_spec_definition.apply_feature_to_schema(
                 &mut self.merged,
                 supergraph_core_directives[0].spec_in_supergraph,
@@ -241,24 +265,12 @@ impl Merger {
                 } else {
                     None
                 };
-                let Some(definition) = self
-                    .merged
-                    .schema()
-                    .directive_definitions
-                    .get(&supergraph_core_directive.name_in_supergraph)
-                else {
-                    bail!(
-                        "Could not find directive definition for @{} in supergraph schema",
-                        supergraph_core_directive.name_in_supergraph
-                    );
-                };
                 self.merged_federation_directive_names
                     .insert(supergraph_core_directive.name_in_supergraph.to_string());
                 self.merged_federation_directive_in_supergraph_by_directive_name
                     .insert(
                         supergraph_core_directive.name_in_supergraph.clone(),
                         MergedDirectiveInfo {
-                            definition: (**definition).clone(),
                             arguments_merger,
                             static_argument_transform: supergraph_core_directive
                                 .composition_spec
@@ -282,6 +294,10 @@ impl Merger {
                 }
             }
         }
+        trace!(
+            "The following federation directives will be merged if applications are found: {}",
+            self.merged_federation_directive_names.iter().join(", ")
+        );
 
         Ok(())
     }
