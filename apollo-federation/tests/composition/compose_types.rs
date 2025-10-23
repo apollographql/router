@@ -506,3 +506,28 @@ fn union_types_merges_inconsistent_unions() {
         .expect("Union U should exist");
     assert_snapshot!(union_u, @"union U = A | B | C");
 }
+
+// =============================================================================
+// Handling extension and non-extension definitions
+// =============================================================================
+
+#[test]
+fn empty_object_type_definition_with_extension_in_subgraph() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+            type T # empty type definition
+
+            extend type T { # an extension with a field
+                field: Boolean
+            }
+
+            type Query {
+                test: T
+            }
+        "#,
+    };
+
+    // This used to panic with a ExtensionWithNoBase error.
+    compose_as_fed2_subgraphs(&[subgraph_a]).expect("composing subgraphs");
+}
