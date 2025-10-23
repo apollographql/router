@@ -207,10 +207,10 @@ unknown:
     assert_eq!(
         error.to_string(),
         String::from(
-            r#"configuration had errors:
+            r#"configuration had errors: 
 1. at line 2
 
-
+  
 ┌ unknown:
 |   foo: true
 └-----> Additional properties are not allowed ('unknown' was unexpected)
