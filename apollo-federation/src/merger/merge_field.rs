@@ -259,7 +259,7 @@ impl Merger {
 
         self.merge_description(&without_external, dest)?;
         self.record_applied_directives_to_merge(&without_external, dest);
-        self.add_arguments_shallow(&without_external, dest);
+        self.add_arguments_shallow(&without_external, dest)?;
         let dest_field = dest.get(self.merged.schema())?;
         let dest_arguments = dest_field.arguments.clone();
         for dest_arg in dest_arguments.iter() {
