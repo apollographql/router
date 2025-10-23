@@ -1043,7 +1043,10 @@ policies:
         let result = cors.ensure_usable_cors_rules();
         // This should fail in our implementation because we enforce the stricter rule
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), CorsConfigError::AllowCredentialsWithAnyOrigin);
+        assert_eq!(
+            result.unwrap_err(),
+            CorsConfigError::AllowCredentialsWithAnyOrigin
+        );
     }
 
     // Test: credentials "omit" + Access-Control-Allow-Origin "https://rabbit.invalid/" + Access-Control-Allow-Credentials omitted = ❌
