@@ -10,7 +10,7 @@ use super::OperationKind;
 use super::fetch::SubgraphSchemas;
 use super::rewrites;
 use crate::error::ValidationErrors;
-use crate::services::SubscriptionTaskParams;
+use crate::plugins::subscription::SubscriptionTaskParams;
 
 pub(crate) const SUBSCRIPTION_EVENT_SPAN_NAME: &str = "subscription_event";
 pub(crate) static OPENED_SUBSCRIPTIONS: AtomicUsize = AtomicUsize::new(0);

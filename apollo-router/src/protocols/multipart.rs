@@ -12,7 +12,7 @@ use tokio_stream::once;
 use tokio_stream::wrappers::IntervalStream;
 
 use crate::graphql;
-use crate::services::SUBSCRIPTION_ERROR_EXTENSION_KEY;
+use crate::plugins::subscription::SUBSCRIPTION_ERROR_EXTENSION_KEY;
 
 #[cfg(test)]
 const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(10);

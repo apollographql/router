@@ -19,8 +19,8 @@ use hyper_util::server::conn::auto::Builder;
 use multimap::MultiMap;
 #[cfg(unix)]
 use tokio::net::UnixListener;
-use tokio::sync::Notify;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use tokio_util::time::FutureExt;
 use tower_service::Service;
 
@@ -214,7 +214,7 @@ macro_rules! handle_connection {
             // the shutdown receiver was triggered first,
             // so we tell the connection to do a graceful shutdown
             // on the next request, then we wait for it to finish
-            _ = connection_shutdown.notified() => {
+            _ = connection_shutdown.cancelled() => {
                 connection_handle.shutdown();
                 connection.as_mut().graceful_shutdown();
                 // Only wait for the connection to close gracfully if we recieved a request.
@@ -227,10 +227,10 @@ macro_rules! handle_connection {
                     if let Err(_) = connection.timeout(connection_shutdown_timeout).await {
                         tracing::warn!(
                             timeout = connection_shutdown_timeout.as_secs(),
-                            server.address = connection_handle.connection_ref.address.to_string(),
-                            schema.id = connection_handle.connection_ref.pipeline_ref.schema_id,
-                            config.hash = connection_handle.connection_ref.pipeline_ref.config_hash,
-                            launch.id = connection_handle.connection_ref.pipeline_ref.launch_id,
+                            server.address = connection_handle.address.to_string(),
+                            schema.id = connection_handle.pipeline_ref.schema_id,
+                            config.hash = connection_handle.pipeline_ref.config_hash,
+                            launch.id = connection_handle.pipeline_ref.launch_id,
                             "connection shutdown exceeded, forcing close",
                         );
                     }
@@ -327,7 +327,7 @@ pub(super) fn serve_router_on_listen_addr(
     let server = async move {
         tokio::pin!(shutdown_receiver);
 
-        let connection_shutdown = Arc::new(Notify::new());
+        let connection_shutdown = CancellationToken::new();
 
         loop {
             tokio::select! {
@@ -460,7 +460,7 @@ pub(super) fn serve_router_on_listen_addr(
         // the shutdown receiver was triggered so we break out of
         // the server loop, tell the currently active connections to stop
         // then return the TCP listen socket
-        connection_shutdown.notify_waiters();
+        connection_shutdown.cancel();
         listener
     };
     (server, shutdown_sender)
@@ -507,6 +507,7 @@ where
 mod tests {
     use std::net::SocketAddr;
     use std::str::FromStr;
+    use std::sync::Arc;
 
     use axum::BoxError;
     use tower::ServiceExt;

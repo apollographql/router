@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast::DirectiveDefinition;
 use multimap::MultiMap;
 
@@ -127,8 +128,11 @@ impl ComposeDirectiveManager {
     pub(crate) fn get_latest_directive_definition(
         &self,
         directive_name: &Name,
-    ) -> Result<Option<&DirectiveDefinition>, FederationError> {
-        Ok(self.latest_directive_definition_map.get(directive_name))
+    ) -> Result<Option<Node<DirectiveDefinition>>, FederationError> {
+        Ok(self
+            .latest_directive_definition_map
+            .get(directive_name)
+            .map(|d| Node::new(d.clone())))
     }
 
     pub(crate) fn should_compose_directive(
@@ -173,7 +177,12 @@ impl ComposeDirectiveManager {
             .collect();
 
         for subgraph in subgraphs {
-            for application in subgraph.schema().compose_directive_applications()? {
+            let Ok(compose_directive_applications) =
+                subgraph.schema().compose_directive_applications()
+            else {
+                continue;
+            };
+            for application in compose_directive_applications {
                 match application {
                     Ok(compose_directive) => {
                         // The parser will ensure this is not null, since `name` is defined as `String!`,

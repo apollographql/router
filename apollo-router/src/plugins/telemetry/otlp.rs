@@ -14,8 +14,9 @@ use url::Url;
 
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[schemars(rename = "OTLPConfig")]
 pub(crate) struct Config {
     /// The endpoint to send data to
     #[serde(default)]
@@ -148,14 +149,14 @@ pub(super) fn process_endpoint(
 
 impl Config {}
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct HttpExporter {
     /// Headers to send on report requests
     pub(crate) headers: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct GrpcExporter {
     /// The optional domain name for tls config.
@@ -174,7 +175,7 @@ pub(crate) struct GrpcExporter {
     pub(crate) metadata: http::HeaderMap,
 }
 
-fn header_map(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+fn header_map(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
     HashMap::<String, Value>::json_schema(generator)
 }
 
@@ -217,7 +218,7 @@ impl GrpcExporter {
     }
 }
 
-#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Protocol {
     #[default]
@@ -225,7 +226,7 @@ pub(crate) enum Protocol {
     Http,
 }
 
-#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Temporality {
     /// Export cumulative metrics.

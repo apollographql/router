@@ -123,7 +123,7 @@ impl ConnectorInstruments {
                     };
                     CustomHistogram {
                         inner: Mutex::new(CustomHistogramInner {
-                            increment: Increment::Duration(Instant::now()),
+                            increment: Increment::Duration(Instant::now(), "s".to_string()),
                             condition: Condition::True,
                             histogram: Some(static_instruments
                                 .get(HTTP_CLIENT_REQUEST_DURATION_METRIC)

@@ -36,7 +36,7 @@ use futures::future::BoxFuture;
 use multimap::MultiMap;
 use once_cell::sync::Lazy;
 use schemars::JsonSchema;
-use schemars::r#gen::SchemaGenerator;
+use schemars::SchemaGenerator;
 use serde_json::Value;
 use tower::BoxError;
 use tower::Service;
@@ -47,7 +47,7 @@ use tower::buffer::future::ResponseFuture;
 use crate::ListenAddr;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
-use crate::notification::Notify;
+use crate::plugins::subscription::notification::Notify;
 use crate::router_factory::Endpoint;
 use crate::services::execution;
 use crate::services::router;
@@ -58,7 +58,7 @@ use crate::uplink::license_enforcement::LicenseState;
 type InstanceFactory =
     fn(PluginInit<serde_json::Value>) -> BoxFuture<'static, Result<Box<dyn DynPlugin>, BoxError>>;
 
-type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::schema::Schema;
+type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::Schema;
 
 /// Global list of plugins.
 #[linkme::distributed_slice]
@@ -69,6 +69,8 @@ pub static PLUGINS: [Lazy<PluginFactory>] = [..];
 pub struct PluginInit<T> {
     /// Configuration
     pub config: T,
+    /// Previous configuration (if this is a reload)
+    pub(crate) previous_config: Option<T>,
     /// Router Supergraph Schema (schema definition language)
     pub supergraph_sdl: Arc<String>,
     /// Router Supergraph Schema ID (SHA256 of the SDL))
@@ -91,6 +93,9 @@ pub struct PluginInit<T> {
     /// NEVER use this in any other plugin. Plugins should only ever access their pre-defined
     /// configuration subset.
     pub(crate) full_config: Option<Value>,
+
+    /// The full router yaml before it was parsed and env variables expanded
+    pub(crate) raw_yaml: Option<Arc<str>>,
 }
 
 impl<T> PluginInit<T>
@@ -130,6 +135,7 @@ where
     /// You can reuse a notify instance, or Build your own.
     pub(crate) fn new_builder(
         config: T,
+        previous_config: Option<T>,
         supergraph_sdl: Arc<String>,
         supergraph_schema_id: Arc<String>,
         supergraph_schema: Arc<Valid<Schema>>,
@@ -138,9 +144,11 @@ where
         notify: Notify<String, graphql::Response>,
         license: Arc<LicenseState>,
         full_config: Option<Value>,
+        original_config_yaml: Option<Arc<str>>,
     ) -> Self {
         PluginInit {
             config,
+            previous_config,
             supergraph_sdl,
             supergraph_schema_id,
             supergraph_schema,
@@ -149,6 +157,7 @@ where
             notify,
             license,
             full_config,
+            raw_yaml: original_config_yaml,
         }
     }
 
@@ -159,6 +168,7 @@ where
     /// invoking build() will fail if the JSON doesn't comply with the configuration format.
     pub(crate) fn try_new_builder(
         config: serde_json::Value,
+        previous_config: Option<serde_json::Value>,
         supergraph_sdl: Arc<String>,
         supergraph_schema_id: Arc<String>,
         supergraph_schema: Arc<Valid<Schema>>,
@@ -167,10 +177,13 @@ where
         notify: Notify<String, graphql::Response>,
         license: Arc<LicenseState>,
         full_config: Option<Value>,
+        original_config_yaml: Option<Arc<str>>,
     ) -> Result<Self, BoxError> {
         let config: T = serde_json::from_value(config)?;
+        let previous_config = previous_config.map(serde_json::from_value).transpose()?;
         Ok(PluginInit {
             config,
+            previous_config,
             supergraph_sdl,
             supergraph_schema,
             supergraph_schema_id,
@@ -179,6 +192,7 @@ where
             notify,
             license,
             full_config,
+            raw_yaml: original_config_yaml,
         })
     }
 
@@ -186,6 +200,7 @@ where
     #[builder(entry = "fake_builder", exit = "build", visibility = "pub")]
     fn fake_new_builder(
         config: T,
+        previous_config: Option<T>,
         supergraph_sdl: Option<Arc<String>>,
         supergraph_schema_id: Option<Arc<String>>,
         supergraph_schema: Option<Arc<Valid<Schema>>>,
@@ -194,9 +209,11 @@ where
         notify: Option<Notify<String, graphql::Response>>,
         license: Option<Arc<LicenseState>>,
         full_config: Option<Value>,
+        original_config_yaml: Option<Arc<str>>,
     ) -> Self {
         PluginInit {
             config,
+            previous_config,
             supergraph_sdl: supergraph_sdl.unwrap_or_default(),
             supergraph_schema_id: supergraph_schema_id.unwrap_or_default(),
             supergraph_schema: supergraph_schema
@@ -206,6 +223,7 @@ where
             notify: notify.unwrap_or_else(Notify::for_tests),
             license: license.unwrap_or_default(),
             full_config,
+            raw_yaml: original_config_yaml,
         }
     }
 }
@@ -218,6 +236,7 @@ impl PluginInit<serde_json::Value> {
     {
         PluginInit::try_builder()
             .config(self.config)
+            .and_previous_config(self.previous_config)
             .supergraph_schema(self.supergraph_schema)
             .supergraph_schema_id(self.supergraph_schema_id)
             .supergraph_sdl(self.supergraph_sdl)
@@ -225,6 +244,7 @@ impl PluginInit<serde_json::Value> {
             .notify(self.notify.clone())
             .license(self.license)
             .and_full_config(self.full_config)
+            .and_original_config_yaml(self.raw_yaml)
             .build()
     }
 }
@@ -319,10 +339,7 @@ impl PluginFactory {
         .await
     }
 
-    pub(crate) fn create_schema(
-        &self,
-        generator: &mut SchemaGenerator,
-    ) -> schemars::schema::Schema {
+    pub(crate) fn create_schema(&self, generator: &mut SchemaGenerator) -> schemars::Schema {
         (self.schema_factory)(generator)
     }
 }

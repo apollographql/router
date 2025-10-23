@@ -10,6 +10,7 @@ use opentelemetry::metrics::MeterProvider;
 use opentelemetry::metrics::ObservableGauge;
 use tokio::task::AbortHandle;
 
+use super::redis::ACTIVE_CLIENT_COUNT;
 use crate::metrics::meter_provider;
 
 /// Collection of Redis metrics gauges
@@ -19,6 +20,7 @@ pub(crate) struct RedisMetricsGauges {
     pub(crate) _latency: ObservableGauge<f64>,
     pub(crate) _request_size: ObservableGauge<f64>,
     pub(crate) _response_size: ObservableGauge<f64>,
+    _active_client_count: ObservableGauge<u64>,
 }
 
 /// Weighted sum data for calculating averages
@@ -171,6 +173,7 @@ impl RedisMetricsCollector {
             Self::create_weighted_average_gauge(&config.request_size_metric, config.caller);
         let response_size_gauge =
             Self::create_weighted_average_gauge(&config.response_size_metric, config.caller);
+        let client_count_gauge = Self::create_client_count_gauge();
         let metrics_handle = Self::spawn_metrics_collection_task(config);
 
         let gauges = RedisMetricsGauges {
@@ -179,6 +182,7 @@ impl RedisMetricsCollector {
             _latency: latency_gauge,
             _request_size: request_size_gauge,
             _response_size: response_size_gauge,
+            _active_client_count: client_count_gauge,
         };
 
         (metrics_handle.abort_handle(), gauges)
@@ -234,6 +238,18 @@ impl RedisMetricsCollector {
                 gauge.observe(average, &[KeyValue::new("kind", caller)]);
             })
             .build()
+    }
+
+    fn create_client_count_gauge() -> ObservableGauge<u64> {
+        let meter = meter_provider().meter("apollo/router");
+        meter
+            .u64_observable_gauge("apollo.router.cache.redis.clients")
+            .with_description("Number of active Redis clients")
+            .with_unit("{client}")
+            .with_callback(move |gauge| {
+                gauge.observe(ACTIVE_CLIENT_COUNT.load(Ordering::Relaxed), &[]);
+            })
+            .init()
     }
 
     /// Spawn the metrics collection task
@@ -355,6 +371,7 @@ mod tests {
     use crate::cache::redis::RedisValue;
     use crate::cache::storage::ValueType;
     use crate::metrics::FutureMetricsExt;
+    use crate::metrics::test_utils::MetricType;
 
     #[test]
     fn test_weighted_sum_calculation() {
@@ -495,14 +512,20 @@ mod tests {
             storage
                 .insert(test_key.clone(), test_value.clone(), None)
                 .await;
-            let retrieved: Option<RedisValue<TestValue>> = storage.get(test_key.clone()).await;
+            let retrieved: Result<RedisValue<TestValue>, _> = storage.get(test_key.clone()).await;
 
             // Verify the mock actually worked
-            assert!(retrieved.is_some(), "Should have retrieved value from mock");
+            assert!(retrieved.is_ok(), "Should have retrieved value from mock");
             assert_eq!(retrieved.unwrap().0.data, "test_value");
 
-            // Verify Redis connection metrics are emitted
-            assert_counter!("apollo.router.cache.redis.connections", 1, kind = "test");
+            // Verify Redis connection metrics are emitted.
+            // Since this metric is based on a global AtomicU64, it's not unique across tests - so
+            // we can only reliably check for metric existence, rather than a specific value.
+            crate::metrics::collect_metrics().metric_exists::<u64>(
+                "apollo.router.cache.redis.clients",
+                MetricType::Gauge,
+                &[],
+            );
 
             // Pause to ensure that queue length is zero
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;

@@ -2,32 +2,29 @@ use http::Uri;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_otlp::WithHttpConfig;
 use opentelemetry_otlp::WithTonicConfig;
-use opentelemetry_sdk::metrics::Instrument;
 use opentelemetry_sdk::metrics::PeriodicReader;
-use opentelemetry_sdk::metrics::StreamBuilder;
 use tonic::metadata::MetadataMap;
 use tower::BoxError;
 
-use crate::plugins::telemetry::config::MetricsCommon;
-use crate::plugins::telemetry::metrics::MetricsBuilder;
-use crate::plugins::telemetry::metrics::MetricsConfigurator;
-use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
-use crate::plugins::telemetry::otlp::process_endpoint;
+use crate::metrics::aggregation::MeterProviderType;
+use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::error_handler::NamedMetricsExporter;
+use crate::plugins::telemetry::otlp::Protocol;
+use crate::plugins::telemetry::metrics::CustomAggregationSelector;
+use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
+use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
 
 impl MetricsConfigurator for super::super::otlp::Config {
-    fn enabled(&self) -> bool {
+    fn config(conf: &Conf) -> &Self {
+        &conf.exporters.metrics.otlp
+    }
+
+    fn is_enabled(&self) -> bool {
         self.enabled
     }
 
-    fn apply(
-        &self,
-        mut builder: MetricsBuilder,
-        metrics_config: &MetricsCommon,
-    ) -> Result<MetricsBuilder, BoxError> {
-        if !self.enabled {
-            return Ok(builder);
-        }
+    fn configure(&self, builder: &mut MetricsBuilder) -> Result<(), BoxError> {
         let kind = TelemetryDataKind::Metrics;
         let exporter = match self.protocol {
             Protocol::Grpc => {
@@ -81,26 +78,14 @@ impl MetricsConfigurator for super::super::otlp::Config {
             }
         };
 
+        let named_exporter = NamedMetricsExporter::new(exporter, "otlp");
         builder.public_meter_provider_builder = builder.public_meter_provider_builder.with_reader(
-            PeriodicReader::builder(exporter)
+            MeterProviderType::Public,
+            PeriodicReader::builder(named_exporter)
                 .with_interval(self.batch_processor.scheduled_delay)
                 .build(),
         );
-        for metric_view in metrics_config.views.clone() {
-            let view = move |i: &Instrument| {
-                let stream_builder: Result<StreamBuilder, String> = metric_view.clone().try_into();
-                if i.name() == metric_view.name {
-                    match stream_builder {
-                        Ok(stream_builder) => stream_builder.build().ok(),
-                        Err(_) => None,
-                    }
-                } else {
-                    None
-                }
-            };
-            builder.public_meter_provider_builder =
-                builder.public_meter_provider_builder.with_view(view);
-        }
-        Ok(builder)
+
+        Ok(())
     }
 }

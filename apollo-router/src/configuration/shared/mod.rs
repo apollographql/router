@@ -3,10 +3,13 @@ use serde::Deserialize;
 
 use crate::plugins::traffic_shaping::Http2Config;
 
+/// HTTP client configuration for coprocessors.
 #[derive(PartialEq, Debug, Clone, Default, Deserialize, JsonSchema, buildstructor::Builder)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Client {
+    /// Use HTTP/2 to communicate with the coprocessor.
     pub(crate) experimental_http2: Option<Http2Config>,
+    /// Specify a DNS resolution strategy to use when resolving the coprocessor URL.
     pub(crate) dns_resolution_strategy: Option<DnsResolutionStrategy>,
 }
 

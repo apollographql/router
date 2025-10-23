@@ -20,7 +20,7 @@ The exact image version to use depends on which release you wish to use. In the 
 
 ## Quick start
 
-To run the router, your Docker container must have the [`APOLLO_GRAPH_REF`](/router/configuration/overview#apollo_graph_ref) and [`APOLLO_KEY`](/router/configuration/overview#apollo_key) environment variables set to your graph ref and API key, respectively.
+To run the router, set the [`APOLLO_GRAPH_REF`](/graphos/routing/configuration/envvars#apollo_graph_ref) and [`APOLLO_KEY`](/graphos/routing/configuration/envvars#apollo_key) environment variables in your Docker container to your graph ref and API key.
 
 Below is a basic example of running an Apollo Runtime image with Docker. It downloads your supergraph schema from Apollo and uses a default configuration that listens for connections on port `4000`.
 
@@ -39,22 +39,15 @@ Make sure to replace `<your-graph-ref>` and `<your-graph-api-key>` with your gra
 
 ## Enabling MCP
 
-<ExperimentalFeature>
-
-This feature is [experimental](/graphos/resources/feature-launch-stages#experimental). For more information about MCP support,  review the [MCP documentation](https://www.apollographql.com/docs/apollo-mcp-server).
-
-</ExperimentalFeature>
-
-To serve MCP requests, enable the [MCP server](https://www.apollographql.com/docs/apollo-mcp-server) using the `MCP_ENABLE` environment variable. You'll also need to export container port `5000` for HTTP Streamable connections to the MCP server, using the `-p 5000:5000` flag.
+To serve MCP requests, enable the [Apollo MCP Server](/apollo-mcp-server) using the `MCP_ENABLE` environment variable. You'll also need to export the container port where the MCP server is running, port `8000` by default, for Streamable HTTP connections to the MCP server, using the `-p 8000:8000` flag.
 
 ```bash title="Docker" {3, 6}
 docker run \
   -p 4000:4000 \
-  -p 5000:5000 \
+  -p 8000:8000 \
   --env APOLLO_GRAPH_REF="<your-graph-ref>" \
   --env APOLLO_KEY="<your-graph-api-key>" \
   --env MCP_ENABLE=1 \
-  --env MCP_UPLINK=1 \
   --rm \
   ghcr.io/apollographql/apollo-runtime:latest
 ```
@@ -95,21 +88,25 @@ Both local and container paths must be specified as absolute paths.
 If you don't want to automatically update your supergraph via [Apollo Uplink](/federation/managed-federation/uplink/), or you don't have connectivity to access Apollo Uplink from your environment, you have two options:
 
 1. Using a local supergraph file, as documented in the [Configuring using local files](#configuring-using-local-files) section.
-1. Using an [OCI image reference](#using-an-oci-image-reference)
+1. Using a [graph artifact reference](#using-a-graph-artifact-reference)
 
-### Using an OCI image reference
+### Using a graph artifact reference
 
-You can use the `GRAPH_ARTIFACT_REFERENCE` environment variable to fetch the supergraph schema from an OCI image:
+⚠️ This option is in preview and doesn't support hot-reloading of schemas.
+
+Set the `APOLLO_GRAPH_ARTIFACT_REFERENCE` environment variable to use the supergraph schema from a graph artifact:
 
 ```bash
 docker run -p 4000:4000 \
   --env APOLLO_KEY="<your-graph-api-key>" \
-  --env GRAPH_ARTIFACT_REFERENCE="<your-oci-reference>" \
+  --env APOLLO_GRAPH_ARTIFACT_REFERENCE="<your-graph-artifact-reference>" \
   --rm \
   ghcr.io/apollographql/apollo-runtime:<runtime-image-version>
 ```
 
-When using this option, the router will fetch the schema from the specified OCI image instead of using Apollo Uplink. Additional information on graph artifacts is available in the [router CLI options documentation](/docs/graphos/routing/configuration/cli#command-line-options).
+When you set this option, the router uses the schema from the specified graph artifact instead of Apollo Uplink.
+The router still fetches entitlements and persisted queries from Uplink.
+For more information on graph artifacts, see the [Router CLI Configuration Reference](/graphos/routing/configuration/cli#--graph-artifact-reference).
 
 ## Running a specific Router and MCP version
 
@@ -119,7 +116,7 @@ To learn more, see the [tagging documentation](https://github.com/apollographql/
 
 ## Additional router configuration information
 
-For more complex configurations, such as overriding subgraph URLs or propagating headers, see [Router Configuration](/router/configuration/overview/).
+For more complex configurations, such as overriding subgraph URLs or propagating headers, see [Router Configuration](/graphos/routing/configuration/overview/).
 
 ## Router-only Docker container
 

@@ -87,6 +87,7 @@ pub(crate) enum HintCode {
     InconsistentRuntimeTypesForShareableReturn,
     ImplicitlyUpgradedFederationVersion,
     ContextualArgumentNotContextualInAllSubgraphs,
+    InterfaceKeyMissingImplementationType,
 }
 
 #[allow(dead_code)]
@@ -150,6 +151,9 @@ impl HintCode {
             }
             HintCode::ContextualArgumentNotContextualInAllSubgraphs => {
                 &CONTEXTUAL_ARGUMENT_NOT_CONTEXTUAL_IN_ALL_SUBGRAPHS
+            }
+            HintCode::InterfaceKeyMissingImplementationType => {
+                &INTERFACE_KEY_MISSING_IMPLEMENTATION_TYPE
             }
         }
     }
@@ -449,3 +453,13 @@ pub(crate) static CONTEXTUAL_ARGUMENT_NOT_CONTEXTUAL_IN_ALL_SUBGRAPHS: LazyLock<
         "Contextual argument is not contextual in all subgraphs",
     )
 });
+
+#[allow(dead_code)]
+pub(crate) static INTERFACE_KEY_MISSING_IMPLEMENTATION_TYPE: LazyLock<HintCodeDefinition> =
+    LazyLock::new(|| {
+        HintCodeDefinition::new(
+            "INTERFACE_KEY_MISSING_IMPLEMENTATION_TYPE",
+            HintLevel::Warn,
+            "Interface key missing implementation type",
+        )
+    });

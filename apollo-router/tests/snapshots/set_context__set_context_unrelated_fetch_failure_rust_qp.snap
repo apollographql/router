@@ -1,5 +1,6 @@
 ---
 source: apollo-router/tests/set_context.rs
+assertion_line: 280
 expression: response
 ---
 {
@@ -13,6 +14,25 @@ expression: response
       ],
       "extensions": {
         "service": "Subgraph2"
+      }
+    },
+    {
+      "message": "Null value found for non-nullable type U",
+      "path": [
+        "t",
+        "u"
+      ],
+      "extensions": {
+        "code": "RESPONSE_VALIDATION_FAILED"
+      }
+    },
+    {
+      "message": "Null value found for non-nullable type T",
+      "path": [
+        "t"
+      ],
+      "extensions": {
+        "code": "RESPONSE_VALIDATION_FAILED"
       }
     }
   ],
@@ -147,21 +167,21 @@ expression: response
     },
     "valueCompletion": [
       {
-        "message": "Cannot return null for non-nullable field U.field",
+        "message": "Null value found for non-nullable type Int",
         "path": [
           "t",
           "u"
         ]
       },
       {
-        "message": "Cannot return null for non-nullable field T.u",
+        "message": "Null value found for non-nullable type U",
         "path": [
           "t",
           "u"
         ]
       },
       {
-        "message": "Cannot return null for non-nullable field T!.t",
+        "message": "Null value found for non-nullable type T",
         "path": [
           "t"
         ]

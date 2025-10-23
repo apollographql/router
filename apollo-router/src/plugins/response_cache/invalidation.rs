@@ -1,34 +1,36 @@
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::time::Instant;
 
 use futures::FutureExt;
 use futures::StreamExt;
 use futures::stream;
 use itertools::Itertools;
+use opentelemetry::StringValue;
 use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
 use tower::BoxError;
 use tracing::Instrument;
 
-use super::plugin::Storage;
-use super::postgres::PostgresCacheStorage;
+use super::plugin::StorageInterface;
 use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::response_cache::plugin::INTERNAL_CACHE_TAG_PREFIX;
 use crate::plugins::response_cache::plugin::RESPONSE_CACHE_VERSION;
+use crate::plugins::response_cache::storage;
+use crate::plugins::response_cache::storage::CacheStorage;
+use crate::plugins::response_cache::storage::redis::Storage;
 
 #[derive(Clone)]
 pub(crate) struct Invalidation {
-    pub(crate) storage: Arc<Storage>,
+    pub(crate) storage: Arc<StorageInterface>,
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum InvalidationError {
+pub(super) enum InvalidationError {
     #[error("error")]
     Misc(#[from] anyhow::Error),
     #[error("caching database error")]
-    Postgres(#[from] sqlx::Error),
+    Storage(#[from] storage::Error),
     #[error("several errors")]
     Errors(#[from] InvalidationErrors),
 }
@@ -37,7 +39,7 @@ impl ErrorCode for InvalidationError {
     fn code(&self) -> &'static str {
         match &self {
             InvalidationError::Misc(_) => "MISC",
-            InvalidationError::Postgres(error) => error.code(),
+            InvalidationError::Storage(error) => error.code(),
             InvalidationError::Errors(_) => "INVALIDATION_ERRORS",
         }
     }
@@ -59,7 +61,7 @@ impl std::fmt::Display for InvalidationErrors {
 impl std::error::Error for InvalidationErrors {}
 
 impl Invalidation {
-    pub(crate) async fn new(storage: Arc<Storage>) -> Result<Self, BoxError> {
+    pub(crate) async fn new(storage: Arc<StorageInterface>) -> Result<Self, BoxError> {
         Ok(Self { storage })
     }
 
@@ -82,8 +84,8 @@ impl Invalidation {
 
     async fn handle_request(
         &self,
-        pg_storage: &PostgresCacheStorage,
-        request: &mut InvalidationRequest,
+        storage: &Storage,
+        request: &InvalidationRequest,
     ) -> Result<u64, InvalidationError> {
         let invalidation_key = request.invalidation_key();
         tracing::debug!(
@@ -92,22 +94,53 @@ impl Invalidation {
         );
         let (count, subgraphs) = match request {
             InvalidationRequest::Subgraph { subgraph } => {
-                let count = pg_storage
-                    .invalidate_by_subgraphs(vec![subgraph.clone()])
-                    .await?;
+                let count = storage
+                    .invalidate_by_subgraph(subgraph, request.kind())
+                    .await
+                    .inspect_err(|err| {
+                        u64_counter_with_unit!(
+                            "apollo.router.operations.response_cache.invalidation.error",
+                            "Errors when invalidating data in cache",
+                            "{error}",
+                            1,
+                            "code" = err.code(),
+                            "kind" = "subgraph",
+                            "subgraph.name" = subgraph.clone()
+                        );
+                    })?;
                 u64_counter_with_unit!(
                     "apollo.router.operations.response_cache.invalidation.entry",
                     "Response cache counter for invalidated entries",
                     "{entry}",
                     count,
+                    "kind" = "subgraph",
                     "subgraph.name" = subgraph.clone()
                 );
                 (count, vec![subgraph.clone()])
             }
-            InvalidationRequest::Type { subgraph, .. } => {
-                let subgraph_counts = pg_storage
-                    .invalidate(vec![invalidation_key], vec![subgraph.clone()])
-                    .await?;
+            InvalidationRequest::Type {
+                subgraph,
+                r#type: graphql_type,
+            } => {
+                let subgraph_counts = storage
+                    .invalidate(
+                        vec![invalidation_key],
+                        vec![subgraph.clone()],
+                        request.kind(),
+                    )
+                    .await
+                    .inspect_err(|err| {
+                        u64_counter_with_unit!(
+                            "apollo.router.operations.response_cache.invalidation.error",
+                            "Errors when invalidating data in cache",
+                            "{error}",
+                            1,
+                            "code" = err.code(),
+                            "kind" = "type",
+                            "subgraph.name" = subgraph.clone(),
+                            "graphql.type" = graphql_type.clone()
+                        );
+                    })?;
                 let mut total_count = 0;
                 for (subgraph_name, count) in subgraph_counts {
                     total_count += count;
@@ -116,7 +149,9 @@ impl Invalidation {
                         "Response cache counter for invalidated entries",
                         "{entry}",
                         count,
-                        "subgraph.name" = subgraph_name
+                        "kind" = "type",
+                        "subgraph.name" = subgraph_name,
+                        "graphql.type" = graphql_type.clone()
                     );
                 }
 
@@ -126,12 +161,31 @@ impl Invalidation {
                 subgraphs,
                 cache_tag,
             } => {
-                let subgraph_counts = pg_storage
+                let subgraph_counts = storage
                     .invalidate(
                         vec![cache_tag.clone()],
                         subgraphs.clone().into_iter().collect(),
+                        request.kind(),
                     )
-                    .await?;
+                    .await
+                    .inspect_err(|err| {
+                        let subgraphs: opentelemetry::Array = subgraphs
+                            .clone()
+                            .into_iter()
+                            .map(StringValue::from)
+                            .collect::<Vec<StringValue>>()
+                            .into();
+                        u64_counter_with_unit!(
+                            "apollo.router.operations.response_cache.invalidation.error",
+                            "Errors when invalidating data in cache",
+                            "{error}",
+                            1,
+                            "code" = err.code(),
+                            "kind" = "cache_tag",
+                            "subgraph.names" = opentelemetry::Value::Array(subgraphs),
+                            "cache.tag" = cache_tag.clone()
+                        );
+                    })?;
                 let mut total_count = 0;
                 for (subgraph_name, count) in subgraph_counts {
                     total_count += count;
@@ -140,7 +194,9 @@ impl Invalidation {
                         "Response cache counter for invalidated entries",
                         "{entry}",
                         count,
-                        "subgraph.name" = subgraph_name
+                        "kind" = "cache_tag",
+                        "subgraph.name" = subgraph_name,
+                        "cache.tag" = cache_tag.clone()
                     );
                 }
 
@@ -184,32 +240,12 @@ impl Invalidation {
                     .collect(),
             };
 
-            for pg_storage in storages {
-                let mut request = request.clone();
+            for storage in storages {
+                let request = request.clone();
                 let f = async move {
-                    let start = Instant::now();
-
-                    let res = self
-                        .handle_request(pg_storage, &mut request)
+                    self.handle_request(storage, &request)
                         .instrument(tracing::info_span!("cache.invalidation.request"))
-                        .await;
-
-                    f64_histogram_with_unit!(
-                        "apollo.router.operations.response_cache.invalidation.duration",
-                        "Duration of the invalidation event execution, in seconds.",
-                        "s",
-                        start.elapsed().as_secs_f64()
-                    );
-                    if let Err(err) = &res {
-                        u64_counter_with_unit!(
-                            "apollo.router.operations.response_cache.invalidation.error",
-                            "Errors when invalidating data in cache",
-                            "{error}",
-                            1,
-                            "code" = err.code()
-                        );
-                    }
-                    res
+                        .await
                 };
                 futures.push(f.boxed());
             }
@@ -231,6 +267,8 @@ impl Invalidation {
         }
     }
 }
+
+pub(super) type InvalidationKind = &'static str;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -272,7 +310,7 @@ impl InvalidationRequest {
         }
     }
 
-    pub(super) fn kind(&self) -> &'static str {
+    pub(super) fn kind(&self) -> InvalidationKind {
         match self {
             InvalidationRequest::Subgraph { .. } => "subgraph",
             InvalidationRequest::Type { .. } => "type",

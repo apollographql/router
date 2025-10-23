@@ -1,4 +1,5 @@
 //! Logic for loading configuration in to an object model
+use std::collections::BTreeMap;
 use std::fmt;
 use std::hash::Hash;
 use std::io;
@@ -27,10 +28,8 @@ use rustls::ServerConfig;
 use rustls::pki_types::CertificateDer;
 use rustls::pki_types::PrivateKeyDer;
 use schemars::JsonSchema;
-use schemars::r#gen::SchemaGenerator;
-use schemars::schema::ObjectValidation;
-use schemars::schema::Schema;
-use schemars::schema::SchemaObject;
+use schemars::Schema;
+use schemars::SchemaGenerator;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
@@ -51,7 +50,6 @@ use crate::ApolloRouterError;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::cooperative_cancellation::CooperativeCancellation;
 use crate::graphql;
-use crate::notification::Notify;
 use crate::plugin::plugins;
 use crate::plugins::chaos;
 use crate::plugins::chaos::Config;
@@ -62,6 +60,7 @@ use crate::plugins::limits;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
 use crate::plugins::subscription::SubscriptionConfig;
+use crate::plugins::subscription::notification::Notify;
 use crate::uplink::UplinkConfig;
 
 pub(crate) mod connector;
@@ -150,6 +149,10 @@ pub struct Configuration {
     #[serde(skip)]
     pub(crate) validated_yaml: Option<Value>,
 
+    /// The full router yaml before it was parsed and env variables expanded
+    #[serde(skip)]
+    pub(crate) raw_yaml: Option<Arc<str>>,
+
     /// Health check configuration
     #[serde(default)]
     pub(crate) health_check: HealthCheck,
@@ -207,6 +210,8 @@ pub struct Configuration {
     #[serde(skip)]
     pub uplink: Option<UplinkConfig>,
 
+    // FIXME(@goto-bus-stop): Sticking this on Configuration is a serious hack just to have
+    // it available everywhere, it is actually not configuration at all
     #[serde(default, skip_serializing, skip_deserializing)]
     pub(crate) notify: Notify<String, graphql::Response>,
 
@@ -290,6 +295,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             notify,
             uplink: None,
             validated_yaml: None,
+            raw_yaml: None,
         }
         .validate()
         .map_err(|e| serde::de::Error::custom(e.to_string()))
@@ -328,6 +334,7 @@ impl Configuration {
 
         let conf = Self {
             validated_yaml: Default::default(),
+            raw_yaml: None,
             supergraph: supergraph.unwrap_or_default(),
             server: server.unwrap_or_default(),
             health_check: health_check.unwrap_or_default(),
@@ -429,6 +436,15 @@ impl Configuration {
             },
         }
     }
+
+    fn apollo_plugin_enabled(&self, plugin_name: &str) -> bool {
+        self.apollo_plugins
+            .plugins
+            .get(plugin_name)
+            .and_then(|config| config.as_object().and_then(|c| c.get("enabled")))
+            .and_then(|enabled| enabled.as_bool())
+            .unwrap_or(false)
+    }
 }
 
 impl Default for Configuration {
@@ -485,6 +501,7 @@ impl Configuration {
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
             batching: batching.unwrap_or_default(),
+            raw_yaml: None,
         };
 
         configuration.validate()
@@ -568,6 +585,16 @@ impl Configuration {
             }
         }
 
+        // response & entity caching
+        if self.apollo_plugin_enabled("preview_response_cache")
+            && self.apollo_plugin_enabled("preview_entity_cache")
+        {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "entity cache and response cache features are mutually exclusive",
+                error: "either set preview_response_cache.enabled: false or preview_entity_cache.enabled: false in your router yaml configuration".into(),
+            });
+        }
+
         Ok(self)
     }
 }
@@ -583,25 +610,20 @@ impl FromStr for Configuration {
 }
 
 fn gen_schema(
-    plugins: schemars::Map<String, Schema>,
-    hidden_plugins: Option<schemars::Map<String, Schema>>,
+    plugins: BTreeMap<String, Schema>,
+    hidden_plugins: Option<BTreeMap<String, Schema>>,
 ) -> Schema {
-    let plugins_object = SchemaObject {
-        object: Some(Box::new(ObjectValidation {
-            properties: plugins,
-            additional_properties: Option::Some(Box::new(Schema::Bool(false))),
-            pattern_properties: hidden_plugins
-                .unwrap_or_default()
-                .into_iter()
-                // Wrap plugin name with regex start/end to enforce exact match
-                .map(|(k, v)| (format!("^{k}$"), v))
-                .collect(),
-            ..Default::default()
-        })),
-        ..Default::default()
-    };
-
-    Schema::Object(plugins_object)
+    schemars::json_schema!({
+        "type": "object",
+        "properties": plugins,
+        "additionalProperties": false,
+        "patternProperties": hidden_plugins
+            .unwrap_or_default()
+            .into_iter()
+            // Wrap plugin name with regex start/end to enforce exact match
+            .map(|(k, v)| (format!("^{}$", k), v))
+            .collect::<BTreeMap<_, _>>()
+    })
 }
 
 /// Plugins provided by Apollo.
@@ -616,8 +638,8 @@ pub(crate) struct ApolloPlugins {
 }
 
 impl JsonSchema for ApolloPlugins {
-    fn schema_name() -> String {
-        stringify!(Plugins).to_string()
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        stringify!(Plugins).into()
     }
 
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
@@ -655,8 +677,8 @@ pub(crate) struct UserPlugins {
 }
 
 impl JsonSchema for UserPlugins {
-    fn schema_name() -> String {
-        stringify!(Plugins).to_string()
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        stringify!(Plugins).into()
     }
 
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
@@ -667,7 +689,7 @@ impl JsonSchema for UserPlugins {
             .sorted_by_key(|factory| factory.name.clone())
             .filter(|factory| !factory.name.starts_with(APOLLO_PLUGIN_PREFIX))
             .map(|factory| (factory.name.to_string(), factory.create_schema(generator)))
-            .collect::<schemars::Map<String, Schema>>();
+            .collect();
         gen_schema(plugins, None)
     }
 }
@@ -710,6 +732,14 @@ pub(crate) struct Supergraph {
     /// but request handling will stop immediately when the client connection is closed.
     pub(crate) early_cancel: bool,
 
+    /// Enable errors generated during response reformatting and result coercion to be returned in
+    /// responses.
+    /// Default: false
+    /// All subgraph responses are checked and corrected to ensure alignment with the schema and
+    /// query. When enabled, misaligned values will generate errors which are included in errors
+    /// array in the response.
+    pub(crate) enable_result_coercion_errors: bool,
+
     /// Log a message if the client closes the connection before the response is sent.
     /// Default: false.
     pub(crate) experimental_log_on_broken_pipe: bool,
@@ -717,12 +747,6 @@ pub(crate) struct Supergraph {
 
 const fn default_generate_query_fragments() -> bool {
     true
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum Auto {
-    Auto,
 }
 
 fn default_defer_support() -> bool {
@@ -742,6 +766,7 @@ impl Supergraph {
         generate_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
+        insert_result_coercion_errors: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -755,6 +780,7 @@ impl Supergraph {
                 .unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
+            enable_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
         }
     }
 }
@@ -773,6 +799,7 @@ impl Supergraph {
         generate_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
+        insert_result_coercion_errors: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -786,6 +813,7 @@ impl Supergraph {
                 .unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
+            enable_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
         }
     }
 }
@@ -958,10 +986,13 @@ pub(crate) struct QueryPlanRedisCache {
     /// Redis password if not provided in the URLs. This field takes precedence over the password in the URL
     pub(crate) password: Option<String>,
 
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_timeout"
+    )]
     #[schemars(with = "Option<String>", default)]
-    /// Redis request timeout (default: 2ms)
-    pub(crate) timeout: Option<Duration>,
+    /// Redis request timeout (default: 500ms)
+    pub(crate) timeout: Duration,
 
     #[serde(
         deserialize_with = "humantime_serde::deserialize",
@@ -1047,10 +1078,13 @@ pub(crate) struct RedisCache {
     /// Redis password if not provided in the URLs. This field takes precedence over the password in the URL
     pub(crate) password: Option<String>,
 
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_timeout"
+    )]
     #[schemars(with = "Option<String>", default)]
-    /// Redis request timeout (default: 2ms)
-    pub(crate) timeout: Option<Duration>,
+    /// Redis request timeout (default: 500ms)
+    pub(crate) timeout: Duration,
 
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
@@ -1084,11 +1118,15 @@ pub(crate) struct RedisCache {
     pub(crate) metrics_interval: Duration,
 }
 
-fn default_required_to_start() -> bool {
+fn default_timeout() -> Duration {
+    Duration::from_millis(500)
+}
+
+pub(crate) fn default_required_to_start() -> bool {
     false
 }
 
-fn default_pool_size() -> u32 {
+pub(crate) fn default_pool_size() -> u32 {
     1
 }
 
@@ -1125,9 +1163,11 @@ fn default_reset_ttl() -> bool {
 pub(crate) struct Tls {
     /// TLS server configuration
     ///
-    /// this will affect the GraphQL endpoint and any other endpoint targeting the same listen address
+    /// This will affect the GraphQL endpoint and any other endpoint targeting the same listen address.
     pub(crate) supergraph: Option<Arc<TlsSupergraph>>,
+    /// Outgoing TLS configuration to subgraphs.
     pub(crate) subgraph: SubgraphConfiguration<TlsClient>,
+    /// Outgoing TLS configuration to Apollo Connectors.
     pub(crate) connector: ConnectorConfiguration<TlsClient>,
 }
 

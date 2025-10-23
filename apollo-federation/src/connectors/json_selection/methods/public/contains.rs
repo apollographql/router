@@ -174,6 +174,8 @@ fn contains_shape(
 mod method_tests {
     use serde_json_bytes::json;
 
+    use crate::connectors::ConnectSpec;
+    use crate::connectors::json_selection::ApplyToError;
     use crate::selection;
 
     #[test]
@@ -427,6 +429,26 @@ mod method_tests {
             result.1[0]
                 .message()
                 .contains("Method ->contains requires an array input, but got: 123")
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn contains_should_return_none_when_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!("arr->contains($.missing)", spec).apply_to(&json!({
+                "arr": [1, 2, 3],
+            })),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Property .missing not found in object",
+                    "path": ["missing"],
+                    "range": [16, 23],
+                    "spec": spec.to_string(),
+                }))]
+            ),
         );
     }
 }

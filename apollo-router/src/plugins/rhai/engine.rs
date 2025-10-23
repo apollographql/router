@@ -52,6 +52,7 @@ use crate::plugins::demand_control::COST_ACTUAL_KEY;
 use crate::plugins::demand_control::COST_ESTIMATED_KEY;
 use crate::plugins::demand_control::COST_RESULT_KEY;
 use crate::plugins::demand_control::COST_STRATEGY_KEY;
+use crate::plugins::response_cache;
 use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
 use crate::query_planner::APOLLO_OPERATION_ID;
 
@@ -1847,6 +1848,10 @@ impl Rhai {
             SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS.to_string().into(),
         );
         global_variables.insert("APOLLO_ENTITY_CACHE_KEY".into(), CONTEXT_CACHE_KEY.into());
+        global_variables.insert(
+            "APOLLO_RESPONSE_CACHE_KEY".into(),
+            response_cache::plugin::CONTEXT_CACHE_KEY.into(),
+        );
         global_variables.insert("APOLLO_OPERATION_ID".into(), APOLLO_OPERATION_ID.into());
         // Demand Control Context Keys
         global_variables.insert(

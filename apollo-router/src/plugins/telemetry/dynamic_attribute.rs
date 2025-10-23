@@ -14,7 +14,7 @@ use super::formatters::APOLLO_PRIVATE_PREFIX;
 use super::otel::OtelData;
 use super::otel::layer::str_to_span_kind;
 use super::otel::layer::str_to_status;
-use super::reload::IsSampled;
+use crate::plugins::telemetry::reload::otel::IsSampled;
 
 #[derive(Debug, Default)]
 pub(crate) struct LogAttributes {

@@ -19,18 +19,22 @@ use tonic::transport::ClientTlsConfig;
 use tower::BoxError;
 use url::Url;
 
+use crate::metrics::aggregation::MeterProviderType;
+use crate::plugins::telemetry::apollo::ApolloUsageReportsBatchProcessorConfiguration;
 use crate::plugins::telemetry::apollo::Config;
+use crate::plugins::telemetry::apollo::OtlpMetricsBatchProcessorConfiguration;
 use crate::plugins::telemetry::apollo::router_id;
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
+use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::error_handler::NamedMetricsExporter;
 use crate::plugins::telemetry::config::MetricsCommon;
-use crate::plugins::telemetry::metrics::MetricsBuilder;
-use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::plugins::telemetry::otlp::process_endpoint;
-use crate::plugins::telemetry::tracing::BatchProcessorConfig;
+use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
+use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
 
 pub(crate) mod histogram;
 pub(crate) mod studio;
@@ -42,80 +46,75 @@ fn default_buckets() -> Vec<f64> {
 }
 
 impl MetricsConfigurator for Config {
-    fn enabled(&self) -> bool {
+    fn config(conf: &Conf) -> &Self {
+        &conf.apollo
+    }
+
+    fn is_enabled(&self) -> bool {
         self.apollo_key.is_some() && self.apollo_graph_ref.is_some()
     }
 
-    fn apply(
-        &self,
-        mut builder: MetricsBuilder,
-        _metrics_config: &MetricsCommon,
-    ) -> Result<MetricsBuilder, BoxError> {
+    fn configure(&self, builder: &mut MetricsBuilder) -> Result<(), BoxError> {
         tracing::debug!("configuring Apollo metrics");
         static ENABLED: AtomicBool = AtomicBool::new(false);
-        Ok(match self {
-            Config {
-                endpoint,
-                experimental_otlp_endpoint: otlp_endpoint,
-                experimental_otlp_metrics_protocol: otlp_metrics_protocol,
-                apollo_key: Some(key),
-                apollo_graph_ref: Some(reference),
-                schema_id,
-                batch_processor,
-                metrics_reference_mode,
-                ..
-            } => {
-                if !ENABLED.swap(true, Ordering::Relaxed) {
-                    tracing::info!(
-                        "Apollo Studio usage reporting is enabled. See https://go.apollo.dev/o/data for details"
-                    );
-                }
+        if let Config {
+            endpoint,
+            experimental_otlp_endpoint: otlp_endpoint,
+            experimental_otlp_metrics_protocol: otlp_metrics_protocol,
+            apollo_key: Some(key),
+            apollo_graph_ref: Some(reference),
+            schema_id,
+            metrics,
+            metrics_reference_mode,
+            ..
+        } = self
+        {
+            if !ENABLED.swap(true, Ordering::Relaxed) {
+                tracing::info!(
+                    "Apollo Studio usage reporting is enabled. See https://go.apollo.dev/o/data for details"
+                );
+            }
 
-                builder = Self::configure_apollo_metrics(
+            Self::configure_apollo_metrics(
+                builder,
+                endpoint,
+                key,
+                reference,
+                schema_id,
+                &metrics.usage_reports.batch_processor,
+                *metrics_reference_mode,
+            )?;
+            // env variable EXPERIMENTAL_APOLLO_OTLP_METRICS_ENABLED will disappear without warning in future
+            if std::env::var("EXPERIMENTAL_APOLLO_OTLP_METRICS_ENABLED")
+                .unwrap_or_else(|_| "true".to_string())
+                == "true"
+            {
+                Self::configure_apollo_otlp_metrics(
                     builder,
-                    endpoint,
+                    otlp_endpoint,
+                    otlp_metrics_protocol,
                     key,
                     reference,
                     schema_id,
-                    batch_processor,
-                    *metrics_reference_mode,
+                    &metrics.otlp.batch_processor,
                 )?;
-                // env variable EXPERIMENTAL_APOLLO_OTLP_METRICS_ENABLED will disappear without warning in future
-                if std::env::var("EXPERIMENTAL_APOLLO_OTLP_METRICS_ENABLED")
-                    .unwrap_or_else(|_| "true".to_string())
-                    == "true"
-                {
-                    builder = Self::configure_apollo_otlp_metrics(
-                        builder,
-                        otlp_endpoint,
-                        otlp_metrics_protocol,
-                        key,
-                        reference,
-                        schema_id,
-                        batch_processor,
-                    )?;
-                }
-                builder
             }
-            _ => {
-                ENABLED.swap(false, Ordering::Relaxed);
-                builder
-            }
-        })
+        }
+        Ok(())
     }
 }
 
 impl Config {
     fn configure_apollo_otlp_metrics(
-        mut builder: MetricsBuilder,
+        builder: &mut MetricsBuilder,
         endpoint: &Url,
         otlp_protocol: &Protocol,
         key: &str,
         reference: &str,
         schema_id: &str,
-        batch_processor: &BatchProcessorConfig,
+        batch_config: &OtlpMetricsBatchProcessorConfiguration,
     ) -> Result<MetricsBuilder, BoxError> {
-        tracing::debug!(endpoint = %endpoint, "creating Apollo OTLP metrics exporter");
+        tracing::info!("configuring Apollo OTLP metrics: {}", batch_config);
         let mut metadata = MetadataMap::new();
         metadata.insert("apollo.api.key", key.parse()?);
         let exporter: opentelemetry_otlp::MetricExporter = match otlp_protocol {
@@ -123,7 +122,7 @@ impl Config {
                 .with_tonic()
                 .with_tls_config(ClientTlsConfig::new().with_native_roots())
                 .with_endpoint(endpoint.as_str())
-                .with_timeout(batch_processor.max_export_timeout)
+                .with_timeout(batch_config.max_export_timeout)
                 .with_metadata(metadata.clone())
                 .with_temporality(opentelemetry_sdk::metrics::Temporality::Delta)
                 .with_compression(opentelemetry_otlp::Compression::Gzip)
@@ -141,7 +140,7 @@ impl Config {
                     .with_http()
                     .with_protocol(opentelemetry_otlp::Protocol::Grpc)
                     .with_temporality(opentelemetry_sdk::metrics::Temporality::Delta)
-                    .with_timeout(batch_processor.max_export_timeout);
+                    .with_timeout(batch_config.max_export_timeout);
                 if let Some(endpoint) = maybe_endpoint {
                     otlp_exporter = otlp_exporter.with_endpoint(endpoint);
                 }
@@ -154,7 +153,7 @@ impl Config {
                 .with_tonic()
                 .with_tls_config(ClientTlsConfig::new().with_native_roots())
                 .with_endpoint(endpoint.as_str())
-                .with_timeout(batch_processor.max_export_timeout)
+                .with_timeout(batch_config.max_export_timeout)
                 .with_metadata(metadata.clone())
                 .with_temporality(opentelemetry_sdk::metrics::Temporality::Delta)
                 .with_compression(opentelemetry_otlp::Compression::Gzip)
@@ -169,21 +168,25 @@ impl Config {
                     .with_http()
                     .with_protocol(opentelemetry_otlp::Protocol::Grpc)
                     .with_temporality(opentelemetry_sdk::metrics::Temporality::Delta)
-                    .with_timeout(batch_processor.max_export_timeout);
+                    .with_timeout(batch_config.max_export_timeout);
                 if let Some(endpoint) = maybe_endpoint {
                     otlp_exporter = otlp_exporter.with_endpoint(endpoint);
                 }
                 otlp_exporter.build()?
             }
         };
-        let default_reader = opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader::builder(exporter, runtime::Tokio)
+
+        let named_exporter = NamedMetricsExporter::new(exporter, "apollo");
+        let named_realtime_exporter = NamedMetricsExporter::new(realtime_exporter, "apollo");
+
+        let default_reader = opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader::builder(named_exporter, runtime::Tokio)
             .with_interval(Duration::from_secs(60))
-            .with_timeout(batch_processor.max_export_timeout)
+            .with_timeout(batch_config.max_export_timeout)
             .build();
 
-        let realtime_reader = opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader::builder(realtime_exporter, runtime::Tokio)
-            .with_interval(batch_processor.scheduled_delay)
-            .with_timeout(batch_processor.max_export_timeout)
+        let realtime_reader = opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader::builder(named_realtime_exporter, runtime::Tokio)
+            .with_interval(batch_config.scheduled_delay)
+            .with_timeout(batch_config.max_export_timeout)
             .build();
 
         let resource = Resource::builder()
@@ -230,32 +233,31 @@ impl Config {
 
         builder.apollo_meter_provider_builder = builder
             .apollo_meter_provider_builder
-            .with_reader(default_reader)
-            .with_resource(resource.clone())
+            .with_reader(MeterProviderType::Apollo, default_reader)
+            .with_resource(MeterProviderType::Apollo, resource.clone())
             .with_view(view_default_aggregation);
 
         builder.apollo_realtime_meter_provider_builder = builder
             .apollo_realtime_meter_provider_builder
-            .with_reader(realtime_reader)
-            .with_resource(resource.clone())
+            .with_reader(MeterProviderType::ApolloRealtime, realtime_reader)
+            .with_resource(MeterProviderType::ApolloRealtime, resource.clone())
             .with_view(view_custom_aggregation);
         Ok(builder)
     }
 
     fn configure_apollo_metrics(
-        mut builder: MetricsBuilder,
+        builder: &mut MetricsBuilder,
         endpoint: &Url,
         key: &str,
         reference: &str,
         schema_id: &str,
-        batch_processor: &BatchProcessorConfig,
+        batch_config: &ApolloUsageReportsBatchProcessorConfiguration,
         metrics_reference_mode: ApolloMetricsReferenceMode,
-    ) -> Result<MetricsBuilder, BoxError> {
-        let batch_processor_config = batch_processor;
-        tracing::debug!(endpoint = %endpoint, "creating Apollo metrics exporter");
+    ) -> Result<(), BoxError> {
+        tracing::info!("configuring Apollo usage report metrics: {}", batch_config);
         let exporter = ApolloExporter::new(
             endpoint,
-            batch_processor_config,
+            batch_config,
             key,
             reference,
             schema_id,
@@ -263,8 +265,8 @@ impl Config {
             metrics_reference_mode,
         )?;
 
-        builder.apollo_metrics_sender = exporter.start();
-        Ok(builder)
+        builder.with_apollo_metrics_sender(exporter.start());
+        Ok(())
     }
 }
 
@@ -295,7 +297,7 @@ mod test {
     use crate::query_planner::OperationKind;
     use crate::services::SupergraphRequest;
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_disabled() -> Result<(), BoxError> {
         let config = r#"
             telemetry:

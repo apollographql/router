@@ -544,6 +544,7 @@ mod tests {
 
     use super::*;
     use crate::assert_debug_snapshot;
+    use crate::connectors::json_selection::ApplyToError;
     use crate::selection;
 
     #[test]
@@ -763,6 +764,26 @@ mod tests {
                 "c": 3,
             })),
             (Some(json!(11)), vec![]),
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn get_should_return_none_when_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!("$.arr->get($.missing)", spec).apply_to(&json!({
+                "arr": [1, 2, 3],
+            })),
+            (
+                None,
+                vec![ApplyToError::from_json(&json!({
+                    "message": "Property .missing not found in object",
+                    "path": ["missing"],
+                    "range": [13, 20],
+                    "spec": spec.to_string(),
+                }))]
+            ),
         );
     }
 }
@@ -1161,22 +1182,23 @@ mod shape_tests {
     fn get_shape_should_return_unknown_for_object_with_unknown_key() {
         let fields = IndexMap::default();
         let input_shape = Shape::object(fields, Shape::none(), []);
+        let test_shape = get_test_shape(
+            vec![WithRange::new(
+                LitExpr::Path(PathSelection {
+                    path: PathList::Key(
+                        Key::field("a").into_with_range(),
+                        PathList::Empty.into_with_range(),
+                    )
+                    .into_with_range(),
+                }),
+                None,
+            )],
+            input_shape.clone(),
+        );
 
         assert_eq!(
-            get_test_shape(
-                vec![WithRange::new(
-                    LitExpr::Path(PathSelection {
-                        path: PathList::Key(
-                            Key::field("a").into_with_range(),
-                            PathList::Empty.into_with_range(),
-                        )
-                        .into_with_range(),
-                    }),
-                    None
-                )],
-                input_shape.clone()
-            ),
-            input_shape.any_field([])
+            test_shape,
+            input_shape.any_field(test_shape.locations.iter().cloned()),
         );
     }
 

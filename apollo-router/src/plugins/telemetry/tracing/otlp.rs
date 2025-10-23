@@ -6,29 +6,28 @@ use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_otlp::WithHttpConfig;
 use opentelemetry_otlp::WithTonicConfig;
 use opentelemetry_sdk::trace::BatchSpanProcessor;
-use opentelemetry_sdk::trace::TracerProviderBuilder;
 use tonic::metadata::MetadataMap;
 use tower::BoxError;
 
-use crate::plugins::telemetry::config::TracingCommon;
-use crate::plugins::telemetry::config_new::spans::Spans;
+use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::otlp::Protocol;
+use crate::plugins::telemetry::error_handler::NamedSpanExporter;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::plugins::telemetry::otlp::process_endpoint;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
-use crate::plugins::telemetry::tracing::TracingConfigurator;
+use crate::plugins::telemetry::reload::tracing::TracingBuilder;
+use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
 
 impl TracingConfigurator for super::super::otlp::Config {
-    fn enabled(&self) -> bool {
+    fn config(conf: &Conf) -> &Self {
+        &conf.exporters.tracing.otlp
+    }
+
+    fn is_enabled(&self) -> bool {
         self.enabled
     }
 
-    fn apply(
-        &self,
-        builder: TracerProviderBuilder,
-        common: &TracingCommon,
-        _spans_config: &Spans,
-    ) -> Result<TracerProviderBuilder, BoxError> {
+    fn configure(&self, builder: &mut TracingBuilder) -> Result<(), BoxError> {
         let kind = TelemetryDataKind::Traces;
         let exporter = match self.protocol {
             Protocol::Grpc => {
@@ -73,17 +72,22 @@ impl TracingConfigurator for super::super::otlp::Config {
                 exporter.build_span_exporter()?
             }
         };
-
-        let batch_span_processor = BatchSpanProcessor::builder(exporter)
+        let named_exporter = NamedSpanExporter::new(exporter.build_span_exporter()?, "otlp");
+        let batch_span_processor = BatchSpanProcessor::builder(named_exporter)
             .with_batch_config(self.batch_processor.clone().into())
             .build()
             .filtered();
-        Ok(
-            if common.preview_datadog_agent_sampling.unwrap_or_default() {
-                builder.with_span_processor(batch_span_processor.always_sampled())
-            } else {
-                builder.with_span_processor(batch_span_processor)
-            },
-        )
+
+        if builder
+            .tracing_common()
+            .preview_datadog_agent_sampling
+            .unwrap_or_default()
+        {
+            builder.with_span_processor(batch_span_processor.always_sampled())
+        } else {
+            builder.with_span_processor(batch_span_processor)
+        }
+
+        Ok(())
     }
 }

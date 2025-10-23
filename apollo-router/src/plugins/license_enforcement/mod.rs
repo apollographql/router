@@ -43,6 +43,7 @@ pub(crate) struct TpsLimitConf {
     pub(crate) interval: Duration,
 }
 
+/// The license enforcement plugin has no configuration.
 #[derive(Debug, Default, Deserialize, JsonSchema, Serialize)]
 pub(crate) struct LicenseEnforcementConfig {}
 
@@ -169,7 +170,7 @@ mod test {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn it_emits_metrics_when_tps_enforced() {
         async {
             // GIVEN

@@ -19,7 +19,6 @@ use super::config_new::ToOtelValue;
 use super::dynamic_attribute::LogAttributes;
 use super::formatters::EXCLUDED_ATTRIBUTES;
 use super::formatters::EventFormatter;
-use super::reload::IsSampled;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::config_new::logging::Format;
 use crate::plugins::telemetry::config_new::logging::StdOut;
@@ -27,7 +26,8 @@ use crate::plugins::telemetry::consts::EVENT_ATTRIBUTE_OMIT_LOG;
 use crate::plugins::telemetry::formatters::RateLimitFormatter;
 use crate::plugins::telemetry::formatters::json::Json;
 use crate::plugins::telemetry::formatters::text::Text;
-use crate::plugins::telemetry::reload::LayeredTracer;
+use crate::plugins::telemetry::reload::otel::IsSampled;
+use crate::plugins::telemetry::reload::otel::LayeredTracer;
 use crate::plugins::telemetry::resource::ConfigResource;
 
 pub(crate) fn create_fmt_layer(

@@ -408,15 +408,12 @@ fn cmd_validate(file_paths: &[PathBuf]) -> Result<(), AnyError> {
     Ok(())
 }
 
-fn subgraph_parse_and_validate(
+fn subgraph_parse_and_expand(
     name: &str,
     url: &str,
     doc_str: &str,
-) -> Result<typestate::Subgraph<typestate::Validated>, SubgraphError> {
-    typestate::Subgraph::parse(name, url, doc_str)?
-        .expand_links()?
-        .assume_upgraded()
-        .validate()
+) -> Result<typestate::Subgraph<typestate::Expanded>, SubgraphError> {
+    typestate::Subgraph::parse(name, url, doc_str)?.expand_links()
 }
 
 fn cmd_subgraph(file_path: &Path) -> Result<(), AnyError> {
@@ -426,7 +423,7 @@ fn cmd_subgraph(file_path: &Path) -> Result<(), AnyError> {
         .and_then(|name| name.to_str().map(|x| x.to_string()))
         .unwrap_or_else(|| "subgraph".to_string());
     let url = format!("http://{name}");
-    let subgraph = match subgraph_parse_and_validate(&name, &url, &doc_str) {
+    let subgraph = match subgraph_parse_and_expand(&name, &url, &doc_str) {
         Ok(subgraph) => subgraph,
         Err(err) => {
             let composition_errors: Vec<_> = err.to_composition_errors().collect();

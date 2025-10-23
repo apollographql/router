@@ -1,7 +1,8 @@
-### Fix OTLP metrics export to prevent UpDown counter drift ([PR #8174](https://github.com/apollographql/router/pull/8174))
+### (refactor) UpDownCounter RAII guards ([PR #8379](https://github.com/apollographql/router/pull/8379))
 
-Previously, when using OTLP metrics export with delta temporality configured, UpDown counters could exhibit drift issues where the counter values would become inaccurate over time. This happened because UpDown counters were incorrectly exported as deltas instead of cumulative values.
+Previously UpDownCounters were being manually incremented and decremented. This PR changes UpDownCounters to use RAII guards
+on drop ensuring that they are always decremented when dropped.
 
-UpDownCounters will now always be exported as aggregate values as per the otel spec.
+In particular this fixes: `apollo.router.opened.subscriptions` which was previously drifting due to manual incrementing and decrementing.
 
-By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/8174
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/8379

@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::ops::DerefMut;
+use std::mem;
 use std::sync::Arc;
 
 use derive_more::From;
@@ -16,8 +16,13 @@ use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
 use opentelemetry::metrics::SyncInstrument;
 use opentelemetry::metrics::UpDownCounter;
+use opentelemetry::metrics::noop::NoopMeterProvider;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use parking_lot::Mutex;
+use strum::EnumCount;
+use strum_macros::Display;
+use strum_macros::EnumCount;
+use strum_macros::EnumIter;
 
 use crate::metrics::filter::FilterMeterProvider;
 
@@ -28,9 +33,11 @@ use crate::metrics::filter::FilterMeterProvider;
 // This is within the spec: https://opentelemetry.io/docs/specs/otel/metrics/api/#get-a-meter
 // `Meters are identified by name, version, and schema_url fields. When more than one Meter of the same name, version, and schema_url is created, it is unspecified whether or under which conditions the same or different Meter instances are returned. It is a user error to create Meters with different attributes but the same identity.`
 
-#[derive(Hash, Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Debug)]
+#[derive(
+    Hash, Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Debug, EnumCount, EnumIter, Display,
+)]
+#[repr(u8)]
 pub(crate) enum MeterProviderType {
-    PublicPrometheus,
     Apollo,
     ApolloRealtime,
     Public,
@@ -39,28 +46,43 @@ pub(crate) enum MeterProviderType {
 
 #[derive(Clone)]
 pub(crate) struct AggregateMeterProvider {
-    inner: Arc<Mutex<Inner>>,
+    inner: Arc<Mutex<Option<Inner>>>,
 }
 
 impl Default for AggregateMeterProvider {
     fn default() -> Self {
         let meter_provider = AggregateMeterProvider {
-            inner: Arc::new(Mutex::new(Inner::default())),
+            inner: Arc::new(Mutex::new(Some(Inner::default()))),
         };
 
         meter_provider.set(
             MeterProviderType::OtelDefault,
-            Some(FilterMeterProvider::public(SdkMeterProvider::default())),
+            FilterMeterProvider::public(SdkMeterProvider::default()),
         );
 
         meter_provider
     }
 }
 
-#[derive(Default)]
 pub(crate) struct Inner {
-    providers: HashMap<MeterProviderType, (FilterMeterProvider, HashMap<MeterId, Meter>)>,
+    providers: Vec<(FilterMeterProvider, HashMap<MeterId, Meter>)>,
     registered_instruments: Vec<InstrumentWrapper>,
+}
+
+impl Default for Inner {
+    fn default() -> Self {
+        Inner {
+            providers: (0..MeterProviderType::COUNT)
+                .map(|_| {
+                    (
+                        FilterMeterProvider::public(SdkMeterProvider::default()),
+                        HashMap::new(),
+                    )
+                })
+                .collect(),
+            registered_instruments: Vec::new(),
+        }
+    }
 }
 
 /// Fields are never used directly but strong references here
@@ -90,7 +112,7 @@ pub(crate) enum InstrumentWrapper {
     },
 }
 
-#[derive(Eq, PartialEq, Hash)]
+#[derive(Eq, PartialEq, Hash, Clone)]
 struct MeterId {
     name: Cow<'static, str>,
     version: Option<Cow<'static, str>>,
@@ -106,35 +128,41 @@ impl AggregateMeterProvider {
     pub(crate) fn set(
         &self,
         meter_provider_type: MeterProviderType,
-        meter_provider: Option<FilterMeterProvider>,
-    ) -> Option<FilterMeterProvider> {
-        let mut inner = self.inner.lock();
+        meter_provider: FilterMeterProvider,
+    ) -> FilterMeterProvider {
+        let mut guard = self.inner.lock();
+        let inner = guard
+            .as_mut()
+            .expect("cannot use meter provider after shutdown");
         // As we are changing a meter provider we need to invalidate any registered instruments.
         // Clearing these allows any weak references at callsites to be invalidated.
         // This must be done BEFORE the old provider is dropped to ensure that metrics are not lost.
         // Once invalidated all metrics callsites will try to obtain new instruments, but will be blocked on the mutex.
-        inner.registered_instruments.clear();
+        inner.invalidate();
 
         //Now update the meter provider
-        let old = if let Some(meter_provider) = meter_provider {
-            inner
-                .providers
-                .insert(
-                    meter_provider_type,
-                    (meter_provider.clone(), HashMap::new()),
-                )
-                .map(|(old_provider, _)| old_provider)
-        } else {
-            None
-        };
+        let mut swap = (meter_provider, HashMap::new());
+        mem::swap(
+            &mut inner.providers[meter_provider_type as usize],
+            &mut swap,
+        );
+
         // Important! The mutex MUST be dropped before the old meter provider is dropped to avoid deadlocks in the case that the export function has metrics.
         // This implicitly happens by returning the old meter provider.
         // However, to avoid a potential footgun where someone removes the return value of this function I will explicitly drop the mutex guard.
-        drop(inner);
+        drop(guard);
 
         // Important! Now it is safe to drop the old meter provider, we return it, so we should be OK. If someone removes the return value of this function then
         // this must instead be converted to a drop call.
-        old
+        swap.0
+    }
+
+    /// Invalidate all the cached instruments
+    #[cfg(test)]
+    pub(crate) fn invalidate(&self) {
+        if let Some(inner) = self.inner.lock().as_mut() {
+            inner.invalidate();
+        }
     }
 
     /// Shutdown MUST be called from a blocking thread.
@@ -142,17 +170,13 @@ impl AggregateMeterProvider {
         // Make sure that we don't deadlock by dropping the mutex guard before actual shutdown happens
         // This means that if we have any misbehaving code that tries to access the meter provider during shutdown, e.g. for export metrics
         // then we don't get stuck on the mutex.
-        let mut inner = self.inner.lock();
-        let mut swap = Inner::default();
-        std::mem::swap(&mut *inner, &mut swap);
-        drop(inner);
-
-        // Now that we have dropped the mutex guard we can safely shutdown the meter providers
-        for (meter_provider_type, (meter_provider, _)) in &swap.providers {
-            if let Err(e) = meter_provider.shutdown() {
-                ::tracing::error!(error = %e, meter_provider_type = ?meter_provider_type, "failed to shutdown meter provider")
-            }
-        }
+        // For instance the apollo exporters have in the past had metrics for exporting, as
+        // they shut down they try to increment a metric which causes a new meter to be created.
+        // However, if we have not released the guard then we deadlock.
+        let mut guard = self.inner.lock();
+        let old = guard.take();
+        drop(guard);
+        drop(old);
     }
 
     /// Create a registered instrument. This enables caching at callsites and invalidation at the meter provider via weak reference.
@@ -164,18 +188,27 @@ impl AggregateMeterProvider {
         Arc<T>: Into<InstrumentWrapper>,
     {
         let mut guard = self.inner.lock();
-        let instrument = Arc::new((create_fn)(guard.deref_mut()));
-        guard.registered_instruments.push(instrument.clone().into());
-        instrument
+        let inner = guard
+            .as_mut()
+            .expect("cannot use meter provider after shutdown");
+        inner.create_registered_instrument(create_fn)
     }
 
     #[cfg(test)]
     pub(crate) fn registered_instruments(&self) -> usize {
-        self.inner.lock().registered_instruments.len()
+        self.inner
+            .lock()
+            .as_ref()
+            .expect("cannot use meter provider after shutdown")
+            .registered_instruments
+            .len()
     }
 }
 
 impl Inner {
+    pub(crate) fn invalidate(&mut self) {
+        self.registered_instruments.clear()
+    }
     pub(crate) fn meter(&mut self, name: &'static str) -> Meter {
         self.versioned_meter(
             name,
@@ -195,7 +228,7 @@ impl Inner {
         let schema_url = schema_url.map(|v| v.into());
         let mut meters = Vec::with_capacity(self.providers.len());
 
-        for (provider, existing_meters) in self.providers.values_mut() {
+        for (provider, existing_meters) in &mut self.providers {
             meters.push(
                 existing_meters
                     .entry(MeterId {
@@ -222,14 +255,30 @@ impl Inner {
 
         Meter::new(Arc::new(AggregateInstrumentProvider { meters }))
     }
+
+    pub(crate) fn create_registered_instrument<T>(
+        &mut self,
+        create_fn: impl Fn(&mut Inner) -> T,
+    ) -> Arc<T>
+    where
+        Arc<T>: Into<InstrumentWrapper>,
+    {
+        let instrument = Arc::new((create_fn)(self));
+        self.registered_instruments.push(instrument.clone().into());
+        instrument
+    }
 }
 
 impl MeterProvider for AggregateMeterProvider {
     fn meter(&self, name: &'static str) -> Meter {
         let mut inner = self.inner.lock();
-        inner.meter(name)
+        if let Some(inner) = inner.as_mut() {
+            inner.meter(name)
+        } else {
+            // The meter was used after shutdown. Default to Noop since the instrument cannot actually be used
+            NoopMeterProvider::default().meter(name)
+        }
     }
-
     fn meter_with_scope(&self, scope: opentelemetry::InstrumentationScope) -> Meter {
         let provider = SdkMeterProvider::default();
         provider.meter_with_scope(scope)
@@ -453,7 +502,7 @@ mod test {
         let meter_provider = AggregateMeterProvider::default();
         meter_provider.set(
             MeterProviderType::Public,
-            Some(FilterMeterProvider::public(delegate)),
+            FilterMeterProvider::public(delegate),
         );
         let meter = meter_provider.meter("test");
 
@@ -501,7 +550,7 @@ mod test {
         let meter_provider = AggregateMeterProvider::default();
         meter_provider.set(
             MeterProviderType::Public,
-            Some(FilterMeterProvider::public(delegate)),
+            FilterMeterProvider::public(delegate),
         );
         let meter = meter_provider.meter("test");
 
@@ -587,7 +636,7 @@ mod test {
         let meter_provider = AggregateMeterProvider::default();
         meter_provider.set(
             MeterProviderType::OtelDefault,
-            Some(FilterMeterProvider::public(delegate)),
+            FilterMeterProvider::public(delegate),
         );
 
         let counter = meter_provider
@@ -666,7 +715,7 @@ mod test {
 
         meter_provider.set(
             MeterProviderType::OtelDefault,
-            Some(FilterMeterProvider::public(delegate)),
+            FilterMeterProvider::public(delegate),
         );
 
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -690,7 +739,7 @@ mod test {
 
         meter_provider.set(
             MeterProviderType::OtelDefault,
-            Some(FilterMeterProvider::public(delegate)),
+            FilterMeterProvider::public(delegate),
         );
 
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -704,7 +753,7 @@ mod test {
         // Setting the meter provider should not deadlock.
         meter_provider.set(
             MeterProviderType::OtelDefault,
-            Some(FilterMeterProvider::public(delegate)),
+            FilterMeterProvider::public(delegate),
         );
 
         tokio::time::sleep(Duration::from_millis(20)).await;

@@ -46,12 +46,8 @@ impl MeterProvider {
             }
         }
     }
-    fn shutdown(&self) -> opentelemetry_sdk::error::OTelSdkResult {
-        match self {
-            MeterProvider::Regular(provider) => provider.shutdown(),
-        }
-    }
 
+    #[cfg(test)]
     fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult {
         match self {
             MeterProvider::Regular(provider) => provider.force_flush(),
@@ -88,14 +84,14 @@ impl FilterMeterProvider {
             .expect("regex should have been valid")
     }
 
-    pub(crate) fn private_realtime<T: Into<MeterProvider>>(delegate: T) -> Self {
+    pub(crate) fn apollo_realtime<T: Into<MeterProvider>>(delegate: T) -> Self {
         FilterMeterProvider::builder()
             .delegate(delegate)
             .allow(Self::get_private_realtime_regex().clone())
             .build()
     }
 
-    pub(crate) fn private<T: Into<MeterProvider>>(delegate: T) -> Self {
+    pub(crate) fn apollo<T: Into<MeterProvider>>(delegate: T) -> Self {
         FilterMeterProvider::builder()
             .delegate(delegate)
             .allow(
@@ -123,11 +119,7 @@ impl FilterMeterProvider {
         FilterMeterProvider::builder().delegate(delegate).build()
     }
 
-    pub(crate) fn shutdown(&self) -> opentelemetry_sdk::error::OTelSdkResult {
-        self.delegate.shutdown()
-    }
-
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult {
         self.delegate.force_flush()
     }
@@ -277,7 +269,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_private_metrics() {
         let exporter = InMemoryMetricExporter::default();
-        let meter_provider = FilterMeterProvider::private(
+        let meter_provider = FilterMeterProvider::apollo(
             MeterProviderBuilder::default()
                 .with_reader(PeriodicReader::builder(exporter.clone()).build())
                 .build(),
@@ -391,7 +383,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_description_and_unit() {
         let exporter = InMemoryMetricExporter::default();
-        let meter_provider = FilterMeterProvider::private(
+        let meter_provider = FilterMeterProvider::apollo(
             MeterProviderBuilder::default()
                 .with_reader(PeriodicReader::builder(exporter.clone()).build())
                 .build(),
@@ -516,7 +508,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_private_realtime_metrics() {
         let exporter = InMemoryMetricExporter::default();
-        let meter_provider = FilterMeterProvider::private_realtime(
+        let meter_provider = FilterMeterProvider::apollo_realtime(
             MeterProviderBuilder::default()
                 .with_reader(PeriodicReader::builder(exporter.clone()).build())
                 .build(),

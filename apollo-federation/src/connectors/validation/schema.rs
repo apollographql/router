@@ -144,7 +144,7 @@ fn abstract_type_error(node: Option<SourceSpan>, source_map: &SourceMap, keyword
     Message {
         code: Code::ConnectorsUnsupportedAbstractType,
         message: format!(
-            "Abstract schema types, such as `{keyword}`, are not supported when using connectors. You can check out our documentation at https://go.apollo.dev/connectors/best-practices#abstract-schema-types-are-unsupported."
+            "Abstract schema types, such as `{keyword}`, are not supported when using connectors."
         ),
         locations: node
             .and_then(|location| location.line_column_range(source_map))

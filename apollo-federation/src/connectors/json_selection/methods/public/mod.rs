@@ -18,6 +18,8 @@ mod last;
 pub(crate) use last::LastMethod;
 mod map;
 pub(crate) use map::MapMethod;
+mod r#as;
+pub(crate) use r#as::AsMethod;
 mod r#match;
 pub(crate) use r#match::MatchMethod;
 pub(crate) use r#match::match_shape;

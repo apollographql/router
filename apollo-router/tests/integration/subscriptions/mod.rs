@@ -1,7 +1,7 @@
 //! Common subscription testing functionality
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 
 use axum::Router;
@@ -13,9 +13,13 @@ use axum::http::StatusCode;
 use axum::response::Response;
 use axum::routing::get;
 use axum::routing::post;
+use futures::SinkExt as _;
+use futures::StreamExt as _;
+use parking_lot::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::json;
+use tokio::time::Duration;
 use tracing::debug;
 use tracing::info;
 use tracing::warn;
@@ -30,7 +34,8 @@ pub mod ws_passthrough;
 struct SubscriptionServerConfig {
     payloads: Vec<serde_json::Value>,
     interval_ms: u64,
-    terminate_subscription: bool,
+    complete_subscription: bool,
+    is_closed: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,7 +67,10 @@ impl Default for CallbackTestState {
     }
 }
 
-pub const SUBSCRIPTION_CONFIG: &str = include_str!("fixtures/subscription.router.yaml");
+pub const SUBSCRIPTION_CONFIG_SUBSCRIPTIONS_TRANSPORT_WS: &str =
+    include_str!("fixtures/subscription.router.yaml");
+pub const SUBSCRIPTION_CONFIG_GRAPHQL_WS: &str =
+    include_str!("fixtures/subscription_graphql_ws.router.yaml");
 pub const SUBSCRIPTION_COPROCESSOR_CONFIG: &str =
     include_str!("fixtures/subscription_coprocessor.router.yaml");
 pub const CALLBACK_CONFIG: &str = include_str!("fixtures/callback.router.yaml");
@@ -72,22 +80,26 @@ pub fn create_sub_query(interval_ms: u64, nb_events: usize) -> String {
     )
 }
 
-#[derive(Clone)]
-struct CustomState {
-    config: SubscriptionServerConfig,
-    is_closed: Arc<AtomicBool>,
-}
-
+/// Set up a WebSocket server that sends the given JSON payloads to clients over either of the
+/// GraphQL-over-WS subscription protocols.
+///
+/// # Parameters
+/// - `interval_ms` - time between subscription events
+/// - `complete_subscription` - make the server immediately close the subscription when all events
+///   are sent. If `false`, the subscription remains open, which is useful for testing
+///   client-initiated closing.
+/// - `is_closed` - the server sets this to `true` when any WS connection has closed
 pub async fn start_subscription_server_with_payloads(
     payloads: Vec<serde_json::Value>,
     interval_ms: u64,
-    terminate_subscription: bool,
+    complete_subscription: bool,
     is_closed: Arc<AtomicBool>,
 ) -> (SocketAddr, wiremock::MockServer) {
     let config = SubscriptionServerConfig {
         payloads,
         interval_ms,
-        terminate_subscription,
+        complete_subscription,
+        is_closed,
     };
 
     // Start WebSocket server using axum
@@ -98,7 +110,7 @@ pub async fn start_subscription_server_with_payloads(
             debug!("Fallback route hit: {}", uri);
             "Not found"
         })
-        .with_state(CustomState { config, is_closed });
+        .with_state(config);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let ws_addr = listener.local_addr().unwrap();
@@ -109,7 +121,7 @@ pub async fn start_subscription_server_with_payloads(
     });
 
     // Wait a moment for the server to start
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
 
     info!("Axum server running on {}", ws_addr);
 
@@ -196,7 +208,7 @@ pub async fn verify_subscription_events(
 
     let mut subscription_events = Vec::new();
     // Set a longer timeout for receiving all events
-    let timeout = tokio::time::timeout(tokio::time::Duration::from_secs(60), async {
+    let timeout = tokio::time::timeout(Duration::from_secs(60), async {
         while let Some(field) = multipart
             .next_field()
             .await
@@ -231,28 +243,27 @@ pub async fn verify_subscription_events(
     );
 
     // Give the stream a moment to ensure it's properly terminated and no more events arrive
-    let termination_timeout =
-        tokio::time::timeout(tokio::time::Duration::from_millis(1000), async {
-            while let Some(field) = multipart
-                .next_field()
-                .await
-                .expect("could not read next chunk")
-            {
-                assert!(is_json_field(&field), "all response chunks must be JSON");
+    let termination_timeout = tokio::time::timeout(Duration::from_millis(1000), async {
+        while let Some(field) = multipart
+            .next_field()
+            .await
+            .expect("could not read next chunk")
+        {
+            assert!(is_json_field(&field), "all response chunks must be JSON");
 
-                let parsed: serde_json::Value = field.json().await.expect("invalid JSON chunk");
-                let data = parsed
-                    .get("data")
-                    .or_else(|| parsed.get("payload").and_then(|p| p.get("data")));
+            let parsed: serde_json::Value = field.json().await.expect("invalid JSON chunk");
+            let data = parsed
+                .get("data")
+                .or_else(|| parsed.get("payload").and_then(|p| p.get("data")));
 
-                assert!(
-                    data.is_none(),
-                    "Unexpected additional event received after {} expected events: {}",
-                    expected_events.len(),
-                    parsed
-                );
-            }
-        });
+            assert!(
+                data.is_none(),
+                "Unexpected additional event received after {} expected events: {}",
+                expected_events.len(),
+                parsed
+            );
+        }
+    });
 
     assert!(
         termination_timeout.await.is_ok(),
@@ -267,142 +278,399 @@ pub async fn verify_subscription_events(
     subscription_events
 }
 
+/// The WS subprotocol name for the modern graphql-ws protocol.
+const SUBPROTOCOL_GRAPHQL_WS: &str = "graphql-transport-ws";
+/// The WS subprotocol name for the legacy subscriptions-transport-ws protocol.
+const SUBPROTOCOL_SUBSCRIPTIONS_TRANSPORT_WS: &str = "graphql-ws";
+
 async fn websocket_handler(
-    State(CustomState { config, is_closed }): State<CustomState>,
+    State(config): State<SubscriptionServerConfig>,
     ws: WebSocketUpgrade,
     headers: axum::http::HeaderMap,
 ) -> Response {
     debug!("WebSocket upgrade requested");
     debug!("Headers: {:?}", headers);
-    ws.protocols(["graphql-ws"])
-        .on_upgrade(move |socket| handle_websocket(socket, config, is_closed))
+    // Speak both protocols
+    ws.protocols([
+        SUBPROTOCOL_GRAPHQL_WS,
+        SUBPROTOCOL_SUBSCRIPTIONS_TRANSPORT_WS,
+    ])
+    .on_upgrade(async move |socket| {
+        match socket
+            .protocol()
+            .expect("must have been provided due to `ws.protocols()` call")
+            .to_str()
+            .expect("always utf8")
+        {
+            SUBPROTOCOL_GRAPHQL_WS => handle_graphql_ws(socket, config).await,
+            SUBPROTOCOL_SUBSCRIPTIONS_TRANSPORT_WS => {
+                handle_subscriptions_transport_ws(socket, config).await
+            }
+            _ => unreachable!("other protocols rejected by `ws.protocols()` call"),
+        }
+    })
 }
 
-async fn handle_websocket(
-    mut socket: WebSocket,
-    config: SubscriptionServerConfig,
-    is_closed: Arc<AtomicBool>,
-) {
+/// Create a WebSocket message from a JSON value.
+fn json_message<T: serde::Serialize>(data: &T) -> axum::extract::ws::Message {
+    axum::extract::ws::Message::text(serde_json::to_string(data).unwrap())
+}
+
+/// Handle a WebSocket connection according to the legacy subscriptions-transport-ws protocol described in:
+/// https://github.com/apollographql/subscriptions-transport-ws/blob/36f3f6f780acc1a458b768db13fd39c65e5e6518/PROTOCOL.md
+///
+/// Note this is a subgraph server, and its purpose is to validate that the router speaks the
+/// right protocol. For this reason, it has strict assertions throughout.
+async fn handle_subscriptions_transport_ws(socket: WebSocket, config: SubscriptionServerConfig) {
     info!("WebSocket connection established");
-    'global: while let Some(msg) = socket.recv().await {
-        if let Ok(msg) = msg {
-            match msg {
-                axum::extract::ws::Message::Text(text) => {
-                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
-                        match parsed.get("type").and_then(|t| t.as_str()) {
-                            Some("connection_init") => {
-                                // Send connection_ack
-                                let ack = json!({
-                                    "type": "connection_ack"
+
+    let mut subscriptions = HashMap::new();
+
+    let (mut ws_sender, mut ws_receiver) = socket.split();
+    let (message_sender, mut message_receiver) = tokio::sync::mpsc::channel(10);
+
+    // We need a bit of indirection to be able to send messages on the socket from individual
+    // subscription tasks, because the socket is not `Clone`
+    tokio::task::spawn(async move {
+        while let Some(message) = message_receiver.recv().await {
+            ws_sender
+                .send(message)
+                .await
+                .expect("could not send message from subgraph to router");
+        }
+    });
+
+    while let Some(msg) = ws_receiver.next().await {
+        match msg.expect("error receiving websocket message from the router") {
+            axum::extract::ws::Message::Text(text) => {
+                let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) else {
+                    panic!("router sent non-JSON subscription message: {text}");
+                };
+
+                match parsed.get("type").and_then(|t| t.as_str()) {
+                    Some("connection_init") => {
+                        // Client sends this message after plain websocket connection to start the communication with the server
+                        // The server will respond only with `connection_ack` + `ka` (if used) or `connection_error` to this message.
+
+                        let ack = json!({ "type": "connection_ack" });
+                        message_sender
+                            .send(json_message(&ack))
+                            .await
+                            .expect("router already closed the connection");
+                    }
+                    Some("start") => {
+                        // Client sends this message to execute GraphQL operation
+                        // - `id: string` : The id of the GraphQL operation to start
+                        // - `payload: Object`:
+                        //    * `query: string` : GraphQL operation as string or parsed GraphQL document node
+                        //    * `variables?: Object` : Object with GraphQL variables
+                        //    * `operationName?: string` : GraphQL operation name
+                        let id = parsed
+                            .get("id")
+                            .and_then(|i| i.as_str())
+                            .unwrap_or("1")
+                            .to_string();
+
+                        let Some(query) = parsed
+                            .get("payload")
+                            .and_then(|payload| payload.get("query"))
+                            .and_then(|query| query.as_str())
+                        else {
+                            panic!(r#"router sent invalid "start" message: {parsed}"#);
+                        };
+
+                        // actual implementation for our test subscription
+                        if !query.contains("userWasCreated") {
+                            unimplemented!("only the userWasCreated subscription is supported");
+                        }
+
+                        let (subscription_close_tx, mut subscription_close_rx) =
+                            tokio::sync::oneshot::channel::<()>();
+                        assert!(
+                            subscriptions
+                                .insert(id.clone(), subscription_close_tx)
+                                .is_none(),
+                            "received duplicate subscription id={id}"
+                        );
+
+                        let interval_ms = config.interval_ms;
+                        let payloads = config.payloads.clone();
+                        let message_sender = message_sender.clone();
+                        tokio::task::spawn(async move {
+                            info!(
+                                "Starting subscription with {} events, interval {}ms (configured)",
+                                payloads.len(),
+                                interval_ms
+                            );
+
+                            // Send multiple subscription events
+                            let mut i = 0;
+                            for custom_payload in &payloads {
+                                // Wait between events
+                                tokio::select! {
+                                    _ = &mut subscription_close_rx => {
+                                        debug!("Client stopping subscription early");
+                                        break;
+                                    }
+                                    _ = tokio::time::sleep(Duration::from_millis(interval_ms)) => {}
+                                }
+
+                                // Always send exactly what we're given - no transformation
+                                let event_data = json!({
+                                    "id": id,
+                                    "type": "data",
+                                    "payload": custom_payload
                                 });
-                                if socket
-                                    .send(axum::extract::ws::Message::text(
-                                        serde_json::to_string(&ack).unwrap(),
-                                    ))
+
+                                if message_sender
+                                    .send(json_message(&event_data))
                                     .await
                                     .is_err()
                                 {
-                                    break 'global;
-                                }
-                            }
-                            Some("start") => {
-                                let id = parsed.get("id").and_then(|i| i.as_str()).unwrap_or("1");
-
-                                // Handle subscription
-                                if let Some(payload) = parsed.get("payload")
-                                    && let Some(query) =
-                                        payload.get("query").and_then(|q| q.as_str())
-                                    && query.contains("userWasCreated")
-                                {
-                                    let interval_ms = config.interval_ms;
-                                    let payloads = &config.payloads;
-
-                                    info!(
-                                        "Starting subscription with {} events, interval {}ms (configured)",
-                                        payloads.len(),
-                                        interval_ms
+                                    // This could be a benign race condition _or_ something that
+                                    // causes a test to fail, so let's at least say something
+                                    warn!(
+                                        "Router already closed connection while server tried to send a message"
                                     );
-
-                                    // Give the router time to fully establish the subscription stream
-                                    tokio::time::sleep(tokio::time::Duration::from_millis(100))
-                                        .await;
-
-                                    // Send multiple subscription events
-                                    for (i, custom_payload) in payloads.iter().enumerate() {
-                                        // Always send exactly what we're given - no transformation
-                                        let event_data = json!({
-                                            "id": id,
-                                            "type": "data",
-                                            "payload": custom_payload
-                                        });
-
-                                        if socket
-                                            .send(axum::extract::ws::Message::text(
-                                                serde_json::to_string(&event_data).unwrap(),
-                                            ))
-                                            .await
-                                            .is_err()
-                                        {
-                                            break 'global;
-                                        }
-
-                                        debug!(
-                                            "Sent subscription event {}/{}",
-                                            i + 1,
-                                            payloads.len()
-                                        );
-
-                                        // Wait between events
-                                        if i < payloads.len() - 1 {
-                                            tokio::time::sleep(tokio::time::Duration::from_millis(
-                                                interval_ms,
-                                            ))
-                                            .await;
-                                        }
-                                    }
-
-                                    if config.terminate_subscription {
-                                        // Send completion
-                                        let complete = json!({
-                                            "id": id,
-                                            "type": "complete"
-                                        });
-                                        if socket
-                                            .send(axum::extract::ws::Message::text(
-                                                serde_json::to_string(&complete).unwrap(),
-                                            ))
-                                            .await
-                                            .is_err()
-                                        {
-                                            break 'global;
-                                        }
-
-                                        info!(
-                                            "Completed subscription with {} events",
-                                            payloads.len()
-                                        );
-                                    } else {
-                                        info!(
-                                            "Sent {} subscription events but did not send `complete` message",
-                                            payloads.len()
-                                        );
-                                    }
                                 }
+
+                                i += 1;
+                                debug!("Sent subscription event {}/{}", i, payloads.len());
                             }
-                            Some("stop") => {
-                                // Handle stop message
-                                break 'global;
+
+                            if subscription_close_rx.is_terminated() {
+                                info!(
+                                    "Sent {i} subscription events, and client closed the subscription"
+                                );
+                            } else if config.complete_subscription {
+                                let complete = json!({
+                                    "id": id,
+                                    "type": "complete"
+                                });
+                                if message_sender.send(json_message(&complete)).await.is_err() {
+                                    // This could be a benign race condition _or_ something that
+                                    // causes a test to fail, so let's at least say something
+                                    warn!(
+                                        "Router already closed connection while server tried to complete subscription"
+                                    );
+                                }
+
+                                info!("Completed subscription with {i} events");
+                            } else {
+                                info!(
+                                    "Sent {i} subscription events but did not send `complete` message"
+                                );
                             }
-                            _ => {}
+                        });
+                    }
+                    Some("stop") => {
+                        // Client sends this message in order to stop a running GraphQL operation execution (for example: unsubscribe)
+                        // Multiple subscriptions can exist on a single connection in theory so we cannot just close the connection entirely
+                        let id = parsed.get("id").and_then(|i| i.as_str()).unwrap_or("1");
+
+                        if let Some(tx) = subscriptions.remove(id) {
+                            _ = tx.send(());
                         }
                     }
+                    Some("connection_terminate") => {
+                        // Client sends this message to terminate the connection.
+
+                        assert!(
+                            subscriptions.is_empty(),
+                            "router did not close subscriptions cleanly: {:?}",
+                            subscriptions.keys().collect::<Vec<_>>()
+                        );
+                        break;
+                    }
+                    ty => panic!("router sent unexpected message type: {ty:?}"),
                 }
-                axum::extract::ws::Message::Close(_) => break 'global,
-                _ => {}
             }
+            axum::extract::ws::Message::Close(_) => {
+                panic!(
+                    "router should not unilaterally close connection, but send `connection_terminate` message"
+                );
+            }
+            _ => {}
         }
     }
-    is_closed.store(true, std::sync::atomic::Ordering::Relaxed);
+
+    // Tests can assert this to know if the server closed the connection cleanly
+    config
+        .is_closed
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Handle a WebSocket connection according to the modern graphql-ws protocol.
+/// Spec URL: https://github.com/enisdenjo/graphql-ws/blob/0c0eb499c3a0278c6d9cc799064f22c5d24d2f60/PROTOCOL.md
+async fn handle_graphql_ws(socket: WebSocket, config: SubscriptionServerConfig) {
+    info!("WebSocket connection established");
+
+    let mut subscriptions = HashMap::new();
+
+    let (mut ws_sender, mut ws_receiver) = socket.split();
+    let (message_sender, mut message_receiver) = tokio::sync::mpsc::channel(10);
+
+    // We need a bit of indirection to be able to send messages on the socket from individual
+    // subscription tasks, because the socket is not `Clone`
+    tokio::task::spawn(async move {
+        while let Some(message) = message_receiver.recv().await {
+            ws_sender
+                .send(message)
+                .await
+                .expect("could not send message from subgraph to router");
+        }
+    });
+
+    while let Some(msg) = ws_receiver.next().await {
+        match msg.expect("error receiving websocket message from the router") {
+            axum::extract::ws::Message::Text(text) => {
+                let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) else {
+                    panic!("router sent non-JSON subscription message: {text}");
+                };
+
+                match parsed.get("type").and_then(|t| t.as_str()) {
+                    Some("connection_init") => {
+                        // Client sends this message after plain websocket connection to start the communication with the server
+                        // The server will respond only with `connection_ack` + `ka` (if used) or `connection_error` to this message.
+
+                        let ack = json!({ "type": "connection_ack" });
+                        message_sender
+                            .send(json_message(&ack))
+                            .await
+                            .expect("router already closed the connection");
+                    }
+                    Some("ping") => {
+                        let pong = json!({ "type": "pong" });
+                        message_sender
+                            .send(json_message(&pong))
+                            .await
+                            .expect("router already closed the connection");
+                    }
+                    Some("subscribe") => {
+                        // Requests an operation specified in the message payload.
+                        // This message provides a unique ID field to connect published messages to the operation requested by this message.
+                        let id = parsed
+                            .get("id")
+                            .and_then(|i| i.as_str())
+                            .unwrap_or("1")
+                            .to_string();
+
+                        let Some(query) = parsed
+                            .get("payload")
+                            .and_then(|payload| payload.get("query"))
+                            .and_then(|query| query.as_str())
+                        else {
+                            panic!(r#"router sent invalid "start" message: {parsed}"#);
+                        };
+
+                        if !query.contains("userWasCreated") {
+                            unimplemented!("only the userWasCreated subscription is supported");
+                        }
+
+                        let (subscription_close_tx, mut subscription_close_rx) =
+                            tokio::sync::oneshot::channel::<()>();
+                        assert!(
+                            subscriptions
+                                .insert(id.clone(), subscription_close_tx)
+                                .is_none(),
+                            "received duplicate subscription id={id}"
+                        );
+
+                        let interval_ms = config.interval_ms;
+                        let payloads = config.payloads.clone();
+                        let message_sender = message_sender.clone();
+                        // actual implementation for our test subscription
+                        tokio::task::spawn(async move {
+                            info!(
+                                "Starting subscription with {} events, interval {}ms (configured)",
+                                payloads.len(),
+                                interval_ms
+                            );
+
+                            // Send multiple subscription events
+                            let mut i = 0;
+                            for custom_payload in &payloads {
+                                // Wait between events
+                                tokio::select! {
+                                    _ = &mut subscription_close_rx => {
+                                        debug!("Client stopping subscription early");
+                                        break;
+                                    }
+                                    _ = tokio::time::sleep(Duration::from_millis(interval_ms)) => {}
+                                }
+
+                                // Always send exactly what we're given - no transformation
+                                let event_data = json!({
+                                    "id": id,
+                                    "type": "next",
+                                    "payload": custom_payload
+                                });
+
+                                if message_sender
+                                    .send(json_message(&event_data))
+                                    .await
+                                    .is_err()
+                                {
+                                    // This could be a benign race condition _or_ something that
+                                    // causes a test to fail, so let's at least say something
+                                    warn!(
+                                        "Router already closed connection while server tried to send a message"
+                                    );
+                                }
+
+                                i += 1;
+                                debug!("Sent subscription event {}/{}", i, payloads.len());
+                            }
+
+                            if subscription_close_rx.is_terminated() {
+                                info!(
+                                    "Sent {i} subscription events, and client closed the subscription"
+                                );
+                            } else if config.complete_subscription {
+                                let complete = json!({
+                                    "id": id,
+                                    "type": "complete"
+                                });
+                                if message_sender.send(json_message(&complete)).await.is_err() {
+                                    // This could be a benign race condition _or_ something that
+                                    // causes a test to fail, so let's at least say something
+                                    warn!(
+                                        "Router already closed connection while server tried to complete subscription"
+                                    );
+                                }
+
+                                info!("Completed subscription with {i} events");
+                            } else {
+                                info!(
+                                    "Sent {i} subscription events but did not send `complete` message"
+                                );
+                            }
+                        });
+                    }
+                    Some("complete") => {
+                        // Multiple subscriptions can exist on a single connection in theory so we cannot just close the connection entirely
+                        let id = parsed.get("id").and_then(|i| i.as_str()).unwrap_or("1");
+
+                        if let Some(tx) = subscriptions.remove(id) {
+                            _ = tx.send(());
+                        }
+                    }
+                    ty => panic!("router sent unexpected message type: {ty:?}"),
+                }
+            }
+            axum::extract::ws::Message::Close(_) => break,
+            _ => {}
+        }
+    }
+
+    assert!(
+        subscriptions.is_empty(),
+        "router did not close subscriptions cleanly: {:?}",
+        subscriptions.keys().collect::<Vec<_>>()
+    );
+    config
+        .is_closed
+        .store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
 pub async fn start_callback_server() -> (SocketAddr, CallbackTestState) {
@@ -423,7 +691,7 @@ pub async fn start_callback_server() -> (SocketAddr, CallbackTestState) {
         axum::serve(listener, app).await.unwrap();
     });
 
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
     info!("Callback server running on {}", addr);
 
     (addr, state)
@@ -444,13 +712,13 @@ async fn handle_callback(
     }
 
     {
-        let mut callbacks = state.received_callbacks.lock().unwrap();
+        let mut callbacks = state.received_callbacks.lock();
         callbacks.push(payload.clone());
     }
 
     match payload.action.as_str() {
         "check" => {
-            let ids = state.subscription_ids.lock().unwrap();
+            let ids = state.subscription_ids.lock();
             if ids.contains(&payload.id) {
                 StatusCode::NO_CONTENT
             } else {
@@ -458,7 +726,7 @@ async fn handle_callback(
             }
         }
         "next" | "complete" => {
-            let ids = state.subscription_ids.lock().unwrap();
+            let ids = state.subscription_ids.lock();
             if ids.contains(&payload.id) {
                 if payload.action == "next" {
                     StatusCode::OK
@@ -470,7 +738,7 @@ async fn handle_callback(
             }
         }
         "heartbeat" => {
-            let ids = state.subscription_ids.lock().unwrap();
+            let ids = state.subscription_ids.lock();
             let all_valid = payload
                 .ids
                 .as_ref()
@@ -495,7 +763,7 @@ async fn handle_callback_no_id(
     debug!("Headers: {:?}", headers);
 
     {
-        let mut callbacks = state.received_callbacks.lock().unwrap();
+        let mut callbacks = state.received_callbacks.lock();
         callbacks.push(payload.clone());
     }
 
@@ -615,7 +883,7 @@ async fn send_callback_events_with_payloads(
 ) {
     let client = reqwest::Client::new();
 
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
     for (i, custom_payload) in payloads.iter().enumerate() {
         let payload = CallbackPayload {
@@ -641,7 +909,7 @@ async fn send_callback_events_with_payloads(
         }
 
         if i < payloads.len() - 1 {
-            tokio::time::sleep(tokio::time::Duration::from_millis(interval_ms)).await;
+            tokio::time::sleep(Duration::from_millis(interval_ms)).await;
         }
     }
 

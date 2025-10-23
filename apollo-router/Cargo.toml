@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "2.6.0"
+version = "2.7.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -8,7 +8,7 @@ description = "A configurable, high-performance routing runtime for Apollo Feder
 license = "Elastic-2.0"
 
 # renovate-automation: rustc version
-rust-version = "1.89.0"
+rust-version = "1.90.0"
 edition = "2024"
 build = "build/main.rs"
 default-run = "router"
@@ -56,11 +56,13 @@ ci = []
 snapshot = ["axum-server"]
 
 [dependencies]
+addr2line = "0.25.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
-apollo-federation = { path = "../apollo-federation", version = "=2.6.0" }
+apollo-federation = { path = "../apollo-federation", version = "=2.7.0" }
 async-compression = { version = "0.4.6", features = [
     "tokio",
+    "futures-io",
     "brotli",
     "gzip",
     "deflate",
@@ -109,8 +111,17 @@ heck = "0.5.0"
 humantime = "2.1.0"
 humantime-serde = "1.1.1"
 hyper = { version = "1.5.1", features = ["full"] }
-# XXX(@goto-bus-stop): Pinned because of undiagnosed tracing failures in 0.1.11 and up: https://github.com/apollographql/router/pull/7159
-hyper-util = { version = "=0.1.10", features = ["full"] }
+hyper-util = { version = "0.1.16", features = [
+    "client",
+    "client-legacy",
+    "server",
+    "server-graceful",
+    "http1",
+    "http2",
+    "tokio",
+    # omit "tracing" feature as it breaks apollo_otel_traces tests, maybe re-add later?
+    # https://github.com/apollographql/router/pull/7575
+] }
 hyper-rustls = { version = "0.27.3", default-features = false, features = [
     "http1",
     "http2",
@@ -120,10 +131,10 @@ indexmap = { version = "2.2.6", features = ["serde"] }
 itertools = "0.14.0"
 jsonpath_lib = "0.3.0"
 jsonpath-rust = "0.3.5"
-jsonschema = { version = "0.17.1", default-features = false }
+jsonschema = { version = "0.33.0", default-features = false }
 jsonwebtoken = "9.3.0"
 libc = "0.2.155"
-linkme = "0.3.27"
+linkme = "0.3.30"
 lru = "0.16.0"
 mediatype = "0.20.0"
 mockall = "0.13.0"
@@ -136,6 +147,7 @@ notify = { version = "8.0.0", default-features = false, features = [
 ] }
 nu-ansi-term = "0.50"
 num-traits = "0.2.19"
+object = { version = "0.36.5", features = ["read"] }
 oci-client = { version = "0.15.0", default-features = false, features = ["rustls-tls", "rustls-tls-native-roots", "trust-dns"] }
 once_cell = "1.19.0"
 
@@ -219,12 +231,6 @@ serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
 strum = "0.27.0"
 strum_macros = "0.27.0"
-sqlx = { version = "0.8", features = [
-    "postgres",
-    "runtime-tokio",
-    "tls-rustls-ring-native-roots",
-    "chrono",
-] }
 sys-info = "0.9.1"
 sysinfo = { version = "0.37.0", features = [
     "system",
@@ -232,8 +238,8 @@ sysinfo = { version = "0.37.0", features = [
 ], default-features = false }
 thiserror = "2.0.0"
 tokio.workspace = true
-tokio-stream = { version = "0.1.15", features = ["sync", "net"] }
-tokio-util = { version = "0.7.11", features = ["net", "codec", "time"] }
+tokio-stream = { version = "0.1.15", features = ["sync", "net", "fs"] }
+tokio-util = { version = "0.7.11", features = ["net", "codec", "time", "compat"] }
 tonic = { version = "0.13.1", features = [
     "transport",
     "gzip",
@@ -245,14 +251,14 @@ tower-service = "0.3.2"
 tracing = "0.1.40"
 tracing-core = "0.1.32"
 tracing-futures = { version = "0.2.5", features = ["futures-03"] }
-tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json"] }
+tracing-subscriber = { version = "0.3.20", features = ["env-filter", "json"] }
 url = { version = "2.5.4", features = ["serde"] }
 urlencoding = "2.1.3"
 uuid = { version = "1.9.1", features = ["serde", "v4"] }
 yaml-rust = "0.4.5"
 wiremock = "0.6"
 wsl = "0.1.0"
-tokio-tungstenite = { version = "0.27.0", features = [
+tokio-tungstenite = { version = "0.28.0", features = [
     "rustls-tls-native-roots",
 ] }
 tokio-rustls = { version = "0.26.0", default-features = false }
@@ -289,6 +295,7 @@ apollo-environment-detector = "0.1.0"
 log = "0.4.22"
 scopeguard = "1.2.0"
 chrono = "0.4.41"
+tokio-tar = { package = "astral-tokio-tar", version = "0.5.3" }
 blake3 = { version = "1.8.2", features = ["serde"] }
 
 [target.'cfg(unix)'.dependencies]
@@ -298,11 +305,12 @@ hyperlocal = { version = "0.9.1", default-features = false, features = [
 ] }
 tikv-jemallocator = { version = "0.6.0", features = ["profiling"], optional = true }
 tikv-jemalloc-ctl = { version = "0.6.0", features = ["stats", "profiling"], optional = true }
+tikv-jemalloc-sys = { version = "0.6.0", features = ["profiling"] }
 
 [dev-dependencies]
 axum = { version = "0.8.1", features = ["http2", "ws"] }
 axum-server = "0.7.1"
-ctor = "0.5.0"
+ctor = "0.6.0"
 ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
 encoding_rs.workspace = true
 fred = { version = "10.1.0", features = [
@@ -351,7 +359,7 @@ multer = { version = "3.1.0", features = ["json"] }
 
 # See note above in this file about `^tracing` packages which also applies to
 # these dev dependencies.
-tracing-subscriber = { version = "0.3.18", default-features = false, features = [
+tracing-subscriber = { version = "0.3.20", default-features = false, features = [
     "env-filter",
     "fmt",
 ] }

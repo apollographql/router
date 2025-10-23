@@ -18,7 +18,6 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::SpanExporter;
-use opentelemetry_sdk::trace::TracerProviderBuilder;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 use schemars::JsonSchema;
@@ -26,9 +25,8 @@ use serde::Deserialize;
 pub(crate) use span_processor::DatadogSpanProcessor;
 use tower::BoxError;
 
+use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::config::GenericWith;
-use crate::plugins::telemetry::config::TracingCommon;
-use crate::plugins::telemetry::config_new::spans::Spans;
 use crate::plugins::telemetry::consts::BUILT_IN_SPAN_NAMES;
 use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::OTEL_ORIGINAL_NAME;
@@ -39,9 +37,11 @@ use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
+use crate::plugins::telemetry::error_handler::NamedSpanExporter;
+use crate::plugins::telemetry::reload::tracing::TracingBuilder;
+use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
-use crate::plugins::telemetry::tracing::TracingConfigurator;
 
 fn default_resource_mappings() -> HashMap<String, String> {
     let mut map = HashMap::with_capacity(7);
@@ -60,11 +60,12 @@ fn default_resource_mappings() -> HashMap<String, String> {
 const ENV_KEY: Key = Key::from_static_str("env");
 const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:8126";
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[schemars(rename = "DatadogConfig")]
 pub(crate) struct Config {
     /// Enable datadog
-    enabled: bool,
+    pub(crate) enabled: bool,
 
     /// The endpoint to send to
     #[serde(default)]
@@ -111,18 +112,17 @@ fn default_true() -> bool {
 }
 
 impl TracingConfigurator for Config {
-    fn enabled(&self) -> bool {
+    fn config(conf: &Conf) -> &Self {
+        &conf.exporters.tracing.datadog
+    }
+
+    fn is_enabled(&self) -> bool {
         self.enabled
     }
 
-    fn apply(
-        &self,
-        builder: TracerProviderBuilder,
-        trace: &TracingCommon,
-        _spans_config: &Spans,
-    ) -> Result<TracerProviderBuilder, BoxError> {
+    fn configure(&self, builder: &mut TracingBuilder) -> Result<(), BoxError> {
         tracing::info!("Configuring Datadog tracing: {}", self.batch_processor);
-        let common: opentelemetry_sdk::trace::Config = trace.into();
+        let common: opentelemetry_sdk::trace::Config = builder.tracing_common().into();
 
         // Precompute representation otel Keys for the mappings so that we don't do heap allocation for each span
         let resource_mappings = self.enable_span_mapping.then(|| {
@@ -214,22 +214,27 @@ impl TracingConfigurator for Config {
         let mut span_metrics = default_span_metrics();
         span_metrics.extend(self.span_metrics.clone());
 
-        let batch_processor =
-            opentelemetry_sdk::trace::BatchSpanProcessor::builder(ExporterWrapper {
-                delegate: exporter,
-                span_metrics,
-            })
+        let wrapper = ExporterWrapper {
+            delegate: exporter,
+            span_metrics,
+        };
+        let named_exporter = NamedSpanExporter::new(wrapper, "datadog");
+
+        let batch_processor = opentelemetry_sdk::trace::BatchSpanProcessor::builder(named_exporter)
             .with_batch_config(self.batch_processor.clone().into())
             .build()
             .filtered();
 
-        Ok(
-            if trace.preview_datadog_agent_sampling.unwrap_or_default() {
-                builder.with_span_processor(batch_processor.always_sampled())
-            } else {
-                builder.with_span_processor(batch_processor)
-            },
-        )
+        if builder
+            .tracing_common()
+            .preview_datadog_agent_sampling
+            .unwrap_or_default()
+        {
+            builder.with_span_processor(batch_processor.always_sampled())
+        } else {
+            builder.with_span_processor(batch_processor)
+        }
+        Ok(())
     }
 }
 

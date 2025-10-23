@@ -38,8 +38,8 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_MESSAGE;
 use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
-use crate::plugins::telemetry::reload::IsSampled;
-use crate::plugins::telemetry::reload::SampledSpan;
+use crate::plugins::telemetry::reload::otel::IsSampled;
+use crate::plugins::telemetry::reload::otel::SampledSpan;
 use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::router_factory::STARTING_SPAN_NAME;
 

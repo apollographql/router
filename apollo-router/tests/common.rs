@@ -717,37 +717,60 @@ impl IntegrationTest {
     #[allow(dead_code)]
     pub async fn start(&mut self) {
         let mut router = Command::new(&self.router_location);
-        if let (Ok(apollo_key), Ok(apollo_graph_ref)) = (
-            std::env::var("TEST_APOLLO_KEY"),
-            std::env::var("TEST_APOLLO_GRAPH_REF"),
-        ) {
-            router
-                .env("APOLLO_KEY", apollo_key)
-                .env("APOLLO_GRAPH_REF", apollo_graph_ref);
+
+        let mut needs_supergraph_cli_arg = true;
+        let non_file_startup_env = &[
+            "APOLLO_ROUTER_SUPERGRAPH_PATH",
+            "APOLLO_ROUTER_SUPERGRAPH_URLS",
+            "APOLLO_GRAPH_ARTIFACT_REFERENCE",
+            "APOLLO_GRAPH_REF",
+        ];
+        // Any env vars set via the env argument should be passed along as-is
+        if let Some(env) = &self.env {
+            for (key, val) in env {
+                // If env vars are used to configure which schema to load, do not
+                // override later with the --supergraph cli arg
+                if non_file_startup_env.iter().any(|x| x == key) {
+                    needs_supergraph_cli_arg = false;
+                }
+                router.env(key, val);
+            }
         }
 
-        if let Some(env) = &self.env {
-            router.envs(env);
+        // These env vars are set by CircleCI to provide a valid license check. This will
+        // overwrite setting these variables in the router.env loaded above, which is intentional
+        // in order to allow local testing without Uplink. Note that this introduces a slight
+        // discrepancy between what a test is executing locally vs. what it executes on CI.
+        if let Ok(apollo_key) = std::env::var("TEST_APOLLO_KEY") {
+            router.env("APOLLO_KEY", apollo_key);
+        }
+        if let Ok(apollo_graph_ref) = std::env::var("TEST_APOLLO_GRAPH_REF") {
+            router.env("APOLLO_GRAPH_REF", apollo_graph_ref);
         }
 
         if let Some(jwt) = &self.jwt {
             router.env("APOLLO_ROUTER_LICENSE", jwt);
         }
 
-        router
-            .args(dbg!([
-                "--hr",
-                "--config",
-                &self.test_config_location.to_string_lossy(),
-                "--supergraph",
-                &self.test_schema_location.to_string_lossy(),
-                "--log",
-                &self.log,
-            ]))
-            .stdout(Stdio::piped());
+        // Build arguments conditionally based on APOLLO_GRAPH_ARTIFACT_REGISTRY
+        let config_path = self.test_config_location.to_string_lossy();
+        let mut args = vec!["--hr", "--config", &config_path, "--log", &self.log];
 
+        // Add --supergraph if launch env vars are not set
+        let schema_path = self.test_schema_location.to_string_lossy();
+        if needs_supergraph_cli_arg {
+            tracing::info!("Loading supergraph from file");
+            args.push("--supergraph");
+            args.push(&schema_path);
+        }
+
+        router
+            .args(args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
         let mut router = router.spawn().expect("router should start");
         let reader = BufReader::new(router.stdout.take().expect("out"));
+        let stderr_reader = BufReader::new(router.stderr.take().expect("err"));
         let stdio_tx = self.stdio_tx.clone();
         let collect_stdio = self.collect_stdio.take();
         let bind_address = self.bind_address.clone();
@@ -796,6 +819,14 @@ impl IntegrationTest {
             }
         });
 
+        // Also read from stderr to capture error messages
+        let stderr_tx = self.stdio_tx.clone();
+        task::spawn(async move {
+            let mut lines = stderr_reader.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let _ = stderr_tx.send(line).await;
+            }
+        });
         self.router = Some(router);
     }
 
@@ -829,7 +860,7 @@ impl IntegrationTest {
                 yaml,
                 &self._subgraph_overrides,
                 &self._apollo_otlp_server.uri().to_string(),
-                Some(self.bind_address()),
+                None,
                 &self.redis_namespace,
                 Some(&self.port_replacements),
             ),

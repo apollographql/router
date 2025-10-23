@@ -2289,6 +2289,7 @@ pub(crate) fn create_initial_options(
     excluded_edges: ExcludedDestinations,
     excluded_conditions: ExcludedConditions,
     override_conditions: &OverrideConditions,
+    initial_subgraph_constraint: Option<Arc<str>>,
     disabled_subgraphs: &IndexSet<Arc<str>>,
 ) -> Result<Vec<SimultaneousPathsWithLazyIndirectPaths>, FederationError> {
     let initial_paths = SimultaneousPaths::from(initial_path);
@@ -2310,8 +2311,18 @@ pub(crate) fn create_initial_options(
             .paths
             .iter()
             .cloned()
-            .map(SimultaneousPaths::from)
-            .collect();
+            .map(|path| {
+                let Some(initial_subgraph_constraint) = &initial_subgraph_constraint else {
+                    return Ok::<_, FederationError>(Some(path));
+                };
+                let tail_weight = path.graph.node_weight(path.tail)?;
+                Ok(if &tail_weight.source == initial_subgraph_constraint {
+                    Some(path)
+                } else {
+                    None
+                })
+            })
+            .process_results(|iter| iter.flatten().map(SimultaneousPaths::from).collect())?;
         Ok(lazy_initial_path.create_lazy_options(options, initial_context))
     } else {
         Ok(vec![lazy_initial_path])

@@ -69,6 +69,7 @@
 
 #[cfg(test)]
 use std::future::Future;
+use std::marker::PhantomData;
 #[cfg(test)]
 use std::pin::Pin;
 use std::sync::OnceLock;
@@ -80,6 +81,78 @@ use crate::metrics::aggregation::AggregateMeterProvider;
 
 pub(crate) mod aggregation;
 pub(crate) mod filter;
+
+/// A RAII guard for an up-down counter that automatically decrements on drop.
+///
+/// This guard implements the RAII (Resource Acquisition Is Initialization) pattern
+/// to ensure that up-down counters are properly decremented when the guard goes out
+/// of scope. This is particularly useful for tracking active operations, connections,
+/// or other resources where the counter should reflect the current state.
+///
+/// It is essential that the same instrument is used for the decrement as was used for an increment
+/// otherwise drift can occur.
+#[derive(Debug)]
+#[doc(hidden)]
+#[must_use = "without holding the guard updown counters will immediately zero out"]
+pub struct UpDownCounterGuard<T>
+where
+    T: std::ops::Neg<Output = T> + Copy,
+{
+    counter: opentelemetry::metrics::UpDownCounter<T>,
+    value: T,
+    attributes: Vec<opentelemetry::KeyValue>,
+}
+
+impl<T> UpDownCounterGuard<T>
+where
+    T: std::ops::Neg<Output = T> + Copy,
+{
+    /// Creates a new guard.
+    #[doc(hidden)]
+    pub fn new(
+        counter: std::sync::Arc<opentelemetry::metrics::UpDownCounter<T>>,
+        value: T,
+        attributes: &[opentelemetry::KeyValue],
+    ) -> Self {
+        // Note that increment will already have been called via the macro, we only deal with drops
+        // It is essential that we take the counter out of the arc otherwise it will break reload.
+        // Instruments rely on weak references to allow callsite invalidation.
+        // Therefore, if we hold onto the Arc then callsite invalidation won't work.
+        Self {
+            counter: (*counter).clone(),
+            value,
+            attributes: attributes.to_vec(),
+        }
+    }
+}
+
+impl<T> Drop for UpDownCounterGuard<T>
+where
+    T: std::ops::Neg<Output = T> + Copy,
+{
+    /// Decrements the counter when the guard is dropped.
+    ///
+    /// This automatically subtracts the original value from the counter,
+    /// ensuring the metric accurately reflects the current state.
+    fn drop(&mut self) {
+        self.counter.add(-self.value, &self.attributes);
+    }
+}
+
+/// Noop guard won't do anything. it serves to unify the logic UpDownCounterGuard
+#[doc(hidden)]
+pub struct NoopGuard<I, T> {
+    _phantom: PhantomData<(I, T)>,
+}
+impl<I, T> NoopGuard<I, T> {
+    /// Noop guard won't do anything. it serves to unify the logic UpDownCounterGuard
+    #[doc(hidden)]
+    pub fn new(_instrument: I, _value: T, _attributes: &[opentelemetry::KeyValue]) -> Self {
+        NoopGuard {
+            _phantom: Default::default(),
+        }
+    }
+}
 
 #[cfg(test)]
 pub(crate) mod test_utils {
@@ -167,11 +240,11 @@ pub(crate) mod test_utils {
 
             meter_provider.set(
                 MeterProviderType::Public,
-                Some(FilterMeterProvider::all(
+                FilterMeterProvider::all(
                     MeterProviderBuilder::default()
                         .with_reader(reader.clone())
                         .build(),
-                )),
+                ),
             );
 
             (meter_provider, reader)
@@ -884,15 +957,15 @@ macro_rules! parse_attributes {
 #[deprecated(since = "TBD", note = "use `u64_counter_with_unit` instead")]
 macro_rules! u64_counter {
     ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
-        metric!(u64, counter, add, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*));
+        metric!(u64, counter, crate::metrics::NoopGuard, add, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*));
     };
 
     ($name:literal, $description:literal, $value: expr, $($attrs:tt)*) => {
-        metric!(u64, counter, add, $name, $description, $value, parse_attributes!($($attrs)*));
+        metric!(u64, counter, crate::metrics::NoopGuard, add, $name, $description, $value, parse_attributes!($($attrs)*));
     };
 
     ($name:literal, $description:literal, $value: expr) => {
-        metric!(u64, counter, add, $name, $description, $value, []);
+        metric!(u64, counter, crate::metrics::NoopGuard, add, $name, $description, $value, []);
     }
 }
 
@@ -906,15 +979,15 @@ macro_rules! u64_counter {
 #[allow(unused_macros)]
 macro_rules! u64_counter_with_unit {
     ($($name:ident).+, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
-        metric!(u64, counter, add, stringify!($($name).+), $description, $unit, $value, parse_attributes!($($attrs)*));
+        metric!(u64, counter, crate::metrics::NoopGuard, add, stringify!($($name).+), $description, $unit, $value, parse_attributes!($($attrs)*));
     };
 
     ($name:literal, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
-        metric!(u64, counter, add, $name, $description, $unit, $value, parse_attributes!($($attrs)*));
+        metric!(u64, counter, crate::metrics::NoopGuard, add, $name, $description, $unit, $value, parse_attributes!($($attrs)*));
     };
 
     ($name:literal, $description:literal, $unit:literal, $value: expr) => {
-        metric!(u64, counter, add, $name, $description, $unit, $value, []);
+        metric!(u64, counter, crate::metrics::NoopGuard, add, $name, $description, $unit, $value, []);
     }
 }
 
@@ -927,15 +1000,15 @@ macro_rules! u64_counter_with_unit {
 #[deprecated(since = "TBD", note = "use `f64_counter_with_unit` instead")]
 macro_rules! f64_counter {
     ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
-        metric!(f64, counter, add, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*));
+        metric!(f64, counter, crate::metrics::NoopGuard, add, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*));
     };
 
     ($name:literal, $description:literal, $value: expr, $($attrs:tt)*) => {
-        metric!(f64, counter, add, $name, $description, $value, parse_attributes!($($attrs)*));
+        metric!(f64, counter, crate::metrics::NoopGuard, add, $name, $description, $value, parse_attributes!($($attrs)*));
     };
 
     ($name:literal, $description:literal, $value: expr) => {
-        metric!(f64, counter, add, $name, $description, $value, []);
+        metric!(f64, counter, crate::metrics::NoopGuard, add, $name, $description, $value, []);
     }
 }
 
@@ -949,101 +1022,199 @@ macro_rules! f64_counter {
 #[allow(unused_macros)]
 macro_rules! f64_counter_with_unit {
     ($($name:ident).+, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
-        metric!(f64, counter, add, stringify!($($name).+), $description, $unit, $value, parse_attributes!($($attrs)*));
+        metric!(f64, counter, crate::metrics::NoopGuard, add, stringify!($($name).+), $description, $unit, $value, parse_attributes!($($attrs)*));
     };
 
     ($name:literal, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
-        metric!(f64, counter, add, $name, $description, $unit, $value, parse_attributes!($($attrs)*));
+        metric!(f64, counter, crate::metrics::NoopGuard, add, $name, $description, $unit, $value, parse_attributes!($($attrs)*));
     };
 
     ($name:literal, $description:literal, $unit:literal, $value: expr) => {
-        metric!(f64, counter, add, $name, $description, $unit, $value, []);
+        metric!(f64, counter, crate::metrics::NoopGuard, add, $name, $description, $unit, $value, []);
     }
 }
 
-/// Get or create an i64 up down counter metric and add a value to it.
-/// The metric must include a description.
+/// Creates or retrieves an i64 up-down counter and returns a RAII guard.
 ///
-/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
-/// behind this API.
+/// This macro increments the counter immediately and returns an [`I64UpDownCounterGuard`]
+/// that automatically decrements the counter when dropped. This ensures accurate tracking
+/// of active resources, operations, or connections.
+///
+/// **Important:** The returned guard must be stored in a variable to keep the counter
+/// incremented. If the guard is immediately dropped, the counter will be decremented.
+///
+/// # Returns
+///
+/// An [`I64UpDownCounterGuard`] that decrements the counter on drop.
+///
+/// # Examples
+///
+/// ```ignore
+/// // Counter is incremented to 1
+/// let _guard = i64_up_down_counter!(
+///     "active_connections",
+///     "Number of active connections",
+///     1,
+///     connection.type = "websocket"
+/// );
+/// // Counter remains at 1 while _guard is in scope
+///
+/// // When _guard is dropped, counter is automatically decremented back to 0
+/// ```
+///
+/// See the [module-level documentation](crate::metrics) for more details.
 #[allow(unused_macros)]
 #[deprecated(since = "TBD", note = "use `i64_up_down_counter_with_unit` instead")]
 macro_rules! i64_up_down_counter {
     ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
-        metric!(i64, up_down_counter, add, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*));
+        metric!(i64, up_down_counter, crate::metrics::UpDownCounterGuard::<i64>, add, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*))
     };
 
     ($name:literal, $description:literal, $value: expr, $($attrs:tt)*) => {
-        metric!(i64, up_down_counter, add, $name, $description, $value, parse_attributes!($($attrs)*));
+        metric!(i64, up_down_counter, crate::metrics::UpDownCounterGuard::<i64>, add, $name, $description, $value, parse_attributes!($($attrs)*))
     };
 
     ($name:literal, $description:literal, $value: expr) => {
-        metric!(i64, up_down_counter, add, $name, $description, $value, []);
+        metric!(i64, up_down_counter, crate::metrics::UpDownCounterGuard::<i64>, add, $name, $description, $value, [])
     };
 }
 
-/// Get or create an i64 up down counter metric and add a value to it.
-/// The metric must include a description and a unit.
+/// Creates or retrieves an i64 up-down counter with a unit and returns a RAII guard.
+///
+/// This macro increments the counter immediately and returns an [`UpDownCounterGuard<i64>`]
+/// that automatically decrements the counter when dropped. This ensures accurate tracking
+/// of active resources, operations, or connections.
 ///
 /// The units should conform to the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/#units).
 ///
-/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
-/// behind this API.
+/// **Important:** The returned guard must be stored in a variable to keep the counter
+/// incremented. If the guard is immediately dropped, the counter will be decremented.
+///
+/// # Returns
+///
+/// An [`UpDownCounterGuard<i64>`] that decrements the counter on drop.
+///
+/// # Examples
+///
+/// ```ignore
+/// // Counter is incremented to 1
+/// let _active_job = i64_up_down_counter_with_unit!(
+///     "compute.active_jobs",
+///     "Number of active computation jobs",
+///     "{job}",
+///     1,
+///     job.type = "query_planning"
+/// );
+/// // Counter remains at 1 while _active_job is in scope
+///
+/// // When _active_job is dropped, counter is automatically decremented back to 0
+/// ```
+///
+/// See the [module-level documentation](crate::metrics) for more details.
 #[allow(unused_macros)]
 macro_rules! i64_up_down_counter_with_unit {
     ($($name:ident).+, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
-        metric!(i64, up_down_counter, add, stringify!($($name).+), $description, $unit, $value, parse_attributes!($($attrs)*));
+        metric!(i64, up_down_counter, crate::metrics::UpDownCounterGuard::<i64>, add, stringify!($($name).+), $description, $unit, $value, parse_attributes!($($attrs)*))
     };
 
     ($name:literal, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
-        metric!(i64, up_down_counter, add, $name, $description, $unit, $value, parse_attributes!($($attrs)*));
+        metric!(i64, up_down_counter, crate::metrics::UpDownCounterGuard::<i64>, add, $name, $description, $unit, $value, parse_attributes!($($attrs)*))
     };
 
     ($name:literal, $description:literal, $unit:literal, $value: expr) => {
-        metric!(i64, up_down_counter, add, $name, $description, $unit, $value, []);
+        metric!(i64, up_down_counter, crate::metrics::UpDownCounterGuard::<i64>, add, $name, $description, $unit, $value, [])
     }
 }
 
-/// Get or create an f64 up down counter metric and add a value to it.
-/// The metric must include a description.
+/// Creates or retrieves an f64 up-down counter and returns a RAII guard.
 ///
-/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
-/// behind this API.
+/// This macro increments the counter immediately and returns an [`UpDownCounterGuard<f64>`]
+/// that automatically decrements the counter when dropped. This ensures accurate tracking
+/// of active resources, operations, or connections.
+///
+/// **Important:** The returned guard must be stored in a variable to keep the counter
+/// incremented. If the guard is immediately dropped, the counter will be decremented.
+///
+/// # Returns
+///
+/// An [`UpDownCounterGuard<f64>`] that decrements the counter on drop.
+///
+/// # Examples
+///
+/// ```ignore
+/// // Counter is incremented by 1.5
+/// let _guard = f64_up_down_counter!(
+///     "active_load",
+///     "Current system load",
+///     1.5,
+///     load.type = "cpu"
+/// );
+/// // Counter remains at 1.5 while _guard is in scope
+///
+/// // When _guard is dropped, counter is automatically decremented by 1.5
+/// ```
+///
+/// See the [module-level documentation](crate::metrics) for more details.
 #[allow(unused_macros)]
 #[deprecated(since = "TBD", note = "use `f64_up_down_counter_with_unit` instead")]
 macro_rules! f64_up_down_counter {
     ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
-        metric!(f64, up_down_counter, add, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*));
+        metric!(f64, up_down_counter, crate::metrics::UpDownCounterGuard::<f64>, add, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*))
     };
 
     ($name:literal, $description:literal, $value: expr, $($attrs:tt)*) => {
-        metric!(f64, up_down_counter, add, $name, $description, $value, parse_attributes!($($attrs)*));
+        metric!(f64, up_down_counter, crate::metrics::UpDownCounterGuard::<f64>, add, $name, $description, $value, parse_attributes!($($attrs)*))
     };
 
     ($name:literal, $description:literal, $value: expr) => {
-        metric!(f64, up_down_counter, add, $name, $description, $value, []);
+        metric!(f64, up_down_counter, crate::metrics::UpDownCounterGuard::<f64>, add, $name, $description, $value, [])
     };
 }
 
-/// Get or create an f64 up down counter metric and add a value to it.
-/// The metric must include a description and a unit.
+/// Creates or retrieves an f64 up-down counter with a unit and returns a RAII guard.
+///
+/// This macro increments the counter immediately and returns an [`UpDownCounterGuard<f64>`]
+/// that automatically decrements the counter when dropped. This ensures accurate tracking
+/// of active resources, operations, or connections.
 ///
 /// The units should conform to the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/#units).
 ///
-/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
-/// behind this API.
+/// **Important:** The returned guard must be stored in a variable to keep the counter
+/// incremented. If the guard is immediately dropped, the counter will be decremented.
+///
+/// # Returns
+///
+/// An [`UpDownCounterGuard<f64>`] that decrements the counter on drop.
+///
+/// # Examples
+///
+/// ```ignore
+/// // Counter is incremented by 2.5
+/// let _memory_usage = f64_up_down_counter_with_unit!(
+///     "memory.active_usage",
+///     "Active memory usage",
+///     "MB",
+///     2.5,
+///     memory.type = "heap"
+/// );
+/// // Counter remains at 2.5 while _memory_usage is in scope
+///
+/// // When _memory_usage is dropped, counter is automatically decremented by 2.5
+/// ```
+///
+/// See the [module-level documentation](crate::metrics) for more details.
 #[allow(unused_macros)]
 macro_rules! f64_up_down_counter_with_unit {
     ($($name:ident).+, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
-        metric!(f64, up_down_counter, add, stringify!($($name).+), $description, $unit, $value, parse_attributes!($($attrs)*));
+        metric!(f64, up_down_counter, crate::metrics::UpDownCounterGuard::<f64>, add, stringify!($($name).+), $description, $unit, $value, parse_attributes!($($attrs)*))
     };
 
     ($name:literal, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
-        metric!(f64, up_down_counter, add, $name, $description, $unit, $value, parse_attributes!($($attrs)*));
+        metric!(f64, up_down_counter, crate::metrics::UpDownCounterGuard::<f64>, add, $name, $description, $unit, $value, parse_attributes!($($attrs)*))
     };
 
     ($name:literal, $description:literal, $unit:literal, $value: expr) => {
-        metric!(f64, up_down_counter, add, $name, $description, $unit, $value, []);
+        metric!(f64, up_down_counter, crate::metrics::UpDownCounterGuard::<f64>, add, $name, $description, $unit, $value, [])
     }
 }
 
@@ -1056,15 +1227,15 @@ macro_rules! f64_up_down_counter_with_unit {
 #[deprecated(since = "TBD", note = "use `f64_histogram_with_unit` instead")]
 macro_rules! f64_histogram {
     ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
-        metric!(f64, histogram, record, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*));
+        metric!(f64, histogram, crate::metrics::NoopGuard, record, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*));
     };
 
     ($name:literal, $description:literal, $value: expr, $($attrs:tt)*) => {
-        metric!(f64, histogram, record, $name, $description, $value, parse_attributes!($($attrs)*));
+        metric!(f64, histogram, crate::metrics::NoopGuard,record, $name, $description, $value, parse_attributes!($($attrs)*));
     };
 
     ($name:literal, $description:literal, $value: expr) => {
-        metric!(f64, histogram, record, $name, $description, $value, []);
+        metric!(f64, histogram, crate::metrics::NoopGuard,record, $name, $description, $value, []);
     };
 }
 
@@ -1091,15 +1262,15 @@ macro_rules! f64_histogram {
 #[allow(unused_macros)]
 macro_rules! f64_histogram_with_unit {
     ($($name:ident).+, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
-        metric!(f64, histogram, record, stringify!($($name).+), $description, $unit, $value, parse_attributes!($($attrs)*));
+        metric!(f64, histogram, crate::metrics::NoopGuard, record, stringify!($($name).+), $description, $unit, $value, parse_attributes!($($attrs)*));
     };
 
     ($name:literal, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
-        metric!(f64, histogram, record, $name, $description, $unit, $value, parse_attributes!($($attrs)*));
+        metric!(f64, histogram, crate::metrics::NoopGuard, record, $name, $description, $unit, $value, parse_attributes!($($attrs)*));
     };
 
     ($name:literal, $description:literal, $unit:literal, $value: expr) => {
-        metric!(f64, histogram, record, $name, $description, $unit, $value, []);
+        metric!(f64, histogram, crate::metrics::NoopGuard, record, $name, $description, $unit, $value, []);
     };
 }
 
@@ -1112,15 +1283,15 @@ macro_rules! f64_histogram_with_unit {
 #[deprecated(since = "TBD", note = "use `u64_histogram_with_unit` instead")]
 macro_rules! u64_histogram {
     ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
-        metric!(u64, histogram, record, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*));
+        metric!(u64, histogram, crate::metrics::NoopGuard, record, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*));
     };
 
     ($name:literal, $description:literal, $value: expr, $($attrs:tt)*) => {
-        metric!(u64, histogram, record, $name, $description, $value, parse_attributes!($($attrs)*));
+        metric!(u64, histogram, crate::metrics::NoopGuard, record, $name, $description, $value, parse_attributes!($($attrs)*));
     };
 
     ($name:literal, $description:literal, $value: expr) => {
-        metric!(u64, histogram, record, $name, $description, $value, []);
+        metric!(u64, histogram, crate::metrics::NoopGuard, record, $name, $description, $value, []);
     };
 }
 
@@ -1134,15 +1305,15 @@ macro_rules! u64_histogram {
 #[allow(unused_macros)]
 macro_rules! u64_histogram_with_unit {
     ($($name:ident).+, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
-        metric!(u64, histogram, record, stringify!($($name).+), $description, $unit, $value, parse_attributes!($($attrs)*));
+        metric!(u64, histogram, crate::metrics::NoopGuard, record, stringify!($($name).+), $description, $unit, $value, parse_attributes!($($attrs)*));
     };
 
     ($name:literal, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
-        metric!(u64, histogram, record, $name, $description, $unit, $value, parse_attributes!($($attrs)*));
+        metric!(u64, histogram, crate::metrics::NoopGuard, record, $name, $description, $unit, $value, parse_attributes!($($attrs)*));
     };
 
     ($name:literal, $description:literal, $unit:literal, $value: expr) => {
-        metric!(u64, histogram, record, $name, $description, $unit, $value, []);
+        metric!(u64, histogram, crate::metrics::NoopGuard, record, $name, $description, $unit, $value, []);
     };
 }
 
@@ -1152,7 +1323,7 @@ thread_local! {
     pub(crate) static CACHE_CALLSITE: std::sync::atomic::AtomicBool = const {std::sync::atomic::AtomicBool::new(false)};
 }
 macro_rules! metric {
-    ($ty:ident, $instrument:ident, $mutation:ident, $name:expr, $description:literal, $unit:literal, $value:expr, $attrs:expr) => {
+    ($ty:ident, $instrument:ident, $guard: ty, $mutation:ident, $name:expr, $description:literal, $unit:literal, $value:expr, $attrs:expr) => {
         // The way this works is that we have a static at each call site that holds a weak reference to the instrument.
         // We make a call we try to upgrade the weak reference. If it succeeds we use the instrument.
         // Otherwise we create a new instrument and update the static.
@@ -1205,19 +1376,27 @@ macro_rules! metric {
                         drop(instrument_guard);
                         instrument_ref
                     };
-                    instrument.$mutation($value, &$attrs);
+                    let attrs : &[opentelemetry::KeyValue] = &$attrs;
+                    instrument.$mutation($value, attrs);
+                    $guard::new(instrument.clone(), $value, attrs)
                 }
                 else {
+                    // This is only for testing.
+                    // The reason it is not cfg test is that we have a legitimate test for callsite caching though
+                    // cache_callsite is always true for not test
                     let meter_provider = crate::metrics::meter_provider();
                     let meter = opentelemetry::metrics::MeterProvider::meter(&meter_provider, "apollo/router");
-                    create_instrument_fn(meter).$mutation($value, &$attrs);
+                    let instrument = create_instrument_fn(meter);
+                    let attrs : &[opentelemetry::KeyValue] = &$attrs;
+                    instrument.$mutation($value, attrs);
+                    $guard::new(std::sync::Arc::new(instrument.clone()), $value, attrs)
                 }
             }
         }
     };
 
-    ($ty:ident, $instrument:ident, $mutation:ident, $name:expr, $description:literal, $value: expr, $attrs: expr) => {
-        metric!($ty, $instrument, $mutation, $name, $description, "", $value, $attrs);
+    ($ty:ident, $instrument:ident, $guard: ty, $mutation:ident, $name:expr, $description:literal, $value: expr, $attrs: expr) => {
+        metric!($ty, $instrument, $guard, $mutation, $name, $description, "", $value, $attrs)
     }
 }
 
@@ -1749,7 +1928,6 @@ mod test {
     use opentelemetry::metrics::MeterProvider;
 
     use crate::metrics::FutureMetricsExt;
-    use crate::metrics::aggregation::MeterProviderType;
     use crate::metrics::meter_provider;
     use crate::metrics::meter_provider_internal;
 
@@ -1874,7 +2052,7 @@ mod test {
     #[tokio::test]
     async fn test_i64_up_down_counter() {
         async {
-            i64_up_down_counter!("test", "test description", 1, "attr" = "val");
+            let _guard = i64_up_down_counter!("test", "test description", 1, "attr" = "val");
             assert_up_down_counter!("test", 1, "attr" = "val");
         }
         .with_metrics()
@@ -1884,8 +2062,89 @@ mod test {
     #[tokio::test]
     async fn test_f64_up_down_counter() {
         async {
-            f64_up_down_counter!("test", "test description", 1.5, "attr" = "val");
+            let _guard = f64_up_down_counter!("test", "test description", 1.5, "attr" = "val");
             assert_up_down_counter!("test", 1.5, "attr" = "val");
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_i64_up_down_counter_guard_auto_decrement() {
+        async {
+            // Test that dropping the guard decrements the counter
+            {
+                let _guard =
+                    i64_up_down_counter!("test_guard", "test description", 1, "attr" = "val");
+                assert_up_down_counter!("test_guard", 1, "attr" = "val");
+            }
+            // After guard is dropped, counter should be back to 0
+            assert_up_down_counter!("test_guard", 0, "attr" = "val");
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_i64_up_down_counter_guard_multiple() {
+        async {
+            // Test multiple guards with the same metric
+            let _guard1 = i64_up_down_counter!("test_multi", "test description", 1, "attr" = "val");
+            assert_up_down_counter!("test_multi", 1, "attr" = "val");
+
+            let _guard2 = i64_up_down_counter!("test_multi", "test description", 1, "attr" = "val");
+            assert_up_down_counter!("test_multi", 2, "attr" = "val");
+
+            let _guard3 = i64_up_down_counter!("test_multi", "test description", 1, "attr" = "val");
+            assert_up_down_counter!("test_multi", 3, "attr" = "val");
+
+            drop(_guard2);
+            assert_up_down_counter!("test_multi", 2, "attr" = "val");
+
+            drop(_guard1);
+            assert_up_down_counter!("test_multi", 1, "attr" = "val");
+
+            drop(_guard3);
+            assert_up_down_counter!("test_multi", 0, "attr" = "val");
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_i64_up_down_counter_guard_different_attributes() {
+        async {
+            // Test guards with different attributes
+            let _guard1 =
+                i64_up_down_counter!("test_attrs", "test description", 1, "attr" = "val1");
+            let _guard2 =
+                i64_up_down_counter!("test_attrs", "test description", 1, "attr" = "val2");
+
+            assert_up_down_counter!("test_attrs", 1, "attr" = "val1");
+            assert_up_down_counter!("test_attrs", 1, "attr" = "val2");
+
+            drop(_guard1);
+            assert_up_down_counter!("test_attrs", 0, "attr" = "val1");
+            assert_up_down_counter!("test_attrs", 1, "attr" = "val2");
+
+            drop(_guard2);
+            assert_up_down_counter!("test_attrs", 0, "attr" = "val2");
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_f64_up_down_counter_guard_auto_decrement() {
+        async {
+            // Test that dropping the guard decrements the counter
+            {
+                let _guard =
+                    f64_up_down_counter!("test_f64_guard", "test description", 2.5, "attr" = "val");
+                assert_up_down_counter!("test_f64_guard", 2.5, "attr" = "val");
+            }
+            // After guard is dropped, counter should be back to 0
+            assert_up_down_counter!("test_f64_guard", 0.0, "attr" = "val");
         }
         .with_metrics()
         .await;
@@ -1937,7 +2196,7 @@ mod test {
     #[should_panic]
     async fn test_type_up_down_counter() {
         async {
-            f64_up_down_counter!("test", "test description", 1.0, "attr" = "val");
+            let _ = f64_up_down_counter!("test", "test description", 1.0, "attr" = "val");
             assert_histogram_sum!("test", 1, "attr" = "val");
         }
         .with_metrics()
@@ -1999,7 +2258,7 @@ mod test {
         assert_eq!(meter_provider_internal().registered_instruments(), 1);
 
         // Force invalidation of instruments
-        meter_provider_internal().set(MeterProviderType::PublicPrometheus, None);
+        meter_provider_internal().invalidate();
         assert_eq!(meter_provider_internal().registered_instruments(), 0);
 
         // Slow path
@@ -2036,7 +2295,7 @@ mod test {
     #[tokio::test]
     async fn test_i64_up_down_counter_with_unit() {
         async {
-            i64_up_down_counter_with_unit!(
+            let _guard = i64_up_down_counter_with_unit!(
                 "test",
                 "test description",
                 "{request}",
@@ -2053,7 +2312,13 @@ mod test {
     #[tokio::test]
     async fn test_f64_up_down_counter_with_unit() {
         async {
-            f64_up_down_counter_with_unit!("test", "test description", "kg", 1.5, "attr" = "val");
+            let _guard = f64_up_down_counter_with_unit!(
+                "test",
+                "test description",
+                "kg",
+                1.5,
+                "attr" = "val"
+            );
             assert_up_down_counter!("test", 1.5, "attr" = "val");
             assert_unit("test", "kg");
         }
