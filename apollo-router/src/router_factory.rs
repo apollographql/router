@@ -887,8 +887,8 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("authorization");
     add_optional_apollo_plugin!("authentication");
     add_oss_apollo_plugin!("preview_file_uploads");
+    add_optional_apollo_plugin!("preview_response_cache");
     add_optional_apollo_plugin!("preview_entity_cache");
-    add_oss_apollo_plugin!("preview_response_cache");
     add_mandatory_apollo_plugin!("progressive_override");
     add_optional_apollo_plugin!("demand_control");
 
@@ -1011,7 +1011,6 @@ mod test {
     const OSS_PLUGINS: &[&str] = &[
         "apollo.forbid_mutations",
         "apollo.override_subgraph_url",
-        "apollo.preview_response_cache",
         "apollo.connectors",
     ];
 
@@ -1178,6 +1177,14 @@ mod test {
                     enabled: true
                 "#
             }
+            "preview_response_cache" => {
+                r#"
+                enabled: true
+                subgraph:
+                  all:
+                    enabled: true
+                "#
+            }
             "demand_control" => {
                 r#"
                 enabled: true
@@ -1196,12 +1203,6 @@ mod test {
             "connectors" => {
                 r#"
                 debug_extensions: false
-                "#
-            }
-            "preview_response_cache" => {
-                r#"
-                enabled: true
-                subgraph: {}
                 "#
             }
             "experimental_mock_subgraphs" => {
@@ -1303,15 +1304,11 @@ mod test {
                 .unwrap();
         let connectors_config =
             serde_yaml::from_str::<serde_json::Value>(get_plugin_config("connectors")).unwrap();
-        let response_cache_config =
-            serde_yaml::from_str::<serde_json::Value>(get_plugin_config("preview_response_cache"))
-                .unwrap();
 
         let router_config = Configuration::builder()
             .apollo_plugin("forbid_mutations", forbid_mutations_config)
             .apollo_plugin("override_subgraph_url", override_subgraph_url_config)
             .apollo_plugin("connectors", connectors_config)
-            .apollo_plugin("preview_response_cache", response_cache_config)
             .build()
             .unwrap();
 
@@ -1364,6 +1361,10 @@ mod test {
         "preview_entity_cache",
         HashSet::from_iter(vec![AllowedFeature::EntityCaching, AllowedFeature::DemandControl]))
     ]
+    #[case::response_cache(
+        "preview_response_cache",
+        HashSet::from_iter(vec![AllowedFeature::DemandControl, AllowedFeature::ResponseCaching]))
+    ]
     #[case::authorization(
         "demand_control",
         HashSet::from_iter(vec![AllowedFeature::Authorization, AllowedFeature::Subscriptions, AllowedFeature::DemandControl]))
@@ -1391,6 +1392,7 @@ mod test {
 
         let plugin_config =
             serde_yaml::from_str::<serde_json::Value>(get_plugin_config(plugin)).unwrap();
+        dbg!(&plugin_config);
         let router_config = Configuration::builder()
             .apollo_plugin(plugin, plugin_config)
             .build()
@@ -1453,6 +1455,10 @@ mod test {
     #[case::entity_caching(
         "preview_entity_cache",
         HashSet::from_iter(vec![AllowedFeature::DemandControl]))
+    ]
+    #[case::response_cache(
+        "preview_response_cache",
+        HashSet::from_iter(vec![AllowedFeature::EntityCaching]))
     ]
     #[case::authorization(
         "demand_control",
