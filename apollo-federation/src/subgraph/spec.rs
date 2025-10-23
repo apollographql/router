@@ -321,6 +321,7 @@ impl FederationSpecDefinitions {
             description: None,
             name,
             directives: Default::default(),
+            definition_origin: None,
         }
     }
 
@@ -330,6 +331,7 @@ impl FederationSpecDefinitions {
             description: None,
             name: alias.clone().unwrap_or(CONTEXTFIELDVALUE_SCALAR_NAME),
             directives: Default::default(),
+            definition_origin: None,
         }
     }
 
@@ -617,6 +619,7 @@ impl FederationSpecDefinitions {
             description: None,
             name: ANY_SCALAR_NAME,
             directives: Default::default(),
+            definition_origin: None,
         };
         ExtendedType::Scalar(Node::new(any_scalar))
     }
@@ -630,6 +633,7 @@ impl FederationSpecDefinitions {
             name: ENTITY_UNION_NAME,
             directives: Default::default(),
             members: entities,
+            definition_origin: None,
         };
         ExtendedType::Union(Node::new(service_type))
     }
@@ -640,6 +644,7 @@ impl FederationSpecDefinitions {
             directives: Default::default(),
             fields: IndexMap::default(),
             implements_interfaces: IndexSet::default(),
+            definition_origin: None,
         };
         service_type.fields.insert(
             name!("_sdl"),
@@ -700,6 +705,7 @@ impl LinkSpecDefinitions {
             description: None,
             name,
             directives: Default::default(),
+            definition_origin: None,
         }
     }
 
@@ -734,6 +740,7 @@ impl LinkSpecDefinitions {
             ]
             .into_iter()
             .collect(),
+            definition_origin: None,
         }
     }
 

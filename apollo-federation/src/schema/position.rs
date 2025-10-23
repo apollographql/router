@@ -806,6 +806,7 @@ impl TypeDefinitionPosition {
                     description: None,
                     name: self.type_name().clone(),
                     directives: Default::default(),
+                    definition_origin: None,
                 }),
             ),
             TypeDefinitionPosition::Object(type_) => type_.insert(
@@ -816,6 +817,7 @@ impl TypeDefinitionPosition {
                     implements_interfaces: Default::default(),
                     fields: Default::default(),
                     directives: Default::default(),
+                    definition_origin: None,
                 }),
             ),
             TypeDefinitionPosition::Interface(type_) => type_.insert_empty(schema),
@@ -826,6 +828,7 @@ impl TypeDefinitionPosition {
                     name: self.type_name().clone(),
                     members: Default::default(),
                     directives: Default::default(),
+                    definition_origin: None,
                 }),
             ),
             TypeDefinitionPosition::Enum(type_) => type_.insert(
@@ -835,6 +838,7 @@ impl TypeDefinitionPosition {
                     name: self.type_name().clone(),
                     values: Default::default(),
                     directives: Default::default(),
+                    definition_origin: None,
                 }),
             ),
             TypeDefinitionPosition::InputObject(type_) => type_.insert(
@@ -844,6 +848,7 @@ impl TypeDefinitionPosition {
                     name: self.type_name().clone(),
                     fields: Default::default(),
                     directives: Default::default(),
+                    definition_origin: None,
                 }),
             ),
         }
@@ -4016,6 +4021,7 @@ impl InterfaceTypeDefinitionPosition {
                 implements_interfaces: Default::default(),
                 fields: Default::default(),
                 directives: Default::default(),
+                definition_origin: None,
             }),
         )
     }

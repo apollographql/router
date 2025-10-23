@@ -701,6 +701,7 @@ mod helpers {
                         description: def.description.clone(),
                         name: def.name.clone(),
                         directives: filter_directives(&self.directive_deny_list, &def.directives),
+                        definition_origin: def.definition_origin.clone(),
                     };
 
                     try_pre_insert!(to_schema, scalar)?;
@@ -713,6 +714,7 @@ mod helpers {
                         name: def.name.clone(),
                         directives: filter_directives(&self.directive_deny_list, &def.directives),
                         values: def.values.clone(),
+                        definition_origin: def.definition_origin.clone(),
                     };
 
                     try_pre_insert!(to_schema, r#enum)?;
@@ -756,7 +758,8 @@ mod helpers {
                         &self.directive_deny_list,
                         &parent_type.directives,
                     ),
-                    fields: Default::default()
+                    fields: Default::default(),
+                    definition_origin: parent_type.definition_origin.clone(),
                 })
             )?;
 
@@ -817,6 +820,7 @@ mod helpers {
                             dummy_field_def.name.clone(),
                             Component::new(dummy_field_def),
                         )]),
+                        definition_origin: None,
                     }),
                 )?;
             }

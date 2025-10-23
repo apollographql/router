@@ -114,6 +114,7 @@ impl GroupVisitor<InputObjectTypeDefinitionPosition, InputObjectFieldDefinitionP
             name: group_def.name.clone(),
             directives: filter_directives(self.directive_deny_list, &group_def.directives),
             fields: IndexMap::with_hasher(Default::default()), // Filled in by the rest of the visitor
+            definition_origin: group_def.definition_origin.clone(),
         };
 
         self.type_stack.push((group.clone(), output_type));

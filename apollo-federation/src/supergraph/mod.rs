@@ -593,6 +593,7 @@ fn add_all_empty_subgraph_types(
                             description: None,
                             name: pos.type_name.clone(),
                             directives: Default::default(),
+                            definition_origin: None,
                         }),
                     )?;
 
@@ -692,6 +693,7 @@ fn add_empty_type(
                             implements_interfaces: Default::default(),
                             directives: Default::default(),
                             fields: Default::default(),
+                            definition_origin: None,
                         }),
                     )?;
                     if pos.type_name == "Query" {
@@ -745,6 +747,7 @@ fn add_empty_type(
                                     interface_object_directive,
                                 )]),
                                 fields: Default::default(),
+                                definition_origin: None,
                             }),
                         )?;
                     } else {
@@ -757,6 +760,7 @@ fn add_empty_type(
                                 implements_interfaces: Default::default(),
                                 directives: Default::default(),
                                 fields: Default::default(),
+                                definition_origin: None,
                             }),
                         )?;
                     }
@@ -770,6 +774,7 @@ fn add_empty_type(
                             name: pos.type_name.clone(),
                             directives: Default::default(),
                             members: Default::default(),
+                            definition_origin: None,
                         }),
                     )?;
                 }
@@ -782,6 +787,7 @@ fn add_empty_type(
                             name: pos.type_name.clone(),
                             directives: Default::default(),
                             values: Default::default(),
+                            definition_origin: None,
                         }),
                     )?;
                 }
@@ -794,6 +800,7 @@ fn add_empty_type(
                             name: pos.type_name.clone(),
                             directives: Default::default(),
                             fields: Default::default(),
+                            definition_origin: None,
                         }),
                     )?;
                 }

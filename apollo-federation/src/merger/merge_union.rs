@@ -123,6 +123,7 @@ mod tests {
             name: Name::new_unchecked(name),
             directives: Default::default(),
             members: Default::default(),
+            definition_origin: None,
         };
 
         for member_name in member_names {
@@ -142,6 +143,7 @@ mod tests {
             directives: Default::default(),
             fields: Default::default(),
             implements_interfaces: Default::default(),
+            definition_origin: None,
         };
 
         Node::new(object_type)

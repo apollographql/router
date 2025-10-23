@@ -60,6 +60,7 @@ impl FieldVisitor<NamedSelection> for SchemaVisitor<'_, ObjectTypeDefinitionPosi
                                 self.directive_deny_list,
                                 &def.directives,
                             ),
+                            definition_origin: def.definition_origin.clone(),
                         };
 
                         try_pre_insert!(self.to_schema, scalar)?;
@@ -75,6 +76,7 @@ impl FieldVisitor<NamedSelection> for SchemaVisitor<'_, ObjectTypeDefinitionPosi
                                 &def.directives,
                             ),
                             values: def.values.clone(),
+                            definition_origin: def.definition_origin.clone(),
                         };
 
                         try_pre_insert!(self.to_schema, r#enum)?;
@@ -176,6 +178,7 @@ impl GroupVisitor<JSONSelectionGroup, NamedSelection>
             implements_interfaces: def.implements_interfaces.clone(),
             directives: filter_directives(self.directive_deny_list, &def.directives),
             fields: IndexMap::with_hasher(Default::default()), // Will be filled in by the `visit` method for each field
+            definition_origin: def.definition_origin.clone(),
         };
 
         self.type_stack.push((group_type.clone(), sub_type));

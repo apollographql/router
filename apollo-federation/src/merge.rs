@@ -1001,6 +1001,7 @@ fn copy_scalar_type(scalar_name: Name, scalar_type: &Node<ScalarType>) -> Extend
         description: scalar_type.description.clone(),
         name: scalar_name,
         directives: Default::default(),
+        definition_origin: scalar_type.definition_origin.clone(),
     }))
 }
 
@@ -1010,6 +1011,7 @@ fn copy_enum_type(enum_name: Name, enum_type: &Node<EnumType>) -> ExtendedType {
         name: enum_name,
         directives: Default::default(),
         values: IndexMap::default(),
+        definition_origin: enum_type.definition_origin.clone(),
     }))
 }
 
@@ -1022,6 +1024,7 @@ fn copy_input_object_type(
         name: input_object_name,
         directives: Default::default(),
         fields: IndexMap::default(),
+        definition_origin: input_object.definition_origin.clone(),
     };
 
     for (field_name, input_field) in input_object.fields.iter() {
@@ -1047,6 +1050,7 @@ fn copy_interface_type(interface_name: Name, interface: &Node<InterfaceType>) ->
         directives: Default::default(),
         fields: copy_fields(interface.fields.iter()),
         implements_interfaces: interface.implements_interfaces.clone(),
+        definition_origin: interface.definition_origin.clone(),
     };
     ExtendedType::Interface(Node::new(new_interface))
 }
@@ -1063,6 +1067,7 @@ fn copy_object_type_stub(
             directives: Default::default(),
             fields: copy_fields(object.fields.iter()),
             implements_interfaces: object.implements_interfaces.clone(),
+            definition_origin: object.definition_origin.clone(),
         };
         ExtendedType::Interface(Node::new(new_interface))
     } else {
@@ -1072,6 +1077,7 @@ fn copy_object_type_stub(
             directives: Default::default(),
             fields: copy_fields(object.fields.iter()),
             implements_interfaces: object.implements_interfaces.clone(),
+            definition_origin: object.definition_origin.clone(),
         };
         ExtendedType::Object(Node::new(new_object))
     }
@@ -1118,6 +1124,7 @@ fn copy_union_type(union_name: Name, description: Option<Node<str>>) -> Extended
         name: union_name,
         directives: Default::default(),
         members: IndexSet::default(),
+        definition_origin: None,
     }))
 }
 
@@ -1237,6 +1244,7 @@ fn add_core_feature_link(supergraph: &mut Schema) {
         directives: Default::default(),
         name: link_import_name.clone(),
         description: None,
+        definition_origin: None,
     }));
     supergraph
         .types
@@ -1306,6 +1314,7 @@ fn link_purpose_enum_type() -> (Name, EnumType) {
         name: link_purpose_name.clone(),
         directives: Default::default(),
         values: IndexMap::default(),
+        definition_origin: None,
     };
     let link_purpose_security_value = EnumValueDefinition {
         description: Some(
@@ -1362,6 +1371,7 @@ fn add_core_feature_join(
         directives: Default::default(),
         name: join_field_set_name.clone(),
         description: None,
+        definition_origin: None,
     }));
     supergraph
         .types
@@ -1373,6 +1383,7 @@ fn add_core_feature_join(
         directives: Default::default(),
         name: join_field_value_name.clone(),
         description: None,
+        definition_origin: None,
     }));
     supergraph
         .types
@@ -1433,6 +1444,7 @@ fn add_core_feature_join(
         ]
         .into_iter()
         .collect(),
+        definition_origin: None,
     }));
     supergraph
         .types
@@ -1480,6 +1492,7 @@ fn add_core_feature_join(
         directives: Default::default(),
         name: join_directive_arguments_name.clone(),
         description: None,
+        definition_origin: None,
     }));
     supergraph.types.insert(
         join_directive_arguments_name,
@@ -1845,6 +1858,7 @@ fn join_graph_enum_type(
         name: join_graph_enum_name.clone(),
         directives: Default::default(),
         values: IndexMap::default(),
+        definition_origin: None,
     };
     for (s, subgraph_name) in subgraphs_and_enum_values {
         let join_graph_applied_directive = Directive {

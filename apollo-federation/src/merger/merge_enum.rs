@@ -307,6 +307,7 @@ pub(crate) mod tests {
             description: None,
             directives: Default::default(),
             values: Default::default(),
+            definition_origin: None,
         });
         status_pos.pre_insert(schema)?;
         status_pos.insert(schema, dest)?;
@@ -368,6 +369,7 @@ pub(crate) mod tests {
             implements_interfaces: Default::default(),
             directives: Default::default(),
             fields: Default::default(),
+            definition_origin: None,
         });
         interface_pos.pre_insert(&mut schema)?;
         interface_pos.insert(&mut schema, interface_type)?;
@@ -382,6 +384,7 @@ pub(crate) mod tests {
             implements_interfaces: Default::default(),
             directives: Default::default(),
             fields: Default::default(),
+            definition_origin: None,
         };
         object_type
             .implements_interfaces
@@ -398,6 +401,7 @@ pub(crate) mod tests {
             name: name!("U"),
             directives: Default::default(),
             members: Default::default(),
+            definition_origin: None,
         };
         union_type.members.insert(ComponentName::from(name!("A")));
         union_pos.pre_insert(&mut schema)?;

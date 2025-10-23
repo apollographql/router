@@ -181,6 +181,7 @@ impl TypeAndDirectiveSpecification for ScalarTypeSpecification {
                 description: None,
                 name: type_pos.type_name.clone(),
                 directives: Default::default(),
+                definition_origin: None,
             }),
         )
     }
@@ -242,6 +243,7 @@ impl TypeAndDirectiveSpecification for ObjectTypeSpecification {
                 implements_interfaces: Default::default(),
                 directives: Default::default(),
                 fields: field_map,
+                definition_origin: None,
             }),
         )
     }
@@ -326,6 +328,7 @@ impl TypeAndDirectiveSpecification for UnionTypeSpecification {
                 name: type_pos.type_name.clone(),
                 directives: Default::default(),
                 members,
+                definition_origin: None,
             }),
         )
     }
@@ -420,6 +423,7 @@ impl TypeAndDirectiveSpecification for EnumTypeSpecification {
                         )
                     })
                     .collect(),
+                definition_origin: None,
             }),
         )
     }
@@ -498,6 +502,7 @@ impl TypeAndDirectiveSpecification for InputObjectTypeSpecification {
                 name: type_pos.type_name.clone(),
                 directives: Default::default(),
                 fields: field_map,
+                definition_origin: None,
             }),
         )
     }

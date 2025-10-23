@@ -257,6 +257,7 @@ impl Subgraph {
                 directives: Default::default(),
                 fields: IndexMap::default(),
                 implements_interfaces: IndexSet::default(),
+                definition_origin: None,
             })))
         {
             let query_type = query_type.make_mut();
