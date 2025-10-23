@@ -17,7 +17,6 @@ use http::HeaderName;
 use http::HeaderValue;
 use http_body_util::BodyExt as _;
 use indexmap::IndexMap;
-use insta::assert_json_snapshot;
 use serde_json::Value;
 use serde_json::json;
 use tokio::time::sleep;
