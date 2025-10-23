@@ -185,6 +185,29 @@ To enable safelisting, you _must_ turn off [automatic persisted queries](/router
 
 GraphOS Router can be [customized](/graphos/routing/customization/overview) via several mechanisms such as [Rhai scripts](/graphos/routing/customization/rhai) and [coprocessors](/graphos/routing/customization/coprocessor). These plugins can affect your router's persistent query processing by writing to the request context.
 
+#### `apollo_persisted_queries::operation_id`
+
+By default, Apollo's protocol for sending PQ IDs from clients to GraphOS Router's protocol for sending is to put the ID in a GraphQL request extension named `persistedQuery`, wrapped in an object under the field `sha256Hash`. (This is the same protocol used for [automatic persisted queries](/router/configuration/in-memory-caching#caching-automatic-persisted-queries-apq) (APQ).) That is, the POST body of the request looks something like
+
+```
+{
+  "extensions": {
+    "persistedQuery": {
+      "version": 1,
+      "sha256Hash": "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b36"
+    }
+  }
+}
+```
+
+However, you can design your own protocol for specifying the PQ ID, such as including it in the URL path or a query parameter. (You are responsible for creating a client that sends PQ IDs in this way.)
+
+Your customization (Rhai script, coprocessor, etc) can examine a request during the [Router Service stage](/graphos/routing/customization/overview#request-path) of the request path and set the `apollo_persisted_queries::operation_id` value in the request context to the request's operation ID. If this value is set, GraphOS Router will not look in the `persistedQuery` extension for the ID.
+
+This means that your GraphQL request does not need to contain any of the usual pieces: `query`, `operationName`, `variables`, or `extensions`. If your request is a POST, you should still include a JSON body containing at least `{}`; if your request is a GET, you should include some query string at the end of the URL (even `?q`).
+
+Note that this only affects PQL-based persisted queries; [automatic persisted queries](/router/configuration/in-memory-caching#caching-automatic-persisted-queries-apq) (APQ) will always use the `persistedQuery` extension.
+
 #### `apollo_persisted_queries::client_name`
 
 When publishing operations to a PQL, you can specify a client name associated with the operation (by including a `clientName` field in the individual operation in your [manifest](/graphos/platform/security/persisted-queries#per-operation-properties), or by including the `--for-client-name` option to `rover persisted-queries publish`). If an operation has a client name, it will only be executed by requests that specify that client name. (Your PQL can contain multiple operations with the same ID and different client names.)
