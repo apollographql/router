@@ -74,9 +74,9 @@ use crate::schema::validators::merged::validate_merged_schema;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
+use crate::utils::first_max_by_key;
 use crate::utils::human_readable::human_readable_subgraph_names;
 use crate::utils::iter_into_single_item;
-use crate::utils::first_max_by_key;
 
 static NON_MERGED_CORE_FEATURES: LazyLock<[Identity; 4]> = LazyLock::new(|| {
     [
@@ -262,7 +262,7 @@ impl Merger {
                     .code()
                     .to_string(),
                 message: format!(
-                    "Subgraph {} has been implicitly upgraded from federation {} to {}",
+                    "Subgraph {} has been implicitly upgraded from federation v{} to v{}",
                     subgraph.name,
                     linked_federation_version,
                     spec.minimum_federation_version()
@@ -1632,9 +1632,8 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 dest.set_description(&mut self.merged, Some(Node::new_str(description)))?;
             } else {
                 // Find the description with the highest count
-                if let Some((idx, _)) = first_max_by_key(descriptions
-                    .iter()
-                    .enumerate(), |(_, (_, counts))| *counts)
+                if let Some((idx, _)) =
+                    first_max_by_key(descriptions.iter().enumerate(), |(_, (_, counts))| *counts)
                 {
                     // Get the description at the found index
                     if let Some((description, _)) = descriptions.iter().nth(idx) {

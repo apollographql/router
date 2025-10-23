@@ -1201,6 +1201,10 @@ Otherwise the @shareable contract will be broken."#,
 
 // Tests for implicit federation version upgrades
 mod implicit_federation_upgrades {
+    use apollo_federation::composition::compose;
+    use apollo_federation::subgraph::typestate::Subgraph;
+    use test_log::test;
+
     use super::*;
 
     #[test]
@@ -1238,6 +1242,7 @@ type Query @shareable {
     http: {
       GET: "/resources"
     }
+    selection: ""
   )
 }
 
@@ -1247,28 +1252,27 @@ type Resource {
 }
         "#;
 
-        let already_newest = ServiceDefinition {
-            name: "already-newest",
-            type_defs: newer_federation_schema,
-        };
+        let already_newest = Subgraph::parse(
+            "already-newest",
+            "http://localhost:4001",
+            newer_federation_schema,
+        )
+        .unwrap();
 
-        let old_but_not_upgraded = ServiceDefinition {
-            name: "old-but-not-upgraded",
-            type_defs: older_federation_schema,
-        };
+        let old_but_not_upgraded = Subgraph::parse(
+            "old-but-not-upgraded",
+            "http://localhost:4002",
+            older_federation_schema,
+        )
+        .unwrap();
 
-        let upgraded = ServiceDefinition {
-            name: "upgraded",
-            type_defs: auto_upgraded_schema,
-        };
+        let upgraded =
+            Subgraph::parse("upgraded", "http://localhost:4003", auto_upgraded_schema).unwrap();
 
-        let result = compose_as_fed2_subgraphs(&[already_newest, old_but_not_upgraded, upgraded]);
-
-        assert!(result.is_ok(), "Expected composition to succeed");
-        let composition_result = result.unwrap();
+        let result = compose(vec![already_newest, old_but_not_upgraded, upgraded]).unwrap();
 
         assert_has_hint(
-            &composition_result,
+            &result,
             "IMPLICITLY_UPGRADED_FEDERATION_VERSION",
             "Subgraph upgraded has been implicitly upgraded from federation v2.5 to v2.10",
         );
@@ -1291,37 +1295,31 @@ type Query @shareable {
     http: {
       GET: "/resources"
     }
+    selection: ""
   )
 }
 
-type Resource {
+type Resource @shareable @key(fields: "id") {
   id: ID!
   description: String!
 }
         "#;
 
-        let upgraded_1 = ServiceDefinition {
-            name: "upgraded-1",
-            type_defs: auto_upgraded_schema,
-        };
+        let upgraded_1 =
+            Subgraph::parse("upgraded-1", "http://localhost:4001", auto_upgraded_schema).unwrap();
 
-        let upgraded_2 = ServiceDefinition {
-            name: "upgraded-2",
-            type_defs: auto_upgraded_schema,
-        };
+        let upgraded_2 =
+            Subgraph::parse("upgraded-2", "http://localhost:4002", auto_upgraded_schema).unwrap();
 
-        let result = compose_as_fed2_subgraphs(&[upgraded_1, upgraded_2]);
-
-        assert!(result.is_ok(), "Expected composition to succeed");
-        let composition_result = result.unwrap();
+        let result = compose(vec![upgraded_1, upgraded_2]).unwrap();
 
         assert_has_hint(
-            &composition_result,
+            &result,
             "IMPLICITLY_UPGRADED_FEDERATION_VERSION",
             "Subgraph upgraded-1 has been implicitly upgraded from federation v2.5 to v2.10",
         );
         assert_has_hint(
-            &composition_result,
+            &result,
             "IMPLICITLY_UPGRADED_FEDERATION_VERSION",
             "Subgraph upgraded-2 has been implicitly upgraded from federation v2.5 to v2.10",
         );
@@ -1347,26 +1345,27 @@ type Query {
 }
         "#;
 
-        let already_newest = ServiceDefinition {
-            name: "already-newest",
-            type_defs: newer_federation_schema,
-        };
+        let already_newest = Subgraph::parse(
+            "already-newest",
+            "http://localhost:4001",
+            newer_federation_schema,
+        )
+        .unwrap();
 
-        let old_but_not_upgraded = ServiceDefinition {
-            name: "old-but-not-upgraded",
-            type_defs: older_federation_schema,
-        };
+        let old_but_not_upgraded = Subgraph::parse(
+            "old-but-not-upgraded",
+            "http://localhost:4002",
+            older_federation_schema,
+        )
+        .unwrap();
 
-        let result = compose_as_fed2_subgraphs(&[already_newest, old_but_not_upgraded]);
-
-        assert!(result.is_ok(), "Expected composition to succeed");
-        let composition_result = result.unwrap();
+        let result = compose(vec![already_newest, old_but_not_upgraded]).unwrap();
 
         // Should not have any hints since no upgrades were caused by non-federation directives
         assert!(
-            composition_result.hints().is_empty(),
+            result.hints().is_empty(),
             "Expected no hints, but got: {:?}",
-            composition_result.hints()
+            result.hints()
         );
     }
 }
