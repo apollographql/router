@@ -7124,18 +7124,12 @@ impl DirectiveDefinitionPosition {
         Ok(())
     }
 
-    pub(crate) fn add_locations(
+    pub(crate) fn set_locations(
         &self,
         schema: &mut FederationSchema,
         locations: Vec<DirectiveLocation>,
     ) -> Result<(), FederationError> {
-        let existing = self.make_mut(&mut schema.schema)?.make_mut();
-
-        for location in locations {
-            if !existing.locations.contains(&location) {
-                existing.locations.push(location);
-            }
-        }
+        self.make_mut(&mut schema.schema)?.make_mut().locations = locations;
         Ok(())
     }
 }

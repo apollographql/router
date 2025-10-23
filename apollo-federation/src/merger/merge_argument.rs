@@ -210,14 +210,14 @@ impl Merger {
                     let arg_sources: Sources<_> = sources
                         .iter()
                         .map(|(idx, source)| {
-                            let pos_opt = source
-                                .as_ref()
-                                .map(|pos| pos.argument_position(arg_name.clone()));
+                            let pos_opt = source.as_ref().and_then(|pos| {
+                                pos.get_argument(self.subgraphs[*idx].schema(), arg_name)
+                            });
                             (*idx, pos_opt)
                         })
                         .collect();
 
-                    self.error_reporter.report_mismatch_hint::<T::ArgumentPosition, T::ArgumentPosition, ()>(
+                    self.error_reporter.report_mismatch_hint::<T::ArgumentPosition, &Node<InputValueDefinition>, ()>(
                         HintCode::InconsistentArgumentPresence,
                         format!(
                             "Optional argument \"{}\" will not be included in the supergraph as it does not appear in all subgraphs: ",

@@ -1373,6 +1373,8 @@ type Query {
 
 // Tests for executable directive hints
 mod executable_directives {
+    use test_log::test;
+
     use super::*;
 
     #[test]
