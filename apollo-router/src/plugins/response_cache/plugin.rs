@@ -17,6 +17,7 @@ use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::StringTemplate;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
+use itertools::Itertools;
 use lru::LruCache;
 use multimap::MultiMap;
 use opentelemetry::Array;
@@ -1794,7 +1795,7 @@ fn extract_cache_keys(
                 subgraph_enums,
             )?;
 
-            get_entity_key_from_selection_set(representation, &selection_set)
+            get_entity_key_from_selection_set(representation, &selection_set).into()
         } else {
             None
         };
@@ -1921,7 +1922,7 @@ fn get_invalidation_entity_keys_from_schema(
     Ok(invalidation_cache_keys)
 }
 
-fn find_matching_key_field_set(
+pub(in crate::plugins) fn find_matching_key_field_set(
     representation: &serde_json_bytes::Map<ByteString, Value>,
     typename: &str,
     subgraph_name: &str,
@@ -1992,7 +1993,7 @@ fn collect_key_field_sets(
 ///   possible `@key` fields to find the matching one, while `take_selection_set` is only called
 ///   once the matching `@key` fields is found.
 // WARN: if you make changes to this fn, make the same changes to the one in response_cache/plugin.rs!
-fn matches_selection_set(
+pub(in crate::plugins) fn matches_selection_set(
     // the JSON representation of the entity data
     representation: &serde_json_bytes::Map<ByteString, Value>,
     // the parsed @key fields to use for matching
@@ -2075,33 +2076,69 @@ fn matches_array_of_objects(
 fn get_entity_key_from_selection_set(
     representation: &serde_json_bytes::Map<ByteString, Value>,
     selection_set: &apollo_compiler::executable::SelectionSet,
-) -> Option<serde_json_bytes::Map<ByteString, Value>> {
-    let mut result = serde_json_bytes::Map::new();
-    for field in selection_set.root_fields(&Default::default()) {
-        // Note: field sets can't have aliases.
-        if field.selection_set.is_empty() {
-            let value = representation.get(field.name.as_str())?;
-            // `value` must be a scalar.
-            if matches!(value, Value::Object(_)) {
-                return None;
-            }
-            // Move the scalar field to the `result`.
-            result.insert(ByteString::from(field.name.as_str()), value.clone());
-            continue;
-        } else {
-            let value = representation.get(field.name.as_str())?;
-            // Update the sub-selection set.
-            let Value::Object(sub_value) = value else {
-                return None;
+) -> serde_json_bytes::Map<ByteString, Value> {
+    fn traverse_object(
+        state: &mut serde_json_bytes::Map<ByteString, Value>,
+        fields: &serde_json_bytes::Map<ByteString, Value>,
+        selection_set: &apollo_compiler::executable::SelectionSet,
+    ) {
+        let default_document = Default::default();
+        let sorted_selections = selection_set
+            .root_fields(&default_document)
+            .sorted_by(|a, b| a.name.cmp(&b.name));
+        for field in sorted_selections {
+            let key = field.name.as_str();
+            let Some(val) = fields.get(key) else {
+                continue;
             };
-            let removed = get_entity_key_from_selection_set(sub_value, &field.selection_set)?;
-            result.insert(
-                ByteString::from(field.name.as_str()),
-                Value::Object(removed),
-            );
+            match val {
+                serde_json_bytes::Value::Object(obj) => {
+                    let mut obj_state = serde_json_bytes::Map::new();
+                    traverse_object(&mut obj_state, obj, &field.selection_set);
+                    state.insert(ByteString::from(key), Value::Object(obj_state));
+                }
+                Value::Array(arr) => {
+                    let mut arr_state = Vec::new();
+                    traverse_array(&mut arr_state, arr, &field.selection_set);
+                    state.insert(ByteString::from(key), Value::Array(arr_state));
+                }
+                // scalar value
+                val => {
+                    state.insert(ByteString::from(key), val.clone());
+                }
+            }
         }
     }
-    Some(result)
+
+    fn traverse_array(
+        state: &mut Vec<Value>,
+        items: &[Value],
+        selection_set: &apollo_compiler::executable::SelectionSet,
+    ) {
+        items.iter().for_each(|v| {
+            match v {
+                serde_json_bytes::Value::Object(obj) => {
+                    let mut obj_state = serde_json_bytes::Map::new();
+                    traverse_object(&mut obj_state, obj, selection_set);
+                    state.push(Value::Object(obj_state));
+                }
+                Value::Array(arr) => {
+                    let mut arr_state = Vec::new();
+                    traverse_array(&mut arr_state, arr, selection_set);
+                    state.push(Value::Array(arr_state));
+                }
+                // scalar value
+                _ => {
+                    state.push(v.clone());
+                }
+            }
+        });
+    }
+
+    let mut state = serde_json_bytes::Map::new();
+    traverse_object(&mut state, representation, selection_set);
+
+    state
 }
 
 /// represents the result of a cache lookup for an entity type and key
@@ -2500,12 +2537,16 @@ mod tests {
     use std::time::Duration;
 
     use apollo_compiler::Schema;
+    use apollo_compiler::parser::Parser;
+    use serde_json_bytes::json;
     use tokio::sync::broadcast;
 
     use super::Subgraph;
     use super::Ttl;
     use crate::configuration::subgraph::SubgraphConfiguration;
     use crate::plugins::response_cache::plugin::ResponseCache;
+    use crate::plugins::response_cache::plugin::get_entity_key_from_selection_set;
+    use crate::plugins::response_cache::plugin::matches_selection_set;
     use crate::plugins::response_cache::storage::redis::Config;
     use crate::plugins::response_cache::storage::redis::Storage;
 
@@ -2636,6 +2677,358 @@ mod tests {
         assert_eq!(
             response_cache.subgraph_ttl("archive"),
             Some(Duration::from_millis(5000))
+        );
+    }
+
+    #[test]
+    fn test_matches_selection_set_handles_arrays() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                locale: String!
+                lists: [List!]!
+                list: [List!]!
+            }
+            type List {
+                id: ID!
+                date: Int!
+                quantity: Int!
+                location: String!
+            }
+        "#;
+        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity location } list { id date quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        // Test with complex nested array structure
+        let representation = json!({
+            "id": "TEST123",
+            "locale": "en_US",
+            "lists": [
+                {
+                    "id": "LIST1",
+                    "date": 20240101,
+                    "quantity": 50,
+                    "location": "WAREHOUSE_A"
+                }
+            ],
+            "list": [
+                {
+                    "id": "LIST2",
+                    "date": 20240101,
+                    "quantity": 100,
+                    "location": "WAREHOUSE_A"
+                },
+                {
+                    "id": "LIST3",
+                    "date": 20240102,
+                    "quantity": 75,
+                    "location": "WAREHOUSE_B"
+                }
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        assert!(
+            matches_selection_set(&representation, &field_set.selection_set),
+            "complex nested arrays should match"
+        );
+    }
+
+    #[test]
+    fn test_matches_selection_subset_handles_arrays() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                locale: String!
+                lists: [List!]!
+                list: [List!]!
+            }
+            type List {
+                id: ID!
+                date: Int!
+                quantity: Int!
+                location: String!
+            }
+        "#;
+        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity location } list { id date quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        // Test with complex nested array structure
+        let representation = json!({
+            "id": "TEST123",
+            "locale": "en_US",
+            "lists": [
+                {
+                    "id": "LIST1",
+                    "date": 20240101,
+                    "quantity": 50
+                }
+            ],
+            "list": [
+                {
+                    "id": "LIST2",
+                    "date": 20240101,
+                    "quantity": 100,
+                    "location": "WAREHOUSE_A"
+                },
+                {
+                    "id": "LIST3",
+                    "date": 20240102,
+                    "quantity": 75,
+                    "location": "WAREHOUSE_B"
+                }
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        assert!(!matches_selection_set(
+            &representation,
+            &field_set.selection_set
+        ),);
+
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity } list { id date quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        assert!(
+            matches_selection_set(&representation, &field_set.selection_set),
+            "complex nested arrays should match"
+        );
+    }
+
+    #[test]
+    fn test_take_selection_set_handles_arrays() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                locale: String!
+                lists: [List!]!
+                list: [List!]!
+            }
+            type List {
+                id: ID!
+                date: Int!
+                quantity: Int!
+                location: String!
+            }
+        "#;
+        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity location } list { id date quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        // Test with complex nested array structure
+        let representation = json!({
+            "id": "TEST123",
+            "locale": "en_US",
+            "lists": [
+                {
+                    "id": "LIST1",
+                    "date": 20240101,
+                    "quantity": 50,
+                    "location": "WAREHOUSE_A"
+                }
+            ],
+            "list": [
+                {
+                    "id": "LIST2",
+                    "date": 20240101,
+                    "quantity": 100,
+                    "location": "WAREHOUSE_A"
+                },
+                {
+                    "id": "LIST3",
+                    "date": 20240102,
+                    "quantity": 75,
+                    "location": "WAREHOUSE_B"
+                }
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        assert!(matches_selection_set(
+            &representation,
+            &field_set.selection_set
+        ));
+        let entity_key =
+            get_entity_key_from_selection_set(&representation, &field_set.selection_set);
+        assert_eq!(
+            &entity_key,
+            json!({
+                "id": "TEST123",
+                "locale": "en_US",
+                "lists": [
+                    {
+                        "id": "LIST1",
+                        "date": 20240101,
+                        "quantity": 50,
+                        "location": "WAREHOUSE_A"
+                    }
+                ],
+                "list": [
+                    {
+                        "id": "LIST2",
+                        "date": 20240101,
+                        "quantity": 100,
+                        "location": "WAREHOUSE_A"
+                    },
+                    {
+                        "id": "LIST3",
+                        "date": 20240102,
+                        "quantity": 75,
+                        "location": "WAREHOUSE_B"
+                    }
+                ]
+            })
+            .as_object()
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn test_take_selection_subset_handles_arrays() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                locale: String!
+                lists: [List!]!
+                list: [List!]!
+            }
+            type List {
+                id: ID!
+                date: Int!
+                quantity: Int!
+                location: String!
+            }
+        "#;
+        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity } list { id quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        // Test with complex nested array structure
+        let representation = json!({
+            "id": "TEST123",
+            "locale": "en_US",
+            "lists": [
+                {
+                    "id": "LIST1",
+                    "date": 20240101,
+                    "quantity": 50,
+                    "location": "WAREHOUSE_A"
+                }
+            ],
+            "list": [
+                {
+                    "id": "LIST2",
+                    "date": 20240101,
+                    "quantity": 100,
+                    "location": "WAREHOUSE_A"
+                },
+                {
+                    "id": "LIST3",
+                    "date": 20240102,
+                    "quantity": 75,
+                    "location": "WAREHOUSE_B"
+                }
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        assert!(matches_selection_set(
+            &representation,
+            &field_set.selection_set
+        ));
+        let entity_key =
+            get_entity_key_from_selection_set(&representation, &field_set.selection_set);
+        assert_eq!(
+            &entity_key,
+            json!({
+                "id": "TEST123",
+                "locale": "en_US",
+                "lists": [
+                    {
+                        "id": "LIST1",
+                        "date": 20240101,
+                        "quantity": 50
+                    }
+                ],
+                "list": [
+                    {
+                        "id": "LIST2",
+                        "quantity": 100,
+                        "location": "WAREHOUSE_A"
+                    },
+                    {
+                        "id": "LIST3",
+                        "quantity": 75,
+                        "location": "WAREHOUSE_B"
+                    }
+                ]
+            })
+            .as_object()
+            .unwrap()
         );
     }
 }

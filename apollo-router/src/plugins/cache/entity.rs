@@ -6,8 +6,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use apollo_compiler::Schema;
-use apollo_compiler::ast::NamedType;
-use apollo_compiler::parser::Parser;
 use apollo_compiler::validation::Valid;
 use http::header;
 use http::header::CACHE_CONTROL;
@@ -57,6 +55,7 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::response_cache::plugin::find_matching_key_field_set;
 use crate::query_planner::OperationKind;
 use crate::services::subgraph;
 use crate::services::subgraph::SubgraphRequestId;
@@ -1453,155 +1452,6 @@ fn extract_cache_keys(
     Ok(res)
 }
 
-fn find_matching_key_field_set(
-    representation: &serde_json_bytes::Map<ByteString, Value>,
-    typename: &str,
-    subgraph_name: &str,
-    supergraph_schema: &Valid<Schema>,
-    subgraph_enums: &HashMap<String, String>,
-) -> Result<apollo_compiler::executable::SelectionSet, FetchError> {
-    // find an entry in the `key_field_sets` that matches the `representation`.
-    collect_key_field_sets(typename, subgraph_name, supergraph_schema, subgraph_enums)?
-        .find(|field_set| {
-            matches_selection_set(representation, &field_set.selection_set)
-        })
-        .map(|field_set| field_set.selection_set)
-        .ok_or_else(|| {
-            tracing::trace!("representation does not match any key field set for typename {typename} in subgraph {subgraph_name}");
-            FetchError::MalformedRequest {
-                reason: format!("unexpected critical internal error for typename {typename} in subgraph {subgraph_name}"),
-            }
-        })
-}
-
-// Collect `@key` field sets on a `typename` in a `subgraph_name`.
-// - Returns a Vec of FieldSet, since there may be more than one @key directives in the subgraph.
-fn collect_key_field_sets(
-    typename: &str,
-    subgraph_name: &str,
-    supergraph_schema: &Valid<Schema>,
-    subgraph_enums: &HashMap<String, String>,
-) -> Result<impl Iterator<Item = apollo_compiler::executable::FieldSet>, FetchError> {
-    Ok(supergraph_schema
-        .types
-        .get(typename)
-        .ok_or_else(|| FetchError::MalformedRequest {
-            reason: format!("unknown typename {typename:?} in representations"),
-        })?
-        .directives()
-        .get_all("join__type")
-        .filter_map(move |directive| {
-            let schema_subgraph_name = directive
-                .specified_argument_by_name("graph")
-                .and_then(|arg| arg.as_enum())
-                .and_then(|arg| subgraph_enums.get(arg.as_str()))?;
-
-            if schema_subgraph_name == subgraph_name {
-                let mut parser = Parser::new();
-                directive
-                    .specified_argument_by_name("key")
-                    .and_then(|arg| arg.as_str())
-                    .and_then(|arg| {
-                        parser
-                            .parse_field_set(
-                                supergraph_schema,
-                                NamedType::new(typename).ok()?,
-                                arg,
-                                "entity_caching.graphql",
-                            )
-                            .ok()
-                    })
-            } else {
-                None
-            }
-        }))
-}
-
-/// Whether the entity, represented as JSON, matches the parsed @key fields (`selection_set`)
-/// * This function mirrors `take_selection_set` and make sure the representation matches the
-///   the shape of `selection_set`.
-/// * This function and `take_selection_set` are separate because this is called for multiple
-///   possible `@key` fields to find the matching one, while `take_selection_set` is only called
-///   once the matching `@key` fields is found.
-// WARN: if you make changes to this fn, make the same changes to the one in response_cache/plugin.rs!
-fn matches_selection_set(
-    // the JSON representation of the entity data
-    representation: &serde_json_bytes::Map<ByteString, Value>,
-    // the parsed @key fields to use for matching
-    selection_set: &apollo_compiler::executable::SelectionSet,
-) -> bool {
-    for field in selection_set.root_fields(&Default::default()) {
-        // the heart of finding the match: we take the field from the selection
-        // set and try to find it in the entity representation;
-        let Some(value) = representation.get(field.name.as_str()) else {
-            return false;
-        };
-
-        // This field selection is not expecting any subdata.
-        if field.selection_set.is_empty() {
-            // Scalar (or array of scalars) fields are always a match.
-            if !is_scalar_or_array_of_scalar(value) {
-                // Mismatch: Scalar value was expected.
-                return false;
-            }
-            continue;
-        }
-
-        // The field selection is expecting a subdata. See if given `value` matches the shape of
-        // its sub-selection set.
-        let result = match value {
-            Value::Object(obj) => {
-                // Recurse into object value
-                matches_selection_set(obj, &field.selection_set)
-            }
-
-            Value::Array(arr) => {
-                // Recurse into array values
-                matches_array_of_objects(arr, &field.selection_set)
-            }
-
-            // scalar values
-            _other => {
-                // Mismatch: object or array value was expected.
-                false
-            }
-        };
-        if !result {
-            return false;
-        }
-    }
-    true
-}
-
-fn is_scalar_or_array_of_scalar(value: &Value) -> bool {
-    match value {
-        Value::Object(_) => false,
-        Value::Array(arr) => arr.iter().all(is_scalar_or_array_of_scalar),
-        _ => true,
-    }
-}
-
-/// See if all array items match the shape of the `selection_set`.
-/// * Note: The array can be multi-dimensional. (the @key field set can match any levels of nested
-///   arrays)
-/// * Precondition: `selection_set` must be non-empty.
-fn matches_array_of_objects(
-    arr: &[Value],
-    selection_set: &apollo_compiler::executable::SelectionSet,
-) -> bool {
-    for item in arr.iter() {
-        let result = match item {
-            Value::Object(obj) => matches_selection_set(obj, selection_set),
-            Value::Array(arr) => matches_array_of_objects(arr, selection_set),
-            _other => false,
-        };
-        if !result {
-            return false;
-        }
-    }
-    true
-}
-
 // Order-insensitive structural hash of the representation value
 pub(crate) fn hash_representation(
     representation: &serde_json_bytes::Map<ByteString, Value>,
@@ -1978,6 +1828,7 @@ mod tests {
     use super::*;
     use crate::plugins::cache::tests::MockStore;
     use crate::plugins::cache::tests::SCHEMA;
+    use crate::plugins::response_cache::plugin::matches_selection_set;
 
     #[tokio::test]
     async fn test_subgraph_enabled() {
