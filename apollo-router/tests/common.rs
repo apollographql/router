@@ -378,7 +378,7 @@ impl Telemetry {
                 .with_resource(resource)
                 .with_span_processor(
                     BatchSpanProcessor::builder(
-                        SpanExporterBuilder::from(opentelemetry_otlp::SpanExporter::builder())
+                        opentelemetry_otlp::SpanExporter::builder()
                             .with_http()
                             .with_endpoint(endpoint)
                             .with_protocol(Protocol::HttpBinary)
