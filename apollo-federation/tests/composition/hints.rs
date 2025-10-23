@@ -60,14 +60,13 @@ fn assert_has_hint(
     }
 }
 
-// Tests for field/argument type inconsistencies
 mod field_type_inconsistencies {
     use test_log::test;
 
     use super::*;
 
     #[test]
-    fn hint_on_inconsistent_field_type_nullable_vs_non_nullable() {
+    fn hints_on_inconsistent_field_type_nullable_vs_non_nullable() {
         let subgraph1 = ServiceDefinition {
             name: "Subgraph1",
             type_defs: r#"
@@ -99,7 +98,7 @@ mod field_type_inconsistencies {
     }
 
     #[test]
-    fn hint_on_subtype_mismatch_for_field() {
+    fn hints_on_subtype_mismatch_for_field() {
         let subgraph1 = ServiceDefinition {
             name: "Subgraph1",
             type_defs: r#"
@@ -147,7 +146,7 @@ mod field_type_inconsistencies {
     }
 
     #[test]
-    fn hint_on_inconsistent_argument_type_nullable_vs_non_nullable() {
+    fn hints_on_inconsistent_argument_type_nullable_vs_non_nullable() {
         let subgraph1 = ServiceDefinition {
             name: "Subgraph1",
             type_defs: r#"
@@ -179,7 +178,7 @@ mod field_type_inconsistencies {
     }
 
     #[test]
-    fn hint_on_argument_with_default_value_in_only_some_subgraph() {
+    fn hints_on_argument_with_default_value_in_only_some_subgraph() {
         let subgraph1 = ServiceDefinition {
             name: "Subgraph1",
             type_defs: r#"
@@ -211,12 +210,11 @@ mod field_type_inconsistencies {
     }
 }
 
-// Tests for entity consistency
 mod entity_consistency {
     use super::*;
 
     #[test]
-    fn hint_on_entity_vs_non_entity_inconsistency() {
+    fn hints_on_entity_vs_non_entity_inconsistency() {
         let subgraph1 = ServiceDefinition {
             name: "Subgraph1",
             type_defs: r#"
@@ -250,14 +248,15 @@ mod entity_consistency {
     }
 }
 
-// Tests for value type field presence
 mod value_type_fields {
+    use apollo_federation::composition::compose;
+    use apollo_federation::subgraph::typestate::Subgraph;
     use test_log::test;
 
     use super::*;
 
     #[test]
-    fn hint_on_object_field_missing_from_some_subgraphs() {
+    fn hints_on_object_field_missing_from_some_subgraphs() {
         let subgraph1 = ServiceDefinition {
             name: "Subgraph1",
             type_defs: r#"
@@ -290,7 +289,57 @@ mod value_type_fields {
     }
 
     #[test]
-    fn hint_on_interface_field_missing_from_some_subgraphs() {
+    fn use_of_federation_key_does_not_raise_hint() {
+        let subgraph1 = Subgraph::parse(
+            "subgraph1",
+            "http://localhost:4001",
+            r#"
+                extend schema
+                  @link(url: "https://specs.apollo.dev/federation/v2.7")
+
+                type Query {
+                    a: Int
+                }
+
+                union U = T
+
+                type T @federation__key(fields:"id") {
+                    id: ID!
+                    b: Int
+                }
+            "#,
+        )
+        .unwrap();
+
+        let subgraph2 = Subgraph::parse(
+            "subgraph2",
+            "http://localhost:4002",
+            r#"
+                extend schema
+                  @link(url: "https://specs.apollo.dev/federation/v2.7")
+
+                type Query {
+                    b: Int
+                }
+
+                type T @federation__key(fields:"id") {
+                    id: ID!
+                    c: Int
+                }
+            "#,
+        )
+        .unwrap();
+
+        let result = compose(vec![subgraph1, subgraph2]);
+        assert!(result.is_ok(), "Expected composition to succeed");
+        let composition_result = result.unwrap();
+
+        // Should not raise hints when using federation__key
+        assert_no_hints(&composition_result);
+    }
+
+    #[test]
+    fn hints_on_interface_field_missing_from_some_subgraphs() {
         let subgraph1 = ServiceDefinition {
             name: "Subgraph1",
             type_defs: r#"
@@ -323,7 +372,42 @@ mod value_type_fields {
     }
 
     #[test]
-    fn hint_on_input_object_field_missing_from_some_subgraphs() {
+    fn no_hint_on_field_of_interface_with_key_not_being_in_all_subgraphs() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    a: Int
+                }
+
+                interface T @key(fields: "id") {
+                    id: ID!
+                    a: Int
+                    b: Int
+                }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                type T @interfaceObject @key(fields: "id") {
+                    id: ID!
+                    a: Int
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        assert!(result.is_ok(), "Expected composition to succeed");
+        let composition_result = result.unwrap();
+
+        // Should not raise hints when interface has @key
+        assert_no_hints(&composition_result);
+    }
+
+    #[test]
+    fn hints_on_input_object_field_missing_from_some_subgraphs() {
         let subgraph1 = ServiceDefinition {
             name: "Subgraph1",
             type_defs: r#"
@@ -356,7 +440,6 @@ mod value_type_fields {
     }
 }
 
-// Tests for union member inconsistencies
 mod union_member_inconsistencies {
     use super::*;
 
@@ -409,7 +492,6 @@ mod union_member_inconsistencies {
     }
 }
 
-// Tests for enum-related hints
 mod enum_hints {
     use test_log::test;
 
@@ -515,7 +597,202 @@ mod enum_hints {
     }
 }
 
-// Tests for description inconsistencies
+mod executable_directives {
+    use test_log::test;
+
+    use super::*;
+
+    #[test]
+    fn hints_on_executable_directives_not_being_in_all_subgraphs() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    a: Int
+                }
+
+                directive @t repeatable on QUERY
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                scalar s
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        assert!(result.is_ok(), "Expected composition to succeed");
+        let composition_result = result.unwrap();
+
+        assert_has_hint(
+            &composition_result,
+            "INCONSISTENT_EXECUTABLE_DIRECTIVE_PRESENCE",
+            r#"Executable directive "@t" will not be part of the supergraph as it does not appear in all subgraphs: it is defined in subgraph "Subgraph1" but not in subgraph "Subgraph2"."#,
+        );
+    }
+
+    #[test]
+    fn hints_on_executable_directives_having_no_locations_intersection() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    a: Int
+                }
+
+                directive @t on QUERY
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                directive @t on FIELD
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        assert!(result.is_ok(), "Expected composition to succeed");
+        let composition_result = result.unwrap();
+
+        assert_has_hint(
+            &composition_result,
+            "NO_EXECUTABLE_DIRECTIVE_LOCATIONS_INTERSECTION",
+            r#"Executable directive "@t" has no location that is common to all subgraphs: it will not appear in the supergraph as there no intersection between location "QUERY" in subgraph "Subgraph1" and location "FIELD" in subgraph "Subgraph2"."#,
+        );
+    }
+
+    #[test]
+    fn hints_on_executable_directives_having_inconsistent_repeatable() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    a: Int
+                }
+
+                directive @t repeatable on QUERY
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                directive @t on QUERY
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        assert!(result.is_ok(), "Expected composition to succeed");
+        let composition_result = result.unwrap();
+
+        assert_has_hint(
+            &composition_result,
+            "INCONSISTENT_EXECUTABLE_DIRECTIVE_REPEATABLE",
+            r#"Executable directive "@t" will not be marked repeatable in the supergraph as it is inconsistently marked repeatable in subgraphs: it is not repeatable in subgraph "Subgraph2" but is repeatable in subgraph "Subgraph1"."#,
+        );
+    }
+
+    #[test]
+    fn hints_on_executable_directives_having_inconsistent_locations() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    a: Int
+                }
+
+                directive @t on QUERY | FIELD
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                directive @t on FIELD
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        assert!(result.is_ok(), "Expected composition to succeed");
+        let composition_result = result.unwrap();
+
+        assert_has_hint(
+            &composition_result,
+            "INCONSISTENT_EXECUTABLE_DIRECTIVE_LOCATIONS",
+            r#"Executable directive "@t" has inconsistent locations across subgraphs and will use location "FIELD" (intersection of all subgraphs) in the supergraph, but has: location "FIELD" in subgraph "Subgraph2" and locations "FIELD, QUERY" in subgraph "Subgraph1"."#,
+        );
+    }
+
+    #[test]
+    fn hints_on_executable_directives_argument_not_being_in_all_subgraphs() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    a: Int
+                }
+
+                directive @t(a: Int) on FIELD
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                directive @t on FIELD
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        assert!(result.is_ok(), "Expected composition to succeed");
+        let composition_result = result.unwrap();
+
+        assert_has_hint(
+            &composition_result,
+            "INCONSISTENT_ARGUMENT_PRESENCE",
+            r#"Optional argument "@t(a:)" will not be included in the supergraph as it does not appear in all subgraphs: it is defined in subgraph "Subgraph1" but not in subgraph "Subgraph2"."#,
+        );
+    }
+}
+
+mod field_argument_inconsistencies {
+    use super::*;
+
+    #[test]
+    fn hints_on_field_argument_not_being_in_all_subgraphs() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    f(a: Int): Int @shareable
+                }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                type Query {
+                    f: Int @shareable
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        assert!(result.is_ok(), "Expected composition to succeed");
+        let composition_result = result.unwrap();
+
+        assert_has_hint(
+            &composition_result,
+            "INCONSISTENT_ARGUMENT_PRESENCE",
+            r#"Optional argument "Query.f(a:)" will not be included in the supergraph as it does not appear in all subgraphs: it is defined in subgraph "Subgraph1" but not in subgraph "Subgraph2"."#,
+        );
+    }
+}
+
 mod description_inconsistencies {
     use test_log::test;
 
@@ -628,7 +905,6 @@ In subgraph "Subgraph1", the description is:
     }
 }
 
-// Tests related to the @override directive
 mod override_directive_hints {
     use super::*;
 
@@ -876,7 +1152,6 @@ mod override_directive_hints {
     }
 }
 
-// Tests for non-repeatable directives used with incompatible arguments
 mod non_repeatable_directive_arguments {
     use super::*;
 
@@ -929,8 +1204,7 @@ mod non_repeatable_directive_arguments {
     }
 
     #[test]
-    fn does_not_warn_if_a_subgraph_uses_the_argument_default_and_other_passes_argument_but_it_is_the_default()
-     {
+    fn does_not_warn_if_a_subgraph_omits_value_and_other_explicitly_passes_default() {
         let subgraph1 = ServiceDefinition {
             name: "Subgraph1",
             type_defs: r#"
@@ -982,7 +1256,7 @@ mod non_repeatable_directive_arguments {
     }
 
     #[test]
-    fn warns_if_subgraphs_use_different_argument() {
+    fn warns_if_subgraphs_use_different_arguments() {
         let subgraph1 = ServiceDefinition {
             name: "Subgraph1",
             type_defs: r#"
@@ -1057,7 +1331,6 @@ mod non_repeatable_directive_arguments {
     }
 }
 
-// Tests for shared field with intersecting but non-equal runtime types
 mod shareable_runtime_types {
     use super::*;
 
@@ -1199,7 +1472,6 @@ Otherwise the @shareable contract will be broken."#,
     }
 }
 
-// Tests for implicit federation version upgrades
 mod implicit_federation_upgrades {
     use apollo_federation::composition::compose;
     use apollo_federation::subgraph::typestate::Subgraph;
@@ -1208,7 +1480,7 @@ mod implicit_federation_upgrades {
     use super::*;
 
     #[test]
-    fn should_hint_that_version_was_upgraded_to_satisfy_directive_requirements() {
+    fn hints_that_version_was_upgraded_to_satisfy_directive_requirements() {
         let older_federation_schema = r#"
 extend schema
   @link(url: "https://specs.apollo.dev/federation/v2.5", import: ["@key"])
@@ -1279,7 +1551,7 @@ type Resource {
     }
 
     #[test]
-    fn should_show_separate_hints_for_each_upgraded_subgraph() {
+    fn shows_separate_hints_for_each_upgraded_subgraph() {
         let auto_upgraded_schema = r#"
 extend schema
   @link(url: "https://specs.apollo.dev/federation/v2.5", import: ["@key", "@shareable"])
@@ -1326,7 +1598,7 @@ type Resource @shareable @key(fields: "id") {
     }
 
     #[test]
-    fn should_not_raise_hints_if_only_upgrade_caused_by_direct_federation_spec_link() {
+    fn does_not_hint_if_only_upgrade_caused_by_direct_federation_spec_link() {
         let older_federation_schema = r#"
 extend schema
   @link(url: "https://specs.apollo.dev/federation/v2.5", import: ["@key"])
@@ -1370,200 +1642,6 @@ type Query {
     }
 }
 
-// Tests for executable directive hints
-mod executable_directives {
-    use test_log::test;
-
-    use super::*;
-
-    #[test]
-    fn hints_on_executable_directives_not_being_in_all_subgraphs() {
-        let subgraph1 = ServiceDefinition {
-            name: "Subgraph1",
-            type_defs: r#"
-                type Query {
-                    a: Int
-                }
-
-                directive @t repeatable on QUERY
-            "#,
-        };
-
-        let subgraph2 = ServiceDefinition {
-            name: "Subgraph2",
-            type_defs: r#"
-                scalar s
-            "#,
-        };
-
-        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
-        assert!(result.is_ok(), "Expected composition to succeed");
-        let composition_result = result.unwrap();
-
-        assert_has_hint(
-            &composition_result,
-            "INCONSISTENT_EXECUTABLE_DIRECTIVE_PRESENCE",
-            r#"Executable directive "@t" will not be part of the supergraph as it does not appear in all subgraphs: it is defined in subgraph "Subgraph1" but not in subgraph "Subgraph2"."#,
-        );
-    }
-
-    #[test]
-    fn hints_on_executable_directives_having_no_locations_intersection() {
-        let subgraph1 = ServiceDefinition {
-            name: "Subgraph1",
-            type_defs: r#"
-                type Query {
-                    a: Int
-                }
-
-                directive @t on QUERY
-            "#,
-        };
-
-        let subgraph2 = ServiceDefinition {
-            name: "Subgraph2",
-            type_defs: r#"
-                directive @t on FIELD
-            "#,
-        };
-
-        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
-        assert!(result.is_ok(), "Expected composition to succeed");
-        let composition_result = result.unwrap();
-
-        assert_has_hint(
-            &composition_result,
-            "NO_EXECUTABLE_DIRECTIVE_LOCATIONS_INTERSECTION",
-            r#"Executable directive "@t" has no location that is common to all subgraphs: it will not appear in the supergraph as there no intersection between location "QUERY" in subgraph "Subgraph1" and location "FIELD" in subgraph "Subgraph2"."#,
-        );
-    }
-
-    #[test]
-    fn hints_on_executable_directives_having_inconsistent_repeatable() {
-        let subgraph1 = ServiceDefinition {
-            name: "Subgraph1",
-            type_defs: r#"
-                type Query {
-                    a: Int
-                }
-
-                directive @t repeatable on QUERY
-            "#,
-        };
-
-        let subgraph2 = ServiceDefinition {
-            name: "Subgraph2",
-            type_defs: r#"
-                directive @t on QUERY
-            "#,
-        };
-
-        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
-        assert!(result.is_ok(), "Expected composition to succeed");
-        let composition_result = result.unwrap();
-
-        assert_has_hint(
-            &composition_result,
-            "INCONSISTENT_EXECUTABLE_DIRECTIVE_REPEATABLE",
-            r#"Executable directive "@t" will not be marked repeatable in the supergraph as it is inconsistently marked repeatable in subgraphs: it is not repeatable in subgraph "Subgraph2" but is repeatable in subgraph "Subgraph1"."#,
-        );
-    }
-
-    #[test]
-    fn hints_on_executable_directives_having_inconsistent_locations() {
-        let subgraph1 = ServiceDefinition {
-            name: "Subgraph1",
-            type_defs: r#"
-                type Query {
-                    a: Int
-                }
-
-                directive @t on QUERY | FIELD
-            "#,
-        };
-
-        let subgraph2 = ServiceDefinition {
-            name: "Subgraph2",
-            type_defs: r#"
-                directive @t on FIELD
-            "#,
-        };
-
-        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
-        assert!(result.is_ok(), "Expected composition to succeed");
-        let composition_result = result.unwrap();
-
-        assert_has_hint(
-            &composition_result,
-            "INCONSISTENT_EXECUTABLE_DIRECTIVE_LOCATIONS",
-            r#"Executable directive "@t" has inconsistent locations across subgraphs and will use location "FIELD" (intersection of all subgraphs) in the supergraph, but has: location "FIELD" in subgraph "Subgraph2" and locations "FIELD, QUERY" in subgraph "Subgraph1"."#,
-        );
-    }
-
-    #[test]
-    fn hints_on_executable_directives_argument_not_being_in_all_subgraphs() {
-        let subgraph1 = ServiceDefinition {
-            name: "Subgraph1",
-            type_defs: r#"
-                type Query {
-                    a: Int
-                }
-
-                directive @t(a: Int) on FIELD
-            "#,
-        };
-
-        let subgraph2 = ServiceDefinition {
-            name: "Subgraph2",
-            type_defs: r#"
-                directive @t on FIELD
-            "#,
-        };
-
-        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
-        assert!(result.is_ok(), "Expected composition to succeed");
-        let composition_result = result.unwrap();
-
-        assert_has_hint(
-            &composition_result,
-            "INCONSISTENT_ARGUMENT_PRESENCE",
-            r#"Optional argument "@t(a:)" will not be included in the supergraph as it does not appear in all subgraphs: it is defined in subgraph "Subgraph1" but not in subgraph "Subgraph2"."#,
-        );
-    }
-
-    #[test]
-    fn hints_on_field_argument_not_being_in_all_subgraphs() {
-        let subgraph1 = ServiceDefinition {
-            name: "Subgraph1",
-            type_defs: r#"
-                type Query {
-                    f(a: Int): Int @shareable
-                }
-            "#,
-        };
-
-        let subgraph2 = ServiceDefinition {
-            name: "Subgraph2",
-            type_defs: r#"
-                type Query {
-                    f: Int @shareable
-                }
-            "#,
-        };
-
-        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
-        assert!(result.is_ok(), "Expected composition to succeed");
-        let composition_result = result.unwrap();
-
-        assert_has_hint(
-            &composition_result,
-            "INCONSISTENT_ARGUMENT_PRESENCE",
-            r#"Optional argument "Query.f(a:)" will not be included in the supergraph as it does not appear in all subgraphs: it is defined in subgraph "Subgraph1" but not in subgraph "Subgraph2"."#,
-        );
-    }
-}
-
-// Tests for external type handling
 mod external_types {
     use test_log::test;
 
@@ -1666,100 +1744,6 @@ mod external_types {
         let composition_result = result.unwrap();
 
         // Should not raise hints when all fields are properly marked @external
-        assert_no_hints(&composition_result);
-    }
-}
-
-// Tests for federation__key usage
-mod federation_key_tests {
-    use apollo_federation::composition::compose;
-    use apollo_federation::subgraph::typestate::Subgraph;
-    use test_log::test;
-
-    use super::*;
-
-    #[test]
-    fn use_of_federation_key_does_not_raise_hint() {
-        let subgraph1 = Subgraph::parse(
-            "subgraph1",
-            "http://localhost:4001",
-            r#"
-                extend schema
-                  @link(url: "https://specs.apollo.dev/federation/v2.7")
-
-                type Query {
-                    a: Int
-                }
-
-                union U = T
-
-                type T @federation__key(fields:"id") {
-                    id: ID!
-                    b: Int
-                }
-            "#,
-        )
-        .unwrap();
-
-        let subgraph2 = Subgraph::parse(
-            "subgraph2",
-            "http://localhost:4002",
-            r#"
-                extend schema
-                  @link(url: "https://specs.apollo.dev/federation/v2.7")
-
-                type Query {
-                    b: Int
-                }
-
-                type T @federation__key(fields:"id") {
-                    id: ID!
-                    c: Int
-                }
-            "#,
-        )
-        .unwrap();
-
-        let result = compose(vec![subgraph1, subgraph2]);
-        assert!(result.is_ok(), "Expected composition to succeed");
-        let composition_result = result.unwrap();
-
-        // Should not raise hints when using federation__key
-        assert_no_hints(&composition_result);
-    }
-
-    #[test]
-    fn no_hint_on_field_of_interface_with_key_not_being_in_all_subgraphs() {
-        let subgraph1 = ServiceDefinition {
-            name: "Subgraph1",
-            type_defs: r#"
-                type Query {
-                    a: Int
-                }
-
-                interface T @key(fields: "id") {
-                    id: ID!
-                    a: Int
-                    b: Int
-                }
-            "#,
-        };
-
-        let subgraph2 = ServiceDefinition {
-            name: "Subgraph2",
-            type_defs: r#"
-                type T @interfaceObject @key(fields: "id") {
-                    id: ID!
-                    a: Int
-                }
-            "#,
-        };
-
-        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
-        assert!(result.is_ok(), "Expected composition to succeed");
-        let composition_result = result.unwrap();
-
-        // Should not raise hints when interface has @key
         assert_no_hints(&composition_result);
     }
 }
