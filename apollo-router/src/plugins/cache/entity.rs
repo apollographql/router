@@ -1446,6 +1446,7 @@ fn extract_cache_keys(
         if is_known_private && let Some(id) = private_id {
             let _ = write!(&mut key, ":{id}");
         }
+        dbg!(&key);
 
         // Restore the `representation` back whole again
         representation.insert(TYPENAME, typename_value);
@@ -1654,7 +1655,10 @@ pub(crate) fn hash_representation(
     hex::encode(digest.finalize().as_slice())
 }
 
-pub(crate) fn hash_representation_filtered(
+// Only hash the list of entity keys
+// * full representation: key fields & other required fields
+// * selection_set: key fields selection set
+pub(crate) fn hash_entity_key(
     representation: &serde_json_bytes::Map<ByteString, Value>,
     selection_set: &apollo_compiler::executable::SelectionSet,
 ) -> String {
@@ -1715,17 +1719,6 @@ pub(crate) fn hash_representation_filtered(
     let mut digest = Sha256::new();
     hash_object(&mut digest, representation, selection_set);
     hex::encode(digest.finalize().as_slice())
-}
-
-// Only hash the list of entity keys
-// * full representation: key fields & other required fields
-// * selection_set: key fields selection set
-pub(crate) fn hash_entity_key(
-    representation: &serde_json_bytes::Map<ByteString, serde_json_bytes::Value>,
-    selection_set: &apollo_compiler::executable::SelectionSet,
-) -> String {
-    // We have to hash the representation because it can contains PII
-    hash_representation_filtered(representation, selection_set)
 }
 
 // Hash other representation variables except __typename and entity keys
@@ -2241,7 +2234,7 @@ mod tests {
             &representation,
             &field_set.selection_set
         ));
-        let hash = hash_representation_filtered(&representation, &field_set.selection_set);
+        let hash = hash_entity_key(&representation, &field_set.selection_set);
         assert_eq!(
             hash,
             "e5faa4c491214ed07f53acc65189e6efacc8b7eedc0d88055d86a5307671f0e3"

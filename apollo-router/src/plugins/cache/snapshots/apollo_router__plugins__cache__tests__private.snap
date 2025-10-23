@@ -4,7 +4,7 @@ expression: cache_keys
 ---
 [
   {
-    "key": "version:1.0:subgraph:orga:type:Organization:entity:bcc0a4a9f8c595510c0ff8849bc36b402ac3f52506392d67107c623528ff11f4:representation::hash:24c28e0fbf1bd14093d77e5fa35abb9b6311a81b6331e894829ebd3188272315:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
+    "key": "version:1.0:subgraph:orga:type:Organization:entity:c20c68e9284977d48135c025d2cfbe3ba985fece08fb225547def3726abddecc:representation:c20c68e9284977d48135c025d2cfbe3ba985fece08fb225547def3726abddecc:hash:24c28e0fbf1bd14093d77e5fa35abb9b6311a81b6331e894829ebd3188272315:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
     "status": "new",
     "cache_control": "private"
   },
