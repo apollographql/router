@@ -1737,4 +1737,29 @@ mod tests {
             r#"[subgraph1] Cannot have both @provides and @external on field "User.id""#
         );
     }
+
+    #[test]
+    fn handle_empty_type_definition() {
+        let s1 = Subgraph::parse(
+            "s1",
+            "",
+            r#"
+            type T # empty type definition
+
+            extend type T { # an extension with a field
+                field: Boolean
+            }
+
+            type Query {
+                test: T
+            }
+        "#,
+        )
+        .expect("parsing schema")
+        .expand_links()
+        .expect("expanding schema");
+
+        // This used to panic with a ExtensionWithNoBase error.
+        _ = upgrade_subgraphs_if_necessary(vec![s1]).expect("upgrading schemas");
+    }
 }
