@@ -23,6 +23,7 @@ use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
 use crate::supergraph::EXECUTABLE_DIRECTIVE_LOCATIONS;
+use crate::utils::first_max_by_key;
 
 #[derive(Clone)]
 pub(crate) struct AppliedDirectiveToMergeEntry {
@@ -200,22 +201,9 @@ impl Merger {
                     ),
                     locations: Default::default(), // PORT_NOTE: No locations in JS implementation.
                 });
-        } else if let Some(most_used_directive) = directive_counts
-            .into_iter()
-            .fold(
-                None,
-                |acc: Option<(Directive, usize)>, (directive, count)| {
-                    // Finds the most used directive application. If there is a tie, returns the first
-                    // one with that count. Unfortunately, Itertools `max_by_key` breaks ties by picking
-                    // the last one.
-                    match acc {
-                        Some((_, max_count)) if count > max_count => Some((directive, count)),
-                        Some((dir, max_count)) => Some((dir, max_count)),
-                        None => Some((directive, count)),
-                    }
-                },
-            )
-            .map(|(directive, _)| directive)
+        } else if let Some(most_used_directive) =
+            first_max_by_key(directive_counts.into_iter(), |(_, count)| *count)
+                .map(|(directive, _)| directive)
         {
             trace!(
                 "Directive @{name} is non-repeatable and has no argument merger, picking most used application at {dest}"

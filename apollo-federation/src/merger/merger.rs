@@ -76,6 +76,7 @@ use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
 use crate::utils::human_readable::human_readable_subgraph_names;
 use crate::utils::iter_into_single_item;
+use crate::utils::first_max_by_key;
 
 static NON_MERGED_CORE_FEATURES: LazyLock<[Identity; 4]> = LazyLock::new(|| {
     [
@@ -1608,7 +1609,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
     where
         T: HasDescription + Display,
     {
-        let mut descriptions = sources
+        let mut descriptions: IndexMap<String, usize> = sources
             .iter()
             .map(|(idx, source)| {
                 source
@@ -1617,19 +1618,23 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                     .map(|d| d.trim().to_string())
                     .unwrap_or_default()
             })
-            .counts();
+            .fold(Default::default(), |mut acc, desc| {
+                if !desc.is_empty() {
+                    *acc.entry(desc).or_insert(0) += 1;
+                }
+                acc
+            });
         // we don't want to raise a hint if a description is ""
-        descriptions.remove("");
+        descriptions.shift_remove("");
 
         if !descriptions.is_empty() {
             if let Some((description, _)) = iter_into_single_item(descriptions.iter()) {
                 dest.set_description(&mut self.merged, Some(Node::new_str(description)))?;
             } else {
                 // Find the description with the highest count
-                if let Some((idx, _)) = descriptions
+                if let Some((idx, _)) = first_max_by_key(descriptions
                     .iter()
-                    .enumerate()
-                    .max_by_key(|(_, (_, counts))| *counts)
+                    .enumerate(), |(_, (_, counts))| *counts)
                 {
                     // Get the description at the found index
                     if let Some((description, _)) = descriptions.iter().nth(idx) {
