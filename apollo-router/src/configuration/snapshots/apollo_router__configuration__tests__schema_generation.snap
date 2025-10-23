@@ -2540,6 +2540,15 @@ expression: "&schema"
         },
         "preview_connect_v0_3": {
           "default": null,
+          "deprecated": true,
+          "description": "Feature gate for Connect spec v0.3. Set to `true` to enable the using\nthe v0.3 spec during the preview phase.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "preview_connect_v0_4": {
+          "default": null,
           "description": "Feature gate for Connect spec v0.3. Set to `true` to enable the using\nthe v0.3 spec during the preview phase.",
           "type": [
             "boolean",
