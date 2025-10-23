@@ -1566,6 +1566,8 @@ mod executable_directives {
 
 // Tests for external type handling
 mod external_types {
+    use test_log::test;
+
     use super::*;
 
     #[test]

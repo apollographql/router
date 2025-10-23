@@ -994,8 +994,9 @@ impl Merger {
         idx: usize,
         ty: &ObjectOrInterfaceTypeDefinitionPosition,
     ) -> Result<bool, FederationError> {
-        Ok(ty.fields(self.merged.schema())?.all(|field| {
-            self.subgraphs[idx]
+        let subgraph = &self.subgraphs[idx];
+        Ok(ty.fields(subgraph.schema().schema())?.all(|field| {
+            subgraph
                 .metadata()
                 .external_metadata()
                 .is_external(&FieldDefinitionPosition::from(field.clone()))
