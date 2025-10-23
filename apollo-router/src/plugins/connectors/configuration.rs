@@ -61,7 +61,13 @@ pub(crate) struct ConnectorsConfig {
     /// Feature gate for Connect spec v0.3. Set to `true` to enable the using
     /// the v0.3 spec during the preview phase.
     #[serde(default)]
+    #[deprecated(note = "Connect spec v0.3 is now available.")]
     pub(crate) preview_connect_v0_3: Option<bool>,
+
+    /// Feature gate for Connect spec v0.3. Set to `true` to enable the using
+    /// the v0.3 spec during the preview phase.
+    #[serde(default)]
+    pub(crate) preview_connect_v0_4: Option<bool>,
 }
 
 // TODO: remove this after deprecation period
