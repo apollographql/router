@@ -1673,13 +1673,18 @@ mod external_types {
 
 // Tests for federation__key usage
 mod federation_key_tests {
+    use apollo_federation::composition::compose;
+    use apollo_federation::subgraph::typestate::Subgraph;
+    use test_log::test;
+
     use super::*;
 
     #[test]
     fn use_of_federation_key_does_not_raise_hint() {
-        let subgraph1 = ServiceDefinition {
-            name: "subgraph1",
-            type_defs: r#"
+        let subgraph1 = Subgraph::parse(
+            "subgraph1",
+            "http://localhost:4001",
+            r#"
                 extend schema
                   @link(url: "https://specs.apollo.dev/federation/v2.7")
 
@@ -1688,32 +1693,35 @@ mod federation_key_tests {
                 }
 
                 union U = T
-                
+
                 type T @federation__key(fields:"id") {
                     id: ID!
                     b: Int
                 }
             "#,
-        };
+        )
+        .unwrap();
 
-        let subgraph2 = ServiceDefinition {
-            name: "subgraph2",
-            type_defs: r#"
+        let subgraph2 = Subgraph::parse(
+            "subgraph2",
+            "http://localhost:4002",
+            r#"
                 extend schema
                   @link(url: "https://specs.apollo.dev/federation/v2.7")
 
                 type Query {
                     b: Int
                 }
-                
+
                 type T @federation__key(fields:"id") {
                     id: ID!
                     c: Int
                 }
             "#,
-        };
+        )
+        .unwrap();
 
-        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        let result = compose(vec![subgraph1, subgraph2]);
         assert!(result.is_ok(), "Expected composition to succeed");
         let composition_result = result.unwrap();
 

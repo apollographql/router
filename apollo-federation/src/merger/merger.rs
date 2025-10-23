@@ -1027,12 +1027,11 @@ impl Merger {
                 continue;
             };
             let subgraph = &self.subgraphs[*idx];
-            if subgraph
+            if !subgraph
                 .schema()
                 .schema()
                 .types
-                .get(dest.type_name())
-                .is_none()
+                .contains_key(dest.type_name())
             {
                 trace!(
                     "Subgraph {} does not define type {}",
@@ -1044,7 +1043,10 @@ impl Merger {
                 .field(field.field_name().clone())
                 .try_get(subgraph.schema().schema())
                 .is_some();
-            if !field_is_defined && !self.are_all_fields_external(*idx, source)? {
+            if !field_is_defined
+                && !self.are_all_fields_external(*idx, source)?
+                && !subgraph.is_interface_object_type(&source.clone().into())
+            {
                 self.error_reporter.report_mismatch_hint::<
                     ObjectOrInterfaceTypeDefinitionPosition,
                     ObjectOrInterfaceTypeDefinitionPosition,
