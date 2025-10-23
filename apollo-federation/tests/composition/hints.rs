@@ -633,6 +633,7 @@ mod override_directive_hints {
     use super::*;
 
     #[test]
+    #[ignore = "Hints for @override to be implemented in FED-555"]
     fn hint_when_from_subgraph_does_not_exist() {
         let subgraph1 = ServiceDefinition {
             name: "Subgraph1",
@@ -666,6 +667,7 @@ mod override_directive_hints {
     }
 
     #[test]
+    #[ignore = "Hints for @override to be implemented in FED-555"]
     fn hint_when_override_directive_can_be_removed() {
         let subgraph1 = ServiceDefinition {
             name: "Subgraph1",
@@ -699,6 +701,7 @@ mod override_directive_hints {
     }
 
     #[test]
+    #[ignore = "Hints for @override to be implemented in FED-555"]
     fn hint_overridden_field_can_be_removed() {
         let subgraph1 = ServiceDefinition {
             name: "Subgraph1",
@@ -733,6 +736,7 @@ mod override_directive_hints {
     }
 
     #[test]
+    #[ignore = "Hints for @override to be implemented in FED-555"]
     fn hint_overridden_field_can_be_made_external() {
         let subgraph1 = ServiceDefinition {
             name: "Subgraph1",
@@ -765,6 +769,7 @@ mod override_directive_hints {
     }
 
     #[test]
+    #[ignore = "Hints for @override to be implemented in FED-555"]
     fn hint_when_override_directive_can_be_removed_because_overridden_field_has_been_marked_external()
      {
         let subgraph1 = ServiceDefinition {
@@ -799,6 +804,7 @@ mod override_directive_hints {
     }
 
     #[test]
+    #[ignore = "Hints for @override to be implemented in FED-555"]
     fn hint_when_progressive_override_migration_is_in_progress() {
         let subgraph1 = ServiceDefinition {
             name: "Subgraph1",
@@ -835,6 +841,7 @@ mod override_directive_hints {
     }
 
     #[test]
+    #[ignore = "Hints for @override to be implemented in FED-555"]
     fn hint_when_progressive_override_migration_is_in_progress_for_referenced_field() {
         let subgraph1 = ServiceDefinition {
             name: "Subgraph1",
