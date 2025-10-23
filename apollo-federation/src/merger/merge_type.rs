@@ -115,12 +115,15 @@ impl Merger {
                 continue;
             };
 
+            if element.has_non_extension_elements() {
+                // Found a definition => no error.
+                return;
+            }
+
             if element.has_extension_elements() {
                 let subgraph_name = subgraph.name.to_string();
                 let element_locations = element.locations(subgraph);
                 subgraphs_with_extension.push((subgraph_name, element_locations));
-            } else {
-                return;
             }
         }
 
