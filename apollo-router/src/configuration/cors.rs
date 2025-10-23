@@ -109,7 +109,7 @@ pub(crate) struct Policy {
 #[serde(deny_unknown_fields)]
 #[serde(default)]
 pub(crate) struct PrivateNetworkAccessPolicy {
-    /// When `Some`, the `Private-Network-Access-ID` header will be added with the given ID.
+    /// When specified, the `Private-Network-Access-ID` header will be added with the given ID.
     /// The ID must be a 48-bit value presented as 6 hexadecimal bytes separated by colons, e.g.
     /// `01:23:45:67:89:0A`.
     pub(crate) access_id: Option<Arc<str>>,
@@ -280,11 +280,11 @@ pub(crate) enum CorsConfigError {
     #[error(
         "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Headers: *` in policy"
     )]
-    AllowCredentialsWithAllowHeaders,
+    AllowCredentialsWithAllowAnyHeaders,
     #[error(
         "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Methods: *` in policy"
     )]
-    AllowCredentialsWithAllowMethods,
+    AllowCredentialsWithAllowAnyMethods,
     #[error(
         "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `allow_any_origin: true`"
     )]
@@ -292,7 +292,7 @@ pub(crate) enum CorsConfigError {
     #[error(
         "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Expose-Headers: *` in policy"
     )]
-    AllowCredentialsWithExposeHeaders,
+    AllowCredentialsWithExposeAnyHeaders,
     #[error(
         "Invalid CORS configuration: `Private-Network-Access-Name` header value must not be empty."
     )]
@@ -358,11 +358,11 @@ impl Cors {
         if self.allow_credentials {
             // Check global fields for wildcards
             if self.allow_headers.iter().any(|x| &**x == "*") {
-                return Err(CorsConfigError::AllowCredentialsWithAllowHeaders);
+                return Err(CorsConfigError::AllowCredentialsWithAllowAnyHeaders);
             }
 
             if self.methods.iter().any(|x| &**x == "*") {
-                return Err(CorsConfigError::AllowCredentialsWithAllowMethods);
+                return Err(CorsConfigError::AllowCredentialsWithAllowAnyMethods);
             }
 
             if self.allow_any_origin {
@@ -372,7 +372,7 @@ impl Cors {
             if let Some(headers) = &self.expose_headers
                 && headers.iter().any(|x| &**x == "*")
             {
-                return Err(CorsConfigError::AllowCredentialsWithExposeHeaders);
+                return Err(CorsConfigError::AllowCredentialsWithExposeAnyHeaders);
             }
         }
 
@@ -384,17 +384,17 @@ impl Cors {
 
                 if policy_credentials {
                     if policy.allow_headers.iter().any(|x| &**x == "*") {
-                        return Err(CorsConfigError::AllowCredentialsWithAllowHeaders);
+                        return Err(CorsConfigError::AllowCredentialsWithAllowAnyHeaders);
                     }
 
                     if let Some(methods) = &policy.methods
                         && methods.iter().any(|x| &**x == "*")
                     {
-                        return Err(CorsConfigError::AllowCredentialsWithAllowMethods);
+                        return Err(CorsConfigError::AllowCredentialsWithAllowAnyMethods);
                     }
 
                     if policy.expose_headers.iter().any(|x| &**x == "*") {
-                        return Err(CorsConfigError::AllowCredentialsWithExposeHeaders);
+                        return Err(CorsConfigError::AllowCredentialsWithExposeAnyHeaders);
                     }
                 }
 
@@ -1043,7 +1043,7 @@ policies:
         let result = cors.ensure_usable_cors_rules();
         // This should fail in our implementation because we enforce the stricter rule
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), CorsConfigError::AllowAnyOrigin);
+        assert_eq!(result.unwrap_err(), CorsConfigError::AllowCredentialsWithAnyOrigin);
     }
 
     // Test: credentials "omit" + Access-Control-Allow-Origin "https://rabbit.invalid/" + Access-Control-Allow-Credentials omitted = ❌
@@ -1131,7 +1131,7 @@ policies:
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err(),
-            CorsConfigError::AllowCredentialsWithAllowHeaders
+            CorsConfigError::AllowCredentialsWithAllowAnyHeaders
         );
     }
 
@@ -1214,7 +1214,7 @@ policies:
         // Should fail on the first wildcard check (global allow_headers)
         assert_eq!(
             result.unwrap_err(),
-            CorsConfigError::AllowCredentialsWithAllowHeaders
+            CorsConfigError::AllowCredentialsWithAllowAnyHeaders
         );
     }
 

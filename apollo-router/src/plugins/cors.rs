@@ -25,8 +25,8 @@ use tower::Service;
 use crate::configuration::cors::Cors;
 use crate::configuration::cors::Policy;
 
-const ACCESS_CONTROL_PRIVATE_NETWORK: HeaderName =
-    HeaderName::from_static("access-control-private-network");
+const ACCESS_CONTROL_ALLOW_PRIVATE_NETWORK: HeaderName =
+    HeaderName::from_static("access-control-allow-private-network");
 const ACCESS_CONTROL_PRIVATE_NETWORK_VALUE: http::HeaderValue = HeaderValue::from_static("true");
 const PRIVATE_NETWORK_ACCESS_NAME: HeaderName =
     HeaderName::from_static("private-network-access-name");
@@ -133,7 +133,6 @@ where
 
         // Intercept OPTIONS requests and return preflight response directly
         if is_preflight {
-            println!("Preflight request!");
             let mut response = Response::builder()
                 .status(http::StatusCode::OK)
                 .body(ResBody::default())
@@ -338,7 +337,7 @@ impl<S> CorsService<S> {
             && let Some(Some(pna)) = policy.map(|policy| policy.private_network_access.as_ref())
         {
             response.headers_mut().insert(
-                ACCESS_CONTROL_PRIVATE_NETWORK,
+                ACCESS_CONTROL_ALLOW_PRIVATE_NETWORK,
                 ACCESS_CONTROL_PRIVATE_NETWORK_VALUE,
             );
 
@@ -1237,7 +1236,7 @@ mod tests {
             .unwrap();
         let resp = futures::executor::block_on(service.call(req)).unwrap();
         let finder = |header| resp.headers().iter().find(|h| h.0 == header);
-        assert!(finder(ACCESS_CONTROL_PRIVATE_NETWORK).is_some());
+        assert!(finder(ACCESS_CONTROL_ALLOW_PRIVATE_NETWORK).is_some());
         assert!(finder(PRIVATE_NETWORK_ACCESS_NAME).is_none());
         assert!(finder(PRIVATE_NETWORK_ACCESS_ID).is_none());
     }
@@ -1268,7 +1267,7 @@ mod tests {
             .unwrap();
         let resp = futures::executor::block_on(service.call(req)).unwrap();
         let finder = |header| resp.headers().iter().find(|h| h.0 == header);
-        assert!(finder(ACCESS_CONTROL_PRIVATE_NETWORK).is_some());
+        assert!(finder(ACCESS_CONTROL_ALLOW_PRIVATE_NETWORK).is_some());
         assert!(
             finder(PRIVATE_NETWORK_ACCESS_NAME).is_some_and(|(_, name)| name == "ferris-server")
         );
@@ -1304,7 +1303,7 @@ mod tests {
             .iter()
             .for_each(|header| println!("{header:?}"));
         let finder = |header| resp.headers().iter().find(|h| h.0 == header);
-        assert!(finder(ACCESS_CONTROL_PRIVATE_NETWORK).is_some());
+        assert!(finder(ACCESS_CONTROL_ALLOW_PRIVATE_NETWORK).is_some());
         assert!(
             finder(PRIVATE_NETWORK_ACCESS_NAME).is_some_and(|(_, name)| name == "ferris-server")
         );

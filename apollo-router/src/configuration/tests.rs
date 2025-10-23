@@ -178,10 +178,10 @@ subgraphs:
     assert_eq!(
         error.to_string(),
         String::from(
-            r#"configuration had errors: 
+            r#"configuration had errors:
 1. at line 4
 
-  
+
   supergraph:
     path: /
 ┌ subgraphs:
@@ -207,10 +207,10 @@ unknown:
     assert_eq!(
         error.to_string(),
         String::from(
-            r#"configuration had errors: 
+            r#"configuration had errors:
 1. at line 2
 
-  
+
 ┌ unknown:
 |   foo: true
 └-----> Additional properties are not allowed ('unknown' was unexpected)
@@ -339,7 +339,7 @@ cors:
         .expect_err("should have resulted in an error");
     assert_eq!(
         error,
-        "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Headers: *`"
+        "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Headers: *` in policy"
     );
 }
 
@@ -361,7 +361,7 @@ cors:
         .expect_err("should have resulted in an error");
     assert_eq!(
         error,
-        "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Methods: *`"
+        "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Methods: *` in policy"
     );
 }
 
