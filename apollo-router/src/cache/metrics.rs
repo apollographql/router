@@ -249,7 +249,7 @@ impl RedisMetricsCollector {
             .with_callback(move |gauge| {
                 gauge.observe(ACTIVE_CLIENT_COUNT.load(Ordering::Relaxed), &[]);
             })
-            .init()
+            .build()
     }
 
     /// Spawn the metrics collection task

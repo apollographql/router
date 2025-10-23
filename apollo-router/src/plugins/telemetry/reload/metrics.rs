@@ -22,9 +22,8 @@
 
 use ahash::HashMap;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::metrics::MeterProviderBuilder;
+use opentelemetry_sdk::metrics::{Instrument, MeterProviderBuilder, Stream, StreamBuilder};
 use opentelemetry_sdk::metrics::SdkMeterProvider;
-use opentelemetry_sdk::metrics::View;
 use prometheus::Registry;
 use tower::BoxError;
 
@@ -128,11 +127,13 @@ impl<'a> MetricsBuilder<'a> {
         self
     }
 
-    pub(crate) fn with_view(
+    pub(crate) fn with_view<T>(
         &mut self,
         meter_provider_type: MeterProviderType,
-        view: Box<dyn View>,
-    ) -> &mut Self {
+        view: T
+    ) -> &mut Self
+    where
+        T: Fn(&Instrument) -> Option<Stream> + Send + Sync + 'static {
         let meter_provider = self.meter_provider(meter_provider_type);
         *meter_provider = std::mem::take(meter_provider).with_view(view);
         self
@@ -177,7 +178,18 @@ impl<'a> MetricsBuilder<'a> {
         meter_provider_type: MeterProviderType,
     ) -> Result<(), BoxError> {
         for metric_view in self.metrics_common().views.clone() {
-            self.with_view(meter_provider_type, metric_view.try_into()?);
+            let view = move |i: &Instrument| {
+                let stream_builder: Result<StreamBuilder, String> = metric_view.clone().try_into();
+                if i.name() == metric_view.name {
+                    match stream_builder {
+                        Ok(stream_builder) => stream_builder.build().ok(),
+                        Err(_) => None,
+                    }
+                } else {
+                    None
+                }
+            };
+            self.with_view(meter_provider_type, view);
         }
         Ok(())
     }

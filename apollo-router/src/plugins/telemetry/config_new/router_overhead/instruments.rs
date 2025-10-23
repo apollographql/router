@@ -36,7 +36,7 @@ pub(crate) fn create_static_instrument(enabled: bool) -> Option<(String, StaticI
                 .with_description(
                     "Router processing overhead (time not spent waiting for subgraphs or connectors to respond).",
                 )
-                .init(),
+                .build(),
         ),
     ))
 }

@@ -6,12 +6,12 @@ use opentelemetry_sdk::metrics::PeriodicReader;
 use tonic::metadata::MetadataMap;
 use tower::BoxError;
 
+use crate::plugins::telemetry::otlp::process_endpoint;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::error_handler::NamedMetricsExporter;
 use crate::plugins::telemetry::otlp::Protocol;
-use crate::plugins::telemetry::metrics::CustomAggregationSelector;
 use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
 use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
 
@@ -79,7 +79,7 @@ impl MetricsConfigurator for super::super::otlp::Config {
         };
 
         let named_exporter = NamedMetricsExporter::new(exporter, "otlp");
-        builder.public_meter_provider_builder = builder.public_meter_provider_builder.with_reader(
+        builder.with_reader(
             MeterProviderType::Public,
             PeriodicReader::builder(named_exporter)
                 .with_interval(self.batch_processor.scheduled_delay)

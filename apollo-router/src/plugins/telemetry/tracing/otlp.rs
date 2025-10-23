@@ -72,7 +72,7 @@ impl TracingConfigurator for super::super::otlp::Config {
                 exporter.build_span_exporter()?
             }
         };
-        let named_exporter = NamedSpanExporter::new(exporter.build_span_exporter()?, "otlp");
+        let named_exporter = NamedSpanExporter::new(exporter, "otlp");
         let batch_span_processor = BatchSpanProcessor::builder(named_exporter)
             .with_batch_config(self.batch_processor.clone().into())
             .build()

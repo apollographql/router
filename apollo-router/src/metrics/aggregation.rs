@@ -16,7 +16,6 @@ use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
 use opentelemetry::metrics::SyncInstrument;
 use opentelemetry::metrics::UpDownCounter;
-use opentelemetry::metrics::noop::NoopMeterProvider;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use parking_lot::Mutex;
 use strum::EnumCount;
@@ -275,8 +274,9 @@ impl MeterProvider for AggregateMeterProvider {
         if let Some(inner) = inner.as_mut() {
             inner.meter(name)
         } else {
-            // The meter was used after shutdown. Default to Noop since the instrument cannot actually be used
-            NoopMeterProvider::default().meter(name)
+            // The meter was used after shutdown. Fall back to a meter from a provider with no
+            // readers since the instrument cannot actually be used
+            SdkMeterProvider::default().meter(name)
         }
     }
     fn meter_with_scope(&self, scope: opentelemetry::InstrumentationScope) -> Meter {

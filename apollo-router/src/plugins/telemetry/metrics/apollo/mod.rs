@@ -113,7 +113,7 @@ impl Config {
         reference: &str,
         schema_id: &str,
         batch_config: &OtlpMetricsBatchProcessorConfiguration,
-    ) -> Result<MetricsBuilder, BoxError> {
+    ) -> Result<(), BoxError> {
         tracing::info!("configuring Apollo OTLP metrics: {}", batch_config);
         let mut metadata = MetadataMap::new();
         metadata.insert("apollo.api.key", key.parse()?);
@@ -231,18 +231,17 @@ impl Config {
             )
         };
 
-        builder.apollo_meter_provider_builder = builder
-            .apollo_meter_provider_builder
+        builder
             .with_reader(MeterProviderType::Apollo, default_reader)
             .with_resource(MeterProviderType::Apollo, resource.clone())
-            .with_view(view_default_aggregation);
+            .with_view(MeterProviderType::Apollo, view_default_aggregation);
 
-        builder.apollo_realtime_meter_provider_builder = builder
-            .apollo_realtime_meter_provider_builder
+        builder
             .with_reader(MeterProviderType::ApolloRealtime, realtime_reader)
             .with_resource(MeterProviderType::ApolloRealtime, resource.clone())
-            .with_view(view_custom_aggregation);
-        Ok(builder)
+            .with_view(MeterProviderType::ApolloRealtime, view_custom_aggregation);
+
+        Ok(())
     }
 
     fn configure_apollo_metrics(
