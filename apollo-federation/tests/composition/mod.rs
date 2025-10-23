@@ -14,6 +14,8 @@ pub(crate) mod test_helpers {
     use apollo_federation::subgraph::typestate::Subgraph;
     use apollo_federation::supergraph::Satisfiable;
     use apollo_federation::supergraph::Supergraph;
+    use apollo_federation::supergraph::CompositionHint;
+    use std::iter::zip;
 
     pub(crate) struct ServiceDefinition<'a> {
         pub(crate) name: &'a str,
@@ -62,6 +64,15 @@ pub(crate) mod test_helpers {
         compose(fed2_subgraphs)
     }
 
+    pub(crate) fn assert_hints_equal(actual_hints: &Vec<CompositionHint>, expected_hints: &Vec<CompositionHint>) {
+        if actual_hints.len() != expected_hints.len() {
+            panic!("Mismatched number of hints")
+        }
+        let zipped = zip(actual_hints, expected_hints);
+        zipped
+            .for_each(|(ch1, ch2)| assert!(ch1.code() == ch2.code() && ch1.message() == ch2.message()));
+    }
+    
     pub(crate) fn assert_composition_success<S>(
         result: Result<Supergraph<S>, Vec<CompositionError>>,
     ) -> Supergraph<S> {
@@ -96,5 +107,6 @@ pub(crate) mod test_helpers {
 
 pub(crate) use test_helpers::ServiceDefinition;
 pub(crate) use test_helpers::assert_composition_success;
+pub(crate) use test_helpers::assert_hints_equal;
 pub(crate) use test_helpers::compose_as_fed2_subgraphs;
 pub(crate) use test_helpers::errors;
