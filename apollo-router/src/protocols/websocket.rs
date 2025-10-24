@@ -267,15 +267,9 @@ where
         let first_non_ping_payload = async {
             loop {
                 match stream.next().await {
-                    Some(Ok(ServerMessage::Ping { payload })) => {
-                        // we don't mind an error here
-                        // because it will fall through the error below
-                        // if we haven't been able to properly get a ConnectionAck within the `CONNECTION_ACK_TIMEOUT`
-                        let _ = stream
-                            .send(ClientMessage::Pong {
-                                payload: payload.map(|p| p.into()),
-                            })
-                            .await;
+                    Some(Ok(ServerMessage::Ping { .. })) => {
+                        // There's no need to send a pong here because the server will send a pong automatically.
+                        // See https://docs.rs/tungstenite/latest/tungstenite/protocol/struct.WebSocket.html#method.write
                     }
                     other => {
                         return other;
@@ -311,13 +305,6 @@ where
         request: graphql::Request,
         heartbeat_interval: Option<tokio::time::Duration>,
     ) -> Result<SubscriptionStream<S>, graphql::Error> {
-        u64_counter!(
-            "apollo.router.operations.subscriptions.events",
-            "Number of subscription events",
-            1,
-            subscriptions.mode = "passthrough"
-        );
-
         self.stream
             .send(self.protocol.subscribe(self.id.to_string(), request))
             .await
@@ -367,6 +354,14 @@ where
                     })
                 },
             }
+        })
+        .inspect(|msg| if let Ok(Message::Text(_) | Message::Binary(_)) = msg {
+            u64_counter!(
+                "apollo.router.operations.subscriptions.events",
+                "Number of subscription events",
+                1,
+                subscriptions.mode = "passthrough"
+            );
         })
         // Parse messages received from the `Stream`
         .map(move |msg| match msg {
@@ -716,6 +711,7 @@ mod tests {
     use axum::extract::WebSocketUpgrade;
     use axum::extract::ws::Message as AxumWsMessage;
     use axum::routing::get;
+    use bytes::Bytes;
     use futures::FutureExt;
     use http::HeaderValue;
     use tokio_tungstenite::connect_async;
@@ -725,6 +721,7 @@ mod tests {
     use super::*;
     use crate::assert_response_eq_ignoring_error_id;
     use crate::graphql::Request;
+    use crate::metrics::FutureMetricsExt;
 
     async fn emulate_correct_websocket_server_new_protocol(
         send_ping: bool,
@@ -746,14 +743,12 @@ mod tests {
                 if send_ping {
                     // It turns out some servers may send Pings before they even ack the connection.
                     socket
-                        .send(AxumWsMessage::text(
-                            serde_json::to_string(&ServerMessage::Ping { payload: None }).unwrap(),
-                        ))
+                        .send(AxumWsMessage::Ping(Bytes::new()))
                         .await
                         .unwrap();
-                    let new_message = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                    let pong_message: ClientMessage = serde_json::from_str(&new_message).unwrap();
-                    assert!(matches!(pong_message, ClientMessage::Pong { payload: None }));
+
+                    let pong_message = socket.next().await.unwrap().unwrap();
+                    assert_eq!(pong_message, AxumWsMessage::Pong(Bytes::new()));
                 }
 
                 socket
@@ -812,28 +807,20 @@ mod tests {
                     .unwrap();
 
                 socket
-                    .send(AxumWsMessage::text(
-                        serde_json::to_string(&ServerMessage::Ping { payload: None }).unwrap(),
-                    ))
+                    .send(AxumWsMessage::Ping(Bytes::new()))
                     .await
                     .unwrap();
 
                 let pong_message = socket.next().await.unwrap().unwrap();
-                assert_eq!(pong_message, AxumWsMessage::text(
-                    serde_json::to_string(&ClientMessage::Pong { payload: None }).unwrap(),
-                ));
+                assert_eq!(pong_message, AxumWsMessage::Pong(Bytes::new()));
 
                 socket
-                    .send(AxumWsMessage::text(
-                        serde_json::to_string(&ServerMessage::Ping { payload: None }).unwrap(),
-                    ))
+                    .send(AxumWsMessage::Ping(Bytes::new()))
                     .await
                     .unwrap();
 
                 let pong_message = socket.next().await.unwrap().unwrap();
-                assert_eq!(pong_message, AxumWsMessage::text(
-                    serde_json::to_string(&ClientMessage::Pong { payload: None }).unwrap(),
-                ));
+                assert_eq!(pong_message, AxumWsMessage::Pong(Bytes::new()));
 
                 socket
                     .send(AxumWsMessage::text(
@@ -875,14 +862,11 @@ mod tests {
                 if send_ping {
                     // It turns out some servers may send Pings before they even ack the connection.
                     socket
-                        .send(AxumWsMessage::text(
-                            serde_json::to_string(&ServerMessage::Ping { payload: None }).unwrap(),
-                        ))
+                        .send(AxumWsMessage::Ping(Bytes::new()))
                         .await
                         .unwrap();
-                    let new_message = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                    let pong_message: ClientMessage = serde_json::from_str(&new_message).unwrap();
-                    assert!(matches!(pong_message, ClientMessage::Pong { payload: None }));
+                    let pong_message = socket.next().await.unwrap().unwrap();
+                    assert_eq!(pong_message, AxumWsMessage::Pong(Bytes::new()));
                 }
                 socket
                     .send(AxumWsMessage::text(
@@ -987,51 +971,75 @@ mod tests {
         );
         let (ws_stream, _resp) = connect_async(request).await.unwrap();
 
-        let sub_uuid = Uuid::new_v4();
-        let gql_socket = GraphqlWebSocket::new(
-            convert_websocket_stream(ws_stream, sub_uuid.to_string()),
-            sub_uuid.to_string(),
-            WebSocketProtocol::GraphqlWs,
-            Some(serde_json_bytes::json!({
-                "token": "XXX"
-            })),
-        )
-        .await
-        .unwrap();
-
-        let sub = "subscription {\n  userWasCreated {\n    username\n  }\n}";
-        let mut gql_read_stream = gql_socket
-            .into_subscription(
-                graphql::Request::builder().query(sub).build(),
-                heartbeat_interval,
+        async move {
+            let sub_uuid = Uuid::new_v4();
+            let gql_socket = GraphqlWebSocket::new(
+                convert_websocket_stream(ws_stream, sub_uuid.to_string()),
+                sub_uuid.to_string(),
+                WebSocketProtocol::GraphqlWs,
+                Some(serde_json_bytes::json!({
+                    "token": "XXX"
+                })),
             )
             .await
             .unwrap();
 
-        let next_payload = gql_read_stream.next().await.unwrap();
-        assert_response_eq_ignoring_error_id!(next_payload, graphql::Response::builder()
-            .error(
-                graphql::Error::builder()
-                    .message(
-                        "cannot deserialize websocket server message: Error(\"expected value\", line: 1, column: 1)".to_string())
-                    .extension_code("INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT")
-                    .build(),
-            )
-            .build()
-        );
+            let sub = "subscription {\n  userWasCreated {\n    username\n  }\n}";
+            let mut gql_read_stream = gql_socket
+                .into_subscription(
+                    graphql::Request::builder().query(sub).build(),
+                    heartbeat_interval,
+                )
+                .await
+                .unwrap();
 
-        let next_payload = gql_read_stream.next().await.unwrap();
-        assert_eq!(
-            next_payload,
-            graphql::Response::builder()
-                .subscribed(true)
-                .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+            // Starts at 1 for the connection ack message
+            assert_counter!(
+                "apollo.router.operations.subscriptions.events",
+                1,
+                subscriptions.mode = "passthrough"
+            );
+
+            let next_payload = gql_read_stream.next().await.unwrap();
+            assert_response_eq_ignoring_error_id!(next_payload, graphql::Response::builder()
+                .error(
+                    graphql::Error::builder()
+                        .message(
+                            "cannot deserialize websocket server message: Error(\"expected value\", line: 1, column: 1)".to_string())
+                        .extension_code("INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT")
+                        .build(),
+                )
                 .build()
-        );
-        assert!(
-            gql_read_stream.next().now_or_never().is_none(),
-            "It should be completed"
-        );
+            );
+            // Increments to 2 for the invalid message
+            assert_counter!(
+                "apollo.router.operations.subscriptions.events",
+                2,
+                subscriptions.mode = "passthrough"
+            );
+
+            let next_payload = gql_read_stream.next().await.unwrap();
+            assert_eq!(
+                next_payload,
+                graphql::Response::builder()
+                    .subscribed(true)
+                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                    .build()
+            );
+            // Increments to 3 for the next message
+            assert_counter!(
+                "apollo.router.operations.subscriptions.events",
+                3,
+                subscriptions.mode = "passthrough"
+            );
+
+            assert!(
+                gql_read_stream.next().now_or_never().is_none(),
+                "It should be completed"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 
     #[tokio::test]
@@ -1128,46 +1136,69 @@ mod tests {
         );
         let (ws_stream, _resp) = connect_async(request).await.unwrap();
 
-        let sub_uuid = Uuid::new_v4();
-        let gql_socket = GraphqlWebSocket::new(
-            convert_websocket_stream(ws_stream, sub_uuid.to_string()),
-            sub_uuid.to_string(),
-            WebSocketProtocol::SubscriptionsTransportWs,
-            None,
-        )
-        .await
-        .unwrap();
-
-        let sub = "subscription {\n  userWasCreated {\n    username\n  }\n}";
-        let mut gql_read_stream = gql_socket
-            .into_subscription(graphql::Request::builder().query(sub).build(), None)
+        async move {
+            let sub_uuid = Uuid::new_v4();
+            let gql_socket = GraphqlWebSocket::new(
+                convert_websocket_stream(ws_stream, sub_uuid.to_string()),
+                sub_uuid.to_string(),
+                WebSocketProtocol::SubscriptionsTransportWs,
+                None,
+            )
             .await
             .unwrap();
 
-        let next_payload = gql_read_stream.next().await.unwrap();
+            let sub = "subscription {\n  userWasCreated {\n    username\n  }\n}";
+            let mut gql_read_stream = gql_socket
+                .into_subscription(graphql::Request::builder().query(sub).build(), None)
+                .await
+                .unwrap();
 
-        assert_response_eq_ignoring_error_id!(next_payload, graphql::Response::builder()
-            .error(
-                graphql::Error::builder()
-                    .message(
-                        "cannot deserialize websocket server message: Error(\"expected value\", line: 1, column: 1)".to_string())
-                    .extension_code("INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT")
-                    .build(),
-            )
-            .build()
-        );
+            // Starts at 1 for the connection ack
+            assert_counter!(
+                "apollo.router.operations.subscriptions.events",
+                1,
+                subscriptions.mode = "passthrough"
+            );
 
-        let next_payload = gql_read_stream.next().await.unwrap();
-        assert_eq!(
-            next_payload,
-            graphql::Response::builder()
-                .subscribed(true)
-                .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+            let next_payload = gql_read_stream.next().await.unwrap();
+            assert_response_eq_ignoring_error_id!(next_payload, graphql::Response::builder()
+                .error(
+                    graphql::Error::builder()
+                        .message(
+                            "cannot deserialize websocket server message: Error(\"expected value\", line: 1, column: 1)".to_string())
+                        .extension_code("INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT")
+                        .build(),
+                )
                 .build()
-        );
-        assert!(
-            gql_read_stream.next().now_or_never().is_none(),
-            "It should be completed"
-        );
+            );
+            // Increments to 3 for the keepalive and invalid message
+            assert_counter!(
+                "apollo.router.operations.subscriptions.events",
+                3,
+                subscriptions.mode = "passthrough"
+            );
+
+            let next_payload = gql_read_stream.next().await.unwrap();
+            assert_eq!(
+                next_payload,
+                graphql::Response::builder()
+                    .subscribed(true)
+                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                    .build()
+            );
+            // Increments to 4 for the next message
+            assert_counter!(
+                "apollo.router.operations.subscriptions.events",
+                4,
+                subscriptions.mode = "passthrough"
+            );
+
+            assert!(
+                gql_read_stream.next().now_or_never().is_none(),
+                "It should be completed"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 }
