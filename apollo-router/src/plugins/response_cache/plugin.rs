@@ -1987,12 +1987,11 @@ fn collect_key_field_sets(
 }
 
 /// Whether the entity, represented as JSON, matches the parsed @key fields (`selection_set`)
-/// * This function mirrors `take_selection_set` and make sure the representation matches the
-///   the shape of `selection_set`.
-/// * This function and `take_selection_set` are separate because this is called for multiple
-///   possible `@key` fields to find the matching one, while `take_selection_set` is only called
-///   once the matching `@key` fields is found.
-// WARN: if you make changes to this fn, make the same changes to the one in response_cache/plugin.rs!
+/// * This function mirrors `get_entity_key_from_selection_set` and make sure the representation
+///   matches the the shape of `selection_set`.
+/// * This function and `get_entity_key_from_selection_set` are separate because this is called for
+///   multiple possible `@key` fields to find the matching one, while
+///   `get_entity_key_from_selection_set` is only called once the matching `@key` fields is found.
 pub(in crate::plugins) fn matches_selection_set(
     // the JSON representation of the entity data
     representation: &serde_json_bytes::Map<ByteString, Value>,
@@ -2073,6 +2072,7 @@ fn matches_array_of_objects(
 
 // Get the selection set from `representation` and returns the value corresponding to it.
 // - Returns None if the representation doesn't match the selection set.
+// Note: This function mirrors `hash_representation_inner` in cache/entity.rs.
 fn get_entity_key_from_selection_set(
     representation: &serde_json_bytes::Map<ByteString, Value>,
     selection_set: &apollo_compiler::executable::SelectionSet,

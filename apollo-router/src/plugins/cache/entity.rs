@@ -1456,6 +1456,7 @@ fn extract_cache_keys(
 // * representation: key fields & other required fields
 // * selection_set: key fields selection set (if any)
 // * if selection_set is provided, only fields present in the selection set are hashed.
+// Note: This function mirrors `get_entity_key_from_selection_set` in response_cache/plugin.rs.
 fn hash_representation_inner(
     representation: &serde_json_bytes::Map<ByteString, Value>,
     selection_set: Option<&apollo_compiler::executable::SelectionSet>,
