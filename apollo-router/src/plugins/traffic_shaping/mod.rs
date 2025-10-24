@@ -281,7 +281,7 @@ impl PluginPrivate for TrafficShaping {
                                     .error(error)
                                     .context(ctx)
                                     .build()
-                                    .expect("should build overloaded response"))
+                                    .expect("should build elapsed response"))
                             }
                             Err(err) => Err(err),
                         }
