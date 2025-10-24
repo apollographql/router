@@ -1426,7 +1426,7 @@ fn extract_cache_keys(
         let hashed_representation = if representation.is_empty() {
             String::new()
         } else {
-            hash_other_representation(representation)
+            hash_representation(representation)
         };
         let hashed_entity_key = hash_entity_key(representation, &key_field_set);
 
@@ -1453,85 +1453,47 @@ fn extract_cache_keys(
 }
 
 // Order-insensitive structural hash of the representation value
-pub(crate) fn hash_representation(
+// * representation: key fields & other required fields
+// * selection_set: key fields selection set (if any)
+// * if selection_set is provided, only fields present in the selection set are hashed.
+// Note: This function mirrors `get_entity_key_from_selection_set` in response_cache/plugin.rs.
+fn hash_representation_inner(
     representation: &serde_json_bytes::Map<ByteString, Value>,
-) -> String {
-    fn hash_object(state: &mut Sha256, fields: &serde_json_bytes::Map<ByteString, Value>) {
-        state.update("{".as_bytes());
-        fields
-            .iter()
-            .sorted_by(|a, b| a.0.cmp(b.0))
-            .for_each(|(k, v)| {
-                state.update(serde_json::to_string(k).unwrap().as_bytes());
-                state.update(":".as_bytes());
-                match v {
-                    serde_json_bytes::Value::Object(obj) => {
-                        hash_object(state, obj);
-                    }
-                    Value::Array(arr) => {
-                        hash_array(state, arr);
-                    }
-                    // scalar value
-                    _ => state.update(serde_json::to_string(v).unwrap().as_bytes()),
-                }
-                state.update(",".as_bytes());
-            });
-        state.update("}".as_bytes());
-    }
-
-    fn hash_array(state: &mut Sha256, items: &[Value]) {
-        state.update("[".as_bytes());
-        items.iter().for_each(|v| {
-            match v {
-                serde_json_bytes::Value::Object(obj) => {
-                    hash_object(state, obj);
-                }
-                Value::Array(arr) => {
-                    hash_array(state, arr);
-                }
-                // scalar value
-                _ => state.update(serde_json::to_string(v).unwrap().as_bytes()),
-            }
-            state.update(",".as_bytes());
-        });
-        state.update("]".as_bytes());
-    }
-
-    let mut digest = Sha256::new();
-    hash_object(&mut digest, representation);
-    hex::encode(digest.finalize().as_slice())
-}
-
-// Only hash the list of entity keys
-// * full representation: key fields & other required fields
-// * selection_set: key fields selection set
-pub(crate) fn hash_entity_key(
-    representation: &serde_json_bytes::Map<ByteString, Value>,
-    selection_set: &apollo_compiler::executable::SelectionSet,
+    selection_set: Option<&apollo_compiler::executable::SelectionSet>,
 ) -> String {
     fn hash_object(
         state: &mut Sha256,
         fields: &serde_json_bytes::Map<ByteString, Value>,
-        selection_set: &apollo_compiler::executable::SelectionSet,
+        selection_set: Option<&apollo_compiler::executable::SelectionSet>,
     ) {
         state.update("{".as_bytes());
         let default_document = Default::default();
-        let sorted_selections = selection_set
-            .root_fields(&default_document)
-            .sorted_by(|a, b| a.name.cmp(&b.name));
-        for field in sorted_selections {
-            let key = field.name.as_str();
-            let Some(val) = fields.get(key) else {
-                continue;
-            };
+        let sorted_selections = if let Some(selection_set) = selection_set {
+            // Select only fields present in the selection set
+            selection_set
+                .root_fields(&default_document)
+                .filter_map(|f| {
+                    let key = f.name.as_str();
+                    let val = fields.get(key)?;
+                    Some((key, val, Some(&f.selection_set)))
+                })
+                .sorted_by(|a, b| a.0.cmp(b.0))
+        } else {
+            // Select all fields
+            fields
+                .iter()
+                .map(|(k, v)| (k.as_str(), v, None))
+                .sorted_by(|a, b| a.0.cmp(b.0))
+        };
+        for (key, val, selection_set) in sorted_selections {
             state.update(serde_json::to_string(key).unwrap().as_bytes());
             state.update(":".as_bytes());
             match val {
                 serde_json_bytes::Value::Object(obj) => {
-                    hash_object(state, obj, &field.selection_set);
+                    hash_object(state, obj, selection_set);
                 }
                 Value::Array(arr) => {
-                    hash_array(state, arr, &field.selection_set);
+                    hash_array(state, arr, selection_set);
                 }
                 // scalar value
                 _ => state.update(serde_json::to_string(val).unwrap().as_bytes()),
@@ -1544,7 +1506,7 @@ pub(crate) fn hash_entity_key(
     fn hash_array(
         state: &mut Sha256,
         items: &[Value],
-        selection_set: &apollo_compiler::executable::SelectionSet,
+        selection_set: Option<&apollo_compiler::executable::SelectionSet>,
     ) {
         state.update("[".as_bytes());
         items.iter().for_each(|v| {
@@ -1568,9 +1530,19 @@ pub(crate) fn hash_entity_key(
     hex::encode(digest.finalize().as_slice())
 }
 
-// Hash other representation variables except __typename and entity keys
-fn hash_other_representation(representation: &serde_json_bytes::Map<ByteString, Value>) -> String {
-    hash_representation(representation)
+// Hash the whole representation
+pub(crate) fn hash_representation(
+    representation: &serde_json_bytes::Map<ByteString, Value>,
+) -> String {
+    hash_representation_inner(representation, None)
+}
+
+// Hash only the entity key part of representation
+fn hash_entity_key(
+    representation: &serde_json_bytes::Map<ByteString, Value>,
+    key_field_set: &apollo_compiler::executable::SelectionSet,
+) -> String {
+    hash_representation_inner(representation, Some(key_field_set))
 }
 
 /// represents the result of a cache lookup for an entity type and key
