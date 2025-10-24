@@ -400,7 +400,7 @@ fn hints_when_merging_cost_arguments() {
     */
 
     let shared_with_cost = coord!(Query.sharedWithCost)
-        .lookup_field(&result.schema().schema())
+        .lookup_field(result.schema().schema())
         .unwrap();
     let cost_directive = shared_with_cost
         .directives
