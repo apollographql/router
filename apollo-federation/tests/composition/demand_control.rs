@@ -1,7 +1,9 @@
+use apollo_compiler::coord;
 use apollo_federation::composition::compose;
 use apollo_federation::error::ErrorCode;
 use apollo_federation::subgraph::typestate::Initial;
 use apollo_federation::subgraph::typestate::Subgraph;
+use test_log::test;
 
 fn subgraph_with_cost() -> Subgraph<Initial> {
     Subgraph::parse(
@@ -355,7 +357,6 @@ fn errors_when_subgraphs_use_different_names() {
     )
 }
 
-#[ignore = "until merge implementation completed"]
 #[test]
 fn hints_when_merging_cost_arguments() {
     let subgraph_a = Subgraph::parse(
@@ -364,7 +365,7 @@ fn hints_when_merging_cost_arguments() {
         r#"
         extend schema
             @link(url: "https://specs.apollo.dev/link/v1.0")
-            @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@cost"])
+            @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@cost", "@shareable"])
 
         type Query {
             sharedWithCost: Int @shareable @cost(weight: 5)
@@ -378,7 +379,7 @@ fn hints_when_merging_cost_arguments() {
         r#"
         extend schema
             @link(url: "https://specs.apollo.dev/link/v1.0")
-            @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@cost"])
+            @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@cost", "@shareable"])
 
         type Query {
             sharedWithCost: Int @shareable @cost(weight: 10)
@@ -388,6 +389,7 @@ fn hints_when_merging_cost_arguments() {
     .unwrap();
     let result = compose(vec![subgraph_a, subgraph_b]).unwrap();
 
+    /* TODO: Re-enable once FED-693 is merged
     assert_eq!(result.hints().len(), 1);
     let hint = result.hints().first().unwrap();
     assert_eq!(hint.code(), "MERGED_NON_REPEATABLE_DIRECTIVE_ARGUMENTS");
@@ -395,6 +397,17 @@ fn hints_when_merging_cost_arguments() {
         hint.message(),
         r#"Directive @cost is applied to "Query.sharedWithCost" in multiple subgraphs with different arguments. Merging strategies used by arguments: { "weight": MAX }""#
     );
+    */
+
+    let shared_with_cost = coord!(Query.sharedWithCost)
+        .lookup_field(&result.schema().schema())
+        .unwrap();
+    let cost_directive = shared_with_cost
+        .directives
+        .iter()
+        .find(|d| d.name == "cost")
+        .expect("Expected @cost directive to be present on Query.sharedWithCost");
+    assert_eq!(cost_directive.to_string(), r#"@cost(weight: 10)"#);
 }
 
 #[ignore = "until merge implementation completed"]
