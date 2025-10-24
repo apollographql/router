@@ -411,9 +411,10 @@ impl Cors {
                         }
 
                         // The access name needs to make the EMCAscript ReGex: `/^[a-z0-9_-.]+$/.`
-                        if name.chars().any(
-                            |c| !matches!(c, 'a'..='z' | '0'..='9' | '_' | '-' | '.'),
-                        ) {
+                        if name
+                            .chars()
+                            .any(|c| !matches!(c, 'a'..='z' | '0'..='9' | '_' | '-' | '.'))
+                        {
                             return Err(CorsConfigError::InvalidPrivateNetworkAccessName);
                         }
                     }
