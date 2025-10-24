@@ -5,4 +5,4 @@ homepage:
 limits:
   parser_max_recursion: 1000
 connectors:
-  preview_connect_v0_3: true
+  preview_connect_v0_4: true

@@ -91,7 +91,7 @@ impl LitExpr {
                 let (input, _) = spaces_or_comments(input)?;
                 Self::parse_primary(input)
             }
-            ConnectSpec::V0_3 => Self::parse_with_operators(input),
+            ConnectSpec::V0_3 | ConnectSpec::V0_4 => Self::parse_with_operators(input),
         }
     }
 
