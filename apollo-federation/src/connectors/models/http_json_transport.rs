@@ -22,7 +22,7 @@ use crate::connectors::JSONSelection;
 use crate::connectors::Namespace;
 use crate::connectors::PathSelection;
 use crate::connectors::StringTemplate;
-use crate::connectors::json_selection::ExternalVarPaths;
+use crate::connectors::json_selection::VarPaths;
 use crate::connectors::models::Header;
 use crate::connectors::spec::ConnectHTTPArguments;
 use crate::connectors::spec::SourceHTTPArguments;

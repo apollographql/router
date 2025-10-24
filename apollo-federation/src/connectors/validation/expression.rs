@@ -22,6 +22,7 @@ use crate::connectors::JSONSelection;
 use crate::connectors::Namespace;
 use crate::connectors::id::ConnectedElement;
 use crate::connectors::id::ObjectCategory;
+use crate::connectors::json_selection::VarPaths;
 use crate::connectors::string_template::Expression;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
@@ -372,7 +373,7 @@ fn resolve_shape(
             }
             Ok(Shape::all(inners, []))
         }
-        ShapeCase::Name(name, key) => {
+        ShapeCase::Name(name, subpath) => {
             let mut resolved = if name.value == "$root" {
                 // For response mapping, $root (aka the response body) is allowed so we will exit out early here
                 // However, $root is not allowed for requests so we will error below
@@ -380,18 +381,63 @@ fn resolve_shape(
                     return Ok(Shape::unknown([]));
                 }
 
-                let mut key_str = key.iter().map(|key| key.to_string()).join(".");
-                if !key_str.is_empty() {
-                    key_str = format!("`{key_str}` ");
+                // This path implicitly starts with the $root variable, and may
+                // have a prefix like $root.*.foo or even $root?.**.foo. Since
+                // we want the error message to focus on the foo identifier, we
+                // skip not only the $root base name but any non-key/index path
+                // elements, like ?, .*, and .**.
+                let mut key_str = String::new();
+                let mut skipping = true;
+                for key in subpath.iter() {
+                    if skipping
+                        && matches!(
+                            key.value,
+                            NamedShapePathKey::AnyIndex
+                                | NamedShapePathKey::AnyField
+                                | NamedShapePathKey::Question
+                                | NamedShapePathKey::NotNone
+                        )
+                    {
+                        continue;
+                    } else {
+                        key_str.push_str(key.to_string().as_str());
+                        // We only skip until we stop skipping, and then all key
+                        // variants become fair game.
+                        skipping = false;
+                    }
                 }
+                if key_str.is_empty() {
+                    // If we ended up converting a path like $ to $root and then
+                    // losing $root due to the logic above, fall back to
+                    // printing the whole path for clarity/debuggability.
+                    key_str = shape.to_string();
+                } else if key_str.starts_with('.') {
+                    // Remove initial . from field keys
+                    key_str.remove(0);
+                }
+                key_str = format!("`{key_str}` ");
+
+                let locals_suffix = {
+                    let local_vars = expression.expression.local_var_names();
+                    if local_vars.is_empty() {
+                        "".to_string()
+                    } else {
+                        format!(
+                            ", {}",
+                            local_vars.into_iter().collect::<Vec<_>>().join(", ")
+                        )
+                    }
+                };
+
                 return Err(Message {
                     code: context.code,
                     message: format!(
-                        "{key_str}must start with one of {namespaces}",
+                        "{key_str}must start with one of {namespaces}{locals_suffix}",
                         namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", "),
                     ),
                     locations: transform_locations(
-                        key.first()
+                        subpath
+                            .first()
                             .map(|key| &key.locations)
                             .unwrap_or(&shape.locations),
                         context,
@@ -433,16 +479,23 @@ fn resolve_shape(
             };
             resolved.locations.extend(shape.locations.iter().cloned());
             let mut path = name.value.clone();
-            for key in key {
+            for key in subpath {
                 let child = resolved.child(key.clone());
-                if child.is_none() {
+                if child.is_none() || child.is_never() {
+                    let key_string = key.to_string();
+                    let key_without_dot = key_string.trim_start_matches('.');
+
                     let message = match key.value {
                         NamedShapePathKey::AnyIndex | NamedShapePathKey::Index(_) => {
                             format!("`{path}` is not an array or string")
                         }
 
                         NamedShapePathKey::AnyField | NamedShapePathKey::Field(_) => {
-                            format!("`{path}` doesn't have a field named `{key}`")
+                            format!("`{path}` doesn't have a field named `{key_without_dot}`")
+                        }
+
+                        NamedShapePathKey::Question | NamedShapePathKey::NotNone => {
+                            format!("`{path}{key}` evaluated to nothing")
                         }
                     };
                     return Err(Message {
@@ -452,7 +505,7 @@ fn resolve_shape(
                     });
                 }
                 resolved = child;
-                path = format!("{path}.{key}");
+                path = format!("{path}{key}");
             }
             resolve_shape(&resolved, context, expression)
         }
@@ -818,6 +871,43 @@ mod tests {
         // and should probably be tested here in addition to v0.3.
         assert_eq!(ConnectSpec::next(), ConnectSpec::V0_3);
 
+        let spec = ConnectSpec::V0_3;
+        let err = validate_with_context(selection, scalars(), spec);
+        assert!(err.is_err());
+        assert!(
+            !err.err().unwrap().locations.is_empty(),
+            "Every error should have at least one location"
+        );
+    }
+
+    #[rstest]
+    #[case::args_object_as_echo_bool("$args.object->as($o)->echo($o.bool)")]
+    #[case::args_object_as_echo_bool("$args.object->as($o)->echo(@.bool->eq($o.bool))")]
+    #[case::args_object_as_echo_bool(
+        "$->as($true, false->not)->as($false, true->not)->echo($true->or($false))"
+    )]
+    #[case::method_math("$([1, 2, 3])->as($arr)->first->add($arr->last)")]
+    #[case::redundant_as("$args.object->as($o)->as($o)->echo($o.bool)")]
+    #[case::unnecessary_as("$args.object->as($obj)->as($o)->echo($o.bool)")]
+    #[case::as_int_addition("$args.int->as($i)->add(1, $i, $i)")]
+    #[case::as_string_concat(
+        "$args.string->as($s, @->slice(0, 100))->echo({ full: @, first100: $s })->jsonStringify"
+    )]
+    fn valid_as_var_bindings(#[case] selection: &str) {
+        let spec = ConnectSpec::V0_3;
+        validate_with_context(selection, scalars(), spec).unwrap();
+    }
+
+    #[rstest]
+    #[case::args_object_as_echo_bool_var_mismatch("$args.object->as($obj)->echo($o.bool)")]
+    #[case::args_object_as_echo_missing_string("$args.object->as($o)->echo($o.string)")]
+    #[case::args_object_as_echo_missing_int("$args.object->as($o)->echo($o.int)")]
+    #[case::as_without_args("$args.object->as")]
+    #[case::as_with_no_args("$args.object->as()")]
+    #[case::as_with_non_variable("$args.object->as(true)")]
+    #[case::as_with_wrong_args("$args.object->as(1, 2, 3)")]
+    #[case::as_with_reused_var("$([1, 2, 3])->as($o, $o)->echo($o)")]
+    fn invalid_expressions_with_as_var_binding(#[case] selection: &str) {
         let spec = ConnectSpec::V0_3;
         let err = validate_with_context(selection, scalars(), spec);
         assert!(err.is_err());

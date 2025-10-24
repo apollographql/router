@@ -1,0 +1,12 @@
+---
+source: apollo-federation/tests/composition/compose_basic.rs
+expression: print_sdl(api_schema.schema())
+---
+type Product {
+  sku: String!
+  name: String!
+}
+
+type Query {
+  products: [Product!]
+}

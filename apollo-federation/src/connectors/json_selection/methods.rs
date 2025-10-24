@@ -28,6 +28,7 @@ mod tests;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ArrowMethod {
     // Public methods:
+    As,
     Echo,
     Map,
     Match,
@@ -141,6 +142,7 @@ impl std::ops::Deref for ArrowMethod {
     fn deref(&self) -> &Self::Target {
         match self {
             // Public methods:
+            Self::As => &public::AsMethod,
             Self::Echo => &public::EchoMethod,
             Self::Map => &public::MapMethod,
             Self::Match => &public::MatchMethod,
@@ -189,6 +191,7 @@ impl ArrowMethod {
     // instead of a String for the method name in the AST.
     pub(super) fn lookup(name: &str) -> Option<Self> {
         let method_opt = match name {
+            "as" => Some(Self::As),
             "echo" => Some(Self::Echo),
             "map" => Some(Self::Map),
             "eq" => Some(Self::Eq),
@@ -243,7 +246,8 @@ impl ArrowMethod {
         // will not be returned from lookup_arrow_method outside of tests.
         matches!(
             self,
-            Self::Echo
+            Self::As
+                | Self::Echo
                 | Self::Map
                 | Self::Match
                 | Self::First

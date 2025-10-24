@@ -50,7 +50,6 @@ use crate::ApolloRouterError;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::cooperative_cancellation::CooperativeCancellation;
 use crate::graphql;
-use crate::notification::Notify;
 use crate::plugin::plugins;
 use crate::plugins::chaos;
 use crate::plugins::chaos::Config;
@@ -61,6 +60,7 @@ use crate::plugins::limits;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
 use crate::plugins::subscription::SubscriptionConfig;
+use crate::plugins::subscription::notification::Notify;
 use crate::uplink::UplinkConfig;
 
 pub(crate) mod connector;
@@ -149,6 +149,10 @@ pub struct Configuration {
     #[serde(skip)]
     pub(crate) validated_yaml: Option<Value>,
 
+    /// The full router yaml before it was parsed and env variables expanded
+    #[serde(skip)]
+    pub(crate) raw_yaml: Option<Arc<str>>,
+
     /// Health check configuration
     #[serde(default)]
     pub(crate) health_check: HealthCheck,
@@ -206,6 +210,8 @@ pub struct Configuration {
     #[serde(skip)]
     pub uplink: Option<UplinkConfig>,
 
+    // FIXME(@goto-bus-stop): Sticking this on Configuration is a serious hack just to have
+    // it available everywhere, it is actually not configuration at all
     #[serde(default, skip_serializing, skip_deserializing)]
     pub(crate) notify: Notify<String, graphql::Response>,
 
@@ -289,6 +295,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             notify,
             uplink: None,
             validated_yaml: None,
+            raw_yaml: None,
         }
         .validate()
         .map_err(|e| serde::de::Error::custom(e.to_string()))
@@ -327,6 +334,7 @@ impl Configuration {
 
         let conf = Self {
             validated_yaml: Default::default(),
+            raw_yaml: None,
             supergraph: supergraph.unwrap_or_default(),
             server: server.unwrap_or_default(),
             health_check: health_check.unwrap_or_default(),
@@ -493,6 +501,7 @@ impl Configuration {
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
             batching: batching.unwrap_or_default(),
+            raw_yaml: None,
         };
 
         configuration.validate()
@@ -723,6 +732,14 @@ pub(crate) struct Supergraph {
     /// but request handling will stop immediately when the client connection is closed.
     pub(crate) early_cancel: bool,
 
+    /// Enable errors generated during response reformatting and result coercion to be returned in
+    /// responses.
+    /// Default: false
+    /// All subgraph responses are checked and corrected to ensure alignment with the schema and
+    /// query. When enabled, misaligned values will generate errors which are included in errors
+    /// array in the response.
+    pub(crate) enable_result_coercion_errors: bool,
+
     /// Log a message if the client closes the connection before the response is sent.
     /// Default: false.
     pub(crate) experimental_log_on_broken_pipe: bool,
@@ -749,6 +766,7 @@ impl Supergraph {
         generate_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
+        insert_result_coercion_errors: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -762,6 +780,7 @@ impl Supergraph {
                 .unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
+            enable_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
         }
     }
 }
@@ -780,6 +799,7 @@ impl Supergraph {
         generate_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
+        insert_result_coercion_errors: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -793,6 +813,7 @@ impl Supergraph {
                 .unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
+            enable_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
         }
     }
 }
@@ -965,10 +986,13 @@ pub(crate) struct QueryPlanRedisCache {
     /// Redis password if not provided in the URLs. This field takes precedence over the password in the URL
     pub(crate) password: Option<String>,
 
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_timeout"
+    )]
     #[schemars(with = "Option<String>", default)]
-    /// Redis request timeout (default: 2ms)
-    pub(crate) timeout: Option<Duration>,
+    /// Redis request timeout (default: 500ms)
+    pub(crate) timeout: Duration,
 
     #[serde(
         deserialize_with = "humantime_serde::deserialize",
@@ -1054,10 +1078,13 @@ pub(crate) struct RedisCache {
     /// Redis password if not provided in the URLs. This field takes precedence over the password in the URL
     pub(crate) password: Option<String>,
 
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_timeout"
+    )]
     #[schemars(with = "Option<String>", default)]
-    /// Redis request timeout (default: 2ms)
-    pub(crate) timeout: Option<Duration>,
+    /// Redis request timeout (default: 500ms)
+    pub(crate) timeout: Duration,
 
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
@@ -1091,11 +1118,15 @@ pub(crate) struct RedisCache {
     pub(crate) metrics_interval: Duration,
 }
 
-fn default_required_to_start() -> bool {
+fn default_timeout() -> Duration {
+    Duration::from_millis(500)
+}
+
+pub(crate) fn default_required_to_start() -> bool {
     false
 }
 
-fn default_pool_size() -> u32 {
+pub(crate) fn default_pool_size() -> u32 {
     1
 }
 

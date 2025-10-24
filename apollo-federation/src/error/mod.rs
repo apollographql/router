@@ -178,6 +178,8 @@ pub enum CompositionError {
     #[error("{message}")]
     InterfaceObjectUsageError { message: String },
     #[error("{message}")]
+    InterfaceKeyMissingImplementationType { message: String },
+    #[error("{message}")]
     TypeKindMismatch { message: String },
     #[error("{message}")]
     ShareableHasMismatchedRuntimeTypes { message: String },
@@ -248,6 +250,18 @@ pub enum CompositionError {
     OverrideSourceHasOverride { message: String },
     #[error("{message}")]
     QueryRootMissing { message: String },
+    #[error("{message}")]
+    ArgumentDefaultMismatch {
+        message: String,
+        locations: Locations,
+    },
+    #[error("{message}")]
+    InputFieldDefaultMismatch {
+        message: String,
+        locations: Locations,
+    },
+    #[error("{message}")]
+    InterfaceFieldNoImplem { message: String },
 }
 
 impl CompositionError {
@@ -271,6 +285,9 @@ impl CompositionError {
             Self::DirectiveDefinitionInvalid { .. } => ErrorCode::DirectiveDefinitionInvalid,
             Self::TypeDefinitionInvalid { .. } => ErrorCode::TypeDefinitionInvalid,
             Self::InterfaceObjectUsageError { .. } => ErrorCode::InterfaceObjectUsageError,
+            Self::InterfaceKeyMissingImplementationType { .. } => {
+                ErrorCode::InterfaceKeyMissingImplementationType
+            }
             Self::TypeKindMismatch { .. } => ErrorCode::TypeKindMismatch,
             Self::ShareableHasMismatchedRuntimeTypes { .. } => {
                 ErrorCode::ShareableHasMismatchedRuntimeTypes
@@ -308,6 +325,9 @@ impl CompositionError {
             Self::OverrideOnInterface { .. } => ErrorCode::OverrideOnInterface,
             Self::OverrideSourceHasOverride { .. } => ErrorCode::OverrideSourceHasOverride,
             Self::QueryRootMissing { .. } => ErrorCode::QueryRootMissing,
+            Self::ArgumentDefaultMismatch { .. } => ErrorCode::FieldArgumentDefaultMismatch,
+            Self::InputFieldDefaultMismatch { .. } => ErrorCode::InputFieldDefaultMismatch,
+            Self::InterfaceFieldNoImplem { .. } => ErrorCode::InterfaceFieldNoImplem,
         }
     }
 
@@ -343,6 +363,11 @@ impl CompositionError {
             Self::InterfaceObjectUsageError { message } => Self::InterfaceObjectUsageError {
                 message: format!("{message}{appendix}"),
             },
+            Self::InterfaceKeyMissingImplementationType { message } => {
+                Self::InterfaceKeyMissingImplementationType {
+                    message: format!("{message}{appendix}"),
+                }
+            }
             Self::TypeKindMismatch { message } => Self::TypeKindMismatch {
                 message: format!("{message}{appendix}"),
             },
@@ -418,6 +443,19 @@ impl CompositionError {
                     locations,
                 }
             }
+            Self::ArgumentDefaultMismatch { message, locations } => Self::ArgumentDefaultMismatch {
+                message: format!("{message}{appendix}"),
+                locations,
+            },
+            Self::InputFieldDefaultMismatch { message, locations } => {
+                Self::InputFieldDefaultMismatch {
+                    message: format!("{message}{appendix}"),
+                    locations,
+                }
+            }
+            Self::InterfaceFieldNoImplem { message } => Self::InterfaceFieldNoImplem {
+                message: format!("{message}{appendix}"),
+            },
             // Remaining errors do not have an obvious way to appending a message, so we just return self.
             Self::SubgraphError { .. }
             | Self::InvalidGraphQLName(..)
@@ -442,7 +480,9 @@ impl CompositionError {
             | Self::RequiredArgumentMissingInSomeSubgraph { locations, .. }
             | Self::RequiredInputFieldMissingInSomeSubgraph { locations, .. }
             | Self::EmptyMergedInputType { locations, .. }
-            | Self::InvalidFieldSharing { locations, .. } => locations,
+            | Self::InvalidFieldSharing { locations, .. }
+            | Self::ArgumentDefaultMismatch { locations, .. }
+            | Self::InputFieldDefaultMismatch { locations, .. } => locations,
             _ => &[],
         }
     }

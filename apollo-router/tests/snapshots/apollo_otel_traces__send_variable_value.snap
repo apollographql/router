@@ -1,7 +1,6 @@
 ---
 source: apollo-router/tests/apollo_otel_traces.rs
 expression: report
-snapshot_kind: text
 ---
 resourceSpans:
   - resource:

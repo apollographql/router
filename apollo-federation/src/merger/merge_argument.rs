@@ -1,11 +1,15 @@
+use std::collections::HashSet;
 use std::fmt::Display;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::ast::Type;
+use apollo_compiler::ast::Value;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
+use tracing::instrument;
+use tracing::trace;
 
 use crate::error::CompositionError;
 use crate::error::FederationError;
@@ -13,8 +17,10 @@ use crate::error::Locations;
 use crate::merger::hints::HintCode;
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
-use crate::merger::merge_field::PLACEHOLDER_TYPE_NAME;
 use crate::schema::FederationSchema;
+use crate::schema::position::DirectiveTargetPosition;
+use crate::schema::position::HasDescription;
+use crate::schema::position::HasType;
 use crate::supergraph::CompositionHint;
 use crate::utils::human_readable::human_readable_subgraph_names;
 
@@ -47,40 +53,61 @@ pub(crate) trait HasArguments {
     ) -> Result<(), FederationError>;
 }
 
+pub(crate) trait HasDefaultValue {
+    fn is_input_field() -> bool;
+
+    fn get_default_value<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Option<&'schema Node<Value>>;
+
+    fn set_default_value(
+        &self,
+        schema: &mut FederationSchema,
+        default: Option<Node<Value>>,
+    ) -> Result<(), FederationError>;
+}
+
 impl Merger {
+    #[instrument(skip(self, sources))]
     pub(in crate::merger) fn add_arguments_shallow<T>(
         &mut self,
         sources: &Sources<T>,
         dest: &T,
-    ) -> Result<(), FederationError>
+    ) -> Result<IndexSet<Name>, FederationError>
     where
-        T: HasArguments + Display,
+        T: HasArguments + std::fmt::Debug + Display,
         <T as HasArguments>::ArgumentPosition: Display,
     {
-        let mut arg_names: IndexSet<Name> = IndexSet::new();
+        let mut arg_types: IndexMap<Name, Node<Type>> = Default::default();
+        let mut removed_args = HashSet::new();
         for (idx, source) in sources.iter() {
             let Some(pos) = source else {
                 continue;
             };
             let schema = self.subgraphs[*idx].schema();
             for arg in pos.get_arguments(schema)? {
-                arg_names.insert(arg.name.clone());
+                arg_types.insert(arg.name.clone(), arg.ty.clone());
             }
         }
 
-        for arg_name in arg_names {
+        for (arg_name, arg_type) in &arg_types {
             // We add the argument unconditionally even if we're going to remove it later on.
             // This enables consistent mismatch/hint reporting.
-            dest.insert_argument(
-                &mut self.merged,
-                Node::new(InputValueDefinition {
-                    description: None,
-                    name: arg_name.clone(),
-                    default_value: None,
-                    ty: Node::new(Type::Named(PLACEHOLDER_TYPE_NAME)),
-                    directives: Default::default(),
-                }),
-            )?;
+            trace!("Inserting shallow definition for argument \"{arg_name}\" in \"{dest}\"");
+            if dest.get_argument(&self.merged, arg_name).is_none() {
+                dest.insert_argument(
+                    &mut self.merged,
+                    Node::new(InputValueDefinition {
+                        description: None,
+                        name: arg_name.clone(),
+                        default_value: None,
+                        ty: arg_type.clone(),
+                        directives: Default::default(),
+                    }),
+                )?;
+            }
+
             let dest_arg_pos = dest.argument_position(arg_name.clone());
 
             // Record whether the argument comes from context in each subgraph.
@@ -90,7 +117,7 @@ impl Merger {
                     continue;
                 };
                 let subgraph = &self.subgraphs[*idx];
-                let arg_opt = pos.get_argument(subgraph.schema(), &arg_name);
+                let arg_opt = pos.get_argument(subgraph.schema(), arg_name);
 
                 if let Some(arg) = arg_opt
                     && let Ok(Some(from_context)) = subgraph.from_context_directive_name()
@@ -116,7 +143,7 @@ impl Merger {
                         continue;
                     };
                     let subgraph = &self.subgraphs[*idx];
-                    if let Some(arg) = pos.get_argument(subgraph.schema(), &arg_name) {
+                    if let Some(arg) = pos.get_argument(subgraph.schema(), arg_name) {
                         if arg.is_required() && arg.default_value.is_none() {
                             self.error_reporter.add_error(CompositionError::ContextualArgumentNotContextualInAllSubgraphs {
                                 message: format!(
@@ -139,7 +166,8 @@ impl Merger {
                 }
                 // Note: we remove the element after the hint/error because we access it in
                 // the hint message generation.
-                dest.remove_argument(&mut self.merged, &arg_name)?;
+                dest.remove_argument(&mut self.merged, arg_name)?;
+                removed_args.insert(arg_name.clone());
                 continue;
             }
 
@@ -153,7 +181,7 @@ impl Merger {
                     continue;
                 };
                 let subgraph = &self.subgraphs[*idx];
-                if let Some(arg) = pos.get_argument(subgraph.schema(), &arg_name) {
+                if let Some(arg) = pos.get_argument(subgraph.schema(), arg_name) {
                     present_in.push(*idx);
                     if arg.is_required() {
                         required_in.push(*idx);
@@ -189,7 +217,7 @@ impl Merger {
                         })
                         .collect();
 
-                    self.error_reporter.report_mismatch_hint::<T::ArgumentPosition, ()>(
+                    self.error_reporter.report_mismatch_hint::<T::ArgumentPosition, T::ArgumentPosition, ()>(
                         HintCode::InconsistentArgumentPresence,
                         format!(
                             "Optional argument \"{}\" will not be included in the supergraph as it does not appear in all subgraphs: ",
@@ -197,10 +225,10 @@ impl Merger {
                         ),
                         &dest_arg_pos,
                         &arg_sources,
+                        |_elt| Some("yes".to_string()),
                         |_elt, _| Some("yes".to_string()),
                         |_, subgraphs| format!("it is defined in {}", subgraphs.unwrap_or_default()),
                         |_, subgraphs| format!(" but not in {}", subgraphs),
-                        None::<fn(Option<&T::ArgumentPosition>) -> bool>,
                         true,
                         false,
                     );
@@ -208,8 +236,141 @@ impl Merger {
 
                 // Note that we remove the element after the hint/error because we
                 // access it in the hint message generation.
-                dest.remove_argument(&mut self.merged, &arg_name)?;
+                dest.remove_argument(&mut self.merged, arg_name)?;
+                removed_args.insert(arg_name.clone());
             }
+        }
+
+        Ok(arg_types
+            .into_keys()
+            .filter(|n| !removed_args.contains(n))
+            .collect())
+    }
+
+    pub(in crate::merger) fn merge_argument<T>(
+        &mut self,
+        sources: &Sources<T>,
+        dest: &T,
+    ) -> Result<(), FederationError>
+    where
+        T: Clone
+            + Display
+            + HasDefaultValue
+            + HasDescription
+            + HasType
+            + Into<DirectiveTargetPosition>,
+    {
+        self.merge_description(sources, dest)?;
+        self.record_applied_directives_to_merge(sources, dest)?;
+        self.merge_type_reference(sources, dest, true)?;
+        self.merge_default_value(sources, dest)?;
+        Ok(())
+    }
+
+    pub(in crate::merger) fn merge_default_value<T>(
+        &mut self,
+        sources: &Sources<T>,
+        dest: &T,
+    ) -> Result<(), FederationError>
+    where
+        T: Display + HasDefaultValue,
+    {
+        let mut dest_default: Option<Node<Value>> = None;
+        let mut locations = Locations::with_capacity(sources.len());
+        let mut has_seen_source = false;
+        let mut is_inconsistent = false;
+        let mut is_incompatible = false;
+
+        // Because default values are always in input/contra-variant positions, we use an intersection strategy. Namely,
+        // the result only has a default if _all_ have a default (which has to be the same, but we error if we found
+        // 2 different defaults no matter what). Essentially, an argument/input field can only be made optional
+        // in the supergraph API if it is optional in all subgraphs, or we may query a subgraph that expects the
+        // value to be provided when it isn't. Note that an alternative could be to use an union strategy instead
+        // but have the router/gateway fill in the default for subgraphs that don't know it, but that implies parsing
+        // all the subgraphs fetches and we probably don't want that.
+        for (idx, source_pos) in sources.iter() {
+            let Some(pos) = source_pos else { continue };
+            let subgraph = &self.subgraphs[*idx];
+            let source_default = pos.get_default_value(subgraph.schema()).inspect(|v| {
+                locations.extend(subgraph.node_locations(v));
+            });
+
+            match &dest_default {
+                None => {
+                    // Note that we set dest_default even if we have seen a source before and maybe thus be inconsistent.
+                    // We won't use that value later if we're inconsistent, but keeping it allows us to always error out
+                    // if we any 2 incompatible defaults.
+                    dest_default = source_default.cloned();
+                    // dest_default may be undefined either because we haven't seen any source (having the argument)
+                    // or because we've seen one but that source had no default. In the later case (`hasSeenSource`),
+                    // if the new source _has_ a default, then we're inconsistent.
+                    if has_seen_source && source_default.is_some() {
+                        is_inconsistent = true;
+                    }
+                }
+                Some(current) => {
+                    // We have `&Node<Value>` here, so we need the double deref to get value equality.
+                    if source_default.is_none_or(|next| **next != **current) {
+                        is_inconsistent = true;
+                        // It's only incompatible if neither is undefined
+                        if source_default.is_some() {
+                            is_incompatible = true;
+                        }
+                    }
+                }
+            }
+            has_seen_source = true;
+        }
+
+        // Note that we set the default if is_incompatible mostly to help the building of the error message. But
+        // as we'll error out, it doesn't really matter.
+        if !is_inconsistent || is_incompatible {
+            dest.set_default_value(&mut self.merged, dest_default.clone())?;
+        }
+
+        let Some(dest_default) = &dest_default else {
+            // If this is `None`, then all subgraphs have no default, and thus everything is consistent.
+            return Ok(());
+        };
+
+        if is_incompatible {
+            self.error_reporter.report_mismatch_error::<Node<Value>, T, ()>(
+                if T::is_input_field() {
+                    CompositionError::InputFieldDefaultMismatch {
+                        message: format!("Input field \"{dest}\" has incompatible default values across subgraphs: it has "),
+                        locations
+                    }
+                } else {
+                    CompositionError::ArgumentDefaultMismatch {
+                        message: format!("Argument \"{dest}\" has incompatible default values across subgraphs: it has "),
+                        locations
+                    }
+                },
+                dest_default,
+                sources,
+                |v| Some(format!("default value {v}")),
+                |pos, idx| {
+                    Some(pos.get_default_value(self.subgraphs[idx].schema())
+                            .map(|v| format!("default value {v}"))
+                            .unwrap_or_else(|| "no default value".to_string()))
+                },
+            );
+        } else if is_inconsistent {
+            self.error_reporter.report_mismatch_hint::<Node<Value>, T, ()>(
+                HintCode::InconsistentDefaultValuePresence,
+                format!("Argument \"{dest}\" has a default value in only some subgraphs: "),
+                dest_default,
+                sources,
+                |v| Some(format!("default value {v}")),
+                |pos, idx| pos.get_default_value(self.subgraphs[idx].schema()).map(|v| v.to_string()),
+                |_, subgraphs| {
+                    let subgraphs = subgraphs.unwrap_or_default();
+                    format!("will not use a default in the supergraph (there is no default in {subgraphs}) but ")
+                },
+                |elt, subgraphs| format!("\"{dest}\" has default value {elt} in {subgraphs}"),
+                false,
+                false,
+            );
         }
 
         Ok(())

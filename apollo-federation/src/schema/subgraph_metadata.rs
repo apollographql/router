@@ -98,11 +98,11 @@ impl SubgraphMetadata {
     }
 
     pub(crate) fn is_field_fully_external(&self, field: &FieldDefinitionPosition) -> bool {
-        self.is_field_external(field) && self.provided_fields.contains(field)
+        self.is_field_external(field) && !self.provided_fields.contains(field)
     }
 
     pub(crate) fn is_field_partially_external(&self, field: &FieldDefinitionPosition) -> bool {
-        self.is_field_external(field) && !self.provided_fields.contains(field)
+        self.is_field_external(field) && self.provided_fields.contains(field)
     }
 
     pub(crate) fn is_field_shareable(&self, field: &FieldDefinitionPosition) -> bool {

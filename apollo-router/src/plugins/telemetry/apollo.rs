@@ -54,7 +54,7 @@ pub(crate) fn router_id() -> String {
     ROUTER_ID.get_or_init(Uuid::new_v4).to_string()
 }
 
-#[derive(Clone, Deserialize, JsonSchema, Debug)]
+#[derive(Clone, Deserialize, JsonSchema, Debug, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 #[schemars(rename = "ApolloTelemetryConfig")]
 pub(crate) struct Config {
@@ -130,17 +130,17 @@ pub(crate) struct Config {
     pub(crate) experimental_local_field_metrics: bool,
 
     /// Enable sending additional subgraph metrics to Apollo Studio via OTLP
-    pub(crate) preview_subgraph_metrics: bool,
+    pub(crate) subgraph_metrics: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct TracingConfiguration {
     /// Configuration for tracing batch processor.
     pub(crate) batch_processor: BatchProcessorConfig,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct MetricsConfiguration {
     /// Configuration for exporting metrics via OTLP.
@@ -149,14 +149,14 @@ pub(crate) struct MetricsConfiguration {
     pub(crate) usage_reports: UsageReportsMetricsConfiguration,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct OtlpMetricsConfiguration {
     /// Batch processor config for OTLP metrics.
     pub(crate) batch_processor: OtlpMetricsBatchProcessorConfiguration,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct UsageReportsMetricsConfiguration {
     /// Batch processor config for Apollo usage report metrics.
@@ -164,7 +164,7 @@ pub(crate) struct UsageReportsMetricsConfiguration {
 }
 
 // This config copies the relevant values from BatchProcessorConfig.
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq)]
 #[serde(default)]
 pub(crate) struct OtlpMetricsBatchProcessorConfiguration {
     #[serde(deserialize_with = "humantime_serde::deserialize")]
@@ -200,7 +200,7 @@ impl Display for OtlpMetricsBatchProcessorConfiguration {
 }
 
 // This config copies the relevant values from BatchProcessorConfig.
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq)]
 #[serde(default)]
 pub(crate) struct ApolloUsageReportsBatchProcessorConfiguration {
     /// The delay interval in milliseconds between two consecutive processing
@@ -249,7 +249,7 @@ impl Display for ApolloUsageReportsBatchProcessorConfiguration {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct ErrorsConfiguration {
     /// Handling of errors coming from subgraph
@@ -259,7 +259,7 @@ pub(crate) struct ErrorsConfiguration {
     pub(crate) preview_extended_error_metrics: ExtendedErrorMetricsMode,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SubgraphErrorConfig {
     /// Handling of errors coming from all subgraphs
@@ -268,7 +268,7 @@ pub(crate) struct SubgraphErrorConfig {
     pub(crate) subgraphs: HashMap<String, ErrorConfiguration>,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct ErrorConfiguration {
     /// Send subgraph errors to Apollo Studio
@@ -301,7 +301,7 @@ impl SubgraphErrorConfig {
 }
 
 /// Extended Open Telemetry error metrics mode
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema, Copy)]
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema, Copy, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub(crate) enum ExtendedErrorMetricsMode {
     /// Do not send extended OTLP error metrics
@@ -313,7 +313,7 @@ pub(crate) enum ExtendedErrorMetricsMode {
 }
 
 /// Allow some error fields to be send to Apollo Studio even when `redact` is true.
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema, Copy)]
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema, Copy, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub(crate) enum ErrorRedactionPolicy {
     /// Applies redaction to all error details.
@@ -382,7 +382,7 @@ impl Default for Config {
             signature_normalization_algorithm: ApolloSignatureNormalizationAlgorithm::default(),
             experimental_local_field_metrics: false,
             metrics_reference_mode: ApolloMetricsReferenceMode::default(),
-            preview_subgraph_metrics: false,
+            subgraph_metrics: false,
         }
     }
 }
@@ -399,7 +399,7 @@ schemar_fn!(
 );
 
 /// Forward headers
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum ForwardHeaders {
     /// Don't send any headers
@@ -438,7 +438,7 @@ schemar_fn!(
 );
 
 /// Forward GraphQL variables
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum ForwardValues {
     /// Dont send any variables

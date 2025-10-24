@@ -46,6 +46,15 @@ pub(crate) enum ResponseStatus {
 
 #[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum ActiveSubgraphRequests {
+    /// The number of active subgraph requests as a count.
+    Count,
+    /// Whether there are any active subgraph requests as a boolean.
+    Bool,
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum OperationKind {
     /// The raw operation kind.
     String,

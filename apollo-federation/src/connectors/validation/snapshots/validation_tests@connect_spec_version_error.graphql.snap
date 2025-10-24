@@ -6,7 +6,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/connect_spec_v
 [
     Message {
         code: UnknownConnectorsVersion,
-        message: "Unknown connect version: 0.99; should be one of 0.1, 0.2, 0.3.",
+        message: "Unknown connect version: 0.99; should be one of 0.1, 0.2, 0.3, 0.4.",
         locations: [
             2:3..5:4,
         ],

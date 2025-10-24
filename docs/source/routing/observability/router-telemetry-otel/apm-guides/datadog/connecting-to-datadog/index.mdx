@@ -1,0 +1,54 @@
+---
+title: Connecting to Datadog
+subtitle: Choose the right connection method for your infrastructure
+description: Overview of different methods to connect Apollo Router to Datadog for telemetry collection
+---
+
+This guide provides detailed configuration for the OpenTelemetry Collector and Datadog Agent methods.
+
+## Connection methods
+
+Datadog supports multiple methods for ingesting OpenTelemetry data: the most relevant are covered in this guide for your convenience, but there are others available.
+
+- **[Datadog OpenTelemetry collector (DDOT)](https://docs.datadoghq.com/opentelemetry/setup/)** - Datadog's distribution of the OpenTelemetry Collector
+- **[OpenTelemetry collector](/graphos/routing/observability/router-telemetry-otel/apm-guides/datadog/connecting-to-datadog/otel-collector)** - Vendor-neutral telemetry pipeline with advanced processing (guide available)
+- **[Datadog agent](/graphos/routing/observability/router-telemetry-otel/apm-guides/datadog/connecting-to-datadog/datadog-agent/datadog-agent-traces)** - Direct connection with native Datadog features (guide available)
+- **[Agentless](https://docs.datadoghq.com/opentelemetry/setup/otlp_ingest/)** - Direct OTLP ingestion to Datadog
+
+For complete information on all connection methods including DDOT Collector and Agentless options, refer to [Datadog's OpenTelemetry setup documentation](https://docs.datadoghq.com/opentelemetry/setup/) and [compatibility guide](https://docs.datadoghq.com/opentelemetry/compatibility/).
+
+## Choose a connection method
+
+Choose one of the following methods based on your current Datadog setup:
+
+- If you are setting up a new environment, use the [Datadog OpenTelemetry Collector (DDOT)](https://docs.datadoghq.com/opentelemetry/setup/) or the [OpenTelemetry Collector](/graphos/routing/observability/router-telemetry-otel/apm-guides/datadog/connecting-to-datadog/otel-collector).
+- If you already have Datadog Agent running, use the [Datadog Agent](/graphos/routing/observability/router-telemetry-otel/apm-guides/datadog/connecting-to-datadog/datadog-agent/datadog-agent-traces).
+- For containerized deployments, consider the [Apollo Runtime container](https://github.com/apollographql/apollo-runtime) which includes pre-configured examples for the OpenTelemetry Collector.
+- For a direct connection with no agent deployment required, use the [Agentless](https://docs.datadoghq.com/opentelemetry/setup/) method.
+
+### Datadog OpenTelemetry collector (Recommended)
+
+**[Datadog OpenTelemetry Collector](https://docs.datadoghq.com/opentelemetry/setup/)** is a Datadog-specific distribution of the OpenTelemetry collector that combines the OpenTelemetry Collector and the Datadog Agent. It is currently Datadog's recommended way to send OpenTelemetry to Datadog.
+This solution is tightly coupled to Datadog and is the most straightforward solution if your organization already uses Datadog.
+
+### OpenTelemetry collector
+
+**[OpenTelemetry collector](/graphos/routing/observability/router-telemetry-otel/apm-guides/datadog/connecting-to-datadog/otel-collector)** provides a vendor-neutral telemetry pipeline with advanced processing capabilities including sampling, filtering, and multi-backend support.
+
+### Datadog agent
+
+The Datadog agent offers direct OTLP ingestion, integrating with Datadog's existing agent infrastructure for logs, infrastructure monitoring, and other telemetry collection.
+
+- [Datadog agent traces configuration](/graphos/routing/observability/router-telemetry-otel/apm-guides/datadog/connecting-to-datadog/datadog-agent/datadog-agent-traces)
+- [Datadog agent metrics configuration](/graphos/routing/observability/router-telemetry-otel/apm-guides/datadog/connecting-to-datadog/datadog-agent/datadog-agent-metrics)
+
+### Agentless
+
+**[Agentless](https://docs.datadoghq.com/opentelemetry/setup/otlp_ingest/)** provides direct OTLP ingestion to Datadog without requiring additional infrastructure components.
+
+## Next steps
+
+After setting up your connection method:
+
+1. [Configure router instrumentation](/graphos/routing/observability/router-telemetry-otel/apm-guides/datadog/router-instrumentation) for Datadog-optimized telemetry.
+2. [Import dashboard templates](/graphos/routing/observability/router-telemetry-otel/apm-guides/datadog/observing-and-monitoring/dashboard-template) for router monitoring.

@@ -1,24 +1,27 @@
 use std::sync::LazyLock;
 
 use apollo_compiler::Name;
+use apollo_compiler::executable::FieldSet;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::FieldDefinition;
+use apollo_compiler::validation::Valid;
 use itertools::Itertools;
 use regex::Regex;
 
-use crate::ValidFederationSubgraphs;
 use crate::bail;
 use crate::ensure;
+use crate::error::CompositionError;
 use crate::error::FederationError;
-use crate::error::MultipleFederationErrors;
+use crate::error::HasLocations;
 use crate::error::SingleFederationError;
-use crate::schema::ValidFederationSchema;
-use crate::schema::field_set::parse_field_set;
+use crate::schema::FederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
+use crate::subgraph::typestate::Subgraph;
+use crate::subgraph::typestate::Validated;
 use crate::utils::human_readable::human_readable_subgraph_names;
 
 // PORT_NOTE: Named `postMergeValidations` in the JS codebase, but adjusted here to follow the
@@ -28,16 +31,10 @@ use crate::utils::human_readable::human_readable_subgraph_names;
 // TODO: The code here largely duplicates logic that is in subgraph schema validation, except that
 // when it detects an error, it provides an error in terms of subgraph inputs (rather than what the
 // merged/supergraph schema). We could try to avoid that duplication in the future.
-// TODO: This code is currently unused. When it is eventually used, it will likely need to return
-// `CompositionError` (the `MultipleFederationErrors` might also need to be replace with
-// `Vec<CompositionError>`). This will likely require adding variants to the comp error and a way
-// to convert fed errors into comp errors (though, there are probably better ways to implement this
-// besides conversion from fed to comp errors).
-#[allow(dead_code)]
 pub(crate) fn validate_merged_schema(
-    supergraph_schema: &ValidFederationSchema,
-    subgraphs: &ValidFederationSubgraphs,
-    errors: &mut MultipleFederationErrors,
+    supergraph_schema: &FederationSchema,
+    subgraphs: &[Subgraph<Validated>],
+    errors: &mut Vec<CompositionError>,
 ) -> Result<(), FederationError> {
     for type_pos in supergraph_schema.get_types() {
         let Ok(type_pos) = ObjectOrInterfaceTypeDefinitionPosition::try_from(type_pos) else {
@@ -63,17 +60,17 @@ pub(crate) fn validate_merged_schema(
                     // This means that the type was defined (or at least implemented the interface)
                     // only in subgraphs where the interface didn't have that field.
                     let subgraphs_with_interface_field = subgraphs
-                        .subgraphs
-                        .values()
-                        .filter(|subgraph| interface_pos.get(subgraph.schema.schema()).is_ok())
+                        .iter()
+                        .filter(|subgraph| {
+                            interface_field_pos.get(subgraph.schema().schema()).is_ok()
+                        })
                         .map(|subgraph| subgraph.name.clone())
                         .collect::<Vec<_>>();
                     let subgraphs_with_type_implementing_interface = subgraphs
-                        .subgraphs
-                        .values()
+                        .iter()
                         .filter(|subgraph| {
                             let Some(subgraph_type) =
-                                subgraph.schema.schema().types.get(type_pos.type_name())
+                                subgraph.schema().schema().types.get(type_pos.type_name())
                             else {
                                 return false;
                             };
@@ -89,9 +86,9 @@ pub(crate) fn validate_merged_schema(
                         })
                         .map(|subgraph| subgraph.name.clone())
                         .collect::<Vec<_>>();
-                    errors.push(SingleFederationError::InterfaceFieldNoImplem {
+                    errors.push(CompositionError::InterfaceFieldNoImplem {
                         message: format!(
-                            "Interface field \"{}\" is declared in {} but type \"{}\" which implements \"${}\" only in {} does not have field \"{}\"",
+                            "Interface field \"{}\" is declared in {} but type \"{}\", which implements \"{}\" only in {} does not have field \"{}\".",
                             interface_field_pos,
                             human_readable_subgraph_names(subgraphs_with_interface_field.iter()),
                             type_pos,
@@ -99,7 +96,7 @@ pub(crate) fn validate_merged_schema(
                             human_readable_subgraph_names(subgraphs_with_type_implementing_interface.iter()),
                             interface_field_pos.field_name,
                         )
-                    }.into())
+                    });
                 }
 
                 // TODO: Should we validate more? Can we have some invalid implementation of a field
@@ -115,28 +112,27 @@ pub(crate) fn validate_merged_schema(
     // does not entail validity for all subgraphs that would have to provide those "requirements".
     // To summarize, we need to re-validate every @requires against the supergraph to guarantee it
     // will always work at runtime.
-    for subgraph in subgraphs.subgraphs.values() {
-        let Some(metadata) = &subgraph.schema.subgraph_metadata else {
-            bail!("Subgraph schema unexpectedly missing metadata");
-        };
-        let requires_directive_definition_name = &metadata
+    for subgraph in subgraphs.iter() {
+        let requires_directive_definition_name = &subgraph
+            .metadata()
             .federation_spec_definition()
-            .requires_directive_definition(&subgraph.schema)?
+            .requires_directive_definition(subgraph.schema())?
             .name;
         let requires_referencers = subgraph
-            .schema
+            .schema()
             .referencers
             .get_directive(requires_directive_definition_name)?;
         // Note that @requires is only supported on object fields.
         for parent_field_pos in &requires_referencers.object_fields {
             let Some(requires_directive) = parent_field_pos
-                .get(subgraph.schema.schema())?
+                .get(subgraph.schema().schema())?
                 .directives
                 .get(requires_directive_definition_name)
             else {
                 bail!("@requires unexpectedly missing from field that references it");
             };
-            let requires_arguments = &metadata
+            let requires_arguments = &subgraph
+                .metadata()
                 .federation_spec_definition()
                 .requires_directive_arguments(requires_directive)?;
             // The type should exist in the supergraph schema. There are a few types we don't merge,
@@ -148,15 +144,13 @@ pub(crate) fn validate_merged_schema(
             let parent_type_pos_in_supergraph: CompositeTypeDefinitionPosition = supergraph_schema
                 .get_type(parent_field_pos.type_name.clone())?
                 .try_into()?;
-            // TODO: Once parse_field_set() gains the ability to rewrite error messages, we should
-            // explicitly disable that here (as it's subgraph-specific error rewriting).
-            let Some(error) = parse_field_set(
-                supergraph_schema,
+
+            let Err(error) = FieldSet::parse_and_validate(
+                Valid::assume_valid_ref(supergraph_schema.schema()),
                 parent_type_pos_in_supergraph.type_name().clone(),
                 requires_arguments.fields,
-                true,
-            )
-            .err() else {
+                "field_set.graphql",
+            ) else {
                 continue;
             };
             // Providing a useful error message to the user here is tricky in the general case
@@ -202,9 +196,13 @@ pub(crate) fn validate_merged_schema(
             // having error codes and variants for all the GraphQL validations. The apollo-compiler
             // crate has this already, but it's crate-private and potentially unstable, so we can't
             // use that for now.
-            for error in error.into_errors() {
+            for error in FederationError::from(error).into_errors() {
                 let SingleFederationError::InvalidGraphQL { message } = error else {
-                    errors.push(error.into());
+                    errors.push(CompositionError::SubgraphError {
+                        subgraph: subgraph.name.to_string(),
+                        error,
+                        locations: requires_directive.locations(subgraph),
+                    });
                     continue;
                 };
                 if let Some(captures) =
@@ -231,7 +229,7 @@ pub(crate) fn validate_merged_schema(
                         },
                         |incompatible_subgraphs| {
                             Ok(format!(
-                                "cannot provide a value for argument \"{argument_name}\" of field \"{field_name}\" as argument \"{argument_name}\" is not defined in {incompatible_subgraphs}",
+                                "cannot provide a value for argument \"{argument_name}\" of field \"{type_name}.{field_name}\" as argument \"{argument_name}\" is not defined in {incompatible_subgraphs}",
                             ))
                         },
                         subgraphs,
@@ -265,7 +263,7 @@ pub(crate) fn validate_merged_schema(
                         },
                         |incompatible_subgraphs| {
                             Ok(format!(
-                                "no value provided for argument \"{argument_name}\" of field \"{field_name}\" but a value is mandatory as \"{argument_name}\" is required in {incompatible_subgraphs}",
+                                "no value provided for argument \"{argument_name}\" of field \"{type_name}.{field_name}\" but a value is mandatory as \"{argument_name}\" is required in {incompatible_subgraphs}",
                             ))
                         },
                         subgraphs,
@@ -301,9 +299,6 @@ static APOLLO_COMPILER_REQUIRED_ARGUMENT_PATTERN: LazyLock<Regex> = LazyLock::ne
     .unwrap()
 });
 
-// TODO: This method is transtively not used. Once `validate_merged_schema` is used and transformed
-// to handle composition errors rather than (or in conjunction with) federation errors, this
-// function will need to be able to return either SubgraphErrors or composition errors.
 #[allow(clippy::too_many_arguments)]
 fn add_requires_error(
     requires_parent_field_pos: &ObjectFieldDefinitionPosition,
@@ -314,20 +309,21 @@ fn add_requires_error(
     argument_name: &str,
     is_field_incompatible: impl Fn(&FieldDefinition) -> Result<bool, FederationError>,
     message_for_incompatible_subgraphs: impl Fn(&str) -> Result<String, FederationError>,
-    subgraphs: &ValidFederationSubgraphs,
-    errors: &mut MultipleFederationErrors,
+    subgraphs: &[Subgraph<Validated>],
+    errors: &mut Vec<CompositionError>,
 ) -> Result<(), FederationError> {
     let type_name = Name::new(type_name)?;
     let field_name = Name::new(field_name)?;
     let argument_name = Name::new(argument_name)?;
+    let mut locations = Vec::with_capacity(subgraphs.len());
     let incompatible_subgraph_names = subgraphs
-        .subgraphs
-        .values()
+        .iter()
         .map(|other_subgraph| {
             if other_subgraph.name == subgraph_name {
                 return Ok(None);
             }
-            let Ok(type_pos_in_other_subgraph) = other_subgraph.schema.get_type(type_name.clone())
+            let Ok(type_pos_in_other_subgraph) =
+                other_subgraph.schema().get_type(type_name.clone())
             else {
                 return Ok(None);
             };
@@ -338,12 +334,13 @@ fn add_requires_error(
             };
             let Some(field_in_other_subgraph) = type_pos_in_other_subgraph
                 .field(field_name.clone())
-                .try_get(other_subgraph.schema.schema())
+                .try_get(other_subgraph.schema().schema())
             else {
                 return Ok(None);
             };
             let is_field_incompatible = is_field_incompatible(field_in_other_subgraph)?;
             if is_field_incompatible {
+                locations.extend(other_subgraph.node_locations(field_in_other_subgraph));
                 Ok::<_, FederationError>(Some(other_subgraph.name.to_string()))
             } else {
                 Ok(None)
@@ -360,13 +357,14 @@ fn add_requires_error(
         human_readable_subgraph_names(incompatible_subgraph_names.into_iter());
     let message = message_for_incompatible_subgraphs(&incompatible_subgraph_names)?;
 
-    errors.push(
-        SingleFederationError::RequiresInvalidFields {
+    errors.push(CompositionError::SubgraphError {
+        subgraph: subgraph_name.to_string(),
+        error: SingleFederationError::RequiresInvalidFields {
             coordinate: requires_parent_field_pos.to_string(),
             application: requires_application.to_string(),
             message,
-        }
-        .into(),
-    );
+        },
+        locations,
+    });
     Ok(())
 }
