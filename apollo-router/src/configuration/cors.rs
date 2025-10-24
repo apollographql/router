@@ -342,13 +342,13 @@ impl Cors {
         // Check for wildcard origins in any Policy
         if let Some(policies) = &self.policies {
             for policy in policies.iter() {
-                if policy.origins.iter().any(|x| &**x == "*") {
+                if policy.origins.iter().any(|x| x.as_ref() == "*") {
                     return Err(CorsConfigError::AllowAnyOrigin);
                 }
 
                 // Validate that origins don't have trailing slashes (per CORS spec)
                 for origin in policy.origins.iter() {
-                    if origin.ends_with('/') && &**origin != "/" {
+                    if origin.ends_with('/') && origin.as_ref() != "/" {
                         return Err(CorsConfigError::TrailingSlashInOrigin);
                     }
                 }
@@ -357,11 +357,11 @@ impl Cors {
 
         if self.allow_credentials {
             // Check global fields for wildcards
-            if self.allow_headers.iter().any(|x| &**x == "*") {
+            if self.allow_headers.iter().any(|x| x.as_ref() == "*") {
                 return Err(CorsConfigError::AllowCredentialsWithAllowAnyHeaders);
             }
 
-            if self.methods.iter().any(|x| &**x == "*") {
+            if self.methods.iter().any(|x| x.as_ref() == "*") {
                 return Err(CorsConfigError::AllowCredentialsWithAllowAnyMethods);
             }
 
@@ -370,7 +370,7 @@ impl Cors {
             }
 
             if let Some(headers) = &self.expose_headers
-                && headers.iter().any(|x| &**x == "*")
+                && headers.iter().any(|x| x.as_ref() == "*")
             {
                 return Err(CorsConfigError::AllowCredentialsWithExposeAnyHeaders);
             }
@@ -383,17 +383,17 @@ impl Cors {
                 let policy_credentials = policy.allow_credentials.unwrap_or(self.allow_credentials);
 
                 if policy_credentials {
-                    if policy.allow_headers.iter().any(|x| &**x == "*") {
+                    if policy.allow_headers.iter().any(|x| x.as_ref() == "*") {
                         return Err(CorsConfigError::AllowCredentialsWithAllowAnyHeaders);
                     }
 
                     if let Some(methods) = &policy.methods
-                        && methods.iter().any(|x| &**x == "*")
+                        && methods.iter().any(|x| x.as_ref() == "*")
                     {
                         return Err(CorsConfigError::AllowCredentialsWithAllowAnyMethods);
                     }
 
-                    if policy.expose_headers.iter().any(|x| &**x == "*") {
+                    if policy.expose_headers.iter().any(|x| x.as_ref() == "*") {
                         return Err(CorsConfigError::AllowCredentialsWithExposeAnyHeaders);
                     }
                 }
@@ -412,7 +412,7 @@ impl Cors {
 
                         // The access name needs to make the EMCAscript ReGex: `/^[a-z0-9_-.]+$/.`
                         if name.chars().any(
-                            |c| !matches!(c, 'A'..='Z'| 'a'..='z' | '0'..='9' | '_' | '-' | '.'),
+                            |c| !matches!(c, 'a'..='z' | '0'..='9' | '_' | '-' | '.'),
                         ) {
                             return Err(CorsConfigError::InvalidPrivateNetworkAccessName);
                         }
