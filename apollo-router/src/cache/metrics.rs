@@ -521,7 +521,7 @@ mod tests {
             // Verify Redis connection metrics are emitted.
             // Since this metric is based on a global AtomicU64, it's not unique across tests - so
             // we can only reliably check for metric existence, rather than a specific value.
-            crate::metrics::collect_metrics().metric_exists::<u64>(
+            crate::metrics::collect_metrics().metric_exists(
                 "apollo.router.cache.redis.clients",
                 MetricType::Gauge,
                 &[],

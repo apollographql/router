@@ -446,7 +446,6 @@ mod test {
     use std::sync::atomic::AtomicI64;
     use std::time::Duration;
 
-    use async_trait::async_trait;
     use opentelemetry::InstrumentationScope;
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::error::OTelSdkResult;
@@ -508,29 +507,28 @@ mod test {
 
         let observe_counter = Arc::new(AtomicI64::new(0));
         let callback_observe_counter = observe_counter.clone();
-        let gauge = meter
-            .i64_observable_gauge("test")
-            .with_callback(move |i| {
-                let count =
-                    callback_observe_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                i.observe(count + 1, &[])
-            })
-            .build();
 
         let mut result = ResourceMetrics::default();
+        {
+            let _gauge = meter
+                .i64_observable_gauge("test")
+                .with_callback(move |i| {
+                    let count =
+                        callback_observe_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    i.observe(count + 1, &[])
+                })
+                .build();
 
-        // Fetching twice will call the observer twice
-        reader
-            .collect(&mut result)
-            .expect("metrics must be collected");
-        reader
-            .collect(&mut result)
-            .expect("metrics must be collected");
+            // Fetching twice will call the observer twice
+            reader
+                .collect(&mut result)
+                .expect("metrics must be collected");
+            reader
+                .collect(&mut result)
+                .expect("metrics must be collected");
 
-        assert_eq!(get_gauge_value(&mut result), 2);
-
-        // Dropping the gauge should remove the observer registration
-        drop(gauge);
+            assert_eq!(get_gauge_value(&mut result), 2);
+        } // Limited scope to drop the gauge after use (b/c it does not impl drop)
 
         // No further increment will happen
         reader
@@ -557,42 +555,45 @@ mod test {
         let observe_counter = Arc::new(AtomicI64::new(0));
         let callback_observe_counter1 = observe_counter.clone();
         let callback_observe_counter2 = observe_counter.clone();
-        let gauge1 = meter
-            .i64_observable_gauge("test")
-            .with_callback(move |i| {
-                let count =
-                    callback_observe_counter1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                i.observe(count + 1, &[])
-            })
-            .build();
 
         let mut result = ResourceMetrics::default();
 
-        // Fetching metrics will call the observer
-        reader
-            .collect(&mut result)
-            .expect("metrics must be collected");
+        {
+            let _gauge1 = meter
+                .i64_observable_gauge("test")
+                .with_callback(move |i| {
+                    let count =
+                        callback_observe_counter1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    i.observe(count + 1, &[])
+                })
+                .build();
 
-        assert_eq!(get_gauge_value(&mut result), 1);
-        drop(gauge1);
+            // Fetching metrics will call the observer
+            reader
+                .collect(&mut result)
+                .expect("metrics must be collected");
 
-        // The first gauge is dropped, let's create a new one
-        let gauge2 = meter
-            .i64_observable_gauge("test")
-            .with_callback(move |i| {
-                let count =
-                    callback_observe_counter2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                i.observe(count + 1, &[])
-            })
-            .build();
+            assert_eq!(get_gauge_value(&mut result), 1);
+        } // Limited scope to drop the gauge after use (b/c it does not impl drop)
 
-        // Fetching metrics will call the observer ONLY on the remaining gauge
-        reader
-            .collect(&mut result)
-            .expect("metrics must be collected");
+        {
+            // The first gauge is dropped, let's create a new one
+            let _gauge2 = meter
+                .i64_observable_gauge("test")
+                .with_callback(move |i| {
+                    let count =
+                        callback_observe_counter2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    i.observe(count + 1, &[])
+                })
+                .build();
 
-        assert_eq!(get_gauge_value(&mut result), 2);
-        drop(gauge2);
+            // Fetching metrics will call the observer ONLY on the remaining gauge
+            reader
+                .collect(&mut result)
+                .expect("metrics must be collected");
+
+            assert_eq!(get_gauge_value(&mut result), 2);
+        } // Limited scope to drop the gauge after use (b/c it does not impl drop)
     }
 
     fn get_gauge_value(result: &mut ResourceMetrics) -> i64 {
@@ -654,20 +655,21 @@ mod test {
         shutdown: Arc<AtomicBool>,
     }
 
-    #[async_trait]
     impl PushMetricExporter for TestExporter {
-        fn export(
-            &self,
-            _metrics: &ResourceMetrics,
-        ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
-            async move {
-                self.count();
-                Ok(())
-            }
+        async fn export(&self, _metrics: &ResourceMetrics) -> OTelSdkResult {
+            self.count();
+            Ok(())
         }
 
         fn force_flush(&self) -> OTelSdkResult {
             self.count();
+            Ok(())
+        }
+
+        fn shutdown_with_timeout(&self, _timeout: Duration) -> OTelSdkResult {
+            self.count();
+            self.shutdown
+                .store(true, std::sync::atomic::Ordering::SeqCst);
             Ok(())
         }
 
@@ -680,13 +682,6 @@ mod test {
 
         fn temporality(&self) -> Temporality {
             Temporality::Cumulative
-        }
-
-        fn shutdown_with_timeout(&self, _timeout: Duration) -> OTelSdkResult {
-            self.count();
-            self.shutdown
-                .store(true, std::sync::atomic::Ordering::SeqCst);
-            Ok(())
         }
     }
 

@@ -231,7 +231,7 @@ mod tests {
     #[tokio::test]
     async fn test_named_span_exporter_adds_prefix() {
         let inner = FailingSpanExporter;
-        let mut named = super::NamedSpanExporter::new(inner, "test-exporter");
+        let named = super::NamedSpanExporter::new(inner, "test-exporter");
 
         let result = named.export(vec![]).await;
 
@@ -281,7 +281,7 @@ mod tests {
         };
         let named = super::NamedMetricsExporter::new(inner, "test-exporter");
 
-        let result = named.export(&mut ResourceMetrics::default()).await;
+        let result = named.export(&ResourceMetrics::default()).await;
 
         assert!(result.is_err());
         let err = result.unwrap_err();
