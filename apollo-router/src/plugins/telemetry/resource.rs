@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::env;
-use std::time::Duration;
 
 use opentelemetry::KeyValue;
 use opentelemetry_sdk::Resource;
@@ -15,7 +14,7 @@ const OTEL_SERVICE_NAME: &str = "OTEL_SERVICE_NAME";
 /// Users can always override them via config.
 struct StaticResourceDetector;
 impl ResourceDetector for StaticResourceDetector {
-    fn detect(&self, _timeout: Duration) -> Resource {
+    fn detect(&self) -> Resource {
         let mut config_resources = vec![];
         config_resources.push(KeyValue::new(
             opentelemetry_semantic_conventions::resource::SERVICE_VERSION,
@@ -29,20 +28,24 @@ impl ResourceDetector for StaticResourceDetector {
                 executable_name,
             ));
         }
-        Resource::new(config_resources)
+        Resource::builder()
+            .with_attributes(config_resources)
+            .build()
     }
 }
 
 struct EnvServiceNameDetector;
 // Used instead of SdkProvidedResourceDetector
 impl ResourceDetector for EnvServiceNameDetector {
-    fn detect(&self, _timeout: Duration) -> Resource {
+    fn detect(&self) -> Resource {
         match env::var(OTEL_SERVICE_NAME) {
-            Ok(service_name) if !service_name.is_empty() => Resource::new(vec![KeyValue::new(
-                opentelemetry_semantic_conventions::resource::SERVICE_NAME,
-                service_name,
-            )]),
-            Ok(_) | Err(_) => Resource::new(vec![]), // return empty resource
+            Ok(service_name) if !service_name.is_empty() => Resource::builder()
+                .with_attribute(KeyValue::new(
+                    opentelemetry_semantic_conventions::resource::SERVICE_NAME,
+                    service_name,
+                ))
+                .build(),
+            Ok(_) | Err(_) => Resource::builder_empty().build(), // return empty resource
         }
     }
 }
@@ -62,28 +65,31 @@ pub trait ConfigResource {
         };
 
         // Last one wins
-        let resource = Resource::from_detectors(
-            Duration::from_secs(0),
-            vec![
-                Box::new(StaticResourceDetector),
-                Box::new(config_resource_detector),
-                Box::new(EnvResourceDetector::new()),
-                Box::new(EnvServiceNameDetector),
-            ],
-        );
+        let detectors: Vec<Box<dyn ResourceDetector>> = vec![
+            Box::new(StaticResourceDetector),
+            Box::new(config_resource_detector),
+            Box::new(EnvResourceDetector::new()),
+            Box::new(EnvServiceNameDetector),
+        ];
+        let resource = Resource::builder().with_detectors(&detectors).build();
 
         // Default service name
         if resource
-            .get(opentelemetry_semantic_conventions::resource::SERVICE_NAME.into())
+            .get(&opentelemetry::Key::from(
+                opentelemetry_semantic_conventions::resource::SERVICE_NAME,
+            ))
             .is_none()
         {
             let executable_name = executable_name();
-            resource.merge(&Resource::new(vec![KeyValue::new(
-                opentelemetry_semantic_conventions::resource::SERVICE_NAME,
-                executable_name
-                    .map(|executable_name| format!("{UNKNOWN_SERVICE}:{executable_name}"))
-                    .unwrap_or_else(|| UNKNOWN_SERVICE.to_string()),
-            )]))
+            Resource::builder()
+                .with_detectors(&detectors)
+                .with_attribute(KeyValue::new(
+                    opentelemetry_semantic_conventions::resource::SERVICE_NAME,
+                    executable_name
+                        .map(|executable_name| format!("{UNKNOWN_SERVICE}:{executable_name}"))
+                        .unwrap_or_else(|| UNKNOWN_SERVICE.to_string()),
+                ))
+                .build()
         } else {
             resource
         }
@@ -104,7 +110,7 @@ struct ConfigResourceDetector {
 }
 
 impl ResourceDetector for ConfigResourceDetector {
-    fn detect(&self, _timeout: Duration) -> Resource {
+    fn detect(&self) -> Resource {
         let mut config_resources = vec![];
 
         // For config resources last entry wins
@@ -136,7 +142,9 @@ impl ResourceDetector for ConfigResourceDetector {
                 service_name.to_string(),
             ));
         }
-        Resource::new(config_resources)
+        Resource::builder()
+            .with_attributes(config_resources)
+            .build()
     }
 }
 

@@ -2,16 +2,10 @@
 use std::collections::HashMap;
 
 use http::Uri;
-use opentelemetry_otlp::HttpExporterBuilder;
-use opentelemetry_otlp::TonicExporterBuilder;
-use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::metrics::InstrumentKind;
-use opentelemetry_sdk::metrics::reader::TemporalitySelector;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
-use tonic::metadata::MetadataMap;
 use tonic::transport::Certificate;
 use tonic::transport::ClientTlsConfig;
 use tonic::transport::Identity;
@@ -24,9 +18,6 @@ use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "OTLPConfig")]
 pub(crate) struct Config {
-    /// Enable otlp
-    pub(crate) enabled: bool,
-
     /// The endpoint to send data to
     #[serde(default)]
     pub(crate) endpoint: Option<String>,
@@ -42,6 +33,9 @@ pub(crate) struct Config {
     /// HTTP configuration settings
     #[serde(default)]
     pub(crate) http: HttpExporter,
+
+    /// Enable otlp
+    pub(crate) enabled: bool,
 
     /// Batch processor settings
     #[serde(default)]
@@ -153,55 +147,7 @@ pub(super) fn process_endpoint(
         .transpose()
 }
 
-impl Config {
-    pub(crate) fn exporter<T: From<HttpExporterBuilder> + From<TonicExporterBuilder>>(
-        &self,
-        kind: TelemetryDataKind,
-    ) -> Result<T, BoxError> {
-        match self.protocol {
-            Protocol::Grpc => {
-                let endpoint_opt = process_endpoint(&self.endpoint, &kind, &self.protocol)?;
-                // Figure out if we need to set tls config for our exporter
-                let tls_config_opt = if let Some(endpoint) = &endpoint_opt {
-                    if !endpoint.is_empty() {
-                        let tls_url = Uri::try_from(endpoint)?;
-                        Some(self.grpc.clone().to_tls_config(&tls_url)?)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                let mut exporter = opentelemetry_otlp::new_exporter()
-                    .tonic()
-                    .with_protocol(opentelemetry_otlp::Protocol::Grpc)
-                    .with_timeout(self.batch_processor.max_export_timeout)
-                    .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()));
-                if let Some(endpoint) = endpoint_opt {
-                    exporter = exporter.with_endpoint(endpoint);
-                }
-                if let Some(tls_config) = tls_config_opt {
-                    exporter = exporter.with_tls_config(tls_config);
-                }
-                Ok(exporter.into())
-            }
-            Protocol::Http => {
-                let endpoint_opt = process_endpoint(&self.endpoint, &kind, &self.protocol)?;
-                let headers = self.http.headers.clone();
-                let mut exporter: HttpExporterBuilder = opentelemetry_otlp::new_exporter()
-                    .http()
-                    .with_protocol(opentelemetry_otlp::Protocol::Grpc)
-                    .with_timeout(self.batch_processor.max_export_timeout)
-                    .with_headers(headers);
-                if let Some(endpoint) = endpoint_opt {
-                    exporter = exporter.with_endpoint(endpoint);
-                }
-                Ok(exporter.into())
-            }
-        }
-    }
-}
+impl Config {}
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, default)]
@@ -290,181 +236,9 @@ pub(crate) enum Temporality {
     Delta,
 }
 
-pub(crate) struct CustomTemporalitySelector(
-    pub(crate) opentelemetry_sdk::metrics::data::Temporality,
-);
-
-impl TemporalitySelector for CustomTemporalitySelector {
-    fn temporality(&self, kind: InstrumentKind) -> opentelemetry_sdk::metrics::data::Temporality {
-        // Up/down counters should always use cumulative temporality to ensure they are sent as aggregates
-        // rather than deltas, which prevents drift issues.
-        // See https://github.com/open-telemetry/opentelemetry-specification/blob/a1c13d59bb7d0fb086df2b3e1eaec9df9efef6cc/specification/metrics/sdk_exporters/otlp.md#additional-configuration for mor information
-        match kind {
-            InstrumentKind::UpDownCounter | InstrumentKind::ObservableUpDownCounter => {
-                opentelemetry_sdk::metrics::data::Temporality::Cumulative
-            }
-            _ => self.0,
-        }
-    }
-}
-
-impl From<&Temporality> for Box<dyn TemporalitySelector> {
-    fn from(value: &Temporality) -> Self {
-        Box::new(match value {
-            Temporality::Cumulative => {
-                CustomTemporalitySelector(opentelemetry_sdk::metrics::data::Temporality::Cumulative)
-            }
-            Temporality::Delta => {
-                CustomTemporalitySelector(opentelemetry_sdk::metrics::data::Temporality::Delta)
-            }
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use opentelemetry_sdk::metrics::data::Temporality as SdkTemporality;
-
     use super::*;
-
-    #[test]
-    fn test_updown_counter_temporality_override() {
-        // Test that up/down counters always get cumulative temporality regardless of configuration
-        let delta_selector = CustomTemporalitySelector(SdkTemporality::Delta);
-        let cumulative_selector = CustomTemporalitySelector(SdkTemporality::Cumulative);
-
-        // UpDownCounter should always be cumulative
-        assert_eq!(
-            delta_selector.temporality(InstrumentKind::UpDownCounter),
-            SdkTemporality::Cumulative,
-            "UpDownCounter should always use cumulative temporality even with delta config"
-        );
-        assert_eq!(
-            cumulative_selector.temporality(InstrumentKind::UpDownCounter),
-            SdkTemporality::Cumulative,
-            "UpDownCounter should use cumulative temporality with cumulative config"
-        );
-
-        // ObservableUpDownCounter should always be cumulative
-        assert_eq!(
-            delta_selector.temporality(InstrumentKind::ObservableUpDownCounter),
-            SdkTemporality::Cumulative,
-            "ObservableUpDownCounter should always use cumulative temporality even with delta config"
-        );
-        assert_eq!(
-            cumulative_selector.temporality(InstrumentKind::ObservableUpDownCounter),
-            SdkTemporality::Cumulative,
-            "ObservableUpDownCounter should use cumulative temporality with cumulative config"
-        );
-    }
-
-    #[test]
-    fn test_counter_temporality_respects_config() {
-        // Test that regular counters respect the configured temporality
-        let delta_selector = CustomTemporalitySelector(SdkTemporality::Delta);
-        let cumulative_selector = CustomTemporalitySelector(SdkTemporality::Cumulative);
-
-        // Counter should respect configuration
-        assert_eq!(
-            delta_selector.temporality(InstrumentKind::Counter),
-            SdkTemporality::Delta,
-            "Counter should use delta temporality with delta config"
-        );
-        assert_eq!(
-            cumulative_selector.temporality(InstrumentKind::Counter),
-            SdkTemporality::Cumulative,
-            "Counter should use cumulative temporality with cumulative config"
-        );
-
-        // ObservableCounter should respect configuration
-        assert_eq!(
-            delta_selector.temporality(InstrumentKind::ObservableCounter),
-            SdkTemporality::Delta,
-            "ObservableCounter should use delta temporality with delta config"
-        );
-        assert_eq!(
-            cumulative_selector.temporality(InstrumentKind::ObservableCounter),
-            SdkTemporality::Cumulative,
-            "ObservableCounter should use cumulative temporality with cumulative config"
-        );
-    }
-
-    #[test]
-    fn test_gauge_temporality_respects_config() {
-        // Test that gauges respect the configured temporality (gauges are not forced to cumulative)
-        let delta_selector = CustomTemporalitySelector(SdkTemporality::Delta);
-        let cumulative_selector = CustomTemporalitySelector(SdkTemporality::Cumulative);
-
-        // Gauge should respect configuration
-        assert_eq!(
-            delta_selector.temporality(InstrumentKind::Gauge),
-            SdkTemporality::Delta,
-            "Gauge should use delta temporality with delta config"
-        );
-        assert_eq!(
-            cumulative_selector.temporality(InstrumentKind::Gauge),
-            SdkTemporality::Cumulative,
-            "Gauge should use cumulative temporality with cumulative config"
-        );
-
-        // ObservableGauge should respect configuration
-        assert_eq!(
-            delta_selector.temporality(InstrumentKind::ObservableGauge),
-            SdkTemporality::Delta,
-            "ObservableGauge should use delta temporality with delta config"
-        );
-        assert_eq!(
-            cumulative_selector.temporality(InstrumentKind::ObservableGauge),
-            SdkTemporality::Cumulative,
-            "ObservableGauge should use cumulative temporality with cumulative config"
-        );
-    }
-
-    #[test]
-    fn test_histogram_temporality_respects_config() {
-        // Test that histograms respect the configured temporality
-        let delta_selector = CustomTemporalitySelector(SdkTemporality::Delta);
-        let cumulative_selector = CustomTemporalitySelector(SdkTemporality::Cumulative);
-
-        // Histogram should respect configuration
-        assert_eq!(
-            delta_selector.temporality(InstrumentKind::Histogram),
-            SdkTemporality::Delta,
-            "Histogram should use delta temporality with delta config"
-        );
-        assert_eq!(
-            cumulative_selector.temporality(InstrumentKind::Histogram),
-            SdkTemporality::Cumulative,
-            "Histogram should use cumulative temporality with cumulative config"
-        );
-    }
-
-    #[test]
-    fn endpoint_grpc_defaulting_no_scheme() {
-        let url = Url::parse("api.apm.com:433").unwrap();
-        let exporter = GrpcExporter::default();
-        let domain = exporter.default_tls_domain(&url);
-        assert_eq!(domain, None);
-    }
-
-    #[test]
-    fn endpoint_grpc_defaulting_scheme() {
-        let url = Url::parse("https://api.apm.com:433").unwrap();
-        let exporter = GrpcExporter::default();
-        let domain = exporter.default_tls_domain(&url);
-        assert_eq!(domain, Some(url.domain().expect("domain was expected")),);
-    }
-
-    #[test]
-    fn endpoint_grpc_explicit_domain() {
-        let url = Url::parse("https://api.apm.com:433").unwrap();
-        let exporter = GrpcExporter {
-            domain_name: Some("foo.bar".to_string()),
-            ..Default::default()
-        };
-        let domain = exporter.default_tls_domain(&url);
-        assert_eq!(domain, Some("foo.bar"));
-    }
 
     #[test]
     fn test_process_endpoint() {

@@ -16,7 +16,6 @@ use config_new::connector::instruments::ConnectorInstruments;
 use config_new::instruments::InstrumentsConfig;
 use config_new::instruments::StaticInstrument;
 use config_new::router_overhead;
-use error_handler::handle_error;
 use futures::StreamExt;
 use futures::future::BoxFuture;
 use futures::future::ready;
@@ -56,6 +55,9 @@ use serde_json_bytes::json;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tracing_subscriber::filter::filter_fn;
+use tracing_subscriber::fmt::Layer;
+use tracing_subscriber::prelude::*;
 use uuid::Uuid;
 
 use self::apollo::ForwardValues;
@@ -237,7 +239,7 @@ impl LruSizeInstrument {
                     gauge.observe(value.load(std::sync::atomic::Ordering::Relaxed), &[]);
                 }
             })
-            .init();
+            .build();
 
         Self {
             value,
@@ -320,9 +322,6 @@ impl PluginPrivate for Telemetry {
             }
         }
 
-        opentelemetry::global::set_error_handler(handle_error)
-            .expect("otel error handler lock poisoned, fatal");
-
         let mut config = init.config;
         config.instrumentation.spans.update_defaults();
         config.instrumentation.instruments.update_defaults();
@@ -337,6 +336,19 @@ impl PluginPrivate for Telemetry {
 
         let (activation, custom_endpoints, apollo_metrics_sender) =
             reload::prepare(&init.previous_config, &config)?;
+
+        // handle OpenTelemetry internal logs and stop them from propagating to tracing bridge/appender
+        // capture logs with the opentelemetry prefix and print them to eprintln!
+        let opentelemetry_layer = Layer::new()
+            .with_writer(std::io::stderr)
+            .with_filter(filter_fn(|metadata| {
+                metadata.target().starts_with("opentelemetry")
+            }));
+
+        // register layer in tracing registry
+        tracing_subscriber::registry()
+            .with(opentelemetry_layer) // OpenTelemetry internal logs (filtered out)
+            .init();
 
         if config.instrumentation.spans.mode == SpanMode::Deprecated {
             ::tracing::warn!(

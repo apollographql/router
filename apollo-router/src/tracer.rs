@@ -118,14 +118,10 @@ mod test {
         let _guard = TRACING_LOCK.lock();
         // Create a tracing layer with the configured tracer
 
-        let provider = opentelemetry_sdk::trace::TracerProvider::builder()
-            .with_simple_exporter(
-                opentelemetry_stdout::SpanExporter::builder()
-                    .with_writer(std::io::stdout())
-                    .build(),
-            )
+        let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+            .with_simple_exporter(opentelemetry_stdout::SpanExporter::default())
             .build();
-        let tracer = provider.tracer_builder("noop").build();
+        let tracer = provider.tracer("noop");
 
         let telemetry = otel::layer().force_sampling().with_tracer(tracer);
         // Use the tracing subscriber `Registry`, or any other subscriber
@@ -145,10 +141,10 @@ mod test {
         let my_id = TraceId::maybe_new();
         assert!(my_id.is_none());
         // Create a tracing layer with the configured tracer
-        let provider = opentelemetry_sdk::trace::TracerProvider::builder()
+        let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
             .with_simple_exporter(opentelemetry_stdout::SpanExporter::default())
             .build();
-        let tracer = provider.tracer_builder("noop").build();
+        let tracer = provider.tracer("noop");
         let telemetry = otel::layer().force_sampling().with_tracer(tracer);
         // Use the tracing subscriber `Registry`, or any other subscriber
         // that impls `LookupSpan`
@@ -168,10 +164,10 @@ mod test {
     fn it_correctly_compares_valid_and_valid_trace_id() {
         let _guard = TRACING_LOCK.lock();
         // Create a tracing layer with the configured tracer
-        let provider = opentelemetry_sdk::trace::TracerProvider::builder()
+        let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
             .with_simple_exporter(opentelemetry_stdout::SpanExporter::default())
             .build();
-        let tracer = provider.tracer_builder("noop").build();
+        let tracer = provider.tracer("noop");
         let telemetry = otel::layer().force_sampling().with_tracer(tracer);
         // Use the tracing subscriber `Registry`, or any other subscriber
         // that impls `LookupSpan`

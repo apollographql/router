@@ -1,11 +1,9 @@
-use std::any::Any;
 use std::borrow::Cow;
 use std::sync::Arc;
 
 use buildstructor::buildstructor;
+use opentelemetry::InstrumentationScope;
 use opentelemetry::KeyValue;
-use opentelemetry::metrics::Callback;
-use opentelemetry::metrics::CallbackRegistration;
 use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Gauge;
 use opentelemetry::metrics::Histogram;
@@ -15,40 +13,44 @@ use opentelemetry::metrics::MeterProvider as OtelMeterProvider;
 use opentelemetry::metrics::ObservableCounter;
 use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
-use opentelemetry::metrics::Observer;
 use opentelemetry::metrics::UpDownCounter;
-use opentelemetry::metrics::noop::NoopMeterProvider;
+use opentelemetry_sdk::metrics::SdkMeterProvider;
 use regex::Regex;
 
 #[derive(Clone)]
 pub(crate) enum MeterProvider {
     Regular(opentelemetry_sdk::metrics::SdkMeterProvider),
-    Global(opentelemetry::global::GlobalMeterProvider),
 }
 
 impl MeterProvider {
     fn versioned_meter(
         &self,
-        name: impl Into<Cow<'static, str>>,
+        name: &'static str,
         version: Option<impl Into<Cow<'static, str>>>,
         schema_url: Option<impl Into<Cow<'static, str>>>,
         attributes: Option<Vec<KeyValue>>,
     ) -> Meter {
         match &self {
             MeterProvider::Regular(provider) => {
-                provider.versioned_meter(name, version, schema_url, attributes)
-            }
-            MeterProvider::Global(provider) => {
-                provider.versioned_meter(name, version, schema_url, attributes)
+                let mut builder = InstrumentationScope::builder(name);
+                if let Some(v) = version {
+                    builder = builder.with_version(v.into());
+                }
+                if let Some(s) = schema_url {
+                    builder = builder.with_schema_url(s.into());
+                }
+                if let Some(ref attrs) = attributes {
+                    builder = builder.with_attributes(attrs.clone());
+                }
+                provider.meter_with_scope(builder.build())
             }
         }
     }
 
     #[cfg(test)]
-    fn force_flush(&self) -> opentelemetry::metrics::Result<()> {
+    fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult {
         match self {
             MeterProvider::Regular(provider) => provider.force_flush(),
-            MeterProvider::Global(_provider) => Ok(()),
         }
     }
 }
@@ -56,12 +58,6 @@ impl MeterProvider {
 impl From<opentelemetry_sdk::metrics::SdkMeterProvider> for MeterProvider {
     fn from(provider: opentelemetry_sdk::metrics::SdkMeterProvider) -> Self {
         MeterProvider::Regular(provider)
-    }
-}
-
-impl From<opentelemetry::global::GlobalMeterProvider> for MeterProvider {
-    fn from(provider: opentelemetry::global::GlobalMeterProvider) -> Self {
-        MeterProvider::Global(provider)
     }
 }
 
@@ -124,7 +120,7 @@ impl FilterMeterProvider {
     }
 
     #[cfg(test)]
-    pub(crate) fn force_flush(&self) -> opentelemetry::metrics::Result<()> {
+    pub(crate) fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult {
         self.delegate.force_flush()
     }
 }
@@ -140,23 +136,52 @@ macro_rules! filter_instrument_fn {
     ($name:ident, $ty:ty, $wrapper:ident) => {
         fn $name(
             &self,
-            name: Cow<'static, str>,
-            description: Option<Cow<'static, str>>,
-            unit: Option<Cow<'static, str>>,
-        ) -> opentelemetry::metrics::Result<$wrapper<$ty>> {
-            let mut builder = match (&self.deny, &self.allow) {
+            builder: opentelemetry::metrics::InstrumentBuilder<'_, $wrapper<$ty>>,
+        ) -> $wrapper<$ty> {
+            let name = builder.name.to_string();
+            match (&self.deny, &self.allow) {
                 // Deny match takes precedence over allow match
-                (Some(deny), _) if deny.is_match(&name) => self.noop.$name(name),
-                (_, Some(allow)) if !allow.is_match(&name) => self.noop.$name(name),
-                (_, _) => self.delegate.$name(name),
-            };
-            if let Some(description) = &description {
-                builder = builder.with_description(description.clone())
+                (Some(deny), _) if deny.is_match(&name) => self.noop.$name(builder.name).build(),
+                (_, Some(allow)) if !allow.is_match(&name) => self.noop.$name(builder.name).build(),
+                (_, _) => {
+                    let mut instrument_builder = self.delegate.$name(builder.name);
+                    if let Some(ref description) = builder.description {
+                        instrument_builder =
+                            instrument_builder.with_description(description.clone());
+                    }
+                    if let Some(ref unit) = builder.unit {
+                        instrument_builder = instrument_builder.with_unit(unit.clone());
+                    }
+                    instrument_builder.build()
+                }
             }
-            if let Some(unit) = &unit {
-                builder = builder.with_unit(unit.clone());
+        }
+    };
+}
+
+macro_rules! filter_histogram_fn {
+    ($name:ident, $ty:ty, $wrapper:ident) => {
+        fn $name(
+            &self,
+            builder: opentelemetry::metrics::HistogramBuilder<'_, $wrapper<$ty>>,
+        ) -> $wrapper<$ty> {
+            let name = builder.name.to_string();
+            match (&self.deny, &self.allow) {
+                // Deny match takes precedence over allow match
+                (Some(deny), _) if deny.is_match(&name) => self.noop.$name(builder.name).build(),
+                (_, Some(allow)) if !allow.is_match(&name) => self.noop.$name(builder.name).build(),
+                (_, _) => {
+                    let mut instrument_builder = self.delegate.$name(builder.name);
+                    if let Some(ref description) = builder.description {
+                        instrument_builder =
+                            instrument_builder.with_description(description.clone());
+                    }
+                    if let Some(ref unit) = builder.unit {
+                        instrument_builder = instrument_builder.with_unit(unit.clone());
+                    }
+                    instrument_builder.build()
+                }
             }
-            builder.try_init()
         }
     };
 }
@@ -165,29 +190,28 @@ macro_rules! filter_observable_instrument_fn {
     ($name:ident, $ty:ty, $wrapper:ident) => {
         fn $name(
             &self,
-            name: Cow<'static, str>,
-            description: Option<Cow<'static, str>>,
-            unit: Option<Cow<'static, str>>,
-            callback: Vec<Callback<$ty>>,
-        ) -> opentelemetry::metrics::Result<$wrapper<$ty>> {
-            let mut builder = match (&self.deny, &self.allow) {
+            builder: opentelemetry::metrics::AsyncInstrumentBuilder<'_, $wrapper<$ty>, $ty>,
+        ) -> $wrapper<$ty> {
+            let name = builder.name.to_string();
+            match (&self.deny, &self.allow) {
                 // Deny match takes precedence over allow match
-                (Some(deny), _) if deny.is_match(&name) => self.noop.$name(name),
-                (_, Some(allow)) if !allow.is_match(&name) => self.noop.$name(name),
-                (_, _) => self.delegate.$name(name),
-            };
-            if let Some(description) = &description {
-                builder = builder.with_description(description.clone());
+                (Some(deny), _) if deny.is_match(&name) => self.noop.$name(builder.name).build(),
+                (_, Some(allow)) if !allow.is_match(&name) => self.noop.$name(builder.name).build(),
+                (_, _) => {
+                    let mut instrument_builder = self.delegate.$name(builder.name);
+                    for callback in builder.callbacks {
+                        instrument_builder = instrument_builder.with_callback(callback);
+                    }
+                    if let Some(ref description) = builder.description {
+                        instrument_builder =
+                            instrument_builder.with_description(description.clone());
+                    }
+                    if let Some(ref unit) = builder.unit {
+                        instrument_builder = instrument_builder.with_unit(unit.clone());
+                    }
+                    instrument_builder.build()
+                }
             }
-            if let Some(unit) = &unit {
-                builder = builder.with_unit(unit.clone());
-            }
-
-            for callback in callback {
-                builder = builder.with_callback(callback);
-            }
-
-            builder.try_init()
         }
     };
 }
@@ -203,8 +227,8 @@ impl InstrumentProvider for FilteredInstrumentProvider {
     filter_observable_instrument_fn!(f64_observable_counter, f64, ObservableCounter);
     filter_observable_instrument_fn!(u64_observable_counter, u64, ObservableCounter);
 
-    filter_instrument_fn!(u64_histogram, u64, Histogram);
-    filter_instrument_fn!(f64_histogram, f64, Histogram);
+    filter_histogram_fn!(u64_histogram, u64, Histogram);
+    filter_histogram_fn!(f64_histogram, f64, Histogram);
 
     filter_instrument_fn!(i64_up_down_counter, i64, UpDownCounter);
     filter_instrument_fn!(f64_up_down_counter, f64, UpDownCounter);
@@ -215,190 +239,189 @@ impl InstrumentProvider for FilteredInstrumentProvider {
     filter_observable_instrument_fn!(f64_observable_gauge, f64, ObservableGauge);
     filter_observable_instrument_fn!(i64_observable_gauge, i64, ObservableGauge);
     filter_observable_instrument_fn!(u64_observable_gauge, u64, ObservableGauge);
-
-    fn register_callback(
-        &self,
-        instruments: &[Arc<dyn Any>],
-        callbacks: Box<dyn Fn(&dyn Observer) + Send + Sync>,
-    ) -> opentelemetry::metrics::Result<Box<dyn CallbackRegistration>> {
-        self.delegate.register_callback(instruments, callbacks)
-    }
 }
 
 impl opentelemetry::metrics::MeterProvider for FilterMeterProvider {
-    fn versioned_meter(
-        &self,
-        name: impl Into<Cow<'static, str>>,
-        version: Option<impl Into<Cow<'static, str>>>,
-        schema_url: Option<impl Into<Cow<'static, str>>>,
-        attributes: Option<Vec<KeyValue>>,
-    ) -> Meter {
+    fn meter(&self, name: &'static str) -> Meter {
         Meter::new(Arc::new(FilteredInstrumentProvider {
-            noop: NoopMeterProvider::default().meter(""),
+            noop: opentelemetry::global::meter_provider().meter(""),
             delegate: self
                 .delegate
-                .versioned_meter(name, version, schema_url, attributes),
+                .versioned_meter(name, None::<&str>, None::<&str>, None),
             deny: self.deny.clone(),
             allow: self.allow.clone(),
         }))
+    }
+    fn meter_with_scope(&self, scope: opentelemetry::InstrumentationScope) -> Meter {
+        let provider = SdkMeterProvider::default();
+        provider.meter_with_scope(scope)
     }
 }
 
 #[cfg(test)]
 mod test {
-    use opentelemetry::global::GlobalMeterProvider;
-    use opentelemetry::metrics::MeterProvider;
+    use opentelemetry_sdk::metrics::InMemoryMetricExporter;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
     use opentelemetry_sdk::metrics::PeriodicReader;
-    use opentelemetry_sdk::runtime;
-    use opentelemetry_sdk::testing::metrics::InMemoryMetricsExporter;
 
     use crate::metrics::filter::FilterMeterProvider;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_private_metrics() {
-        let exporter = InMemoryMetricsExporter::default();
+        let exporter = InMemoryMetricExporter::default();
         let meter_provider = FilterMeterProvider::apollo(
             MeterProviderBuilder::default()
-                .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
+                .with_reader(PeriodicReader::builder(exporter.clone()).build())
                 .build(),
         );
-        let filtered = meter_provider.versioned_meter("filtered", "".into(), "".into(), None);
+        let filtered =
+            meter_provider
+                .delegate
+                .versioned_meter("filtered", "".into(), "".into(), None);
         // Matches allow
         filtered
             .u64_counter("apollo.router.operations")
-            .init()
+            .build()
             .add(1, &[]);
         filtered
             .u64_counter("apollo.router.operations.test")
-            .init()
+            .build()
             .add(1, &[]);
         filtered
             .u64_counter("apollo.graphos.cloud.test")
-            .init()
+            .build()
             .add(1, &[]);
         filtered
             .u64_counter("apollo.router.query_planning.test")
-            .init()
+            .build()
             .add(1, &[]);
         filtered
             .u64_counter("apollo.router.lifecycle.api_schema")
-            .init()
+            .build()
             .add(1, &[]);
         filtered
             .u64_counter("apollo.router.operations.connectors")
-            .init()
+            .build()
             .add(1, &[]);
         filtered
             .u64_observable_gauge("apollo.router.schema.connectors")
             .with_callback(move |observer| observer.observe(1, &[]))
-            .init();
+            .build();
 
         // Mismatches allow
         filtered
             .u64_counter("apollo.router.unknown.test")
-            .init()
+            .build()
             .add(1, &[]);
 
         // Matches deny
         filtered
             .u64_counter("apollo.router.operations.error")
-            .init()
+            .build()
             .add(1, &[]);
 
         meter_provider.force_flush().unwrap();
 
-        let metrics: Vec<_> = exporter
-            .get_finished_metrics()
-            .unwrap()
-            .into_iter()
-            .flat_map(|m| m.scope_metrics.into_iter())
-            .flat_map(|m| m.metrics)
+        let resource_metrics = exporter.get_finished_metrics().unwrap();
+        let metrics: Vec<_> = resource_metrics
+            .iter()
+            .flat_map(|rm| rm.scope_metrics())
+            .flat_map(|sm| sm.metrics())
             .collect();
 
         // Matches allow
         assert!(
             metrics
                 .iter()
-                .any(|m| m.name == "apollo.router.operations.test")
-        );
-
-        assert!(metrics.iter().any(|m| m.name == "apollo.router.operations"));
-
-        assert!(
-            metrics
-                .iter()
-                .any(|m| m.name == "apollo.graphos.cloud.test")
+                .any(|m| m.name() == "apollo.router.operations.test")
         );
 
         assert!(
             metrics
                 .iter()
-                .any(|m| m.name == "apollo.router.lifecycle.api_schema")
+                .any(|m| m.name() == "apollo.router.operations")
         );
 
         assert!(
             metrics
                 .iter()
-                .any(|m| m.name == "apollo.router.operations.connectors")
+                .any(|m| m.name() == "apollo.graphos.cloud.test")
+        );
+
+        assert!(
+            metrics
+                .iter()
+                .any(|m| m.name() == "apollo.router.lifecycle.api_schema")
+        );
+
+        assert!(
+            metrics
+                .iter()
+                .any(|m| m.name() == "apollo.router.operations.connectors")
         );
         assert!(
             metrics
                 .iter()
-                .any(|m| m.name == "apollo.router.schema.connectors")
+                .any(|m| m.name() == "apollo.router.schema.connectors")
         );
 
         // Mismatches allow
         assert!(
             !metrics
                 .iter()
-                .any(|m| m.name == "apollo.router.unknown.test")
+                .any(|m| m.name() == "apollo.router.unknown.test")
         );
 
         // Matches deny
         assert!(
             !metrics
                 .iter()
-                .any(|m| m.name == "apollo.router.operations.error")
+                .any(|m| m.name() == "apollo.router.operations.error")
         );
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_description_and_unit() {
-        let exporter = InMemoryMetricsExporter::default();
+        let exporter = InMemoryMetricExporter::default();
         let meter_provider = FilterMeterProvider::apollo(
             MeterProviderBuilder::default()
-                .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
+                .with_reader(PeriodicReader::builder(exporter.clone()).build())
                 .build(),
         );
-        let filtered = meter_provider.versioned_meter("filtered", "".into(), "".into(), None);
+        let filtered =
+            meter_provider
+                .delegate
+                .versioned_meter("filtered", "".into(), "".into(), None);
         filtered
             .u64_counter("apollo.router.operations")
             .with_description("desc")
             .with_unit("ms")
-            .init()
+            .build()
             .add(1, &[]);
         meter_provider.force_flush().unwrap();
 
-        let metrics: Vec<_> = exporter
-            .get_finished_metrics()
-            .unwrap()
-            .into_iter()
-            .flat_map(|m| m.scope_metrics.into_iter())
-            .flat_map(|m| m.metrics)
+        let resource_metrics = exporter.get_finished_metrics().unwrap();
+        let metrics: Vec<_> = resource_metrics
+            .iter()
+            .flat_map(|rm| rm.scope_metrics())
+            .flat_map(|sm| sm.metrics())
             .collect();
-        assert!(metrics.iter().any(|m| m.name == "apollo.router.operations"
-            && m.description == "desc"
-            && m.unit == "ms"));
+        assert!(
+            metrics
+                .iter()
+                .any(|m| m.name() == "apollo.router.operations"
+                    && m.description() == "desc"
+                    && m.unit() == "ms")
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_public_metrics_using_meter_provider() {
-        let exporter = InMemoryMetricsExporter::default();
+        let exporter = InMemoryMetricExporter::default();
         test_public_metrics(
             exporter.clone(),
             MeterProviderBuilder::default()
-                .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
+                .with_reader(PeriodicReader::builder(exporter.clone()).build())
                 .build(),
         )
         .await;
@@ -406,120 +429,122 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_public_metrics_using_global_meter_provider() {
-        let exporter = InMemoryMetricsExporter::default();
+        let exporter = InMemoryMetricExporter::default();
 
         test_public_metrics(
             exporter.clone(),
-            GlobalMeterProvider::new(
-                MeterProviderBuilder::default()
-                    .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
-                    .build(),
-            ),
+            MeterProviderBuilder::default()
+                .with_reader(PeriodicReader::builder(exporter.clone()).build())
+                .build(),
         )
         .await;
     }
     async fn test_public_metrics<T: Into<super::MeterProvider>>(
-        exporter: InMemoryMetricsExporter,
+        exporter: InMemoryMetricExporter,
         meter_provider: T,
     ) {
         let meter_provider = FilterMeterProvider::public(meter_provider);
-        let filtered = meter_provider.versioned_meter("filtered", "".into(), "".into(), None);
+        let filtered =
+            meter_provider
+                .delegate
+                .versioned_meter("filtered", "".into(), "".into(), None);
         filtered
             .u64_counter("apollo.router.config")
-            .init()
+            .build()
             .add(1, &[]);
         filtered
             .u64_counter("apollo.router.config.test")
-            .init()
+            .build()
             .add(1, &[]);
         filtered
             .u64_counter("apollo.router.entities")
-            .init()
+            .build()
             .add(1, &[]);
         filtered
             .u64_counter("apollo.router.entities.test")
-            .init()
+            .build()
             .add(1, &[]);
         filtered
             .u64_counter("apollo.router.operations.connectors")
-            .init()
+            .build()
             .add(1, &[]);
         filtered
             .u64_observable_gauge("apollo.router.schema.connectors")
             .with_callback(move |observer| observer.observe(1, &[]))
-            .init();
+            .build();
         meter_provider.force_flush().unwrap();
 
-        let metrics: Vec<_> = exporter
-            .get_finished_metrics()
-            .unwrap()
-            .into_iter()
-            .flat_map(|m| m.scope_metrics.into_iter())
-            .flat_map(|m| m.metrics)
+        let resource_metrics = exporter.get_finished_metrics().unwrap();
+        let metrics: Vec<_> = resource_metrics
+            .iter()
+            .flat_map(|rm| rm.scope_metrics())
+            .flat_map(|sm| sm.metrics())
             .collect();
 
-        assert!(!metrics.iter().any(|m| m.name == "apollo.router.config"));
+        assert!(!metrics.iter().any(|m| m.name() == "apollo.router.config"));
         assert!(
             !metrics
                 .iter()
-                .any(|m| m.name == "apollo.router.config.test")
+                .any(|m| m.name() == "apollo.router.config.test")
         );
-        assert!(!metrics.iter().any(|m| m.name == "apollo.router.entities"));
+        assert!(!metrics.iter().any(|m| m.name() == "apollo.router.entities"));
         assert!(
             !metrics
                 .iter()
-                .any(|m| m.name == "apollo.router.entities.test")
-        );
-        assert!(
-            !metrics
-                .iter()
-                .any(|m| m.name == "apollo.router.operations.connectors")
+                .any(|m| m.name() == "apollo.router.entities.test")
         );
         assert!(
             !metrics
                 .iter()
-                .any(|m| m.name == "apollo.router.schema.connectors")
+                .any(|m| m.name() == "apollo.router.operations.connectors")
+        );
+        assert!(
+            !metrics
+                .iter()
+                .any(|m| m.name() == "apollo.router.schema.connectors")
         );
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_private_realtime_metrics() {
-        let exporter = InMemoryMetricsExporter::default();
+        let exporter = InMemoryMetricExporter::default();
         let meter_provider = FilterMeterProvider::apollo_realtime(
             MeterProviderBuilder::default()
-                .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
+                .with_reader(PeriodicReader::builder(exporter.clone()).build())
                 .build(),
         );
-        let filtered = meter_provider.versioned_meter("filtered", "".into(), "".into(), None);
+        let filtered =
+            meter_provider
+                .delegate
+                .versioned_meter("filtered", "".into(), "".into(), None);
         filtered
             .u64_counter("apollo.router.operations.error")
-            .init()
+            .build()
             .add(1, &[]);
         filtered
             .u64_counter("apollo.router.operations.mismatch")
-            .init()
+            .build()
             .add(1, &[]);
         meter_provider.force_flush().unwrap();
 
-        let metrics: Vec<_> = exporter
-            .get_finished_metrics()
-            .unwrap()
-            .into_iter()
-            .flat_map(|m| m.scope_metrics.into_iter())
-            .flat_map(|m| m.metrics)
+        let resource_metrics = exporter.get_finished_metrics().unwrap();
+        let metrics: Vec<_> = resource_metrics
+            .iter()
+            .flat_map(|rm| rm.scope_metrics())
+            .flat_map(|sm| sm.metrics())
             .collect();
         // Matches
         assert!(
             metrics
                 .iter()
-                .any(|m| m.name == "apollo.router.operations.error")
+                .any(|m| m.name() == "apollo.router.operations.error")
         );
 
         // Mismatches
         assert!(
             !metrics
                 .iter()
-                .any(|m| m.name == "apollo.router.operations.mismatch")
+                .any(|m| m.name() == "apollo.router.operations.mismatch")
         );
     }
 }

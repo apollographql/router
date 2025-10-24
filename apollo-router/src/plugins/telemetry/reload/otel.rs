@@ -78,11 +78,8 @@ static FMT_LAYER_HANDLE: OnceCell<
 > = OnceCell::new();
 
 pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
-    let hot_tracer = ReloadTracer::new(
-        opentelemetry_sdk::trace::TracerProvider::default()
-            .tracer_builder("noop")
-            .build(),
-    );
+    let hot_tracer =
+        ReloadTracer::new(opentelemetry_sdk::trace::SdkTracerProvider::default().tracer("noop"));
     let opentelemetry_layer = otel::layer().with_tracer(hot_tracer.clone());
 
     // We choose json or plain based on tty
