@@ -54,7 +54,7 @@
 //!       # methods not specified - uses global default [POST]
 //!     - origins: [https://app2.com]
 //!       methods: []  # Explicitly disable all methods
-//!     - origins: [https://app3.com]  
+//!     - origins: [https://app3.com]
 //!       methods: [GET, DELETE]  # Use specific methods
 //!     - origins: [https://api.example.com]
 //!       match_origins: ["^https://.*\\.example\\.com$"]  # Regex pattern for subdomains
@@ -62,6 +62,7 @@
 //!       # Uses global methods [POST]
 //! ```
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use regex::Regex;
@@ -78,15 +79,15 @@ pub(crate) struct Policy {
     pub(crate) allow_credentials: Option<bool>,
 
     /// The headers to allow for these origins
-    pub(crate) allow_headers: Vec<String>,
+    pub(crate) allow_headers: Arc<[Arc<str>]>,
 
     /// Which response headers should be made available to scripts running in the browser
-    pub(crate) expose_headers: Vec<String>,
+    pub(crate) expose_headers: Arc<[Arc<str>]>,
 
     /// Regex patterns to match origins against.
-    #[serde(with = "serde_regex")]
+    #[serde(with = "arc_regex")]
     #[schemars(with = "Vec<String>")]
-    pub(crate) match_origins: Vec<Regex>,
+    pub(crate) match_origins: Arc<[Regex]>,
 
     /// The `Access-Control-Max-Age` header value in time units
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
@@ -94,32 +95,52 @@ pub(crate) struct Policy {
     pub(crate) max_age: Option<Duration>,
 
     /// Allowed request methods for these origins.
-    pub(crate) methods: Option<Vec<String>>,
+    pub(crate) methods: Option<Arc<[Arc<str>]>>,
 
     /// The origins to allow requests from.
-    pub(crate) origins: Vec<String>,
+    pub(crate) origins: Arc<[Arc<str>]>,
+
+    /// When `Some`, the `Access-Control-Allow-Private-Network` header will be added as well as the
+    /// respective headers contained within the policy.
+    pub(crate) private_network_access: Option<PrivateNetworkAccessPolicy>,
+}
+
+#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[serde(default)]
+pub(crate) struct PrivateNetworkAccessPolicy {
+    /// When specified, the `Private-Network-Access-ID` header will be added with the given ID.
+    /// The ID must be a 48-bit value presented as 6 hexadecimal bytes separated by colons, e.g.
+    /// `01:23:45:67:89:0A`.
+    pub(crate) access_id: Option<Arc<str>>,
+
+    /// When `Some`, the `Private-Network-Access-Name` header will be added with the given name.
+    /// The name can be at most 248 UTF-8 code units and match a RegEx equivalent to the ECMAScript
+    /// RegEx `/^[a-z0-9_-.]+$/.`
+    pub(crate) access_name: Option<Arc<str>>,
 }
 
 impl Default for Policy {
     fn default() -> Self {
         Self {
             allow_credentials: None,
-            allow_headers: Vec::new(),
-            expose_headers: Vec::new(),
-            match_origins: Vec::new(),
+            allow_headers: Arc::new([]),
+            expose_headers: Arc::new([]),
+            match_origins: Arc::new([]),
             max_age: None,
             methods: None,
             origins: default_origins(),
+            private_network_access: None,
         }
     }
 }
 
-fn default_origins() -> Vec<String> {
-    vec!["https://studio.apollographql.com".into()]
+fn default_origins() -> Arc<[Arc<str>]> {
+    Arc::new(["https://studio.apollographql.com".into()])
 }
 
-fn default_cors_methods() -> Vec<String> {
-    vec!["GET".into(), "POST".into(), "OPTIONS".into()]
+fn default_cors_methods() -> Arc<[Arc<str>]> {
+    Arc::new(["GET".into(), "POST".into(), "OPTIONS".into()])
 }
 
 // Currently, this is only used for testing.
@@ -135,15 +156,29 @@ impl Policy {
         max_age: Option<Duration>,
         methods: Option<Vec<String>>,
         origins: Vec<String>,
+        private_network_access: Option<PrivateNetworkAccessPolicy>,
     ) -> Self {
         Self {
             allow_credentials,
-            allow_headers,
-            expose_headers,
-            match_origins,
+            allow_headers: allow_headers.into_iter().map(Arc::from).collect(),
+            expose_headers: expose_headers.into_iter().map(Arc::from).collect(),
+            match_origins: match_origins.into(),
             max_age,
-            methods,
-            origins,
+            methods: methods.map(|methods| methods.into_iter().map(Arc::from).collect()),
+            origins: origins.into_iter().map(Arc::from).collect(),
+            private_network_access,
+        }
+    }
+}
+
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl PrivateNetworkAccessPolicy {
+    #[builder]
+    pub(crate) fn new(access_name: Option<String>, access_id: Option<String>) -> Self {
+        Self {
+            access_id: access_id.map(Arc::from),
+            access_name: access_name.map(Arc::from),
         }
     }
 }
@@ -169,14 +204,14 @@ pub(crate) struct Cors {
     /// - accept `x-apollo-operation-name` AND / OR `apollo-require-preflight`
     /// - defined `csrf` required headers in your yml configuration, as shown in the
     ///   `examples/cors-and-csrf/custom-headers.router.yaml` files.
-    pub(crate) allow_headers: Vec<String>,
+    pub(crate) allow_headers: Arc<[Arc<str>]>,
 
     /// Which response headers should be made available to scripts running in the browser,
     /// in response to a cross-origin request.
-    pub(crate) expose_headers: Option<Vec<String>>,
+    pub(crate) expose_headers: Option<Arc<[Arc<str>]>>,
 
     /// Allowed request methods. See module documentation for default behavior.
-    pub(crate) methods: Vec<String>,
+    pub(crate) methods: Arc<[Arc<str>]>,
 
     /// The `Access-Control-Max-Age` header value in time units
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
@@ -185,7 +220,7 @@ pub(crate) struct Cors {
 
     /// The origin(s) to allow requests from. The router matches request origins against policies
     /// in order, first by exact match, then by regex. See module documentation for default behavior.
-    pub(crate) policies: Option<Vec<Policy>>,
+    pub(crate) policies: Option<Arc<[Policy]>>,
 }
 
 impl Default for Cors {
@@ -206,7 +241,9 @@ impl Cors {
         methods: Option<Vec<String>>,
         policies: Option<Vec<Policy>>,
     ) -> Self {
-        let global_methods = methods.unwrap_or_else(default_cors_methods);
+        let global_methods = methods.map_or_else(default_cors_methods, |methods| {
+            methods.into_iter().map(Arc::from).collect()
+        });
         let policies = policies.or_else(|| {
             let default_policy = Policy {
                 methods: Some(global_methods.clone()),
@@ -218,13 +255,60 @@ impl Cors {
         Self {
             allow_any_origin: allow_any_origin.unwrap_or_default(),
             allow_credentials: allow_credentials.unwrap_or_default(),
-            allow_headers: allow_headers.unwrap_or_default(),
-            expose_headers,
+            allow_headers: allow_headers.map_or_else(Default::default, |headers| {
+                headers.into_iter().map(Arc::from).collect()
+            }),
+            expose_headers: expose_headers
+                .map(|headers| headers.into_iter().map(Arc::from).collect()),
             max_age,
             methods: global_methods,
-            policies,
+            policies: policies.map(Arc::from),
         }
     }
+}
+
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub(crate) enum CorsConfigError {
+    #[error(
+        "Invalid CORS configuration: use `allow_any_origin: true` to set `Access-Control-Allow-Origin: *`"
+    )]
+    AllowAnyOrigin,
+    #[error(
+        "Invalid CORS configuration: origins cannot have trailing slashes (a serialized origin has no trailing slash)"
+    )]
+    TrailingSlashInOrigin,
+    #[error(
+        "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Headers: *` in policy"
+    )]
+    AllowCredentialsWithAllowAnyHeaders,
+    #[error(
+        "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Methods: *` in policy"
+    )]
+    AllowCredentialsWithAllowAnyMethods,
+    #[error(
+        "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `allow_any_origin: true`"
+    )]
+    AllowCredentialsWithAnyOrigin,
+    #[error(
+        "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Expose-Headers: *` in policy"
+    )]
+    AllowCredentialsWithExposeAnyHeaders,
+    #[error(
+        "Invalid CORS configuration: `Private-Network-Access-Name` header value must not be empty."
+    )]
+    EmptyPrivateNetworkAccessName,
+    #[error(
+        "Invalid CORS configuration: `Private-Network-Access-Name` header value must be no longer than 248 characters."
+    )]
+    LengthyPrivateNetworkAccessName,
+    #[error(
+        "Invalid CORS configuration: `Private-Network-Access-Name` header value can only contain the characters a-z0-9_-."
+    )]
+    InvalidPrivateNetworkAccessName,
+    #[error(
+        "Invalid CORS configuration: `Private-Network-Access-ID` header value must be a 48-bit value presented as 6 hexadecimal bytes separated by colons"
+    )]
+    InvalidPrivateNetworkAccessId,
 }
 
 impl Cors {
@@ -254,22 +338,18 @@ impl Cors {
     //
     // Similarly, `Access-Control-Expose-Headers`, `Access-Control-Allow-Methods`, and `Access-Control-Allow-Headers`
     // response headers can only use `*` as value when request's credentials mode is not "include".
-    pub(crate) fn ensure_usable_cors_rules(&self) -> Result<(), &'static str> {
+    pub(crate) fn ensure_usable_cors_rules(&self) -> Result<(), CorsConfigError> {
         // Check for wildcard origins in any Policy
         if let Some(policies) = &self.policies {
-            for policy in policies {
-                if policy.origins.iter().any(|x| x == "*") {
-                    return Err(
-                        "Invalid CORS configuration: use `allow_any_origin: true` to set `Access-Control-Allow-Origin: *`",
-                    );
+            for policy in policies.iter() {
+                if policy.origins.iter().any(|x| x.as_ref() == "*") {
+                    return Err(CorsConfigError::AllowAnyOrigin);
                 }
 
                 // Validate that origins don't have trailing slashes (per CORS spec)
-                for origin in &policy.origins {
-                    if origin.ends_with('/') && origin != "/" {
-                        return Err(
-                            "Invalid CORS configuration: origins cannot have trailing slashes (a serialized origin has no trailing slash)",
-                        );
+                for origin in policy.origins.iter() {
+                    if origin.ends_with('/') && origin.as_ref() != "/" {
+                        return Err(CorsConfigError::TrailingSlashInOrigin);
                     }
                 }
             }
@@ -277,70 +357,104 @@ impl Cors {
 
         if self.allow_credentials {
             // Check global fields for wildcards
-            if self.allow_headers.iter().any(|x| x == "*") {
-                return Err(
-                    "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
-                        with `Access-Control-Allow-Headers: *`",
-                );
+            if self.allow_headers.iter().any(|x| x.as_ref() == "*") {
+                return Err(CorsConfigError::AllowCredentialsWithAllowAnyHeaders);
             }
 
-            if self.methods.iter().any(|x| x == "*") {
-                return Err(
-                    "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
-                    with `Access-Control-Allow-Methods: *`",
-                );
+            if self.methods.iter().any(|x| x.as_ref() == "*") {
+                return Err(CorsConfigError::AllowCredentialsWithAllowAnyMethods);
             }
 
             if self.allow_any_origin {
-                return Err(
-                    "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
-                    with `allow_any_origin: true`",
-                );
+                return Err(CorsConfigError::AllowCredentialsWithAnyOrigin);
             }
 
             if let Some(headers) = &self.expose_headers
-                && headers.iter().any(|x| x == "*")
+                && headers.iter().any(|x| x.as_ref() == "*")
             {
-                return Err(
-                    "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
-                        with `Access-Control-Expose-Headers: *`",
-                );
+                return Err(CorsConfigError::AllowCredentialsWithExposeAnyHeaders);
             }
         }
 
         // Check per-policy fields for wildcards when policy-level credentials are enabled
         if let Some(policies) = &self.policies {
-            for policy in policies {
+            for policy in policies.iter() {
                 // Check if policy-level credentials override is enabled
                 let policy_credentials = policy.allow_credentials.unwrap_or(self.allow_credentials);
 
                 if policy_credentials {
-                    if policy.allow_headers.iter().any(|x| x == "*") {
-                        return Err(
-                            "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
-                            with `Access-Control-Allow-Headers: *` in policy",
-                        );
+                    if policy.allow_headers.iter().any(|x| x.as_ref() == "*") {
+                        return Err(CorsConfigError::AllowCredentialsWithAllowAnyHeaders);
                     }
 
                     if let Some(methods) = &policy.methods
-                        && methods.iter().any(|x| x == "*")
+                        && methods.iter().any(|x| x.as_ref() == "*")
                     {
-                        return Err(
-                            "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
-                                with `Access-Control-Allow-Methods: *` in policy",
-                        );
+                        return Err(CorsConfigError::AllowCredentialsWithAllowAnyMethods);
                     }
 
-                    if policy.expose_headers.iter().any(|x| x == "*") {
-                        return Err(
-                            "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
-                            with `Access-Control-Expose-Headers: *` in policy",
-                        );
+                    if policy.expose_headers.iter().any(|x| x.as_ref() == "*") {
+                        return Err(CorsConfigError::AllowCredentialsWithExposeAnyHeaders);
+                    }
+                }
+
+                if let Some(pna) = &policy.private_network_access {
+                    if let Some(name) = &pna.access_name {
+                        if name.is_empty() {
+                            return Err(CorsConfigError::EmptyPrivateNetworkAccessName);
+                        }
+
+                        // NOTE: Simply checking the number of bytes in the string will suffice
+                        // (rather than chars) since all chars in the name are only a byte wide.
+                        if name.len() > 248 {
+                            return Err(CorsConfigError::LengthyPrivateNetworkAccessName);
+                        }
+
+                        // The access name needs to make the EMCAscript ReGex: `/^[a-z0-9_-.]+$/.`
+                        if name
+                            .chars()
+                            .any(|c| !matches!(c, 'a'..='z' | '0'..='9' | '_' | '-' | '.'))
+                        {
+                            return Err(CorsConfigError::InvalidPrivateNetworkAccessName);
+                        }
+                    }
+
+                    // The access ID needs to follow pattern: XX:XX:XX:XX:XX:XX` (where "X" is a
+                    // hexdigit). This is 17 characters long, seperated by colons, with each
+                    // substring being only 2 characters long
+                    if let Some(id) = &pna.access_id
+                        && (id.len() != 17
+                            || id
+                                .split(':')
+                                .any(|s| s.len() != 2 || s.chars().any(|c| !c.is_ascii_hexdigit())))
+                    {
+                        return Err(CorsConfigError::InvalidPrivateNetworkAccessId);
                     }
                 }
             }
         }
         Ok(())
+    }
+}
+
+mod arc_regex {
+    use std::sync::Arc;
+
+    use regex::Regex;
+    use serde::Deserializer;
+    use serde::Serializer;
+
+    pub(super) fn serialize<S: Serializer>(
+        values: &Arc<[Regex]>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serde_regex::serialize(&values.to_vec(), serializer)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Arc<[Regex]>, D::Error> {
+        serde_regex::deserialize::<Vec<Regex>, D>(deserializer).map(Arc::from)
     }
 }
 
@@ -851,7 +965,7 @@ policies:
         assert!(policies[0].methods.is_none());
 
         // Verify that the global methods are set correctly
-        assert_eq!(cors.methods, vec!["POST"]);
+        assert_eq!(cors.methods, Arc::from(["POST".into()]));
     }
 
     // Test that policy with Some([]) methods overrides global defaults
@@ -872,10 +986,10 @@ policies:
 
         // Verify that the policy has Some([]) methods (overrides global)
         let policies = cors.policies.unwrap();
-        assert_eq!(policies[0].methods, Some(vec![]));
+        assert_eq!(policies[0].methods, Some(Arc::from([])));
 
         // Verify that the global methods are set correctly
-        assert_eq!(cors.methods, vec!["POST", "PUT"]);
+        assert_eq!(cors.methods, Arc::from(["POST".into(), "PUT".into()]));
     }
 
     // Test that policy with Some([value]) methods uses those specific values
@@ -898,11 +1012,11 @@ policies:
         let policies = cors.policies.unwrap();
         assert_eq!(
             policies[0].methods,
-            Some(vec!["GET".into(), "DELETE".into()])
+            Some(Arc::from(["GET".into(), "DELETE".into()]))
         );
 
         // Verify that the global methods are set correctly
-        assert_eq!(cors.methods, vec!["POST"]);
+        assert_eq!(cors.methods, Arc::from(["POST".into()]));
     }
 
     // Tests based on CORS specification table for credentials mode and Access-Control-Allow-Origin combinations
@@ -930,9 +1044,10 @@ policies:
         let result = cors.ensure_usable_cors_rules();
         // This should fail in our implementation because we enforce the stricter rule
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains(
-            "Cannot combine `Access-Control-Allow-Credentials: true` with `allow_any_origin: true`"
-        ));
+        assert_eq!(
+            result.unwrap_err(),
+            CorsConfigError::AllowCredentialsWithAnyOrigin
+        );
     }
 
     // Test: credentials "omit" + Access-Control-Allow-Origin "https://rabbit.invalid/" + Access-Control-Allow-Credentials omitted = ❌
@@ -948,11 +1063,7 @@ policies:
             .build();
         let result = cors.ensure_usable_cors_rules();
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .contains("origins cannot have trailing slashes")
-        );
+        assert_eq!(result.unwrap_err(), CorsConfigError::TrailingSlashInOrigin);
     }
 
     // Test: credentials "omit" + Access-Control-Allow-Origin "https://rabbit.invalid" + Access-Control-Allow-Credentials omitted = ✅
@@ -1022,7 +1133,10 @@ policies:
 
         let result = cors.ensure_usable_cors_rules();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Headers: *` in policy"));
+        assert_eq!(
+            result.unwrap_err(),
+            CorsConfigError::AllowCredentialsWithAllowAnyHeaders
+        );
     }
 
     // Test policy-level credentials disabled should allow wildcards even with global credentials enabled
@@ -1068,11 +1182,7 @@ policies:
             .build();
         let result = cors.ensure_usable_cors_rules();
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .contains("origins cannot have trailing slashes")
-        );
+        assert_eq!(result.unwrap_err(), CorsConfigError::TrailingSlashInOrigin);
     }
 
     // Test edge case: empty string origin
@@ -1106,6 +1216,153 @@ policies:
         let result = cors.ensure_usable_cors_rules();
         assert!(result.is_err());
         // Should fail on the first wildcard check (global allow_headers)
-        assert!(result.unwrap_err().contains("Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Headers: *`"));
+        assert_eq!(
+            result.unwrap_err(),
+            CorsConfigError::AllowCredentialsWithAllowAnyHeaders
+        );
+    }
+
+    #[test]
+    fn test_empty_pna_access_name_cors_configuration() {
+        let cors = Cors::builder()
+            .policies(vec![
+                Policy::builder()
+                    .private_network_access(
+                        PrivateNetworkAccessPolicy::builder()
+                            .access_name(String::from(""))
+                            .build(),
+                    )
+                    .build(),
+            ])
+            .build();
+        let layer = cors.into_layer();
+        assert!(layer.is_err());
+
+        assert_eq!(
+            layer.unwrap_err(),
+            String::from(
+                "Invalid CORS configuration: `Private-Network-Access-Name` header value must not be empty."
+            )
+        );
+    }
+
+    #[test]
+    fn test_bad_pna_access_name_cors_configuration() {
+        let cors = Cors::builder()
+            .policies(vec![
+                Policy::builder()
+                    .private_network_access(
+                        PrivateNetworkAccessPolicy::builder()
+                            .access_name(String::from("Bad name"))
+                            .build(),
+                    )
+                    .build(),
+            ])
+            .build();
+        let layer = cors.into_layer();
+        assert!(layer.is_err());
+
+        assert_eq!(
+            layer.unwrap_err(),
+            String::from(
+                "Invalid CORS configuration: `Private-Network-Access-Name` header value can only contain the characters a-z0-9_-."
+            )
+        );
+    }
+
+    #[test]
+    fn test_long_pna_access_name_cors_configuration() {
+        let cors = Cors::builder()
+            .policies(vec![
+                Policy::builder()
+                    .private_network_access(
+                        PrivateNetworkAccessPolicy::builder()
+                            .access_name("long_name".repeat(28))
+                            .build(),
+                    )
+                    .build(),
+            ])
+            .build();
+        let layer = cors.into_layer();
+        assert!(layer.is_err());
+
+        assert_eq!(
+            layer.unwrap_err(),
+            String::from(
+                "Invalid CORS configuration: `Private-Network-Access-Name` header value must be no longer than 248 characters."
+            )
+        );
+    }
+
+    #[test]
+    fn test_short_pna_access_id_cors_configuration() {
+        let cors = Cors::builder()
+            .policies(vec![
+                Policy::builder()
+                    .private_network_access(
+                        PrivateNetworkAccessPolicy::builder()
+                            .access_id(String::from("01:23:45:56:78"))
+                            .build(),
+                    )
+                    .build(),
+            ])
+            .build();
+        let layer = cors.into_layer();
+        assert!(layer.is_err());
+
+        assert_eq!(
+            layer.unwrap_err(),
+            String::from(
+                "Invalid CORS configuration: `Private-Network-Access-ID` header value must be a 48-bit value presented as 6 hexadecimal bytes separated by colons"
+            )
+        );
+    }
+
+    #[test]
+    fn test_bad_pna_access_id_cors_configuration() {
+        let cors = Cors::builder()
+            .policies(vec![
+                Policy::builder()
+                    .private_network_access(
+                        PrivateNetworkAccessPolicy::builder()
+                            .access_id(String::from("0:1:2:3:4:5:5:6:7"))
+                            .build(),
+                    )
+                    .build(),
+            ])
+            .build();
+        let layer = cors.into_layer();
+        assert!(layer.is_err());
+
+        assert_eq!(
+            layer.unwrap_err(),
+            String::from(
+                "Invalid CORS configuration: `Private-Network-Access-ID` header value must be a 48-bit value presented as 6 hexadecimal bytes separated by colons"
+            )
+        );
+    }
+
+    #[test]
+    fn test_non_hex_pna_access_id_cors_configuration() {
+        let cors = Cors::builder()
+            .policies(vec![
+                Policy::builder()
+                    .private_network_access(
+                        PrivateNetworkAccessPolicy::builder()
+                            .access_id(String::from("O1:23:45:56:78:9A"))
+                            .build(),
+                    )
+                    .build(),
+            ])
+            .build();
+        let layer = cors.into_layer();
+        assert!(layer.is_err());
+
+        assert_eq!(
+            layer.unwrap_err(),
+            String::from(
+                "Invalid CORS configuration: `Private-Network-Access-ID` header value must be a 48-bit value presented as 6 hexadecimal bytes separated by colons"
+            )
+        );
     }
 }
