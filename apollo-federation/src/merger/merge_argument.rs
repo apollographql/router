@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fmt::Display;
 
 use apollo_compiler::Name;
@@ -79,6 +80,7 @@ impl Merger {
         <T as HasArguments>::ArgumentPosition: Display,
     {
         let mut arg_types: IndexMap<Name, Node<Type>> = Default::default();
+        let mut removed_args = HashSet::new();
         for (idx, source) in sources.iter() {
             let Some(pos) = source else {
                 continue;
@@ -165,6 +167,7 @@ impl Merger {
                 // Note: we remove the element after the hint/error because we access it in
                 // the hint message generation.
                 dest.remove_argument(&mut self.merged, arg_name)?;
+                removed_args.insert(arg_name.clone());
                 continue;
             }
 
@@ -234,10 +237,14 @@ impl Merger {
                 // Note that we remove the element after the hint/error because we
                 // access it in the hint message generation.
                 dest.remove_argument(&mut self.merged, arg_name)?;
+                removed_args.insert(arg_name.clone());
             }
         }
 
-        Ok(arg_types.into_keys().collect())
+        Ok(arg_types
+            .into_keys()
+            .filter(|n| !removed_args.contains(n))
+            .collect())
     }
 
     pub(in crate::merger) fn merge_argument<T>(

@@ -35,6 +35,8 @@ pub(super) struct SupergraphRequestConf {
     pub(super) sdl: bool,
     /// Send the method
     pub(super) method: bool,
+    /// The coprocessor URL for this stage (overrides the global URL if specified)
+    pub(super) url: Option<String>,
 }
 
 /// What information is passed to a router request/response stage
@@ -53,6 +55,8 @@ pub(super) struct SupergraphResponseConf {
     pub(super) sdl: bool,
     /// Send the HTTP status
     pub(super) status_code: bool,
+    /// The coprocessor URL for this stage (overrides the global URL if specified)
+    pub(super) url: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
@@ -69,7 +73,7 @@ impl SupergraphStage {
         &self,
         http_client: C,
         service: supergraph::BoxService,
-        coprocessor_url: String,
+        default_url: String,
         sdl: Arc<String>,
         response_validation: bool,
     ) -> supergraph::BoxService
@@ -86,7 +90,7 @@ impl SupergraphStage {
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
-            let coprocessor_url = coprocessor_url.clone();
+            let coprocessor_url = request_config.url.clone().unwrap_or(default_url.clone());
             let http_client = http_client.clone();
             let sdl = sdl.clone();
 
@@ -117,6 +121,7 @@ impl SupergraphStage {
 
         let response_layer = (self.response != Default::default()).then_some({
             let response_config = self.response.clone();
+            let coprocessor_url = response_config.url.clone().unwrap_or(default_url);
 
             MapFutureLayer::new(move |fut| {
                 let coprocessor_url = coprocessor_url.clone();
@@ -906,6 +911,7 @@ mod tests {
                 body: true,
                 sdl: false,
                 method: false,
+                url: None,
             },
             response: Default::default(),
         };
@@ -1048,6 +1054,7 @@ mod tests {
                 body: true,
                 sdl: false,
                 method: false,
+                url: None,
             },
             response: Default::default(),
         };
@@ -1185,6 +1192,7 @@ mod tests {
                 body: true,
                 sdl: true,
                 status_code: false,
+                url: None,
             },
             request: Default::default(),
         };
@@ -1321,6 +1329,7 @@ mod tests {
                 body: true,
                 sdl: true,
                 status_code: false,
+                url: None,
             },
             request: Default::default(),
         };
@@ -1438,6 +1447,7 @@ mod tests {
                 body: true,
                 sdl: true,
                 status_code: false,
+                url: None,
             },
             request: Default::default(),
         };
@@ -1552,6 +1562,7 @@ mod tests {
                 body: true,
                 sdl: true,
                 status_code: false,
+                url: None,
             },
         }
     }
@@ -1612,6 +1623,7 @@ mod tests {
                 body: true,
                 sdl: true,
                 method: true,
+                url: None,
             },
             response: Default::default(),
         }

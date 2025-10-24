@@ -328,6 +328,8 @@ pub(super) struct RouterRequestConf {
     pub(super) path: bool,
     /// Send the method
     pub(super) method: bool,
+    /// The coprocessor URL for this stage (overrides the global URL if specified)
+    pub(super) url: Option<String>,
 }
 
 /// What information is passed to a router request/response stage
@@ -346,6 +348,8 @@ pub(super) struct RouterResponseConf {
     pub(super) sdl: bool,
     /// Send the HTTP status
     pub(super) status_code: bool,
+    /// The coprocessor URL for this stage (overrides the global URL if specified)
+    pub(super) url: Option<String>,
 }
 /// What information is passed to a subgraph request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
@@ -367,6 +371,8 @@ pub(super) struct SubgraphRequestConf {
     pub(super) service_name: bool,
     /// Send the subgraph request id
     pub(super) subgraph_request_id: bool,
+    /// The coprocessor URL for this stage (overrides the global URL if specified)
+    pub(super) url: Option<String>,
 }
 
 /// What information is passed to a subgraph request/response stage
@@ -387,6 +393,8 @@ pub(super) struct SubgraphResponseConf {
     pub(super) status_code: bool,
     /// Send the subgraph request id
     pub(super) subgraph_request_id: bool,
+    /// The coprocessor URL for this stage (overrides the global URL if specified)
+    pub(super) url: Option<String>,
 }
 
 /// Configures the externalization plugin
@@ -394,7 +402,7 @@ pub(super) struct SubgraphResponseConf {
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "CoprocessorConfig")]
 struct Conf {
-    /// The url you'd like to offload processing to
+    /// The url you'd like to offload processing to (can be overridden per-stage)
     url: String,
     client: Option<Client>,
     /// The timeout for external requests
@@ -521,7 +529,7 @@ impl RouterStage {
         &self,
         http_client: C,
         service: router::BoxService,
-        coprocessor_url: String,
+        default_url: String,
         sdl: Arc<String>,
         response_validation: bool,
     ) -> router::BoxService
@@ -538,7 +546,7 @@ impl RouterStage {
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
-            let coprocessor_url = coprocessor_url.clone();
+            let coprocessor_url = request_config.url.clone().unwrap_or(default_url.clone());
             let http_client = http_client.clone();
             let sdl = sdl.clone();
 
@@ -571,6 +579,7 @@ impl RouterStage {
 
         let response_layer = (self.response != Default::default()).then_some({
             let response_config = self.response.clone();
+            let coprocessor_url = response_config.url.clone().unwrap_or(default_url);
             MapFutureLayer::new(move |fut| {
                 let sdl = sdl.clone();
                 let coprocessor_url = coprocessor_url.clone();
@@ -642,7 +651,7 @@ impl SubgraphStage {
         &self,
         http_client: C,
         service: subgraph::BoxService,
-        coprocessor_url: String,
+        default_url: String,
         service_name: String,
         response_validation: bool,
     ) -> subgraph::BoxService
@@ -660,7 +669,7 @@ impl SubgraphStage {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
             let http_client = http_client.clone();
-            let coprocessor_url = coprocessor_url.clone();
+            let coprocessor_url = request_config.url.clone().unwrap_or(default_url.clone());
             let service_name = service_name.clone();
             AsyncCheckpointLayer::new(move |request: subgraph::Request| {
                 let http_client = http_client.clone();
@@ -689,6 +698,7 @@ impl SubgraphStage {
 
         let response_layer = (self.response != Default::default()).then_some({
             let response_config = self.response.clone();
+            let coprocessor_url = response_config.url.clone().unwrap_or(default_url);
 
             MapFutureLayer::new(move |fut| {
                 let http_client = http_client.clone();

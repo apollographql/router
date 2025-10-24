@@ -17,6 +17,7 @@ use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
 use crate::plugins::telemetry::config_new::instruments::CustomInstruments;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
 use crate::plugins::telemetry::config_new::router::attributes::RouterAttributes;
+use crate::plugins::telemetry::config_new::router_overhead::RouterOverheadAttributes;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::router;
 
@@ -41,6 +42,11 @@ pub(crate) struct RouterInstrumentsConfig {
     #[serde(rename = "http.server.response.body.size")]
     pub(crate) http_server_response_body_size:
         DefaultedStandardInstrument<Extendable<RouterAttributes, RouterSelector>>,
+
+    /// Histogram of router overhead (time not spent in subgraph requests)
+    #[serde(rename = "apollo.router.overhead")]
+    pub(crate) router_overhead:
+        DefaultedStandardInstrument<Extendable<RouterOverheadAttributes, RouterSelector>>,
 }
 
 impl DefaultForLevel for RouterInstrumentsConfig {
@@ -57,6 +63,8 @@ impl DefaultForLevel for RouterInstrumentsConfig {
             .defaults_for_levels(requirement_level, kind);
         self.http_server_response_body_size
             .defaults_for_levels(requirement_level, kind);
+        self.router_overhead
+            .defaults_for_levels(requirement_level, kind);
     }
 }
 
@@ -70,6 +78,15 @@ pub(crate) struct RouterInstruments {
     >,
     pub(crate) http_server_response_body_size: Option<
         CustomHistogram<router::Request, router::Response, (), RouterAttributes, RouterSelector>,
+    >,
+    pub(crate) router_overhead: Option<
+        CustomHistogram<
+            router::Request,
+            router::Response,
+            (),
+            RouterOverheadAttributes,
+            RouterSelector,
+        >,
     >,
     pub(crate) custom: RouterCustomInstruments,
 }
@@ -92,6 +109,9 @@ impl Instrumented for RouterInstruments {
         if let Some(http_server_response_body_size) = &self.http_server_response_body_size {
             http_server_response_body_size.on_request(request);
         }
+        if let Some(router_overhead) = &self.router_overhead {
+            router_overhead.on_request(request);
+        }
         self.custom.on_request(request);
     }
 
@@ -108,6 +128,9 @@ impl Instrumented for RouterInstruments {
         if let Some(http_server_response_body_size) = &self.http_server_response_body_size {
             http_server_response_body_size.on_response(response);
         }
+        if let Some(router_overhead) = &self.router_overhead {
+            router_overhead.on_response(response);
+        }
         self.custom.on_response(response);
     }
 
@@ -123,6 +146,9 @@ impl Instrumented for RouterInstruments {
         }
         if let Some(http_server_response_body_size) = &self.http_server_response_body_size {
             http_server_response_body_size.on_error(error, ctx);
+        }
+        if let Some(router_overhead) = &self.router_overhead {
+            router_overhead.on_error(error, ctx);
         }
         self.custom.on_error(error, ctx);
     }

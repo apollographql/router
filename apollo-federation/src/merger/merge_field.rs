@@ -258,7 +258,7 @@ impl Merger {
                 message: format!(
                     "Field \"{}\" is marked @external on all the subgraphs in which it is listed ({}).",
                     dest,
-                    defining_subgraphs.join(", ")
+                    human_readable_subgraph_names(defining_subgraphs.iter())
                 ),
             };
 
@@ -419,8 +419,8 @@ impl Merger {
 
                 let error = CompositionError::MergedDirectiveApplicationOnExternal {
                     message: format!(
-                        "[{}] Cannot apply merged directive @{} to external field \"{field_pos}\"",
-                        self.names[source_idx], directive.name,
+                        "[{}] Cannot apply merged directive {} to external field \"{field_pos}\"",
+                        self.names[source_idx], directive,
                     ),
                 };
 
@@ -575,7 +575,12 @@ impl Merger {
                 |d| d.try_get(self.merged.schema())
                         .and_then(|f| Some(format!("default value {}", f.default_value.as_ref()?))), 
                 |s, idx| s.try_get(self.subgraphs[idx].schema().schema())
-                        .and_then(|f| Some(format!("default value {}", f.default_value.as_ref()?))),
+                        .map(|f| if let Some(def) = &f.default_value {
+                            format!("default value {}", def)
+                        } else {
+                            "no default value".to_string()
+                        })
+                ,
             );
         }
 

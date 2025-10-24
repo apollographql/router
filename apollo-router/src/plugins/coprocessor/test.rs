@@ -61,6 +61,114 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fails_without_global_url() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "router": {
+                    "request": {
+                        "url": "http://127.0.0.1:8082",
+                        "body": true
+                    }
+                }
+            }
+        });
+        // Should fail schema validation because url is a required field
+        assert!(
+            crate::TestHarness::builder()
+                .configuration_json(config)
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn succeeds_with_stage_specific_url() {
+        let config = serde_json::json!({
+            "coprocessor": {
+                "url": "http://127.0.0.1:8081",
+                "router": {
+                    "request": {
+                        "url": "http://127.0.0.1:8082",
+                        "body": true
+                    }
+                }
+            }
+        });
+        // Should succeed because router.request has its own URL that overrides the global URL
+        let _test_harness = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await
+            .unwrap();
+
+        // Now verify that the stage-specific URL is actually used
+        let router_stage = RouterStage {
+            request: RouterRequestConf {
+                condition: Default::default(),
+                headers: true,
+                context: ContextConf::NewContextConf(NewContextConf::All),
+                body: true,
+                sdl: false,
+                path: false,
+                method: false,
+                url: Some("http://127.0.0.1:8082".to_string()), // stage-specific URL
+            },
+            response: Default::default(),
+        };
+
+        let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
+            // Return a simple successful response
+            Ok(supergraph::Response::builder()
+                .data(json!({ "test": 1234_u32 }))
+                .context(req.context)
+                .build()
+                .unwrap())
+        })
+        .await;
+
+        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+            Box::pin(async move {
+                // Verify the request was sent to the stage-specific URL (8082), not the global URL (8081)
+                let uri = req.uri().to_string();
+                assert!(
+                    uri.contains("127.0.0.1:8082"),
+                    "Expected request to be sent to stage-specific URL port 8082, but got: {}",
+                    uri
+                );
+
+                // Return a valid coprocessor response
+                let input = json!({
+                    "version": 1,
+                    "stage": "RouterRequest",
+                    "control": "continue",
+                    "body": "{\"query\": \"{ __typename }\"}",
+                    "context": {
+                        "entries": {}
+                    }
+                });
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        serde_json::to_string(&input).unwrap(),
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = router_stage.as_service(
+            mock_http_client,
+            mock_router_service.boxed(),
+            "http://127.0.0.1:8081".to_string(), // global URL - should NOT be used
+            Arc::new("".to_string()),
+            true,
+        );
+
+        let request = supergraph::Request::canned_builder().build().unwrap();
+
+        // This will call the mock_http_client, which verifies the correct URL is used
+        service.oneshot(request.try_into().unwrap()).await.unwrap();
+    }
+
+    #[tokio::test]
     async fn unknown_fields_are_denied() {
         let config = serde_json::json!({
             "coprocessor": {
@@ -89,6 +197,7 @@ mod tests {
                 sdl: true,
                 path: false,
                 method: false,
+                url: None,
             },
             response: Default::default(),
         };
@@ -152,6 +261,7 @@ mod tests {
                 sdl: true,
                 path: false,
                 method: false,
+                url: None,
             },
             response: Default::default(),
         };
@@ -215,6 +325,7 @@ mod tests {
                 sdl: true,
                 path: false,
                 method: false,
+                url: None,
             },
             response: Default::default(),
         };
@@ -1662,6 +1773,7 @@ mod tests {
                 body: true,
                 status_code: false,
                 sdl: false,
+                url: None,
             },
         };
 
@@ -1727,6 +1839,7 @@ mod tests {
                 body: true,
                 status_code: false,
                 sdl: false,
+                url: None,
             },
         };
 
@@ -1832,6 +1945,7 @@ mod tests {
                 body: true,
                 status_code: false,
                 sdl: false,
+                url: None,
             },
         };
 
@@ -1934,6 +2048,7 @@ mod tests {
                 sdl: true,
                 path: true,
                 method: true,
+                url: None,
             },
             response: Default::default(),
         };
@@ -2059,6 +2174,7 @@ mod tests {
                 sdl: true,
                 path: true,
                 method: true,
+                url: None,
             },
             response: Default::default(),
         };
@@ -2227,6 +2343,7 @@ mod tests {
                 sdl: true,
                 path: true,
                 method: true,
+                url: None,
             },
             response: Default::default(),
         };
@@ -2337,6 +2454,7 @@ mod tests {
                 sdl: true,
                 path: true,
                 method: true,
+                url: None,
             },
             response: Default::default(),
         };
@@ -2470,6 +2588,7 @@ mod tests {
                 sdl: true,
                 path: true,
                 method: true,
+                url: None,
             },
             response: Default::default(),
         };
@@ -2565,6 +2684,7 @@ mod tests {
                 sdl: true,
                 path: true,
                 method: true,
+                url: None,
             },
             response: Default::default(),
         };
@@ -2650,6 +2770,7 @@ mod tests {
                 body: true,
                 sdl: true,
                 status_code: false,
+                url: None,
             },
             request: Default::default(),
         };
@@ -3181,6 +3302,7 @@ mod tests {
                 body: true,
                 sdl: true,
                 status_code: false,
+                url: None,
             },
         }
     }
@@ -3429,6 +3551,7 @@ mod tests {
                 service_name: false,
                 status_code: false,
                 subgraph_request_id: false,
+                url: None,
             },
         }
     }
@@ -3463,6 +3586,7 @@ mod tests {
                 method: true,
                 service_name: true,
                 subgraph_request_id: true,
+                url: None,
             },
             response: Default::default(),
         }

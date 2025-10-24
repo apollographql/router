@@ -91,12 +91,18 @@ fn cors_defaults() {
     let cors = Cors::builder().build();
     let policies = cors.policies.unwrap();
     assert_eq!(policies.len(), 1);
-    assert_eq!(policies[0].origins, ["https://studio.apollographql.com"]);
+    assert_eq!(
+        policies[0].origins,
+        Arc::from(["https://studio.apollographql.com".into()])
+    );
     assert!(
         !cors.allow_any_origin,
         "Allow any origin should be disabled by default"
     );
-    assert_eq!(cors.methods, ["GET", "POST", "OPTIONS"]);
+    assert_eq!(
+        cors.methods,
+        Arc::from(["GET".into(), "POST".into(), "OPTIONS".into()])
+    );
     assert!(cors.max_age.is_none());
 }
 
@@ -117,11 +123,14 @@ fn cors_single_origin_config() {
     let policies = cors.policies.unwrap();
     assert_eq!(policies.len(), 1);
     let oc = &policies[0];
-    assert_eq!(oc.origins, ["https://trusted.com"]);
+    assert_eq!(oc.origins, Arc::from(["https://trusted.com".into()]));
     assert!(oc.allow_credentials.unwrap());
-    assert_eq!(oc.allow_headers, ["content-type", "authorization"]);
-    assert_eq!(oc.expose_headers, ["x-custom-header"]);
-    assert_eq!(oc.methods, Some(vec!["GET".into(), "POST".into()]));
+    assert_eq!(
+        oc.allow_headers,
+        Arc::from(["content-type".into(), "authorization".into()])
+    );
+    assert_eq!(oc.expose_headers, Arc::from(["x-custom-header".into()]));
+    assert_eq!(oc.methods, Some(Arc::from(["GET".into(), "POST".into()])));
 }
 
 #[test]
@@ -330,7 +339,7 @@ cors:
         .expect_err("should have resulted in an error");
     assert_eq!(
         error,
-        "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Headers: *`"
+        "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Headers: *` in policy"
     );
 }
 
@@ -352,7 +361,7 @@ cors:
         .expect_err("should have resulted in an error");
     assert_eq!(
         error,
-        "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Methods: *`"
+        "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Methods: *` in policy"
     );
 }
 
@@ -457,11 +466,17 @@ fn validate_project_config_files() {
                     .mocked_env_var("JAEGER_HOST", "http://example.com")
                     .mocked_env_var("JAEGER_USERNAME", "username")
                     .mocked_env_var("JAEGER_PASSWORD", "pass")
+                    .mocked_env_var("REDIS_PASSWORD", "pass")
                     .mocked_env_var("ZIPKIN_HOST", "http://example.com")
                     .mocked_env_var("TEST_CONFIG_ENDPOINT", "http://example.com")
                     .mocked_env_var("TEST_CONFIG_COLLECTOR_ENDPOINT", "http://example.com")
                     .mocked_env_var("PARSER_MAX_RECURSION", "500")
                     .mocked_env_var("AWS_ROLE_ARN", "arn:aws:iam::12345678:role/SomeRole")
+                    .mocked_env_var("INVALIDATION_SHARED_KEY", "invalidation")
+                    .mocked_env_var(
+                        "INVALIDATION_SHARED_KEY_PRODUCTS",
+                        "invalidation-for-products",
+                    )
                     .build()
                     .unwrap();
 

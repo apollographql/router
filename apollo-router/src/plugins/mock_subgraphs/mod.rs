@@ -6,7 +6,11 @@ use std::sync::LazyLock;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::OperationType;
-use apollo_compiler::request::coerce_variable_values;
+use apollo_compiler::resolvers::Execution;
+use apollo_compiler::resolvers::FieldError;
+use apollo_compiler::resolvers::ObjectValue;
+use apollo_compiler::resolvers::ResolveInfo;
+use apollo_compiler::resolvers::ResolvedValue;
 use apollo_compiler::response::GraphQLError;
 use apollo_compiler::response::JsonMap;
 use apollo_compiler::response::JsonValue;
@@ -14,15 +18,12 @@ use apollo_compiler::validation::Valid;
 use tower::BoxError;
 use tower::ServiceExt;
 
-use self::execution::resolver::ResolvedValue;
 use crate::graphql;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::response_cache::plugin::GRAPHQL_RESPONSE_EXTENSION_ENTITY_CACHE_TAGS;
 use crate::plugins::response_cache::plugin::GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS;
 use crate::services::subgraph;
-
-pub(crate) mod execution;
 
 register_private_plugin!("apollo", "experimental_mock_subgraphs", MockSubgraphsPlugin);
 
@@ -173,61 +174,47 @@ fn subgraph_call(
         .operations
         .get(request.operation_name.as_deref())
         .map_err(|e| vec![e.to_graphql_error(&doc.sources)])?;
-    let variable_values = coerce_variable_values(subgraph_schema, operation, &request.variables)
-        .map_err(|e| vec![e.to_graphql_error(&doc.sources)])?;
-    let object_type_name = operation.object_type();
+
     let plain_error = |message: &str| vec![GraphQLError::new(message, None, &doc.sources)];
-    let root_operation_object_type_def = subgraph_schema
-        .get_object(object_type_name)
-        .ok_or_else(|| plain_error("undefined root operation object type"))?;
-    let (mode, root_mocks) = match operation.operation_type {
-        OperationType::Query => (execution::engine::ExecutionMode::Normal, &config.query),
-        OperationType::Mutation => (
-            execution::engine::ExecutionMode::Sequential,
-            config
-                .mutation
-                .as_ref()
-                .ok_or_else(|| plain_error("mutation is not supported"))?,
-        ),
+    let root_mocks = match operation.operation_type {
+        OperationType::Query => &config.query,
+        OperationType::Mutation => config
+            .mutation
+            .as_ref()
+            .ok_or_else(|| plain_error("mutation is not supported"))?,
         OperationType::Subscription => return Err(plain_error("subscription not supported")),
     };
+    let response_extensions = RefCell::new(JsonMap::new());
     let initial_value = RootResolver {
         root_mocks,
         entities: &config.entities,
+        response_extensions: &response_extensions,
     };
-    let mut errors = Vec::new();
-    let response_extensions = RefCell::new(JsonMap::new());
-    let path = None;
-    let data = match execution::engine::execute_selection_set(
-        subgraph_schema,
-        &doc,
-        &variable_values,
-        &mut errors,
-        &response_extensions,
-        path,
-        mode,
-        root_operation_object_type_def,
-        &initial_value,
-        &operation.selection_set.selections,
-    ) {
-        Ok(map) => JsonValue::Object(map),
-        Err(execution::engine::PropagateNull) => JsonValue::Null,
-    };
-    Ok(graphql::Response::builder()
-        .data(data)
-        .errors(errors.into_iter().map(Into::into).collect())
-        .extensions(response_extensions.into_inner())
-        .build())
+    let result = Execution::new(subgraph_schema, &doc)
+        .operation(operation)
+        .raw_variable_values(&request.variables)
+        .execute_sync(&initial_value);
+    match result {
+        Ok(response) => Ok(graphql::Response::builder()
+            .data(Some(JsonValue::from(response.data)))
+            .errors(response.errors.into_iter().map(Into::into).collect())
+            .extensions(response_extensions.into_inner())
+            .build()),
+        Err(request_error) => Err(vec![request_error.to_graphql_error(&doc.sources)]),
+    }
 }
 
 struct RootResolver<'a> {
     root_mocks: &'a JsonMap,
     entities: &'a [JsonMap],
+    response_extensions: &'a RefCell<JsonMap>,
 }
 
 struct MockResolver<'a> {
+    type_name: &'a str,
     in_entity: bool,
     mocks: &'a JsonMap,
+    response_extensions: &'a RefCell<JsonMap>,
 }
 
 impl<'a> RootResolver<'a> {
@@ -240,40 +227,43 @@ impl<'a> RootResolver<'a> {
     }
 }
 
-impl execution::resolver::Resolver for RootResolver<'_> {
+impl ObjectValue for RootResolver<'_> {
     fn type_name(&self) -> &str {
         unreachable!()
     }
 
     fn resolve_field<'a>(
         &'a self,
-        response_extensions: &'a RefCell<JsonMap>,
-        field_name: &'a str,
-        arguments: &'a JsonMap,
-    ) -> Result<ResolvedValue<'a>, execution::resolver::ResolverError> {
-        if field_name != "_entities" {
+        info: &'a ResolveInfo<'a>,
+    ) -> Result<ResolvedValue<'a>, FieldError> {
+        if info.field_name() != "_entities" {
             let in_entity = false;
             return resolve_normal_field(
-                response_extensions,
+                self.response_extensions,
                 in_entity,
                 self.root_mocks,
-                field_name,
-                arguments,
+                info,
             );
         }
-        let entities = arguments["representations"]
+        let entities = info.arguments()["representations"]
             .as_array()
-            .ok_or("expected array `representations`")?
+            .ok_or(FieldError {
+                message: "expected array `representations`".into(),
+            })?
             .iter()
             .map(move |representation| {
-                let representation = representation
-                    .as_object()
-                    .ok_or("expected object `representations[n]`")?;
-                let entity = self.find_entities(representation).ok_or_else(|| {
-                    format!("no mocked entity found for representation {representation:?}")
+                let representation = representation.as_object().ok_or(FieldError {
+                    message: "expected object `representations[n]`".into(),
                 })?;
+                let entity = self
+                    .find_entities(representation)
+                    .ok_or_else(|| FieldError {
+                        message: format!(
+                            "no mocked entity found for representation {representation:?}"
+                        ),
+                    })?;
                 if let Some(keys) = entity.get("__cacheTags") {
-                    response_extensions
+                    self.response_extensions
                         .borrow_mut()
                         .entry(GRAPHQL_RESPONSE_EXTENSION_ENTITY_CACHE_TAGS)
                         .or_insert_with(|| JsonValue::Array(Vec::new()))
@@ -282,58 +272,58 @@ impl execution::resolver::Resolver for RootResolver<'_> {
                         .push(keys.clone());
                 }
                 Ok(ResolvedValue::object(MockResolver {
+                    type_name: mock_type_name(entity)
+                        .expect("missing `__typename` mock for entity"),
                     in_entity: true,
                     mocks: entity,
+                    response_extensions: self.response_extensions,
                 }))
             });
-        Ok(ResolvedValue::list(entities))
+        Ok(ResolvedValue::List(Box::new(entities)))
     }
 }
 
-impl execution::resolver::Resolver for MockResolver<'_> {
+impl ObjectValue for MockResolver<'_> {
     fn type_name(&self) -> &str {
-        self.mocks
-            .get("__typename")
-            .expect("missing `__typename` mock for interface or union type")
-            .as_str()
-            .expect("`__typename` is not a string")
+        self.type_name
     }
 
     fn resolve_field<'a>(
         &'a self,
-        response_extensions: &'a RefCell<JsonMap>,
-        field_name: &'a str,
-        arguments: &'a JsonMap,
-    ) -> Result<ResolvedValue<'a>, execution::resolver::ResolverError> {
-        resolve_normal_field(
-            response_extensions,
-            self.in_entity,
-            self.mocks,
-            field_name,
-            arguments,
-        )
+        info: &'a ResolveInfo<'a>,
+    ) -> Result<ResolvedValue<'a>, FieldError> {
+        resolve_normal_field(self.response_extensions, self.in_entity, self.mocks, info)
     }
+}
+
+fn mock_type_name(mock: &JsonMap) -> Option<&str> {
+    Some(
+        mock.get("__typename")?
+            .as_str()
+            .expect("`__typename` is not a string"),
+    )
 }
 
 fn resolve_normal_field<'a>(
     response_extensions: &'a RefCell<JsonMap>,
     in_entity: bool,
     mocks: &'a JsonMap,
-    field_name: &'a str,
-    arguments: &'a JsonMap,
-) -> Result<ResolvedValue<'a>, execution::resolver::ResolverError> {
-    let _ignored = arguments; // TODO: find some way to vary response based on arguments?
-    let mock = mocks
-        .get(field_name)
-        .ok_or_else(|| format!("field '{field_name}' not found in mocked data"))?;
-    resolve_value(response_extensions, in_entity, mock)
+    info: &'a ResolveInfo<'a>,
+) -> Result<ResolvedValue<'a>, FieldError> {
+    // TODO: find some way to vary response based on arguments?
+    let field_name = info.field_name();
+    let mock = mocks.get(field_name).ok_or_else(|| FieldError {
+        message: format!("field '{field_name}' not found in mocked data"),
+    })?;
+    resolve_value(response_extensions, in_entity, mock, info)
 }
 
 fn resolve_value<'a>(
     response_extensions: &'a RefCell<JsonMap>,
     in_entity: bool,
     mock: &'a JsonValue,
-) -> Result<ResolvedValue<'a>, String> {
+    info: &'a ResolveInfo<'a>,
+) -> Result<ResolvedValue<'a>, FieldError> {
     match mock {
         JsonValue::Object(map) => {
             if !in_entity && let Some(keys) = map.get("__cacheTags") {
@@ -346,14 +336,17 @@ fn resolve_value<'a>(
                     .extend_from_slice(keys.as_array().unwrap());
             };
             Ok(ResolvedValue::object(MockResolver {
+                type_name: mock_type_name(map)
+                    .unwrap_or_else(|| info.field_definition().ty.inner_named_type()),
                 in_entity,
                 mocks: map,
+                response_extensions,
             }))
         }
         JsonValue::Array(values) => {
-            Ok(ResolvedValue::list(values.iter().map(move |x| {
-                resolve_value(response_extensions, in_entity, x)
-            })))
+            Ok(ResolvedValue::List(Box::new(values.iter().map(move |x| {
+                resolve_value(response_extensions, in_entity, x, info)
+            }))))
         }
         json => Ok(ResolvedValue::leaf(json.clone())),
     }
