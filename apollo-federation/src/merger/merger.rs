@@ -121,6 +121,8 @@ pub(crate) struct CompositionOptions {
     // Add options as needed - for now keeping it minimal
     /// Maximum allowable number of outstanding subgraph paths to validate during satisfiability.
     pub(crate) max_validation_subgraph_paths: Option<usize>,
+    /// Maximum allowable number of in-memory paths (weighted by path size) during satisfiability.
+    pub(crate) max_path_weight: Option<u64>,
 }
 
 #[allow(unused)]

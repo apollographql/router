@@ -23,6 +23,7 @@ use crate::query_graph::condition_resolver::ConditionResolution;
 use crate::query_graph::condition_resolver::ConditionResolverCache;
 use crate::query_graph::graph_path::ExcludedConditions;
 use crate::query_graph::graph_path::ExcludedDestinations;
+use crate::query_graph::graph_path::GraphPathWeightCounter;
 use crate::query_graph::graph_path::operation::OpGraphPathContext;
 use crate::schema::ValidFederationSchema;
 use crate::supergraph::CompositionHint;
@@ -45,6 +46,8 @@ struct TopLevelConditionResolver {
     query_graph: Arc<QueryGraph>,
     /// The cache for top-level condition resolution.
     condition_resolver_cache: ConditionResolverCache,
+    /// Counter to track/limit the number of in-memory paths (weighted by path size).
+    graph_path_weight_counter: Arc<GraphPathWeightCounter>,
 }
 
 /// When we visit a node in the API schema query graph, we keep track of any information about the
@@ -91,6 +94,10 @@ impl ValidationTraversal {
             top_level_condition_resolver: TopLevelConditionResolver {
                 query_graph: federated_query_graph.clone(),
                 condition_resolver_cache: ConditionResolverCache::new(),
+                graph_path_weight_counter: Arc::new(GraphPathWeightCounter {
+                    limit: composition_options.max_path_weight,
+                    ..Default::default()
+                }),
             },
             stack: vec![],
             previous_visits: Default::default(),
@@ -107,6 +114,10 @@ impl ValidationTraversal {
                 api_schema_query_graph.clone(),
                 federated_query_graph.clone(),
                 *kind,
+                validation_traversal
+                    .top_level_condition_resolver
+                    .graph_path_weight_counter
+                    .clone(),
             )?);
         }
         Ok(validation_traversal)
@@ -306,6 +317,7 @@ impl CachingConditionResolver for TopLevelConditionResolver {
             excluded_destinations,
             excluded_conditions,
             extra_conditions,
+            self.graph_path_weight_counter.clone(),
         )
     }
 }

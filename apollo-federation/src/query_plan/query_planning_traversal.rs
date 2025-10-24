@@ -23,6 +23,7 @@ use crate::query_graph::condition_resolver::ConditionResolution;
 use crate::query_graph::condition_resolver::ConditionResolverCache;
 use crate::query_graph::graph_path::ExcludedConditions;
 use crate::query_graph::graph_path::ExcludedDestinations;
+use crate::query_graph::graph_path::GraphPathWeightCounter;
 use crate::query_graph::graph_path::operation::ClosedBranch;
 use crate::query_graph::graph_path::operation::ClosedPath;
 use crate::query_graph::graph_path::operation::OpGraphPath;
@@ -87,6 +88,8 @@ pub(crate) struct QueryPlanningParameters<'a> {
     /// The configuration for the query planner.
     pub(crate) config: QueryPlannerConfig,
     pub(crate) statistics: &'a QueryPlanningStatistics,
+    /// Counter to track/limit the number of in-memory paths (weighted by path size).
+    pub(crate) graph_path_weight_counter: Arc<GraphPathWeightCounter>,
     pub(crate) override_conditions: OverrideConditions,
     pub(crate) check_for_cooperative_cancellation: Option<&'a dyn Fn() -> ControlFlow<()>>,
     pub(crate) disabled_subgraphs: IndexSet<Arc<str>>,
@@ -275,6 +278,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         let initial_path = OpGraphPath::new(
             Arc::clone(&parameters.federated_query_graph),
             parameters.head,
+            parameters.graph_path_weight_counter.clone(),
         )
         .unwrap();
 
@@ -1155,6 +1159,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 .clone(),
             config: self.parameters.config.clone(),
             statistics: self.parameters.statistics,
+            graph_path_weight_counter: self.parameters.graph_path_weight_counter.clone(),
             override_conditions: self.parameters.override_conditions.clone(),
             fetch_id_generator: self.parameters.fetch_id_generator.clone(),
             check_for_cooperative_cancellation: self.parameters.check_for_cooperative_cancellation,

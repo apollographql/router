@@ -433,6 +433,10 @@ impl Configuration {
             debug: QueryPlannerDebugConfig {
                 max_evaluated_plans,
                 paths_limit: self.supergraph.query_planning.experimental_paths_limit,
+                path_weight_limit: self
+                    .supergraph
+                    .query_planning
+                    .experimental_path_weight_limit,
             },
         }
     }
@@ -930,6 +934,19 @@ pub(crate) struct QueryPlanning {
     /// The default value is None, which specifies no limit.
     pub(crate) experimental_paths_limit: Option<u32>,
 
+    /// Before creating query plans, for each path of fields in the query we compute all the
+    /// possible options to traverse that path via the subgraphs. These options themselves consist
+    /// of paths, and these option paths may consume a significant amount of memory for sufficiently
+    /// complex schemas and operations.
+    ///
+    /// This config allows limiting the number of in-memory paths (weighted by path size). If the
+    /// query planner exceeds this limit while planning an operation, planning will abort and the
+    /// operation will fail. For guidance on what value to configure for this option, please use the
+    /// router metric `apollo.router.query_planning.plan.path_weight_high_water_mark`.
+    ///
+    /// The default value is None, which specifies no limit.
+    pub(crate) experimental_path_weight_limit: Option<u64>,
+
     /// If cache warm up is configured, this will allow the router to keep a query plan created with
     /// the old schema, if it determines that the schema update does not affect the corresponding query
     pub(crate) experimental_reuse_query_plans: bool,
@@ -949,6 +966,7 @@ impl QueryPlanning {
         warmed_up_queries: Option<usize>,
         experimental_plans_limit: Option<u32>,
         experimental_paths_limit: Option<u32>,
+        experimental_path_weight_limit: Option<u64>,
         experimental_reuse_query_plans: Option<bool>,
         experimental_cooperative_cancellation: Option<CooperativeCancellation>,
     ) -> Self {
@@ -957,6 +975,7 @@ impl QueryPlanning {
             warmed_up_queries,
             experimental_plans_limit,
             experimental_paths_limit,
+            experimental_path_weight_limit,
             experimental_reuse_query_plans: experimental_reuse_query_plans.unwrap_or_default(),
             experimental_cooperative_cancellation: experimental_cooperative_cancellation
                 .unwrap_or_default(),
