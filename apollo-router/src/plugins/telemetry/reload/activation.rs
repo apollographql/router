@@ -24,10 +24,10 @@
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
+
 use opentelemetry::InstrumentationScope;
 use opentelemetry::propagation::TextMapCompositePropagator;
 use opentelemetry::trace::TracerProvider;
-use opentelemetry_sdk::trace::SdkTracerProvider;
 use parking_lot::Mutex;
 use prometheus::Registry;
 use tokio::task::spawn_blocking;
@@ -192,12 +192,11 @@ impl Activation {
             && let Some(tracer_provider) = self.new_trace_provider.take()
         {
             // Build a new tracer from the provider and hot-swap it into the tracing subscriber
-            let tracer = tracer_provider
-                .tracer_with_scope(
-                    InstrumentationScope::builder(GLOBAL_TRACER_NAME)
-                        .with_version(env!("CARGO_PKG_VERSION"))
-                        .build()
-                );
+            let tracer = tracer_provider.tracer_with_scope(
+                InstrumentationScope::builder(GLOBAL_TRACER_NAME)
+                    .with_version(env!("CARGO_PKG_VERSION"))
+                    .build(),
+            );
             hot_tracer.reload(tracer);
 
             // Install the new provider globally and safely drop the old one in a blocking task

@@ -6,12 +6,12 @@ use opentelemetry_sdk::metrics::PeriodicReader;
 use tonic::metadata::MetadataMap;
 use tower::BoxError;
 
-use crate::plugins::telemetry::otlp::process_endpoint;
-use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::error_handler::NamedMetricsExporter;
 use crate::plugins::telemetry::otlp::Protocol;
+use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::plugins::telemetry::otlp::process_endpoint;
 use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
 use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
 

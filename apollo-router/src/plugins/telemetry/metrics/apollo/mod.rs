@@ -29,7 +29,6 @@ use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::error_handler::NamedMetricsExporter;
-use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::plugins::telemetry::otlp::process_endpoint;

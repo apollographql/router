@@ -22,8 +22,11 @@
 
 use ahash::HashMap;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::metrics::{Instrument, MeterProviderBuilder, Stream, StreamBuilder};
+use opentelemetry_sdk::metrics::Instrument;
+use opentelemetry_sdk::metrics::MeterProviderBuilder;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_sdk::metrics::Stream;
+use opentelemetry_sdk::metrics::StreamBuilder;
 use prometheus::Registry;
 use tower::BoxError;
 
@@ -130,10 +133,11 @@ impl<'a> MetricsBuilder<'a> {
     pub(crate) fn with_view<T>(
         &mut self,
         meter_provider_type: MeterProviderType,
-        view: T
+        view: T,
     ) -> &mut Self
     where
-        T: Fn(&Instrument) -> Option<Stream> + Send + Sync + 'static {
+        T: Fn(&Instrument) -> Option<Stream> + Send + Sync + 'static,
+    {
         let meter_provider = self.meter_provider(meter_provider_type);
         *meter_provider = std::mem::take(meter_provider).with_view(view);
         self

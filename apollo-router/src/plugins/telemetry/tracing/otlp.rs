@@ -10,13 +10,13 @@ use tonic::metadata::MetadataMap;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::Conf;
-use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::error_handler::NamedSpanExporter;
+use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::plugins::telemetry::otlp::process_endpoint;
-use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::reload::tracing::TracingBuilder;
 use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
+use crate::plugins::telemetry::tracing::SpanProcessorExt;
 
 impl TracingConfigurator for super::super::otlp::Config {
     fn config(conf: &Conf) -> &Self {

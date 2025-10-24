@@ -10,7 +10,6 @@ use opentelemetry_sdk::trace::BatchConfigBuilder;
 use opentelemetry_sdk::trace::Span;
 use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::SpanProcessor;
-use opentelemetry_sdk::trace::TracerProviderBuilder;
 use schemars::JsonSchema;
 use serde::Deserialize;
 

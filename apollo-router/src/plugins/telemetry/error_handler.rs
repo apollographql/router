@@ -3,10 +3,11 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::TryFutureExt;
-use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
+use opentelemetry_sdk::error::OTelSdkError;
+use opentelemetry_sdk::error::OTelSdkResult;
+use opentelemetry_sdk::metrics::Temporality;
 use opentelemetry_sdk::metrics::data::ResourceMetrics;
 use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
-use opentelemetry_sdk::metrics::Temporality;
 use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::trace::SpanExporter;
 
@@ -31,7 +32,7 @@ impl<E: SpanExporter> Debug for NamedSpanExporter<E> {
 }
 
 impl<E: SpanExporter> SpanExporter for NamedSpanExporter<E> {
-    fn export(&self, batch: Vec<SpanData>) ->  impl Future<Output = OTelSdkResult> + Send {
+    fn export(&self, batch: Vec<SpanData>) -> impl Future<Output = OTelSdkResult> + Send {
         let name = self.name;
         let fut = self.inner.export(batch);
         Box::pin(async move {
@@ -74,18 +75,15 @@ impl<E: PushMetricExporter> Debug for NamedMetricsExporter<E> {
 }
 
 fn prefix_metrics_error(name: &'static str, err: OTelSdkError) -> OTelSdkError {
-        let modified = format!("[{} traces] {}", name, err);
-        // Recreate as an internal failure to allow us to write a tagged message. This has
-        // the unfortunate side effect of removing the original type
-        OTelSdkError::InternalFailure(modified)
+    let modified = format!("[{} traces] {}", name, err);
+    // Recreate as an internal failure to allow us to write a tagged message. This has
+    // the unfortunate side effect of removing the original type
+    OTelSdkError::InternalFailure(modified)
 }
 
 #[async_trait]
 impl<E: PushMetricExporter> PushMetricExporter for NamedMetricsExporter<E> {
-    fn export(
-        &self,
-        metrics: &ResourceMetrics,
-    ) -> impl Future<Output = OTelSdkResult> + Send {
+    fn export(&self, metrics: &ResourceMetrics) -> impl Future<Output = OTelSdkResult> + Send {
         self.inner
             .export(metrics)
             .map_err(|err| prefix_metrics_error(self.name, err))
@@ -119,22 +117,22 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use futures::future::BoxFuture;
-    use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
+    use opentelemetry_sdk::error::OTelSdkError;
+    use opentelemetry_sdk::error::OTelSdkResult;
+    use opentelemetry_sdk::metrics::Temporality;
     use opentelemetry_sdk::metrics::data::ResourceMetrics;
     use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
-    use opentelemetry_sdk::metrics::Temporality;
     use opentelemetry_sdk::trace::SpanData;
     use opentelemetry_sdk::trace::SpanExporter;
     use parking_lot::Mutex;
-    use tracing_core::field::Visit;
     use tracing_core::Event;
     use tracing_core::Field;
     use tracing_core::Subscriber;
+    use tracing_core::field::Visit;
     use tracing_futures::WithSubscriber;
+    use tracing_subscriber::Layer;
     use tracing_subscriber::layer::Context;
     use tracing_subscriber::layer::SubscriberExt;
-    use tracing_subscriber::Layer;
 
     use crate::metrics::FutureMetricsExt;
 
@@ -251,10 +249,7 @@ mod tests {
     }
 
     impl PushMetricExporter for FailingMetricsExporter {
-        async fn export(
-            &self,
-            _metrics: &ResourceMetrics,
-        ) -> OTelSdkResult {
+        async fn export(&self, _metrics: &ResourceMetrics) -> OTelSdkResult {
             match self.error_type {
                 "other" => Err(OTelSdkError::InternalFailure("export failed".to_string())),
                 "config" => Err(OTelSdkError::InternalFailure("invalid config".to_string())),
