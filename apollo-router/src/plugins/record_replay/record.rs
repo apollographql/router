@@ -174,7 +174,8 @@ impl Plugin for Record {
                     let operation_name = req.supergraph_request.body().operation_name.clone();
                     let variables = req.supergraph_request.body().variables.clone();
                     let headers = externalize_header_map(req.supergraph_request.headers())
-                        .expect("failed to externalize header map");
+                        .map_err(|e| tracing::error!("failed to externalize header map: {}", e))
+                        .unwrap_or_default();
                     let method = req.supergraph_request.method().to_string();
                     let uri = req.supergraph_request.uri().to_string();
 
@@ -242,7 +243,8 @@ impl Plugin for Record {
                     operation_name: req.subgraph_request.body().operation_name.clone(),
                     variables: req.subgraph_request.body().variables.clone(),
                     headers: externalize_header_map(req.subgraph_request.headers())
-                        .expect("failed to externalize header map"),
+                        .map_err(|e| tracing::error!("failed to externalize header map: {}", e))
+                        .unwrap_or_default(),
                     method: req.subgraph_request.method().to_string(),
                     uri: req.subgraph_request.uri().to_string(),
                 },
@@ -261,7 +263,10 @@ impl Plugin for Record {
                             subgraph_name,
                             response: ResponseDetails {
                                 headers: externalize_header_map(&res.response.headers().clone())
-                                    .expect("failed to externalize header map"),
+                                    .map_err(|e| {
+                                        tracing::error!("failed to externalize header map: {}", e)
+                                    })
+                                    .unwrap_or_default(),
                                 chunks: vec![res.response.body().clone()],
                             },
                             request: req,
