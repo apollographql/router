@@ -250,12 +250,11 @@ mod tests {
         error_type: &'static str,
     }
 
-    #[async_trait::async_trait]
     impl PushMetricExporter for FailingMetricsExporter {
-        fn export(
+        async fn export(
             &self,
             _metrics: &ResourceMetrics,
-        ) -> impl Future<Output = OTelSdkResult> + Send {
+        ) -> OTelSdkResult {
             match self.error_type {
                 "other" => Err(OTelSdkError::InternalFailure("export failed".to_string())),
                 "config" => Err(OTelSdkError::InternalFailure("invalid config".to_string())),
@@ -267,7 +266,7 @@ mod tests {
             Ok(())
         }
 
-        fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
+        fn shutdown_with_timeout(&self, _timeout: Duration) -> OTelSdkResult {
             Ok(())
         }
 
