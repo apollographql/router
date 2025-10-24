@@ -1,0 +1,17 @@
+preview_response_cache:
+  enabled: true
+  subgraph:
+    all:
+      redis:
+        required_to_start: true
+        urls:
+          - redis://127.0.0.1:6379
+        pool_size: 4
+
+telemetry:
+  exporters:
+    metrics:
+      prometheus:
+        listen: 127.0.0.1:4000
+        enabled: true
+        path: /metrics
