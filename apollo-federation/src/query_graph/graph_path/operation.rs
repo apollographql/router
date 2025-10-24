@@ -1481,7 +1481,7 @@ impl OpGraphPath {
                             options_for_each_implementation,
                             check_cancellation,
                         )?
-                        .take(1000)
+                        .take(200_000)
                         .collect();
 
                         if let Some(interface_path) = interface_path {
@@ -1659,7 +1659,7 @@ impl OpGraphPath {
                             options_for_each_implementation,
                             check_cancellation,
                         )?
-                        .take(1000)
+                        .take(200_000)
                         .collect();
                         debug!("Type-exploded options: {}", DisplaySlice(&all_options));
                         Ok((Some(all_options), None))
@@ -2304,7 +2304,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
 
         let all_options: Vec<_> =
             SimultaneousPaths::flat_cartesian_product(options_for_each_path, check_cancellation)?
-                .take(1000)
+                .take(200_000)
                 .collect();
 
         debug!("{all_options:?}");
