@@ -1476,10 +1476,14 @@ impl OpGraphPath {
                             debug!("Collected field from {implementation_type_pos}");
                             options_for_each_implementation.push(field_options);
                         }
-                        let all_options = SimultaneousPaths::flat_cartesian_product(
+
+                        let all_options: Vec<_> = SimultaneousPaths::flat_cartesian_product(
                             options_for_each_implementation,
                             check_cancellation,
-                        )?;
+                        )?
+                        .take(1000)
+                        .collect();
+
                         if let Some(interface_path) = interface_path {
                             let (interface_path, all_options) =
                                 if direct_path_overrides_type_explosion {
@@ -1651,10 +1655,12 @@ impl OpGraphPath {
                                 "Advanced into type from current type: {options_for_each_implementation:?}"
                             );
                         }
-                        let all_options = SimultaneousPaths::flat_cartesian_product(
+                        let all_options: Vec<_> = SimultaneousPaths::flat_cartesian_product(
                             options_for_each_implementation,
                             check_cancellation,
-                        )?;
+                        )?
+                        .take(1000)
+                        .collect();
                         debug!("Type-exploded options: {}", DisplaySlice(&all_options));
                         Ok((Some(all_options), None))
                     }
@@ -1856,30 +1862,74 @@ impl OpGraphPath {
     }
 }
 
+struct CartesianProductIter<'a> {
+    options_for_each_path: Vec<Vec<SimultaneousPaths>>,
+    option_indexes: Vec<usize>,
+    done: bool,
+    check_cancellation: &'a dyn Fn() -> Result<(), SingleFederationError>,
+}
+
+impl<'a> Iterator for CartesianProductIter<'a> {
+    type Item = SimultaneousPaths;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
+
+        if let Err(_) = (self.check_cancellation)() {
+            self.done = true;
+            return None;
+        }
+
+        // calculate capacity for current combo
+        let num_simultaneous_paths = self
+            .options_for_each_path
+            .iter()
+            .zip(&self.option_indexes)
+            .map(|(options, &idx)| options[idx].0.len())
+            .sum();
+
+        let mut simultaneous_paths = Vec::with_capacity(num_simultaneous_paths);
+
+        for (options, &idx) in self.options_for_each_path.iter().zip(&self.option_indexes) {
+            simultaneous_paths.extend(options[idx].0.iter().cloned());
+        }
+
+        let result = SimultaneousPaths(simultaneous_paths);
+
+        for (options, option_index) in self
+            .options_for_each_path
+            .iter()
+            .zip(&mut self.option_indexes)
+        {
+            if *option_index == options.len() - 1 {
+                *option_index = 0;
+            } else {
+                *option_index += 1;
+                return Some(result); // changed from break
+            }
+        }
+
+        self.done = true;
+        Some(result)
+    }
+}
+
 impl SimultaneousPaths {
     /// Given options generated for the advancement of each path of a `SimultaneousPaths`, generate
     /// the options for the `SimultaneousPaths` as a whole.
-    fn flat_cartesian_product(
+    fn flat_cartesian_product<'a>(
         options_for_each_path: Vec<Vec<SimultaneousPaths>>,
-        check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
-    ) -> Result<Vec<SimultaneousPaths>, FederationError> {
-        // This can be written more tersely with a bunch of `reduce()`/`flat_map()`s and friends,
-        // but when interfaces type-explode into many implementations, this can end up with fairly
-        // large `Vec`s and be a bottleneck, and a more iterative version that pre-allocates `Vec`s
-        // is quite a bit faster.
-        if options_for_each_path.is_empty() {
-            return Ok(vec![]);
-        }
-
-        // Track, for each path, which option index we're at.
-        let mut option_indexes = vec![0; options_for_each_path.len()];
-
-        // Pre-allocate `Vec` for the result.
+        check_cancellation: &'a dyn Fn() -> Result<(), SingleFederationError>,
+    ) -> Result<impl Iterator<Item = SimultaneousPaths> + 'a, FederationError> {
+        let num_paths = options_for_each_path.len();
         let num_options = options_for_each_path
             .iter()
             .fold(1_usize, |product, options| {
                 product.saturating_mul(options.len())
             });
+
         if num_options > 1_000_000 {
             return Err(SingleFederationError::QueryPlanComplexityExceeded {
                 message: format!(
@@ -1888,34 +1938,15 @@ impl SimultaneousPaths {
             }
             .into());
         }
-        let mut product = Vec::with_capacity(num_options);
 
-        // Compute the cartesian product.
-        for _ in 0..num_options {
-            check_cancellation()?;
-            let num_simultaneous_paths = options_for_each_path
-                .iter()
-                .zip(&option_indexes)
-                .map(|(options, option_index)| options[*option_index].0.len())
-                .sum();
-            let mut simultaneous_paths = Vec::with_capacity(num_simultaneous_paths);
+        let product_iter = CartesianProductIter {
+            options_for_each_path,
+            option_indexes: vec![0; num_paths],
+            done: false,
+            check_cancellation,
+        };
 
-            for (options, option_index) in options_for_each_path.iter().zip(&option_indexes) {
-                simultaneous_paths.extend(options[*option_index].0.iter().cloned());
-            }
-            product.push(SimultaneousPaths(simultaneous_paths));
-
-            for (options, option_index) in options_for_each_path.iter().zip(&mut option_indexes) {
-                if *option_index == options.len() - 1 {
-                    *option_index = 0
-                } else {
-                    *option_index += 1;
-                    break;
-                }
-            }
-        }
-
-        Ok(product)
+        Ok(product_iter)
     }
 
     /// Given 2 `SimultaneousPaths` that represent 2 different options to reach the same query leaf
@@ -2271,8 +2302,11 @@ impl SimultaneousPathsWithLazyIndirectPaths {
             }
         }
 
-        let all_options =
-            SimultaneousPaths::flat_cartesian_product(options_for_each_path, check_cancellation)?;
+        let all_options: Vec<_> =
+            SimultaneousPaths::flat_cartesian_product(options_for_each_path, check_cancellation)?
+                .take(1000)
+                .collect();
+
         debug!("{all_options:?}");
         Ok(Some(self.create_lazy_options(all_options, updated_context)))
     }
