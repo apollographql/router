@@ -62,7 +62,6 @@ use crate::services::subgraph;
 
 #[cfg(test)]
 mod test;
-
 mod execution;
 mod supergraph;
 
@@ -498,8 +497,7 @@ fn record_coprocessor_duration(
 }
 
 fn record_coprocessor_operation(
-    stage: PipelineStep, succeeded: bool) {
-    //FIXME INSIDE FUNCTION
+    stage: PipelineStep, succeeded: bool) {    
     u64_counter!(
         "apollo.router.operations.coprocessor",
         "Total run operations with co-processors enabled",
@@ -803,10 +801,23 @@ where
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;    
     record_coprocessor_duration(PipelineStep::RouterRequest, 
         start.elapsed());
-    record_coprocessor_operation(PipelineStep::RouterRequest, co_processor_result.is_ok());
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let mut co_processor_output = co_processor_result?;
+
+    // Determine logical success before control flow branches
+    let succeeded = match co_processor_output.body.as_ref() {
+        Some(body_value) => {
+            // Try to parse as JSON to look for "errors" key
+            match serde_json::from_str::<serde_json_bytes::Value>(body_value) {
+                Ok(json_val) => !json_val.get("errors").is_some(),
+                Err(_) => true, // not JSON, treat as success
+            }
+        }
+        None => false, // no body = logical failure
+    };
+
+    record_coprocessor_operation(PipelineStep::RouterRequest, succeeded);
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::RouterRequest)?;
     // unwrap is safe here because validate_coprocessor_output made sure control is available
@@ -969,10 +980,23 @@ where
     let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
         record_coprocessor_duration(PipelineStep::RouterRequest, 
         start.elapsed());
-    record_coprocessor_operation(PipelineStep::RouterRequest, co_processor_result.is_ok());
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
+
+    // Determine logical success before control flow branches
+    let succeeded = match co_processor_output.body.as_ref() {
+        Some(body_value) => {
+            // Try to parse as JSON to look for "errors" key
+            match serde_json::from_str::<serde_json_bytes::Value>(body_value) {
+                Ok(json_val) => !json_val.get("errors").is_some(),
+                Err(_) => true, // not JSON, treat as success
+            }
+        }
+        None => false, // no body = logical failure
+    };
+
+    record_coprocessor_operation(PipelineStep::RouterResponse, succeeded);
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::RouterResponse)?;
 
@@ -1156,12 +1180,25 @@ where
     tracing::debug!(?payload, "externalized output");    
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    record_coprocessor_duration(PipelineStep::RouterRequest, 
+    record_coprocessor_duration(PipelineStep::SubgraphRequest, 
         start.elapsed());
-    record_coprocessor_operation(PipelineStep::RouterRequest, co_processor_result.is_ok());
     
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
+
+    // Determine logical success before control flow branches
+    let succeeded = match co_processor_output.body.as_ref() {
+        Some(body_value) => {
+            // Try to deserialize a copy of the body just for validation
+            let gql_response =
+                deserialize_coprocessor_response(body_value.clone(), response_validation);
+            gql_response.errors.is_empty()
+        }
+        None => false, // no body = logical failure
+    };
+
+    record_coprocessor_operation(PipelineStep::SubgraphRequest, succeeded);
+
     validate_coprocessor_output(&co_processor_output, PipelineStep::SubgraphRequest)?;
     // unwrap is safe here because validate_coprocessor_output made sure control is available
     let control = co_processor_output.control.expect("validated above; qed");
@@ -1307,12 +1344,24 @@ where
     tracing::debug!(?payload, "externalized output");    
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    record_coprocessor_duration(PipelineStep::RouterRequest, 
+    record_coprocessor_duration(PipelineStep::SubgraphResponse, 
         start.elapsed());
-    record_coprocessor_operation(PipelineStep::RouterRequest, co_processor_result.is_ok());
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
+
+    // Determine logical success before control flow branches
+    let succeeded = match co_processor_output.body.as_ref() {
+        Some(body_value) => {
+            // Try to deserialize a copy of the body just for validation
+            let gql_response =
+                deserialize_coprocessor_response(body_value.clone(), response_validation);
+            gql_response.errors.is_empty()
+        }
+        None => false, // no body = logical failure
+    };
+
+    record_coprocessor_operation(PipelineStep::SubgraphResponse, succeeded);
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::SubgraphResponse)?;
 

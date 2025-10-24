@@ -214,12 +214,25 @@ where
     tracing::debug!(?payload, "externalized output");    
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    record_coprocessor_duration(PipelineStep::RouterRequest, 
-        start.elapsed());
-    record_coprocessor_operation(PipelineStep::RouterRequest, co_processor_result.is_ok());
+    record_coprocessor_duration(PipelineStep::ExecutionRequest, 
+        start.elapsed());    
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
+
+    // Determine logical success before control flow branches
+    let succeeded = match co_processor_output.body.as_ref() {
+        Some(body_value) => {
+            // Try to deserialize a copy of the body just for validation
+            let gql_response =
+                deserialize_coprocessor_response(body_value.clone(), response_validation);
+            gql_response.errors.is_empty()
+        }
+        None => false, // no body = logical failure
+    };
+
+    record_coprocessor_operation(PipelineStep::ExecutionRequest, succeeded);
+
     validate_coprocessor_output(&co_processor_output, PipelineStep::ExecutionRequest)?;
     // unwrap is safe here because validate_coprocessor_output made sure control is available
     let control = co_processor_output.control.expect("validated above; qed");
@@ -357,12 +370,24 @@ where
     tracing::debug!(?payload, "externalized output");    
     let start = Instant::now();
     let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
-    record_coprocessor_duration(PipelineStep::RouterRequest, 
+    record_coprocessor_duration(PipelineStep::ExecutionResponse, 
         start.elapsed());
-    record_coprocessor_operation(PipelineStep::RouterRequest, co_processor_result.is_ok());
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
+
+    // Determine logical success before control flow branches
+    let succeeded = match co_processor_output.body.as_ref() {
+        Some(body_value) => {
+            // Try to deserialize a copy of the body just for validation
+            let gql_response =
+                deserialize_coprocessor_response(body_value.clone(), response_validation);
+            gql_response.errors.is_empty()
+        }
+        None => false, // no body = logical failure
+    };
+
+    record_coprocessor_operation(PipelineStep::ExecutionResponse, succeeded);
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::ExecutionResponse)?;
 
@@ -522,6 +547,8 @@ mod tests {
     use crate::services::execution;
     use crate::services::router;
     use crate::services::router::body::RouterBody;
+    use crate::metrics::FutureMetricsExt;
+    use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
 
     #[allow(clippy::type_complexity)]
     pub(crate) fn mock_with_callback(
@@ -566,6 +593,211 @@ mod tests {
         });
 
         mock_http_client
+    }    
+   
+    #[tokio::test]
+    async fn execution_request_metric_incremented_when_processed() {
+
+         // Make 2 requests to better validate metric is being incremented correctly
+        async{
+            for _ in 0..2 {                
+                let _stage = create_execution_stage_for_request_validation_test();
+
+                let _service = _stage.as_service(
+                    create_mock_http_client_execution_request_valid_response(),
+                    create_mock_execution_service().boxed(),
+                    "http://test".to_string(),
+                    Arc::default(),
+                    false, // Validation disabled
+                );
+            
+                let _request = execution::Request::fake_builder().build();
+                let _response = _service.oneshot(_request).await;
+            }
+
+             assert_coprocessor_operations_metrics(&[
+                (PipelineStep::ExecutionRequest, 2, Some(true)),
+            ]);
+            
+        }        
+        .with_metrics()
+        .await;
+    }
+
+     #[tokio::test]
+    async fn execution_response_metric_incremented_when_processed() {
+
+         // Make 3 requests to better validate metric is being incremented correctly
+        async{
+            for _ in 0..3 {                
+                let _stage = create_execution_stage_for_response_validation_test();
+
+                let _service = _stage.as_service(
+                    create_mock_http_client_execution_response_valid_response(),
+                    create_mock_execution_service().boxed(),
+                    "http://test".to_string(),
+                    Arc::default(),
+                    false, // Validation disabled
+                );
+
+            
+                let _request = execution::Request::fake_builder().build();
+                let _response = _service.oneshot(_request).await;
+            }
+
+            assert_coprocessor_operations_metrics(&[
+                (PipelineStep::ExecutionResponse, 3, Some(true)),
+            ]);
+        }        
+        .with_metrics()
+        .await;
+    }
+
+     #[tokio::test]
+    async fn both_execution_stages_metric_incremented_when_processed() {
+
+        async{
+            for _ in 0..3 {                
+                let _stage = create_execution_stage_for_request_validation_test();
+
+                let _service = _stage.as_service(
+                    create_mock_http_client_execution_request_valid_response(),
+                    create_mock_execution_service().boxed(),
+                    "http://test".to_string(),
+                    Arc::default(),
+                    false, // Validation disabled
+                );
+
+            
+                let _request = execution::Request::fake_builder().build();
+                let _response = _service.oneshot(_request).await;
+            }
+
+            for _ in 0..2 {                
+                let _stage = create_execution_stage_for_response_validation_test();
+
+                let _service = _stage.as_service(
+                    create_mock_http_client_execution_response_valid_response(),
+                    create_mock_execution_service().boxed(),
+                    "http://test".to_string(),
+                    Arc::default(),
+                    false, // Validation disabled
+                );
+
+            
+                let _request = execution::Request::fake_builder().build();
+                let _response = _service.oneshot(_request).await;
+            }
+
+            assert_coprocessor_operations_metrics(&[
+                (PipelineStep::ExecutionRequest, 3, Some(true)),
+                (PipelineStep::ExecutionResponse, 2, Some(true)),
+            ]);
+        }        
+        .with_metrics()
+        .await;
+    }
+
+     #[tokio::test]
+    async fn execution_request_metric_incremented_for_errored_stage_processing() {
+
+         // Make 2 requests to better validate metric is being incremented correctly
+        async{
+            for _ in 0..2 {                
+                let _stage = create_execution_stage_for_request_validation_test();
+
+                let _service = _stage.as_service(
+                    create_mock_http_client_execution_request_invalid_response(),
+                    create_mock_execution_service().boxed(),
+                    "http://test".to_string(),
+                    Arc::default(),
+                    true, // Validation enabled
+                );
+
+            
+                let _request = execution::Request::fake_builder().build();
+                let _response = _service.oneshot(_request).await;
+            }
+
+            assert_coprocessor_operations_metrics(&[
+                (PipelineStep::ExecutionRequest, 2, Some(false)),
+            ]);
+        }        
+        .with_metrics()
+        .await;
+    }
+
+     #[tokio::test]
+    async fn execution_response_metric_incremented_for_errored_stage_processing() {
+
+         // Make 2 requests to better validate metric is being incremented correctly
+        async{
+            for _ in 0..2 {                
+                let _stage = create_execution_stage_for_response_validation_test();
+
+                let _service = _stage.as_service(
+                    create_mock_http_client_invalid_response(),
+                    create_mock_execution_service().boxed(),
+                    "http://test".to_string(),
+                    Arc::default(),
+                    true, // Validation enabled
+                );
+
+            
+                let _request = execution::Request::fake_builder().build();
+                let _response = _service.oneshot(_request).await;
+            }
+
+            assert_coprocessor_operations_metrics(&[
+                (PipelineStep::ExecutionResponse, 2, Some(false)),
+            ]);
+        }        
+        .with_metrics()
+        .await;
+    }
+
+     #[tokio::test]
+    async fn both_execution_stages_metric_incremented_for_errored_stages_processing() {
+
+        async{
+            for _ in 0..2 {                
+                let _stage = create_execution_stage_for_request_validation_test();
+
+                let _service = _stage.as_service(
+                    create_mock_http_client_execution_request_invalid_response(),
+                    create_mock_execution_service().boxed(),
+                    "http://test".to_string(),
+                    Arc::default(),
+                    false, // Validation disabled
+                );
+
+                let _request = execution::Request::fake_builder().build();
+                let _response = _service.oneshot(_request).await;
+            }
+
+            for _ in 0..3 {                
+                let _stage = create_execution_stage_for_response_validation_test();
+
+                let _service = _stage.as_service(
+                    create_mock_http_client_invalid_response(),
+                    create_mock_execution_service().boxed(),
+                    "http://test".to_string(),
+                    Arc::default(),
+                    false, // Validation disabled
+                );
+
+            
+                let _request = execution::Request::fake_builder().build();
+                let _response = _service.oneshot(_request).await;
+            }
+
+            assert_coprocessor_operations_metrics(&[
+                (PipelineStep::ExecutionRequest, 2, Some(false)),
+                (PipelineStep::ExecutionResponse, 3, Some(false)),
+            ]);
+        }        
+        .with_metrics()
+        .await;
     }
 
     #[tokio::test]
