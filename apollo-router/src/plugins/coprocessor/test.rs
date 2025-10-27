@@ -12,7 +12,7 @@ mod tests {
     use http::header::CONTENT_TYPE;
     use mime::APPLICATION_JSON;
     use mime::TEXT_HTML;
-    use router::body::RouterBody; 
+    use router::body::RouterBody;
     use serde_json_bytes::json;
     use services::subgraph::SubgraphRequestId;
     use tower::BoxError;
@@ -23,18 +23,20 @@ mod tests {
     use crate::graphql::Response;
     use crate::json_ext::Object;
     use crate::json_ext::Value;
+    use crate::metrics::FutureMetricsExt;
     use crate::plugin::test::MockInternalHttpClientService;
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraphService;
     use crate::plugin::test::MockSupergraphService;
-    use crate::plugins::coprocessor::handle_graphql_response;
-    use crate::plugins::coprocessor::is_graphql_response_minimally_valid;    
-    use crate::plugins::coprocessor::supergraph::SupergraphResponseConf;
-    use crate::plugins::coprocessor::SubgraphRequestConf;
-    use crate::plugins::coprocessor::SubgraphResponseConf;
     use crate::plugins::coprocessor::RouterRequestConf;
     use crate::plugins::coprocessor::RouterResponseConf;
+    use crate::plugins::coprocessor::SubgraphRequestConf;
+    use crate::plugins::coprocessor::SubgraphResponseConf;
+    use crate::plugins::coprocessor::handle_graphql_response;
+    use crate::plugins::coprocessor::is_graphql_response_minimally_valid;
+    use crate::plugins::coprocessor::supergraph::SupergraphResponseConf;
     use crate::plugins::coprocessor::supergraph::SupergraphStage;
+    use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
     use crate::plugins::coprocessor::was_incoming_payload_valid;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::services::external::EXTERNALIZABLE_VERSION;
@@ -43,8 +45,6 @@ mod tests {
     use crate::services::router;
     use crate::services::subgraph;
     use crate::services::supergraph;
-    use crate::metrics::FutureMetricsExt;
-    use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
 
     #[tokio::test]
     async fn load_plugin() {
@@ -3144,7 +3144,7 @@ mod tests {
                 url: None,
             },
             response: Default::default(),
-        }        
+        }
     }
 
     // Helper to create a RouterStage response with condition always false
@@ -3160,8 +3160,8 @@ mod tests {
                 status_code: false,
                 url: None,
             },
-        }        
-    }    
+        }
+    }
 
     async fn create_mock_router_service_for_validation_test() -> router::BoxService {
         router::service::from_supergraph_mock_callback(move |req| {
@@ -3233,7 +3233,7 @@ mod tests {
         })
     }
 
-     // Helper function to create mock http client that returns invalid GraphQL response
+    // Helper function to create mock http client that returns invalid GraphQL response
     fn create_mock_http_client_router_request_invalid_response() -> MockInternalHttpClientService {
         mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
@@ -3254,7 +3254,7 @@ mod tests {
         })
     }
 
-     // Helper function to create mock http client that returns invalid GraphQL response
+    // Helper function to create mock http client that returns invalid GraphQL response
     fn create_mock_http_client_router_response_invalid_response() -> MockInternalHttpClientService {
         mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
@@ -3630,7 +3630,7 @@ mod tests {
                 subgraph_request_id: false,
                 url: None,
             },
-        }        
+        }
     }
 
     // Helper function to create mock http client that returns valid GraphQL break response
@@ -4137,10 +4137,9 @@ mod tests {
 
     #[tokio::test]
     async fn subgraph_request_metric_incremented_when_condition_true() {
-
         async {
             // Make multiple requests to better validate metric is being incremented correctly
-            for _ in 0..2 {                
+            for _ in 0..2 {
                 let _stage = create_subgraph_stage_for_request_validation_test();
 
                 let _service = _stage.as_service(
@@ -4151,27 +4150,25 @@ mod tests {
                     false, // Validation disabled
                 );
 
-            
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
             }
 
-            assert_coprocessor_operations_metrics(&[
-                (PipelineStep::SubgraphRequest, 2, Some(true)),
-            ]);
-            
-        }        
+            assert_coprocessor_operations_metrics(&[(
+                PipelineStep::SubgraphRequest,
+                2,
+                Some(true),
+            )]);
+        }
         .with_metrics()
         .await;
     }
 
-
     #[tokio::test]
     async fn subgraph_response_metric_incremented_when_condition_true() {
-
-        async{
+        async {
             // Make multiple requests to better validate metric is being incremented correctly
-            for _ in 0..3 {                
+            for _ in 0..3 {
                 let _stage = create_subgraph_stage_for_validation_test();
 
                 let _service = _stage.as_service(
@@ -4181,24 +4178,24 @@ mod tests {
                     "my_service".to_string(),
                     false, // Validation disabled
                 );
-            
+
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
             }
 
-            assert_coprocessor_operations_metrics(&[
-                (PipelineStep::SubgraphResponse, 3, Some(true)),
-            ]);
-            
-        }        
+            assert_coprocessor_operations_metrics(&[(
+                PipelineStep::SubgraphResponse,
+                3,
+                Some(true),
+            )]);
+        }
         .with_metrics()
         .await;
     }
-    
-    #[tokio::test]    
-    async fn subgraph_request_metric_not_incremented_when_condition_false() {
 
-        async{
+    #[tokio::test]
+    async fn subgraph_request_metric_not_incremented_when_condition_false() {
+        async {
             // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..2 {
                 let _stage = create_subgraph_stage_for_request_with_false_condition();
@@ -4210,23 +4207,21 @@ mod tests {
                     "my_service".to_string(),
                     false, // Validation disabled
                 );
-            
+
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
             }
 
             // This call will validate there are no metrics for all stages
             assert_coprocessor_operations_metrics(&[]);
-            
-        }        
+        }
         .with_metrics()
         .await;
     }
 
-     #[tokio::test]
+    #[tokio::test]
     async fn subgraph_response_metric_not_incremented_when_condition_false() {
-
-        async{
+        async {
             // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..3 {
                 let _stage = create_subgraph_stage_for_response_with_false_condition();
@@ -4238,25 +4233,23 @@ mod tests {
                     "my_service".to_string(),
                     false, // Validation disabled
                 );
-            
+
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
             }
 
             // This call will validate there are no metrics for all stages
             assert_coprocessor_operations_metrics(&[]);
-            
-        }        
+        }
         .with_metrics()
         .await;
     }
 
-     #[tokio::test]
+    #[tokio::test]
     async fn both_subgraph_stages_metric_incremented_when_conditions_true() {
-
-        async{
+        async {
             // Make multiple requests to better validate metric is being incremented correctly
-            for _ in 0..2 {                
+            for _ in 0..2 {
                 let _stage = create_subgraph_stage_for_request_validation_test();
 
                 let _service = _stage.as_service(
@@ -4266,13 +4259,13 @@ mod tests {
                     "my_service".to_string(),
                     false, // Validation disabled
                 );
-            
+
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
             }
 
             // Make multiple requests to better validate metric is being incremented correctly
-            for _ in 0..3 {                
+            for _ in 0..3 {
                 let _stage = create_subgraph_stage_for_validation_test();
 
                 let _service = _stage.as_service(
@@ -4283,7 +4276,6 @@ mod tests {
                     false, // Validation disabled
                 );
 
-            
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
             }
@@ -4292,15 +4284,14 @@ mod tests {
                 (PipelineStep::SubgraphRequest, 2, Some(true)),
                 (PipelineStep::SubgraphResponse, 3, Some(true)),
             ]);
-        }        
+        }
         .with_metrics()
         .await;
     }
 
-     #[tokio::test]
+    #[tokio::test]
     async fn subgraph_request_metric_incremented_for_errored_stage_processing() {
-
-        async{
+        async {
             // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..2 {
                 let _stage = create_subgraph_stage_for_request_validation_test();
@@ -4312,23 +4303,24 @@ mod tests {
                     "my_service".to_string(),
                     true, // Validation enabled
                 );
-            
+
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
             }
 
-            assert_coprocessor_operations_metrics(&[
-                (PipelineStep::SubgraphRequest, 2, Some(false)),
-            ]);
-        }        
+            assert_coprocessor_operations_metrics(&[(
+                PipelineStep::SubgraphRequest,
+                2,
+                Some(false),
+            )]);
+        }
         .with_metrics()
         .await;
     }
 
-     #[tokio::test]
+    #[tokio::test]
     async fn subgraph_response_metric_incremented_for_errored_stage_processing() {
-
-        async{
+        async {
             // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..3 {
                 let _stage = create_subgraph_stage_for_validation_test();
@@ -4340,24 +4332,24 @@ mod tests {
                     "my_service".to_string(),
                     true, // Validation enabled
                 );
-            
+
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
             }
 
-            assert_coprocessor_operations_metrics(&[
-                (PipelineStep::SubgraphResponse, 3, Some(false)),
-            ]);
-        }        
+            assert_coprocessor_operations_metrics(&[(
+                PipelineStep::SubgraphResponse,
+                3,
+                Some(false),
+            )]);
+        }
         .with_metrics()
         .await;
     }
 
-
-     #[tokio::test]
+    #[tokio::test]
     async fn both_subgraph_stages_metric_incremented_for_errored_stages_processing() {
-
-        async{
+        async {
             // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..1 {
                 let _stage = create_subgraph_stage_for_request_validation_test();
@@ -4369,7 +4361,7 @@ mod tests {
                     "my_service".to_string(),
                     true, // Validation enabled
                 );
-            
+
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
             }
@@ -4385,7 +4377,7 @@ mod tests {
                     "my_service".to_string(),
                     true, // Validation enabled
                 );
-            
+
                 let _request = subgraph::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
             }
@@ -4394,26 +4386,20 @@ mod tests {
                 (PipelineStep::SubgraphRequest, 1, Some(false)),
                 (PipelineStep::SubgraphResponse, 2, Some(false)),
             ]);
-        }        
+        }
         .with_metrics()
         .await;
     }
-
 
     #[tokio::test]
     async fn router_request_metric_incremented_when_condition_true() {
-
         async {
             // Make multiple requests to better validate metric is being incremented correctly
-            for _ in 0..3 { 
-
-                let router_stage = 
-                    create_router_stage_for_request_validation_test();
-                 // Mock HTTP client used by coprocessor (RouterRequest stage)
-                let mock_http_client = 
-                    create_mock_http_client_router_request_valid_response();
-                let mock_router_service = 
-                    create_mock_router_service();                         
+            for _ in 0..3 {
+                let router_stage = create_router_stage_for_request_validation_test();
+                // Mock HTTP client used by coprocessor (RouterRequest stage)
+                let mock_http_client = create_mock_http_client_router_request_valid_response();
+                let mock_router_service = create_mock_router_service();
 
                 let service_stack = router_stage
                     .as_service(
@@ -4429,28 +4415,20 @@ mod tests {
                 let _ = service_stack.oneshot(request).await.unwrap();
             }
 
-            assert_coprocessor_operations_metrics(&[
-                (PipelineStep::RouterRequest, 3, Some(true)),
-            ]);
-            
-        }        
+            assert_coprocessor_operations_metrics(&[(PipelineStep::RouterRequest, 3, Some(true))]);
+        }
         .with_metrics()
         .await;
     }
 
     #[tokio::test]
-    async fn router_response_metric_incremented_when_condition_true() {  
-
-        async{
+    async fn router_response_metric_incremented_when_condition_true() {
+        async {
             // Make multiple requests to better validate metric is being incremented correctly
-            for _ in 0..2 {      
-
-                let router_stage = 
-                    create_router_stage_for_response_validation_test();
-                let mock_http_client = 
-                    create_mock_http_client_router_response_valid_response();
-                let mock_router_service = 
-                    create_mock_router_service();                         
+            for _ in 0..2 {
+                let router_stage = create_router_stage_for_response_validation_test();
+                let mock_http_client = create_mock_http_client_router_response_valid_response();
+                let mock_router_service = create_mock_router_service();
 
                 let service_stack = router_stage
                     .as_service(
@@ -4466,28 +4444,21 @@ mod tests {
                 let _ = service_stack.oneshot(request).await.unwrap();
             }
 
-            assert_coprocessor_operations_metrics(&[
-                (PipelineStep::RouterResponse, 2, Some(true)),
-            ]);
-            
-        }        
+            assert_coprocessor_operations_metrics(&[(PipelineStep::RouterResponse, 2, Some(true))]);
+        }
         .with_metrics()
         .await;
     }
-     
-    #[tokio::test]    
+
+    #[tokio::test]
     async fn router_request_metric_not_incremented_when_condition_false() {
-         
-        async{
+        async {
             // Make multiple requests to better validate metric is being incremented correctly
-            for _ in 0..2 {      
-                let router_stage = 
-                    create_router_stage_for_request_with_false_condition();
-                 // Mock HTTP client used by coprocessor (RouterRequest stage)
-                let mock_http_client = 
-                    create_mock_http_client_router_response_valid_response();
-                let mock_router_service = 
-                    create_mock_router_service();                         
+            for _ in 0..2 {
+                let router_stage = create_router_stage_for_request_with_false_condition();
+                // Mock HTTP client used by coprocessor (RouterRequest stage)
+                let mock_http_client = create_mock_http_client_router_response_valid_response();
+                let mock_router_service = create_mock_router_service();
 
                 let service_stack = router_stage
                     .as_service(
@@ -4505,25 +4476,19 @@ mod tests {
 
             // This call will validate there are no metrics for all stages
             assert_coprocessor_operations_metrics(&[]);
-            
-        }        
+        }
         .with_metrics()
         .await;
     }
 
-     #[tokio::test]
+    #[tokio::test]
     async fn router_response_metric_not_incremented_when_condition_false() {
-
-        async{
+        async {
             // Make multiple requests to better validate metric is being incremented correctly
-            for _ in 0..1 { 
-
-                let router_stage = 
-                    create_router_stage_for_response_with_false_condition();
-                let mock_http_client = 
-                    create_mock_http_client_router_response_valid_response();
-                let mock_router_service = 
-                    create_mock_router_service();                         
+            for _ in 0..1 {
+                let router_stage = create_router_stage_for_response_with_false_condition();
+                let mock_http_client = create_mock_http_client_router_response_valid_response();
+                let mock_router_service = create_mock_router_service();
 
                 let service_stack = router_stage
                     .as_service(
@@ -4537,30 +4502,23 @@ mod tests {
 
                 let request = router::Request::fake_builder().build().unwrap();
                 let _ = service_stack.oneshot(request).await.unwrap();
-
             }
 
             // This call will validate there are no metrics for all stages
             assert_coprocessor_operations_metrics(&[]);
-            
-        }        
+        }
         .with_metrics()
         .await;
     }
 
-     #[tokio::test]
+    #[tokio::test]
     async fn both_router_stages_metric_incremented_when_conditions_true() {
-
-        async{
+        async {
             // Make multiple requests to better validate metric is being incremented correctly
-            for _ in 0..2 { 
-
-                let router_stage = 
-                    create_router_stage_for_request_validation_test();
-                let mock_http_client = 
-                    create_mock_http_client_router_request_valid_response();
-                let mock_router_service = 
-                    create_mock_router_service();                         
+            for _ in 0..2 {
+                let router_stage = create_router_stage_for_request_validation_test();
+                let mock_http_client = create_mock_http_client_router_request_valid_response();
+                let mock_router_service = create_mock_router_service();
 
                 let service_stack = router_stage
                     .as_service(
@@ -4574,18 +4532,13 @@ mod tests {
 
                 let request = router::Request::fake_builder().build().unwrap();
                 let _ = service_stack.oneshot(request).await.unwrap();
-                
             }
 
             // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..4 {
-
-                let router_stage = 
-                    create_router_stage_for_response_validation_test();
-                let mock_http_client = 
-                    create_mock_http_client_router_response_valid_response();
-                let mock_router_service = 
-                    create_mock_router_service();                         
+                let router_stage = create_router_stage_for_response_validation_test();
+                let mock_http_client = create_mock_http_client_router_response_valid_response();
+                let mock_router_service = create_mock_router_service();
 
                 let service_stack = router_stage
                     .as_service(
@@ -4605,24 +4558,19 @@ mod tests {
                 (PipelineStep::RouterRequest, 2, Some(true)),
                 (PipelineStep::RouterResponse, 4, Some(true)),
             ]);
-        }        
+        }
         .with_metrics()
         .await;
     }
 
-     #[tokio::test]
+    #[tokio::test]
     async fn router_request_metric_incremented_for_errored_stage_processing() {
-
-        async{
+        async {
             // Make multiple requests to better validate metric is being incremented correctly
-            for _ in 0..2 { 
-
-                let router_stage = 
-                    create_router_stage_for_request_validation_test();
-                let mock_http_client = 
-                    create_mock_http_client_router_request_invalid_response();
-                let mock_router_service = 
-                    create_mock_router_service();                         
+            for _ in 0..2 {
+                let router_stage = create_router_stage_for_request_validation_test();
+                let mock_http_client = create_mock_http_client_router_request_invalid_response();
+                let mock_router_service = create_mock_router_service();
 
                 let service_stack = router_stage
                     .as_service(
@@ -4636,30 +4584,22 @@ mod tests {
 
                 let request = router::Request::fake_builder().build().unwrap();
                 let _ = service_stack.oneshot(request).await.unwrap();
-                
             }
 
-            assert_coprocessor_operations_metrics(&[
-                (PipelineStep::RouterRequest, 2, Some(false)),
-            ]);
-        }        
+            assert_coprocessor_operations_metrics(&[(PipelineStep::RouterRequest, 2, Some(false))]);
+        }
         .with_metrics()
         .await;
     }
 
-     #[tokio::test]
+    #[tokio::test]
     async fn router_response_metric_incremented_for_errored_stage_processing() {
-
         async {
             // Make multiple requests to better validate metric is being incremented correctly
-            for _ in 0..4 {      
-
-                let router_stage = 
-                    create_router_stage_for_response_validation_test();
-                let mock_http_client = 
-                    create_mock_http_client_router_response_invalid_response();
-                let mock_router_service = 
-                    create_mock_router_service();                         
+            for _ in 0..4 {
+                let router_stage = create_router_stage_for_response_validation_test();
+                let mock_http_client = create_mock_http_client_router_response_invalid_response();
+                let mock_router_service = create_mock_router_service();
 
                 let service_stack = router_stage
                     .as_service(
@@ -4673,31 +4613,26 @@ mod tests {
 
                 let request = router::Request::fake_builder().build().unwrap();
                 let _ = service_stack.oneshot(request).await.unwrap();
-
             }
 
-            assert_coprocessor_operations_metrics(&[
-                (PipelineStep::RouterResponse, 4, Some(false)),
-            ]);
-        }        
+            assert_coprocessor_operations_metrics(&[(
+                PipelineStep::RouterResponse,
+                4,
+                Some(false),
+            )]);
+        }
         .with_metrics()
         .await;
     }
 
-
-     #[tokio::test]
+    #[tokio::test]
     async fn both_router_stages_metric_incremented_for_errored_stages_processing() {
-
-        async{
+        async {
             // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..3 {
-
-                let router_stage = 
-                    create_router_stage_for_request_validation_test();
-                let mock_http_client = 
-                    create_mock_http_client_router_request_invalid_response();
-                let mock_router_service = 
-                    create_mock_router_service();                         
+                let router_stage = create_router_stage_for_request_validation_test();
+                let mock_http_client = create_mock_http_client_router_request_invalid_response();
+                let mock_router_service = create_mock_router_service();
 
                 let service_stack = router_stage
                     .as_service(
@@ -4710,18 +4645,14 @@ mod tests {
                     .boxed();
 
                 let request = router::Request::fake_builder().build().unwrap();
-                let _ = service_stack.oneshot(request).await.unwrap();                
+                let _ = service_stack.oneshot(request).await.unwrap();
             }
 
             // Make multiple requests to better validate metric is being incremented correctly
             for _ in 0..2 {
-
-                let router_stage = 
-                    create_router_stage_for_response_validation_test();
-                let mock_http_client = 
-                    create_mock_http_client_router_response_invalid_response();
-                let mock_router_service = 
-                    create_mock_router_service();                         
+                let router_stage = create_router_stage_for_response_validation_test();
+                let mock_http_client = create_mock_http_client_router_response_invalid_response();
+                let mock_router_service = create_mock_router_service();
 
                 let service_stack = router_stage
                     .as_service(
@@ -4735,14 +4666,13 @@ mod tests {
 
                 let request = router::Request::fake_builder().build().unwrap();
                 let _ = service_stack.oneshot(request).await.unwrap();
-
             }
 
             assert_coprocessor_operations_metrics(&[
                 (PipelineStep::RouterRequest, 3, Some(false)),
                 (PipelineStep::RouterResponse, 2, Some(false)),
             ]);
-        }        
+        }
         .with_metrics()
         .await;
     }
@@ -4786,8 +4716,8 @@ pub(crate) fn assert_coprocessor_operations_metrics(
                 "apollo.router.operations.coprocessor",
                 *expected_value,
                 coprocessor.stage = stage.to_string(),
-                coprocessor.succeeded = succeeded
-                    .expect("succeeded must be provided for expected stages")                
+                coprocessor.succeeded =
+                    succeeded.expect("succeeded must be provided for expected stages")
             );
         } else {
             // ❌ Unexpected stage: must not exist or must be zero

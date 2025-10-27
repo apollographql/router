@@ -60,10 +60,10 @@ use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::subgraph;
 
-#[cfg(test)]
-mod test;
 mod execution;
 mod supergraph;
+#[cfg(test)]
+mod test;
 
 pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
 const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5));
@@ -494,8 +494,7 @@ fn default_response_validation() -> bool {
     true
 }
 
-fn record_coprocessor_duration(
-    stage: PipelineStep, duration: Duration) {
+fn record_coprocessor_duration(stage: PipelineStep, duration: Duration) {
     f64_histogram!(
         "apollo.router.operations.coprocessor.duration",
         "Time spent waiting for the coprocessor to answer, in seconds",
@@ -504,8 +503,7 @@ fn record_coprocessor_duration(
     );
 }
 
-fn record_coprocessor_operation(
-    stage: PipelineStep, succeeded: bool) {    
+fn record_coprocessor_operation(stage: PipelineStep, succeeded: bool) {
     u64_counter!(
         "apollo.router.operations.coprocessor",
         "Total run operations with co-processors enabled",
@@ -806,11 +804,10 @@ where
         .method(parts.method.to_string())
         .build();
 
-    tracing::debug!(?payload, "externalized output");    
+    tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
-    let co_processor_result = payload.call(http_client, &coprocessor_url).await;    
-    record_coprocessor_duration(PipelineStep::RouterRequest, 
-        start.elapsed());
+    let co_processor_result = payload.call(http_client, &coprocessor_url).await;
+    record_coprocessor_duration(PipelineStep::RouterRequest, start.elapsed());
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let mut co_processor_output = co_processor_result?;
@@ -985,11 +982,10 @@ where
         .and_sdl(sdl_to_send.clone())
         .build();
 
-    tracing::debug!(?payload, "externalized output");    
+    tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
     let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
-        record_coprocessor_duration(PipelineStep::RouterRequest, 
-        start.elapsed());
+    record_coprocessor_duration(PipelineStep::RouterRequest, start.elapsed());
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
@@ -1187,12 +1183,11 @@ where
         .and_subgraph_request_id(subgraph_request_id)
         .build();
 
-    tracing::debug!(?payload, "externalized output");    
+    tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    record_coprocessor_duration(PipelineStep::SubgraphRequest, 
-        start.elapsed());
-    
+    record_coprocessor_duration(PipelineStep::SubgraphRequest, start.elapsed());
+
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
 
@@ -1351,11 +1346,10 @@ where
         .and_subgraph_request_id(subgraph_request_id)
         .build();
 
-    tracing::debug!(?payload, "externalized output");    
+    tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    record_coprocessor_duration(PipelineStep::SubgraphResponse, 
-        start.elapsed());
+    record_coprocessor_duration(PipelineStep::SubgraphResponse, start.elapsed());
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;

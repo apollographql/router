@@ -216,11 +216,10 @@ where
         .and_query_plan(query_plan)
         .build();
 
-    tracing::debug!(?payload, "externalized output");    
+    tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    record_coprocessor_duration(PipelineStep::ExecutionRequest, 
-        start.elapsed());    
+    record_coprocessor_duration(PipelineStep::ExecutionRequest, start.elapsed());
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
@@ -372,11 +371,10 @@ where
         .build();
 
     // Second, call our co-processor and get a reply.
-    tracing::debug!(?payload, "externalized output");    
+    tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
     let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
-    record_coprocessor_duration(PipelineStep::ExecutionResponse, 
-        start.elapsed());
+    record_coprocessor_duration(PipelineStep::ExecutionResponse, start.elapsed());
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
@@ -547,13 +545,13 @@ mod tests {
     use super::super::*;
     use super::*;
     use crate::json_ext::Object;
+    use crate::metrics::FutureMetricsExt;
     use crate::plugin::test::MockExecutionService;
     use crate::plugin::test::MockInternalHttpClientService;
+    use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
     use crate::services::execution;
     use crate::services::router;
     use crate::services::router::body::RouterBody;
-    use crate::metrics::FutureMetricsExt;
-    use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
 
     #[allow(clippy::type_complexity)]
     pub(crate) fn mock_with_callback(
@@ -598,14 +596,13 @@ mod tests {
         });
 
         mock_http_client
-    }    
-   
+    }
+
     #[tokio::test]
     async fn execution_request_metric_incremented_when_processed() {
-
-         // Make 2 requests to better validate metric is being incremented correctly
-        async{
-            for _ in 0..2 {                
+        // Make 2 requests to better validate metric is being incremented correctly
+        async {
+            for _ in 0..2 {
                 let _stage = create_execution_stage_for_request_validation_test();
 
                 let _service = _stage.as_service(
@@ -615,26 +612,26 @@ mod tests {
                     Arc::default(),
                     false, // Validation disabled
                 );
-            
+
                 let _request = execution::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
             }
 
-             assert_coprocessor_operations_metrics(&[
-                (PipelineStep::ExecutionRequest, 2, Some(true)),
-            ]);
-            
-        }        
+            assert_coprocessor_operations_metrics(&[(
+                PipelineStep::ExecutionRequest,
+                2,
+                Some(true),
+            )]);
+        }
         .with_metrics()
         .await;
     }
 
-     #[tokio::test]
+    #[tokio::test]
     async fn execution_response_metric_incremented_when_processed() {
-
-         // Make 3 requests to better validate metric is being incremented correctly
-        async{
-            for _ in 0..3 {                
+        // Make 3 requests to better validate metric is being incremented correctly
+        async {
+            for _ in 0..3 {
                 let _stage = create_execution_stage_for_response_validation_test();
 
                 let _service = _stage.as_service(
@@ -645,24 +642,24 @@ mod tests {
                     false, // Validation disabled
                 );
 
-            
                 let _request = execution::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
             }
 
-            assert_coprocessor_operations_metrics(&[
-                (PipelineStep::ExecutionResponse, 3, Some(true)),
-            ]);
-        }        
+            assert_coprocessor_operations_metrics(&[(
+                PipelineStep::ExecutionResponse,
+                3,
+                Some(true),
+            )]);
+        }
         .with_metrics()
         .await;
     }
 
-     #[tokio::test]
+    #[tokio::test]
     async fn both_execution_stages_metric_incremented_when_processed() {
-
-        async{
-            for _ in 0..3 {                
+        async {
+            for _ in 0..3 {
                 let _stage = create_execution_stage_for_request_validation_test();
 
                 let _service = _stage.as_service(
@@ -673,12 +670,11 @@ mod tests {
                     false, // Validation disabled
                 );
 
-            
                 let _request = execution::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
             }
 
-            for _ in 0..2 {                
+            for _ in 0..2 {
                 let _stage = create_execution_stage_for_response_validation_test();
 
                 let _service = _stage.as_service(
@@ -689,7 +685,6 @@ mod tests {
                     false, // Validation disabled
                 );
 
-            
                 let _request = execution::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
             }
@@ -698,17 +693,16 @@ mod tests {
                 (PipelineStep::ExecutionRequest, 3, Some(true)),
                 (PipelineStep::ExecutionResponse, 2, Some(true)),
             ]);
-        }        
+        }
         .with_metrics()
         .await;
     }
 
-     #[tokio::test]
+    #[tokio::test]
     async fn execution_request_metric_incremented_for_errored_stage_processing() {
-
-         // Make 2 requests to better validate metric is being incremented correctly
-        async{
-            for _ in 0..2 {                
+        // Make 2 requests to better validate metric is being incremented correctly
+        async {
+            for _ in 0..2 {
                 let _stage = create_execution_stage_for_request_validation_test();
 
                 let _service = _stage.as_service(
@@ -719,25 +713,25 @@ mod tests {
                     true, // Validation enabled
                 );
 
-            
                 let _request = execution::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
             }
 
-            assert_coprocessor_operations_metrics(&[
-                (PipelineStep::ExecutionRequest, 2, Some(false)),
-            ]);
-        }        
+            assert_coprocessor_operations_metrics(&[(
+                PipelineStep::ExecutionRequest,
+                2,
+                Some(false),
+            )]);
+        }
         .with_metrics()
         .await;
     }
 
-     #[tokio::test]
+    #[tokio::test]
     async fn execution_response_metric_incremented_for_errored_stage_processing() {
-
-         // Make 2 requests to better validate metric is being incremented correctly
-        async{
-            for _ in 0..2 {                
+        // Make 2 requests to better validate metric is being incremented correctly
+        async {
+            for _ in 0..2 {
                 let _stage = create_execution_stage_for_response_validation_test();
 
                 let _service = _stage.as_service(
@@ -748,24 +742,24 @@ mod tests {
                     true, // Validation enabled
                 );
 
-            
                 let _request = execution::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
             }
 
-            assert_coprocessor_operations_metrics(&[
-                (PipelineStep::ExecutionResponse, 2, Some(false)),
-            ]);
-        }        
+            assert_coprocessor_operations_metrics(&[(
+                PipelineStep::ExecutionResponse,
+                2,
+                Some(false),
+            )]);
+        }
         .with_metrics()
         .await;
     }
 
-     #[tokio::test]
+    #[tokio::test]
     async fn both_execution_stages_metric_incremented_for_errored_stages_processing() {
-
-        async{
-            for _ in 0..2 {                
+        async {
+            for _ in 0..2 {
                 let _stage = create_execution_stage_for_request_validation_test();
 
                 let _service = _stage.as_service(
@@ -780,7 +774,7 @@ mod tests {
                 let _response = _service.oneshot(_request).await;
             }
 
-            for _ in 0..3 {                
+            for _ in 0..3 {
                 let _stage = create_execution_stage_for_response_validation_test();
 
                 let _service = _stage.as_service(
@@ -791,7 +785,6 @@ mod tests {
                     false, // Validation disabled
                 );
 
-            
                 let _request = execution::Request::fake_builder().build();
                 let _response = _service.oneshot(_request).await;
             }
@@ -800,7 +793,7 @@ mod tests {
                 (PipelineStep::ExecutionRequest, 2, Some(false)),
                 (PipelineStep::ExecutionResponse, 3, Some(false)),
             ]);
-        }        
+        }
         .with_metrics()
         .await;
     }

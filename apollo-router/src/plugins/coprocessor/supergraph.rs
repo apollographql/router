@@ -218,13 +218,12 @@ where
         .and_sdl(sdl_to_send)
         .build();
 
-    tracing::debug!(?payload, "externalized output");    
+    tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
 
-    record_coprocessor_duration(PipelineStep::SupergraphRequest, 
-        start.elapsed());    
-    
+    record_coprocessor_duration(PipelineStep::SupergraphRequest, start.elapsed());
+
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
 
@@ -378,11 +377,10 @@ where
         .build();
 
     // Second, call our co-processor and get a reply.
-    tracing::debug!(?payload, "externalized output");    
+    tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
-    let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;    
-    record_coprocessor_duration(PipelineStep::SupergraphResponse, 
-        start.elapsed());    
+    let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
+    record_coprocessor_duration(PipelineStep::SupergraphResponse, start.elapsed());
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
@@ -560,14 +558,13 @@ mod tests {
     use super::super::*;
     use super::*;
     use crate::json_ext::Object;
+    use crate::metrics::FutureMetricsExt;
     use crate::plugin::test::MockInternalHttpClientService;
     use crate::plugin::test::MockSupergraphService;
+    use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::services::router;
-    use crate::services::supergraph;    
-    use crate::metrics::FutureMetricsExt;
-    use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
-
+    use crate::services::supergraph;
 
     #[allow(clippy::type_complexity)]
     pub(crate) fn mock_with_callback(
@@ -613,11 +610,10 @@ mod tests {
 
         mock_http_client
     }
-    
+
     #[tokio::test]
     async fn supergraph_request_metric_not_incremented_when_condition_false() {
-
-        async{
+        async {
             for _ in 0..2 {
                 // Create a Supergraph stage with condition = false
                 let _stage = create_supergraph_stage_for_request_with_false_condition();
@@ -630,24 +626,20 @@ mod tests {
                     false, // Validation disabled
                 );
 
-            
                 let _request = supergraph::Request::fake_builder().build().unwrap();
                 let _response = _service.oneshot(_request).await;
             }
 
             // This call will validate there are no metrics for all stages
             assert_coprocessor_operations_metrics(&[]);
-            
-        }        
+        }
         .with_metrics()
         .await;
     }
 
-
     #[tokio::test]
     async fn supergraph_response_metric_not_incremented_when_condition_false() {
-
-        async{
+        async {
             for _ in 0..2 {
                 // Create a Supergraph stage with condition = false
                 let _stage = create_supergraph_stage_for_response_with_false_condition();
@@ -660,23 +652,20 @@ mod tests {
                     false, // Validation disabled
                 );
 
-            
                 let _request = supergraph::Request::fake_builder().build().unwrap();
                 let _response = _service.oneshot(_request).await;
             }
 
             assert_coprocessor_operations_metrics(&[]);
-
-        }        
+        }
         .with_metrics()
         .await;
     }
-    
+
     #[tokio::test]
     async fn supergraph_request_metric_incremented_when_condition_true() {
-
-         // Make 2 requests to better validate metric is being incremented correctly
-        async{
+        // Make 2 requests to better validate metric is being incremented correctly
+        async {
             for _ in 0..2 {
                 // Create a Supergraph stage with condition = false
                 let _stage = create_supergraph_stage_for_request_validation_test();
@@ -688,16 +677,17 @@ mod tests {
                     Arc::default(),
                     false, // Validation disabled
                 );
-            
+
                 let _request = supergraph::Request::fake_builder().build().unwrap();
                 let _response = _service.oneshot(_request).await;
             }
 
-             assert_coprocessor_operations_metrics(&[
-                (PipelineStep::SupergraphRequest, 2, Some(true)),
-            ]);
-            
-        }        
+            assert_coprocessor_operations_metrics(&[(
+                PipelineStep::SupergraphRequest,
+                2,
+                Some(true),
+            )]);
+        }
         .with_metrics()
         .await;
 
@@ -705,11 +695,10 @@ mod tests {
         // (if the function were invoked, mockall would panic due to times(0))
     }
 
-     #[tokio::test]
+    #[tokio::test]
     async fn supergraph_response_metric_incremented_when_condition_true() {
-
-         // Make 3 requests to better validate metric is being incremented correctly
-        async{
+        // Make 3 requests to better validate metric is being incremented correctly
+        async {
             for _ in 0..3 {
                 // Create a Supergraph stage with condition = false
                 let _stage = create_supergraph_stage_for_response_validation_test();
@@ -722,15 +711,16 @@ mod tests {
                     false, // Validation disabled
                 );
 
-            
                 let _request = supergraph::Request::fake_builder().build().unwrap();
                 let _response = _service.oneshot(_request).await;
             }
 
-            assert_coprocessor_operations_metrics(&[
-                (PipelineStep::SupergraphResponse, 3, Some(true)),
-            ]);
-        }        
+            assert_coprocessor_operations_metrics(&[(
+                PipelineStep::SupergraphResponse,
+                3,
+                Some(true),
+            )]);
+        }
         .with_metrics()
         .await;
 
@@ -738,11 +728,10 @@ mod tests {
         // (if the function were invoked, mockall would panic due to times(0))
     }
 
-     #[tokio::test]
+    #[tokio::test]
     async fn both_supergraph_stages_metric_incremented_when_conditions_true() {
-
-        async{
-            for _ in 0..3 {                
+        async {
+            for _ in 0..3 {
                 let _stage = create_supergraph_stage_for_request_validation_test();
 
                 let _service = _stage.as_service(
@@ -753,12 +742,11 @@ mod tests {
                     false, // Validation disabled
                 );
 
-            
                 let _request = supergraph::Request::fake_builder().build().unwrap();
                 let _response = _service.oneshot(_request).await;
             }
 
-            for _ in 0..2 {                
+            for _ in 0..2 {
                 let _stage = create_supergraph_stage_for_response_validation_test();
 
                 let _service = _stage.as_service(
@@ -769,7 +757,6 @@ mod tests {
                     false, // Validation disabled
                 );
 
-            
                 let _request = supergraph::Request::fake_builder().build().unwrap();
                 let _response = _service.oneshot(_request).await;
             }
@@ -778,7 +765,7 @@ mod tests {
                 (PipelineStep::SupergraphRequest, 3, Some(true)),
                 (PipelineStep::SupergraphResponse, 2, Some(true)),
             ]);
-        }        
+        }
         .with_metrics()
         .await;
 
@@ -786,11 +773,10 @@ mod tests {
         // (if the function were invoked, mockall would panic due to times(0))
     }
 
-     #[tokio::test]
+    #[tokio::test]
     async fn supergraph_request_metric_incremented_for_errored_stage_processing() {
-
-         // Make 2 requests to better validate metric is being incremented correctly
-        async{
+        // Make 2 requests to better validate metric is being incremented correctly
+        async {
             for _ in 0..2 {
                 // Create a Supergraph stage with condition = false
                 let _stage = create_supergraph_stage_for_request_validation_test();
@@ -803,15 +789,16 @@ mod tests {
                     true, // Validation disabled
                 );
 
-            
                 let _request = supergraph::Request::fake_builder().build().unwrap();
                 let _response = _service.oneshot(_request).await;
             }
 
-            assert_coprocessor_operations_metrics(&[
-                (PipelineStep::SupergraphRequest, 2, Some(false)),
-            ]);
-        }        
+            assert_coprocessor_operations_metrics(&[(
+                PipelineStep::SupergraphRequest,
+                2,
+                Some(false),
+            )]);
+        }
         .with_metrics()
         .await;
 
@@ -819,11 +806,10 @@ mod tests {
         // (if the function were invoked, mockall would panic due to times(0))
     }
 
-     #[tokio::test]
+    #[tokio::test]
     async fn supergraph_response_metric_incremented_for_errored_stage_processing() {
-
-         // Make 2 requests to better validate metric is being incremented correctly
-        async{
+        // Make 2 requests to better validate metric is being incremented correctly
+        async {
             for _ in 0..2 {
                 // Create a Supergraph stage with condition = false
                 let _stage = create_supergraph_stage_for_response_validation_test();
@@ -836,15 +822,16 @@ mod tests {
                     true, // Validation disabled
                 );
 
-            
                 let _request = supergraph::Request::fake_builder().build().unwrap();
                 let _response = _service.oneshot(_request).await;
             }
 
-            assert_coprocessor_operations_metrics(&[
-                (PipelineStep::SupergraphResponse, 2, Some(false)),
-            ]);
-        }        
+            assert_coprocessor_operations_metrics(&[(
+                PipelineStep::SupergraphResponse,
+                2,
+                Some(false),
+            )]);
+        }
         .with_metrics()
         .await;
 
@@ -852,12 +839,10 @@ mod tests {
         // (if the function were invoked, mockall would panic due to times(0))
     }
 
-
-     #[tokio::test]
+    #[tokio::test]
     async fn both_supergraph_stages_metric_incremented_for_errored_stages_processing() {
-
-        async{
-            for _ in 0..2 {                
+        async {
+            for _ in 0..2 {
                 let _stage = create_supergraph_stage_for_request_validation_test();
 
                 let _service = _stage.as_service(
@@ -868,12 +853,11 @@ mod tests {
                     false, // Validation disabled
                 );
 
-            
                 let _request = supergraph::Request::fake_builder().build().unwrap();
                 let _response = _service.oneshot(_request).await;
             }
 
-            for _ in 0..3 {                
+            for _ in 0..3 {
                 let _stage = create_supergraph_stage_for_response_validation_test();
 
                 let _service = _stage.as_service(
@@ -884,7 +868,6 @@ mod tests {
                     false, // Validation disabled
                 );
 
-            
                 let _request = supergraph::Request::fake_builder().build().unwrap();
                 let _response = _service.oneshot(_request).await;
             }
@@ -893,7 +876,7 @@ mod tests {
                 (PipelineStep::SupergraphRequest, 2, Some(false)),
                 (PipelineStep::SupergraphResponse, 3, Some(false)),
             ]);
-        }        
+        }
         .with_metrics()
         .await;
 
@@ -1549,7 +1532,6 @@ mod tests {
             json!({ "data": { "test": 3 }, "hasNext": false }),
         );
     }
-    
 
     // Helper function to create supergraph stage for validation tests
     fn create_supergraph_stage_for_response_validation_test() -> SupergraphStage {
@@ -1567,8 +1549,7 @@ mod tests {
         }
     }
 
-
-    // Helper to create a SupergraphStage request with condition always false    
+    // Helper to create a SupergraphStage request with condition always false
     fn create_supergraph_stage_for_request_with_false_condition() -> SupergraphStage {
         SupergraphStage {
             request: SupergraphRequestConf {
