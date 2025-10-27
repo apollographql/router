@@ -1,12 +1,13 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::mem;
+use std::mem::take;
 use std::sync::Arc;
 
 use derive_more::From;
 use opentelemetry::InstrumentationScope;
 use opentelemetry::KeyValue;
-use opentelemetry::metrics::Counter;
+use opentelemetry::metrics::{AsyncInstrument, Counter, ObservableCounter};
 use opentelemetry::metrics::Gauge;
 use opentelemetry::metrics::Histogram;
 use opentelemetry::metrics::InstrumentProvider;
@@ -337,14 +338,36 @@ impl<T: Copy> SyncInstrument<T> for AggregateGauge<T> {
     }
 }
 
-// Observable instruments don't need to have a ton of optimisation because they are only read on demand.
 macro_rules! aggregate_observable_instrument_fn {
-    ($name:ident, $ty:ty, $wrapper:ident) => {
+    ($name:ident, $ty:ty, $instrument:ident) => {
         fn $name(
             &self,
-            _builder: opentelemetry::metrics::AsyncInstrumentBuilder<'_, $wrapper<$ty>, $ty>,
-        ) -> $wrapper<$ty> {
-            $wrapper::new()
+            mut builder: opentelemetry::metrics::AsyncInstrumentBuilder<'_, $instrument<$ty>, $ty>,
+        ) -> $instrument<$ty> {
+            // TODO Feels like AI slop. Figure out a less ugly way
+            let callbacks: Vec<Arc<dyn Fn(&dyn AsyncInstrument<$ty>) + Send + Sync>> = take(&mut builder.callbacks)
+                .into_iter()
+                .map(Arc::from)
+                .collect();
+            for meter in &self.meters {
+                let mut instrument_builder = meter.$name(builder.name.clone());
+                if let Some(ref desc) = builder.description {
+                    instrument_builder = instrument_builder.with_description(desc.clone());
+                }
+                if let Some(ref u) = builder.unit {
+                    instrument_builder = instrument_builder.with_unit(u.clone());
+                }
+                // We must register the observe callbacks
+                for cb in &callbacks {
+                    let cb = Arc::clone(cb);
+                    instrument_builder = instrument_builder.with_callback(move |inst| cb(inst));
+                }
+                instrument_builder.build();
+            }
+            // TODO test to see if this is true
+            // Now that we've registered the instrument and its observed callbacks on each meter,
+            // they can no longer be accessed or modified. Return a stub.
+            $instrument::new()
         }
     };
 }

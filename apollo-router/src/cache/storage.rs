@@ -346,6 +346,7 @@ mod test {
             cache.activate();
 
             cache.insert("test".to_string(), Stuff {}).await;
+
             assert_gauge!(
                 "apollo.router.cache.storage.estimated_size",
                 1,
