@@ -1,9 +1,9 @@
-### Automatic unit conversion for duration instruments with non-second units
+### Add automatic unit conversion for duration instruments with non-second units
 
-The Router now automatically converts duration measurements to match the configured unit for telemetry instruments.
+The router now automatically converts duration measurements to match the configured unit for telemetry instruments.
 Previously, duration instruments always recorded values in seconds regardless of the configured `unit` field.
-With this enhancement, when you specify units like `"ms"` (milliseconds), `"us"` (microseconds), or `"ns"` (nanoseconds),
-the Router will automatically convert the measured duration to the appropriate scale.
+When you specify units like `"ms"` (milliseconds), `"us"` (microseconds), or `"ns"` (nanoseconds),
+the router automatically converts the measured duration to the appropriate scale.
 
 **Supported units:**
 - `"s"` - seconds (default)
@@ -11,8 +11,8 @@ the Router will automatically convert the measured duration to the appropriate s
 - `"us"` - microseconds
 - `"ns"` - nanoseconds
 
-Important Note: This should only be used in cases where you are required to integrate with an observability platform that does not properly translate from source timeunit into the necessary target timeunit (ie: seconds to milliseconds).  In all other cases, 
-customers should follow the OLTP convention indicating you "SHOULD" use seconds as the unit.
+> [!NOTE]
+> Use this feature only when you need to integrate with an observability platform that doesn't properly translate from source time units to target time units (for example, seconds to milliseconds). In all other cases, follow the OTLP convention that you "SHOULD" use seconds as the unit.
 
 **Example:**
 ```yaml title="router.yaml"

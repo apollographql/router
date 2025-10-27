@@ -1,8 +1,7 @@
-### (refactor) UpDownCounter RAII guards ([PR #8379](https://github.com/apollographql/router/pull/8379))
+### Prevent UpDownCounter drift using RAII guards ([PR #8379](https://github.com/apollographql/router/pull/8379))
 
-Previously UpDownCounters were being manually incremented and decremented. This PR changes UpDownCounters to use RAII guards
-on drop ensuring that they are always decremented when dropped.
+UpDownCounters now use RAII guards instead of manual incrementing and decrementing, ensuring they're always decremented when dropped.
 
-In particular this fixes: `apollo.router.opened.subscriptions` which was previously drifting due to manual incrementing and decrementing.
+This fix resolves drift in `apollo.router.opened.subscriptions` that occurred due to manual incrementing and decrementing.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/8379

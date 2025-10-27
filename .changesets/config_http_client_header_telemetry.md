@@ -1,6 +1,6 @@
-### Telemetry instrumentation config for http_client headers ([PR #8349](https://github.com/apollographql/router/pull/8349))
+### Add telemetry instrumentation config for `http_client` headers ([PR #8349](https://github.com/apollographql/router/pull/8349))
 
-Adds a new telemetry instrumentation configuration for the http_client spans. This setting allows request headers added by Rhai scripts to be attached to the http_client span. The `some_rhai_response_header` value is available on the subgraph span as before.
+A new telemetry instrumentation configuration for `http_client` spans allows request headers added by Rhai scripts to be attached to the `http_client` span. The `some_rhai_response_header` value remains available on the subgraph span as before.
 
 ```yaml
 telemetry:

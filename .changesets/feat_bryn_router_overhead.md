@@ -1,4 +1,4 @@
-### (feat) Add router overhead metric ([PR #8455](https://github.com/apollographql/router/pull/8455))
+### Add router overhead metric ([PR #8455](https://github.com/apollographql/router/pull/8455))
 
 The `apollo.router.overhead` histogram provides a direct measurement of router processing overhead. This metric tracks the time the router spends on tasks other than waiting for downstream HTTP requests—including GraphQL parsing, validation, query planning, response composition, and plugin execution.
 

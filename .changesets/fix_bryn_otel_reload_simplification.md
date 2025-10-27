@@ -1,8 +1,7 @@
-### Only reload telemetry when needed ([PR #8328](https://github.com/apollographql/router/pull/8328))
+### Reload telemetry only when configuration changes ([PR #8328](https://github.com/apollographql/router/pull/8328))
 
-Previously when schema or config reload took place telemetry would always be reloaded. This would drop existing exporters 
-and create new ones.
+Previously, schema or config reloads would always reload telemetry, dropping existing exporters and creating new ones.
 
-Telemetry exporters will now only be recreated if relevant configuration has changed.
+Telemetry exporters are now only recreated when relevant configuration has changed.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/8328
