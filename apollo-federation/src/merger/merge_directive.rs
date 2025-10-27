@@ -181,7 +181,7 @@ impl Merger {
                     })
                     .cloned()
                     .collect_vec();
-                if let Some(merged_value) = (merger.merge)(name, &values)? {
+                if let Some(merged_value) = (merger.merge)(&arg_def.name, &values)? {
                     let merged_arg = Argument {
                         name: arg_def.name.clone(),
                         value: Node::new(merged_value),
