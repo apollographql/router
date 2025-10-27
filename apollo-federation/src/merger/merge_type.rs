@@ -30,7 +30,8 @@ impl Merger {
             .map(|(idx, subgraph)| (idx, subgraph.schema().get_type(type_def.clone()).ok()))
             .collect();
 
-        self.check_for_extension_with_no_base(&sources, &dest);
+        // FED-877: Disabled until apollo-compiler 2.0 is released.
+        // self.check_for_extension_with_no_base(&sources, &dest);
         self.merge_description(&sources, &dest)?;
         self.add_join_type(&sources, &dest)?;
         self.record_applied_directives_to_merge(&sources, &dest)?;
@@ -95,6 +96,7 @@ impl Merger {
     /// Records errors if this type is defined as an extension in all subgraphs where it is
     /// present. This is a good candidate to move to the pre-merge validations phase, but we
     /// currently check during merge because it requires visiting all types in the schema.
+    #[allow(dead_code)]
     fn check_for_extension_with_no_base(
         &mut self,
         sources: &Sources<TypeDefinitionPosition>,

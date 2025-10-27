@@ -122,7 +122,8 @@ impl SchemaUpgrader {
             extends_directive_name: subgraph.extends_directive_name()?.clone(),
             metadata: subgraph.metadata().clone(),
         };
-        self.pre_upgrade_validations(&upgrade_metadata, &subgraph)?;
+        // FED-877: Disabled until apollo-compiler 2.0 is released.
+        // self.pre_upgrade_validations(&upgrade_metadata, &subgraph)?;
 
         // TODO avoid cloning the schema here
         let mut schema = self.upgrade_spec_links(subgraph.schema().clone())?;
@@ -185,6 +186,7 @@ impl SchemaUpgrader {
     }
 
     // integrates checkForExtensionWithNoBase from the JS code
+    #[allow(dead_code)]
     fn pre_upgrade_validations(
         &self,
         upgrade_metadata: &UpgradeMetadata,
