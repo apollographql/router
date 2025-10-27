@@ -81,6 +81,11 @@ pub fn merge_subgraphs(
             message: e.to_string(),
         }]
     })?;
+    tracing::trace!(
+        "Merge has {} errors and {} hints",
+        result.errors.len(),
+        result.hints.len()
+    );
     if result.errors.is_empty() {
         let schema = result
             .supergraph
