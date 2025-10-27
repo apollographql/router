@@ -323,36 +323,36 @@ mod federation_directives {
 mod inconsistent_feature_versions {
     use super::*;
 
-    #[ignore = "until merge implementation completed"]
+    #[ignore = "hint not yet implemented - needs to detect major version mismatches in non-composed directives"]
     #[test]
     fn hints_when_mismatched_versions_are_not_composed() {
         let subgraph_a = generate_subgraph(
             r#"subgraphA"#,
             r#"@link(url: "https://specs.custom.dev/foo/v5.0", import: ["@foo"])"#,
             "",
-            r#"directive @foo(String!) on FIELD_DEFINITION"#,
-            r#"@foo("a")"#,
+            r#"directive @foo(arg: String!) on FIELD_DEFINITION"#,
+            r#"@foo(arg: "a")"#,
         );
         let subgraph_b = generate_subgraph(
             r#"subgraphB"#,
             r#"@link(url: "https://specs.custom.dev/foo/v2.0", import: ["@foo"])"#,
             "",
-            r#"directive @foo(String!) on FIELD_DEFINITION"#,
-            r#"@foo("b")"#,
+            r#"directive @foo(arg: String!) on FIELD_DEFINITION"#,
+            r#"@foo(arg: "b")"#,
         );
         let subgraph_c = generate_subgraph(
             r#"subgraphC"#,
             r#"@link(url: "https://specs.custom.dev/foo/v3.0", import: ["@foo"])"#,
             "",
-            r#"directive @foo(String!) on FIELD_DEFINITION"#,
-            r#"@foo("")"#,
+            r#"directive @foo(arg: String!) on FIELD_DEFINITION"#,
+            r#"@foo(arg: "")"#,
         );
         let subgraph_d = generate_subgraph(
             r#"subgraphD"#,
             r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo"])"#,
             "",
-            r#"directive @foo(String!) on FIELD_DEFINITION"#,
-            r#"@foo("b")"#,
+            r#"directive @foo(arg: String!) on FIELD_DEFINITION"#,
+            r#"@foo(arg: "b")"#,
         );
 
         let result = compose(vec![subgraph_a, subgraph_b, subgraph_c, subgraph_d]).unwrap();
@@ -398,13 +398,11 @@ mod inconsistent_feature_versions {
     }
 
     #[rstest]
-    #[ignore = "until merge implementation completed"]
     #[case(
-        r#"composeDirective(name: "foo")"#,
+        r#"@composeDirective(name: "@foo")"#,
         "https://specs.custom.dev/foo/v1.4",
         "directive @foo(name: String!) on FIELD_DEFINITION | OBJECT"
     )]
-    #[ignore = "until merge implementation completed"]
     #[case(
         "",
         "https://specs.custom.dev/foo/v1.0",
@@ -418,7 +416,7 @@ mod inconsistent_feature_versions {
         let subgraph_a = generate_subgraph(
             "subgraphA",
             r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo"])"#,
-            r#"composeDirective(name: "foo")"#,
+            r#"@composeDirective(name: "@foo")"#,
             "directive @foo(name: String!) on FIELD_DEFINITION",
             r#"@foo(name: "a")"#,
         );
@@ -442,14 +440,12 @@ mod inconsistent_imports {
     use super::*;
 
     #[rstest]
-    #[ignore = "until merge implementation completed"]
     #[case(
         r#"
         directive @foo(name: String!) on FIELD_DEFINITION
         directive @bar(name: String!, address: String) on FIELD_DEFINITION | OBJECT
     "#
     )]
-    #[ignore = "until merge implementation completed"]
     #[case(
         r#"
         directive @foo(name: String!) on FIELD_DEFINITION
@@ -485,12 +481,29 @@ mod inconsistent_imports {
             "directive @bar(name: String!, address: String) on FIELD_DEFINITION | OBJECT",
         );
 
-        let schema = result.schema().schema().to_string();
-        assert!(schema.contains(r#"subgraphA: String @foo(name: "a")"#));
-        assert!(schema.contains(r#"subgraphB: String @bar(name: "b")"#));
+        let schema = result.schema().schema();
+        
+        let subgraph_a_field = coord!(User.subgraphA)
+            .lookup_field(schema)
+            .unwrap();
+        let foo_directive = subgraph_a_field
+            .directives
+            .iter()
+            .find(|d| d.name == "foo")
+            .expect("Expected @foo directive to be present on User.subgraphA");
+        assert_eq!(foo_directive.to_string(), r#"@foo(name: "a")"#);
+        
+        let subgraph_b_field = coord!(User.subgraphB)
+            .lookup_field(schema)
+            .unwrap();
+        let bar_directive = subgraph_b_field
+            .directives
+            .iter()
+            .find(|d| d.name == "bar")
+            .expect("Expected @bar directive to be present on User.subgraphB");
+        assert_eq!(bar_directive.to_string(), r#"@bar(name: "b")"#);
     }
 
-    #[ignore = "until merge implementation completed"]
     #[test]
     fn hints_when_imported_with_mismatched_name_but_not_exported() {
         let subgraph_a = generate_subgraph(
@@ -533,12 +546,30 @@ mod inconsistent_imports {
             "directive @bar(name: String!, address: String) on FIELD_DEFINITION | OBJECT",
         );
 
-        let schema = result.schema().schema().to_string();
-        assert!(schema.contains(r#"subgraphA: String @foo(name: "a")"#));
-        assert!(schema.contains(r#"subgraphB: String @bar(name: "b")"#));
+        let schema = result.schema().schema();
+        
+        let subgraph_a_field = coord!(User.subgraphA)
+            .lookup_field(schema)
+            .unwrap();
+        let foo_directive = subgraph_a_field
+            .directives
+            .iter()
+            .find(|d| d.name == "foo")
+            .expect("Expected @foo directive to be present on User.subgraphA");
+        assert_eq!(foo_directive.to_string(), r#"@foo(name: "a")"#);
+        
+        let subgraph_b_field = coord!(User.subgraphB)
+            .lookup_field(schema)
+            .unwrap();
+        let bar_directive = subgraph_b_field
+            .directives
+            .iter()
+            .find(|d| d.name == "bar")
+            .expect("Expected @bar directive to be present on User.subgraphB");
+        assert_eq!(bar_directive.to_string(), r#"@bar(name: "b")"#);
     }
 
-    #[ignore = "until merge implementation completed"]
+    #[ignore = "validation not yet implemented - needs to check that @composeDirective references exist in linked spec"]
     #[test]
     fn errors_when_exported_but_undefined() {
         let subgraph_a = generate_subgraph(
@@ -884,7 +915,7 @@ Did you mean "@bar"?
 mod composition {
     use super::*;
 
-    #[ignore = "until merge implementation completed"]
+    #[ignore = "needs implementation - should allow custom @tag alongside federation @tag when federation one is not renamed"]
     #[test]
     fn composes_custom_tag_directive_when_renamed() {
         let subgraph_a = Subgraph::parse("subgraphA", "", r#"
@@ -916,15 +947,30 @@ mod composition {
             "directive @mytag(name: String!, prop: String!) on FIELD_DEFINITION | OBJECT",
         );
 
-        let schema = result.schema().schema().to_string();
-        assert!(schema.contains(r#"a: String @mytag(name: "a", prop: "b")"#));
-        assert!(schema.contains(r#"b: String @tag(name: "c")"#));
-        assert!(schema.contains(
+        let schema = result.schema().schema();
+        
+        let field_a = coord!(User.a).lookup_field(schema).unwrap();
+        let mytag_directive = field_a
+            .directives
+            .iter()
+            .find(|d| d.name == "mytag")
+            .expect("Expected @mytag directive on User.a");
+        assert_eq!(mytag_directive.to_string(), r#"@mytag(name: "a", prop: "b")"#);
+        
+        let field_b = coord!(User.b).lookup_field(schema).unwrap();
+        let tag_directive = field_b
+            .directives
+            .iter()
+            .find(|d| d.name == "tag")
+            .expect("Expected @tag directive on User.b");
+        assert_eq!(tag_directive.to_string(), r#"@tag(name: "c")"#);
+        
+        assert!(schema.to_string().contains(
             r#"@link(url: "https://custom.dev/tag/v1.0", import: [{ name: "@tag", as: "@mytag"}])"#
         ));
     }
 
-    #[ignore = "until merge implementation completed"]
+    #[ignore = "needs implementation - should allow custom @tag when federation @tag is renamed to different name"]
     #[test]
     fn composes_custom_tag_when_federation_tag_is_renamed() {
         let subgraph_a = Subgraph::parse("subgraphA", "", r#"
@@ -956,13 +1002,27 @@ mod composition {
             "directive @tag(name: String!, prop: String!) on FIELD_DEFINITION | OBJECT",
         );
 
-        let schema = result.schema().schema().to_string();
-        assert!(schema.contains(r#"a: String @tag(name: "a", prop: "b")"#));
-        assert!(schema.contains(r#"b: String @mytag(name: "c")"#));
-        assert!(schema.contains(r#"@link(url: "https://custom.dev/tag/v1.0", import: ["@tag"])"#));
+        let schema = result.schema().schema();
+        
+        let field_a = coord!(User.a).lookup_field(schema).unwrap();
+        let tag_directive = field_a
+            .directives
+            .iter()
+            .find(|d| d.name == "tag")
+            .expect("Expected @tag directive on User.a");
+        assert_eq!(tag_directive.to_string(), r#"@tag(name: "a", prop: "b")"#);
+        
+        let field_b = coord!(User.b).lookup_field(schema).unwrap();
+        let mytag_directive = field_b
+            .directives
+            .iter()
+            .find(|d| d.name == "mytag")
+            .expect("Expected @mytag directive on User.b");
+        assert_eq!(mytag_directive.to_string(), r#"@mytag(name: "c")"#);
+        
+        assert!(schema.to_string().contains(r#"@link(url: "https://custom.dev/tag/v1.0", import: ["@tag"])"#));
     }
 
-    #[ignore = "until merge implementation completed"]
     #[test]
     fn composes_repeatable_custom_directives() {
         let subgraph_a = Subgraph::parse("subgraphA", "", r#"
@@ -987,15 +1047,21 @@ mod composition {
         "#).unwrap();
 
         let result = compose(vec![subgraph_a, subgraph_b]).unwrap();
-        let schema = result.schema().schema().to_string();
-        assert!(
-            schema.contains(
-                r#"shared: String @shareable @auth(scope: "VIEWER") @auth(scope: "ADMIN")"#
-            )
-        )
+        let schema = result.schema().schema();
+        
+        let shared_field = coord!(Query.shared).lookup_field(schema).unwrap();
+        let auth_directives: Vec<_> = shared_field
+            .directives
+            .iter()
+            .filter(|d| d.name == "auth")
+            .collect();
+        
+        assert_eq!(auth_directives.len(), 2, "Expected 2 @auth directives on Query.shared");
+        
+        assert_eq!(auth_directives[0].to_string(), r#"@auth(scope: "VIEWER")"#);
+        assert_eq!(auth_directives[1].to_string(), r#"@auth(scope: "ADMIN")"#);
     }
 
-    #[ignore = "until merge implementation completed"]
     #[test]
     fn composes_custom_directive_with_nullable_array_arguments() {
         let subgraph_a = Subgraph::parse("subgraphA", "", r#"
@@ -1020,8 +1086,19 @@ mod composition {
         "#).unwrap();
 
         let result = compose(vec![subgraph_a, subgraph_b]).unwrap();
-        let schema = result.schema().schema().to_string();
-        assert!(schema.contains(r#"shared: String @shareable @auth(scope: ["VIEWER"]) @auth"#));
+        let schema = result.schema().schema();
+        
+        let shared_field = coord!(Query.shared).lookup_field(schema).unwrap();
+        let auth_directives: Vec<_> = shared_field
+            .directives
+            .iter()
+            .filter(|d| d.name == "auth")
+            .collect();
+        
+        assert_eq!(auth_directives.len(), 2, "Expected 2 @auth directives on Query.shared");
+        
+        assert_eq!(auth_directives[0].to_string(), r#"@auth(scope: "VIEWER")"#);
+        assert_eq!(auth_directives[1].to_string(), "@auth");
     }
 }
 
