@@ -1,5 +1,5 @@
-use apollo_compiler::coord;
 use apollo_compiler::Name;
+use apollo_compiler::coord;
 use apollo_federation::composition::compose;
 use apollo_federation::subgraph::typestate::Initial;
 use apollo_federation::subgraph::typestate::Subgraph;
@@ -29,13 +29,13 @@ mod simple_cases {
 
         let schema = result.schema().schema();
         assert!(
-            schema.to_string().contains(r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo"])"#),
+            schema
+                .to_string()
+                .contains(r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo"])"#),
             "Schema does not contain expected @link directive"
         );
-        
-        let subgraph_a_field = coord!(User.subgraphA)
-            .lookup_field(schema)
-            .unwrap();
+
+        let subgraph_a_field = coord!(User.subgraphA).lookup_field(schema).unwrap();
         let foo_directive = subgraph_a_field
             .directives
             .iter()
@@ -56,7 +56,7 @@ mod simple_cases {
         let subgraph_b = generate_subgraph("subgraphB", "", "", "", "");
 
         let result = compose(vec![subgraph_a, subgraph_b]).unwrap();
-        
+
         assert_has_directive_definition(
             &result,
             "directive @foo__bar(name: String!) on FIELD_DEFINITION",
@@ -67,10 +67,8 @@ mod simple_cases {
             schema.to_string().contains(r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: [{name: "@bar", as: "@foo__bar"}])"#),
             "Schema does not contain expected @link directive"
         );
-        
-        let subgraph_a_field = coord!(User.subgraphA)
-            .lookup_field(schema)
-            .unwrap();
+
+        let subgraph_a_field = coord!(User.subgraphA).lookup_field(schema).unwrap();
         let foo_bar_directive = subgraph_a_field
             .directives
             .iter()
@@ -108,13 +106,13 @@ mod simple_cases {
 
         let schema = result.schema().schema();
         assert!(
-            schema.to_string().contains(r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo"])"#),
+            schema
+                .to_string()
+                .contains(r#"@link(url: "https://specs.custom.dev/foo/v1.0", import: ["@foo"])"#),
             "Schema does not contain expected @link directive"
         );
-        
-        let user_a_field = coord!(User.a)
-            .lookup_field(schema)
-            .unwrap();
+
+        let user_a_field = coord!(User.a).lookup_field(schema).unwrap();
         let foo_directive = user_a_field
             .directives
             .iter()
@@ -323,7 +321,6 @@ mod federation_directives {
 mod inconsistent_feature_versions {
     use super::*;
 
-    #[ignore = "hint not yet implemented - needs to detect major version mismatches in non-composed directives"]
     #[test]
     fn hints_when_mismatched_versions_are_not_composed() {
         let subgraph_a = generate_subgraph(
@@ -482,20 +479,16 @@ mod inconsistent_imports {
         );
 
         let schema = result.schema().schema();
-        
-        let subgraph_a_field = coord!(User.subgraphA)
-            .lookup_field(schema)
-            .unwrap();
+
+        let subgraph_a_field = coord!(User.subgraphA).lookup_field(schema).unwrap();
         let foo_directive = subgraph_a_field
             .directives
             .iter()
             .find(|d| d.name == "foo")
             .expect("Expected @foo directive to be present on User.subgraphA");
         assert_eq!(foo_directive.to_string(), r#"@foo(name: "a")"#);
-        
-        let subgraph_b_field = coord!(User.subgraphB)
-            .lookup_field(schema)
-            .unwrap();
+
+        let subgraph_b_field = coord!(User.subgraphB).lookup_field(schema).unwrap();
         let bar_directive = subgraph_b_field
             .directives
             .iter()
@@ -547,20 +540,16 @@ mod inconsistent_imports {
         );
 
         let schema = result.schema().schema();
-        
-        let subgraph_a_field = coord!(User.subgraphA)
-            .lookup_field(schema)
-            .unwrap();
+
+        let subgraph_a_field = coord!(User.subgraphA).lookup_field(schema).unwrap();
         let foo_directive = subgraph_a_field
             .directives
             .iter()
             .find(|d| d.name == "foo")
             .expect("Expected @foo directive to be present on User.subgraphA");
         assert_eq!(foo_directive.to_string(), r#"@foo(name: "a")"#);
-        
-        let subgraph_b_field = coord!(User.subgraphB)
-            .lookup_field(schema)
-            .unwrap();
+
+        let subgraph_b_field = coord!(User.subgraphB).lookup_field(schema).unwrap();
         let bar_directive = subgraph_b_field
             .directives
             .iter()
@@ -948,15 +937,18 @@ mod composition {
         );
 
         let schema = result.schema().schema();
-        
+
         let field_a = coord!(User.a).lookup_field(schema).unwrap();
         let mytag_directive = field_a
             .directives
             .iter()
             .find(|d| d.name == "mytag")
             .expect("Expected @mytag directive on User.a");
-        assert_eq!(mytag_directive.to_string(), r#"@mytag(name: "a", prop: "b")"#);
-        
+        assert_eq!(
+            mytag_directive.to_string(),
+            r#"@mytag(name: "a", prop: "b")"#
+        );
+
         let field_b = coord!(User.b).lookup_field(schema).unwrap();
         let tag_directive = field_b
             .directives
@@ -964,7 +956,7 @@ mod composition {
             .find(|d| d.name == "tag")
             .expect("Expected @tag directive on User.b");
         assert_eq!(tag_directive.to_string(), r#"@tag(name: "c")"#);
-        
+
         assert!(schema.to_string().contains(
             r#"@link(url: "https://custom.dev/tag/v1.0", import: [{ name: "@tag", as: "@mytag"}])"#
         ));
@@ -1003,7 +995,7 @@ mod composition {
         );
 
         let schema = result.schema().schema();
-        
+
         let field_a = coord!(User.a).lookup_field(schema).unwrap();
         let tag_directive = field_a
             .directives
@@ -1011,7 +1003,7 @@ mod composition {
             .find(|d| d.name == "tag")
             .expect("Expected @tag directive on User.a");
         assert_eq!(tag_directive.to_string(), r#"@tag(name: "a", prop: "b")"#);
-        
+
         let field_b = coord!(User.b).lookup_field(schema).unwrap();
         let mytag_directive = field_b
             .directives
@@ -1019,8 +1011,12 @@ mod composition {
             .find(|d| d.name == "mytag")
             .expect("Expected @mytag directive on User.b");
         assert_eq!(mytag_directive.to_string(), r#"@mytag(name: "c")"#);
-        
-        assert!(schema.to_string().contains(r#"@link(url: "https://custom.dev/tag/v1.0", import: ["@tag"])"#));
+
+        assert!(
+            schema
+                .to_string()
+                .contains(r#"@link(url: "https://custom.dev/tag/v1.0", import: ["@tag"])"#)
+        );
     }
 
     #[test]
@@ -1048,16 +1044,20 @@ mod composition {
 
         let result = compose(vec![subgraph_a, subgraph_b]).unwrap();
         let schema = result.schema().schema();
-        
+
         let shared_field = coord!(Query.shared).lookup_field(schema).unwrap();
         let auth_directives: Vec<_> = shared_field
             .directives
             .iter()
             .filter(|d| d.name == "auth")
             .collect();
-        
-        assert_eq!(auth_directives.len(), 2, "Expected 2 @auth directives on Query.shared");
-        
+
+        assert_eq!(
+            auth_directives.len(),
+            2,
+            "Expected 2 @auth directives on Query.shared"
+        );
+
         assert_eq!(auth_directives[0].to_string(), r#"@auth(scope: "VIEWER")"#);
         assert_eq!(auth_directives[1].to_string(), r#"@auth(scope: "ADMIN")"#);
     }
@@ -1087,16 +1087,20 @@ mod composition {
 
         let result = compose(vec![subgraph_a, subgraph_b]).unwrap();
         let schema = result.schema().schema();
-        
+
         let shared_field = coord!(Query.shared).lookup_field(schema).unwrap();
         let auth_directives: Vec<_> = shared_field
             .directives
             .iter()
             .filter(|d| d.name == "auth")
             .collect();
-        
-        assert_eq!(auth_directives.len(), 2, "Expected 2 @auth directives on Query.shared");
-        
+
+        assert_eq!(
+            auth_directives.len(),
+            2,
+            "Expected 2 @auth directives on Query.shared"
+        );
+
         assert_eq!(auth_directives[0].to_string(), r#"@auth(scope: "VIEWER")"#);
         assert_eq!(auth_directives[1].to_string(), "@auth");
     }

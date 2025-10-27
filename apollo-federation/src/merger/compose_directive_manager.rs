@@ -334,24 +334,64 @@ impl ComposeDirectiveManager {
             }
         }
 
-        // Find the latest version for each imported feature. If we find a major version mismatch,
-        // add this feature to the list of features that won't be merged.
+        // Build a map of all core features used across subgraphs (even non-composed ones)
+        let mut all_features_by_identity: MultiMap<Identity, (Arc<Link>, String)> = MultiMap::new();
+        for subgraph in subgraphs {
+            if let Some(links) = subgraph.schema().metadata() {
+                for link in &links.links {
+                    all_features_by_identity.insert(
+                        link.url.identity.clone(),
+                        (link.clone(), subgraph.name.clone()),
+                    );
+                }
+            }
+        }
+
+        // Check for major version mismatches in ALL features (composed and non-composed)
+        // For non-composed features with mismatches, emit a hint
+        for (identity, features) in all_features_by_identity.iter_all() {
+            if identity.domain == APOLLO_SPEC_DOMAIN {
+                continue;
+            }
+
+            let mut major_versions = HashSet::new();
+            for (link, _) in features {
+                major_versions.insert(link.url.version.major);
+            }
+
+            if major_versions.len() > 1 {
+                // Check if this feature is being composed
+                let is_composed = items_by_identity.contains_key(identity);
+                
+                if is_composed {
+                    error_reporter.add_error(CompositionError::DirectiveCompositionError {
+                        message: format!(
+                            "Core feature \"{}\" requested to be merged has major version mismatch across subgraphs",
+                            identity
+                        )
+                    });
+                    wont_merge_features.insert(identity.clone());
+                } else {
+                    error_reporter.add_hint(CompositionHint {
+                        code: HintCode::DirectiveCompositionInfo.code().to_string(),
+                        message: format!("Non-composed core feature \"{}\" has major version mismatch across subgraphs", identity),
+                        locations: vec![],
+                    });
+                }
+            }
+        }
+
+        // Find the latest version for each imported feature that is being composed
         for (identity, linked_elements) in items_by_identity.iter_all() {
+            if wont_merge_features.contains(identity) {
+                continue;
+            }
+
             for linked_element in linked_elements {
                 let latest = self.latest_feature_map.entry(identity.clone()).or_insert((
                     linked_element.link.link.clone(),
                     linked_element.subgraph_name.clone(),
                 ));
-
-                if linked_element.link.link.url.version.major != latest.0.url.version.major {
-                    error_reporter.add_error(CompositionError::DirectiveCompositionError {
-                        message: format!(
-                            "Core feature \"{}\" requested to be merged has major version mismatch across subgraphs",
-                            linked_element.link.link.url.identity
-                        )
-                    });
-                    break;
-                }
 
                 if linked_element
                     .link
