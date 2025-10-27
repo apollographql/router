@@ -74,6 +74,7 @@ use crate::schema::validators::merged::validate_merged_schema;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
+use crate::utils::first_max_by_key;
 use crate::utils::human_readable::human_readable_subgraph_names;
 use crate::utils::iter_into_single_item;
 
@@ -261,7 +262,7 @@ impl Merger {
                     .code()
                     .to_string(),
                 message: format!(
-                    "Subgraph {} has been implicitly upgraded from federation {} to {}",
+                    "Subgraph {} has been implicitly upgraded from federation v{} to v{}",
                     subgraph.name,
                     linked_federation_version,
                     spec.minimum_federation_version()
@@ -903,7 +904,7 @@ impl Merger {
         obj: ObjectTypeDefinitionPosition,
     ) -> Result<(), FederationError> {
         let is_entity = self.hint_on_inconsistent_entity(&obj)?;
-        let is_value_type = !is_entity && self.merged.is_root_type(&obj.type_name);
+        let is_value_type = !is_entity && !self.merged.is_root_type(&obj.type_name);
         let is_subscription = self.merged.is_subscription_root_type(&obj.type_name);
 
         let added = self.add_fields_shallow(obj.clone())?;
@@ -914,8 +915,22 @@ impl Merger {
         } else {
             for (field, subgraph_fields) in added {
                 if is_value_type {
+                    let subgraph_types = self
+                        .subgraphs
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, subgraph)| {
+                            let maybe_ty: Option<ObjectOrInterfaceTypeDefinitionPosition> =
+                                subgraph
+                                    .schema()
+                                    .get_type(obj.type_name.clone())
+                                    .ok()
+                                    .and_then(|ty| ty.try_into().ok());
+                            (idx, maybe_ty)
+                        })
+                        .collect();
                     self.hint_on_inconsistent_value_type_field(
-                        &subgraph_fields,
+                        &subgraph_types,
                         &ObjectOrInterfaceTypeDefinitionPosition::Object(obj.clone()),
                         &field,
                     )?;
@@ -980,17 +995,18 @@ impl Merger {
         idx: usize,
         ty: &ObjectOrInterfaceTypeDefinitionPosition,
     ) -> Result<bool, FederationError> {
-        Ok(ty.fields(self.merged.schema())?.all(|field| {
-            self.subgraphs[idx]
+        let subgraph = &self.subgraphs[idx];
+        Ok(ty.fields(subgraph.schema().schema())?.all(|field| {
+            subgraph
                 .metadata()
                 .external_metadata()
                 .is_external(&FieldDefinitionPosition::from(field.clone()))
         }))
     }
 
-    pub(crate) fn hint_on_inconsistent_value_type_field<T>(
+    pub(crate) fn hint_on_inconsistent_value_type_field(
         &mut self,
-        sources: &Sources<T>,
+        sources: &Sources<ObjectOrInterfaceTypeDefinitionPosition>,
         dest: &ObjectOrInterfaceTypeDefinitionPosition,
         field: &ObjectOrInterfaceFieldDefinitionPosition,
     ) -> Result<(), FederationError> {
@@ -999,82 +1015,62 @@ impl Merger {
                 HintCode::InconsistentObjectValueTypeField,
                 "non-entity object",
             ),
-            ObjectOrInterfaceFieldDefinitionPosition::Interface(_) => (
-                HintCode::InconsistentInterfaceValueTypeField,
-                "non-entity interface",
-            ),
+            ObjectOrInterfaceFieldDefinitionPosition::Interface(_) => {
+                (HintCode::InconsistentInterfaceValueTypeField, "interface")
+            }
         };
-        for (idx, unit) in sources.iter() {
-            if unit.is_some() {
-                let subgraph = &self.subgraphs[*idx];
-                let field_pos = dest.field(field.field_name().clone());
-                let field = field_pos.try_get(self.merged.schema());
-                if field.is_none() && !self.are_all_fields_external(*idx, dest)? {
-                    // transform sources to ExtendedType sources
-                    let printable_sources = sources
-                        .iter()
-                        .map(|(idx, pos)| match pos {
-                            None => (*idx, None),
-                            Some(_) => {
-                                let extended_type = subgraph
-                                    .schema()
-                                    .schema()
-                                    .types
-                                    .get(dest.type_name())
-                                    .cloned();
-                                (*idx, extended_type)
-                            }
-                        })
-                        .collect::<IndexMap<usize, Option<ExtendedType>>>();
-                    let dest_in_supergraph = match dest {
-                        ObjectOrInterfaceTypeDefinitionPosition::Object(obj) => {
-                            ExtendedType::Object(obj.get(self.merged.schema())?.clone())
-                        }
-                        ObjectOrInterfaceTypeDefinitionPosition::Interface(itf) => {
-                            ExtendedType::Interface(itf.get(self.merged.schema())?.clone())
-                        }
-                    };
-                    fn print_ty_has_field(
-                        ty: &ExtendedType,
-                        field_pos: &ObjectOrInterfaceFieldDefinitionPosition,
-                    ) -> Option<String> {
-                        match ty {
-                            ExtendedType::Object(obj) => {
-                                if obj.fields.contains_key(field_pos.field_name()) {
-                                    Some("yes".to_string())
-                                } else {
-                                    Some("no".to_string())
-                                }
-                            }
-                            ExtendedType::Interface(itf) => {
-                                if itf.fields.contains_key(field_pos.field_name()) {
-                                    Some("yes".to_string())
-                                } else {
-                                    Some("no".to_string())
-                                }
-                            }
-                            _ => Some("no".to_string()),
-                        }
-                    }
-                    self.error_reporter.report_mismatch_hint::<ExtendedType, ExtendedType, ()>(
+        for (idx, source) in sources.iter() {
+            let Some(source) = source else {
+                trace!(
+                    "Subgraph {} does not provide source for {}",
+                    self.names[*idx], dest
+                );
+                continue;
+            };
+            let subgraph = &self.subgraphs[*idx];
+            if !subgraph
+                .schema()
+                .schema()
+                .types
+                .contains_key(dest.type_name())
+            {
+                trace!(
+                    "Subgraph {} does not define type {}",
+                    self.names[*idx], source
+                );
+                continue;
+            }
+            let field_is_defined = source
+                .field(field.field_name().clone())
+                .try_get(subgraph.schema().schema())
+                .is_some();
+            if !field_is_defined
+                && !self.are_all_fields_external(*idx, source)?
+                && !subgraph.is_interface_object_type(&source.clone().into())
+            {
+                self.error_reporter.report_mismatch_hint::<
+                    ObjectOrInterfaceTypeDefinitionPosition,
+                    ObjectOrInterfaceTypeDefinitionPosition,
+                    ()>(
                         hint_id.clone(),
-                        format!("Field \"{}.{}\" of {} type \"{}\" is defined in some but not all subgraphs that define \"{}\"",
-                            dest.type_name(),
-                            field_pos.field_name(),
+format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subgraphs that define \"{}\": ",
                             type_description,
                             dest.type_name(),
                             dest.type_name(),
                         ),
-                        &dest_in_supergraph,
-                        &printable_sources,
-                        |ty| print_ty_has_field(ty, &field_pos),
-                        |ty, _| print_ty_has_field(ty, &field_pos),
-                        |_, subgraphs| format!("\"{}.{}\" is defined in {}", field_pos.type_name(), field_pos.field_name(), subgraphs.unwrap_or_default()),
+                        dest,
+                        sources,
+                        |_| Some("yes".to_string()),
+                        |pos, idx| pos.field(field.field_name().clone())
+                            .try_get(self.subgraphs[idx].schema().schema())
+                            .map(|_| "yes".to_string())
+                            .or(Some("no".to_string())),
+                                                |_, subgraphs| format!("\"{field}\" is defined in {}", subgraphs.unwrap_or_default()),
                         |_, subgraphs| format!(" but not in {}", subgraphs),
+
                         false,
                         false,
-                    );
-                }
+                    )
             }
         }
         Ok(())
@@ -1101,17 +1097,18 @@ impl Merger {
                 }
             }
         }
-        let supergraph = 0;
         if !source_as_entity.is_empty() && !source_as_non_entity.is_empty() {
-            self.error_reporter.report_mismatch_hint::<usize, usize, ()>(
+            self.error_reporter.report_mismatch_hint::<ObjectTypeDefinitionPosition, usize, ()>(
                 HintCode::InconsistentEntity,
-                format!("Type \"{}\" is declared as an entity (has a @key applied) in some but all defining subgraphs: ",
+                format!("Type \"{}\" is declared as an entity (has a @key applied) in some but not all defining subgraphs: ",
                     &obj.type_name,
                 ),
-                &supergraph,
+                obj,
                 &sources,
-                |idx| if source_as_entity.contains(idx) { Some("yes".to_string()) } else { Some("no".to_string()) },
+                // Categorize whether the source has a @key or not.
+                |_| Some("no".to_string()),
                 |idx, _| if source_as_entity.contains(idx) { Some("yes".to_string()) } else { Some("no".to_string()) },
+                // Note that the first callback is for elements that are "like the supergraph". In this case the supergraph has no @key.
                 |_, subgraphs| format!("it has no @key in {}", subgraphs.unwrap_or_default()),
                 |_, subgraphs| format!(" but has some @key in {}", subgraphs),
                 false,
@@ -1336,17 +1333,17 @@ impl Merger {
                 trace!("Types are identical");
                 continue;
             } else if let Ok(true) = self.is_strict_subtype(ty, source_ty) {
-                trace!("Current {ty} is a strict subtype of source {source_ty}");
+                trace!("Source {source_ty} is a strict subtype of current {ty}");
                 has_subtypes = true;
                 if is_input_position {
-                    // For input: upgrade to the supertype
+                    // For inputs, update to the more specific subtype
                     *ty = source_ty.clone();
                 }
             } else if let Ok(true) = self.is_strict_subtype(source_ty, ty) {
-                trace!("Source {source_ty} is a strict subtype of current {ty}");
+                trace!("Current {ty} is a strict subtype of source {source_ty}");
                 has_subtypes = true;
                 if !is_input_position {
-                    // For output: keep the supertype; for input: adopt the subtype
+                    // For outputs, update to the more general supertype
                     *ty = source_ty.clone();
                 }
             } else {
@@ -1366,6 +1363,7 @@ impl Merger {
         self.track_enum_usage(&ty, dest.to_string(), ast_node, is_input_position);
 
         if has_incompatible {
+            trace!("Type has incompatible sources, reporting mismatch error");
             let error = if T::is_argument() {
                 CompositionError::FieldArgumentTypeMismatch {
                     message: format!(
@@ -1394,7 +1392,7 @@ impl Merger {
 
             Ok(false)
         } else if has_subtypes {
-            // Report compatibility hint for subtype relationships
+            trace!("Type has different but compatible sources, reporting mismatch hint");
             let hint_code = if T::is_argument() {
                 HintCode::InconsistentButCompatibleArgumentType
             } else {
@@ -1410,22 +1408,21 @@ impl Merger {
             let type_class = if is_input_position {
                 "supertype"
             } else {
-                "subtypes"
+                "subtype"
             };
 
             self.error_reporter.report_mismatch_hint::<Type, T, ()>(
                 hint_code,
                 format!(
-                    "Type of {element_kind} \"{dest}\" is inconsistent but compatible across subgraphs:",
-
+                    "Type of {element_kind} \"{dest}\" is inconsistent but compatible across subgraphs: ",
                 ),
                 &ty,
                 sources,
-                |d| Some(format!("type \"{d}\"")),
+                |d| Some(d.to_string()),
                 |s, idx| {
                     s.get_type(self.subgraphs[idx].schema())
                         .ok()
-                        .map(|t| format!("type \"{t}\""))
+                        .map(|t| t.to_string())
                 },
                 |elt, subgraphs| {
                     format!(
@@ -1612,7 +1609,7 @@ impl Merger {
     where
         T: HasDescription + Display,
     {
-        let mut descriptions = sources
+        let mut descriptions: IndexMap<String, usize> = sources
             .iter()
             .map(|(idx, source)| {
                 source
@@ -1621,19 +1618,22 @@ impl Merger {
                     .map(|d| d.trim().to_string())
                     .unwrap_or_default()
             })
-            .counts();
+            .fold(Default::default(), |mut acc, desc| {
+                if !desc.is_empty() {
+                    *acc.entry(desc).or_insert(0) += 1;
+                }
+                acc
+            });
         // we don't want to raise a hint if a description is ""
-        descriptions.remove("");
+        descriptions.shift_remove("");
 
         if !descriptions.is_empty() {
             if let Some((description, _)) = iter_into_single_item(descriptions.iter()) {
                 dest.set_description(&mut self.merged, Some(Node::new_str(description)))?;
             } else {
                 // Find the description with the highest count
-                if let Some((idx, _)) = descriptions
-                    .iter()
-                    .enumerate()
-                    .max_by_key(|(_, (_, counts))| *counts)
+                if let Some((idx, _)) =
+                    first_max_by_key(descriptions.iter().enumerate(), |(_, (_, counts))| *counts)
                 {
                     // Get the description at the found index
                     if let Some((description, _)) = descriptions.iter().nth(idx) {
@@ -1654,19 +1654,21 @@ impl Merger {
                 // should decide if we want to bother here: maybe we can leave
                 // it to studio so handle a better experience (as it can more UX
                 // wise).
-                let coordinate = dest.to_string();
-                let name = if !coordinate.is_empty() {
-                    "Element {coordinate}"
+                let name = if T::is_schema_definition() {
+                    "The schema definition".to_string()
                 } else {
-                    "The schema definition"
+                    format!("Element \"{dest}\"")
                 };
                 self.error_reporter.report_mismatch_hint::<T, T, ()>(
                     HintCode::InconsistentDescription,
-                    format!("{name} has inconsistent descriptions across the subgraphs. "),
+                    format!("{name} has inconsistent descriptions across subgraphs. "),
                     dest,
                     sources,
                     |elem| elem.description(&self.merged).map(|desc| desc.to_string()),
-                    |elem, _| elem.description(&self.merged).map(|desc| desc.to_string()),
+                    |elem, idx| {
+                        elem.description(self.subgraphs[idx].schema())
+                            .map(|desc| desc.to_string())
+                    },
                     |desc, subgraphs| {
                         format!(
                             "The supergraph will use description (from {}):\n{}",
@@ -1900,47 +1902,6 @@ impl Merger {
         };
 
         self.error_reporter.add_error(enhanced_error);
-    }
-
-    pub(crate) fn report_mismatch_hint<T>(
-        &mut self,
-        code: HintCode,
-        message: String,
-        sources: &Sources<Node<T>>,
-        accessor: impl Fn(&Option<Node<T>>) -> bool,
-    ) {
-        // Build detailed hint message showing which subgraphs have/don't have the element
-        let mut has_subgraphs = Vec::new();
-        let mut missing_subgraphs = Vec::new();
-
-        for (&idx, source) in sources.iter() {
-            let subgraph_name = if idx < self.names.len() {
-                &self.names[idx]
-            } else {
-                "unknown"
-            };
-            let result = accessor(source);
-            if result {
-                has_subgraphs.push(subgraph_name);
-            } else {
-                missing_subgraphs.push(subgraph_name);
-            }
-        }
-
-        let detailed_message = format!(
-            "{}defined in {} but not in {}",
-            message,
-            has_subgraphs.join(", "),
-            missing_subgraphs.join(", ")
-        );
-
-        // Add the hint to the error reporter
-        let hint = CompositionHint {
-            code: code.definition().code().to_string(),
-            message: detailed_message,
-            locations: self.source_locations(sources),
-        };
-        self.error_reporter.add_hint(hint);
     }
 
     pub(crate) fn source_locations<T>(&self, sources: &Sources<Node<T>>) -> Vec<SubgraphLocation> {
