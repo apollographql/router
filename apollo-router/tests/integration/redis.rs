@@ -466,15 +466,13 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     // if this is failing due to a cache key change, hook up redis-cli with the MONITOR command to see the keys being set
-    let s:String = client
+    let v:Value = client
           .get(format!("{namespace}:version:1.1:subgraph:products:type:Query:hash:6422a4ef561035dd94b357026091b72dca07429196aed0342e9e32cc1d48a13f:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"))
           .await
           .unwrap();
-    let v: Value = serde_json::from_str(&s).unwrap();
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
-    let s: String = client.get(format!("{namespace}:version:1.1:subgraph:reviews:type:Product:entity:b4b9ed9d4e2f363655b5446f86dc83b506dfcbcea2abae70309aca3f8674ff8b:representation:b4b9ed9d4e2f363655b5446f86dc83b506dfcbcea2abae70309aca3f8674ff8b:hash:3cede4e233486ac841993dd8fc0662ef375351481eeffa8e989008901300a693:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")).await.unwrap();
-    let v: Value = serde_json::from_str(&s).unwrap();
+    let v: Value = client.get(format!("{namespace}:version:1.1:subgraph:reviews:type:Product:entity:b4b9ed9d4e2f363655b5446f86dc83b506dfcbcea2abae70309aca3f8674ff8b:representation:b4b9ed9d4e2f363655b5446f86dc83b506dfcbcea2abae70309aca3f8674ff8b:hash:3cede4e233486ac841993dd8fc0662ef375351481eeffa8e989008901300a693:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")).await.unwrap();
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
     // we abuse the query shape to return a response with a different but overlapping set of entities
@@ -585,11 +583,10 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
         .unwrap();
     insta::assert_json_snapshot!(response);
 
-    let s:String = client
+    let v:Value = client
         .get(format!("{namespace}:version:1.1:subgraph:reviews:type:Product:entity:8487b68a26af72c427e461b27b66b16a930533c49d64370a2a85eaa518d7db26:representation:8487b68a26af72c427e461b27b66b16a930533c49d64370a2a85eaa518d7db26:hash:3cede4e233486ac841993dd8fc0662ef375351481eeffa8e989008901300a693:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"))
         .await
         .unwrap();
-    let v: Value = serde_json::from_str(&s).unwrap();
     insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
     const SECRET_SHARED_KEY: &str = "supersecret";
@@ -1256,7 +1253,6 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
         .method(Method::POST)
         .build()
         .unwrap();
-
     let response = supergraph
         .clone()
         .oneshot(request)
@@ -1267,13 +1263,12 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
         .unwrap();
     insta::assert_json_snapshot!(response);
 
-    let s:String = client
-          .get(format!("{namespace}:version:1.1:subgraph:reviews:type:Product:entity:72bafad9ffe61307806863b13856470e429e0cf332c99e5b735224fb0b1436f7:representation::hash:cb85bbec2ae755057b4229863ea810c364179017179eba6a11afe1e247afd322:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"))
+    let s:Value = client
+          .get(format!("{namespace}:version:1.1:subgraph:reviews:type:Product:entity:b4b9ed9d4e2f363655b5446f86dc83b506dfcbcea2abae70309aca3f8674ff8b:representation:b4b9ed9d4e2f363655b5446f86dc83b506dfcbcea2abae70309aca3f8674ff8b:hash:cb85bbec2ae755057b4229863ea810c364179017179eba6a11afe1e247afd322:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"))
           .await
           .unwrap();
-    let v: Value = serde_json::from_str(&s).unwrap();
     assert_eq!(
-        v.as_object().unwrap().get("data").unwrap(),
+        s.as_object().unwrap().get("data").unwrap(),
         &json! {{
             "reviews": [{
                 "body": "I can sit on it",
@@ -1281,13 +1276,12 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
             }]
         }}
     );
-    let s:String = client
-          .get(format!("{namespace}:version:1.1:subgraph:reviews:type:Product:entity:472484d4df9e800bbb846447c4c077787860c4c9ec59579d50009bfcba275c3b:representation::hash:cb85bbec2ae755057b4229863ea810c364179017179eba6a11afe1e247afd322:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"))
+    let s:Value = client
+          .get(format!("{namespace}:version:1.1:subgraph:reviews:type:Product:entity:f1494ef9a7866493fa3ffe10727b4c61467c24ed84ebf90e5082bed84055e1a2:representation:f1494ef9a7866493fa3ffe10727b4c61467c24ed84ebf90e5082bed84055e1a2:hash:cb85bbec2ae755057b4229863ea810c364179017179eba6a11afe1e247afd322:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c"))
           .await
           .unwrap();
-    let v: Value = serde_json::from_str(&s).unwrap();
     assert_eq!(
-        v.as_object().unwrap().get("data").unwrap(),
+        s.as_object().unwrap().get("data").unwrap(),
         &json! {{
             "reviews": [{
                 "body": "I can sit on it",
