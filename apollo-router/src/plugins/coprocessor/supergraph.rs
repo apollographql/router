@@ -1578,6 +1578,7 @@ mod tests {
                 body: true,
                 sdl: false,
                 method: false,
+                url: None,
             },
             response: Default::default(),
         }
@@ -1594,6 +1595,7 @@ mod tests {
                 body: true,
                 sdl: true,
                 status_code: false,
+                url: None,
             },
         }
     }

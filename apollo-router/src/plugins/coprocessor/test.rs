@@ -28,8 +28,12 @@ mod tests {
     use crate::plugin::test::MockSubgraphService;
     use crate::plugin::test::MockSupergraphService;
     use crate::plugins::coprocessor::handle_graphql_response;
-    use crate::plugins::coprocessor::is_graphql_response_minimally_valid;
+    use crate::plugins::coprocessor::is_graphql_response_minimally_valid;    
     use crate::plugins::coprocessor::supergraph::SupergraphResponseConf;
+    use crate::plugins::coprocessor::SubgraphRequestConf;
+    use crate::plugins::coprocessor::SubgraphResponseConf;
+    use crate::plugins::coprocessor::RouterRequestConf;
+    use crate::plugins::coprocessor::RouterResponseConf;
     use crate::plugins::coprocessor::supergraph::SupergraphStage;
     use crate::plugins::coprocessor::was_incoming_payload_valid;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
@@ -3137,6 +3141,7 @@ mod tests {
                 sdl: true,
                 path: false,
                 method: false,
+                url: None,
             },
             response: Default::default(),
         }        
@@ -3153,6 +3158,7 @@ mod tests {
                 body: true,
                 sdl: true,
                 status_code: false,
+                url: None,
             },
         }        
     }    
@@ -3604,6 +3610,7 @@ mod tests {
                 method: true,
                 service_name: true,
                 subgraph_request_id: true,
+                url: None,
             },
             response: Default::default(),
         }
@@ -3621,6 +3628,7 @@ mod tests {
                 service_name: false,
                 status_code: false,
                 subgraph_request_id: false,
+                url: None,
             },
         }        
     }
