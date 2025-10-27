@@ -4,6 +4,69 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.61.11] - 2025-10-27
+
+## 🚀 Features
+
+### jemalloc metrics ([PR #7735](https://github.com/apollographql/router/pull/7735))
+
+The router adds the following new metrics when running the router on Linux with its default `global-allocator` feature:
+
+- [`apollo_router_jemalloc_active`](https://jemalloc.net/jemalloc.3.html#stats.active): Total number of bytes in active pages allocated by the application.
+- [`apollo_router_jemalloc_allocated`](https://jemalloc.net/jemalloc.3.html#stats.allocated): Total number of bytes allocated by the application.
+- [`apollo_router_jemalloc_mapped`](https://jemalloc.net/jemalloc.3.html#stats.mapped): Total number of bytes in active extents mapped by the allocator.
+- [`apollo_router_jemalloc_metadata`](https://jemalloc.net/jemalloc.3.html#stats.metadata): Total number of bytes dedicated to metadata, which comprise base allocations used for bootstrap-sensitive allocator metadata structures and internal allocations.
+- [`apollo_router_jemalloc_resident`](https://jemalloc.net/jemalloc.3.html#stats.resident): Maximum number of bytes in physically resident data pages mapped by the allocator, comprising all pages dedicated to allocator metadata, pages backing active allocations, and unused dirty pages.
+- [`apollo_router_jemalloc_retained`](https://jemalloc.net/jemalloc.3.html#stats.retained): Total number of bytes in virtual memory mappings that were retained rather than being returned to the operating system via e.g. `munmap(2)` or similar.
+
+By [@Velfi](https://github.com/Velfi) in https://github.com/apollographql/router/pull/7735
+
+## 🐛 Fixes
+
+### Query planning errors with progressive override on interface implementations ([PR #7929](https://github.com/apollographql/router/pull/7929))
+
+The router now correctly generates query plans when using [progressive override](https://www.apollographql.com/docs/graphos/schema-design/federated-schemas/entities/migrate-fields#incremental-migration-with-progressive-override) (`@override` with labels) on types that implement interfaces within the same subgraph.
+
+Previously, the Rust query planner would fail to generate plans for these scenarios with the error `"Was not able to find any options for {}: This shouldn't have happened."`, while the JavaScript planner handled them correctly.
+
+This fix resolves planning failures when your schema uses:
+
+- Interface implementations local to a subgraph
+- Progressive override directives on both the implementing type and its fields
+- Queries that traverse through the overridden interface implementations
+
+These will now successfully plan and execute.
+
+By [@TylerBloom](https://github.com/TylerBloom) in https://github.com/apollographql/router/pull/7929
+
+### WebSocket connection cleanup for subscriptions ([PR #8104](https://github.com/apollographql/router/pull/8104))
+
+WebSocket connections to subgraphs now close properly when all client subscriptions end, preventing unnecessary resource usage.
+
+Previously, connections could remain open after clients disconnected, not being cleaned up until a new event was received. The router now tracks active subscriptions and closes the subgraph connection when the last client disconnects, ensuring efficient resource management.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/8104
+
+### Reduce log level for interrupted WebSocket streams ([PR #8344](https://github.com/apollographql/router/pull/8344))
+
+The router now logs interrupted WebSocket streams at `trace` level instead of `error` level.
+
+Previously, WebSocket stream interruptions logged at `error` level, creating excessive noise in logs when clients disconnected normally or networks experienced transient issues. Client disconnections and network interruptions are expected operational events that don't require immediate attention.
+
+Your logs will now be cleaner and more actionable, making genuine errors easier to spot. You can enable `trace` level logging when debugging WebSocket connection issues.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/8344
+
+### Connection shutdown race condition during hot reload ([PR #8169](https://github.com/apollographql/router/pull/8169))
+
+The router now reliably terminates all connections during hot reload, preventing out-of-memory errors from multiple active pipelines.
+
+A race condition during hot reload occasionally left connections in an active state instead of terminating. Connections that are opening during shutdown now immediately terminate, maintaining stable memory usage through hot reloads.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/8169
+
+
+
 # [1.61.10] - 2025-07-24
 
 ## 🐛 Fixes
