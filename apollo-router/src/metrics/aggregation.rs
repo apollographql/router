@@ -5,10 +5,8 @@ use std::mem::take;
 use std::sync::Arc;
 
 use derive_more::From;
-use opentelemetry::InstrumentationScope;
-use opentelemetry::KeyValue;
-use opentelemetry::metrics::{AsyncInstrument, Counter, ObservableCounter};
-use opentelemetry::metrics::Gauge;
+use itertools::Itertools;
+use opentelemetry::metrics::{Gauge, ObservableCounter};
 use opentelemetry::metrics::Histogram;
 use opentelemetry::metrics::InstrumentProvider;
 use opentelemetry::metrics::Meter;
@@ -17,6 +15,9 @@ use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
 use opentelemetry::metrics::SyncInstrument;
 use opentelemetry::metrics::UpDownCounter;
+use opentelemetry::metrics::{AsyncInstrument, Callback, Counter};
+use opentelemetry::InstrumentationScope;
+use opentelemetry::KeyValue;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use parking_lot::Mutex;
 use strum::EnumCount;
@@ -25,7 +26,7 @@ use strum_macros::EnumCount;
 use strum_macros::EnumIter;
 
 use crate::metrics::filter::FilterMeterProvider;
-
+use crate::plugin::DynPlugin;
 // This meter provider enables us to combine multiple meter providers. The reasons we need this are:
 // 1. Prometheus meters are special. To dispose a meter is to dispose the entire registry. This means we need to make a best effort to keep them around.
 // 2. To implement filtering we use a view. However this must be set during build of the meter provider, thus we need separate ones for Apollo and general metrics.
@@ -66,7 +67,7 @@ impl Default for AggregateMeterProvider {
 
 pub(crate) struct Inner {
     providers: Vec<(FilterMeterProvider, HashMap<MeterId, Meter>)>,
-    registered_instruments: Vec<InstrumentWrapper>,
+    registered_instruments: Arc<Mutex<Vec<InstrumentWrapper>>>,
 }
 
 impl Default for Inner {
@@ -80,7 +81,7 @@ impl Default for Inner {
                     )
                 })
                 .collect(),
-            registered_instruments: Vec::new(),
+            registered_instruments: Default::default(),
         }
     }
 }
@@ -110,6 +111,15 @@ pub(crate) enum InstrumentWrapper {
     F64Histogram {
         _keep_alive: Arc<Histogram<f64>>,
     },
+    I64ObservableGauge { _keep_alive: Arc<ObservableGauge<i64>> },
+    U64ObservableGauge { _keep_alive: Arc<ObservableGauge<u64>> },
+    F64ObservableGauge { _keep_alive: Arc<ObservableGauge<f64>> },
+    I64ObservableUpDown { _keep_alive: Arc<ObservableUpDownCounter<i64>> },
+    U64ObservableUpDown { _keep_alive: Arc<ObservableUpDownCounter<u64>> },
+    F64ObservableUpDown { _keep_alive: Arc<ObservableUpDownCounter<f64>> },
+    I64ObservableCounter { _keep_alive: Arc<ObservableCounter<i64>> },
+    U64ObservableCounter { _keep_alive: Arc<ObservableCounter<u64>> },
+    F64ObservableCounter { _keep_alive: Arc<ObservableCounter<f64>> },
 }
 
 #[derive(Eq, PartialEq, Hash, Clone)]
@@ -201,13 +211,14 @@ impl AggregateMeterProvider {
             .as_ref()
             .expect("cannot use meter provider after shutdown")
             .registered_instruments
+            .lock()
             .len()
     }
 }
 
 impl Inner {
     pub(crate) fn invalidate(&mut self) {
-        self.registered_instruments.clear()
+        self.registered_instruments.lock().clear()
     }
     pub(crate) fn meter(&mut self, name: &'static str) -> Meter {
         self.versioned_meter(
@@ -253,7 +264,10 @@ impl Inner {
             );
         }
 
-        Meter::new(Arc::new(AggregateInstrumentProvider { meters }))
+        Meter::new(Arc::new(AggregateInstrumentProvider {
+            meters,
+            keep_alive: Arc::clone(&self.registered_instruments)
+        }))
     }
 
     pub(crate) fn create_registered_instrument<T>(
@@ -264,7 +278,7 @@ impl Inner {
         Arc<T>: Into<InstrumentWrapper>,
     {
         let instrument = Arc::new((create_fn)(self));
-        self.registered_instruments.push(instrument.clone().into());
+        self.registered_instruments.lock().push(instrument.clone().into());
         instrument
     }
 }
@@ -288,6 +302,7 @@ impl MeterProvider for AggregateMeterProvider {
 
 pub(crate) struct AggregateInstrumentProvider {
     meters: Vec<Meter>,
+    keep_alive: Arc<Mutex<Vec<InstrumentWrapper>>>
 }
 
 pub(crate) struct AggregateCounter<T> {
@@ -338,36 +353,47 @@ impl<T: Copy> SyncInstrument<T> for AggregateGauge<T> {
     }
 }
 
+// Observable instruments don't need to have a ton of optimisation because they are only read on demand.
 macro_rules! aggregate_observable_instrument_fn {
     ($name:ident, $ty:ty, $instrument:ident) => {
         fn $name(
             &self,
             mut builder: opentelemetry::metrics::AsyncInstrumentBuilder<'_, $instrument<$ty>, $ty>,
         ) -> $instrument<$ty> {
-            // TODO Feels like AI slop. Figure out a less ugly way
-            let callbacks: Vec<Arc<dyn Fn(&dyn AsyncInstrument<$ty>) + Send + Sync>> = take(&mut builder.callbacks)
+            let callbacks: Vec<Arc<Callback<$ty>>> = take(&mut builder.callbacks)
                 .into_iter()
                 .map(Arc::from)
-                .collect();
+                .collect_vec();
+            let name = builder.name.clone();
+            let description = builder.description.clone();
+            let unit = builder.unit.clone();
+
+            // Build the originally defined instrument for each meter
+            let mut handles = Vec::with_capacity(self.meters.len());
             for meter in &self.meters {
-                let mut instrument_builder = meter.$name(builder.name.clone());
-                if let Some(ref desc) = builder.description {
-                    instrument_builder = instrument_builder.with_description(desc.clone());
+                let mut b = meter.$name(name.clone());
+                if let Some(ref d) = description {
+                    b = b.with_description(d.clone());
                 }
-                if let Some(ref u) = builder.unit {
-                    instrument_builder = instrument_builder.with_unit(u.clone());
+                if let Some(ref u) = unit {
+                    b = b.with_unit(u.clone());
                 }
-                // We must register the observe callbacks
                 for cb in &callbacks {
                     let cb = Arc::clone(cb);
-                    instrument_builder = instrument_builder.with_callback(move |inst| cb(inst));
+                    b = b.with_callback(move |inst| cb(inst));
                 }
-                instrument_builder.build();
+                handles.push(b.build());
             }
-            // TODO test to see if this is true
-            // Now that we've registered the instrument and its observed callbacks on each meter,
-            // they can no longer be accessed or modified. Return a stub.
-            $instrument::new()
+            // Return the first instrument. Keep the rest alive by registering them with the AggregateMeterProvider::Inner
+            // TODO should we also register the first one?
+            let first = handles.first().cloned().expect("At least one meter should exist");
+            if handles.len() > 1 {
+                let mut keep_alive = self.keep_alive.lock();
+                for i in handles.into_iter().skip(1){
+                    keep_alive.push(InstrumentWrapper::from(Arc::new(i)))
+                }
+            }
+            first
         }
     };
 }
@@ -463,23 +489,23 @@ impl InstrumentProvider for AggregateInstrumentProvider {
 
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
-    use std::sync::Weak;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::AtomicI64;
+    use std::sync::Arc;
+    use std::sync::Weak;
     use std::time::Duration;
 
-    use opentelemetry::InstrumentationScope;
     use opentelemetry::metrics::MeterProvider;
+    use opentelemetry::InstrumentationScope;
     use opentelemetry_sdk::error::OTelSdkResult;
+    use opentelemetry_sdk::metrics::data::ResourceMetrics;
+    use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
+    use opentelemetry_sdk::metrics::reader::MetricReader;
     use opentelemetry_sdk::metrics::ManualReader;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
     use opentelemetry_sdk::metrics::PeriodicReader;
     use opentelemetry_sdk::metrics::Pipeline;
     use opentelemetry_sdk::metrics::Temporality;
-    use opentelemetry_sdk::metrics::data::ResourceMetrics;
-    use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
-    use opentelemetry_sdk::metrics::reader::MetricReader;
 
     use crate::metrics::aggregation::AggregateMeterProvider;
     use crate::metrics::aggregation::MeterProviderType;

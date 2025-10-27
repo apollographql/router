@@ -270,7 +270,7 @@ pub(crate) mod test_utils {
 
     pub(crate) fn collect_metrics() -> Metrics {
         let mut metrics = Metrics::default();
-        let (_, reader) = meter_provider_and_readers();
+        let (_mp, reader) = meter_provider_and_readers();
         reader
             .collect(&mut metrics.resource_metrics)
             .expect("Failed to collect metrics. Did you forget to use `async{}.with_metrics()`? See dev-docs/metrics.md");
