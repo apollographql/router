@@ -10,7 +10,7 @@ use crate::schema::FederationSchema;
 
 #[allow(dead_code)]
 #[derive(Clone, Copy)]
-pub enum ArgumentCompositionStrategy {
+pub(crate) enum ArgumentCompositionStrategy {
     Max,
     Min,
     // Sum,
@@ -52,7 +52,7 @@ impl ArgumentCompositionStrategy {
         }
     }
 
-    pub fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> &str {
         self.get_impl().name()
     }
 
