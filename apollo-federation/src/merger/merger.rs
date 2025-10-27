@@ -13,6 +13,7 @@ use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::ast::Type;
+use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
@@ -37,6 +38,8 @@ use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::join_spec_definition::JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
+use crate::link::link_spec_definition::LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME;
+use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
 use crate::link::link_spec_definition::LINK_VERSIONS;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
@@ -522,12 +525,9 @@ impl Merger {
             .all_composed_core_features()
             .iter()
         {
-            let Some(feature_definition) = SPEC_REGISTRY.get_definition(&feature.url) else {
-                continue;
-            };
             let imports = directives
                 .iter()
-                .map(|(alias, original)| {
+                .map(|(original, alias)| {
                     if *alias == *original {
                         Import {
                             alias: None,
@@ -543,17 +543,37 @@ impl Merger {
                     }
                 })
                 .collect_vec();
-            self.link_spec_definition.apply_feature_to_schema(
-                &mut self.merged,
-                *feature_definition,
-                None,
-                feature_definition.purpose(),
-                if imports.is_empty() {
-                    None
-                } else {
-                    Some(imports)
-                },
-            )?;
+
+            if let Some(feature_definition) = SPEC_REGISTRY.get_definition(&feature.url) {
+                self.link_spec_definition.apply_feature_to_schema(
+                    &mut self.merged,
+                    *feature_definition,
+                    None,
+                    feature_definition.purpose(),
+                    if imports.is_empty() {
+                        None
+                    } else {
+                        Some(imports)
+                    },
+                )?;
+            } else {
+                let mut directive =
+                    Directive::new(self.link_spec_definition.url().identity.name.clone());
+                directive.arguments.push(Node::new(Argument {
+                    name: LINK_DIRECTIVE_URL_ARGUMENT_NAME,
+                    value: Node::new(feature.url.to_string().into()),
+                }));
+                if !imports.is_empty() {
+                    directive.arguments.push(Node::new(Argument {
+                        name: LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME,
+                        value: Node::new(Value::List(
+                            imports.into_iter().map(|i| Node::new(i.into())).collect(),
+                        )),
+                    }));
+                }
+                SchemaDefinitionPosition
+                    .insert_directive(&mut self.merged, Component::new(directive))?;
+            }
         }
         Ok(())
     }
@@ -700,6 +720,9 @@ impl Merger {
             for (name, definition) in subgraph.schema().schema().directive_definitions.iter() {
                 if self.merged.get_directive_definition(name).is_none()
                     && self.is_merged_directive_definition(&subgraph.name, definition)
+                    && !self
+                        .compose_directive_manager
+                        .has_latest_directive_definition(name)
                 {
                     let pos = DirectiveDefinitionPosition {
                         directive_name: name.clone(),
@@ -1154,14 +1177,21 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
 
     fn merge_directive_definitions(&mut self) -> Result<(), FederationError> {
         // We should skip the supergraph specific directives, that is the @core and @join directives.
-        for directive_name in self
+
+        // Collect all directive names from both the merged schema and the compose directive manager
+        let mut directive_names: HashSet<Name> = self
             .merged
             .schema()
             .directive_definitions
             .keys()
             .cloned()
-            .collect_vec()
-        {
+            .collect();
+
+        for name in self.compose_directive_manager.composed_directive_names() {
+            directive_names.insert(name.clone());
+        }
+
+        for directive_name in directive_names {
             if self
                 .link_spec_definition
                 .is_spec_directive_name(&self.merged, &directive_name)

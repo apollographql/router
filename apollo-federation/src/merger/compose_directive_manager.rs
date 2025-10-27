@@ -57,19 +57,42 @@ struct MergeDirectiveItem {
     subgraph_name: String,
     definition: DirectiveDefinition,
     link: LinkedElement,
+    original_name: Name,
 }
 
 impl MergeDirectiveItem {
+    fn new(subgraph_name: String, definition: DirectiveDefinition, link: LinkedElement) -> Self {
+        let original_name = if let Some(import) = &link.import {
+            import.element.clone()
+        } else {
+            let spec_name = link.link.spec_name_in_schema();
+            let directive_name = &definition.name;
+            
+            if let Some(suffix) = directive_name
+                .as_str()
+                .strip_prefix(spec_name.as_str())
+                .and_then(|s| s.strip_prefix("__"))
+            {
+                Name::new(suffix).unwrap_or_else(|_| directive_name.clone())
+            } else {
+                directive_name.clone()
+            }
+        };
+        
+        Self {
+            subgraph_name,
+            definition,
+            link,
+            original_name,
+        }
+    }
+    
     fn identity(&self) -> &Identity {
         &self.link.link.url.identity
     }
 
     fn original_directive_name(&self) -> &Name {
-        self.link
-            .import
-            .as_ref()
-            .map(|i| i.element.as_ref())
-            .unwrap_or_else(|| self.link.link.spec_name_in_schema())
+        &self.original_name
     }
 
     fn aliased_directive_name(&self) -> &Name {
@@ -78,7 +101,7 @@ impl MergeDirectiveItem {
             .as_ref()
             .map(|i| i.imported_name())
             .or_else(|| self.link.link.spec_alias.as_ref())
-            .unwrap_or_else(|| self.link.link.spec_name_in_schema())
+            .unwrap_or(&self.definition.name)
     }
 }
 
@@ -123,8 +146,17 @@ impl ComposeDirectiveManager {
             .contains_key(directive_name)
     }
 
+    pub(crate) fn has_latest_directive_definition(&self, directive_name: &Name) -> bool {
+        self.latest_directive_definition_map
+            .contains_key(directive_name)
+    }
+
+    pub(crate) fn composed_directive_names(&self) -> impl Iterator<Item = &Name> {
+        self.latest_directive_definition_map.keys()
+    }
+
     /// Returns the latest definition found across subgraphs for the given directive name. It
-    /// expects the name to be the original name of the directive in its spec, not an alias.
+    /// expects the name to be the aliased name of the directive as it appears in the schema.
     pub(crate) fn get_latest_directive_definition(
         &self,
         directive_name: &Name,
@@ -237,8 +269,13 @@ impl ComposeDirectiveManager {
                         // Note that check for conflicts across subgraphs to make sure that we
                         // don't compose a custom `@tag` directive with the federation one, if it
                         // hasn't been properly renamed in another subgraph.
+                        let original_directive_name = feature
+                            .import
+                            .as_ref()
+                            .map(|import| &import.element)
+                            .unwrap_or(&directive.name);
                         if feature.link.url.identity.domain == APOLLO_SPEC_DOMAIN
-                            && DEFAULT_COMPOSED_DIRECTIVES.contains(&directive.name)
+                            && DEFAULT_COMPOSED_DIRECTIVES.contains(original_directive_name)
                         {
                             error_reporter
                                 .add_compose_directive_hint_for_default_composed_directive(
@@ -267,11 +304,11 @@ impl ComposeDirectiveManager {
                                 subgraphs_with_conflict,
                             );
                         } else {
-                            let item = MergeDirectiveItem {
-                                subgraph_name: subgraph.name.clone(),
-                                definition: directive.as_ref().clone(),
-                                link: feature.clone(),
-                            };
+                            let item = MergeDirectiveItem::new(
+                                subgraph.name.clone(),
+                                directive.as_ref().clone(),
+                                feature.clone(),
+                            );
                             items_by_subgraph.insert(subgraph.name.clone(), item.clone());
                             items_by_identity
                                 .insert(feature.link.url.identity.clone(), item.clone());
@@ -328,7 +365,7 @@ impl ComposeDirectiveManager {
                         linked_element.subgraph_name.clone(),
                     );
                     self.latest_directive_definition_map.insert(
-                        linked_element.original_directive_name().clone(),
+                        linked_element.aliased_directive_name().clone(),
                         linked_element.definition.clone(),
                     );
                     self.directives_for_feature_map
