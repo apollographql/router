@@ -224,7 +224,7 @@ fn validate_args_selection(
             ) {
                 return Err(CacheTagValidationError::CacheTagInvalidFormat {
                     message: format!(
-                        "invalid path ending at \"{name}\", which is not a scalar type"
+                        "invalid path ending at \"{name}\", which is not a scalar type or an enum"
                     ),
                 });
             }
@@ -378,10 +378,13 @@ fn build_selection_set(
             build_selection_set(&mut new_field.selection_set, schema, sel)?;
         } else {
             // A leaf field should have a scalar type.
-            if !matches!(&new_field_type_def, TypeDefinitionPosition::Scalar(_)) {
+            if !matches!(
+                &new_field_type_def,
+                TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_)
+            ) {
                 return Err(CacheTagValidationError::CacheTagInvalidFormat {
                     message: format!(
-                        "invalid path ending at \"{name}\", which is not a scalar type"
+                        "invalid path ending at \"{name}\", which is not a scalar type or an enum"
                     ),
                 });
             }
@@ -585,6 +588,11 @@ mod tests {
                     @cacheTag(format: "topProducts")
                     @cacheTag(format: "topProducts-{$args.first}-{$args.country}")
             }
+
+            type Test @key(fields: "id country") @cacheTag(format: "test-{$key.id}-{$key.country}") {
+                id: ID!
+                country: Country!
+            }
         "#;
         build_and_validate(SCHEMA);
     }
@@ -673,7 +681,7 @@ mod tests {
             build_for_errors(SCHEMA),
             vec![
                 "cacheTag format is invalid: cannot create selection set with \"somethingElse\"",
-                "cacheTag format is invalid: invalid path ending at \"test\", which is not a scalar type",
+                "cacheTag format is invalid: invalid path ending at \"test\", which is not a scalar type or an enum",
                 "Each entity field referenced in a @cacheTag format (applied on entity type) must be a member of every @key field set. In other words, when there are multiple @key fields on the type, the referenced field(s) must be limited to their intersection. Bad cacheTag format \"product-{$key.test.b}\" on type \"Product\"",
                 "@cacheTag format references a nullable field \"Test.c\"",
                 "cacheTag format is invalid: unknown field \"second\""
