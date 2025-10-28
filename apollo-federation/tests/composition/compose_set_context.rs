@@ -42,7 +42,7 @@ fn vanilla_setcontext_success_case() {
     assert!(result.is_ok(), "Expected composition to succeed");
     let supergraph = result.expect("Expected composition to succeed");
     assert!(
-        supergraph.schema().schema().types.len() > 0,
+        !supergraph.schema().schema().types.is_empty(),
         "Supergraph should contain types"
     );
 }
@@ -86,7 +86,7 @@ fn using_a_list_as_input_to_fromcontext() {
     assert!(result.is_ok(), "Expected composition to succeed");
     let supergraph = result.expect("Expected composition to succeed");
     assert!(
-        supergraph.schema().schema().types.len() > 0,
+        !supergraph.schema().schema().types.is_empty(),
         "Supergraph should contain types"
     );
 }
@@ -333,7 +333,7 @@ fn contextual_argument_present_in_multiple_subgraphs_default_value() {
     assert!(result.is_ok(), "Expected composition to succeed");
     let supergraph = result.expect("Expected composition to succeed");
     assert!(
-        supergraph.schema().schema().types.len() > 0,
+        !supergraph.schema().schema().types.is_empty(),
         "Supergraph should contain types"
     );
 
@@ -384,7 +384,7 @@ fn contextual_argument_present_in_multiple_subgraphs_nullable() {
     assert!(result.is_ok(), "Expected composition to succeed");
     let supergraph = result.expect("Expected composition to succeed");
     assert!(
-        supergraph.schema().schema().types.len() > 0,
+        !supergraph.schema().schema().types.is_empty(),
         "Supergraph should contain types"
     );
 }
@@ -481,7 +481,7 @@ fn contextual_argument_present_in_multiple_subgraphs_success_case() {
     assert!(result.is_ok(), "Expected composition to succeed");
     let supergraph = result.expect("Expected composition to succeed");
     assert!(
-        supergraph.schema().schema().types.len() > 0,
+        !supergraph.schema().schema().types.is_empty(),
         "Supergraph should contain types"
     );
 }
@@ -781,7 +781,7 @@ fn fields_marked_external_because_of_context_not_flagged_as_unused() {
     assert!(result.is_ok(), "Expected composition to succeed");
     let supergraph = result.expect("Expected composition to succeed");
     assert!(
-        supergraph.schema().schema().types.len() > 0,
+        !supergraph.schema().schema().types.is_empty(),
         "Supergraph should contain types"
     );
 }
@@ -914,7 +914,7 @@ fn nullability_mismatch_ok_if_contextual_value_non_nullable() {
     assert!(result.is_ok(), "Expected composition to succeed");
     let supergraph = result.expect("Expected composition to succeed");
     assert!(
-        supergraph.schema().schema().types.len() > 0,
+        !supergraph.schema().schema().types.is_empty(),
         "Supergraph should contain types"
     );
 }
@@ -1023,7 +1023,7 @@ fn setcontext_on_interface_with_type_condition_success() {
     assert!(result.is_ok(), "Expected composition to succeed");
     let supergraph = result.expect("Expected composition to succeed");
     assert!(
-        supergraph.schema().schema().types.len() > 0,
+        !supergraph.schema().schema().types.is_empty(),
         "Supergraph should contain types"
     );
 }
@@ -1071,7 +1071,7 @@ fn setcontext_on_interface_success() {
     assert!(result.is_ok(), "Expected composition to succeed");
     let supergraph = result.expect("Expected composition to succeed");
     assert!(
-        supergraph.schema().schema().types.len() > 0,
+        !supergraph.schema().schema().types.is_empty(),
         "Supergraph should contain types"
     );
 }
@@ -1335,7 +1335,7 @@ fn setcontext_with_multiple_contexts_type_conditions_success() {
     assert!(result.is_ok(), "Expected composition to succeed");
     let supergraph = result.expect("Expected composition to succeed");
     assert!(
-        supergraph.schema().schema().types.len() > 0,
+        !supergraph.schema().schema().types.is_empty(),
         "Supergraph should contain types"
     );
 }
@@ -1442,7 +1442,7 @@ fn setcontext_with_multiple_contexts_duck_typing_success() {
     assert!(result.is_ok(), "Expected composition to succeed");
     let supergraph = result.expect("Expected composition to succeed");
     assert!(
-        supergraph.schema().schema().types.len() > 0,
+        !supergraph.schema().schema().types.is_empty(),
         "Supergraph should contain types"
     );
 }
@@ -1488,7 +1488,7 @@ fn vanilla_setcontext_success_case_alt() {
     assert!(result.is_ok(), "Expected composition to succeed");
     let supergraph = result.expect("Expected composition to succeed");
     assert!(
-        supergraph.schema().schema().types.len() > 0,
+        !supergraph.schema().schema().types.is_empty(),
         "Supergraph should contain types"
     );
 }
