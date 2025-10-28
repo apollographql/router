@@ -67,7 +67,7 @@ impl MergeDirectiveItem {
         } else {
             let spec_name = link.link.spec_name_in_schema();
             let directive_name = &definition.name;
-            
+
             if let Some(suffix) = directive_name
                 .as_str()
                 .strip_prefix(spec_name.as_str())
@@ -78,7 +78,7 @@ impl MergeDirectiveItem {
                 directive_name.clone()
             }
         };
-        
+
         Self {
             subgraph_name,
             definition,
@@ -86,7 +86,7 @@ impl MergeDirectiveItem {
             original_name,
         }
     }
-    
+
     fn identity(&self) -> &Identity {
         &self.link.link.url.identity
     }
@@ -362,7 +362,7 @@ impl ComposeDirectiveManager {
             if major_versions.len() > 1 {
                 // Check if this feature is being composed
                 let is_composed = items_by_identity.contains_key(identity);
-                
+
                 if is_composed {
                     error_reporter.add_error(CompositionError::DirectiveCompositionError {
                         message: format!(
