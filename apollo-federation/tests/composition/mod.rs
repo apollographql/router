@@ -14,22 +14,22 @@ mod demand_control;
 mod directive_argument_merge_strategies;
 // TODO: remove #[ignore] from tests once all fns called by Merger::merge() are implemented
 mod external;
-mod hints;
 mod override_directive;
 mod subscription;
 mod supergraph_reversibility;
 mod validation_errors;
 
 pub(crate) mod test_helpers {
+    use std::iter::zip;
+
     use apollo_federation::ValidFederationSubgraphs;
     use apollo_federation::composition::compose;
     use apollo_federation::error::CompositionError;
     use apollo_federation::error::FederationError;
     use apollo_federation::subgraph::typestate::Subgraph;
+    use apollo_federation::supergraph::CompositionHint;
     use apollo_federation::supergraph::Satisfiable;
     use apollo_federation::supergraph::Supergraph;
-    use apollo_federation::supergraph::CompositionHint;
-    use std::iter::zip;
 
     pub(crate) struct ServiceDefinition<'a> {
         pub(crate) name: &'a str,
@@ -92,32 +92,41 @@ pub(crate) mod test_helpers {
         expected_errors: &[(&str, &str)],
     ) {
         let errors = result.as_ref().expect_err("Expected composition to fail");
-        let error_strings: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
+        let error_strings: Vec<(String, String)> = errors
+            .iter()
+            .map(|e| (e.code().definition().code().to_string(), e.to_string()))
+            .collect();
 
         // Verify error count matches expectations
         assert_eq!(
-            errors.len(),
-            expected_errors.len(),
-            "Expected {} errors but got {}: {:?}",
             expected_errors.len(),
             errors.len(),
+            "Expected {} errors but got {}:\nEXPECTED:\n{:?}\nACTUAL:\n{:?}",
+            expected_errors.len(),
+            errors.len(),
+            expected_errors,
             error_strings
         );
 
         // Verify each expected error code and message
-        for (i, (_expected_code, expected_message)) in expected_errors.iter().enumerate() {
-            let error = &errors[i];
+        for (i, (expected_code, expected_message)) in expected_errors.iter().enumerate() {
+            let (error_code, error_str) = &error_strings[i];
 
-            // Check error code (assuming CompositionError has a code method or field)
-            // This will need to be implemented based on the actual CompositionError structure
-            // For now, we'll validate the error message contains the expected content
-            let error_str = error.to_string();
+            // Check error message
             assert!(
                 error_str.contains(expected_message),
-                "Error {} does not contain expected message.\nExpected: {}\nActual: {}",
+                "Error at index {} does not contain expected message.\nEXPECTED:\n{}\nACTUAL:\n{}",
                 i,
                 expected_message,
                 error_str
+            );
+            // Check error code
+            assert!(
+                error_code.contains(expected_code),
+                "Error at index {} does not contain expected code.\nEXPECTED:\n{}\nACTUAL:\n{}",
+                i,
+                expected_code,
+                error_code
             );
         }
     }
@@ -133,51 +142,32 @@ pub(crate) mod test_helpers {
         api_supergraph.extract_subgraphs()
     }
 
-    pub(crate) fn assert_hints_equal(actual_hints: &Vec<CompositionHint>, expected_hints: &Vec<CompositionHint>) {
+    pub(crate) fn assert_hints_equal(
+        actual_hints: &Vec<CompositionHint>,
+        expected_hints: &Vec<CompositionHint>,
+    ) {
         if actual_hints.len() != expected_hints.len() {
-            panic!("Mismatched number of hints")
+            panic!(
+                "Mismatched number of hints: expected {} hint(s) but got {} hint(s)\nEXPECTED:\n{expected_hints:#?}\nACTUAL:\n{actual_hints:#?}",
+                expected_hints.len(),
+                actual_hints.len()
+            )
         }
         let zipped = zip(actual_hints, expected_hints);
-        zipped
-            .for_each(|(ch1, ch2)| assert!(ch1.code() == ch2.code() && ch1.message() == ch2.message()));
-    }
-    
-    pub(crate) fn assert_composition_success<S>(
-        result: Result<Supergraph<S>, Vec<CompositionError>>,
-    ) -> Supergraph<S> {
-        match result {
-            Ok(supergraph) => supergraph,
-            Err(errors) => {
-                panic!(
-                    "Expected successful composition, but got errors: {:?}",
-                    errors
-                        .iter()
-                        .map(|e| e.to_string())
-                        .collect::<Vec<_>>()
-                        .join("\n\n")
-                );
-            }
-        }
-    }
-
-    // Return a vec of error codes and error messages as strings
-    pub(crate) fn errors<S>(
-        result: &Result<Supergraph<S>, Vec<CompositionError>>,
-    ) -> Vec<(String, String)> {
-        match result {
-            Ok(_) => panic!("Expected an error, but got a successful composition"),
-            Err(err) => err
-                .iter()
-                .map(|e| (e.code().definition().code().to_string(), e.to_string()))
-                .collect(),
-        }
+        zipped.for_each(|(ch1, ch2)| {
+            assert!(
+                ch1.code() == ch2.code() && ch1.message() == ch2.message(),
+                "EXPECTED:\n{:#?}\nACTUAL:\n{:#?}",
+                expected_hints,
+                actual_hints
+            )
+        });
     }
 }
 
 pub(crate) use test_helpers::ServiceDefinition;
-pub(crate) use test_helpers::assert_composition_success;
-pub(crate) use test_helpers::assert_hints_equal;
 pub(crate) use test_helpers::assert_composition_errors;
+pub(crate) use test_helpers::assert_hints_equal;
 pub(crate) use test_helpers::compose_as_fed2_subgraphs;
-pub(crate) use test_helpers::errors;pub(crate) use test_helpers::extract_subgraphs_from_supergraph_result;
+pub(crate) use test_helpers::extract_subgraphs_from_supergraph_result;
 pub(crate) use test_helpers::print_sdl;
