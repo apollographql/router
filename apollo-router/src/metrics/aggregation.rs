@@ -384,14 +384,11 @@ macro_rules! aggregate_observable_instrument_fn {
                 }
                 handles.push(b.build());
             }
-            // Return the first instrument. Keep the rest alive by registering them with the AggregateMeterProvider::Inner
-            // TODO should we also register the first one?
+            // Return the first instrument. Keep them all alive by registering them with the AggregateMeterProvider::Inner
             let first = handles.first().cloned().expect("At least one meter should exist");
-            if handles.len() > 1 {
-                let mut keep_alive = self.keep_alive.lock();
-                for i in handles.into_iter().skip(1){
-                    keep_alive.push(InstrumentWrapper::from(Arc::new(i)))
-                }
+            let mut keep_alive = self.keep_alive.lock();
+            for i in handles.into_iter() {
+                keep_alive.push(InstrumentWrapper::from(Arc::new(i)))
             }
             first
         }

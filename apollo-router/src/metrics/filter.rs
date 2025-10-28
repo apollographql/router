@@ -47,6 +47,14 @@ impl MeterProvider {
         }
     }
 
+    fn meter_with_scope(&self, scope: &InstrumentationScope) -> Meter {
+        match &self {
+            MeterProvider::Regular(provider) => {
+                provider.meter_with_scope(scope.clone())
+            }
+        }
+    }
+
     #[cfg(test)]
     fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult {
         match self {
@@ -253,8 +261,12 @@ impl opentelemetry::metrics::MeterProvider for FilterMeterProvider {
         }))
     }
     fn meter_with_scope(&self, scope: opentelemetry::InstrumentationScope) -> Meter {
-        let provider = SdkMeterProvider::default();
-        provider.meter_with_scope(scope)
+        Meter::new(Arc::new(FilteredInstrumentProvider {
+            noop: opentelemetry::global::meter_provider().meter(""),
+            delegate: self.delegate.meter_with_scope(&scope),
+            deny: self.deny.clone(),
+            allow: self.allow.clone(),
+        }))
     }
 }
 
