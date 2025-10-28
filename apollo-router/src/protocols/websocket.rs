@@ -268,8 +268,13 @@ where
             loop {
                 match stream.next().await {
                     Some(Ok(ServerMessage::Ping { .. })) => {
-                        // There's no need to send a pong here because the server will send a pong automatically.
-                        // See https://docs.rs/tungstenite/latest/tungstenite/protocol/struct.WebSocket.html#method.write
+                        // tungstenite will send a pong automatically when it receives a ping,
+                        // we just need to call flush - see:
+                        // https://docs.rs/tungstenite/latest/tungstenite/protocol/struct.WebSocket.html#method.flush
+                        // we don't mind an error here
+                        // because it will fall through the error below
+                        // if we haven't been able to properly get a ConnectionAck within the `CONNECTION_ACK_TIMEOUT`
+                        let _ = stream.flush().await;
                     }
                     other => {
                         return other;
@@ -730,9 +735,9 @@ mod tests {
     ) -> SocketAddr {
         let ws_handler = move |ws: WebSocketUpgrade| async move {
             let res = ws.protocols([GRAPHQL_WS_SUBPROTOCOL]).on_upgrade(move |mut socket| async move {
-                let connection_ack = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let ack_msg: ClientMessage = serde_json::from_str(&connection_ack).unwrap();
-                if let ClientMessage::ConnectionInit { payload } = ack_msg {
+                let connection_init = socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                let init_msg: ClientMessage = serde_json::from_str(&connection_init).unwrap();
+                if let ClientMessage::ConnectionInit { payload } = init_msg {
                     assert_eq!(payload, Some(serde_json_bytes::json!({"connectionParams": {
                         "token": "XXX"
                     }})));
@@ -747,7 +752,7 @@ mod tests {
                         .await
                         .unwrap();
 
-                    let pong_message = socket.next().await.unwrap().unwrap();
+                    let pong_message = socket.recv().await.unwrap().unwrap();
                     assert_eq!(pong_message, AxumWsMessage::Pong(Bytes::new()));
                 }
 
@@ -865,7 +870,7 @@ mod tests {
                         .send(AxumWsMessage::Ping(Bytes::new()))
                         .await
                         .unwrap();
-                    let pong_message = socket.next().await.unwrap().unwrap();
+                    let pong_message = socket.recv().await.unwrap().unwrap();
                     assert_eq!(pong_message, AxumWsMessage::Pong(Bytes::new()));
                 }
                 socket
