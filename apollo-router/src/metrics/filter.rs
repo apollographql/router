@@ -14,7 +14,6 @@ use opentelemetry::metrics::ObservableCounter;
 use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
 use opentelemetry::metrics::UpDownCounter;
-use opentelemetry_sdk::metrics::SdkMeterProvider;
 use regex::Regex;
 
 #[derive(Clone)]
@@ -49,9 +48,7 @@ impl MeterProvider {
 
     fn meter_with_scope(&self, scope: &InstrumentationScope) -> Meter {
         match &self {
-            MeterProvider::Regular(provider) => {
-                provider.meter_with_scope(scope.clone())
-            }
+            MeterProvider::Regular(provider) => provider.meter_with_scope(scope.clone()),
         }
     }
 

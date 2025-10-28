@@ -6,7 +6,11 @@ use std::sync::Arc;
 
 use derive_more::From;
 use itertools::Itertools;
-use opentelemetry::metrics::{Gauge, ObservableCounter};
+use opentelemetry::InstrumentationScope;
+use opentelemetry::KeyValue;
+use opentelemetry::metrics::Callback;
+use opentelemetry::metrics::Counter;
+use opentelemetry::metrics::Gauge;
 use opentelemetry::metrics::Histogram;
 use opentelemetry::metrics::InstrumentProvider;
 use opentelemetry::metrics::Meter;
@@ -15,9 +19,6 @@ use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
 use opentelemetry::metrics::SyncInstrument;
 use opentelemetry::metrics::UpDownCounter;
-use opentelemetry::metrics::{AsyncInstrument, Callback, Counter};
-use opentelemetry::InstrumentationScope;
-use opentelemetry::KeyValue;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use parking_lot::Mutex;
 use strum::EnumCount;
@@ -26,7 +27,7 @@ use strum_macros::EnumCount;
 use strum_macros::EnumIter;
 
 use crate::metrics::filter::FilterMeterProvider;
-use crate::plugin::DynPlugin;
+
 // This meter provider enables us to combine multiple meter providers. The reasons we need this are:
 // 1. Prometheus meters are special. To dispose a meter is to dispose the entire registry. This means we need to make a best effort to keep them around.
 // 2. To implement filtering we use a view. However this must be set during build of the meter provider, thus we need separate ones for Apollo and general metrics.
@@ -468,23 +469,23 @@ impl InstrumentProvider for AggregateInstrumentProvider {
 
 #[cfg(test)]
 mod test {
-    use std::sync::atomic::AtomicBool;
-    use std::sync::atomic::AtomicI64;
     use std::sync::Arc;
     use std::sync::Weak;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::AtomicI64;
     use std::time::Duration;
 
-    use opentelemetry::metrics::MeterProvider;
     use opentelemetry::InstrumentationScope;
+    use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::error::OTelSdkResult;
-    use opentelemetry_sdk::metrics::data::ResourceMetrics;
-    use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
-    use opentelemetry_sdk::metrics::reader::MetricReader;
     use opentelemetry_sdk::metrics::ManualReader;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
     use opentelemetry_sdk::metrics::PeriodicReader;
     use opentelemetry_sdk::metrics::Pipeline;
     use opentelemetry_sdk::metrics::Temporality;
+    use opentelemetry_sdk::metrics::data::ResourceMetrics;
+    use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
+    use opentelemetry_sdk::metrics::reader::MetricReader;
 
     use crate::metrics::aggregation::AggregateMeterProvider;
     use crate::metrics::aggregation::MeterProviderType;
