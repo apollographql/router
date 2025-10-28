@@ -66,7 +66,6 @@ mod test;
 mod execution;
 mod supergraph;
 
-
 pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
 const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5));
 const COPROCESSOR_ERROR_EXTENSION: &str = "ERROR";
