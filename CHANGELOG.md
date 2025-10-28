@@ -65,8 +65,6 @@ A race condition during hot reload occasionally left connections in an active st
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/8169
 
-
-
 # [1.61.10] - 2025-07-24
 
 ## 🐛 Fixes
