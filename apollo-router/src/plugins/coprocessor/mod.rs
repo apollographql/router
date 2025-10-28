@@ -60,10 +60,12 @@ use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::subgraph;
 
-mod execution;
-mod supergraph;
 #[cfg(test)]
 mod test;
+
+mod execution;
+mod supergraph;
+
 
 pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
 const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5));
@@ -555,7 +557,7 @@ impl RouterStage {
                 let sdl = sdl.clone();
 
                 async move {
-                    let result = process_router_request_stage(
+                    process_router_request_stage(
                         http_client,
                         coprocessor_url,
                         sdl,
@@ -567,10 +569,7 @@ impl RouterStage {
                     .map_err(|error| {
                         tracing::error!("coprocessor: router request stage error: {error}");
                         error
-                    });
-
-                    // BACK HERE
-                    result
+                    })
                 }
             })
         });
@@ -586,7 +585,7 @@ impl RouterStage {
 
                 async move {
                     let response: router::Response = fut.await?;
-                    let result = process_router_response_stage(
+                    process_router_response_stage(
                         http_client,
                         coprocessor_url,
                         sdl,
@@ -598,8 +597,7 @@ impl RouterStage {
                     .map_err(|error| {
                         tracing::error!("coprocessor: router response stage error: {error}");
                         error
-                    });
-                    result
+                    })
                 }
             })
         });
@@ -676,7 +674,7 @@ impl SubgraphStage {
                 let request_config = request_config.clone();
 
                 async move {
-                    let result = process_subgraph_request_stage(
+                    process_subgraph_request_stage(
                         http_client,
                         coprocessor_url,
                         service_name,
@@ -688,8 +686,7 @@ impl SubgraphStage {
                     .map_err(|error| {
                         tracing::error!("coprocessor: subgraph request stage error: {error}");
                         error
-                    });
-                    result
+                    })
                 }
             })
         });
@@ -706,7 +703,7 @@ impl SubgraphStage {
 
                 async move {
                     let response: subgraph::Response = fut.await?;
-                    let result = process_subgraph_response_stage(
+                    process_subgraph_response_stage(
                         http_client,
                         coprocessor_url,
                         service_name,
@@ -718,8 +715,7 @@ impl SubgraphStage {
                     .map_err(|error| {
                         tracing::error!("coprocessor: subgraph response stage error: {error}");
                         error
-                    });
-                    result
+                    })
                 }
             })
         });
@@ -817,7 +813,7 @@ where
         Some(body_value) => {
             // Try to parse as JSON to look for "errors" key
             match serde_json::from_str::<serde_json_bytes::Value>(body_value) {
-                Ok(json_val) => !json_val.get("errors").is_some(),
+                Ok(json_val) => json_val.get("errors").is_none(),
                 Err(_) => true, // not JSON, treat as success
             }
         }
@@ -995,7 +991,7 @@ where
         Some(body_value) => {
             // Try to parse as JSON to look for "errors" key
             match serde_json::from_str::<serde_json_bytes::Value>(body_value) {
-                Ok(json_val) => !json_val.get("errors").is_some(),
+                Ok(json_val) => json_val.get("errors").is_none(),
                 Err(_) => true, // not JSON, treat as success
             }
         }

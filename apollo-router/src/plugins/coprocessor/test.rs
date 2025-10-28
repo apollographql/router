@@ -1,3 +1,55 @@
+use crate::services::external::PipelineStep;
+
+macro_rules! assert_counter_zero_or_absent {
+    ($($arg:tt)*) => {{
+        let result = std::panic::catch_unwind(|| {
+            assert_counter!($($arg)*);
+        });
+        if result.is_err() {
+            // ignora "metric not found" — trata como zero
+            println!("(info) counter not found — treating as 0 for test");
+        }
+    }};
+}
+
+#[cfg(test)]
+pub(crate) fn assert_coprocessor_operations_metrics(
+    expected_stages: &[(PipelineStep, u64, Option<bool>)],
+) {
+    // Iterate over all known pipeline stages and verify the metrics
+    for stage in [
+        PipelineStep::RouterRequest,
+        PipelineStep::RouterResponse,
+        PipelineStep::SupergraphRequest,
+        PipelineStep::SupergraphResponse,
+        PipelineStep::ExecutionRequest,
+        PipelineStep::ExecutionResponse,
+        PipelineStep::SubgraphRequest,
+        PipelineStep::SubgraphResponse,
+    ] {
+        // Check if this stage is part of the expected stages list
+        if let Some((_, expected_value, succeeded)) =
+            expected_stages.iter().find(|(s, _, _)| *s == stage)
+        {
+            // ✅ Expected stage: must exist with the given value and succeeded flag
+            assert_counter!(
+                "apollo.router.operations.coprocessor",
+                *expected_value,
+                coprocessor.stage = stage.to_string(),
+                coprocessor.succeeded =
+                    succeeded.expect("succeeded must be provided for expected stages")
+            );
+        } else {
+            // ❌ Unexpected stage: must not exist or must be zero
+            assert_counter_zero_or_absent!(
+                "apollo.router.operations.coprocessor",
+                0,
+                coprocessor.stage = stage.to_string()
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -4675,57 +4727,5 @@ mod tests {
         }
         .with_metrics()
         .await;
-    }
-}
-
-use crate::services::external::PipelineStep;
-
-macro_rules! assert_counter_zero_or_absent {
-    ($($arg:tt)*) => {{
-        let result = std::panic::catch_unwind(|| {
-            assert_counter!($($arg)*);
-        });
-        if result.is_err() {
-            // ignora "metric not found" — trata como zero
-            println!("(info) counter not found — treating as 0 for test");
-        }
-    }};
-}
-
-#[cfg(test)]
-pub(crate) fn assert_coprocessor_operations_metrics(
-    expected_stages: &[(PipelineStep, u64, Option<bool>)],
-) {
-    // Iterate over all known pipeline stages and verify the metrics
-    for stage in [
-        PipelineStep::RouterRequest,
-        PipelineStep::RouterResponse,
-        PipelineStep::SupergraphRequest,
-        PipelineStep::SupergraphResponse,
-        PipelineStep::ExecutionRequest,
-        PipelineStep::ExecutionResponse,
-        PipelineStep::SubgraphRequest,
-        PipelineStep::SubgraphResponse,
-    ] {
-        // Check if this stage is part of the expected stages list
-        if let Some((_, expected_value, succeeded)) =
-            expected_stages.iter().find(|(s, _, _)| *s == stage)
-        {
-            // ✅ Expected stage: must exist with the given value and succeeded flag
-            assert_counter!(
-                "apollo.router.operations.coprocessor",
-                *expected_value,
-                coprocessor.stage = stage.to_string(),
-                coprocessor.succeeded =
-                    succeeded.expect("succeeded must be provided for expected stages")
-            );
-        } else {
-            // ❌ Unexpected stage: must not exist or must be zero
-            assert_counter_zero_or_absent!(
-                "apollo.router.operations.coprocessor",
-                0,
-                coprocessor.stage = stage.to_string()
-            );
-        }
     }
 }

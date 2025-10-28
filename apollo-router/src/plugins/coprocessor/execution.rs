@@ -97,7 +97,7 @@ impl ExecutionStage {
                 let sdl = sdl.clone();
 
                 async move {
-                    let result = process_execution_request_stage(
+                    process_execution_request_stage(
                         http_client,
                         coprocessor_url,
                         sdl,
@@ -109,8 +109,7 @@ impl ExecutionStage {
                     .map_err(|error| {
                         tracing::error!("coprocessor: execution request stage error: {error}");
                         error
-                    });
-                    result
+                    })
                 }
             })
         });
@@ -127,8 +126,7 @@ impl ExecutionStage {
 
                 async move {
                     let response: execution::Response = fut.await?;
-
-                    let result = process_execution_response_stage(
+                    process_execution_response_stage(
                         http_client,
                         coprocessor_url,
                         sdl,
@@ -140,8 +138,7 @@ impl ExecutionStage {
                     .map_err(|error| {
                         tracing::error!("coprocessor: execution response stage error: {error}");
                         error
-                    });
-                    result
+                    })
                 }
             })
         });
