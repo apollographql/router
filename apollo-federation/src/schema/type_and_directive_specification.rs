@@ -587,6 +587,9 @@ impl DirectiveSpecification {
                     arg_strategies.len() == args.len(),
                     "Invalid directive specification for @{name}: not all arguments define a composition strategy"
                 );
+                tracing::trace!(
+                    "Creating argument merger for directive @{name} with strategies: {arg_strategies:?}",
+                );
                 argument_merger = Some(directive_argument_merger(
                     name.clone(),
                     args.to_vec(),

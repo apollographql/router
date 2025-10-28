@@ -123,8 +123,8 @@ impl Merger {
                     }
 
                     self.error_reporter.report_mismatch_hint::<InputObjectFieldDefinitionPosition, InputObjectFieldDefinitionPosition, ()>(
-                            HintCode::InconsistentDescription,
-                            format!("Input object field \"{}\" will not be added to \"{}\" in the supergraph as it does not appear in all subgraphs: it is ",
+                            HintCode::InconsistentInputObjectField,
+                            format!("Input object field \"{}\" will not be added to \"{}\" in the supergraph as it does not appear in all subgraphs: ",
                                 dest_field.field_name, dest.type_name
                             ),
                             &dest_field,
@@ -138,7 +138,7 @@ impl Merger {
                             },
                             |_, subgraphs| {
                                 format!(
-                                    "but not in {}",
+                                    " but not in {}",
                                     subgraphs,
                                 )
                             },
