@@ -264,7 +264,8 @@ impl Plugin for Record {
                             .clone()
                             .unwrap_or_else(|| "UnnamedOperation".to_string());
 
-                        let (headers, header_errors) = parse_headers(&res.response.headers().clone());
+                        let (headers, header_errors) =
+                            parse_headers(&res.response.headers().clone());
 
                         let subgraph = Subgraph {
                             subgraph_name,
