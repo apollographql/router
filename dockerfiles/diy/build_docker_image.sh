@@ -173,6 +173,7 @@ cd "$(dirname "${0}")" || terminate "Couldn't cd to source location";
 mkdir "${BUILD_DIR}/dockerfiles"
 cp dockerfiles/Dockerfile.repo "${BUILD_DIR}" || terminate "Couldn't copy dockerfiles to ${BUILD_DIR}"
 cp ../Dockerfile.router "${BUILD_DIR}" || terminate "Couldn't copy dockerfiles to ${BUILD_DIR}"
+cp ../download_and_validate_router.sh "${BUILD_DIR}" || terminate "Couldn't copy random sidecar download and validate script to ${BUILD_DIR}"
 cp ../router.yaml "${BUILD_DIR}/dockerfiles" || terminate "Couldn't copy ../router.yaml to ${BUILD_DIR}"
 
 # Change to our build directory

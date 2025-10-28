@@ -1,15 +1,15 @@
 mod configuration;
 mod license;
-mod reload;
+pub(crate) mod reload;
 mod schema;
 mod shutdown;
 
 use std::fmt::Debug;
 use std::fmt::Formatter;
+use std::sync::Arc;
 
 pub use configuration::ConfigurationSource;
 pub use license::LicenseSource;
-pub(crate) use reload::ReloadSource;
 pub use schema::SchemaSource;
 pub use shutdown::ShutdownSource;
 
@@ -28,7 +28,7 @@ use crate::uplink::schema::SchemaState;
 /// Messages that are broadcast across the app.
 pub(crate) enum Event {
     /// The configuration was updated.
-    UpdateConfiguration(Configuration),
+    UpdateConfiguration(Arc<Configuration>),
 
     /// There are no more updates to the configuration
     NoMoreConfiguration,

@@ -564,7 +564,7 @@ where
             state = match event {
                 UpdateConfiguration(configuration) => {
                     state
-                        .update_inputs(&mut self, None, Some(Arc::new(configuration)), None)
+                        .update_inputs(&mut self, None, Some(configuration), None)
                         .await
                 }
                 NoMoreConfiguration => state.no_more_configuration().await,
@@ -716,11 +716,11 @@ mod tests {
             Err(NoLicense)
         );
     }
-    fn test_config_restricted() -> Configuration {
+    fn test_config_restricted() -> Arc<Configuration> {
         let mut config = Configuration::builder().build().unwrap();
         config.validated_yaml =
             Some(json!({"plugins":{"experimental.restricted":{"enabled":true}}}));
-        config
+        config.into()
     }
 
     #[test(tokio::test)]
@@ -846,7 +846,7 @@ mod tests {
                 server_factory,
                 router_factory,
                 stream::iter(vec![
-                    UpdateConfiguration(Configuration::builder().build().unwrap()),
+                    UpdateConfiguration(Configuration::builder().build().unwrap().into()),
                     UpdateSchema(example_schema()),
                     UpdateLicense(LicenseState::Unlicensed),
                     UpdateConfiguration(test_config_restricted()),
@@ -890,7 +890,7 @@ mod tests {
                 server_factory,
                 router_factory,
                 stream::iter(vec![
-                    UpdateConfiguration(Configuration::builder().build().unwrap()),
+                    UpdateConfiguration(Configuration::builder().build().unwrap().into()),
                     UpdateSchema(example_schema()),
                     UpdateLicense(LicenseState::default()),
                     Shutdown
@@ -912,7 +912,7 @@ mod tests {
                 server_factory,
                 router_factory,
                 stream::iter(vec![
-                    UpdateConfiguration(Configuration::builder().build().unwrap()),
+                    UpdateConfiguration(Configuration::builder().build().unwrap().into()),
                     UpdateSchema(SchemaState {
                         sdl: minimal_schema.to_owned(),
                         launch_id: None
@@ -938,7 +938,7 @@ mod tests {
                 server_factory,
                 router_factory,
                 stream::iter(vec![
-                    UpdateConfiguration(Configuration::builder().build().unwrap()),
+                    UpdateConfiguration(Configuration::builder().build().unwrap().into()),
                     UpdateSchema(SchemaState {
                         sdl: minimal_schema.to_owned(),
                         launch_id: None
@@ -967,7 +967,7 @@ mod tests {
                 server_factory,
                 router_factory,
                 stream::iter(vec![
-                    UpdateConfiguration(Configuration::builder().build().unwrap()),
+                    UpdateConfiguration(Configuration::builder().build().unwrap().into()),
                     UpdateSchema(SchemaState {
                         sdl: minimal_schema.to_owned(),
                         launch_id: None
@@ -993,7 +993,7 @@ mod tests {
                 server_factory,
                 router_factory,
                 stream::iter(vec![
-                    UpdateConfiguration(Configuration::builder().build().unwrap()),
+                    UpdateConfiguration(Configuration::builder().build().unwrap().into()),
                     UpdateSchema(example_schema()),
                     UpdateLicense(LicenseState::default()),
                     UpdateConfiguration(
@@ -1005,6 +1005,7 @@ mod tests {
                             )
                             .build()
                             .unwrap()
+                            .into()
                     ),
                     Shutdown
                 ])
@@ -1025,7 +1026,7 @@ mod tests {
                 server_factory,
                 router_factory,
                 stream::iter(vec![
-                    UpdateConfiguration(Configuration::builder().build().unwrap()),
+                    UpdateConfiguration(Configuration::builder().build().unwrap().into()),
                     UpdateSchema(example_schema()),
                     UpdateLicense(LicenseState::default()),
                     Shutdown
@@ -1052,7 +1053,7 @@ mod tests {
                 server_factory,
                 router_factory,
                 stream::iter(vec![
-                    UpdateConfiguration(Configuration::builder().build().unwrap()),
+                    UpdateConfiguration(Configuration::builder().build().unwrap().into()),
                     UpdateSchema(example_schema()),
                     UpdateLicense(LicenseState::default()),
                 ])
@@ -1091,7 +1092,7 @@ mod tests {
                 server_factory,
                 router_factory,
                 stream::iter(vec![
-                    UpdateConfiguration(Configuration::builder().build().unwrap()),
+                    UpdateConfiguration(Configuration::builder().build().unwrap().into()),
                     UpdateSchema(example_schema()),
                     UpdateLicense(LicenseState::default()),
                     UpdateSchema(SchemaState {
@@ -1146,7 +1147,7 @@ mod tests {
                 server_factory,
                 router_factory,
                 stream::iter(vec![
-                    UpdateConfiguration(Configuration::builder().build().unwrap()),
+                    UpdateConfiguration(Configuration::builder().build().unwrap().into()),
                     UpdateSchema(example_schema()),
                     UpdateLicense(LicenseState::default()),
                     UpdateConfiguration(
@@ -1154,6 +1155,7 @@ mod tests {
                             .homepage(Homepage::builder().enabled(true).build())
                             .build()
                             .unwrap()
+                            .into()
                     ),
                     UpdateSchema(SchemaState {
                         sdl: minimal_schema.to_owned(),

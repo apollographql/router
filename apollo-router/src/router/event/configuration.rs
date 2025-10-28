@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 
 use derivative::Derivative;
@@ -65,12 +66,12 @@ impl ConfigurationSource {
         match self {
             ConfigurationSource::Static(mut instance) => {
                 instance.uplink = uplink_config;
-                stream::iter(vec![UpdateConfiguration(*instance)]).boxed()
+                stream::iter(vec![UpdateConfiguration(Arc::new(*instance))]).boxed()
             }
             ConfigurationSource::Stream(stream) => stream
                 .map(move |mut c| {
                     c.uplink = uplink_config.clone();
-                    UpdateConfiguration(c)
+                    UpdateConfiguration(Arc::new(c))
                 })
                 .boxed(),
             #[allow(deprecated)]
@@ -100,7 +101,9 @@ impl ConfigurationSource {
                                             {
                                                 Ok(mut configuration) => {
                                                     configuration.uplink = uplink_config.clone();
-                                                    Some(UpdateConfiguration(configuration))
+                                                    Some(UpdateConfiguration(Arc::new(
+                                                        configuration,
+                                                    )))
                                                 }
                                                 Err(err) => {
                                                     tracing::error!("{}", err);
@@ -112,8 +115,10 @@ impl ConfigurationSource {
                                     .boxed()
                             } else {
                                 configuration.uplink = uplink_config.clone();
-                                stream::once(future::ready(UpdateConfiguration(configuration)))
-                                    .boxed()
+                                stream::once(future::ready(UpdateConfiguration(Arc::new(
+                                    configuration,
+                                ))))
+                                .boxed()
                             }
                         }
                         Err(err) => {
