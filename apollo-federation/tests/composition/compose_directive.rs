@@ -896,16 +896,17 @@ Did you mean "@bar"?
 }
 
 mod composition {
+    use test_log::test;
+
     use super::*;
 
-    #[ignore = "needs implementation - should allow custom @tag alongside federation @tag when federation one is not renamed"]
     #[test]
     fn composes_custom_tag_directive_when_renamed() {
         let subgraph_a = Subgraph::parse("subgraphA", "", r#"
             extend schema
                 @link(url: "https://specs.apollo.dev/link/v1.0")
                 @link(url: "https://specs.apollo.dev/federation/v2.1", import: ["@key", "@composeDirective", "@tag"])
-                @link(url: "https://custom.dev/tag/v1.0", import: [{ name: "@tag", as: "@mytag"}])
+                @link(url: "https://custom.dev/myspec/v1.0", import: [{ name: "@tag", as: "@mytag"}])
                 @composeDirective(name: "@mytag")
 
             directive @mytag(name: String!, prop: String!) on FIELD_DEFINITION | OBJECT
@@ -923,7 +924,7 @@ mod composition {
         let result = compose(vec![subgraph_a, subgraph_b]).unwrap();
         assert_has_directive_definition(
             &result,
-            "directive @tag(name: String!) on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA",
+            "directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA",
         );
         assert_has_directive_definition(
             &result,
@@ -952,18 +953,19 @@ mod composition {
         assert_eq!(tag_directive.to_string(), r#"@tag(name: "c")"#);
 
         assert!(schema.to_string().contains(
-            r#"@link(url: "https://custom.dev/tag/v1.0", import: [{ name: "@tag", as: "@mytag"}])"#
-        ));
+                r#"@link(url: "https://custom.dev/myspec/v1.0", import: [{name: "@tag", as: "@mytag"}])"#,
+            ),
+            "Expected link to custom spec to be in composed schema, but got schema:\n{schema}",
+        );
     }
 
-    #[ignore = "needs implementation - should allow custom @tag when federation @tag is renamed to different name"]
     #[test]
     fn composes_custom_tag_when_federation_tag_is_renamed() {
         let subgraph_a = Subgraph::parse("subgraphA", "", r#"
             extend schema
-                @link(url: "https://specs.apollo.dev/federation/v2.1", import: ["@key", "@composeDirective", {name: "@tag", as: "@mytag"}])
                 @link(url: "https://specs.apollo.dev/link/v1.0")
-                @link(url: "https://custom.dev/tag/v1.0", import: ["@tag"])
+                @link(url: "https://specs.apollo.dev/federation/v2.1", import: ["@key", "@composeDirective", {name: "@tag", as: "@mytag"}])
+                @link(url: "https://custom.dev/myspec/v1.0", import: ["@tag"])
                 @composeDirective(name: "@tag")
 
             directive @tag(name: String!, prop: String!) on FIELD_DEFINITION | OBJECT
@@ -976,12 +978,29 @@ mod composition {
                 b: String @mytag(name: "c")
             }
         "#).unwrap();
-        let subgraph_b = generate_subgraph("subgraphB", "", "", "", "");
+        let subgraph_b = Subgraph::parse(
+            "subgraphB",
+            "",
+            r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/link/v1.0")
+                @link(url: "https://specs.apollo.dev/federation/v2.1", import: ["@key"])
+
+            type Query {
+                subgraphB: User
+            }
+            type User @key(fields: "id") {
+                id: Int
+                subgraphB: String
+            }
+        "#,
+        )
+        .unwrap();
 
         let result = compose(vec![subgraph_a, subgraph_b]).unwrap();
         assert_has_directive_definition(
             &result,
-            "directive @mytag(name: String!) on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA",
+            "directive @mytag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA",
         );
         assert_has_directive_definition(
             &result,
@@ -1009,7 +1028,7 @@ mod composition {
         assert!(
             schema
                 .to_string()
-                .contains(r#"@link(url: "https://custom.dev/tag/v1.0", import: ["@tag"])"#)
+                .contains(r#"@link(url: "https://custom.dev/myspec/v1.0", import: ["@tag"])"#)
         );
     }
 
