@@ -71,8 +71,8 @@ telemetry:
       router:
         apollo.router.overhead: true
 ```
-
-**Note that the use of this metric is nuanced, and there is risk misinterpretation. See the full docs for this metric to help understand how it can be used.** 
+> [!NOTE]
+> Note that the use of this metric is nuanced, and there is risk of misinterpretation. See [the full docs](https://www.apollographql.com/docs/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/selectors#router-overhead-selectors) for this metric to help understand how it can be used.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/8455
 
@@ -86,13 +86,13 @@ By [@juancarlosjr97](https://github.com/juancarlosjr97) in https://github.com/ap
 
 ### Add ability to rename metrics ([PR #8424](https://github.com/apollographql/router/pull/8424))
 
-The router can now rename instruments via OpenTelemetry views.
+The router can now rename instruments via OpenTelemetry views. Details on how to use this feature can be found in [the docs](https://www.apollographql.com/docs/graphos/routing/observability/router-telemetry-otel/telemetry-pipelines/metrics-exporters/overview#renaming-metrics).
 
 Benefits:
 - **Cost optimization**: Some observability platforms only allow tag indexing controls on a per-metric name basis. Using OTLP semantic naming conventions and having the same metric name emitted by different services can prevent effective use of these controls.
 - **Convention alignment**: Many customers have specific metric naming conventions across their organization—this feature allows them to align with those conventions. 
 
-By [Jon Christiansen](https://github.com/theJC) in https://github.com/apollographql/router/pull/8412
+By [@theJC](https://github.com/theJC) in https://github.com/apollographql/router/pull/8412
 
 ## 🐛 Fixes
 
@@ -112,7 +112,8 @@ The `connections` metric was implemented with an up-down counter that would some
 
 The new `clients` metric counts the number of clients across the router via an `AtomicU64` and surfaces that value in a gauge.
 
-**Note**: The old metric included a `kind` attribute to reflect the number of clients in each pool (for example, entity caching, query planning). The new metric doesn't include this attribute; the purpose of the metric is to ensure the number of clients isn't growing unbounded ([#7319](https://github.com/apollographql/router/pull/7319)).
+> [!NOTE]
+> The old metric included a `kind` attribute to reflect the number of clients in each pool (for example, entity caching, query planning). The new metric doesn't include this attribute; the purpose of the metric is to ensure the number of clients isn't growing unbounded ([#7319](https://github.com/apollographql/router/pull/7319)).
 
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/8161
 
