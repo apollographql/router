@@ -218,7 +218,10 @@ fn validate_args_selection(
             validate_args_selection(schema, Some(type_name), &next_fields, sel)?;
         } else {
             // A leaf field should have a scalar type.
-            if !matches!(&type_def, TypeDefinitionPosition::Scalar(_)) {
+            if !matches!(
+                &type_def,
+                TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_)
+            ) {
                 return Err(CacheTagValidationError::CacheTagInvalidFormat {
                     message: format!(
                         "invalid path ending at \"{name}\", which is not a scalar type"
@@ -569,10 +572,18 @@ mod tests {
                 name: String
             }
 
+            enum Country {
+                BE
+                FR
+            }
+
             type Query {
                 topProducts(first: Int! = 5): [Product]
                     @cacheTag(format: "topProducts")
                     @cacheTag(format: "topProducts-{$args.first}")
+                topProductsByCountry(first: Int! = 5, country: Country!): [Product]
+                    @cacheTag(format: "topProducts")
+                    @cacheTag(format: "topProducts-{$args.first}-{$args.country}")
             }
         "#;
         build_and_validate(SCHEMA);
