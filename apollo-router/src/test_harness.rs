@@ -27,7 +27,7 @@ use crate::plugin::PluginPrivate;
 use crate::plugin::PluginUnstable;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::canned;
-use crate::plugins::telemetry::reload::init_telemetry;
+use crate::plugins::telemetry::reload::otel::init_telemetry;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::HasSchema;
 use crate::services::SupergraphCreator;

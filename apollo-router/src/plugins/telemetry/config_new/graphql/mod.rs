@@ -208,7 +208,7 @@ pub(crate) mod test {
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::test::PluginTestHarness;
 
-    #[test_log::test(tokio::test)]
+    #[tokio::test(flavor = "multi_thread")]
     async fn basic_metric_publishing() {
         async {
             let schema_str = include_str!(
@@ -256,7 +256,7 @@ pub(crate) mod test {
         .await;
     }
 
-    #[test_log::test(tokio::test)]
+    #[tokio::test(flavor = "multi_thread")]
     async fn multiple_fields_metric_publishing() {
         async {
             let schema_str = include_str!(
@@ -311,7 +311,7 @@ pub(crate) mod test {
         .await;
     }
 
-    #[test_log::test(tokio::test)]
+    #[tokio::test(flavor = "multi_thread")]
     async fn disabled_metric_publishing() {
         async {
             let schema_str = include_str!(
@@ -353,7 +353,7 @@ pub(crate) mod test {
         .await;
     }
 
-    #[test_log::test(tokio::test)]
+    #[tokio::test(flavor = "multi_thread")]
     async fn filtered_metric_publishing() {
         async {
             let schema_str = include_str!(

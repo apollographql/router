@@ -18,6 +18,10 @@ pub struct Test {
     #[clap(long)]
     locked: bool,
 
+    /// Pass --no-fail-fast to cargo test
+    #[clap(long)]
+    no_fail_fast: bool,
+
     /// Pass --workspace to cargo test
     #[clap(long)]
     workspace: bool,
@@ -50,6 +54,10 @@ impl Test {
                 args.push("--locked".to_string());
             }
 
+            if self.no_fail_fast {
+                args.push("--no-fail-fast".to_string());
+            }
+
             if self.workspace {
                 args.push("--workspace".to_string());
             }
@@ -73,6 +81,10 @@ impl Test {
 
             if self.locked {
                 args.push("--locked".to_string());
+            }
+
+            if self.no_fail_fast {
+                args.push("--no-fail-fast".to_string());
             }
 
             if self.workspace {

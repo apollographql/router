@@ -9,8 +9,8 @@ Configuration yaml:
 * Authentication plugin
   .authentication.router
 
-* Subgraph entity caching
-  .preview_entity_cache.enabled
+* Subgraph response caching
+  .preview_response_cache.enabled
 
 * Federated subscriptions
   .subscription.enabled

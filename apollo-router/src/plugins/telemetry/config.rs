@@ -64,7 +64,7 @@ pub(crate) struct Conf {
 }
 
 /// Exporter configuration
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Exporters {
     /// Logging configuration
@@ -96,7 +96,7 @@ impl Instrumentation {
 }
 
 /// Metrics configuration
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Metrics {
     /// Common metrics configuration across all exporters
@@ -107,7 +107,7 @@ pub(crate) struct Metrics {
     pub(crate) prometheus: metrics::prometheus::Config,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct MetricsCommon {
     /// Set a service.name resource in your metrics
@@ -141,6 +141,12 @@ impl Default for MetricsCommon {
 pub(crate) struct MetricView {
     /// The instrument name you're targeting
     pub(crate) name: String,
+    /// Rename the metric to this name
+    ///
+    /// This allows you to customize metric names for both OTLP and Prometheus exporters.
+    /// Note: Prometheus will apply additional transformations (dots to underscores, unit suffixes).
+    /// Apollo metrics are not affected by this rename - they will retain original names.
+    pub(crate) rename: Option<String>,
     /// New description to set to the instrument
     pub(crate) description: Option<String>,
     /// New unit to set to the instrument
@@ -168,6 +174,9 @@ impl TryInto<Box<dyn View>> for MetricView {
         });
         let instrument = Instrument::new().name(self.name);
         let mut mask = Stream::new();
+        if let Some(new_name) = self.rename {
+            mask = mask.name(new_name);
+        }
         if let Some(desc) = self.description {
             mask = mask.description(desc);
         }
@@ -196,7 +205,7 @@ pub(crate) enum MetricAggregation {
 }
 
 /// Tracing configuration
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Tracing {
     // TODO: when deleting the `experimental_` prefix, check the usage when enabling dev mode
@@ -216,7 +225,7 @@ pub(crate) struct Tracing {
     pub(crate) datadog: tracing::datadog::Config,
 }
 
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct ExposeTraceId {
     /// Expose the trace_id in response headers
@@ -281,7 +290,7 @@ pub(crate) enum ApolloSignatureNormalizationAlgorithm {
 }
 
 /// Apollo usage report reference generation modes.
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema, Copy)]
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema, Copy, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub(crate) enum ApolloMetricsReferenceMode {
     /// Use the extended mode to report input object fields and enum value references as well as object fields.
@@ -293,7 +302,7 @@ pub(crate) enum ApolloMetricsReferenceMode {
 
 /// Configure propagation of traces. In general you won't have to do this as these are automatically configured
 /// along with any exporter you configure.
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Propagation {
     /// Select a custom request header to set your own trace_id (header value must be convertible from hexadecimal to set a correct trace_id)
@@ -312,7 +321,7 @@ pub(crate) struct Propagation {
     pub(crate) aws_xray: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, Default, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RequestPropagation {
     /// Choose the header name to expose trace_id (default: apollo-trace-id)
@@ -325,7 +334,7 @@ pub(crate) struct RequestPropagation {
     pub(crate) format: TraceIdFormat,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 #[non_exhaustive]
 pub(crate) struct TracingCommon {
@@ -617,7 +626,7 @@ impl From<opentelemetry::Array> for AttributeArray {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, untagged)]
 pub(crate) enum SamplerOption {
     /// Sample a given fraction. Fractions >= 1 will always sample.
@@ -625,7 +634,7 @@ pub(crate) enum SamplerOption {
     Always(Sampler),
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Sampler {
     /// Always sample
@@ -848,5 +857,59 @@ mod tests {
         AttributeValue::try_from(json!([1, true])).expect_err("mixed conversion must fail");
         AttributeValue::try_from(json!([1.1, true])).expect_err("mixed conversion must fail");
         AttributeValue::try_from(json!([true, "bar"])).expect_err("mixed conversion must fail");
+    }
+
+    #[test]
+    fn test_metric_view_rename_deserialization() {
+        // Test deserialization of MetricView with rename field
+        let json_config = json!({
+            "name": "http.server.request.duration",
+            "rename": "apollo.router.http.duration"
+        });
+
+        let view: MetricView = serde_json::from_value(json_config).expect("should deserialize");
+        assert_eq!(view.name, "http.server.request.duration");
+        assert_eq!(view.rename, Some("apollo.router.http.duration".to_string()));
+        assert_eq!(view.description, None);
+        assert_eq!(view.unit, None);
+        assert_eq!(view.aggregation, None);
+        assert_eq!(view.allowed_attribute_keys, None);
+    }
+
+    #[test]
+    fn test_metric_view_without_rename() {
+        // Test backward compatibility - MetricView without rename field
+        let json_config = json!({
+            "name": "http.server.request.duration",
+            "description": "HTTP request duration"
+        });
+
+        let view: MetricView = serde_json::from_value(json_config).expect("should deserialize");
+        assert_eq!(view.name, "http.server.request.duration");
+        assert_eq!(view.rename, None);
+        assert_eq!(view.description, Some("HTTP request duration".to_string()));
+    }
+
+    #[test]
+    fn test_metric_view_with_all_fields() {
+        // Test MetricView with rename combined with other fields
+        let json_config = json!({
+            "name": "http.server.request.duration",
+            "rename": "custom.metric.name",
+            "description": "Custom description",
+            "unit": "s",
+            "aggregation": {
+                "histogram": {
+                    "buckets": [0.1, 0.5, 1.0, 5.0]
+                }
+            }
+        });
+
+        let view: MetricView = serde_json::from_value(json_config).expect("should deserialize");
+        assert_eq!(view.name, "http.server.request.duration");
+        assert_eq!(view.rename, Some("custom.metric.name".to_string()));
+        assert_eq!(view.description, Some("Custom description".to_string()));
+        assert_eq!(view.unit, Some("s".to_string()));
+        assert!(view.aggregation.is_some());
     }
 }

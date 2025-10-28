@@ -1,6 +1,711 @@
 ### `telemetry`
 
-<ExpansionPanel title="telemetry YAML snippet">
+<ExpansionPanel title="telemetry YAML snippet (>= Router v2.7.0) ">
+
+```yaml title="telemetry"
+telemetry:
+  apollo:
+    tracing:
+      batch_processor:
+        max_export_timeout: 30s
+        scheduled_delay: 5s
+        max_export_batch_size: 512
+        max_concurrent_exports: 1
+        max_queue_size: 2048
+    metrics:
+      otlp:
+        batch_processor:
+          scheduled_delay: 5s
+          max_export_timeout: 30s
+      usage_reports:
+        batch_processor:
+          max_export_timeout: 30s
+          scheduled_delay: 5s
+          max_queue_size: 2048
+    buffer_size: 10000
+    client_name_header: apollographql-client-name
+    client_version_header: apollographql-client-version
+    endpoint: https://usage-reporting.api.apollographql.com/api/ingress/traces
+    errors:
+      preview_extended_error_metrics: disabled
+      subgraph:
+        all:
+          redact: true
+          redaction_policy: strict
+          send: true
+        subgraphs: {}
+    experimental_local_field_metrics: false
+    experimental_otlp_endpoint: https://usage-reporting.api.apollographql.com/
+    experimental_otlp_tracing_protocol: grpc
+    field_level_instrumentation_sampler: 0.0
+    metrics_reference_mode: extended
+    otlp_tracing_sampler: 0.0
+    send_headers:
+      only:
+      - example_only_item
+    send_variable_values:
+      only:
+      - example_only_item
+    signature_normalization_algorithm: enhanced
+  exporters:
+    logging:
+      common:
+        resource: {}
+        service_name: null
+        service_namespace: null
+      stdout:
+        enabled: true
+        format:
+          json:
+            display_current_span: false
+            display_filename: false
+            display_level: true
+            display_line_number: false
+            display_resource: true
+            display_span_id: true
+            display_span_list: true
+            display_target: true
+            display_thread_id: false
+            display_thread_name: false
+            display_timestamp: true
+            display_trace_id: hexadecimal
+            span_attributes: []
+        rate_limit:
+          capacity: 1
+          enabled: false
+          interval:
+            nanos: 0
+            secs: 1
+        tty_format:
+          json:
+            display_current_span: false
+            display_filename: false
+            display_level: true
+            display_line_number: false
+            display_resource: true
+            display_span_id: true
+            display_span_list: true
+            display_target: true
+            display_thread_id: false
+            display_thread_name: false
+            display_timestamp: true
+            display_trace_id: hexadecimal
+            span_attributes: []
+    metrics:
+      common:
+        buckets:
+        - 0.001
+        - 0.005
+        - 0.015
+        - 0.05
+        - 0.1
+        - 0.2
+        - 0.3
+        - 0.4
+        - 0.5
+        - 1.0
+        - 5.0
+        - 10.0
+        resource: {}
+        service_name: null
+        service_namespace: null
+        views:
+        - aggregation:
+            histogram:
+              buckets:
+              - 0.0
+          allowed_attribute_keys:
+          - example_allowed_attribute_keys_item
+          description: example_description
+          name: example_name
+          rename: example_rename
+          unit: example_unit
+      otlp:
+        batch_processor:
+          max_concurrent_exports: 1
+          max_export_batch_size: 512
+          max_export_timeout:
+            nanos: 0
+            secs: 30
+          max_queue_size: 2048
+          scheduled_delay:
+            nanos: 0
+            secs: 5
+        enabled: false
+        endpoint: example_endpoint
+        grpc:
+          ca: null
+          cert: null
+          domain_name: null
+          key: null
+          metadata: {}
+        http:
+          headers: {}
+        protocol: grpc
+        temporality: cumulative
+      prometheus:
+        enabled: false
+        listen: example_listen
+        path: /metrics
+    tracing:
+      common:
+        max_attributes_per_event: 128
+        max_attributes_per_link: 128
+        max_attributes_per_span: 128
+        max_events_per_span: 128
+        max_links_per_span: 128
+        parent_based_sampler: true
+        preview_datadog_agent_sampling: null
+        resource: {}
+        sampler: 0.0
+        service_name: null
+        service_namespace: null
+      datadog:
+        batch_processor:
+          max_concurrent_exports: 1
+          max_export_batch_size: 512
+          max_export_timeout:
+            nanos: 0
+            secs: 30
+          max_queue_size: 2048
+          scheduled_delay:
+            nanos: 0
+            secs: 5
+        enable_span_mapping: true
+        enabled: false
+        endpoint: example_endpoint
+        fixed_span_names: true
+        resource_mapping: {}
+        span_metrics:
+          connect: true
+          connect_request: true
+          execution: true
+          http_request: true
+          parse_query: true
+          query_planning: true
+          request: true
+          router: true
+          subgraph: true
+          subgraph_request: true
+          supergraph: true
+      experimental_response_trace_id:
+        enabled: false
+        format: hexadecimal
+        header_name: example_header_name
+      otlp:
+        batch_processor:
+          max_concurrent_exports: 1
+          max_export_batch_size: 512
+          max_export_timeout:
+            nanos: 0
+            secs: 30
+          max_queue_size: 2048
+          scheduled_delay:
+            nanos: 0
+            secs: 5
+        enabled: false
+        endpoint: example_endpoint
+        grpc:
+          ca: null
+          cert: null
+          domain_name: null
+          key: null
+          metadata: {}
+        http:
+          headers: {}
+        protocol: grpc
+        temporality: cumulative
+      propagation:
+        aws_xray: false
+        baggage: false
+        datadog: false
+        jaeger: false
+        request:
+          format: hexadecimal
+          header_name: example_header_name
+        trace_context: false
+        zipkin: false
+      zipkin:
+        batch_processor:
+          max_concurrent_exports: 1
+          max_export_batch_size: 512
+          max_export_timeout:
+            nanos: 0
+            secs: 30
+          max_queue_size: 2048
+          scheduled_delay:
+            nanos: 0
+            secs: 5
+        enabled: false
+        endpoint: example_endpoint
+  instrumentation:
+    events:
+      connector:
+        error:
+          condition:
+            eq:
+            - false
+            - false
+          level: info
+        request:
+          condition:
+            eq:
+            - false
+            - false
+          level: info
+        response:
+          condition:
+            eq:
+            - false
+            - false
+          level: info
+      router:
+        error:
+          condition:
+            eq:
+            - false
+            - false
+          level: info
+        request:
+          condition:
+            eq:
+            - false
+            - false
+          level: info
+        response:
+          condition:
+            eq:
+            - false
+            - false
+          level: info
+      subgraph:
+        error:
+          condition:
+            eq:
+            - false
+            - false
+          level: info
+        request:
+          condition:
+            eq:
+            - false
+            - false
+          level: info
+        response:
+          condition:
+            eq:
+            - false
+            - false
+          level: info
+      supergraph:
+        error:
+          condition:
+            eq:
+            - false
+            - false
+          level: info
+        request:
+          condition:
+            eq:
+            - false
+            - false
+          level: info
+        response:
+          condition:
+            eq:
+            - false
+            - false
+          level: info
+    instruments:
+      cache:
+        apollo.router.operations.entity.cache:
+          attributes:
+            graphql.type.name:
+              alias: example_alias
+      connector:
+        http.client.request.body.size:
+          attributes:
+            connector.http.method:
+              alias: example_alias
+            connector.source.name:
+              alias: example_alias
+            connector.url.template:
+              alias: example_alias
+            subgraph.name:
+              alias: example_alias
+        http.client.request.duration:
+          attributes:
+            connector.http.method:
+              alias: example_alias
+            connector.source.name:
+              alias: example_alias
+            connector.url.template:
+              alias: example_alias
+            subgraph.name:
+              alias: example_alias
+        http.client.response.body.size:
+          attributes:
+            connector.http.method:
+              alias: example_alias
+            connector.source.name:
+              alias: example_alias
+            connector.url.template:
+              alias: example_alias
+            subgraph.name:
+              alias: example_alias
+      default_requirement_level: none
+      graphql:
+        field.execution:
+          attributes:
+            graphql.field.name:
+              alias: example_alias
+            graphql.field.type:
+              alias: example_alias
+            graphql.list.length:
+              alias: example_alias
+            graphql.operation.name:
+              alias: example_alias
+            graphql.type.name:
+              alias: example_alias
+        list.length:
+          attributes:
+            graphql.field.name:
+              alias: example_alias
+            graphql.field.type:
+              alias: example_alias
+            graphql.list.length:
+              alias: example_alias
+            graphql.operation.name:
+              alias: example_alias
+            graphql.type.name:
+              alias: example_alias
+      router:
+        http.server.active_requests:
+          attributes:
+            http.request.method: false
+            server.address: false
+            server.port: false
+            url.scheme: false
+        http.server.request.body.size:
+          attributes:
+            baggage: null
+            dd.trace_id:
+              alias: example_alias
+            error.type:
+              alias: example_alias
+            http.request.body.size:
+              alias: example_alias
+            http.request.method:
+              alias: example_alias
+            http.response.body.size:
+              alias: example_alias
+            http.response.status_code:
+              alias: example_alias
+            http.route:
+              alias: example_alias
+            network.local.address:
+              alias: example_alias
+            network.local.port:
+              alias: example_alias
+            network.peer.address:
+              alias: example_alias
+            network.peer.port:
+              alias: example_alias
+            network.protocol.name:
+              alias: example_alias
+            network.protocol.version:
+              alias: example_alias
+            network.transport:
+              alias: example_alias
+            network.type:
+              alias: example_alias
+            server.address:
+              alias: example_alias
+            server.port:
+              alias: example_alias
+            trace_id:
+              alias: example_alias
+            url.path:
+              alias: example_alias
+            url.query:
+              alias: example_alias
+            url.scheme:
+              alias: example_alias
+            user_agent.original:
+              alias: example_alias
+        http.server.request.duration:
+          attributes:
+            baggage: null
+            dd.trace_id:
+              alias: example_alias
+            error.type:
+              alias: example_alias
+            http.request.body.size:
+              alias: example_alias
+            http.request.method:
+              alias: example_alias
+            http.response.body.size:
+              alias: example_alias
+            http.response.status_code:
+              alias: example_alias
+            http.route:
+              alias: example_alias
+            network.local.address:
+              alias: example_alias
+            network.local.port:
+              alias: example_alias
+            network.peer.address:
+              alias: example_alias
+            network.peer.port:
+              alias: example_alias
+            network.protocol.name:
+              alias: example_alias
+            network.protocol.version:
+              alias: example_alias
+            network.transport:
+              alias: example_alias
+            network.type:
+              alias: example_alias
+            server.address:
+              alias: example_alias
+            server.port:
+              alias: example_alias
+            trace_id:
+              alias: example_alias
+            url.path:
+              alias: example_alias
+            url.query:
+              alias: example_alias
+            url.scheme:
+              alias: example_alias
+            user_agent.original:
+              alias: example_alias
+        http.server.response.body.size:
+          attributes:
+            baggage: null
+            dd.trace_id:
+              alias: example_alias
+            error.type:
+              alias: example_alias
+            http.request.body.size:
+              alias: example_alias
+            http.request.method:
+              alias: example_alias
+            http.response.body.size:
+              alias: example_alias
+            http.response.status_code:
+              alias: example_alias
+            http.route:
+              alias: example_alias
+            network.local.address:
+              alias: example_alias
+            network.local.port:
+              alias: example_alias
+            network.peer.address:
+              alias: example_alias
+            network.peer.port:
+              alias: example_alias
+            network.protocol.name:
+              alias: example_alias
+            network.protocol.version:
+              alias: example_alias
+            network.transport:
+              alias: example_alias
+            network.type:
+              alias: example_alias
+            server.address:
+              alias: example_alias
+            server.port:
+              alias: example_alias
+            trace_id:
+              alias: example_alias
+            url.path:
+              alias: example_alias
+            url.query:
+              alias: example_alias
+            url.scheme:
+              alias: example_alias
+            user_agent.original:
+              alias: example_alias
+      subgraph:
+        http.client.request.body.size:
+          attributes:
+            http.request.resend_count:
+              alias: example_alias
+            subgraph.graphql.document:
+              alias: example_alias
+            subgraph.graphql.operation.name:
+              alias: example_alias
+            subgraph.graphql.operation.type:
+              alias: example_alias
+            subgraph.name:
+              alias: example_alias
+        http.client.request.duration:
+          attributes:
+            http.request.resend_count:
+              alias: example_alias
+            subgraph.graphql.document:
+              alias: example_alias
+            subgraph.graphql.operation.name:
+              alias: example_alias
+            subgraph.graphql.operation.type:
+              alias: example_alias
+            subgraph.name:
+              alias: example_alias
+        http.client.response.body.size:
+          attributes:
+            http.request.resend_count:
+              alias: example_alias
+            subgraph.graphql.document:
+              alias: example_alias
+            subgraph.graphql.operation.name:
+              alias: example_alias
+            subgraph.graphql.operation.type:
+              alias: example_alias
+            subgraph.name:
+              alias: example_alias
+      supergraph:
+        cost.actual:
+          attributes:
+            cost.actual:
+              alias: example_alias
+            cost.delta:
+              alias: example_alias
+            cost.estimated:
+              alias: example_alias
+            cost.result:
+              alias: example_alias
+            graphql.document:
+              alias: example_alias
+            graphql.operation.name:
+              alias: example_alias
+            graphql.operation.type:
+              alias: example_alias
+        cost.delta:
+          attributes:
+            cost.actual:
+              alias: example_alias
+            cost.delta:
+              alias: example_alias
+            cost.estimated:
+              alias: example_alias
+            cost.result:
+              alias: example_alias
+            graphql.document:
+              alias: example_alias
+            graphql.operation.name:
+              alias: example_alias
+            graphql.operation.type:
+              alias: example_alias
+        cost.estimated:
+          attributes:
+            cost.actual:
+              alias: example_alias
+            cost.delta:
+              alias: example_alias
+            cost.estimated:
+              alias: example_alias
+            cost.result:
+              alias: example_alias
+            graphql.document:
+              alias: example_alias
+            graphql.operation.name:
+              alias: example_alias
+            graphql.operation.type:
+              alias: example_alias
+    spans:
+      connector:
+        attributes:
+          connector.http.method:
+            alias: example_alias
+          connector.source.name:
+            alias: example_alias
+          connector.url.template:
+            alias: example_alias
+          subgraph.name:
+            alias: example_alias
+      default_attribute_requirement_level: none
+      mode: deprecated
+      router:
+        attributes:
+          baggage: null
+          dd.trace_id:
+            alias: example_alias
+          error.type:
+            alias: example_alias
+          http.request.body.size:
+            alias: example_alias
+          http.request.method:
+            alias: example_alias
+          http.response.body.size:
+            alias: example_alias
+          http.response.status_code:
+            alias: example_alias
+          http.route:
+            alias: example_alias
+          network.local.address:
+            alias: example_alias
+          network.local.port:
+            alias: example_alias
+          network.peer.address:
+            alias: example_alias
+          network.peer.port:
+            alias: example_alias
+          network.protocol.name:
+            alias: example_alias
+          network.protocol.version:
+            alias: example_alias
+          network.transport:
+            alias: example_alias
+          network.type:
+            alias: example_alias
+          server.address:
+            alias: example_alias
+          server.port:
+            alias: example_alias
+          trace_id:
+            alias: example_alias
+          url.path:
+            alias: example_alias
+          url.query:
+            alias: example_alias
+          url.scheme:
+            alias: example_alias
+          user_agent.original:
+            alias: example_alias
+      subgraph:
+        attributes:
+          http.request.resend_count:
+            alias: example_alias
+          subgraph.graphql.document:
+            alias: example_alias
+          subgraph.graphql.operation.name:
+            alias: example_alias
+          subgraph.graphql.operation.type:
+            alias: example_alias
+          subgraph.name:
+            alias: example_alias
+      supergraph:
+        attributes:
+          cost.actual:
+            alias: example_alias
+          cost.delta:
+            alias: example_alias
+          cost.estimated:
+            alias: example_alias
+          cost.result:
+            alias: example_alias
+          graphql.document:
+            alias: example_alias
+          graphql.operation.name:
+            alias: example_alias
+          graphql.operation.type:
+            alias: example_alias
+```
+
+</ExpansionPanel>
+
+<ExpansionPanel title="telemetry YAML snippet (deprecated <= Router v2.6) ">
 
 ```yaml title="telemetry"
 telemetry:
@@ -39,7 +744,7 @@ telemetry:
     send_variable_values:
       only:
       - example_only_item
-    signature_normalization_algorithm: legacy
+    signature_normalization_algorithm: enhanced
   exporters:
     logging:
       common:

@@ -89,9 +89,7 @@ mod tests {
         .unwrap()
         .assume_expanded()
         .unwrap()
-        .assume_upgraded()
-        .assume_validated()
-        .unwrap();
+        .assume_validated();
 
         let s2 = Subgraph::parse(
             "s2",
@@ -119,9 +117,7 @@ mod tests {
         .unwrap()
         .assume_expanded()
         .unwrap()
-        .assume_upgraded()
-        .assume_validated()
-        .unwrap();
+        .assume_validated();
 
         let res = validate_consistent_root_fields(&[s1, s2]).unwrap_err();
         let errors = res.iter().map(|e| e.to_string()).collect_vec();

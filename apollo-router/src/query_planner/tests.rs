@@ -52,6 +52,18 @@ macro_rules! test_schema {
     };
 }
 
+fn subgraph_service_factory(
+    graphs: Vec<(String, Arc<dyn MakeSubgraphService>)>,
+) -> SubgraphServiceFactory {
+    SubgraphServiceFactory::new(
+        graphs,
+        Default::default(),
+        // Required for subscriptions: we are not testing that here
+        Default::default(),
+        None,
+    )
+}
+
 #[test]
 fn query_plan_from_json() {
     let query_plan: PlanNode = serde_json::from_str(test_query_plan!()).unwrap();
@@ -101,13 +113,10 @@ async fn mock_subgraph_service_with_panics_should_be_reported_as_service_closed(
     let (sender, _) = tokio::sync::mpsc::channel(10);
 
     let schema = Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap());
-    let ssf = SubgraphServiceFactory::new(
-        vec![(
-            "product".into(),
-            Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
-        )],
-        Default::default(),
-    );
+    let ssf = subgraph_service_factory(vec![(
+        "product".into(),
+        Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
+    )]);
     let sf = Arc::new(FetchServiceFactory::new(
         schema.clone(),
         Default::default(),
@@ -164,18 +173,18 @@ async fn fetch_includes_operation_name() {
             })
             .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
         mock_products_service
+            .expect_clone()
+            .returning(plugin::test::MockSubgraphService::new);
+        mock_products_service
     });
 
     let (sender, _) = tokio::sync::mpsc::channel(10);
 
     let schema = Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap());
-    let ssf = SubgraphServiceFactory::new(
-        vec![(
-            "product".into(),
-            Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
-        )],
-        Default::default(),
-    );
+    let ssf = subgraph_service_factory(vec![(
+        "product".into(),
+        Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
+    )]);
     let sf = Arc::new(FetchServiceFactory::new(
         schema.clone(),
         Default::default(),
@@ -229,18 +238,18 @@ async fn fetch_makes_post_requests() {
             })
             .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
         mock_products_service
+            .expect_clone()
+            .returning(plugin::test::MockSubgraphService::new);
+        mock_products_service
     });
 
     let (sender, _) = tokio::sync::mpsc::channel(10);
 
     let schema = Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap());
-    let ssf = SubgraphServiceFactory::new(
-        vec![(
-            "product".into(),
-            Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
-        )],
-        Default::default(),
-    );
+    let ssf = subgraph_service_factory(vec![(
+        "product".into(),
+        Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
+    )]);
     let sf = Arc::new(FetchServiceFactory::new(
         schema.clone(),
         Default::default(),
@@ -364,6 +373,9 @@ async fn defer() {
                     .build())
             });
         mock_x_service
+            .expect_clone()
+            .returning(plugin::test::MockSubgraphService::new);
+        mock_x_service
     });
 
     let mut mock_y_service = plugin::test::MockSubgraphService::new();
@@ -381,25 +393,25 @@ async fn defer() {
                     .build())
             });
         mock_y_service
+            .expect_clone()
+            .returning(plugin::test::MockSubgraphService::new);
+        mock_y_service
     });
 
     let (sender, receiver) = tokio::sync::mpsc::channel(10);
 
     let schema = include_str!("testdata/defer_schema.graphql");
     let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
-    let ssf = SubgraphServiceFactory::new(
-        vec![
-            (
-                "X".into(),
-                Arc::new(mock_x_service) as Arc<dyn MakeSubgraphService>,
-            ),
-            (
-                "Y".into(),
-                Arc::new(mock_y_service) as Arc<dyn MakeSubgraphService>,
-            ),
-        ],
-        Default::default(),
-    );
+    let ssf = subgraph_service_factory(vec![
+        (
+            "X".into(),
+            Arc::new(mock_x_service) as Arc<dyn MakeSubgraphService>,
+        ),
+        (
+            "Y".into(),
+            Arc::new(mock_y_service) as Arc<dyn MakeSubgraphService>,
+        ),
+    ]);
     let sf = Arc::new(FetchServiceFactory::new(
         schema.clone(),
         Default::default(),
@@ -499,13 +511,10 @@ async fn defer_if_condition() {
     let (sender, receiver) = tokio::sync::mpsc::channel(10);
     let mut receiver_stream = ReceiverStream::new(receiver);
 
-    let ssf = SubgraphServiceFactory::new(
-        vec![(
-            "accounts".into(),
-            Arc::new(mocked_accounts) as Arc<dyn MakeSubgraphService>,
-        )],
-        Default::default(),
-    );
+    let ssf = subgraph_service_factory(vec![(
+        "accounts".into(),
+        Arc::new(mocked_accounts) as Arc<dyn MakeSubgraphService>,
+    )]);
     let service_factory = Arc::new(FetchServiceFactory::new(
         schema.clone(),
         Default::default(),
@@ -647,6 +656,9 @@ async fn dependent_mutations() {
             .expect_call()
             .times(1)
             .returning(|_| Ok(SubgraphResponse::fake_builder().build()));
+        mock_a_service
+            .expect_clone()
+            .returning(plugin::test::MockSubgraphService::new);
 
         mock_a_service
     });
@@ -659,19 +671,16 @@ async fn dependent_mutations() {
     mock_b_service.expect_call().never();
 
     let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
-    let ssf = SubgraphServiceFactory::new(
-        vec![
-            (
-                "A".into(),
-                Arc::new(mock_a_service) as Arc<dyn MakeSubgraphService>,
-            ),
-            (
-                "B".into(),
-                Arc::new(mock_b_service) as Arc<dyn MakeSubgraphService>,
-            ),
-        ],
-        Default::default(),
-    );
+    let ssf = subgraph_service_factory(vec![
+        (
+            "A".into(),
+            Arc::new(mock_a_service) as Arc<dyn MakeSubgraphService>,
+        ),
+        (
+            "B".into(),
+            Arc::new(mock_b_service) as Arc<dyn MakeSubgraphService>,
+        ),
+    ]);
     let sf = Arc::new(FetchServiceFactory::new(
         schema.clone(),
         Default::default(),

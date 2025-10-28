@@ -1,5 +1,6 @@
 use apollo_compiler::Name;
 use apollo_compiler::schema::Component;
+use tracing::instrument;
 
 use crate::bail;
 use crate::error::CompositionError;
@@ -14,6 +15,7 @@ use crate::schema::SchemaElement;
 use crate::schema::position::TypeDefinitionPosition;
 
 impl Merger {
+    #[instrument(skip(self))]
     pub(in crate::merger) fn merge_type(&mut self, type_def: &Name) -> Result<(), FederationError> {
         let Ok(dest) = self.merged.get_type(type_def.clone()) else {
             bail!(
@@ -31,7 +33,7 @@ impl Merger {
         self.check_for_extension_with_no_base(&sources, &dest);
         self.merge_description(&sources, &dest)?;
         self.add_join_type(&sources, &dest)?;
-        self.record_applied_directives_to_merge(&sources, &dest);
+        self.record_applied_directives_to_merge(&sources, &dest)?;
         self.add_join_directive_directives(&sources, &dest)?;
         match dest {
             TypeDefinitionPosition::Scalar(_) => {
@@ -41,7 +43,7 @@ impl Merger {
                 self.merge_object(obj)?;
             }
             TypeDefinitionPosition::Interface(itf) => {
-                self.merge_interface(itf);
+                self.merge_interface(itf)?;
             }
             TypeDefinitionPosition::Union(un) => {
                 let sources = sources
@@ -72,7 +74,18 @@ impl Merger {
                 self.merge_enum(sources, &en)?;
             }
             TypeDefinitionPosition::InputObject(io) => {
-                self.merge_input_object(io);
+                let sources = sources
+                    .iter()
+                    .map(|(idx, pos)| {
+                        if let Some(TypeDefinitionPosition::InputObject(p)) = pos {
+                            let schema = self.subgraphs[*idx].schema().schema();
+                            (*idx, p.get(schema).ok().cloned())
+                        } else {
+                            (*idx, None)
+                        }
+                    })
+                    .collect();
+                self.merge_input(&sources, &io)?;
             }
         }
 
@@ -149,12 +162,13 @@ impl Merger {
             if keys.is_empty() {
                 // If there are no keys, we apply a single `@join__type` for this type.
                 let directive = self.join_spec_definition.type_directive(
+                    &self.merged,
                     name,
                     None,
                     None,
                     None,
                     is_interface_object.then_some(is_interface_object),
-                );
+                )?;
                 dest.insert_directive(&mut self.merged, Component::new(directive))?;
             } else {
                 // If this type has keys, we apply a `@join__type` for each key.
@@ -178,12 +192,13 @@ impl Merger {
                     // supergraph schema. This generates smaller schemas and makes it easier to
                     // check equality between schemas which may not support some of the arguments.
                     let directive = self.join_spec_definition.type_directive(
+                        &self.merged,
                         name.clone(),
                         key_fields.cloned(),
                         extension.then_some(extension),
                         key_resolvable.and_then(|v| v.to_bool()),
                         is_interface_object.then_some(is_interface_object),
-                    );
+                    )?;
                     dest.insert_directive(&mut self.merged, Component::new(directive))?;
                 }
             }

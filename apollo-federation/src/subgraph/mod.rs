@@ -452,6 +452,8 @@ impl Display for SubgraphError {
 }
 
 pub mod test_utils {
+    use either::Either;
+
     use super::SubgraphError;
     use super::typestate::Expanded;
     use super::typestate::Subgraph;
@@ -474,9 +476,11 @@ pub mod test_utils {
         } else {
             subgraph
         };
-        let mut subgraph = subgraph.expand_links()?.assume_upgraded();
-        subgraph.normalize_root_types()?;
-        subgraph.validate()
+        let subgraph = subgraph.expand_links()?;
+        match subgraph.normalize_root_types()? {
+            Either::Left(s) => Ok(s.assume_validated()),
+            Either::Right(s) => s.validate(),
+        }
     }
 
     pub fn build_inner_expanded(
@@ -491,7 +495,7 @@ pub mod test_utils {
         } else {
             subgraph
         };
-        subgraph.expand_links()
+        subgraph.expand_links_without_validation()
     }
 
     pub fn build_and_validate(schema_str: &str) -> Subgraph<Validated> {

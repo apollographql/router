@@ -30,7 +30,7 @@ use super::ConnectId;
 use super::JSONSelection;
 use super::PathSelection;
 use super::id::ConnectorPosition;
-use super::json_selection::ExternalVarPaths;
+use super::json_selection::VarPaths;
 use super::spec::connect::ConnectBatchArguments;
 use super::spec::connect::ConnectDirectiveArguments;
 use super::spec::errors::ErrorsArguments;

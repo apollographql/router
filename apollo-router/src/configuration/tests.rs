@@ -457,11 +457,17 @@ fn validate_project_config_files() {
                     .mocked_env_var("JAEGER_HOST", "http://example.com")
                     .mocked_env_var("JAEGER_USERNAME", "username")
                     .mocked_env_var("JAEGER_PASSWORD", "pass")
+                    .mocked_env_var("REDIS_PASSWORD", "pass")
                     .mocked_env_var("ZIPKIN_HOST", "http://example.com")
                     .mocked_env_var("TEST_CONFIG_ENDPOINT", "http://example.com")
                     .mocked_env_var("TEST_CONFIG_COLLECTOR_ENDPOINT", "http://example.com")
                     .mocked_env_var("PARSER_MAX_RECURSION", "500")
                     .mocked_env_var("AWS_ROLE_ARN", "arn:aws:iam::12345678:role/SomeRole")
+                    .mocked_env_var("INVALIDATION_SHARED_KEY", "invalidation")
+                    .mocked_env_var(
+                        "INVALIDATION_SHARED_KEY_PRODUCTS",
+                        "invalidation-for-products",
+                    )
                     .build()
                     .unwrap();
 
@@ -1266,4 +1272,43 @@ fn find_struct_name(lines: &[&str], line_number: usize) -> Option<String> {
             })
         })
         .next()
+}
+
+#[test]
+fn it_prevents_enablement_of_both_subgraph_caching_plugins() {
+    let make_config = |response_cache_enabled, entity_cache_enabled| {
+        let mut config = json!({});
+        if let Some(enabled) = response_cache_enabled {
+            config.as_object_mut().unwrap().insert(
+                "preview_response_cache".to_string(),
+                json!({"enabled": enabled}),
+            );
+        }
+        if let Some(enabled) = entity_cache_enabled {
+            config.as_object_mut().unwrap().insert(
+                "preview_entity_cache".to_string(),
+                json!({"enabled": enabled}),
+            );
+        }
+        config
+    };
+
+    let _: Configuration =
+        serde_json::from_value(make_config(None, None)).expect("neither plugin configured");
+
+    let _: Configuration = serde_json::from_value(make_config(Some(true), None))
+        .expect("response cache plugin configured");
+
+    let _: Configuration = serde_json::from_value(make_config(Some(true), Some(false)))
+        .expect("response cache plugin configured");
+
+    let _: Configuration = serde_json::from_value(make_config(None, Some(true)))
+        .expect("entity cache plugin configured");
+
+    let _: Configuration = serde_json::from_value(make_config(Some(false), Some(true)))
+        .expect("entity cache plugin configured");
+
+    let config_result: Result<Configuration, _> =
+        serde_json::from_value(make_config(Some(true), Some(true)));
+    config_result.expect_err("both plugins configured");
 }

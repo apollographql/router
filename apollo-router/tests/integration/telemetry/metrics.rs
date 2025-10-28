@@ -352,3 +352,161 @@ async fn test_gauges_on_reload() {
         )
         .await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_prom_reset_on_reload() {
+    let mut router = IntegrationTest::builder()
+        .config(include_str!("fixtures/prometheus.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    router.execute_default_query().await;
+    router.execute_default_query().await;
+
+    router
+        .assert_metrics_contains(
+            r#"http_server_request_duration_seconds_count{http_request_method="POST",status="200",otel_scope_name="apollo/router"} 2"#,
+            None,
+        )
+        .await;
+
+    // This config will NOT reload prometheus as the config did not change
+    router
+        .update_config(include_str!("fixtures/prometheus.router.yaml"))
+        .await;
+    router.assert_reloaded().await;
+    router
+        .assert_metrics_contains(
+            r#"http_server_request_duration_seconds_count{http_request_method="POST",status="200",otel_scope_name="apollo/router"} 2"#,
+            None,
+        )
+        .await;
+
+    // This config will force a reload as it changes the prometheus buckets
+    router
+        .update_config(include_str!("fixtures/prometheus_reload.router.yaml"))
+        .await;
+    router.assert_reloaded().await;
+    router.execute_default_query().await;
+    router
+        .assert_metrics_contains(
+            r#"http_server_request_duration_seconds_count{http_request_method="POST",status="200",otel_scope_name="apollo/router"} 1"#,
+            None,
+        )
+        .await;
+    router.graceful_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_prometheus_metric_rename() {
+    let mut router = IntegrationTest::builder()
+        .config(include_str!(
+            "fixtures/prometheus_metric_rename.router.yaml"
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Execute queries to generate metrics
+    router.execute_default_query().await;
+    router.execute_default_query().await;
+
+    // Get Prometheus metrics
+    let metrics = router
+        .get_metrics_response()
+        .await
+        .expect("failed to fetch metrics")
+        .text()
+        .await
+        .unwrap();
+
+    // Verify the renamed metric exists with Prometheus transformations
+    // custom.http.duration → custom_http_duration_seconds (dots to underscores, unit suffix added)
+    check_metrics_contains(&metrics, r#"custom_http_duration_seconds_count"#);
+    check_metrics_contains(&metrics, r#"custom_http_duration_seconds_sum"#);
+    check_metrics_contains(&metrics, r#"custom_http_duration_seconds_bucket"#);
+
+    // Verify the original metric name does NOT exist
+    assert!(
+        !metrics.contains(r#"http_server_request_duration_seconds"#),
+        "Original metric name should not exist after rename"
+    );
+
+    // Verify renamed operations metric
+    check_metrics_contains(&metrics, r#"custom_operations_count"#);
+
+    // Verify metric is actually recording data
+    check_metrics_contains(
+        &metrics,
+        r#"custom_http_duration_seconds_count{http_request_method="POST",status="200",otel_scope_name="apollo/router"} 2"#,
+    );
+
+    router.graceful_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_metric_rename_on_reload() {
+    // This test verifies that changing the rename field in a view triggers a proper reload
+    // and that the new renamed metric appears correctly
+    let mut router = IntegrationTest::builder()
+        .config(include_str!(
+            "fixtures/prometheus_metric_rename.router.yaml"
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    router.execute_default_query().await;
+    router.execute_default_query().await;
+
+    // Verify initial renamed metric exists
+    router
+        .assert_metrics_contains(
+            r#"custom_http_duration_seconds_count{http_request_method="POST",status="200",otel_scope_name="apollo/router"} 2"#,
+            None,
+        )
+        .await;
+
+    // Reload with different rename
+    router
+        .update_config(include_str!(
+            "fixtures/prometheus_rename_reload.router.yaml"
+        ))
+        .await;
+    router.assert_reloaded().await;
+
+    // Execute another query after reload
+    router.execute_default_query().await;
+
+    let metrics = router
+        .get_metrics_response()
+        .await
+        .expect("failed to fetch metrics")
+        .text()
+        .await
+        .unwrap();
+
+    // After reload, the new renamed metric should exist
+    check_metrics_contains(&metrics, r#"reloaded_http_duration_seconds_count"#);
+
+    // Verify metric is recording data with new name
+    check_metrics_contains(
+        &metrics,
+        r#"reloaded_http_duration_seconds_count{http_request_method="POST",status="200",otel_scope_name="apollo/router"} 1"#,
+    );
+
+    // Old renamed metric should not exist (metrics reset on reload)
+    assert!(
+        !metrics.contains(r#"custom_http_duration_seconds"#),
+        "Old renamed metric should not exist after reload with different rename"
+    );
+
+    router.graceful_shutdown().await;
+}

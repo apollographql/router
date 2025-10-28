@@ -1,49 +1,45 @@
 use opentelemetry_otlp::MetricsExporterBuilder;
 use opentelemetry_sdk::metrics::PeriodicReader;
-use opentelemetry_sdk::metrics::View;
 use opentelemetry_sdk::runtime;
 use tower::BoxError;
 
-use crate::plugins::telemetry::config::MetricsCommon;
+use crate::metrics::aggregation::MeterProviderType;
+use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::error_handler::NamedMetricsExporter;
 use crate::plugins::telemetry::metrics::CustomAggregationSelector;
-use crate::plugins::telemetry::metrics::MetricsBuilder;
-use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
+use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
 
 impl MetricsConfigurator for super::super::otlp::Config {
-    fn enabled(&self) -> bool {
+    fn config(conf: &Conf) -> &Self {
+        &conf.exporters.metrics.otlp
+    }
+
+    fn is_enabled(&self) -> bool {
         self.enabled
     }
 
-    fn apply(
-        &self,
-        mut builder: MetricsBuilder,
-        metrics_config: &MetricsCommon,
-    ) -> Result<MetricsBuilder, BoxError> {
-        if !self.enabled {
-            return Ok(builder);
-        }
+    fn configure(&self, builder: &mut MetricsBuilder) -> Result<(), BoxError> {
         let exporter_builder: MetricsExporterBuilder = self.exporter(TelemetryDataKind::Metrics)?;
         let exporter = exporter_builder.build_metrics_exporter(
             (&self.temporality).into(),
             Box::new(
                 CustomAggregationSelector::builder()
-                    .boundaries(metrics_config.buckets.clone())
+                    .boundaries(builder.metrics_common().buckets.clone())
                     .build(),
             ),
         )?;
 
-        builder.public_meter_provider_builder = builder.public_meter_provider_builder.with_reader(
-            PeriodicReader::builder(exporter, runtime::Tokio)
+        let named_exporter = NamedMetricsExporter::new(exporter, "otlp");
+        builder.with_reader(
+            MeterProviderType::Public,
+            PeriodicReader::builder(named_exporter, runtime::Tokio)
                 .with_interval(self.batch_processor.scheduled_delay)
                 .with_timeout(self.batch_processor.max_export_timeout)
                 .build(),
         );
-        for metric_view in metrics_config.views.clone() {
-            let view: Box<dyn View> = metric_view.try_into()?;
-            builder.public_meter_provider_builder =
-                builder.public_meter_provider_builder.with_view(view);
-        }
-        Ok(builder)
+
+        Ok(())
     }
 }
