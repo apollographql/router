@@ -61,10 +61,10 @@ expression: response
           "kind": {
             "typename": "User",
             "entityKey": {
-              "email": "test@test.com",
               "country": {
                 "a": "France"
-              }
+              },
+              "email": "test@test.com"
             }
           },
           "subgraphName": "users",

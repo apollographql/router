@@ -23,6 +23,7 @@ use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
 use crate::supergraph::EXECUTABLE_DIRECTIVE_LOCATIONS;
+use crate::utils::first_max_by_key;
 
 #[derive(Clone)]
 pub(crate) struct AppliedDirectiveToMergeEntry {
@@ -130,6 +131,11 @@ impl Merger {
                     .into_iter()
                     .map(|d| (**d).clone())
                     .collect_vec();
+                for application in &mut applications {
+                    // When we deduplicate directives below, we want to treat applications which
+                    // explicitly pass the default the same as applications which omit it.
+                    self.fill_argument_defaults(application, &definition);
+                }
                 if let Some(transform) =
                     &directive_in_supergraph.and_then(|d| d.static_argument_transform.as_ref())
                 {
@@ -175,7 +181,7 @@ impl Merger {
                     })
                     .cloned()
                     .collect_vec();
-                if let Some(merged_value) = (merger.merge)(name, &values)? {
+                if let Some(merged_value) = (merger.merge)(&arg_def.name, &values)? {
                     let merged_arg = Argument {
                         name: arg_def.name.clone(),
                         value: Node::new(merged_value),
@@ -195,10 +201,9 @@ impl Merger {
                     ),
                     locations: Default::default(), // PORT_NOTE: No locations in JS implementation.
                 });
-        } else if let Some(most_used_directive) = directive_counts
-            .into_iter()
-            .max_by_key(|(_, count)| *count)
-            .map(|(directive, _)| directive)
+        } else if let Some(most_used_directive) =
+            first_max_by_key(directive_counts.into_iter(), |(_, count)| *count)
+                .map(|(directive, _)| directive)
         {
             trace!(
                 "Directive @{name} is non-repeatable and has no argument merger, picking most used application at {dest}"
@@ -212,7 +217,8 @@ impl Merger {
                     Some("no arguments".to_string())
                 } else {
                     Some(format!(
-                        "arguments: [{}]",
+                        // This is a single set of curly braces with a value interpolated in the middle.
+                        "arguments {{{}}}",
                         elt.arguments
                             .iter()
                             .map(|arg| format!("{}: {}", arg.name, arg.value))
@@ -243,6 +249,25 @@ impl Merger {
         }
 
         Ok(())
+    }
+
+    fn fill_argument_defaults(&self, directive: &mut Directive, definition: &DirectiveDefinition) {
+        let existing_arg_names = directive
+            .arguments
+            .iter()
+            .map(|arg| arg.name.clone())
+            .collect::<IndexSet<_>>();
+        for arg_def in &definition.arguments {
+            if !existing_arg_names.contains(&arg_def.name)
+                && let Some(default_value) = &arg_def.default_value
+            {
+                let arg = Argument {
+                    name: arg_def.name.clone(),
+                    value: default_value.clone(),
+                };
+                directive.arguments.push(Node::new(arg));
+            }
+        }
     }
 
     fn transform_arguments(
@@ -294,11 +319,9 @@ impl Merger {
                 .subgraphs
                 .iter()
                 .enumerate()
-                .filter_map(|(idx, subgraph)| {
-                    subgraph
-                        .schema()
-                        .get_directive_definition(name)
-                        .map(|def| (idx, Some(def)))
+                .map(|(idx, subgraph)| {
+                    let def = subgraph.schema().get_directive_definition(name);
+                    (idx, def)
                 })
                 .collect();
             if Self::some_sources(&sources, |source, idx| {
@@ -368,8 +391,6 @@ impl Merger {
         let mut locations: Vec<DirectiveLocation> = Vec::new();
         let mut inconsistent_locations = false;
 
-        let supergraph_dest = dest.get(self.merged.schema())?.clone();
-
         for (idx, source) in sources {
             let Some(source) = source
                 .as_ref()
@@ -380,14 +401,14 @@ impl Merger {
                 dest.remove(&mut self.merged)?;
                 self.error_reporter.report_mismatch_hint::<DirectiveDefinitionPosition, DirectiveDefinitionPosition,()>(
                     HintCode::InconsistentExecutableDirectivePresence,
-                    format!("Executable directive \"{name}\" will not be part of the supergraph as it does not appear in all subgraphs: "),
+                    format!("Executable directive \"@{name}\" will not be part of the supergraph as it does not appear in all subgraphs: "),
                     dest,
                     sources,
                     |_elt| Some("yes".to_string()),
                     |_elt, _idx| Some("yes".to_string()),
                     |_, subgraphs| format!("it is defined in {}", subgraphs.unwrap_or_default()),
                     |_, subgraphs| format!(" but not in {subgraphs}"),
-                    false,
+                    true,
                     false,
                 );
                 return Ok(());
@@ -403,6 +424,10 @@ impl Merger {
             }
 
             let source_locations = extract_executable_locations(source);
+            trace!(
+                "Source locations for executable directive \"@{name}\" in subgraph {}: {:?}",
+                self.subgraphs[*idx].name, source_locations
+            );
             if locations.is_empty() {
                 locations = source_locations;
             } else {
@@ -411,13 +436,17 @@ impl Merger {
                 }
                 locations.retain(|loc| source_locations.contains(loc));
 
+                trace!(
+                    "After processing subgraph {}, executable directive \"@{name}\" has locations: {:?}",
+                    self.subgraphs[*idx].name, locations
+                );
                 if locations.is_empty() {
-                    self.error_reporter.report_mismatch_hint::<Node<DirectiveDefinition>, DirectiveDefinitionPosition, ()>(
+                    self.error_reporter.report_mismatch_hint::<DirectiveDefinitionPosition, DirectiveDefinitionPosition, ()>(
                         HintCode::NoExecutableDirectiveLocationsIntersection,
-                        format!("Executable directive \"{name}\" has no location that is common to all subgraphs: "),
-                        &supergraph_dest,
+                        format!("Executable directive \"@{name}\" has no location that is common to all subgraphs: "),
+                        dest,
                         sources,
-                        |elt| Some(location_string(&extract_executable_locations(elt))),
+                        |_| Some(location_string(&[])),
                         |pos, idx| pos.try_get(self.subgraphs[idx].schema().schema())
                             .map(|elt| location_string(&extract_executable_locations(elt))),
                         |_, _subgraphs| "it will not appear in the supergraph as there no intersection between ".to_string(),
@@ -429,17 +458,18 @@ impl Merger {
             }
         }
         dest.set_repeatable(&mut self.merged, repeatable.unwrap_or_default())?; // repeatable will always be Some() here
-        dest.add_locations(&mut self.merged, locations)?;
+        dest.set_locations(&mut self.merged, locations)?;
 
         self.merge_description(sources, dest)?;
+        let supergraph_dest = dest.get(self.merged.schema())?;
 
         if inconsistent_repeatable {
             self.error_reporter.report_mismatch_hint::<Node<DirectiveDefinition>, DirectiveDefinitionPosition, ()>(
                 HintCode::InconsistentExecutableDirectiveRepeatable,
-                format!("Executable directive \"{name}\" will not be marked repeatable in the supergraph as it is inconsistently marked repeatable in subgraphs: "),
-                &supergraph_dest,
+                format!("Executable directive \"@{name}\" will not be marked repeatable in the supergraph as it is inconsistently marked repeatable in subgraphs: "),
+                supergraph_dest,
                 sources,
-                |elt| if elt.repeatable { Some("yes".to_string()) } else { Some("no".to_string()) },
+                |_| if repeatable.unwrap_or_default() { Some("yes".to_string()) } else { Some("no".to_string()) },
                 |pos, idx| pos.try_get(self.subgraphs[idx].schema().schema())
                     .map(|elt|  if elt.repeatable { "yes".to_string() } else { "no".to_string() }),
                 |_, subgraphs| format!("it is not repeatable in {}", subgraphs.unwrap_or_default()),
@@ -452,15 +482,15 @@ impl Merger {
             self.error_reporter.report_mismatch_hint::<Node<DirectiveDefinition>, DirectiveDefinitionPosition, ()>(
                 HintCode::InconsistentExecutableDirectiveLocations,
                 format!(
-                    "Executable directive \"{name}\" has inconsistent locations across subgraphs: "
+                    "Executable directive \"@{name}\" has inconsistent locations across subgraphs "
                 ),
-                &supergraph_dest,
+                supergraph_dest,
                 sources,
                 |elt| Some(location_string(&extract_executable_locations(elt))),
                 |pos, idx| pos.try_get(self.subgraphs[idx].schema().schema()).map(|elt| location_string(&extract_executable_locations(elt))),
-                |_, _subgraphs| {
-                    "it will not appear in the supergraph as there no intersection between "
-                        .to_string()
+                |locs, subgraphs| {
+                    format!("and will use {locs} (intersection of all subgraphs) in the supergraph, but has: {}",
+                    subgraphs.map(|s| format!("{locs} in {s} and ")).unwrap_or_default())
                 },
                 |locs, subgraphs| format!("{locs} in {subgraphs}"),
                 false,
@@ -506,17 +536,14 @@ impl Merger {
 }
 
 fn extract_executable_locations(source: &Node<DirectiveDefinition>) -> Vec<DirectiveLocation> {
-    // Note: I don't think the sort order matters here so long as it's consistent
     source
         .locations
         .iter()
         .filter(|location| EXECUTABLE_DIRECTIVE_LOCATIONS.contains(*location))
         .copied()
-        .sorted_by_key(|loc| {
-            EXECUTABLE_DIRECTIVE_LOCATIONS
-                .get_index_of(loc)
-                .unwrap_or(usize::MAX)
-        })
+        // JS decided to sort by name to enforce some consistent order. Really, we just want a
+        // stable order, but there's a test asserting alphabetical order, so we follow that.
+        .sorted_by_key(|loc| loc.name())
         .collect()
 }
 

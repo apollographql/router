@@ -258,7 +258,7 @@ impl Merger {
                 message: format!(
                     "Field \"{}\" is marked @external on all the subgraphs in which it is listed ({}).",
                     dest,
-                    defining_subgraphs.join(", ")
+                    human_readable_subgraph_names(defining_subgraphs.iter())
                 ),
             };
 
@@ -332,14 +332,9 @@ impl Merger {
         // Convert to FieldDefinitionPosition types for external field validation
         let field_sources: Sources<FieldDefinitionPosition> = sources
             .iter()
-            .map(|(idx, source)| match source {
-                Some(ObjectOrInterfaceFieldDefinitionPosition::Object(pos)) => {
-                    (*idx, Some(FieldDefinitionPosition::Object(pos.clone())))
-                }
-                Some(ObjectOrInterfaceFieldDefinitionPosition::Interface(pos)) => {
-                    (*idx, Some(FieldDefinitionPosition::Interface(pos.clone())))
-                }
-                None => (*idx, None),
+            .map(|(idx, source)| {
+                let field_pos = source.clone().map(|pos| pos.into());
+                (*idx, field_pos)
             })
             .collect();
 
