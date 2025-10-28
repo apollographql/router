@@ -170,6 +170,16 @@ fn validate_args_selection(
     fields: &IndexMap<Name, &Type>,
     selection: &SelectionTrie,
 ) -> Result<(), CacheTagValidationError> {
+    // Check the format selection is just a single selection. The `StringTemplate` allows multiple
+    // selections like `{$args { a b }}`, but cache tags don't support that.
+    let num_selections = selection.iter().count();
+    if num_selections != 1 {
+        return Err(CacheTagValidationError::CacheTagInvalidFormat {
+            message: format!(
+                "invalid path element at \"{selection}\", which is not a single selection"
+            ),
+        });
+    }
     for (key, sel) in selection.iter() {
         let name = Name::new(key).map_err(|_| CacheTagValidationError::CacheTagInvalidFormat {
             message: format!("invalid field selection name \"{key}\""),
@@ -362,6 +372,16 @@ fn build_selection_set(
     schema: &FederationSchema,
     selection: &SelectionTrie,
 ) -> Result<(), CacheTagValidationError> {
+    // Check the format selection is just a single selection. The `StringTemplate` allows multiple
+    // selections like `{$key { a b }}`, but cache tags don't support that.
+    let num_selections = selection.iter().count();
+    if num_selections != 1 {
+        return Err(CacheTagValidationError::CacheTagInvalidFormat {
+            message: format!(
+                "invalid path element at \"{selection}\", which is not a single selection"
+            ),
+        });
+    }
     for (key, sel) in selection.iter() {
         let name = Name::new(key).map_err(|_| CacheTagValidationError::CacheTagInvalidFormat {
             message: format!("invalid field selection name \"{key}\""),
@@ -577,6 +597,11 @@ mod tests {
         let subgraph = build_inner_expanded(schema, BuildOption::AsFed2).unwrap();
         let mut errors = Vec::new();
         validate_cache_tag_directives(subgraph.schema(), &mut errors).unwrap();
+        if !errors.is_empty() {
+            for error in &errors {
+                println!("Error: {}", error);
+            }
+        }
         assert!(errors.is_empty());
     }
 
@@ -591,10 +616,11 @@ mod tests {
     #[test]
     fn test_valid_format_string() {
         const SCHEMA: &str = r#"
-            type Product @key(fields: "upc")
+            type Product @key(fields: "upc age")
                          @cacheTag(format: "product-{$key.upc}")
             {
                 upc: String!
+                age: Int!
                 name: String
             }
 
@@ -725,7 +751,7 @@ mod tests {
             type Query {
                 topProducts(first: Int = 5): [Product]
                     @cacheTag(format: "topProducts")
-                    @cacheTag(format: "topProducts-{$args.second}")
+                    @cacheTag(format: "topProducts-{$args { second }}")
             }
         "#;
         assert_eq!(
@@ -736,6 +762,33 @@ mod tests {
                 "Each entity field referenced in a @cacheTag format (applied on entity type) must be a member of every @key field set. In other words, when there are multiple @key fields on the type, the referenced field(s) must be limited to their intersection. Bad cacheTag format \"product-{$key.test.b}\" on type \"Product\"",
                 "@cacheTag format references a nullable field \"Test.c\"",
                 "cacheTag format is invalid: unknown field \"second\""
+            ]
+        );
+    }
+
+    #[test]
+    fn test_invalid_format_string_multiple_selections() {
+        const SCHEMA: &str = r#"
+            type Product @key(fields: "upc name")
+                         @cacheTag(format: "product-{$key { upc name }}")
+                         @cacheTag(format: "product-{$key {}}")
+            {
+                upc: String!
+                name: String
+            }
+
+            type Query {
+                topProducts(first: Int): [Product]
+                    @cacheTag(format: "topProducts")
+                    @cacheTag(format: "topProducts-{$args { first country }}")
+            }
+        "#;
+        assert_eq!(
+            build_for_errors(SCHEMA),
+            vec![
+                "cacheTag format is invalid: invalid path element at \"upc name\", which is not a single selection",
+                "cacheTag format is invalid: invalid path element at \"\", which is not a single selection",
+                "cacheTag format is invalid: invalid path element at \"first country\", which is not a single selection",
             ]
         );
     }
