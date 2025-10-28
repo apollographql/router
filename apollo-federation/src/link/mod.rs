@@ -271,7 +271,7 @@ impl Into<Value> for Import {
         } else {
             self.element.to_string()
         };
-        
+
         if let Some(alias) = self.alias {
             let alias_string = if self.is_directive {
                 format!("@{}", alias)
@@ -283,10 +283,7 @@ impl Into<Value> for Import {
                     IMPORT_NAME_ARGUMENT,
                     Node::new(Value::String(element_string)),
                 ),
-                (
-                    IMPORT_AS_ARGUMENT,
-                    Node::new(Value::String(alias_string)),
-                ),
+                (IMPORT_AS_ARGUMENT, Node::new(Value::String(alias_string))),
             ])
         } else {
             Value::String(element_string)
@@ -426,6 +423,14 @@ impl Link {
                     None
                 }
             })
+    }
+
+    /// Returns true if this link has an import assigning a alias to the given element.
+    pub(crate) fn renames(&self, element: &Name) -> bool {
+        self.imports
+            .iter()
+            .find(|import| &import.element == element)
+            .is_some_and(|import| *import.imported_name() != *element)
     }
 }
 
