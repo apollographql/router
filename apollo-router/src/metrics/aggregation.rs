@@ -67,7 +67,7 @@ impl Default for AggregateMeterProvider {
 
 pub(crate) struct Inner {
     providers: Vec<(FilterMeterProvider, HashMap<MeterId, Meter>)>,
-    registered_instruments: Arc<Mutex<Vec<InstrumentWrapper>>>,
+    registered_instruments: Vec<InstrumentWrapper>,
 }
 
 impl Default for Inner {
@@ -81,7 +81,7 @@ impl Default for Inner {
                     )
                 })
                 .collect(),
-            registered_instruments: Default::default(),
+            registered_instruments: Vec::new(),
         }
     }
 }
@@ -111,15 +111,6 @@ pub(crate) enum InstrumentWrapper {
     F64Histogram {
         _keep_alive: Arc<Histogram<f64>>,
     },
-    I64ObservableGauge { _keep_alive: Arc<ObservableGauge<i64>> },
-    U64ObservableGauge { _keep_alive: Arc<ObservableGauge<u64>> },
-    F64ObservableGauge { _keep_alive: Arc<ObservableGauge<f64>> },
-    I64ObservableUpDown { _keep_alive: Arc<ObservableUpDownCounter<i64>> },
-    U64ObservableUpDown { _keep_alive: Arc<ObservableUpDownCounter<u64>> },
-    F64ObservableUpDown { _keep_alive: Arc<ObservableUpDownCounter<f64>> },
-    I64ObservableCounter { _keep_alive: Arc<ObservableCounter<i64>> },
-    U64ObservableCounter { _keep_alive: Arc<ObservableCounter<u64>> },
-    F64ObservableCounter { _keep_alive: Arc<ObservableCounter<f64>> },
 }
 
 #[derive(Eq, PartialEq, Hash, Clone)]
@@ -211,14 +202,13 @@ impl AggregateMeterProvider {
             .as_ref()
             .expect("cannot use meter provider after shutdown")
             .registered_instruments
-            .lock()
             .len()
     }
 }
 
 impl Inner {
     pub(crate) fn invalidate(&mut self) {
-        self.registered_instruments.lock().clear()
+        self.registered_instruments.clear()
     }
     pub(crate) fn meter(&mut self, name: &'static str) -> Meter {
         self.versioned_meter(
@@ -264,10 +254,7 @@ impl Inner {
             );
         }
 
-        Meter::new(Arc::new(AggregateInstrumentProvider {
-            meters,
-            keep_alive: Arc::clone(&self.registered_instruments)
-        }))
+        Meter::new(Arc::new(AggregateInstrumentProvider { meters }))
     }
 
     pub(crate) fn create_registered_instrument<T>(
@@ -278,7 +265,7 @@ impl Inner {
         Arc<T>: Into<InstrumentWrapper>,
     {
         let instrument = Arc::new((create_fn)(self));
-        self.registered_instruments.lock().push(instrument.clone().into());
+        self.registered_instruments.push(instrument.clone().into());
         instrument
     }
 }
@@ -302,7 +289,6 @@ impl MeterProvider for AggregateMeterProvider {
 
 pub(crate) struct AggregateInstrumentProvider {
     meters: Vec<Meter>,
-    keep_alive: Arc<Mutex<Vec<InstrumentWrapper>>>
 }
 
 pub(crate) struct AggregateCounter<T> {
@@ -368,7 +354,8 @@ macro_rules! aggregate_observable_instrument_fn {
             let description = builder.description.clone();
             let unit = builder.unit.clone();
 
-            // Build the originally defined instrument for each meter
+            // Build the originally defined instrument for each meter. Most importantly, this will
+            // register the callbacks
             let mut handles = Vec::with_capacity(self.meters.len());
             for meter in &self.meters {
                 let mut b = meter.$name(name.clone());
@@ -384,13 +371,8 @@ macro_rules! aggregate_observable_instrument_fn {
                 }
                 handles.push(b.build());
             }
-            // Return the first instrument. Keep them all alive by registering them with the AggregateMeterProvider::Inner
-            let first = handles.first().cloned().expect("At least one meter should exist");
-            let mut keep_alive = self.keep_alive.lock();
-            for i in handles.into_iter() {
-                keep_alive.push(InstrumentWrapper::from(Arc::new(i)))
-            }
-            first
+
+            $instrument::new()
         }
     };
 }
