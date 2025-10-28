@@ -15,6 +15,7 @@ use crate::composition::satisfiability::validation_state::ValidationState;
 use crate::ensure;
 use crate::error::CompositionError;
 use crate::error::FederationError;
+use crate::merger::hints::HintCode;
 use crate::operation::FieldSelection;
 use crate::operation::InlineFragment;
 use crate::operation::InlineFragmentSelection;
@@ -148,11 +149,11 @@ pub(super) fn shareable_field_mismatched_runtime_types_hint(
         subgraphs.\n\
         Since a shared field must be resolved the same way in all subgraphs, make sure that {} \
         only resolve \"{}\" to objects of {}. In particular:\n\
-        {}\n\
+        {}.\n\
         Otherwise the @shareable contract will be broken.",
         operation,
         field_definition_position,
-        field.ty.inner_named_type(),
+        field.ty,
         human_readable_subgraph_names(all_subgraphs.iter()),
         field_definition_position,
         human_readable_types(common_runtime_types.iter()),
@@ -160,7 +161,9 @@ pub(super) fn shareable_field_mismatched_runtime_types_hint(
     );
     hints.push(CompositionHint {
         message,
-        code: "INCONSISTENT_RUNTIME_TYPES_FOR_SHAREABLE_RETURN".to_owned(),
+        code: HintCode::InconsistentRuntimeTypesForShareableReturn
+            .code()
+            .to_string(),
         locations: Default::default(), // TODO
     });
     Ok(())

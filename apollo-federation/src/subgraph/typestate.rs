@@ -40,6 +40,7 @@ use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
 use crate::link::spec::Identity;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
+use crate::query_graph::build_query_graph::FEDERATED_GRAPH_ROOT_SOURCE;
 use crate::schema::FederationSchema;
 use crate::schema::SchemaElement;
 use crate::schema::blueprint::FederationBlueprint;
@@ -162,11 +163,21 @@ pub struct Subgraph<S> {
 }
 
 impl Subgraph<Initial> {
-    pub fn new(name: &str, url: &str, schema: Schema) -> Subgraph<Initial> {
-        Subgraph {
-            name: name.to_string(),
-            url: url.to_string(),
-            state: Initial { schema },
+    pub fn new(name: &str, url: &str, schema: Schema) -> Result<Subgraph<Initial>, SubgraphError> {
+        // We use this name as the "source" of root nodes in our federated query graph.
+        if name == FEDERATED_GRAPH_ROOT_SOURCE {
+            Err(SubgraphError::new_without_locations(
+                name.to_string(),
+                SingleFederationError::InvalidSubgraphName {
+                    message: format!("Invalid name {name} for a subgraph: this name is reserved"),
+                },
+            ))
+        } else {
+            Ok(Subgraph {
+                name: name.to_string(),
+                url: url.to_string(),
+                state: Initial { schema },
+            })
         }
     }
 
@@ -185,7 +196,7 @@ impl Subgraph<Initial> {
         // Simulate graphql-js behavior accepting duplicate argument definitions.
         parser_backward_compatibility::remove_duplicate_arguments(&mut schema);
 
-        Ok(Self::new(name, url, schema))
+        Self::new(name, url, schema)
     }
 
     /// Converts the schema to a fed2 schema.
@@ -207,7 +218,7 @@ impl Subgraph<Initial> {
         };
         add_federation_link_to_test_schema(&mut schema, federation_spec.version(), no_imports)
             .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;
-        Ok(Self::new(&self.name, &self.url, schema))
+        Self::new(&self.name, &self.url, schema)
     }
 
     pub fn assume_expanded(self) -> Result<Subgraph<Expanded>, SubgraphError> {

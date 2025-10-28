@@ -127,6 +127,10 @@ impl Supergraph<Merged> {
         &self.state.hints
     }
 
+    pub fn hints_mut(&mut self) -> &mut Vec<CompositionHint> {
+        &mut self.state.hints
+    }
+
     #[allow(unused)]
     pub(crate) fn subgraph_name_to_graph_enum_value(
         &self,

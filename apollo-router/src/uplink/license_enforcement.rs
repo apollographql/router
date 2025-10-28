@@ -344,6 +344,15 @@ impl LicenseEnforcementReport {
                     .build(),
             );
         }
+        if !allowed_features.contains(&AllowedFeature::ResponseCaching) {
+            configuration_restrictions.push(
+                ConfigurationRestriction::builder()
+                    .path("$.preview_response_cache.enabled")
+                    .value(true)
+                    .name("Subgraph response caching")
+                    .build(),
+            );
+        }
         if !allowed_features.contains(&AllowedFeature::PersistedQueries) {
             configuration_restrictions.push(
                 ConfigurationRestriction::builder()
@@ -528,6 +537,8 @@ pub enum AllowedFeature {
     DistributedQueryPlanning,
     /// Subgraph entity caching
     EntityCaching,
+    /// Subgraph response caching
+    ResponseCaching,
     /// Experimental features in the router
     Experimental,
     /// Extended reference reporting
@@ -556,6 +567,7 @@ impl From<&str> for AllowedFeature {
             "demand_control" => Self::DemandControl,
             "distributed_query_planning" => Self::DistributedQueryPlanning,
             "entity_caching" => Self::EntityCaching,
+            "response_caching" => Self::ResponseCaching,
             "experimental" => Self::Experimental,
             "extended_reference_reporting" => Self::ExtendedReferenceReporting,
             "persisted_queries" => Self::PersistedQueries,
@@ -577,6 +589,7 @@ impl AllowedFeature {
             "authorization" => Some(AllowedFeature::Authorization),
             "authentication" => Some(AllowedFeature::Authentication),
             "preview_entity_cache" => Some(AllowedFeature::EntityCaching),
+            "preview_response_cache" => Some(AllowedFeature::ResponseCaching),
             "demand_control" => Some(AllowedFeature::DemandControl),
             "coprocessor" => Some(AllowedFeature::Coprocessors),
             _other => None,

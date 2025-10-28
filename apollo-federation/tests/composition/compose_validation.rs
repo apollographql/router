@@ -1,3 +1,5 @@
+use test_log::test;
+
 use super::ServiceDefinition;
 use super::assert_composition_errors;
 use super::compose_as_fed2_subgraphs;
@@ -7,7 +9,6 @@ use super::compose_as_fed2_subgraphs;
 // =============================================================================
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn merge_validations_errors_when_a_subgraph_is_invalid() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -30,12 +31,20 @@ fn merge_validations_errors_when_a_subgraph_is_invalid() {
     let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
     assert_composition_errors(
         &result,
-        &[("INVALID_GRAPHQL", "[subgraphA] Unknown type A")],
+        &[(
+            "INVALID_GRAPHQL",
+            r#"[subgraphA] Error: cannot find type `A` in this document
+   ╭─[ subgraphA:3:14 ]
+   │
+ 3 │           a: A
+   │              ┬  
+   │              ╰── not found in this scope
+───╯"#,
+        )],
     );
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn merge_validations_errors_when_subgraph_has_introspection_reserved_name() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -60,13 +69,18 @@ fn merge_validations_errors_when_subgraph_has_introspection_reserved_name() {
         &result,
         &[(
             "INVALID_GRAPHQL",
-            r#"[subgraphA] Name "__someQuery" must not begin with "__", which is reserved by GraphQL introspection."#,
+            r#"[subgraphA] Error: a field cannot be named `__someQuery` as names starting with two underscores are reserved
+   ╭─[ subgraphA:3:11 ]
+   │
+ 3 │           __someQuery: Int
+   │           ─────┬─────  
+   │                ╰─────── Pick a different name here
+───╯"#,
         )],
     );
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn merge_validations_errors_when_tag_definition_is_invalid() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -99,7 +113,6 @@ fn merge_validations_errors_when_tag_definition_is_invalid() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn merge_validations_reject_subgraph_named_underscore() {
     let subgraph_a = ServiceDefinition {
         name: "_",
@@ -130,7 +143,6 @@ fn merge_validations_reject_subgraph_named_underscore() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn merge_validations_reject_if_no_subgraphs_have_query() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -161,7 +173,6 @@ fn merge_validations_reject_if_no_subgraphs_have_query() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn merge_validations_reject_type_defined_with_different_kinds() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -196,7 +207,6 @@ fn merge_validations_reject_type_defined_with_different_kinds() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn merge_validations_errors_if_external_field_not_defined_elsewhere() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -232,7 +242,6 @@ fn merge_validations_errors_if_external_field_not_defined_elsewhere() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn merge_validations_errors_if_mandatory_argument_not_in_all_subgraphs() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -263,7 +272,6 @@ fn merge_validations_errors_if_mandatory_argument_not_in_all_subgraphs() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn merge_validations_errors_if_subgraph_required_without_args_but_mandatory_in_supergraph() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -301,7 +309,6 @@ fn merge_validations_errors_if_subgraph_required_without_args_but_mandatory_in_s
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn merge_validations_errors_if_subgraph_required_with_arg_not_in_supergraph() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -343,7 +350,6 @@ fn merge_validations_errors_if_subgraph_required_with_arg_not_in_supergraph() {
 // =============================================================================
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn post_merge_errors_if_type_does_not_implement_interface_post_merge() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -387,7 +393,6 @@ fn post_merge_errors_if_type_does_not_implement_interface_post_merge() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn post_merge_errors_if_type_does_not_implement_interface_on_interface() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -440,7 +445,6 @@ fn post_merge_errors_if_type_does_not_implement_interface_on_interface() {
 // =============================================================================
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn misc_not_broken_by_similar_field_argument_signatures() {
     // This test validates the case from https://github.com/apollographql/federation/issues/1100 is fixed.
     let subgraph_a = ServiceDefinition {
@@ -476,7 +480,6 @@ fn misc_not_broken_by_similar_field_argument_signatures() {
 // =============================================================================
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn satisfiability_validation_uses_proper_error_code() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -505,7 +508,10 @@ fn satisfiability_validation_uses_proper_error_code() {
     // This test specifically checks that the error code is SATISFIABILITY_ERROR
     // The exact error message is tested elsewhere
     let errors = result.expect_err("Expected composition to fail due to satisfiability");
-    let error_codes: Vec<String> = errors.iter().map(|e| format!("{:?}", e)).collect();
+    let error_codes: Vec<String> = errors
+        .iter()
+        .map(|e| e.code().definition().code().to_string())
+        .collect();
     assert!(
         error_codes
             .iter()
@@ -516,7 +522,6 @@ fn satisfiability_validation_uses_proper_error_code() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn satisfiability_validation_handles_indirectly_reachable_keys() {
     // This test ensures that a regression introduced by https://github.com/apollographql/federation/pull/1653
     // is properly fixed. All we want to check is that validation succeeds on this example.

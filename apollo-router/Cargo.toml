@@ -100,6 +100,7 @@ fred = { version = "10.1.0", features = [
     "i-cluster",
     "tcp-user-timeouts",
     "metrics",
+    "serde-json"
 ] }
 futures = { version = "0.3.30", features = ["thread-pool"] }
 graphql_client = "0.14.0"

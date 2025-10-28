@@ -5,6 +5,7 @@ mod schema;
 mod shutdown;
 
 use std::fmt::Debug;
+use std::fmt::Display;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
@@ -73,6 +74,40 @@ impl Debug for Event {
             }
             UpdateLicense(e) => {
                 write!(f, "UpdateLicense({e:?})")
+            }
+            NoMoreLicense => {
+                write!(f, "NoMoreLicense")
+            }
+            Reload => {
+                write!(f, "ForcedHotReload")
+            }
+            RhaiReload => {
+                write!(f, "RhaiReload")
+            }
+            Shutdown => {
+                write!(f, "Shutdown")
+            }
+        }
+    }
+}
+
+impl Display for Event {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UpdateConfiguration(_) => {
+                write!(f, "UpdateConfiguration")
+            }
+            NoMoreConfiguration => {
+                write!(f, "NoMoreConfiguration")
+            }
+            UpdateSchema(_) => {
+                write!(f, "UpdateSchema")
+            }
+            NoMoreSchema => {
+                write!(f, "NoMoreSchema")
+            }
+            UpdateLicense(license_state) => {
+                write!(f, "UpdateLicense({})", license_state.get_name())
             }
             NoMoreLicense => {
                 write!(f, "NoMoreLicense")

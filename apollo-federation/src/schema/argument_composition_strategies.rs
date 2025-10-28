@@ -9,7 +9,7 @@ use apollo_compiler::ty;
 use crate::schema::FederationSchema;
 
 #[allow(dead_code)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) enum ArgumentCompositionStrategy {
     Max,
     Min,

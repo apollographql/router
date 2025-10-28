@@ -1,8 +1,8 @@
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
-  @link(url: "https://specs.apollo.dev/connect/v0.3", for: EXECUTION)
-  @join__directive(graphs: [ONE], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.3", import: ["@source", "@connect"]})
+  @link(url: "https://specs.apollo.dev/connect/v0.4", for: EXECUTION)
+  @join__directive(graphs: [ONE], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.4", import: ["@source", "@connect"]})
 {
   query: Query
 }

@@ -587,6 +587,9 @@ impl DirectiveSpecification {
                     arg_strategies.len() == args.len(),
                     "Invalid directive specification for @{name}: not all arguments define a composition strategy"
                 );
+                tracing::trace!(
+                    "Creating argument merger for directive @{name} with strategies: {arg_strategies:?}",
+                );
                 argument_merger = Some(directive_argument_merger(
                     name.clone(),
                     args.to_vec(),
@@ -839,7 +842,7 @@ fn ensure_same_arguments(
             if expected_arg.ty.is_non_null() && expected_arg.default_value.is_none() {
                 let expected_arg_name = &expected_arg.name;
                 errors.push(generate_error(&format!(
-                        r#"Invalid definition for {what}: Missing required argument "{expected_arg_name}""#
+                        r#"Invalid definition for {what}: missing required argument "{expected_arg_name}""#
                     )));
             }
             continue;

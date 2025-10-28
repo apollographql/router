@@ -2055,7 +2055,7 @@ mod tag_tests {
             build_for_errors_with_option(doc, BuildOption::AsIs),
             [(
                 "DIRECTIVE_DEFINITION_INVALID",
-                r#"[S] Invalid definition for directive "@tag": Missing required argument "name""#
+                r#"[S] Invalid definition for directive "@tag": missing required argument "name""#
             )]
         );
     }

@@ -18,7 +18,7 @@ use tracing::Instrument;
 use super::entity::Storage as EntityStorage;
 use crate::cache::redis::RedisCacheStorage;
 use crate::plugins::cache::entity::ENTITY_CACHE_VERSION;
-use crate::plugins::cache::entity::hash_entity_key;
+use crate::plugins::cache::entity::hash_representation;
 
 #[derive(Clone)]
 pub(crate) struct Invalidation {
@@ -243,7 +243,7 @@ impl InvalidationRequest {
                 r#type,
                 key,
             } => {
-                let entity_key = hash_entity_key(key);
+                let entity_key = hash_representation(key);
                 format!(
                     "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph}:type:{type}:entity:{entity_key}:*"
                 )

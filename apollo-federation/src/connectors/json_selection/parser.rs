@@ -300,7 +300,7 @@ impl JSONSelection {
     fn parse_span(input: Span) -> ParseResult<Self> {
         match get_connect_spec(&input) {
             ConnectSpec::V0_1 | ConnectSpec::V0_2 => Self::parse_span_v0_2(input),
-            ConnectSpec::V0_3 => Self::parse_span_v0_3(input),
+            ConnectSpec::V0_3 | ConnectSpec::V0_4 => Self::parse_span_v0_3(input),
         }
     }
 
@@ -550,7 +550,7 @@ impl NamedSelection {
     pub(crate) fn parse(input: Span) -> ParseResult<Self> {
         match get_connect_spec(&input) {
             ConnectSpec::V0_1 | ConnectSpec::V0_2 => Self::parse_v0_2(input),
-            ConnectSpec::V0_3 => Self::parse_v0_3(input),
+            ConnectSpec::V0_3 | ConnectSpec::V0_4 => Self::parse_v0_3(input),
         }
     }
 
@@ -1068,7 +1068,7 @@ impl PathList {
                     // a single struct in connect/v0.3, the ambiguity between
                     // single-key paths and field selections is no longer a
                     // problem, since they are now represented the same way.
-                    ConnectSpec::V0_3 => {
+                    ConnectSpec::V0_3 | ConnectSpec::V0_4 => {
                         let full_range = merge_ranges(key.range(), rest.range());
                         Ok((remainder, WithRange::new(Self::Key(key, rest), full_range)))
                     }
@@ -1109,7 +1109,7 @@ impl PathList {
             ConnectSpec::V0_1 | ConnectSpec::V0_2 => {
                 // The ? token was not introduced until connect/v0.3.
             }
-            ConnectSpec::V0_3 => {
+            ConnectSpec::V0_3 | ConnectSpec::V0_4 => {
                 if let Ok((suffix, question)) = ranged_span("?")(input.clone()) {
                     let (remainder, rest) = Self::parse_with_depth(suffix.clone(), depth + 1)?;
 
