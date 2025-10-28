@@ -217,6 +217,12 @@ fn validate_args_selection(
                 .collect::<Result<IndexMap<_, _>, _>>()?;
             validate_args_selection(schema, Some(type_name), &next_fields, sel)?;
         } else {
+            // A leaf field must not be a list.
+            if field.is_list() {
+                return Err(CacheTagValidationError::CacheTagInvalidFormat {
+                    message: format!("invalid path ending at \"{name}\", which is a list type"),
+                });
+            }
             // A leaf field should have a scalar type.
             if !matches!(
                 &type_def,
@@ -377,6 +383,12 @@ fn build_selection_set(
             )?;
             build_selection_set(&mut new_field.selection_set, schema, sel)?;
         } else {
+            // A leaf field must not be a list.
+            if new_field.ty().is_list() {
+                return Err(CacheTagValidationError::CacheTagInvalidFormat {
+                    message: format!("invalid path ending at \"{name}\", which is a list type"),
+                });
+            }
             // A leaf field should have a scalar type.
             if !matches!(
                 &new_field_type_def,
@@ -618,6 +630,31 @@ mod tests {
             vec![
                 "@cacheTag format references a nullable field \"Product.name\"",
                 "@cacheTag format references a nullable argument \"first\"",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_invalid_format_string_list_args() {
+        const SCHEMA: &str = r#"
+            type Product @key(fields: "upc names")
+                         @cacheTag(format: "product-{$key.upc}-{$key.names}")
+            {
+                upc: String!
+                names: [String!]!
+            }
+
+            type Query {
+                topProducts(groups: [Int!]!): [Product]
+                    @cacheTag(format: "topProducts")
+                    @cacheTag(format: "topProducts-{$args.groups}")
+            }
+        "#;
+        assert_eq!(
+            build_for_errors(SCHEMA),
+            vec![
+                "cacheTag format is invalid: invalid path ending at \"names\", which is a list type",
+                "cacheTag format is invalid: invalid path ending at \"groups\", which is a list type",
             ]
         );
     }
