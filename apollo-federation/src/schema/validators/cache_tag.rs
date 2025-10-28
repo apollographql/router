@@ -180,7 +180,7 @@ fn validate_args_selection(
                 .ok_or_else(|| CacheTagValidationError::CacheTagInvalidFormat {
                     message: format!("unknown field \"{name}\""),
                 })?;
-        if !field.is_non_null() {
+        if !is_fully_non_null(field) {
             if let Some(parent_type_name) = parent_type_name {
                 return Err(CacheTagValidationError::CacheTagFormatNullableField {
                     field_name: name.clone(),
@@ -237,6 +237,17 @@ fn validate_args_selection(
         }
     }
     Ok(())
+}
+
+/// Similar to `Type::is_non_null`, but checks if the type is non-null at all nested levels of
+/// lists.
+fn is_fully_non_null(ty: &Type) -> bool {
+    match ty {
+        Type::Named(_) => false,
+        Type::List(_) => false,
+        Type::NonNullNamed(_) => true,
+        Type::NonNullList(inner) => is_fully_non_null(inner),
+    }
 }
 
 fn validate_args_on_object_type(
@@ -366,7 +377,7 @@ fn build_selection_set(
                 message: format!("invalid field selection name \"{key}\""),
             })?;
 
-        if !new_field.ty().is_non_null() {
+        if !is_fully_non_null(new_field.ty()) {
             return Err(CacheTagValidationError::CacheTagFormatNullableField {
                 field_name: name.clone(),
                 parent_type: selection_set.ty.to_string(),
@@ -623,6 +634,8 @@ mod tests {
                 topProducts(first: Int): [Product]
                     @cacheTag(format: "topProducts")
                     @cacheTag(format: "topProducts-{$args.first}")
+                productsByCountry(country: [String]!): [Product]
+                    @cacheTag(format: "productsByCountry-{$args.country}")
             }
         "#;
         assert_eq!(
@@ -630,6 +643,7 @@ mod tests {
             vec![
                 "@cacheTag format references a nullable field \"Product.name\"",
                 "@cacheTag format references a nullable argument \"first\"",
+                "@cacheTag format references a nullable argument \"country\"",
             ]
         );
     }
