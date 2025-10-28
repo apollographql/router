@@ -52,7 +52,18 @@ By [Jon Christiansen](https://github.com/theJC) in https://github.com/apollograp
 
 ### Add response reformatting and result coercion errors ([PR #8441](https://github.com/apollographql/router/pull/8441))
 
-All subgraph responses are checked and corrected to ensure alignment with the schema and query. When a misaligned value is returned, it's nullified. When the feature is enabled, errors for this nullification are now included in the errors array in the response.
+All subgraph responses are checked and corrected to ensure alignment with the schema and query. When a misaligned value is returned, it's nullified. When enabled, errors for this nullification are now included in the errors array in the response.
+
+Enable this feature in your router configuration:
+
+```yaml title="router.yaml"
+supergraph:
+  enable_result_coercion_errors: true
+```
+
+When enabled, the router generates validation errors with the code `RESPONSE_VALIDATION_FAILED` for any values that don't match the expected GraphQL type. These errors include the specific path and reason for the validation failure, helping you identify data inconsistencies between your subgraphs and schema.
+
+While this feature improves GraphQL correctness, clients may encounter errors in responses where they previously did not, which may require consideration based on your specific usage patterns.
 
 By [@TylerBloom](https://github.com/TylerBloom) in https://github.com/apollographql/router/pull/8441
 
