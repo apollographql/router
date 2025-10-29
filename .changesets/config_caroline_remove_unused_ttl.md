@@ -8,10 +8,9 @@ preview_response_cache:
   enabled: true
   subgraph:
     all:
-      redis:
-        urls: [ "redis://test" ]
-        required_to_start: true
       enabled: true
+      redis:
+        urls: [ "redis://..." ]
       ttl: 10m
 ```
 
