@@ -86,10 +86,26 @@ The 2024 preview used a linear scan approach for active invalidation that scaled
 
 ### How does the current release affect existing users?
 
-All changes are backward-compatible. If you're using the `preview_entity_caching` plugin, you can migrate to response caching by:
-- Renaming `preview_entity_caching` to `preview_response_caching`.
-- Get rid of `redis.scan_count` configuration, it's now useless because response caching doesn't scan Redis anymore.
-- Rename `redis.timeout`, response caching introduces more granularity in timeouts so instead of just having `redis.timeout` it will now be replaced with `redis.fetch_timeout`, `redis.insert_timeout`, `redis.invalidate_timeout`, these timeouts are still all optionals.
+Response caching is backward-compatible with entity caching. You can switch to response caching without breaking changes.
+
+If you're currently using the `preview_entity_caching` plugin, you should migrate to response caching as soon as possible. The new implementation provides better performance and more flexible caching controls.
+
+### How do I migrate from entity caching to response caching?
+
+Follow these steps to migrate your configuration:
+
+1. **Update the plugin name:** Replace `preview_entity_caching` with `preview_response_caching` in your router configuration.
+
+2. **Remove the `scan_count` setting:** Delete the `redis.scan_count` configuration option if you have it set. Response caching uses approach that does not require Redis `SCAN` operations, eliminating a key performance bottleneck that existed in the previous entity caching version.
+
+3. **Update timeout configuration:** Replace the single `redis.timeout` setting with more granular timeout options as appropriate:
+   - `redis.fetch_timeout`: Controls how long to wait when retrieving data from cache
+   - `redis.insert_timeout`: Controls how long to wait when storing new data in cache
+   - `redis.invalidate_timeout`: Controls how long to wait when removing data from cache
+
+   All timeout settings remain optional. Determine which timeouts you need based on your cache operations.
+
+4. **Update your metrics and monitoring:** Response caching introduces new metric names and additional observability options. Check the [observability documentation](/routing/performance/caching/response-caching/observability) for the complete list of available metrics and their updated names. The new implementation also provides additional metrics for better insight into cache performance.
 
 ### Can I use response caching in production with earlier router versions?
 
