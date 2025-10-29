@@ -29,7 +29,7 @@ Response caching solves traditional GraphQL caching challenges including mixed T
 
 Configure response caching using the `preview_response_cache` configuration option with Redis as the cache backend.  For complete setup instructions and advanced configuration, see the [Response Caching documentation](https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/overview).
 
-**Migration from entity caching**: For existing entity caching users, migration as simple as renaming configuration options. For migration details see the [Response Caching FAQ](https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/faq).
+**Migration from entity caching**: For existing entity caching users, migration is as simple as renaming configuration options. For migration details see the [Response Caching FAQ](https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/faq).
 
 ### Support per-stage coprocessor URLs ([PR #8384](https://github.com/apollographql/router/pull/8384))
 
