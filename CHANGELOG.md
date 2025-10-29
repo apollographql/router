@@ -6,6 +6,31 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🚀 Features
 
+### Response caching
+
+**Available on [all GraphOS plans](https://www.apollographql.com/pricing) including Free, Developer, Standard and Enterprise.**
+
+Response caching enables the router to cache GraphQL subgraph origin responses using Redis, delivering performance improvements by reducing subgraph load and query latency. Unlike traditional HTTP caching or client-side caching, response caching works at the GraphQL entity level—caching reusable portions of query responses that can be shared across different operations and users.
+
+Response caching caches two types of data:
+
+- **Root query fields**: Responses for root field fetches
+- **Entity representations**: Individual entities, offering reuse across queries
+
+Benefits include:
+
+- **Active cache invalidation**: Target specific cached data for immediate removal using cache tags
+- **Cache debugger**: Debugging in Apollo Sandbox shows cache status, TTLs, and cache tags during development
+- **GraphQL-aware**: Understands GraphQL operations to improve partial cache hit rates while respecting data visibility and authorization
+- **Entity-level granularity**: Caches at the entity level rather than entire responses
+- **Flexible TTL control**: Data cached using HTTP `Cache-Control` headers from subgraph origins
+
+Response caching solves traditional GraphQL caching challenges including mixed TTL requirements across a single response, personalized versus public data mixing, and high data duplication.
+
+Configure response caching using the `preview_response_cache` configuration option with Redis as the cache backend.  For complete setup instructions and advanced configuration, see the [Response Caching documentation](https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/overview).
+
+**Migration from entity caching**: For existing entity caching users, migration is as simple as renaming configuration options. For migration details see the [Response Caching FAQ](https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/faq).
+
 ### Support per-stage coprocessor URLs ([PR #8384](https://github.com/apollographql/router/pull/8384))
 
 You can now configure different coprocessor URLs for each stage of request/response processing (router, supergraph, execution, subgraph). Each stage can specify its own `url` field that overrides the global default URL.
