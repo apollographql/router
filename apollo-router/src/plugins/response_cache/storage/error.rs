@@ -28,8 +28,16 @@ impl Error {
 
 impl ErrorCode for Error {
     fn code(&self) -> &'static str {
+        const TIMEOUT_CODE: &str = "TIMEOUT";
+
         match self {
-            Error::Database(err) => err.kind().to_str(),
+            Error::Database(err) => {
+                if err.kind() == &fred::error::ErrorKind::Timeout {
+                    TIMEOUT_CODE
+                } else {
+                    err.kind().to_str()
+                }
+            },
             Error::Join(err) => {
                 if err.is_cancelled() {
                     "CANCELLED"
@@ -44,7 +52,7 @@ impl ErrorCode for Error {
                 Category::Data => "Serialize::Data",
                 Category::Eof => "Serialize::EOF",
             },
-            Error::Timeout(_) => "TIMED_OUT",
+            Error::Timeout(_) => TIMEOUT_CODE
         }
     }
 }
