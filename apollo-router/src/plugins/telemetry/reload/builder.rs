@@ -611,26 +611,40 @@ mod tests {
     async fn test_datadog_propagation_validation() {
         let mut config = create_config_with_apollo_enabled();
 
-        let mut datadog_propagation = Propagation::default();
-        datadog_propagation.datadog = true;
+        let datadog_propagation = Propagation {
+            datadog: true,
+            ..Default::default()
+        };
+        let jaeger_propagation = Propagation {
+            jaeger: true,
+            ..Default::default()
+        };
 
-        let mut jaeger_propagation = Propagation::default();
-        jaeger_propagation.jaeger = true;
-
-        let mut datadog_and_baggage_propagation = datadog_propagation.clone();
-        datadog_and_baggage_propagation.baggage = true;
-
-        let mut datadog_and_jaeger_propagation = datadog_propagation.clone();
-        datadog_and_jaeger_propagation.jaeger = true;
-
-        let mut datadog_and_trace_context_propagation = datadog_propagation.clone();
-        datadog_and_trace_context_propagation.trace_context = true;
-
-        let mut datadog_and_zipkin_propagation = datadog_propagation.clone();
-        datadog_and_zipkin_propagation.zipkin = true;
-
-        let mut datadog_and_aws_xray_propagation = datadog_propagation.clone();
-        datadog_and_aws_xray_propagation.aws_xray = true;
+        let datadog_and_baggage_propagation = Propagation {
+            datadog: true,
+            baggage: true,
+            ..Default::default()
+        };
+        let datadog_and_jaeger_propagation = Propagation {
+            datadog: true,
+            jaeger: true,
+            ..Default::default()
+        };
+        let datadog_and_trace_context_propagation = Propagation {
+            datadog: true,
+            trace_context: true,
+            ..Default::default()
+        };
+        let datadog_and_zipkin_propagation = Propagation {
+            datadog: true,
+            zipkin: true,
+            ..Default::default()
+        };
+        let datadog_and_aws_xray_propagation = Propagation {
+            datadog: true,
+            aws_xray: true,
+            ..Default::default()
+        };
 
         let allowed_propagation_configs = [
             datadog_propagation,
