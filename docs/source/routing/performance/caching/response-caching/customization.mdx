@@ -183,7 +183,6 @@ preview_response_cache:
         fetch_timeout: 750ms # Optional, by default: 500ms
         insert_timeout: 750ms # Optional, by default: 500ms
         invalidate_timeout: 750ms # Optional, by default: 1s
-        ttl: 24h # Optional, default: no expiration. Default TTL for data saved in Redis
     # Configure response caching per subgraph, overrides options from the "all" section
     subgraphs:
       products:
@@ -292,7 +291,6 @@ preview_response_cache:
       enabled: true
       redis:
         urls: ["redis://..."]
-        ttl: 24h
 ```
 
 ### Namespace prefix
