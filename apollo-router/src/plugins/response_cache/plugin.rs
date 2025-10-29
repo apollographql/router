@@ -2445,6 +2445,7 @@ async fn reattempt_connection(
     any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
 ))]
 mod tests {
+    use std::collections::HashMap;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -2455,8 +2456,16 @@ mod tests {
     use super::Ttl;
     use crate::configuration::subgraph::SubgraphConfiguration;
     use crate::plugins::response_cache::plugin::ResponseCache;
+<<<<<<< HEAD
+=======
+    use crate::plugins::response_cache::plugin::get_entity_key_from_selection_set;
+    use crate::plugins::response_cache::plugin::get_invalidation_root_keys_from_schema;
+    use crate::plugins::response_cache::plugin::matches_selection_set;
+>>>>>>> 176a6c2a (fix(response_cache): do not raise an error when using enum in cacheTag directive format (#8496))
     use crate::plugins::response_cache::storage::redis::Config;
     use crate::plugins::response_cache::storage::redis::Storage;
+    use crate::services::OperationKind;
+    use crate::services::subgraph;
 
     const SCHEMA: &str = include_str!("../../testdata/orga_supergraph_cache_key.graphql");
 
@@ -2587,4 +2596,491 @@ mod tests {
             Some(Duration::from_millis(5000))
         );
     }
+<<<<<<< HEAD
+=======
+
+    #[test]
+    fn test_matches_selection_set_handles_arrays() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                locale: String!
+                lists: [List!]!
+                list: [List!]!
+            }
+            type List {
+                id: ID!
+                date: Int!
+                quantity: Int!
+                location: String!
+            }
+        "#;
+        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity location } list { id date quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        // Test with complex nested array structure
+        let representation = json!({
+            "id": "TEST123",
+            "locale": "en_US",
+            "lists": [
+                {
+                    "id": "LIST1",
+                    "date": 20240101,
+                    "quantity": 50,
+                    "location": "WAREHOUSE_A"
+                }
+            ],
+            "list": [
+                {
+                    "id": "LIST2",
+                    "date": 20240101,
+                    "quantity": 100,
+                    "location": "WAREHOUSE_A"
+                },
+                {
+                    "id": "LIST3",
+                    "date": 20240102,
+                    "quantity": 75,
+                    "location": "WAREHOUSE_B"
+                }
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        assert!(
+            matches_selection_set(&representation, &field_set.selection_set),
+            "complex nested arrays should match"
+        );
+    }
+
+    #[test]
+    fn test_matches_selection_subset_handles_arrays() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                locale: String!
+                lists: [List!]!
+                list: [List!]!
+            }
+            type List {
+                id: ID!
+                date: Int!
+                quantity: Int!
+                location: String!
+            }
+        "#;
+        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity location } list { id date quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        // Test with complex nested array structure
+        let representation = json!({
+            "id": "TEST123",
+            "locale": "en_US",
+            "lists": [
+                {
+                    "id": "LIST1",
+                    "date": 20240101,
+                    "quantity": 50
+                }
+            ],
+            "list": [
+                {
+                    "id": "LIST2",
+                    "date": 20240101,
+                    "quantity": 100,
+                    "location": "WAREHOUSE_A"
+                },
+                {
+                    "id": "LIST3",
+                    "date": 20240102,
+                    "quantity": 75,
+                    "location": "WAREHOUSE_B"
+                }
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        assert!(!matches_selection_set(
+            &representation,
+            &field_set.selection_set
+        ),);
+
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity } list { id date quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        assert!(
+            matches_selection_set(&representation, &field_set.selection_set),
+            "complex nested arrays should match"
+        );
+    }
+
+    #[test]
+    fn test_take_selection_set_handles_arrays() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                locale: String!
+                lists: [List!]!
+                list: [List!]!
+            }
+            type List {
+                id: ID!
+                date: Int!
+                quantity: Int!
+                location: String!
+            }
+        "#;
+        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity location } list { id date quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        // Test with complex nested array structure
+        let representation = json!({
+            "id": "TEST123",
+            "locale": "en_US",
+            "lists": [
+                {
+                    "id": "LIST1",
+                    "date": 20240101,
+                    "quantity": 50,
+                    "location": "WAREHOUSE_A"
+                }
+            ],
+            "list": [
+                {
+                    "id": "LIST2",
+                    "date": 20240101,
+                    "quantity": 100,
+                    "location": "WAREHOUSE_A"
+                },
+                {
+                    "id": "LIST3",
+                    "date": 20240102,
+                    "quantity": 75,
+                    "location": "WAREHOUSE_B"
+                }
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        assert!(matches_selection_set(
+            &representation,
+            &field_set.selection_set
+        ));
+        let entity_key =
+            get_entity_key_from_selection_set(&representation, &field_set.selection_set);
+        assert_eq!(
+            &entity_key,
+            json!({
+                "id": "TEST123",
+                "locale": "en_US",
+                "lists": [
+                    {
+                        "id": "LIST1",
+                        "date": 20240101,
+                        "quantity": 50,
+                        "location": "WAREHOUSE_A"
+                    }
+                ],
+                "list": [
+                    {
+                        "id": "LIST2",
+                        "date": 20240101,
+                        "quantity": 100,
+                        "location": "WAREHOUSE_A"
+                    },
+                    {
+                        "id": "LIST3",
+                        "date": 20240102,
+                        "quantity": 75,
+                        "location": "WAREHOUSE_B"
+                    }
+                ]
+            })
+            .as_object()
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn test_take_selection_subset_handles_arrays() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                locale: String!
+                lists: [List!]!
+                list: [List!]!
+            }
+            type List {
+                id: ID!
+                date: Int!
+                quantity: Int!
+                location: String!
+            }
+        "#;
+        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity } list { id quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        // Test with complex nested array structure
+        let representation = json!({
+            "id": "TEST123",
+            "locale": "en_US",
+            "lists": [
+                {
+                    "id": "LIST1",
+                    "date": 20240101,
+                    "quantity": 50,
+                    "location": "WAREHOUSE_A"
+                }
+            ],
+            "list": [
+                {
+                    "id": "LIST2",
+                    "date": 20240101,
+                    "quantity": 100,
+                    "location": "WAREHOUSE_A"
+                },
+                {
+                    "id": "LIST3",
+                    "date": 20240102,
+                    "quantity": 75,
+                    "location": "WAREHOUSE_B"
+                }
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        assert!(matches_selection_set(
+            &representation,
+            &field_set.selection_set
+        ));
+        let entity_key =
+            get_entity_key_from_selection_set(&representation, &field_set.selection_set);
+        assert_eq!(
+            &entity_key,
+            json!({
+                "id": "TEST123",
+                "locale": "en_US",
+                "lists": [
+                    {
+                        "id": "LIST1",
+                        "date": 20240101,
+                        "quantity": 50
+                    }
+                ],
+                "list": [
+                    {
+                        "id": "LIST2",
+                        "quantity": 100,
+                        "location": "WAREHOUSE_A"
+                    },
+                    {
+                        "id": "LIST3",
+                        "quantity": 75,
+                        "location": "WAREHOUSE_B"
+                    }
+                ]
+            })
+            .as_object()
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn test_get_invalidation_root_keys_from_schema() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+            directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+            directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+            directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+            directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+            input join__ContextArgument {
+              name: String!
+              type: String!
+              context: String!
+              selection: join__FieldValue!
+            }
+
+            scalar join__DirectiveArguments
+
+            scalar join__FieldSet
+
+            scalar join__FieldValue
+
+            enum join__Graph {
+              USER @join__graph(name: "USER", url: "none")
+              TEST @join__graph(name: "TEST", url: "none")
+            }
+
+            scalar link__Import
+
+            enum link__Purpose {
+              """
+              `SECURITY` features provide metadata necessary to securely resolve fields.
+              """
+              SECURITY
+
+              """
+              `EXECUTION` features provide metadata necessary for operation execution.
+              """
+              EXECUTION
+            }
+
+            type Query {
+                test: Test
+                testByCountry(id: ID!, country: Country!): Test @join__directive(
+                    graphs: [USER]
+                    name: "federation__cacheTag"
+                    args: { format: "test-{$args.id}-{$args.country}" }
+                )
+                @join__directive(
+                    graphs: [USER]
+                    name: "federation__cacheTag"
+                    args: { format: "test-{$args.country}" }
+                )
+                @join__directive(
+                    graphs: [USER]
+                    name: "federation__cacheTag"
+                    args: { format: "test" }
+                )
+            }
+
+            enum Country {
+                BE
+                FR
+            }
+
+            type Test {
+                id: ID!
+                locale: String!
+                lists: [List!]!
+                list: [List!]!
+            }
+            type List {
+                id: ID!
+                date: Int!
+                quantity: Int!
+                location: String!
+            }
+        "#;
+        let schema = Arc::new(Schema::parse_and_validate(schema_text, "test.graphql").unwrap());
+        let query = r#"query Test {
+          testByCountry(id: "2", country: BE) {
+            locale
+          }
+        }"#;
+        let mut sub_request = subgraph::Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(
+                        crate::graphql::Request::builder()
+                            .query(query)
+                            .operation_name("Test")
+                            .build(),
+                    )
+                    .unwrap(),
+            )
+            .operation_kind(OperationKind::Query)
+            .subgraph_name("USER")
+            .build();
+        sub_request.executable_document = Some(Arc::new(
+            apollo_compiler::ExecutableDocument::parse_and_validate(&schema, query, "test.graphql")
+                .unwrap(),
+        ));
+        let subgraph_enums: HashMap<String, String> = [("USER".to_string(), "USER".to_string())]
+            .into_iter()
+            .collect();
+        let cache_tags =
+            get_invalidation_root_keys_from_schema(&sub_request, &subgraph_enums, schema.clone())
+                .unwrap();
+
+        assert_eq!(
+            cache_tags,
+            [
+                "test".to_string(),
+                "test-BE".to_string(),
+                "test-2-BE".to_string()
+            ]
+            .into_iter()
+            .collect()
+        );
+    }
+>>>>>>> 176a6c2a (fix(response_cache): do not raise an error when using enum in cacheTag directive format (#8496))
 }
