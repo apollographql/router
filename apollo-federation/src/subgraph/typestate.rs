@@ -383,6 +383,9 @@ mod parser_backward_compatibility {
 }
 
 impl Subgraph<Expanded> {
+    /// Returns true if the given type name is an orphan type extension in this subgraph.
+    /// - Orphan type implies that there is one or more extensions for the type, but no base
+    ///   definition.
     pub(crate) fn is_orphan_extension_type(&self, type_name: &Name) -> bool {
         self.state.orphan_extension_types.contains(type_name)
     }
@@ -538,6 +541,9 @@ impl Subgraph<Validated> {
         &self.state.schema
     }
 
+    /// Returns true if the given type name is an orphan type extension in this subgraph.
+    /// - Orphan type implies that there is one or more extensions for the type, but no base
+    ///   definition.
     pub(crate) fn is_orphan_extension_type(&self, type_name: &Name) -> bool {
         self.state.orphan_extension_types.contains(type_name)
     }

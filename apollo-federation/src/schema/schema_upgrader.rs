@@ -65,6 +65,9 @@ struct UpgradeMetadata {
 }
 
 impl UpgradeMetadata {
+    /// Returns true if the given type name is an orphan type extension in this subgraph.
+    /// - Orphan type implies that there is one or more extensions for the type, but no base
+    ///   definition.
     fn is_orphan_extension_type(&self, type_name: &Name) -> bool {
         self.orphan_extension_types.contains(type_name)
     }
@@ -618,9 +621,10 @@ impl SchemaUpgrader {
             .extends_directive_name
             .as_ref()
             .is_some_and(|extends| type_.directives().has(extends.as_str()));
+        let is_orphan_extension = upgrade_metadata.is_orphan_extension_type(type_.name());
         Ok((type_.has_extension_elements() || has_extend)
             && (type_.is_object() || type_.is_interface())
-            && (has_extend || upgrade_metadata.is_orphan_extension_type(type_.name())))
+            && (has_extend || is_orphan_extension))
     }
 
     /// Whether the type is a root type but is declared only as an extension, which federation 1 actually accepts.
@@ -640,8 +644,9 @@ impl SchemaUpgrader {
             .extends_directive_name
             .as_ref()
             .is_some_and(|extends| ty.directives().has(extends.as_str()));
+        let is_orphan_extension = upgrade_metadata.is_orphan_extension_type(ty.name());
 
-        has_extends_directive || upgrade_metadata.is_orphan_extension_type(ty.name())
+        has_extends_directive || is_orphan_extension
     }
 
     fn is_root_type(schema: &FederationSchema, ty: &TypeDefinitionPosition) -> bool {
