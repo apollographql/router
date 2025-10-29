@@ -180,10 +180,9 @@ preview_response_cache:
       # Configure Redis globally
       redis:
         urls: ["redis://..."]
-        fetch_timeout: 750ms # Optional, by default: 500ms
+        fetch_timeout: 750ms # Optional, by default: 150ms
         insert_timeout: 750ms # Optional, by default: 500ms
         invalidate_timeout: 750ms # Optional, by default: 1s
-        ttl: 24h # Optional, default: no expiration. Default TTL for data saved in Redis
     # Configure response caching per subgraph, overrides options from the "all" section
     subgraphs:
       products:
@@ -263,7 +262,8 @@ preview_response_cache:
 
 ### Timeout configuration
 
-Redis connections and commands have a default timeout of 500ms that you can override. A timeout of 750ms provides a good balance between responsiveness and reliability for most use cases:
+Redis connections and commands have default timeouts that you can override. The timeouts are tailored to specific caching operations: fetch, insert, invalidate, and maintenance.
+Setting a lower fetch timeout and a higher insert timeout provides a good balance of reliability and client responsiveness.
 
 ```yaml title="router.yaml"
 preview_response_cache:
@@ -273,7 +273,7 @@ preview_response_cache:
       enabled: true
       redis:
         urls: ["redis://..."]
-        fetch_timeout: 750ms
+        fetch_timeout: 250ms
         insert_timeout: 750ms
         invalidate_timeout: 750ms
 ```
