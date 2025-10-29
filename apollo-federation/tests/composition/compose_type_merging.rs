@@ -749,3 +749,65 @@ fn arguments_merges_subtypes_within_lists() {
     }
     "###);
 }
+
+// =============================================================================
+// EXTENSION_WITH_NO_BASE validation
+// =============================================================================
+
+#[test]
+fn report_extension_with_no_base() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+            directive @dir on SCALAR
+
+            extend scalar MyScalar @dir
+
+            type Query {
+                test: MyScalar
+            }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "EXTENSION_WITH_NO_BASE",
+            r#"[subgraphA] Type "MyScalar" is an extension type, but there is no type definition for "MyScalar" in any subgraph."#,
+        )],
+    );
+}
+
+#[test]
+fn handle_extension_with_empty_base() {
+    // This test used to panic.
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+            directive @dir on SCALAR
+
+            scalar MyScalar # Note: empty base type definition
+
+            extend scalar MyScalar @dir
+
+            type Query {
+                test: MyScalar
+            }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a]);
+    let supergraph = result.expect("Expected composition to succeed");
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
+        .expect("Expected API schema generation to succeed");
+
+    assert_snapshot!(print_sdl(api_schema.schema()), @r###"
+    scalar MyScalar
+
+    type Query {
+      test: MyScalar
+    }
+    "###);
+}

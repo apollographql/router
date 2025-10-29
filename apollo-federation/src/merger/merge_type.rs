@@ -11,7 +11,6 @@ use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_RESOLVABLE_ARGUMENT_NAME;
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
-use crate::schema::SchemaElement;
 use crate::schema::position::TypeDefinitionPosition;
 
 impl Merger {
@@ -115,11 +114,12 @@ impl Merger {
                 continue;
             };
 
-            if element.has_extension_elements() {
+            if subgraph.is_orphan_extension_type(element.name()) {
                 let subgraph_name = subgraph.name.to_string();
                 let element_locations = element.locations(subgraph);
                 subgraphs_with_extension.push((subgraph_name, element_locations));
             } else {
+                // Found a subgraph with a base definition for this type.
                 return;
             }
         }
