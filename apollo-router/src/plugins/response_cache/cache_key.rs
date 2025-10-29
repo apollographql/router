@@ -64,7 +64,6 @@ pub(super) struct PrimaryCacheKeyEntity<'a> {
     pub(super) subgraph_name: &'a str,
     pub(super) entity_type: &'a str,
     pub(super) representation: &'a Map<ByteString, Value>,
-    pub(super) entity_key: &'a Map<ByteString, Value>,
     /// NB: hashed before insertion into this struct, so that the hashed representation can be reused for all entities in this query
     pub(super) subgraph_query_hash: &'a str,
     pub(super) additional_data_hash: &'a str,
@@ -80,7 +79,6 @@ impl<'a> PrimaryCacheKeyEntity<'a> {
             additional_data_hash,
             private_id,
             representation,
-            entity_key,
         } = self;
 
         let hashed_representation = if representation.is_empty() {
@@ -88,17 +86,15 @@ impl<'a> PrimaryCacheKeyEntity<'a> {
         } else {
             sort_and_hash_object(representation)
         };
-        let hashed_entity_key = sort_and_hash_object(entity_key);
 
         // - response cache version: current version of the hash
         // - subgraph name: caching is done per subgraph
         // - type: can invalidate all instances of a type
-        // - entity key: invalidate a specific entity
         // - representation: representation variable value
         // - query hash: invalidate the entry for a specific query and operation name
         // - additional data: separate cache entries depending on info like authorization status
         let mut key = format!(
-            "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}:entity:{hashed_entity_key}:representation:{hashed_representation}:hash:{subgraph_query_hash}:data:{additional_data_hash}"
+            "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}:representation:{hashed_representation}:hash:{subgraph_query_hash}:data:{additional_data_hash}"
         );
 
         if let Some(private_id) = private_id {

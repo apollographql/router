@@ -9,7 +9,7 @@ use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 use futures::Stream;
-use futures::StreamExt;
+use futures::StreamExt as _;
 use futures::future::BoxFuture;
 use futures::stream::once;
 use serde_json_bytes::Value;
@@ -22,13 +22,14 @@ use tokio::sync::mpsc::error::TryRecvError;
 use tokio_stream::wrappers::ReceiverStream;
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::ServiceExt;
+use tower::ServiceExt as _;
 use tower_service::Service;
 use tracing::Instrument;
 use tracing::Span;
 use tracing::event;
 use tracing_core::Level;
 
+use crate::Configuration;
 use crate::apollo_studio_interop::ReferencedEnums;
 use crate::apollo_studio_interop::extract_enums_from_response;
 use crate::graphql::Error;
@@ -64,6 +65,7 @@ pub(crate) struct ExecutionService {
     pub(crate) schema: Arc<Schema>,
     pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
     pub(crate) fetch_service_factory: Arc<FetchServiceFactory>,
+    pub(crate) configuration: Arc<Configuration>,
     /// Subscription config if enabled
     subscription_config: Option<SubscriptionConfig>,
     apollo_telemetry_config: Option<ApolloTelemetryConfig>,
@@ -192,6 +194,8 @@ impl ExecutionService {
         };
 
         let execution_span = Span::current();
+        let insert_result_coercion_errors =
+            self.configuration.supergraph.enable_result_coercion_errors;
 
         let stream = stream
             .map(move |mut response: Response| {
@@ -243,6 +247,7 @@ impl ExecutionService {
                         &mut nullified_paths,
                         metrics_ref_mode,
                         &context,
+                        insert_result_coercion_errors,
                         response,
                     )
                 }))
@@ -261,6 +266,7 @@ impl ExecutionService {
         nullified_paths: &mut Vec<Path>,
         metrics_ref_mode: ApolloMetricsReferenceMode,
         context: &crate::Context,
+        insert_result_coercion_errors: bool,
         mut response: Response,
     ) -> Option<Response> {
         // responses that would fall under a path that was previously nullified are not sent
@@ -330,6 +336,7 @@ impl ExecutionService {
                     variables.clone(),
                     schema.api_schema(),
                     variables_set,
+                    insert_result_coercion_errors
                 );
             }
 
@@ -340,6 +347,7 @@ impl ExecutionService {
                         variables.clone(),
                         schema.api_schema(),
                         variables_set,
+                        insert_result_coercion_errors
                     )
                     ,
             );
@@ -635,6 +643,7 @@ pub(crate) struct ExecutionServiceFactory {
     pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
     pub(crate) plugins: Arc<Plugins>,
     pub(crate) fetch_service_factory: Arc<FetchServiceFactory>,
+    pub(crate) configuration: Arc<Configuration>,
 }
 
 impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
@@ -663,6 +672,7 @@ impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
                         subscription_config: subscription_plugin_conf,
                         subgraph_schemas: self.subgraph_schemas.clone(),
                         apollo_telemetry_config: apollo_telemetry_conf,
+                        configuration: Arc::clone(&self.configuration),
                     }
                     .boxed(),
                     |acc, (_, e)| e.execution_service(acc),

@@ -258,7 +258,7 @@ impl Merger {
                 message: format!(
                     "Field \"{}\" is marked @external on all the subgraphs in which it is listed ({}).",
                     dest,
-                    defining_subgraphs.join(", ")
+                    human_readable_subgraph_names(defining_subgraphs.iter())
                 ),
             };
 
@@ -332,14 +332,9 @@ impl Merger {
         // Convert to FieldDefinitionPosition types for external field validation
         let field_sources: Sources<FieldDefinitionPosition> = sources
             .iter()
-            .map(|(idx, source)| match source {
-                Some(ObjectOrInterfaceFieldDefinitionPosition::Object(pos)) => {
-                    (*idx, Some(FieldDefinitionPosition::Object(pos.clone())))
-                }
-                Some(ObjectOrInterfaceFieldDefinitionPosition::Interface(pos)) => {
-                    (*idx, Some(FieldDefinitionPosition::Interface(pos.clone())))
-                }
-                None => (*idx, None),
+            .map(|(idx, source)| {
+                let field_pos = source.clone().map(|pos| pos.into());
+                (*idx, field_pos)
             })
             .collect();
 
@@ -419,8 +414,8 @@ impl Merger {
 
                 let error = CompositionError::MergedDirectiveApplicationOnExternal {
                     message: format!(
-                        "Cannot apply merged directive @{} to external field \"{}\" (in subgraph \"{}\")",
-                        directive.name, field_pos, self.names[source_idx]
+                        "[{}] Cannot apply merged directive {} to external field \"{field_pos}\"",
+                        self.names[source_idx], directive,
                     ),
                 };
 
@@ -575,7 +570,12 @@ impl Merger {
                 |d| d.try_get(self.merged.schema())
                         .and_then(|f| Some(format!("default value {}", f.default_value.as_ref()?))), 
                 |s, idx| s.try_get(self.subgraphs[idx].schema().schema())
-                        .and_then(|f| Some(format!("default value {}", f.default_value.as_ref()?))),
+                        .map(|f| if let Some(def) = &f.default_value {
+                            format!("default value {}", def)
+                        } else {
+                            "no default value".to_string()
+                        })
+                ,
             );
         }
 

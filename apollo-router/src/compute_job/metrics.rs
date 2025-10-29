@@ -69,35 +69,6 @@ impl Drop for JobWatcher {
     }
 }
 
-pub(super) struct ActiveComputeMetric {
-    compute_job_type: ComputeJobType,
-}
-
-impl ActiveComputeMetric {
-    // create metric (auto-increments and decrements)
-    pub(super) fn register(compute_job_type: ComputeJobType) -> Self {
-        let s = Self { compute_job_type };
-        s.incr(1);
-        s
-    }
-
-    fn incr(&self, value: i64) {
-        i64_up_down_counter_with_unit!(
-            "apollo.router.compute_jobs.active_jobs",
-            "Number of computation jobs in progress",
-            "{job}",
-            value,
-            job.type = self.compute_job_type
-        );
-    }
-}
-
-impl Drop for ActiveComputeMetric {
-    fn drop(&mut self) {
-        self.incr(-1);
-    }
-}
-
 pub(super) fn observe_queue_wait_duration(
     compute_job_type: ComputeJobType,
     queue_duration: Duration,
@@ -124,7 +95,6 @@ pub(super) fn observe_compute_duration(compute_job_type: ComputeJobType, job_dur
 #[cfg(test)]
 mod tests {
     use crate::compute_job::ComputeJobType;
-    use crate::compute_job::metrics::ActiveComputeMetric;
     use crate::compute_job::metrics::JobWatcher;
     use crate::compute_job::metrics::Outcome;
 
@@ -158,35 +128,5 @@ mod tests {
             }
             check_histogram_count(count, "query_planning", "rejected_queue_full");
         }
-    }
-
-    #[test]
-    fn test_active_compute_metric() {
-        let check_count = |count: i64, job_type: &'static str| {
-            assert_up_down_counter!(
-                "apollo.router.compute_jobs.active_jobs",
-                count,
-                "job.type" = job_type
-            );
-        };
-
-        {
-            let _introspection_1 = ActiveComputeMetric::register(ComputeJobType::Introspection);
-            let _introspection_2 = ActiveComputeMetric::register(ComputeJobType::Introspection);
-            let introspection_3 = ActiveComputeMetric::register(ComputeJobType::Introspection);
-            check_count(3, "introspection");
-
-            let _planning_1 = ActiveComputeMetric::register(ComputeJobType::QueryPlanning);
-            check_count(3, "introspection");
-            check_count(1, "query_planning");
-
-            drop(introspection_3);
-            check_count(2, "introspection");
-            check_count(1, "query_planning");
-        }
-
-        // block ended, so should have no ongoing computation
-        check_count(0, "introspection");
-        check_count(0, "query_planning");
     }
 }

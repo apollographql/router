@@ -67,7 +67,6 @@ mod http_server_factory;
 mod introspection;
 pub mod layers;
 pub(crate) mod logging;
-pub(crate) mod notification;
 mod orbiter;
 mod plugins;
 pub(crate) mod protocols;
@@ -81,6 +80,7 @@ pub mod test_harness;
 pub mod tracer;
 mod uplink;
 
+pub(crate) mod allocator;
 #[doc(hidden)]
 pub mod otel_compat;
 mod registry;
@@ -92,7 +92,7 @@ pub use crate::context::extensions::Extensions;
 pub use crate::context::extensions::sync::ExtensionsMutex;
 pub use crate::executable::Executable;
 pub use crate::executable::main;
-pub use crate::notification::Notify;
+pub use crate::plugins::subscription::notification::Notify;
 pub use crate::router::ApolloRouterError;
 pub use crate::router::ConfigurationSource;
 pub use crate::router::LicenseSource;

@@ -160,11 +160,14 @@ macro_rules! infallible_conversions {
 pub(crate) trait HasDescription {
     fn description<'schema>(&self, schema: &'schema FederationSchema)
     -> Option<&'schema Node<str>>;
+
     fn set_description(
         &self,
         schema: &mut FederationSchema,
         description: Option<Node<str>>,
     ) -> Result<(), FederationError>;
+
+    fn is_schema_definition() -> bool;
 }
 
 macro_rules! impl_has_description_for {
@@ -184,6 +187,10 @@ macro_rules! impl_has_description_for {
             ) -> Result<(), FederationError> {
                 self.make_mut(&mut schema.schema)?.make_mut().description = description;
                 Ok(())
+            }
+
+            fn is_schema_definition() -> bool {
+                false
             }
         }
     };
@@ -221,6 +228,10 @@ impl HasDescription for SchemaDefinitionPosition {
         self.make_mut(&mut schema.schema).make_mut().description = description;
         Ok(())
     }
+
+    fn is_schema_definition() -> bool {
+        true
+    }
 }
 
 impl HasDescription for ObjectOrInterfaceFieldDefinitionPosition {
@@ -243,6 +254,10 @@ impl HasDescription for ObjectOrInterfaceFieldDefinitionPosition {
             Self::Object(field) => field.set_description(schema, description),
             Self::Interface(field) => field.set_description(schema, description),
         }
+    }
+
+    fn is_schema_definition() -> bool {
+        false
     }
 }
 
@@ -269,6 +284,10 @@ impl HasDescription for FieldDefinitionPosition {
             FieldDefinitionPosition::Union(field) => field.set_description(schema, description),
         }
     }
+
+    fn is_schema_definition() -> bool {
+        false
+    }
 }
 
 impl HasDescription for UnionTypenameFieldDefinitionPosition {
@@ -286,6 +305,10 @@ impl HasDescription for UnionTypenameFieldDefinitionPosition {
         _description: Option<Node<str>>,
     ) -> Result<(), FederationError> {
         bail!("Description is immutable for union typename fields")
+    }
+
+    fn is_schema_definition() -> bool {
+        false
     }
 }
 
@@ -334,6 +357,10 @@ impl HasDescription for DirectiveTargetPosition {
             )),
         }
     }
+
+    fn is_schema_definition() -> bool {
+        false
+    }
 }
 
 impl HasDescription for FieldArgumentDefinitionPosition {
@@ -357,6 +384,10 @@ impl HasDescription for FieldArgumentDefinitionPosition {
             Self::Interface(field) => field.set_description(schema, description),
         }
     }
+
+    fn is_schema_definition() -> bool {
+        false
+    }
 }
 
 pub(crate) trait HasType {
@@ -372,6 +403,8 @@ pub(crate) trait HasType {
         &self,
         schema: &FederationSchema,
     ) -> Result<EnumExampleAst, FederationError>;
+
+    fn is_argument() -> bool;
 }
 
 impl HasType for DirectiveArgumentDefinitionPosition {
@@ -398,6 +431,10 @@ impl HasType for DirectiveArgumentDefinitionPosition {
         let node = self.get(schema.schema())?.clone();
         Ok(EnumExampleAst::Input(node))
     }
+
+    fn is_argument() -> bool {
+        true
+    }
 }
 
 impl HasType for FieldArgumentDefinitionPosition {
@@ -423,6 +460,10 @@ impl HasType for FieldArgumentDefinitionPosition {
     ) -> Result<EnumExampleAst, FederationError> {
         let node = self.get(schema.schema())?.clone();
         Ok(EnumExampleAst::Input(node))
+    }
+
+    fn is_argument() -> bool {
+        true
     }
 }
 
@@ -451,6 +492,10 @@ impl HasType for InputObjectFieldDefinitionPosition {
             self.get(schema.schema())?.clone().node,
         ))
     }
+
+    fn is_argument() -> bool {
+        false
+    }
 }
 
 impl HasType for ObjectFieldDefinitionPosition {
@@ -477,6 +522,10 @@ impl HasType for ObjectFieldDefinitionPosition {
         let node = self.get(schema.schema())?.clone().node;
         Ok(EnumExampleAst::Field(node))
     }
+
+    fn is_argument() -> bool {
+        false
+    }
 }
 
 impl HasType for InterfaceFieldDefinitionPosition {
@@ -502,6 +551,10 @@ impl HasType for InterfaceFieldDefinitionPosition {
     ) -> Result<EnumExampleAst, FederationError> {
         let node = self.get(schema.schema())?.clone().node;
         Ok(EnumExampleAst::Field(node))
+    }
+
+    fn is_argument() -> bool {
+        false
     }
 }
 
@@ -535,6 +588,10 @@ impl HasType for ObjectOrInterfaceFieldDefinitionPosition {
             Self::Object(field) => field.enum_example_ast(schema),
             Self::Interface(field) => field.enum_example_ast(schema),
         }
+    }
+
+    fn is_argument() -> bool {
+        false
     }
 }
 
@@ -931,6 +988,10 @@ impl HasDescription for TypeDefinitionPosition {
             Self::Enum(ty) => ty.set_description(schema, description),
             Self::InputObject(ty) => ty.set_description(schema, description),
         }
+    }
+
+    fn is_schema_definition() -> bool {
+        false
     }
 }
 
@@ -1771,7 +1832,9 @@ impl SchemaDefinitionPosition {
     ) -> Result<(), FederationError> {
         let schema_definition = self.make_mut(&mut schema.schema);
         match kind {
-            SchemaRootDefinitionKind::Query => schema_definition.make_mut().query = Some(type_name),
+            SchemaRootDefinitionKind::Query => {
+                schema_definition.make_mut().query = Some(type_name);
+            }
             SchemaRootDefinitionKind::Mutation => {
                 schema_definition.make_mut().mutation = Some(type_name)
             }
@@ -1779,6 +1842,10 @@ impl SchemaDefinitionPosition {
                 schema_definition.make_mut().subscription = Some(type_name)
             }
         }
+
+        let schema_definition = self.get(&schema.schema);
+        self.insert_references(schema_definition, &schema.schema, &mut schema.referencers)?;
+
         Ok(())
     }
 }
@@ -6717,7 +6784,9 @@ impl InputObjectFieldDefinitionPosition {
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if is_graphql_reserved_name(&self.field_name) {
-            bail!(r#"Cannot insert reserved input object field "{self}""#);
+            // Skip invalid fields using a reserved name.
+            // - GraphQL validation will catch them later.
+            return Ok(());
         }
         validate_node_directives(field.directives.deref())?;
         for directive_reference in field.directives.iter() {
@@ -7055,18 +7124,12 @@ impl DirectiveDefinitionPosition {
         Ok(())
     }
 
-    pub(crate) fn add_locations(
+    pub(crate) fn set_locations(
         &self,
         schema: &mut FederationSchema,
         locations: Vec<DirectiveLocation>,
     ) -> Result<(), FederationError> {
-        let existing = self.make_mut(&mut schema.schema)?.make_mut();
-
-        for location in locations {
-            if !existing.locations.contains(&location) {
-                existing.locations.push(location);
-            }
-        }
+        self.make_mut(&mut schema.schema)?.make_mut().locations = locations;
         Ok(())
     }
 }
