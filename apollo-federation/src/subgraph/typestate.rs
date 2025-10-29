@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -71,24 +72,38 @@ use crate::supergraph::SERVICE_TYPE_SPEC;
 #[derive(Clone, Debug)]
 pub struct Initial {
     schema: Schema,
+    orphan_extension_types: HashSet<Name>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Expanded {
     schema: ValidFederationSchema,
+    orphan_extension_types: HashSet<Name>,
     metadata: SubgraphMetadata,
 }
 
 #[derive(Clone, Debug)]
 pub struct Upgraded {
     schema: FederationSchema,
+    orphan_extension_types: HashSet<Name>,
     metadata: SubgraphMetadata,
 }
 
 #[derive(Clone, Debug)]
 pub struct Validated {
     schema: ValidFederationSchema,
+    orphan_extension_types: HashSet<Name>,
     metadata: SubgraphMetadata,
+}
+
+impl Expanded {
+    pub(crate) fn orphan_extension_types(&self) -> &HashSet<Name> {
+        &self.orphan_extension_types
+    }
+
+    pub(crate) fn into_orphan_extension_types(self) -> HashSet<Name> {
+        self.orphan_extension_types
+    }
 }
 
 pub(crate) trait HasMetadata {
@@ -163,7 +178,12 @@ pub struct Subgraph<S> {
 }
 
 impl Subgraph<Initial> {
-    pub fn new(name: &str, url: &str, schema: Schema) -> Result<Subgraph<Initial>, SubgraphError> {
+    pub fn new(
+        name: &str,
+        url: &str,
+        schema: Schema,
+        orphan_extension_types: HashSet<Name>,
+    ) -> Result<Subgraph<Initial>, SubgraphError> {
         // We use this name as the "source" of root nodes in our federated query graph.
         if name == FEDERATED_GRAPH_ROOT_SOURCE {
             Err(SubgraphError::new_without_locations(
@@ -176,7 +196,10 @@ impl Subgraph<Initial> {
             Ok(Subgraph {
                 name: name.to_string(),
                 url: url.to_string(),
-                state: Initial { schema },
+                state: Initial {
+                    schema,
+                    orphan_extension_types,
+                },
             })
         }
     }
@@ -186,17 +209,22 @@ impl Subgraph<Initial> {
         url: &str,
         schema_str: &str,
     ) -> Result<Subgraph<Initial>, SubgraphError> {
-        let mut schema = Schema::builder()
+        let schema_builder = Schema::builder()
             .adopt_orphan_extensions()
             .ignore_builtin_redefinitions()
-            .parse(schema_str, name)
+            .parse(schema_str, name);
+        let orphan_extension_types = schema_builder
+            .iter_orphan_extension_types()
+            .cloned()
+            .collect();
+        let mut schema = schema_builder
             .build()
             .map_err(|e| SubgraphError::from_diagnostic_list(name, e.errors))?;
 
         // Simulate graphql-js behavior accepting duplicate argument definitions.
         parser_backward_compatibility::remove_duplicate_arguments(&mut schema);
 
-        Self::new(name, url, schema)
+        Self::new(name, url, schema, orphan_extension_types)
     }
 
     /// Converts the schema to a fed2 schema.
@@ -218,7 +246,12 @@ impl Subgraph<Initial> {
         };
         add_federation_link_to_test_schema(&mut schema, federation_spec.version(), no_imports)
             .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;
-        Self::new(&self.name, &self.url, schema)
+        Self::new(
+            &self.name,
+            &self.url,
+            schema,
+            self.state.orphan_extension_types,
+        )
     }
 
     pub fn assume_expanded(self) -> Result<Subgraph<Expanded>, SubgraphError> {
@@ -228,6 +261,7 @@ impl Subgraph<Initial> {
             ValidFederationSchema::new_assume_valid(schema).map_err(|(_schema, error)| {
                 SubgraphError::new_without_locations(self.name.clone(), error)
             })?;
+        let orphan_extension_types = self.state.orphan_extension_types;
         let metadata = compute_subgraph_metadata(&schema)
             .and_then(|m| {
                 m.ok_or_else(|| {
@@ -242,7 +276,11 @@ impl Subgraph<Initial> {
         Ok(Subgraph {
             name: self.name,
             url: self.url,
-            state: Expanded { schema, metadata },
+            state: Expanded {
+                schema,
+                orphan_extension_types,
+                metadata,
+            },
         })
     }
 
@@ -265,6 +303,7 @@ impl Subgraph<Initial> {
 
     fn expand_links_internal(self, validate: bool) -> Result<Subgraph<Expanded>, FederationError> {
         let schema = expand_schema(self.state.schema)?;
+        let orphan_extension_types = self.state.orphan_extension_types;
         trace!("expand_links: compute_subgraph_metadata");
         let metadata = compute_subgraph_metadata(&schema)?.ok_or_else(|| {
             internal_error!(
@@ -283,7 +322,11 @@ impl Subgraph<Initial> {
         Ok(Subgraph {
             name: self.name,
             url: self.url,
-            state: Expanded { schema, metadata },
+            state: Expanded {
+                schema,
+                orphan_extension_types,
+                metadata,
+            },
         })
     }
 }
@@ -340,6 +383,10 @@ mod parser_backward_compatibility {
 }
 
 impl Subgraph<Expanded> {
+    pub(crate) fn is_orphan_extension_type(&self, type_name: &Name) -> bool {
+        self.state.orphan_extension_types.contains(type_name)
+    }
+
     /// Normalizes root types if necessary.
     /// - Returns either `Subgraph<Expanded>` (if unchanged) or `Subgraph<Upgraded>` (if changed).
     pub fn normalize_root_types(
@@ -357,6 +404,7 @@ impl Subgraph<Expanded> {
                 state: Upgraded {
                     schema,
                     metadata: self.state.metadata,
+                    orphan_extension_types: self.state.orphan_extension_types,
                 },
             }))
         } else {
@@ -369,6 +417,7 @@ impl Subgraph<Expanded> {
                         .assume_valid()
                         .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?,
                     metadata: self.state.metadata,
+                    orphan_extension_types: self.state.orphan_extension_types,
                 },
             }))
         }
@@ -382,6 +431,7 @@ impl Subgraph<Expanded> {
             state: Upgraded {
                 schema: self.state.schema.into(),
                 metadata: self.state.metadata,
+                orphan_extension_types: self.state.orphan_extension_types,
             },
         }
     }
@@ -394,6 +444,7 @@ impl Subgraph<Expanded> {
             url: self.url,
             state: Validated {
                 schema: self.state.schema,
+                orphan_extension_types: self.state.orphan_extension_types,
                 metadata: self.state.metadata,
             },
         }
@@ -461,6 +512,7 @@ impl Subgraph<Upgraded> {
             url: self.url,
             state: Validated {
                 schema,
+                orphan_extension_types: self.state.orphan_extension_types,
                 metadata: self.state.metadata,
             },
         })
@@ -484,6 +536,10 @@ fn default_operation_name(op_type: &OperationType) -> Name {
 impl Subgraph<Validated> {
     pub fn validated_schema(&self) -> &ValidFederationSchema {
         &self.state.schema
+    }
+
+    pub(crate) fn is_orphan_extension_type(&self, type_name: &Name) -> bool {
+        self.state.orphan_extension_types.contains(type_name)
     }
 }
 

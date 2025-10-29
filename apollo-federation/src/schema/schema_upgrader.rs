@@ -61,6 +61,13 @@ struct UpgradeMetadata {
     provides_directive_name: Option<Name>,
     extends_directive_name: Option<Name>,
     metadata: SubgraphMetadata,
+    orphan_extension_types: HashSet<Name>,
+}
+
+impl UpgradeMetadata {
+    fn is_orphan_extension_type(&self, type_name: &Name) -> bool {
+        self.orphan_extension_types.contains(type_name)
+    }
 }
 
 impl SchemaUpgrader {
@@ -121,6 +128,7 @@ impl SchemaUpgrader {
             provides_directive_name: subgraph.provides_directive_name()?.clone(),
             extends_directive_name: subgraph.extends_directive_name()?.clone(),
             metadata: subgraph.metadata().clone(),
+            orphan_extension_types: subgraph.state.orphan_extension_types().clone(),
         };
         self.pre_upgrade_validations(&upgrade_metadata, &subgraph)?;
 
@@ -155,14 +163,39 @@ impl SchemaUpgrader {
 
         self.remove_tag_on_external(&upgrade_metadata, &mut schema)?;
 
+        // Some type extensions are converted to definitions in the `remove_type_extensions`.
+        // We need to update the orphan extension types accordingly.
+        let orphan_extension_types = Self::filter_orphan_extension_types(
+            subgraph.state.into_orphan_extension_types(),
+            &schema,
+        );
+
         let upgraded_subgraph =
             // These errors will be wrapped as SubgraphErrors in `Self::upgrade`
-            Subgraph::new(subgraph.name.as_str(), subgraph.url.as_str(), schema.schema)
+            Subgraph::new(subgraph.name.as_str(), subgraph.url.as_str(), schema.schema, orphan_extension_types)
                 .map_err(|e| e.into_federation_error())?
                 .assume_expanded()
                 .map_err(|err| err.into_federation_error())?
                 .assume_upgraded();
         Ok(upgraded_subgraph)
+    }
+
+    /// Compute a new `orphan_extension_types` with only types that still have an extension in the upgraded schema.
+    fn filter_orphan_extension_types(
+        orphan_extension_types: HashSet<Name>,
+        schema: &FederationSchema,
+    ) -> HashSet<Name> {
+        orphan_extension_types
+            .into_iter()
+            .filter(|type_name| {
+                schema.try_get_type((*type_name).clone()).is_some_and(|ty| {
+                    let Ok(ty) = ty.get(schema.schema()) else {
+                        return false;
+                    };
+                    ty.has_extension_elements()
+                })
+            })
+            .collect()
     }
 
     fn upgrade_spec_links(
@@ -220,7 +253,9 @@ impl SchemaUpgrader {
                             };
                             let extended_type =
                                 type_info.pos.get(other_subgraph.schema().schema())?;
-                            Ok::<bool, FederationError>(extended_type.has_non_extension_elements())
+                            Ok::<bool, FederationError>(
+                                !other_subgraph.is_orphan_extension_type(extended_type.name()),
+                            )
                         })
                 })
                 .unwrap_or(Ok(false))?;
@@ -585,7 +620,7 @@ impl SchemaUpgrader {
             .is_some_and(|extends| type_.directives().has(extends.as_str()));
         Ok((type_.has_extension_elements() || has_extend)
             && (type_.is_object() || type_.is_interface())
-            && (has_extend || !type_.has_non_extension_elements()))
+            && (has_extend || upgrade_metadata.is_orphan_extension_type(type_.name())))
     }
 
     /// Whether the type is a root type but is declared only as an extension, which federation 1 actually accepts.
@@ -606,7 +641,7 @@ impl SchemaUpgrader {
             .as_ref()
             .is_some_and(|extends| ty.directives().has(extends.as_str()));
 
-        has_extends_directive || (ty.has_extension_elements() && !ty.has_non_extension_elements())
+        has_extends_directive || upgrade_metadata.is_orphan_extension_type(ty.name())
     }
 
     fn is_root_type(schema: &FederationSchema, ty: &TypeDefinitionPosition) -> bool {

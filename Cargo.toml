@@ -75,3 +75,8 @@ sha1 = "0.10.6"
 tempfile = "3.10.1"
 tokio = { version = "1.36.0", features = ["full"] }
 tower = { version = "0.5.1", features = ["full"] }
+
+[patch.crates-io]
+apollo-compiler = { git = "https://github.com/apollographql/apollo-rs", branch = "duckki/iter_orphan_extension_types" }
+apollo-parser = { git = "https://github.com/apollographql/apollo-rs", branch = "duckki/iter_orphan_extension_types" }
+apollo-smith = { git = "https://github.com/apollographql/apollo-rs", branch = "duckki/iter_orphan_extension_types" }
