@@ -86,50 +86,10 @@ The 2024 preview used a linear scan approach for active invalidation that scaled
 
 ### How does the current release affect existing users?
 
-All changes are backward-compatible. If you're using the `preview_entity_caching` plugin, you can migrate to response caching by renaming `preview_entity_caching` to `preview_response_caching` and get rid of `redis.scan_count` configuration because it's now useless we don't scan Redis anymore. `redis.reset_ttl` configuration has been removed, if you need this please contact us. Response caching introduces more granularity in timeouts so instead of just having `redis.timeout` it will now be replaced with `redis.fetch_timeout`, `redis.insert_timeout`, `redis.invalidate_timeout`, these timeouts are all optionals.
-
-So for example if you have this kind of configuration with entity caching:
-
-```yaml title="previous.router.yaml"
-preview_entity_caching:
-  enabled: true
-  invalidation:
-    listen: 0.0.0.0:4000
-    path: /invalidation
-  subgraph:
-    all:
-      enabled: true
-      redis:
-        urls: ["redis://localhost:6379"]
-        scan_count: 10 # Don't exist anymore
-        reset_ttl: true # Don't exist anymore
-        timeout: 4s # Rename it to  `fetch_timeout` or `insert_timeout` or both
-      invalidation:
-        enabled: true
-        shared_key: ${env.INVALIDATION_SHARED_KEY}
-```
-
-Here is an example of new configuration for response caching:
-
-```yaml title="router.yaml"
-preview_response_cache:
-  enabled: true
-  debug: true
-  invalidation:
-    listen: 0.0.0.0:4000
-    path: /invalidation
-  subgraph:
-    all:
-      enabled: true
-      redis:
-        urls: ["redis://localhost:6379"]
-        fetch_timeout: 4s # Optional
-        insert_timeout: 4s # Optional
-        invalidate_timeout: 4s # Optional
-      invalidation:
-        enabled: true
-        shared_key: ${env.INVALIDATION_SHARED_KEY}
-```
+All changes are backward-compatible. If you're using the `preview_entity_caching` plugin, you can migrate to response caching by:
+- Renaming `preview_entity_caching` to `preview_response_caching`.
+- Get rid of `redis.scan_count` configuration, it's now useless because response caching doesn't scan Redis anymore.
+- Rename `redis.timeout`, response caching introduces more granularity in timeouts so instead of just having `redis.timeout` it will now be replaced with `redis.fetch_timeout`, `redis.insert_timeout`, `redis.invalidate_timeout`, these timeouts are still all optionals.
 
 ### Can I use response caching in production with earlier router versions?
 
