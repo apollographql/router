@@ -295,7 +295,8 @@ scopeguard = "1.2.0"
 chrono = "0.4.41"
 tokio-tar = { package = "astral-tokio-tar", version = "0.5.3" }
 blake3 = { version = "1.8.2", features = ["serde"] }
-redis = { version = "0.32.7", features = ["ahash", "cache-aio", "cluster", "cluster-async", "connection-manager", "tls-rustls", "tokio-rustls-comp"] }
+redis = { version = "0.32.7", features = ["ahash", "cache-aio", "cluster", "cluster-async", "connection-manager", "sentinel", "tls-rustls", "tokio-rustls-comp"] }
+deadpool-redis = { version = "0.22.0", features = ["rt_tokio_1", "cluster", "sentinel", "tls-rustls", "cache-aio", "cluster-async", "tokio-rustls-comp"] }
 
 [target.'cfg(unix)'.dependencies]
 uname = "0.1.1"
