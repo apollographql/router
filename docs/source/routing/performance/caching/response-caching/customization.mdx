@@ -278,9 +278,9 @@ preview_response_cache:
         invalidate_timeout: 750ms
 ```
 
-### TTL for Redis entries
+### TTL for cache entries
 
-The `ttl` option defines the default global expiration for Redis entries. By default, it doesn't set any expiration for response caching.
+The `ttl` option defines the default global expiration for cache entries. A TTL must be set for all enabled subgraphs.
 
 To prevent potential cache overflow, consider setting the TTL to 24 hours or twice the median publish interval (whichever is less), and monitor cache utilization in your environment, especially if you cache a lot of different data:
 
@@ -290,9 +290,10 @@ preview_response_cache:
   subgraph:
     all:
       enabled: true
-      redis:
-        urls: ["redis://..."]
-        ttl: 24h
+      ttl: 24h
+    products:
+      enabled: true
+      ttl: 6h
 ```
 
 ### Namespace prefix
