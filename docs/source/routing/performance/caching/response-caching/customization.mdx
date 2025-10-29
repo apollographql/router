@@ -180,7 +180,7 @@ preview_response_cache:
       # Configure Redis globally
       redis:
         urls: ["redis://..."]
-        fetch_timeout: 750ms # Optional, by default: 500ms
+        fetch_timeout: 300ms # Optional, by default: 150ms
         insert_timeout: 750ms # Optional, by default: 500ms
         invalidate_timeout: 750ms # Optional, by default: 1s
     # Configure response caching per subgraph, overrides options from the "all" section
@@ -262,7 +262,7 @@ preview_response_cache:
 
 ### Timeout configuration
 
-Redis connections and commands have a default timeout of 500ms that you can override. A timeout of 750ms provides a good balance between responsiveness and reliability for most use cases:
+Redis connections and commands have default timeouts that you can override. The timeouts are tailored to specific caching operations: fetch, insert, invalidate, and maintenance. Set a lower fetch timeout and a higher insert timeout for a good balance of reliability and client responsiveness:
 
 ```yaml title="router.yaml"
 preview_response_cache:
@@ -272,14 +272,14 @@ preview_response_cache:
       enabled: true
       redis:
         urls: ["redis://..."]
-        fetch_timeout: 750ms
+        fetch_timeout: 250ms
         insert_timeout: 750ms
         invalidate_timeout: 750ms
 ```
 
-### TTL for Redis entries
+### TTL for cache entries
 
-The `ttl` option defines the default global expiration for Redis entries. By default, it doesn't set any expiration for response caching.
+The `ttl` option defines the default global expiration for cache entries. You must set a TTL for all enabled subgraphs.
 
 To prevent potential cache overflow, consider setting the TTL to 24 hours or twice the median publish interval (whichever is less), and monitor cache utilization in your environment, especially if you cache a lot of different data:
 
@@ -289,8 +289,10 @@ preview_response_cache:
   subgraph:
     all:
       enabled: true
-      redis:
-        urls: ["redis://..."]
+      ttl: 24h
+    products:
+      enabled: true
+      ttl: 6h
 ```
 
 ### Namespace prefix
