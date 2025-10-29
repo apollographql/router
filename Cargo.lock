@@ -174,7 +174,7 @@ checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 [[package]]
 name = "apollo-compiler"
 version = "1.30.0"
-source = "git+https://github.com/apollographql/apollo-rs?branch=duckki%2Fiter_orphan_extension_types#909f39d5384206b4a48ba0e3d21266f392803f57"
+source = "git+https://github.com/apollographql/apollo-rs?branch=main#253d30619c221f0dc97c1d8117544c65019fb54a"
 dependencies = [
  "ahash",
  "apollo-parser",
@@ -265,7 +265,7 @@ dependencies = [
 [[package]]
 name = "apollo-parser"
 version = "0.8.4"
-source = "git+https://github.com/apollographql/apollo-rs?branch=duckki%2Fiter_orphan_extension_types#909f39d5384206b4a48ba0e3d21266f392803f57"
+source = "git+https://github.com/apollographql/apollo-rs?branch=main#253d30619c221f0dc97c1d8117544c65019fb54a"
 dependencies = [
  "memchr",
  "rowan",
@@ -472,7 +472,7 @@ dependencies = [
 [[package]]
 name = "apollo-smith"
 version = "0.15.1"
-source = "git+https://github.com/apollographql/apollo-rs?branch=duckki%2Fiter_orphan_extension_types#909f39d5384206b4a48ba0e3d21266f392803f57"
+source = "git+https://github.com/apollographql/apollo-rs?branch=main#253d30619c221f0dc97c1d8117544c65019fb54a"
 dependencies = [
  "apollo-compiler",
  "apollo-parser",
