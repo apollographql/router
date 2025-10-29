@@ -543,7 +543,7 @@ macro_rules! check_cache_key {
                 let v: Value = cache_value.get("data").unwrap().clone();
                 insta::assert_json_snapshot!(v);
             }
-            None => panic!("cannot get cache key {}", $cache_key),
+            None => panic!("cannot get cache key {}", key),
         }
     };
 }
@@ -682,7 +682,7 @@ async fn integration_test_basic() -> Result<(), BoxError> {
     let cache_key = "version:1.0:subgraph:products:type:Query:hash:bf44683f0c222652b509d6efb8f324610c8671181de540a96a5016bd71daa7cc:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
     check_cache_key!(&namespace, cache_key, &client);
 
-    let product_cache_key = "version:1.0:subgraph:reviews:type:Product:entity:ddf7d062949ffde207db2ced05093a823d64730d30fac573d6168f13cc8080c5:representation::hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    let product_cache_key = "version:1.0:subgraph:reviews:type:Product:representation:ddf7d062949ffde207db2ced05093a823d64730d30fac573d6168f13cc8080c5:hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
     check_cache_key!(&namespace, product_cache_key, &client);
 
     let supergraph = apollo_router::TestHarness::builder()
@@ -927,7 +927,7 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
     let query_cache_key = "version:1.0:subgraph:products:type:Query:hash:f4f41cfa309494d41648c3a3c398c61cb00197696102199454a25a0dcdd2f592:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
     check_cache_key!(&namespace, query_cache_key, &client);
 
-    let user_cache_key = "version:1.0:subgraph:users:type:User:entity:e2d4bfa6d172a744110f37cd5227ffb3d146259fe84d19a6c91d8da877373f3e:representation:d8b1260836cd0e1ccbc3831719273c917c865c5ede8ea860781722db1f31fb36:hash:460b70e698b8c9d8496b0567e0f0848b9f7fef36e841a8a0b0771891150c35e5:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    let user_cache_key = "version:1.0:subgraph:users:type:User:representation:e2d4bfa6d172a744110f37cd5227ffb3d146259fe84d19a6c91d8da877373f3e:hash:460b70e698b8c9d8496b0567e0f0848b9f7fef36e841a8a0b0771891150c35e5:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
     check_cache_key!(&namespace, user_cache_key, &client);
 
     let supergraph = apollo_router::TestHarness::builder()

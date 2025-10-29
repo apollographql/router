@@ -56,15 +56,15 @@ expression: response
           }
         },
         {
-          "key": "version:1.0:subgraph:users:type:User:entity:e2d4bfa6d172a744110f37cd5227ffb3d146259fe84d19a6c91d8da877373f3e:representation:d8b1260836cd0e1ccbc3831719273c917c865c5ede8ea860781722db1f31fb36:hash:460b70e698b8c9d8496b0567e0f0848b9f7fef36e841a8a0b0771891150c35e5:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+          "key": "version:1.0:subgraph:users:type:User:representation:e2d4bfa6d172a744110f37cd5227ffb3d146259fe84d19a6c91d8da877373f3e:hash:460b70e698b8c9d8496b0567e0f0848b9f7fef36e841a8a0b0771891150c35e5:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
           "invalidationKeys": [],
           "kind": {
             "typename": "User",
             "entityKey": {
-              "email": "test@test.com",
               "country": {
                 "a": "France"
-              }
+              },
+              "email": "test@test.com"
             }
           },
           "subgraphName": "users",

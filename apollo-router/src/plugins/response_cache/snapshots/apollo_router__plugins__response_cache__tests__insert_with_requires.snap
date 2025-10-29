@@ -5,7 +5,7 @@ expression: cache_keys
 ---
 [
   {
-    "key": "version:1.0:subgraph:inventory:type:Product:entity:dd668a3ba05fb2fcd9e372b7063fe717f3ff1c209c29fa8367b8324e49775115:representation:0ddc528355e36e2e8725d9401d77b0019bf31e6002049975c9c5e61a3e251a55:hash:e17604a6faec59ed79157e1fadee7d2a3fed4b1dc871da2be114ffafdcdec02c:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+    "key": "version:1.0:subgraph:inventory:type:Product:representation:fad83d6ff957f12a7829ec7f25a2160d4bd7530abbe47937f19fbed8996d10d9:hash:e17604a6faec59ed79157e1fadee7d2a3fed4b1dc871da2be114ffafdcdec02c:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [
       "product",
       "product-1"
@@ -23,8 +23,8 @@ expression: cache_keys
         "representations": [
           {
             "weight": 5,
-            "price": 150,
             "upc": "1",
+            "price": 150,
             "__typename": "Product"
           }
         ]

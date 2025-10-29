@@ -42,17 +42,17 @@ expression: cache_keys
     }
   },
   {
-    "key": "version:1.0:subgraph:users:type:User:entity:e2d4bfa6d172a744110f37cd5227ffb3d146259fe84d19a6c91d8da877373f3e:representation:d8b1260836cd0e1ccbc3831719273c917c865c5ede8ea860781722db1f31fb36:hash:ea28d2c7807fe753287c8c1f1e08f5fa62da4260ba4616dbd19e4d82936e0195:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+    "key": "version:1.0:subgraph:users:type:User:representation:e2d4bfa6d172a744110f37cd5227ffb3d146259fe84d19a6c91d8da877373f3e:hash:ea28d2c7807fe753287c8c1f1e08f5fa62da4260ba4616dbd19e4d82936e0195:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [
       "user-email:test@test.com-country-a:France"
     ],
     "kind": {
       "typename": "User",
       "entityKey": {
-        "email": "test@test.com",
         "country": {
           "a": "France"
-        }
+        },
+        "email": "test@test.com"
       }
     },
     "subgraphName": "users",
