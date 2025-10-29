@@ -88,7 +88,7 @@ The 2024 preview used a linear scan approach for active invalidation that scaled
 
 Response caching is backward-compatible with entity caching. You can switch to response caching without breaking changes.
 
-If you're currently using the `preview_entity_caching` plugin, you should migrate to response caching as soon as possible. The new implementation provides better performance and more flexible caching controls.
+If you're currently using the `preview_entity_caching` plugin, migrate to response caching as soon as possible. The new implementation provides better performance and more flexible caching controls.
 
 ### How do I migrate from entity caching to response caching?
 
@@ -96,7 +96,7 @@ Follow these steps to migrate your configuration:
 
 1. **Update the plugin name:** Replace `preview_entity_caching` with `preview_response_caching` in your router configuration.
 
-2. **Remove the `scan_count` setting:** Delete the `redis.scan_count` configuration option if you have it set. Response caching uses approach that does not require Redis `SCAN` operations, eliminating a key performance bottleneck that existed in the previous entity caching version.
+2. **Remove the `scan_count` setting:** Delete the `redis.scan_count` configuration option if you have it set. Response caching uses an approach that doesn't require Redis `SCAN` operations, eliminating a key performance bottleneck from the previous entity caching version.
 
 3. **Update timeout configuration:** Replace the single `redis.timeout` setting with more granular timeout options as appropriate:
    - `redis.fetch_timeout`: Controls how long to wait when retrieving data from cache
