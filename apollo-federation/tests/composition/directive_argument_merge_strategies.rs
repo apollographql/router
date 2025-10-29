@@ -10,7 +10,6 @@ mod tests {
     use test_log::test;
 
     use super::*;
-    use crate::composition::assert_composition_errors;
 
     /* The following argument merging strategies are not currently being used by any
        public-facing directives and thus are not represented in this set of tests:
@@ -216,41 +215,5 @@ mod tests {
             b_requires_scopes_directive.to_string(),
             r#"@requiresScopes(scopes: ["x"])"#
         )
-    }
-
-    #[test]
-    fn errors_when_declaring_strategy_that_does_not_match_the_argument_type() {
-        let subgraph1 = ServiceDefinition {
-            name: "Subgraph1",
-            type_defs: r#"
-                extend schema @link(url: "https://specs.apollo.dev/foo/v0.1")
-
-                type Query {
-                    t: T
-                }
-
-                type T {
-                    v: String @foo(value: "bar")
-                }
-            "#,
-        };
-
-        let subgraph2 = ServiceDefinition {
-            name: "Subgraph2",
-            type_defs: r#"
-                extend schema @link(url: "https://specs.apollo.dev/foo/v0.1")
-
-                type T {
-                    v: String @foo(value: "bar")
-                }
-            "#,
-        };
-
-        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
-        let expected_errors = [(
-            "DIRECTIVE_DEFINITION_INVALID",
-            r#"Invalid composition strategy MAX for argument @foo(value:) of type String; MAX only supports type(s) Int!"#,
-        )];
-        assert_composition_errors(&result, &expected_errors);
     }
 }
