@@ -78,8 +78,9 @@ impl<'a> TracingBuilder<'a> {
 pub(crate) fn create_propagator(
     propagation: &Propagation,
     tracing: &Tracing,
-) -> TextMapCompositePropagator {
+) -> Result<TextMapCompositePropagator, BoxError> {
     let mut propagators: Vec<Box<dyn TextMapPropagator + Send + Sync + 'static>> = Vec::new();
+
     if propagation.jaeger {
         propagators.push(Box::<opentelemetry_jaeger_propagator::Propagator>::default());
     }
@@ -93,6 +94,22 @@ pub(crate) fn create_propagator(
         propagators.push(Box::<opentelemetry_zipkin::Propagator>::default());
     }
     if propagation.datadog || tracing.datadog.enabled {
+        if propagation.jaeger
+            || propagation.trace_context
+            || propagation.zipkin
+            || propagation.aws_xray
+        {
+            if tracing.datadog.enabled && propagation.datadog {
+                return Err(BoxError::from(
+                    "if the datadog exporter is enabled and any other propagator is enabled, the datadog propagator must be disabled",
+                ));
+            } else if propagation.datadog {
+                return Err(BoxError::from(
+                    "datadog propagation cannot be used with any other propagator except for baggage",
+                ));
+            }
+        }
+
         propagators.push(Box::<
             crate::plugins::telemetry::tracing::datadog_exporter::DatadogPropagator,
         >::default());
@@ -109,7 +126,7 @@ pub(crate) fn create_propagator(
             propagation.request.format.clone(),
         )));
     }
-    TextMapCompositePropagator::new(propagators)
+    Ok(TextMapCompositePropagator::new(propagators))
 }
 
 /// Trait for trace exporters to contribute to tracer provider construction

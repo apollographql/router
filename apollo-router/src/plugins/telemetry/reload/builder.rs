@@ -83,7 +83,7 @@ impl<'a> Builder<'a> {
             self.setup_public_tracing()?;
             self.setup_public_metrics()?;
             self.setup_apollo_metrics()?;
-            self.setup_propagation();
+            self.setup_propagation()?;
             Ok((self.activation, self.endpoints, self.apollo_sender))
         })
     }
@@ -184,12 +184,13 @@ impl<'a> Builder<'a> {
             || previous_config.exporters.tracing.common != self.config.exporters.tracing.common
     }
 
-    fn setup_propagation(&mut self) {
+    fn setup_propagation(&mut self) -> Result<(), BoxError> {
         let propagators = create_propagator(
             &self.config.exporters.tracing.propagation,
             &self.config.exporters.tracing,
-        );
+        )?;
         self.activation.with_tracer_propagator(propagators);
+        Ok(())
     }
 
     fn setup_logging(&mut self) {
@@ -223,6 +224,7 @@ mod tests {
     use crate::plugins::telemetry::config::Exporters;
     use crate::plugins::telemetry::config::Instrumentation;
     use crate::plugins::telemetry::config::Metrics;
+    use crate::plugins::telemetry::config::Propagation;
     use crate::plugins::telemetry::config::Tracing;
 
     fn create_default_config() -> Conf {
@@ -603,5 +605,85 @@ mod tests {
             instr.tracer_provider_set,
             "Tracer provider should reload when span limits change"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_datadog_propagation_validation() {
+        let mut config = create_config_with_apollo_enabled();
+
+        let mut datadog_propagation = Propagation::default();
+        datadog_propagation.datadog = true;
+
+        let mut jaeger_propagation = Propagation::default();
+        jaeger_propagation.jaeger = true;
+
+        let mut datadog_and_baggage_propagation = datadog_propagation.clone();
+        datadog_and_baggage_propagation.baggage = true;
+
+        let mut datadog_and_jaeger_propagation = datadog_propagation.clone();
+        datadog_and_jaeger_propagation.jaeger = true;
+
+        let mut datadog_and_trace_context_propagation = datadog_propagation.clone();
+        datadog_and_trace_context_propagation.trace_context = true;
+
+        let mut datadog_and_zipkin_propagation = datadog_propagation.clone();
+        datadog_and_zipkin_propagation.zipkin = true;
+
+        let mut datadog_and_aws_xray_propagation = datadog_propagation.clone();
+        datadog_and_aws_xray_propagation.aws_xray = true;
+
+        let allowed_propagation_configs = [
+            datadog_propagation,
+            datadog_and_baggage_propagation,
+            jaeger_propagation,
+        ];
+
+        let disallowed_propagation_configs = [
+            datadog_and_jaeger_propagation,
+            datadog_and_trace_context_propagation,
+            datadog_and_zipkin_propagation,
+            datadog_and_aws_xray_propagation,
+        ];
+
+        for propagation in allowed_propagation_configs.iter().cloned() {
+            config.exporters.tracing.propagation = propagation;
+            let builder = Builder::new(&None, &config);
+            assert!(
+                builder.build().is_ok(),
+                "tracing config should pass validation: {:#?}",
+                &config.exporters.tracing
+            );
+        }
+
+        for propagation in disallowed_propagation_configs.iter().cloned() {
+            config.exporters.tracing.propagation = propagation;
+            let builder = Builder::new(&None, &config);
+            assert_eq!(
+                "datadog propagation cannot be used with any other propagator except for baggage",
+                builder.build().err().unwrap().to_string()
+            );
+        }
+
+        let mut datadog_config = config.clone();
+        datadog_config.exporters.tracing.datadog.enabled = true;
+
+        for propagation in allowed_propagation_configs {
+            datadog_config.exporters.tracing.propagation = propagation;
+            let builder = Builder::new(&None, &datadog_config);
+            assert!(
+                builder.build().is_ok(),
+                "tracing config should pass validation: {:#?}",
+                &datadog_config.exporters.tracing
+            );
+        }
+
+        for propagation in disallowed_propagation_configs {
+            datadog_config.exporters.tracing.propagation = propagation;
+            let builder = Builder::new(&None, &datadog_config);
+            assert_eq!(
+                "if the datadog exporter is enabled and any other propagator is enabled, the datadog propagator must be disabled",
+                builder.build().err().unwrap().to_string()
+            );
+        }
     }
 }
