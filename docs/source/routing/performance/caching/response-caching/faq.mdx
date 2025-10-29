@@ -103,7 +103,7 @@ Follow these steps to migrate your configuration:
    - `redis.insert_timeout`: Controls how long to wait when storing new data in cache
    - `redis.invalidate_timeout`: Controls how long to wait when removing data from cache
 
-   All timeout settings remain optional. Determine which timeouts you need based on your cache operations.
+   All timeout settings are optional. Set timeouts based on your application's performance requirements for specific cache operations.
 
 4. **Update your metrics and monitoring:** Response caching introduces new metric names and additional observability options. Check the [observability documentation](/routing/performance/caching/response-caching/observability) for the complete list of available metrics and their updated names. The new implementation also provides additional metrics for better insight into cache performance.
 
