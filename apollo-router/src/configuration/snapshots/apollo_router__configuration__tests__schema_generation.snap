@@ -2052,14 +2052,6 @@ expression: "&schema"
           "default": null,
           "description": "TLS client configuration"
         },
-        "ttl": {
-          "default": null,
-          "description": "TTL for entries",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "urls": {
           "description": "List of URLs to the Redis cluster",
           "items": {
