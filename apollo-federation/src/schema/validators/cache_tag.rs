@@ -170,6 +170,16 @@ fn validate_args_selection(
     fields: &IndexMap<Name, &Type>,
     selection: &SelectionTrie,
 ) -> Result<(), CacheTagValidationError> {
+    // Check the format selection is just a single selection. The `StringTemplate` allows multiple
+    // selections like `{$args { a b }}`, but cache tags don't support that.
+    let num_selections = selection.iter().count();
+    if num_selections != 1 {
+        return Err(CacheTagValidationError::CacheTagInvalidFormat {
+            message: format!(
+                "invalid path element at \"{selection}\", which is not a single selection"
+            ),
+        });
+    }
     for (key, sel) in selection.iter() {
         let name = Name::new(key).map_err(|_| CacheTagValidationError::CacheTagInvalidFormat {
             message: format!("invalid field selection name \"{key}\""),
@@ -180,7 +190,7 @@ fn validate_args_selection(
                 .ok_or_else(|| CacheTagValidationError::CacheTagInvalidFormat {
                     message: format!("unknown field \"{name}\""),
                 })?;
-        if !field.is_non_null() {
+        if !is_fully_non_null(field) {
             if let Some(parent_type_name) = parent_type_name {
                 return Err(CacheTagValidationError::CacheTagFormatNullableField {
                     field_name: name.clone(),
@@ -217,6 +227,12 @@ fn validate_args_selection(
                 .collect::<Result<IndexMap<_, _>, _>>()?;
             validate_args_selection(schema, Some(type_name), &next_fields, sel)?;
         } else {
+            // A leaf field must not be a list.
+            if field.is_list() {
+                return Err(CacheTagValidationError::CacheTagInvalidFormat {
+                    message: format!("invalid path ending at \"{name}\", which is a list type"),
+                });
+            }
             // A leaf field should have a scalar type.
             if !matches!(
                 &type_def,
@@ -231,6 +247,17 @@ fn validate_args_selection(
         }
     }
     Ok(())
+}
+
+/// Similar to `Type::is_non_null`, but checks if the type is non-null at all nested levels of
+/// lists.
+fn is_fully_non_null(ty: &Type) -> bool {
+    match ty {
+        Type::Named(_) => false,
+        Type::List(_) => false,
+        Type::NonNullNamed(_) => true,
+        Type::NonNullList(inner) => is_fully_non_null(inner),
+    }
 }
 
 fn validate_args_on_object_type(
@@ -345,6 +372,16 @@ fn build_selection_set(
     schema: &FederationSchema,
     selection: &SelectionTrie,
 ) -> Result<(), CacheTagValidationError> {
+    // Check the format selection is just a single selection. The `StringTemplate` allows multiple
+    // selections like `{$key { a b }}`, but cache tags don't support that.
+    let num_selections = selection.iter().count();
+    if num_selections != 1 {
+        return Err(CacheTagValidationError::CacheTagInvalidFormat {
+            message: format!(
+                "invalid path element at \"{selection}\", which is not a single selection"
+            ),
+        });
+    }
     for (key, sel) in selection.iter() {
         let name = Name::new(key).map_err(|_| CacheTagValidationError::CacheTagInvalidFormat {
             message: format!("invalid field selection name \"{key}\""),
@@ -360,7 +397,7 @@ fn build_selection_set(
                 message: format!("invalid field selection name \"{key}\""),
             })?;
 
-        if !new_field.ty().is_non_null() {
+        if !is_fully_non_null(new_field.ty()) {
             return Err(CacheTagValidationError::CacheTagFormatNullableField {
                 field_name: name.clone(),
                 parent_type: selection_set.ty.to_string(),
@@ -377,6 +414,12 @@ fn build_selection_set(
             )?;
             build_selection_set(&mut new_field.selection_set, schema, sel)?;
         } else {
+            // A leaf field must not be a list.
+            if new_field.ty().is_list() {
+                return Err(CacheTagValidationError::CacheTagInvalidFormat {
+                    message: format!("invalid path ending at \"{name}\", which is a list type"),
+                });
+            }
             // A leaf field should have a scalar type.
             if !matches!(
                 &new_field_type_def,
@@ -554,6 +597,11 @@ mod tests {
         let subgraph = build_inner_expanded(schema, BuildOption::AsFed2).unwrap();
         let mut errors = Vec::new();
         validate_cache_tag_directives(subgraph.schema(), &mut errors).unwrap();
+        if !errors.is_empty() {
+            for error in &errors {
+                println!("Error: {}", error);
+            }
+        }
         assert!(errors.is_empty());
     }
 
@@ -568,10 +616,11 @@ mod tests {
     #[test]
     fn test_valid_format_string() {
         const SCHEMA: &str = r#"
-            type Product @key(fields: "upc")
+            type Product @key(fields: "upc age")
                          @cacheTag(format: "product-{$key.upc}")
             {
                 upc: String!
+                age: Int!
                 name: String
             }
 
@@ -611,6 +660,8 @@ mod tests {
                 topProducts(first: Int): [Product]
                     @cacheTag(format: "topProducts")
                     @cacheTag(format: "topProducts-{$args.first}")
+                productsByCountry(country: [String]!): [Product]
+                    @cacheTag(format: "productsByCountry-{$args.country}")
             }
         "#;
         assert_eq!(
@@ -618,6 +669,32 @@ mod tests {
             vec![
                 "@cacheTag format references a nullable field \"Product.name\"",
                 "@cacheTag format references a nullable argument \"first\"",
+                "@cacheTag format references a nullable argument \"country\"",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_invalid_format_string_list_args() {
+        const SCHEMA: &str = r#"
+            type Product @key(fields: "upc names")
+                         @cacheTag(format: "product-{$key.upc}-{$key.names}")
+            {
+                upc: String!
+                names: [String!]!
+            }
+
+            type Query {
+                topProducts(groups: [Int!]!): [Product]
+                    @cacheTag(format: "topProducts")
+                    @cacheTag(format: "topProducts-{$args.groups}")
+            }
+        "#;
+        assert_eq!(
+            build_for_errors(SCHEMA),
+            vec![
+                "cacheTag format is invalid: invalid path ending at \"names\", which is a list type",
+                "cacheTag format is invalid: invalid path ending at \"groups\", which is a list type",
             ]
         );
     }
@@ -674,7 +751,7 @@ mod tests {
             type Query {
                 topProducts(first: Int = 5): [Product]
                     @cacheTag(format: "topProducts")
-                    @cacheTag(format: "topProducts-{$args.second}")
+                    @cacheTag(format: "topProducts-{$args { second }}")
             }
         "#;
         assert_eq!(
@@ -685,6 +762,33 @@ mod tests {
                 "Each entity field referenced in a @cacheTag format (applied on entity type) must be a member of every @key field set. In other words, when there are multiple @key fields on the type, the referenced field(s) must be limited to their intersection. Bad cacheTag format \"product-{$key.test.b}\" on type \"Product\"",
                 "@cacheTag format references a nullable field \"Test.c\"",
                 "cacheTag format is invalid: unknown field \"second\""
+            ]
+        );
+    }
+
+    #[test]
+    fn test_invalid_format_string_multiple_selections() {
+        const SCHEMA: &str = r#"
+            type Product @key(fields: "upc name")
+                         @cacheTag(format: "product-{$key { upc name }}")
+                         @cacheTag(format: "product-{$key {}}")
+            {
+                upc: String!
+                name: String
+            }
+
+            type Query {
+                topProducts(first: Int): [Product]
+                    @cacheTag(format: "topProducts")
+                    @cacheTag(format: "topProducts-{$args { first country }}")
+            }
+        "#;
+        assert_eq!(
+            build_for_errors(SCHEMA),
+            vec![
+                "cacheTag format is invalid: invalid path element at \"upc name\", which is not a single selection",
+                "cacheTag format is invalid: invalid path element at \"\", which is not a single selection",
+                "cacheTag format is invalid: invalid path element at \"first country\", which is not a single selection",
             ]
         );
     }
