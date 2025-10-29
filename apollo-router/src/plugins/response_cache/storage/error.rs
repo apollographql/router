@@ -37,7 +37,7 @@ impl ErrorCode for Error {
                 } else {
                     err.kind().to_str()
                 }
-            },
+            }
             Error::Join(err) => {
                 if err.is_cancelled() {
                     "CANCELLED"
@@ -52,7 +52,7 @@ impl ErrorCode for Error {
                 Category::Data => "Serialize::Data",
                 Category::Eof => "Serialize::EOF",
             },
-            Error::Timeout(_) => TIMEOUT_CODE
+            Error::Timeout(_) => TIMEOUT_CODE,
         }
     }
 }
