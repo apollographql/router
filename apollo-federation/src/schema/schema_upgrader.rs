@@ -622,9 +622,10 @@ impl SchemaUpgrader {
             .as_ref()
             .is_some_and(|extends| type_.directives().has(extends.as_str()));
         let is_orphan_extension = upgrade_metadata.is_orphan_extension_type(type_.name());
-        Ok((type_.has_extension_elements() || has_extend)
-            && (type_.is_object() || type_.is_interface())
-            && (has_extend || is_orphan_extension))
+
+        // `is_orphan_extension` implies that there is at least one extension for the type, so we
+        // don't need to check for `type_.has_extension_elements()`.
+        Ok((type_.is_object() || type_.is_interface()) && (has_extend || is_orphan_extension))
     }
 
     /// Whether the type is a root type but is declared only as an extension, which federation 1 actually accepts.
