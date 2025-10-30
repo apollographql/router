@@ -107,7 +107,7 @@ pub(crate) fn create_propagator(
                 return Err(BoxError::from(
                     "datadog propagation cannot be used with any other propagator except for baggage",
                 ));
-            } else if let None = propagation.datadog {
+            } else if propagation.datadog.is_none() {
                 return Err(BoxError::from(
                     "datadog propagation must be explicitly disabled if the datadog exporter is enabled and any propagator other than baggage is enabled",
                 ));

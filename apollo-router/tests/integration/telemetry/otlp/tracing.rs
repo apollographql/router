@@ -260,7 +260,7 @@ async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog()
     let mock_server_uri = "http://will-never-be-used.local";
     let config =
         include_str!("../fixtures/otlp_datadog_request_with_zipkin_propagator.router.yaml")
-            .replace("<otel-collector-endpoint>", &mock_server_uri);
+            .replace("<otel-collector-endpoint>", mock_server_uri);
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp {
             endpoint: Some(format!("{}/v1/traces", mock_server_uri)),
