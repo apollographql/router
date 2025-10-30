@@ -740,7 +740,7 @@ mod tests {
 
         let planner_res = planner
             .call(QueryPlannerRequest::new(
-                query_str.to_string(),
+                query_str.to_string().into(),
                 None,
                 query,
                 CacheKeyMetadata::default(),
