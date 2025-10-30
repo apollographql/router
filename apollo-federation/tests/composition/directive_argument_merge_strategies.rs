@@ -16,14 +16,13 @@ mod tests {
        - min
        - intersection
        - nullable_and
-       - nullable_max
        - nullable_union
     */
 
     #[test]
     fn works_for_max_argument_merge_strategy() {
         // NOTE: @cost uses the MAX strategy for merging arguments,
-        // So we'll use it as a proxy for the private @max directive
+        // So we'll use it as a proxy for the @max directive
 
         let subgraph1 = ServiceDefinition {
             name: "Subgraph1",
@@ -116,7 +115,7 @@ mod tests {
     #[test]
     fn works_for_union_argument_merge_strategy() {
         // NOTE: @requiresScopes uses the UNION strategy for merging arguments,
-        // So we'll use it as a proxy for the private @union directive
+        // So we'll use it as a proxy for the @union directive
 
         let subgraph1 = ServiceDefinition {
             name: "Subgraph1",
@@ -215,5 +214,109 @@ mod tests {
             b_requires_scopes_directive.to_string(),
             r#"@requiresScopes(scopes: ["x"])"#
         )
+    }
+
+    #[test]
+    fn works_for_nullable_max_argument_merge_strategy() {
+        // NOTE: @listSize(assumedSize:) uses the NULLABLE_MAX strategy for merging arguments,
+        // So we'll use it as a proxy for the @nullable_max directive
+
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    t: [T!] @shareable @listSize(assumedSize: 20)
+                }
+
+                type T @key(fields: "k") {
+                    k: [ID] @listSize(assumedSize: 1)
+                }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                type Query {
+                    t: [T!] @shareable @listSize(assumedSize: 10)
+                }
+
+                type T @key(fields: "k") {
+                    k: [ID] @listSize(assumedSize: 3)
+                    a: String
+                    b: [Int] @listSize(assumedSize: null)
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        let result_sg = result.expect("Composition should succeed");
+
+        // Check expected hints
+        let expected_hints = vec![
+            CompositionHint {
+                code: String::from("MERGED_NON_REPEATABLE_DIRECTIVE_ARGUMENTS"),
+                message: String::from(
+                    r#"Directive @listSize is applied to "Query.t" in multiple subgraphs with different arguments. Merging strategies used by arguments: { assumedSize: NULLABLE_MAX, slicingArguments: NULLABLE_UNION, sizedFields: NULLABLE_UNION, requireOneSlicingArgument: NULLABLE_AND }"#,
+                ),
+                locations: Vec::new(),
+            },
+            CompositionHint {
+                code: String::from("MERGED_NON_REPEATABLE_DIRECTIVE_ARGUMENTS"),
+                message: String::from(
+                    r#"Directive @listSize is applied to "T.k" in multiple subgraphs with different arguments. Merging strategies used by arguments: { assumedSize: NULLABLE_MAX, slicingArguments: NULLABLE_UNION, sizedFields: NULLABLE_UNION, requireOneSlicingArgument: NULLABLE_AND }"#,
+                ),
+                locations: Vec::new(),
+            },
+        ];
+        assert_hints_equal(result_sg.hints(), &expected_hints);
+
+        // Check merging using NULLABLE_AND succeeded
+        let schema = result_sg.schema().schema();
+        let sdl = print_sdl(schema);
+        assert!(
+            sdl.contains(
+                r#"@link(url: "https://specs.apollo.dev/cost/v0.1", import: ["listSize"])"#
+            )
+        );
+
+        let t = coord!(Query.t)
+            .lookup_field(schema)
+            .expect("Query.t should be defined on the supergraph");
+        let t_requires_scopes_directive = t
+            .directives
+            .iter()
+            .find(|d| d.name == "listSize")
+            .expect("@listSize directive should be present on T");
+        assert_eq!(
+            t_requires_scopes_directive.to_string(),
+            r#"@listSize(assumedSize: 20, requireOneSlicingArgument: true)"#
+        );
+
+        let k = coord!(T.k)
+            .lookup_field(schema)
+            .expect("T.k should be defined on the supergraph");
+        let k_requires_scopes_directive = k
+            .directives
+            .iter()
+            .find(|d| d.name == "listSize")
+            .expect("@listSize directive should be present on T.k");
+        assert_eq!(
+            k_requires_scopes_directive.to_string(),
+            r#"@listSize(assumedSize: 3, requireOneSlicingArgument: true)"#
+        );
+
+        let b = coord!(T.b)
+            .lookup_field(schema)
+            .expect("T.b should be defined on the supergraph");
+        let b_requires_scopes_directive = b
+            .directives
+            .iter()
+            .find(|d| d.name == "listSize")
+            .expect("@listSize directive should be present on T.b");
+        assert_eq!(
+            b_requires_scopes_directive.to_string(),
+            r#"@listSize(assumedSize: null, requireOneSlicingArgument: true)"#
+        );
     }
 }
