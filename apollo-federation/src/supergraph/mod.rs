@@ -89,7 +89,6 @@ use crate::schema::type_and_directive_specification::UnionTypeSpecification;
 use crate::utils::FallibleIterator;
 
 #[derive(Debug)]
-#[allow(unused)]
 pub struct Supergraph<S> {
     pub state: S,
 }
@@ -196,7 +195,6 @@ impl Supergraph<Satisfiable> {
 }
 
 #[derive(Clone, Debug)]
-#[allow(unused)]
 pub struct Merged {
     schema: Valid<Schema>,
     hints: Vec<CompositionHint>,
@@ -209,7 +207,6 @@ impl Merged {
 }
 
 #[derive(Clone, Debug)]
-#[allow(unused)]
 pub struct Satisfiable {
     schema: ValidFederationSchema,
     metadata: SupergraphMetadata,
@@ -231,8 +228,6 @@ pub struct SupergraphMetadata {
 // TODO this should be expanded as needed
 //  @see apollo-federation-types BuildMessage for what is currently used by rover
 #[derive(Clone, Debug)]
-#[allow(unused)]
-#[allow(unreachable_pub)]
 pub struct CompositionHint {
     pub message: String,
     pub code: String,
