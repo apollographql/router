@@ -1,4 +1,5 @@
 use insta::assert_snapshot;
+use test_log::test;
 
 use super::ServiceDefinition;
 use super::assert_composition_errors;
@@ -10,7 +11,6 @@ use super::print_sdl;
 // =============================================================================
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn interface_object_composes_valid_usages_correctly() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -61,7 +61,6 @@ fn interface_object_composes_valid_usages_correctly() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn interface_object_errors_if_used_with_no_corresponding_interface() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -102,7 +101,6 @@ fn interface_object_errors_if_used_with_no_corresponding_interface() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn interface_object_errors_if_missing_in_some_subgraph() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -162,7 +160,6 @@ fn interface_object_errors_if_missing_in_some_subgraph() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn interface_object_errors_if_interface_has_key_but_subgraph_doesnt_know_all_implementations() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -218,7 +215,6 @@ fn interface_object_errors_if_interface_has_key_but_subgraph_doesnt_know_all_imp
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn interface_object_errors_if_subgraph_defines_both_interface_object_and_implementations() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -276,7 +272,6 @@ fn interface_object_errors_if_subgraph_defines_both_interface_object_and_impleme
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn interface_object_composes_references_to_interface_object() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -322,7 +317,6 @@ fn interface_object_composes_references_to_interface_object() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn interface_object_does_not_error_when_optimizing_unnecessary_loops() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -383,7 +377,6 @@ fn interface_object_does_not_error_when_optimizing_unnecessary_loops() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn interface_object_fed354_repro_failure() {
     let subgraph1 = ServiceDefinition {
         name: "Subgraph1",
