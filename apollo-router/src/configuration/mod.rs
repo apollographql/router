@@ -1020,6 +1020,9 @@ pub(crate) struct QueryPlanRedisCache {
     #[serde(default = "default_query_planner_cache_pool_size")]
     /// The size of the Redis connection pool
     pub(crate) pool_size: u32,
+
+    #[serde(default)]
+    pub(crate) read_from_replicas: bool,
 }
 
 fn default_query_plan_cache_ttl() -> Duration {
@@ -1116,6 +1119,9 @@ pub(crate) struct RedisCache {
     #[schemars(with = "Option<String>", default)]
     /// Interval for collecting Redis metrics (default: 1s)
     pub(crate) metrics_interval: Duration,
+
+    #[serde(default)]
+    pub(crate) read_from_replicas: bool,
 }
 
 fn default_timeout() -> Duration {
@@ -1148,6 +1154,7 @@ impl From<QueryPlanRedisCache> for RedisCache {
             reset_ttl: value.reset_ttl,
             pool_size: value.pool_size,
             metrics_interval: default_metrics_interval(),
+            read_from_replicas: value.read_from_replicas,
         }
     }
 }

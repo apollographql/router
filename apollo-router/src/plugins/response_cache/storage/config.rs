@@ -84,6 +84,8 @@ pub(crate) struct Config {
     #[schemars(with = "Option<String>", default)]
     /// Interval for collecting Redis metrics (default: 1s)
     pub(crate) metrics_interval: Duration,
+    #[serde(default)]
+    pub(crate) read_from_replicas: bool,
 }
 
 fn default_fetch_timeout() -> Duration {
@@ -125,6 +127,7 @@ impl From<&Config> for RedisCache {
             reset_ttl: false,
             pool_size: value.pool_size,
             metrics_interval: value.metrics_interval,
+            read_from_replicas: value.read_from_replicas,
         }
     }
 }

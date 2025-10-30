@@ -301,6 +301,7 @@ impl RedisCacheStorage {
             reset_ttl: false,
             pool_size: 1,
             metrics_interval: Duration::from_millis(100),
+            read_from_replicas: false,
         };
 
         Self::from_mocks_and_config(mocks, config, "test", false).await
