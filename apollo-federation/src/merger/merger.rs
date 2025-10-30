@@ -16,7 +16,6 @@ use apollo_compiler::ast::Type;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::validation::Valid;
 use indexmap::IndexSet;
 use itertools::Itertools;
 use strum::IntoEnumIterator as _;
@@ -24,6 +23,7 @@ use tracing::instrument;
 use tracing::trace;
 
 use crate::LinkSpecDefinition;
+use crate::api_schema;
 use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
@@ -53,6 +53,7 @@ use crate::merger::merge_enum::EnumTypeUsage;
 use crate::merger::merge_field::FieldMergeContext;
 use crate::merger::merge_field::JoinFieldBuilder;
 use crate::schema::FederationSchema;
+use crate::schema::ValidFederationSchema;
 use crate::schema::directive_location::DirectiveLocationExt;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
@@ -103,11 +104,8 @@ pub(crate) type Sources<T> = IndexMap<usize, Option<T>>;
 
 #[derive(Debug)]
 pub(crate) struct MergeResult {
-    #[allow(dead_code)]
-    pub(crate) supergraph: Option<Valid<FederationSchema>>,
-    #[allow(dead_code)]
+    pub(crate) supergraph: Option<ValidFederationSchema>,
     pub(crate) errors: Vec<CompositionError>,
-    #[allow(dead_code)]
     pub(crate) hints: Vec<CompositionHint>,
 }
 
@@ -507,13 +505,58 @@ impl Merger {
                     hints,
                 });
             }
-            let valid_schema = Valid::assume_valid(self.merged);
-            Ok(MergeResult {
-                supergraph: Some(valid_schema),
-                errors,
-                hints,
-            })
+            match Self::validate_supergraph_schema(self.merged) {
+                Ok(supergraph) => Ok(MergeResult {
+                    supergraph: Some(supergraph),
+                    errors: Vec::default(),
+                    hints,
+                }),
+                Err(composition_errors) => Ok(MergeResult {
+                    supergraph: None,
+                    errors: composition_errors,
+                    hints,
+                }),
+            }
         }
+    }
+
+    /// Validate the merged supergraph as a GraphQL schema and check if its API schema can be
+    /// computed.
+    fn validate_supergraph_schema(
+        merged: FederationSchema,
+    ) -> Result<ValidFederationSchema, Vec<CompositionError>> {
+        // TODO: Errors thrown by the `validate` below are likely to be confusing for users,
+        // because they refer to a document they don't know about (the merged-but-not-returned
+        // supergraph) and don't point back to the subgraphs in any way.
+        // Given the subgraphs are valid and given how merging works (it takes the union of what is
+        // in the subgraphs), there is only so much things that can be invalid in the supergraph at
+        // this point. We should make sure we add all such validation to `validate_merged_schema()`
+        // with good error messages (that points to subgraphs appropriately). and then simply
+        // _assert_ that `Schema.validate()` doesn't throw as a sanity check.
+        let supergraph_schema = merged
+            .validate_or_return_self()
+            .map_err(|(_partial_schema, err)| Self::convert_to_merge_errors(err))?;
+
+        // Lastly, we validate that the API schema of the supergraph can be successfully computed,
+        // which currently will surface issues around misuses of `@inaccessible` (there should be
+        // other errors in theory, but if there is, better find it now rather than later).
+        api_schema::to_api_schema(supergraph_schema.clone(), Default::default()).map_err(
+            |err| {
+                // TODO: port `updateInaccessibleErrorsWithLinkToSubgraphs` from JS (FED-882)
+                Self::convert_to_merge_errors(err)
+            },
+        )?;
+
+        Ok(supergraph_schema)
+    }
+
+    /// Convert a FederationError into a Vec<CompositionError> for merge errors.
+    fn convert_to_merge_errors(error: FederationError) -> Vec<CompositionError> {
+        error
+            .into_errors()
+            .into_iter()
+            .map(|e| CompositionError::MergeError { error: e })
+            .collect()
     }
 
     fn add_core_features(&mut self) -> Result<(), FederationError> {
