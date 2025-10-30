@@ -15,7 +15,6 @@ mod tests {
        public-facing directives and thus are not represented in this set of tests:
        - min
        - intersection
-       - nullable_union
     */
 
     #[test]
@@ -320,13 +319,13 @@ mod tests {
         let c = coord!(T.c)
             .lookup_field(schema)
             .expect("T.b should be defined on the supergraph");
-        let b_requires_scopes_directive = c
+        let c_requires_scopes_directive = c
             .directives
             .iter()
             .find(|d| d.name == "listSize")
             .expect("@listSize directive should be present on T.c");
         assert_eq!(
-            b_requires_scopes_directive.to_string(),
+            c_requires_scopes_directive.to_string(),
             r#"@listSize(requireOneSlicingArgument: null)"#
         );
     }
@@ -431,6 +430,144 @@ mod tests {
         assert_eq!(
             b_requires_scopes_directive.to_string(),
             r#"@listSize(assumedSize: null, requireOneSlicingArgument: true)"#
+        );
+    }
+
+    #[test]
+    fn works_for_nullable_union_argument_merge_strategy() {
+        // NOTE: @listSize(slicingArguments: & sizedFields:) are merged using the NULLABLE_UNION strategy
+
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    t: [T!] @shareable
+                }
+
+                type Cursor @shareable {
+                    page: [Item!]
+                    nextPageToken: [String]
+                }
+
+                type Item @key(fields: "id") {
+                  id: ID
+                }
+
+                type T @key(fields: "a") @shareable {
+                    k(first: Int): [ID] @listSize(slicingArguments: ["first"])
+                    a: Int
+                    b: Cursor! @listSize(sizedFields: ["page"])
+                }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                type Cursor @shareable {
+                    page: [Item!]
+                    nextPageToken: [String]
+                }
+
+                type Item @key(fields: "id") {
+                    id: ID
+                }
+
+                type T @key(fields: "a") @shareable {
+                    k(last: Int): [ID] @listSize(slicingArguments: ["last"])
+                    a: Int
+                    b: Cursor! @listSize(sizedFields: ["nextPageToken"])
+                    c: Cursor! @listSize(sizedFields: ["nextPageToken"])
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        let result_sg = result.expect("Composition should succeed");
+
+        // Check expected hints
+        let expected_hints = vec![
+            CompositionHint {
+                code: String::from("INCONSISTENT_ARGUMENT_PRESENCE"),
+                message: String::from(
+                    r#"Optional argument "T.k(first:)" will not be included in the supergraph as it does not appear in all subgraphs: it is defined in subgraph "Subgraph1" but not in subgraph "Subgraph2"."#,
+                ),
+                locations: Vec::new(),
+            },
+            CompositionHint {
+                code: String::from("INCONSISTENT_ARGUMENT_PRESENCE"),
+                message: String::from(
+                    r#"Optional argument "T.k(last:)" will not be included in the supergraph as it does not appear in all subgraphs: it is defined in subgraph "Subgraph2" but not in subgraph "Subgraph1"."#,
+                ),
+                locations: Vec::new(),
+            },
+            CompositionHint {
+                code: String::from("MERGED_NON_REPEATABLE_DIRECTIVE_ARGUMENTS"),
+                message: String::from(
+                    r#"Directive @listSize is applied to "T.k" in multiple subgraphs with different arguments. Merging strategies used by arguments: { assumedSize: NULLABLE_MAX, slicingArguments: NULLABLE_UNION, sizedFields: NULLABLE_UNION, requireOneSlicingArgument: NULLABLE_AND }"#,
+                ),
+                locations: Vec::new(),
+            },
+            CompositionHint {
+                code: String::from("MERGED_NON_REPEATABLE_DIRECTIVE_ARGUMENTS"),
+                message: String::from(
+                    r#"Directive @listSize is applied to "T.b" in multiple subgraphs with different arguments. Merging strategies used by arguments: { assumedSize: NULLABLE_MAX, slicingArguments: NULLABLE_UNION, sizedFields: NULLABLE_UNION, requireOneSlicingArgument: NULLABLE_AND }"#,
+                ),
+                locations: Vec::new(),
+            },
+        ];
+        assert_hints_equal(result_sg.hints(), &expected_hints);
+
+        // Check merging using NULLABLE_UNION succeeded
+        let schema = result_sg.schema().schema();
+        let sdl = print_sdl(schema);
+        assert!(
+            sdl.contains(
+                r#"@link(url: "https://specs.apollo.dev/cost/v0.1", import: ["listSize"])"#
+            )
+        );
+
+        coord!(Query.t)
+            .lookup_field(schema)
+            .expect("Query.t should be defined on the supergraph");
+
+        let k = coord!(T.k)
+            .lookup_field(schema)
+            .expect("T.k should be defined on the supergraph");
+        let k_requires_scopes_directive = k
+            .directives
+            .iter()
+            .find(|d| d.name == "listSize")
+            .expect("@listSize directive should be present on T.k");
+        assert_eq!(
+            k_requires_scopes_directive.to_string(),
+            r#"@listSize(slicingArguments: ["first", "last"], requireOneSlicingArgument: true)"#
+        );
+
+        let b = coord!(T.b)
+            .lookup_field(schema)
+            .expect("T.b should be defined on the supergraph");
+        let b_requires_scopes_directive = b
+            .directives
+            .iter()
+            .find(|d| d.name == "listSize")
+            .expect("@listSize directive should be present on T.b");
+        assert_eq!(
+            b_requires_scopes_directive.to_string(),
+            r#"@listSize(sizedFields: ["page", "nextPageToken"], requireOneSlicingArgument: true)"#
+        );
+
+        let c = coord!(T.c)
+            .lookup_field(schema)
+            .expect("T.b should be defined on the supergraph");
+        let c_requires_scopes_directive = c
+            .directives
+            .iter()
+            .find(|d| d.name == "listSize")
+            .expect("@listSize directive should be present on T.c");
+        assert_eq!(
+            c_requires_scopes_directive.to_string(),
+            r#"@listSize(sizedFields: ["nextPageToken"], requireOneSlicingArgument: true)"#
         );
     }
 }
