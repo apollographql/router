@@ -257,13 +257,13 @@ async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog()
     if !graph_os_enabled() {
         panic!("Error: test skipped because GraphOS is not enabled");
     }
-    let mock_server = mock_otlp_server(1..).await;
+    let mock_server_uri = "http://will-never-be-used.local";
     let config =
         include_str!("../fixtures/otlp_datadog_request_with_zipkin_propagator.router.yaml")
-            .replace("<otel-collector-endpoint>", &mock_server.uri());
+            .replace("<otel-collector-endpoint>", &mock_server_uri);
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp {
-            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+            endpoint: Some(format!("{}/v1/traces", mock_server_uri)),
         })
         .extra_propagator(Telemetry::Datadog)
         .config(&config)
@@ -271,105 +271,8 @@ async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog()
         .await;
 
     router.start().await;
-    router.assert_started().await;
+    router.wait_for_log_message("could not create router: datadog propagation cannot be used with any other propagator except for baggage").await;
 
-    TraceSpec::builder()
-        .services(["client", "router", "subgraph"].into())
-        .priority_sampled("1")
-        .subgraph_sampled(true)
-        .build()
-        .validate_otlp_trace(
-            &mut router,
-            &mock_server,
-            Query::builder().traced(true).build(),
-        )
-        .await?;
-    // ---------------------- zipkin propagator with unsampled trace
-    // Testing for an unsampled trace, so it should be sent to the otlp exporter with sampling priority set 0
-    // But it shouldn't send the trace to subgraph as the trace is originally not sampled, the main goal is to measure it at the DD agent level
-    TraceSpec::builder()
-        .services(["router"].into())
-        .priority_sampled("0")
-        .subgraph_sampled(false)
-        .build()
-        .validate_otlp_trace(
-            &mut router,
-            &mock_server,
-            Query::builder()
-                .traced(false)
-                .header("X-B3-TraceId", "80f198ee56343ba864fe8b2a57d3eff7")
-                .header("X-B3-ParentSpanId", "05e3ac9a4f6e3b90")
-                .header("X-B3-SpanId", "e457b5a2e4d86bd1")
-                .header("X-B3-Sampled", "0")
-                .build(),
-        )
-        .await?;
-    // ---------------------- trace context propagation
-    // Testing for a trace containing the right tracestate with m and psr for DD and a sampled trace, so it should be sent to the otlp exporter with sampling priority set to 1
-    // And it should also send the trace to subgraph as the trace is sampled
-    TraceSpec::builder()
-        .services(["client", "router", "subgraph"].into())
-        .priority_sampled("1")
-        .subgraph_sampled(true)
-        .build()
-        .validate_otlp_trace(
-            &mut router,
-            &mock_server,
-            Query::builder()
-                .traced(true)
-                .header(
-                    "traceparent",
-                    "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
-                )
-                .header("tracestate", "m=1,psr=1")
-                .build(),
-        )
-        .await?;
-    // ----------------------
-    // Testing for a trace containing the right tracestate with m and psr for DD and an unsampled trace, so it should be sent to the otlp exporter with sampling priority set to 0
-    // But it shouldn't send the trace to subgraph as the trace is originally not sampled, the main goal is to measure it at the DD agent level
-    TraceSpec::builder()
-        .services(["router"].into())
-        .priority_sampled("0")
-        .subgraph_sampled(false)
-        .build()
-        .validate_otlp_trace(
-            &mut router,
-            &mock_server,
-            Query::builder()
-                .traced(false)
-                .header(
-                    "traceparent",
-                    "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-02",
-                )
-                .header("tracestate", "m=1,psr=0")
-                .build(),
-        )
-        .await?;
-    // ----------------------
-    // Testing for a trace containing a tracestate m and psr with psr set to 1 for DD and an unsampled trace, so it should be sent to the otlp exporter with sampling priority set to 1
-    // It should not send the trace to the subgraph as we didn't use the datadog propagator and therefore the trace will remain unsampled.
-    TraceSpec::builder()
-        .services(["router", "subgraph"].into())
-        .priority_sampled("1")
-        .subgraph_sampled(true)
-        .build()
-        .validate_otlp_trace(
-            &mut router,
-            &mock_server,
-            Query::builder()
-                .traced(false)
-                .header(
-                    "traceparent",
-                    "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-03",
-                )
-                .header("tracestate", "m=1,psr=1")
-                .build(),
-        )
-        .await?;
-
-    // Be careful if you add the same kind of test crafting your own trace id, make sure to increment the previous trace id by 1 if not you'll receive all the previous spans tested with the same trace id before
-    router.graceful_shutdown().await;
     Ok(())
 }
 
