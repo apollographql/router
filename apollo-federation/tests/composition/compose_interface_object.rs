@@ -95,7 +95,7 @@ fn interface_object_errors_if_used_with_no_corresponding_interface() {
         &result,
         &[(
             "INTERFACE_OBJECT_USAGE_ERROR",
-            r#"Type "I" is declared with @interfaceObject in all the subgraphs in which is is defined (it is defined in subgraphs "subgraphA" and "subgraphB" but should be defined as an interface in at least one subgraph)"#,
+            r#"Type "I" is declared with @interfaceObject in all the subgraphs in which it is defined (it is defined in subgraphs "subgraphA" and "subgraphB" but should be defined as an interface in at least one subgraph)"#,
         )],
     );
 }

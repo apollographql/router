@@ -76,6 +76,7 @@ use crate::schema::validators::merged::validate_merged_schema;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
+use crate::utils::MultiIndexMap;
 use crate::utils::first_max_by_key;
 use crate::utils::human_readable::human_readable_subgraph_names;
 use crate::utils::iter_into_single_item;
@@ -562,7 +563,10 @@ impl Merger {
 
     fn add_types_shallow(&mut self) -> Result<(), FederationError> {
         let mut mismatched_types = IndexSet::new();
-        let mut types_with_interface_object = IndexSet::new();
+        // A mapping of Ty -> [SubgraphA, SubgraphB] where Ty is a interface object in those
+        // subgraphs
+        let mut subgraphs_with_interface_obj =
+            MultiIndexMap::<TypeDefinitionPosition, String>::new();
 
         for subgraph in &self.subgraphs {
             for pos in subgraph.schema().get_types() {
@@ -573,7 +577,10 @@ impl Merger {
                 let mut expects_interface = false;
                 if subgraph.is_interface_object_type(&pos) {
                     expects_interface = true;
-                    types_with_interface_object.insert(pos.clone());
+                    let itf_pos = InterfaceTypeDefinitionPosition {
+                        type_name: pos.type_name().clone(),
+                    };
+                    subgraphs_with_interface_obj.insert(itf_pos.into(), subgraph.name.clone());
                 }
                 if let Ok(previous) = self.merged.get_type(pos.type_name().clone()) {
                     if expects_interface
@@ -598,19 +605,23 @@ impl Merger {
         }
 
         for mismatched_type in mismatched_types.iter() {
-            self.report_mismatched_type_definitions(mismatched_type, &types_with_interface_object);
+            let subgraphs = subgraphs_with_interface_obj
+                .get(mismatched_type)
+                .cloned()
+                .unwrap_or_default();
+            self.report_mismatched_type_definitions(mismatched_type, &subgraphs);
         }
 
         // Most invalid use of @interfaceObject are reported as a mismatch above, but one exception is the
         // case where a type is used only with @interfaceObject, but there is no corresponding interface
         // definition in any subgraph.
-        for type_ in types_with_interface_object.iter() {
+        for type_ in subgraphs_with_interface_obj.keys() {
             if mismatched_types.contains(type_) {
                 continue;
             }
 
             let mut found_interface = false;
-            let mut subgraphs_with_type = HashSet::new();
+            let mut subgraphs_with_type = IndexSet::new();
             for subgraph in &self.subgraphs {
                 let type_in_subgraph = subgraph.schema().get_type(type_.type_name().clone());
                 if matches!(type_in_subgraph, Ok(TypeDefinitionPosition::Interface(_))) {
@@ -658,7 +669,7 @@ impl Merger {
     fn report_mismatched_type_definitions(
         &mut self,
         mismatched_type: &TypeDefinitionPosition,
-        types_with_interface_object: &IndexSet<TypeDefinitionPosition>,
+        subgraphs_with_interface_object: &Vec<String>,
     ) {
         let sources = self
             .subgraphs
@@ -673,12 +684,13 @@ impl Merger {
                 )
             })
             .collect();
-        let type_kind_to_string = |type_def: &TypeDefinitionPosition| {
-            let type_kind_description = if types_with_interface_object.contains(type_def) {
-                "Interface Object Type (Object Type with @interfaceObject)".to_string()
-            } else {
-                type_def.kind().replace("Type", " Type")
-            };
+        let type_kind_to_string = |idx: usize, type_def: &TypeDefinitionPosition| {
+            let type_kind_description =
+                if subgraphs_with_interface_object.contains(&self.subgraphs[idx].name) {
+                    "Interface Object Type (Object Type with @interfaceObject)".to_string()
+                } else {
+                    type_def.kind().replace("Type", " Type")
+                };
             Some(type_kind_description)
         };
         // TODO: Third type param is supposed to be representation of AST nodes
@@ -692,8 +704,8 @@ impl Merger {
                 },
                 mismatched_type,
                 &sources,
-                type_kind_to_string,
-                |ty, _| type_kind_to_string(ty),
+                |ty| Some(ty.kind().replace("Type", " Type")),
+                |ty, idx| type_kind_to_string(idx, ty),
             );
     }
 
