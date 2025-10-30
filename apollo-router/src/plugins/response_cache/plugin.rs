@@ -17,6 +17,7 @@ use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::StringTemplate;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
+use itertools::Itertools;
 use lru::LruCache;
 use multimap::MultiMap;
 use opentelemetry::Array;
@@ -1786,14 +1787,15 @@ fn extract_cache_keys(
 
         // Get the entity key from `representation`, only needed in debug for the cache debugger
         let representation_entity_key = if debug {
-            get_matching_key_field_set(
+            let selection_set = find_matching_key_field_set(
                 representation,
                 typename,
                 subgraph_name,
                 &supergraph_schema,
                 subgraph_enums,
-            )?
-            .into()
+            )?;
+
+            get_entity_key_from_selection_set(representation, &selection_set).into()
         } else {
             None
         };
@@ -1920,30 +1922,25 @@ fn get_invalidation_entity_keys_from_schema(
     Ok(invalidation_cache_keys)
 }
 
-fn get_matching_key_field_set(
+pub(in crate::plugins) fn find_matching_key_field_set(
     representation: &serde_json_bytes::Map<ByteString, Value>,
     typename: &str,
     subgraph_name: &str,
     supergraph_schema: &Valid<Schema>,
     subgraph_enums: &HashMap<String, String>,
-) -> Result<serde_json_bytes::Map<ByteString, Value>, FetchError> {
+) -> Result<apollo_compiler::executable::SelectionSet, FetchError> {
     // find an entry in the `key_field_sets` that matches the `representation`.
-    let matched_key_field_set =
-        collect_key_field_sets(typename, subgraph_name, supergraph_schema, subgraph_enums)?
+    collect_key_field_sets(typename, subgraph_name, supergraph_schema, subgraph_enums)?
         .find(|field_set| {
             matches_selection_set(representation, &field_set.selection_set)
         })
+        .map(|field_set| field_set.selection_set)
         .ok_or_else(|| {
             tracing::trace!("representation does not match any key field set for typename {typename} in subgraph {subgraph_name}");
             FetchError::MalformedRequest {
                 reason: format!("unexpected critical internal error for typename {typename} in subgraph {subgraph_name}"),
             }
-        })?;
-    get_selection_set(representation, &matched_key_field_set.selection_set).ok_or_else(|| {
-        FetchError::MalformedRequest {
-            reason: format!("representation does not match the field set {matched_key_field_set}"),
-        }
-    })
+        })
 }
 
 // Collect `@key` field sets on a `typename` in a `subgraph_name`.
@@ -1979,7 +1976,7 @@ fn collect_key_field_sets(
                                 supergraph_schema,
                                 NamedType::new(typename).ok()?,
                                 arg,
-                                "response_caching.graphql",
+                                "entity_caching.graphql",
                             )
                             .ok()
                     })
@@ -1989,30 +1986,84 @@ fn collect_key_field_sets(
         }))
 }
 
-// Does the shape of `representation`  match the `selection_set`?
-fn matches_selection_set(
+/// Whether the entity, represented as JSON, matches the parsed @key fields (`selection_set`)
+/// * This function mirrors `get_entity_key_from_selection_set` and make sure the representation
+///   matches the the shape of `selection_set`.
+/// * This function and `get_entity_key_from_selection_set` are separate because this is called for
+///   multiple possible `@key` fields to find the matching one, while
+///   `get_entity_key_from_selection_set` is only called once the matching `@key` fields is found.
+pub(in crate::plugins) fn matches_selection_set(
+    // the JSON representation of the entity data
     representation: &serde_json_bytes::Map<ByteString, Value>,
+    // the parsed @key fields to use for matching
     selection_set: &apollo_compiler::executable::SelectionSet,
 ) -> bool {
     for field in selection_set.root_fields(&Default::default()) {
-        // Note: field sets can't have aliases.
+        // the heart of finding the match: we take the field from the selection
+        // set and try to find it in the entity representation;
         let Some(value) = representation.get(field.name.as_str()) else {
             return false;
         };
 
+        // This field selection is not expecting any subdata.
         if field.selection_set.is_empty() {
-            // `value` must be a scalar.
-            if matches!(value, Value::Object(_)) {
+            // Scalar (or array of scalars) fields are always a match.
+            if !is_scalar_or_array_of_scalar(value) {
+                // Mismatch: Scalar value was expected.
                 return false;
             }
             continue;
         }
 
-        // Check the sub-selection set.
-        let Value::Object(sub_value) = value else {
-            return false;
+        // The field selection is expecting a subdata. See if given `value` matches the shape of
+        // its sub-selection set.
+        let result = match value {
+            Value::Object(obj) => {
+                // Recurse into object value
+                matches_selection_set(obj, &field.selection_set)
+            }
+
+            Value::Array(arr) => {
+                // Recurse into array values
+                matches_array_of_objects(arr, &field.selection_set)
+            }
+
+            // scalar values
+            _other => {
+                // Mismatch: object or array value was expected.
+                false
+            }
         };
-        if !matches_selection_set(sub_value, &field.selection_set) {
+        if !result {
+            return false;
+        }
+    }
+    true
+}
+
+fn is_scalar_or_array_of_scalar(value: &Value) -> bool {
+    match value {
+        Value::Object(_) => false,
+        Value::Array(arr) => arr.iter().all(is_scalar_or_array_of_scalar),
+        _ => true,
+    }
+}
+
+/// See if all array items match the shape of the `selection_set`.
+/// * Note: The array can be multi-dimensional. (the @key field set can match any levels of nested
+///   arrays)
+/// * Precondition: `selection_set` must be non-empty.
+fn matches_array_of_objects(
+    arr: &[Value],
+    selection_set: &apollo_compiler::executable::SelectionSet,
+) -> bool {
+    for item in arr.iter() {
+        let result = match item {
+            Value::Object(obj) => matches_selection_set(obj, selection_set),
+            Value::Array(arr) => matches_array_of_objects(arr, selection_set),
+            _other => false,
+        };
+        if !result {
             return false;
         }
     }
@@ -2021,36 +2072,73 @@ fn matches_selection_set(
 
 // Get the selection set from `representation` and returns the value corresponding to it.
 // - Returns None if the representation doesn't match the selection set.
-fn get_selection_set(
+// Note: This function mirrors `hash_representation_inner` in cache/entity.rs.
+fn get_entity_key_from_selection_set(
     representation: &serde_json_bytes::Map<ByteString, Value>,
     selection_set: &apollo_compiler::executable::SelectionSet,
-) -> Option<serde_json_bytes::Map<ByteString, Value>> {
-    let mut result = serde_json_bytes::Map::new();
-    for field in selection_set.root_fields(&Default::default()) {
-        // Note: field sets can't have aliases.
-        if field.selection_set.is_empty() {
-            let value = representation.get(field.name.as_str())?;
-            // `value` must be a scalar.
-            if matches!(value, Value::Object(_)) {
-                return None;
-            }
-            // Move the scalar field to the `result`.
-            result.insert(ByteString::from(field.name.as_str()), value.clone());
-            continue;
-        } else {
-            let value = representation.get(field.name.as_str())?;
-            // Update the sub-selection set.
-            let Value::Object(sub_value) = value else {
-                return None;
+) -> serde_json_bytes::Map<ByteString, Value> {
+    fn traverse_object(
+        state: &mut serde_json_bytes::Map<ByteString, Value>,
+        fields: &serde_json_bytes::Map<ByteString, Value>,
+        selection_set: &apollo_compiler::executable::SelectionSet,
+    ) {
+        let default_document = Default::default();
+        let sorted_selections = selection_set
+            .root_fields(&default_document)
+            .sorted_by(|a, b| a.name.cmp(&b.name));
+        for field in sorted_selections {
+            let key = field.name.as_str();
+            let Some(val) = fields.get(key) else {
+                continue;
             };
-            let removed = get_selection_set(sub_value, &field.selection_set)?;
-            result.insert(
-                ByteString::from(field.name.as_str()),
-                Value::Object(removed),
-            );
+            match val {
+                serde_json_bytes::Value::Object(obj) => {
+                    let mut obj_state = serde_json_bytes::Map::new();
+                    traverse_object(&mut obj_state, obj, &field.selection_set);
+                    state.insert(ByteString::from(key), Value::Object(obj_state));
+                }
+                Value::Array(arr) => {
+                    let mut arr_state = Vec::new();
+                    traverse_array(&mut arr_state, arr, &field.selection_set);
+                    state.insert(ByteString::from(key), Value::Array(arr_state));
+                }
+                // scalar value
+                val => {
+                    state.insert(ByteString::from(key), val.clone());
+                }
+            }
         }
     }
-    Some(result)
+
+    fn traverse_array(
+        state: &mut Vec<Value>,
+        items: &[Value],
+        selection_set: &apollo_compiler::executable::SelectionSet,
+    ) {
+        items.iter().for_each(|v| {
+            match v {
+                serde_json_bytes::Value::Object(obj) => {
+                    let mut obj_state = serde_json_bytes::Map::new();
+                    traverse_object(&mut obj_state, obj, selection_set);
+                    state.push(Value::Object(obj_state));
+                }
+                Value::Array(arr) => {
+                    let mut arr_state = Vec::new();
+                    traverse_array(&mut arr_state, arr, selection_set);
+                    state.push(Value::Array(arr_state));
+                }
+                // scalar value
+                _ => {
+                    state.push(v.clone());
+                }
+            }
+        });
+    }
+
+    let mut state = serde_json_bytes::Map::new();
+    traverse_object(&mut state, representation, selection_set);
+
+    state
 }
 
 /// represents the result of a cache lookup for an entity type and key
@@ -2445,18 +2533,26 @@ async fn reattempt_connection(
     any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
 ))]
 mod tests {
+    use std::collections::HashMap;
     use std::sync::Arc;
     use std::time::Duration;
 
     use apollo_compiler::Schema;
+    use apollo_compiler::parser::Parser;
+    use serde_json_bytes::json;
     use tokio::sync::broadcast;
 
     use super::Subgraph;
     use super::Ttl;
     use crate::configuration::subgraph::SubgraphConfiguration;
     use crate::plugins::response_cache::plugin::ResponseCache;
+    use crate::plugins::response_cache::plugin::get_entity_key_from_selection_set;
+    use crate::plugins::response_cache::plugin::get_invalidation_root_keys_from_schema;
+    use crate::plugins::response_cache::plugin::matches_selection_set;
     use crate::plugins::response_cache::storage::redis::Config;
     use crate::plugins::response_cache::storage::redis::Storage;
+    use crate::services::OperationKind;
+    use crate::services::subgraph;
 
     const SCHEMA: &str = include_str!("../../testdata/orga_supergraph_cache_key.graphql");
 
@@ -2585,6 +2681,490 @@ mod tests {
         assert_eq!(
             response_cache.subgraph_ttl("archive"),
             Some(Duration::from_millis(5000))
+        );
+    }
+
+    #[test]
+    fn test_matches_selection_set_handles_arrays() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                locale: String!
+                lists: [List!]!
+                list: [List!]!
+            }
+            type List {
+                id: ID!
+                date: Int!
+                quantity: Int!
+                location: String!
+            }
+        "#;
+        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity location } list { id date quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        // Test with complex nested array structure
+        let representation = json!({
+            "id": "TEST123",
+            "locale": "en_US",
+            "lists": [
+                {
+                    "id": "LIST1",
+                    "date": 20240101,
+                    "quantity": 50,
+                    "location": "WAREHOUSE_A"
+                }
+            ],
+            "list": [
+                {
+                    "id": "LIST2",
+                    "date": 20240101,
+                    "quantity": 100,
+                    "location": "WAREHOUSE_A"
+                },
+                {
+                    "id": "LIST3",
+                    "date": 20240102,
+                    "quantity": 75,
+                    "location": "WAREHOUSE_B"
+                }
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        assert!(
+            matches_selection_set(&representation, &field_set.selection_set),
+            "complex nested arrays should match"
+        );
+    }
+
+    #[test]
+    fn test_matches_selection_subset_handles_arrays() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                locale: String!
+                lists: [List!]!
+                list: [List!]!
+            }
+            type List {
+                id: ID!
+                date: Int!
+                quantity: Int!
+                location: String!
+            }
+        "#;
+        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity location } list { id date quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        // Test with complex nested array structure
+        let representation = json!({
+            "id": "TEST123",
+            "locale": "en_US",
+            "lists": [
+                {
+                    "id": "LIST1",
+                    "date": 20240101,
+                    "quantity": 50
+                }
+            ],
+            "list": [
+                {
+                    "id": "LIST2",
+                    "date": 20240101,
+                    "quantity": 100,
+                    "location": "WAREHOUSE_A"
+                },
+                {
+                    "id": "LIST3",
+                    "date": 20240102,
+                    "quantity": 75,
+                    "location": "WAREHOUSE_B"
+                }
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        assert!(!matches_selection_set(
+            &representation,
+            &field_set.selection_set
+        ),);
+
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity } list { id date quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        assert!(
+            matches_selection_set(&representation, &field_set.selection_set),
+            "complex nested arrays should match"
+        );
+    }
+
+    #[test]
+    fn test_take_selection_set_handles_arrays() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                locale: String!
+                lists: [List!]!
+                list: [List!]!
+            }
+            type List {
+                id: ID!
+                date: Int!
+                quantity: Int!
+                location: String!
+            }
+        "#;
+        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity location } list { id date quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        // Test with complex nested array structure
+        let representation = json!({
+            "id": "TEST123",
+            "locale": "en_US",
+            "lists": [
+                {
+                    "id": "LIST1",
+                    "date": 20240101,
+                    "quantity": 50,
+                    "location": "WAREHOUSE_A"
+                }
+            ],
+            "list": [
+                {
+                    "id": "LIST2",
+                    "date": 20240101,
+                    "quantity": 100,
+                    "location": "WAREHOUSE_A"
+                },
+                {
+                    "id": "LIST3",
+                    "date": 20240102,
+                    "quantity": 75,
+                    "location": "WAREHOUSE_B"
+                }
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        assert!(matches_selection_set(
+            &representation,
+            &field_set.selection_set
+        ));
+        let entity_key =
+            get_entity_key_from_selection_set(&representation, &field_set.selection_set);
+        assert_eq!(
+            &entity_key,
+            json!({
+                "id": "TEST123",
+                "locale": "en_US",
+                "lists": [
+                    {
+                        "id": "LIST1",
+                        "date": 20240101,
+                        "quantity": 50,
+                        "location": "WAREHOUSE_A"
+                    }
+                ],
+                "list": [
+                    {
+                        "id": "LIST2",
+                        "date": 20240101,
+                        "quantity": 100,
+                        "location": "WAREHOUSE_A"
+                    },
+                    {
+                        "id": "LIST3",
+                        "date": 20240102,
+                        "quantity": 75,
+                        "location": "WAREHOUSE_B"
+                    }
+                ]
+            })
+            .as_object()
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn test_take_selection_subset_handles_arrays() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                locale: String!
+                lists: [List!]!
+                list: [List!]!
+            }
+            type List {
+                id: ID!
+                date: Int!
+                quantity: Int!
+                location: String!
+            }
+        "#;
+        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity } list { id quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        // Test with complex nested array structure
+        let representation = json!({
+            "id": "TEST123",
+            "locale": "en_US",
+            "lists": [
+                {
+                    "id": "LIST1",
+                    "date": 20240101,
+                    "quantity": 50,
+                    "location": "WAREHOUSE_A"
+                }
+            ],
+            "list": [
+                {
+                    "id": "LIST2",
+                    "date": 20240101,
+                    "quantity": 100,
+                    "location": "WAREHOUSE_A"
+                },
+                {
+                    "id": "LIST3",
+                    "date": 20240102,
+                    "quantity": 75,
+                    "location": "WAREHOUSE_B"
+                }
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        assert!(matches_selection_set(
+            &representation,
+            &field_set.selection_set
+        ));
+        let entity_key =
+            get_entity_key_from_selection_set(&representation, &field_set.selection_set);
+        assert_eq!(
+            &entity_key,
+            json!({
+                "id": "TEST123",
+                "locale": "en_US",
+                "lists": [
+                    {
+                        "id": "LIST1",
+                        "date": 20240101,
+                        "quantity": 50
+                    }
+                ],
+                "list": [
+                    {
+                        "id": "LIST2",
+                        "quantity": 100,
+                        "location": "WAREHOUSE_A"
+                    },
+                    {
+                        "id": "LIST3",
+                        "quantity": 75,
+                        "location": "WAREHOUSE_B"
+                    }
+                ]
+            })
+            .as_object()
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn test_get_invalidation_root_keys_from_schema() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+            directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+            directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+            directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+            directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+            input join__ContextArgument {
+              name: String!
+              type: String!
+              context: String!
+              selection: join__FieldValue!
+            }
+
+            scalar join__DirectiveArguments
+
+            scalar join__FieldSet
+
+            scalar join__FieldValue
+
+            enum join__Graph {
+              USER @join__graph(name: "USER", url: "none")
+              TEST @join__graph(name: "TEST", url: "none")
+            }
+
+            scalar link__Import
+
+            enum link__Purpose {
+              """
+              `SECURITY` features provide metadata necessary to securely resolve fields.
+              """
+              SECURITY
+
+              """
+              `EXECUTION` features provide metadata necessary for operation execution.
+              """
+              EXECUTION
+            }
+
+            type Query {
+                test: Test
+                testByCountry(id: ID!, country: Country!): Test @join__directive(
+                    graphs: [USER]
+                    name: "federation__cacheTag"
+                    args: { format: "test-{$args.id}-{$args.country}" }
+                )
+                @join__directive(
+                    graphs: [USER]
+                    name: "federation__cacheTag"
+                    args: { format: "test-{$args.country}" }
+                )
+                @join__directive(
+                    graphs: [USER]
+                    name: "federation__cacheTag"
+                    args: { format: "test" }
+                )
+            }
+
+            enum Country {
+                BE
+                FR
+            }
+
+            type Test {
+                id: ID!
+                locale: String!
+                lists: [List!]!
+                list: [List!]!
+            }
+            type List {
+                id: ID!
+                date: Int!
+                quantity: Int!
+                location: String!
+            }
+        "#;
+        let schema = Arc::new(Schema::parse_and_validate(schema_text, "test.graphql").unwrap());
+        let query = r#"query Test {
+          testByCountry(id: "2", country: BE) {
+            locale
+          }
+        }"#;
+        let mut sub_request = subgraph::Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(
+                        crate::graphql::Request::builder()
+                            .query(query)
+                            .operation_name("Test")
+                            .build(),
+                    )
+                    .unwrap(),
+            )
+            .operation_kind(OperationKind::Query)
+            .subgraph_name("USER")
+            .build();
+        sub_request.executable_document = Some(Arc::new(
+            apollo_compiler::ExecutableDocument::parse_and_validate(&schema, query, "test.graphql")
+                .unwrap(),
+        ));
+        let subgraph_enums: HashMap<String, String> = [("USER".to_string(), "USER".to_string())]
+            .into_iter()
+            .collect();
+        let cache_tags =
+            get_invalidation_root_keys_from_schema(&sub_request, &subgraph_enums, schema.clone())
+                .unwrap();
+
+        assert_eq!(
+            cache_tags,
+            [
+                "test".to_string(),
+                "test-BE".to_string(),
+                "test-2-BE".to_string()
+            ]
+            .into_iter()
+            .collect()
         );
     }
 }
