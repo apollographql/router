@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
 use std::task;
+use std::time::Duration;
 
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
@@ -32,6 +33,7 @@ use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
 use crate::configuration::cooperative_cancellation::CooperativeCancellation;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
+use crate::graphql;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
@@ -694,12 +696,52 @@ where
                                 });
                             planning_task.await
                         } else {
-                            unreachable!(
-                                "Can't set a timeout without enabling cooperative cancellation"
-                            );
+                            unreachable!("ruh roh");
                         }
                     }
-                    None => planning_task.await,
+                    None => {
+                        tokio::select! {
+                             _ = tokio::spawn(async {
+                             #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
+                             {
+                                 use tikv_jemalloc_ctl::{epoch, stats};
+                                 let e = epoch::mib().unwrap();
+                                 loop {
+                                     // epoch determines refresh of stats
+                                     e.advance().unwrap();
+                                     // in bytes
+                                     match stats::allocated::read() {
+                                         Ok(allocated) => {
+                                             // 2 * kb * mb * gb
+                                             if allocated > 1 * 1024 * 1024 * 1024 {
+                                                 tracing::error!("getting hot! aborting via select, allocated: {allocated}");
+                                                 return;
+                                             }
+                                         }
+                                         Err(err) => {
+                                             tracing::warn!("error trying to get allocated mem: {err}");
+                                         }
+                                     };
+
+                                     tokio::time::sleep(Duration::from_secs(1)).await;
+                                 }
+                             };
+                             }) => {
+                                tracing::warn!("aborting query plan for expensive query");
+
+                                let mut err = graphql::Error::default();
+                                err.message = "Query plan aborted".to_string();
+
+                                return Ok(QueryPlannerResponse { content: None, errors: vec![err] });
+
+                             }
+                        res =  tokio::task::spawn(planning_task) =>
+                            {
+                                let blah = res.unwrap().unwrap();
+                                return blah;
+                            }
+                        };
+                    }
                 }
             } else {
                 // some clients might timeout and cancel the request before query planning is finished,
