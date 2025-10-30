@@ -608,96 +608,240 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_datadog_propagation_validation() {
+    async fn test_datadog_propagation_only_passes() {
         let mut config = create_config_with_apollo_enabled();
-
-        let datadog_propagation = Propagation {
-            datadog: true,
-            ..Default::default()
-        };
-        let jaeger_propagation = Propagation {
-            jaeger: true,
+        config.exporters.tracing.propagation = Propagation {
+            datadog: Some(true),
             ..Default::default()
         };
 
-        let datadog_and_baggage_propagation = Propagation {
-            datadog: true,
+        let builder = Builder::new(&None, &config);
+        assert!(builder.build().is_ok());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_datadog_with_baggage_propagation_passes() {
+        let mut config = create_config_with_apollo_enabled();
+        config.exporters.tracing.propagation = Propagation {
+            datadog: Some(true),
             baggage: true,
             ..Default::default()
         };
-        let datadog_and_jaeger_propagation = Propagation {
-            datadog: true,
+
+        let builder = Builder::new(&None, &config);
+        assert!(builder.build().is_ok());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_jaeger_propagation_only_passes() {
+        let mut config = create_config_with_apollo_enabled();
+        config.exporters.tracing.propagation = Propagation {
             jaeger: true,
             ..Default::default()
         };
-        let datadog_and_trace_context_propagation = Propagation {
-            datadog: true,
+
+        let builder = Builder::new(&None, &config);
+        assert!(builder.build().is_ok());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_datadog_with_jaeger_propagation_fails() {
+        let mut config = create_config_with_apollo_enabled();
+        config.exporters.tracing.propagation = Propagation {
+            datadog: Some(true),
+            jaeger: true,
+            ..Default::default()
+        };
+
+        let builder = Builder::new(&None, &config);
+        assert_eq!(
+            "datadog propagation cannot be used with any other propagator except for baggage",
+            builder.build().err().unwrap().to_string()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_datadog_with_trace_context_propagation_fails() {
+        let mut config = create_config_with_apollo_enabled();
+        config.exporters.tracing.propagation = Propagation {
+            datadog: Some(true),
             trace_context: true,
             ..Default::default()
         };
-        let datadog_and_zipkin_propagation = Propagation {
-            datadog: true,
+
+        let builder = Builder::new(&None, &config);
+        assert_eq!(
+            "datadog propagation cannot be used with any other propagator except for baggage",
+            builder.build().err().unwrap().to_string()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_datadog_with_zipkin_propagation_fails() {
+        let mut config = create_config_with_apollo_enabled();
+        config.exporters.tracing.propagation = Propagation {
+            datadog: Some(true),
             zipkin: true,
             ..Default::default()
         };
-        let datadog_and_aws_xray_propagation = Propagation {
-            datadog: true,
+
+        let builder = Builder::new(&None, &config);
+        assert_eq!(
+            "datadog propagation cannot be used with any other propagator except for baggage",
+            builder.build().err().unwrap().to_string()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_datadog_with_aws_xray_propagation_fails() {
+        let mut config = create_config_with_apollo_enabled();
+        config.exporters.tracing.propagation = Propagation {
+            datadog: Some(true),
             aws_xray: true,
             ..Default::default()
         };
 
-        let allowed_propagation_configs = [
-            datadog_propagation,
-            datadog_and_baggage_propagation,
-            jaeger_propagation,
-        ];
+        let builder = Builder::new(&None, &config);
+        assert_eq!(
+            "datadog propagation cannot be used with any other propagator except for baggage",
+            builder.build().err().unwrap().to_string()
+        );
+    }
 
-        let disallowed_propagation_configs = [
-            datadog_and_jaeger_propagation,
-            datadog_and_trace_context_propagation,
-            datadog_and_zipkin_propagation,
-            datadog_and_aws_xray_propagation,
-        ];
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_datadog_exporter_enabled_with_datadog_propagation_only_passes() {
+        let mut config = create_config_with_apollo_enabled();
+        config.exporters.tracing.datadog.enabled = true;
+        config.exporters.tracing.propagation = Propagation {
+            datadog: Some(true),
+            ..Default::default()
+        };
 
-        for propagation in allowed_propagation_configs.iter().cloned() {
-            config.exporters.tracing.propagation = propagation;
-            let builder = Builder::new(&None, &config);
-            assert!(
-                builder.build().is_ok(),
-                "tracing config should pass validation: {:#?}",
-                &config.exporters.tracing
-            );
-        }
+        let builder = Builder::new(&None, &config);
+        assert!(builder.build().is_ok());
+    }
 
-        for propagation in disallowed_propagation_configs.iter().cloned() {
-            config.exporters.tracing.propagation = propagation;
-            let builder = Builder::new(&None, &config);
-            assert_eq!(
-                "datadog propagation cannot be used with any other propagator except for baggage",
-                builder.build().err().unwrap().to_string()
-            );
-        }
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_datadog_exporter_enabled_with_datadog_baggage_propagation_passes() {
+        let mut config = create_config_with_apollo_enabled();
+        config.exporters.tracing.datadog.enabled = true;
+        config.exporters.tracing.propagation = Propagation {
+            datadog: Some(true),
+            baggage: true,
+            ..Default::default()
+        };
 
-        let mut datadog_config = config.clone();
-        datadog_config.exporters.tracing.datadog.enabled = true;
+        let builder = Builder::new(&None, &config);
+        assert!(builder.build().is_ok());
+    }
 
-        for propagation in allowed_propagation_configs {
-            datadog_config.exporters.tracing.propagation = propagation;
-            let builder = Builder::new(&None, &datadog_config);
-            assert!(
-                builder.build().is_ok(),
-                "tracing config should pass validation: {:#?}",
-                &datadog_config.exporters.tracing
-            );
-        }
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_datadog_exporter_enabled_with_jaeger_propagation_only_fails() {
+        let mut config = create_config_with_apollo_enabled();
+        config.exporters.tracing.datadog.enabled = true;
+        config.exporters.tracing.propagation = Propagation {
+            jaeger: true,
+            ..Default::default()
+        };
 
-        for propagation in disallowed_propagation_configs {
-            datadog_config.exporters.tracing.propagation = propagation;
-            let builder = Builder::new(&None, &datadog_config);
-            assert_eq!(
-                "if the datadog exporter is enabled and any other propagator is enabled, the datadog propagator must be disabled",
-                builder.build().err().unwrap().to_string()
-            );
-        }
+        let builder = Builder::new(&None, &config);
+        assert_eq!(
+            "datadog propagation must be explicitly disabled if the datadog exporter is enabled and any propagator other than baggage is enabled",
+            builder.build().err().unwrap().to_string()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_datadog_exporter_enabled_with_datadog_jaeger_propagation_fails() {
+        let mut config = create_config_with_apollo_enabled();
+        config.exporters.tracing.datadog.enabled = true;
+        config.exporters.tracing.propagation = Propagation {
+            datadog: Some(true),
+            jaeger: true,
+            ..Default::default()
+        };
+
+        let builder = Builder::new(&None, &config);
+        assert_eq!(
+            "if the datadog exporter is enabled and any other propagator is enabled, the datadog propagator must be disabled",
+            builder.build().err().unwrap().to_string()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_datadog_exporter_enabled_with_datadog_trace_context_propagation_fails() {
+        let mut config = create_config_with_apollo_enabled();
+        config.exporters.tracing.datadog.enabled = true;
+        config.exporters.tracing.propagation = Propagation {
+            datadog: Some(true),
+            trace_context: true,
+            ..Default::default()
+        };
+
+        let builder = Builder::new(&None, &config);
+        assert_eq!(
+            "if the datadog exporter is enabled and any other propagator is enabled, the datadog propagator must be disabled",
+            builder.build().err().unwrap().to_string()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_datadog_exporter_enabled_with_datadog_zipkin_propagation_fails() {
+        let mut config = create_config_with_apollo_enabled();
+        config.exporters.tracing.datadog.enabled = true;
+        config.exporters.tracing.propagation = Propagation {
+            datadog: Some(true),
+            zipkin: true,
+            ..Default::default()
+        };
+
+        let builder = Builder::new(&None, &config);
+        assert_eq!(
+            "if the datadog exporter is enabled and any other propagator is enabled, the datadog propagator must be disabled",
+            builder.build().err().unwrap().to_string()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_datadog_exporter_enabled_with_datadog_aws_xray_propagation_fails() {
+        let mut config = create_config_with_apollo_enabled();
+        config.exporters.tracing.datadog.enabled = true;
+        config.exporters.tracing.propagation = Propagation {
+            datadog: Some(true),
+            aws_xray: true,
+            ..Default::default()
+        };
+
+        let builder = Builder::new(&None, &config);
+        assert_eq!(
+            "if the datadog exporter is enabled and any other propagator is enabled, the datadog propagator must be disabled",
+            builder.build().err().unwrap().to_string()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_datadog_exporter_enabled_with_otlp_exporter_enabled_fails() {
+        let mut config = create_config_with_apollo_enabled();
+        config.exporters.tracing.datadog.enabled = true;
+        config.exporters.tracing.otlp.enabled = true;
+
+        let builder = Builder::new(&None, &config);
+        assert_eq!(
+            "datadog propagation must be explicitly disabled if the datadog exporter is enabled and any propagator other than baggage is enabled",
+            builder.build().err().unwrap().to_string()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_datadog_exporter_enabled_with_zipkin_exporter_enabled_fails() {
+        let mut config = create_config_with_apollo_enabled();
+        config.exporters.tracing.datadog.enabled = true;
+        config.exporters.tracing.zipkin.enabled = true;
+
+        let builder = Builder::new(&None, &config);
+        assert_eq!(
+            "datadog propagation must be explicitly disabled if the datadog exporter is enabled and any propagator other than baggage is enabled",
+            builder.build().err().unwrap().to_string()
+        );
     }
 }
