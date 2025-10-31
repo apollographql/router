@@ -840,6 +840,7 @@ impl Selector for SubgraphSelector {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashMap;
     use std::str::FromStr;
     use std::sync::Arc;
 
@@ -870,6 +871,7 @@ mod test {
     use crate::plugins::cache::entity::CacheSubgraph;
     use crate::plugins::cache::metrics::CacheMetricContextKey;
     use crate::plugins::response_cache;
+    use crate::plugins::response_cache::plugin::CacheControls;
     use crate::plugins::telemetry::config::AttributeValue;
     use crate::plugins::telemetry::config_new::Selector;
     use crate::plugins::telemetry::config_new::selectors::All;
@@ -1681,7 +1683,10 @@ mod test {
             crate::plugins::response_cache::cache_control::CacheControl::new(&header_map, None)
                 .unwrap();
         let context = crate::context::Context::new();
-        context.extensions().with_lock(|l| l.insert(cache_control));
+        let mut cache_controls: CacheControls = HashMap::new();
+        let subgraph_request_id = SubgraphRequestId("test".to_string());
+        cache_controls.insert(subgraph_request_id.clone(), cache_control);
+        context.extensions().with_lock(|l| l.insert(cache_controls));
 
         let selector = SubgraphSelector::ResponseCacheControl {
             response_cache_control: CacheControlSelector::MaxAge,
@@ -1700,6 +1705,7 @@ mod test {
             selector.on_response(
                 &crate::services::SubgraphResponse::fake_builder()
                     .subgraph_name("test".to_string())
+                    .id(subgraph_request_id.clone())
                     .context(context.clone())
                     .build(),
             ),
@@ -1713,6 +1719,7 @@ mod test {
             selector.on_response(
                 &crate::services::SubgraphResponse::fake_builder()
                     .subgraph_name("test".to_string())
+                    .id(subgraph_request_id.clone())
                     .context(context.clone())
                     .build(),
             ),
