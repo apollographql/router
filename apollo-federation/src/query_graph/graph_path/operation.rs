@@ -786,11 +786,11 @@ impl OpGraphPath {
         let Some(last_edge_index) = last_edge_index else {
             // PORT_NOTE: The JS codebase just returns the same path if all edges are downcast or
             // `None` edges. This is likely a bug, so we instead return the empty path here.
-            return OpGraphPath::new(self.graph.clone(), self.head);
+            return OpGraphPath::new(self.graph.clone(), self.head, self.weight_counter.clone());
         };
         let prefix_length = last_edge_index + 1;
         if prefix_length == self.edges.len() {
-            return Ok(self.clone());
+            return self.try_clone();
         }
         let Some(last_edge) = self.edges[last_edge_index] else {
             return Err(FederationError::internal(
@@ -798,7 +798,7 @@ impl OpGraphPath {
             ));
         };
         let (_, last_edge_tail) = self.graph.edge_endpoints(last_edge)?;
-        Ok(OpGraphPath {
+        OpGraphPath {
             graph: self.graph.clone(),
             head: self.head,
             tail: last_edge_tail,
@@ -815,7 +815,9 @@ impl OpGraphPath {
             matching_context_ids: self.matching_context_ids[0..prefix_length].to_vec(),
             arguments_to_context_usages: self.arguments_to_context_usages[0..prefix_length]
                 .to_vec(),
-        })
+            weight_counter: self.weight_counter.clone(),
+        }
+        .update_weight_counter_after_instantiation()
     }
 
     pub(crate) fn is_equivalent_save_for_type_explosion_to(
@@ -1352,7 +1354,7 @@ impl OpGraphPath {
                             };
                             let implementation_options =
                                 SimultaneousPathsWithLazyIndirectPaths::new(
-                                    self.clone().into(),
+                                    self.try_clone()?.into(),
                                     context.clone(),
                                     Default::default(),
                                     Default::default(),
@@ -1501,7 +1503,7 @@ impl OpGraphPath {
                         "No edge to take for condition {operation_inline_fragment} from current type"
                     );
                     let fragment_path = if operation_inline_fragment.directives.is_empty() {
-                        self.clone()
+                        self.try_clone()?
                     } else {
                         self.add(
                             operation_inline_fragment.clone().into(),
@@ -1572,7 +1574,7 @@ impl OpGraphPath {
                             };
                             let implementation_options =
                                 SimultaneousPathsWithLazyIndirectPaths::new(
-                                    self.clone().into(),
+                                    self.try_clone()?.into(),
                                     context.clone(),
                                     Default::default(),
                                     Default::default(),
@@ -1648,7 +1650,7 @@ impl OpGraphPath {
                             // convert it to an inline fragment without type condition,
                             // otherwise we ignore the fragment altogether.
                             if operation_inline_fragment.directives.is_empty() {
-                                return Ok((Some(vec![self.clone().into()]), None));
+                                return Ok((Some(vec![self.try_clone()?.into()]), None));
                             }
                             let operation_inline_fragment = InlineFragment {
                                 schema: self.graph.schema_by_source(&tail_weight.source)?.clone(),
@@ -2544,7 +2546,8 @@ mod tests {
         let schema = ValidFederationSchema::new(schema).unwrap();
         let name = "S1".into();
         let graph = build_query_graph(name, schema.clone(), Default::default()).unwrap();
-        let path = OpGraphPath::new(Arc::new(graph), NodeIndex::new(0)).unwrap();
+        let path =
+            OpGraphPath::new(Arc::new(graph), NodeIndex::new(0), Default::default()).unwrap();
         // NOTE: in general GraphPath would be used against a federated supergraph which would have
         // a root node [query](_)* followed by a Query(S1) node
         // This test is run against subgraph schema meaning it will start from Query(S1) node instead

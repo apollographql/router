@@ -6,6 +6,7 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::LazyLock;
+use std::sync::atomic;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -28,6 +29,7 @@ use tracing::debug_span;
 use super::condition_resolver::ContextMapEntry;
 use crate::bail;
 use crate::error::FederationError;
+use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::graphql_definition::DeferDirectiveArguments;
 use crate::operation::Field;
@@ -65,6 +67,76 @@ pub(crate) struct ContextUsageEntry {
     pub(crate) relative_path: Vec<FetchDataPathElement>,
     pub(crate) selection_set: SelectionSet,
     pub(crate) subgraph_argument_type: Node<Type>,
+}
+
+/// When running a task like query planning or satisfiability checking, the number of paths in
+/// memory may grow too large for the environment's configured memory, causing the task and its
+/// upstream callers to be abruptly terminated. To help avoid this, we:
+/// 1. Count the graph paths in use by a task over time, where the count is weighted by the number
+///    of edges. Specifically, the weight is the number of edges plus one.
+/// 2. Track the high water mark of the count, representing the maximum count value seen during the
+///    task. This is particularly useful for metrics.
+/// 3. Allow an optional limit on the count, which causes an error to be emitted when the count is
+///    increased over the limit.
+#[derive(Default)]
+pub(crate) struct GraphPathWeightCounter {
+    pub(crate) count: atomic::AtomicU64,
+    pub(crate) high_water_mark: atomic::AtomicU64,
+    pub(crate) limit: Option<u64>,
+}
+
+impl GraphPathWeightCounter {
+    pub(crate) fn add_path<TTrigger, TEdge>(
+        &self,
+        path: &GraphPath<TTrigger, TEdge>,
+    ) -> Result<(), FederationError>
+    where
+        TTrigger: Eq + Hash + GraphPathTriggerVariant,
+        TEdge: Copy + Into<Option<EdgeIndex>>,
+        EdgeIndex: Into<TEdge>,
+    {
+        let weight = Self::weight(path);
+        let old_count = self.count.fetch_add(weight, atomic::Ordering::Relaxed);
+        let Some(new_count) = old_count.checked_add(weight) else {
+            return Err(SingleFederationError::QueryPlanComplexityExceeded {
+                message: "Weight of in-memory paths exceeded the maximum value of an unsigned 64-bit integer".to_owned(),
+            }.into());
+        };
+        let Some(limit) = self.limit else {
+            return Ok(());
+        };
+        if new_count > limit {
+            return Err(SingleFederationError::QueryPlanComplexityExceeded {
+                message: format!("Weight of in-memory paths exceeded the limit of {}", limit),
+            }
+            .into());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn sub_path<TTrigger, TEdge>(&self, path: &GraphPath<TTrigger, TEdge>)
+    where
+        TTrigger: Eq + Hash + GraphPathTriggerVariant,
+        TEdge: Copy + Into<Option<EdgeIndex>>,
+        EdgeIndex: Into<TEdge>,
+    {
+        // Note the weight doesn't change over the path's lifetime, since graph paths are immutable.
+        self.count
+            .fetch_sub(Self::weight(path), atomic::Ordering::Relaxed);
+    }
+
+    pub(crate) fn high_water_mark(&self) -> u64 {
+        self.high_water_mark.load(atomic::Ordering::Relaxed)
+    }
+
+    fn weight<TTrigger, TEdge>(path: &GraphPath<TTrigger, TEdge>) -> u64
+    where
+        TTrigger: Eq + Hash + GraphPathTriggerVariant,
+        TEdge: Copy + Into<Option<EdgeIndex>>,
+        EdgeIndex: Into<TEdge>,
+    {
+        path.edges.len() as u64 + 1
+    }
 }
 
 /// An immutable path in a query graph.
@@ -108,7 +180,7 @@ pub(crate) struct ContextUsageEntry {
 // in the Rust code we don't have a distinguished type for that case. We instead check this at
 // runtime (at the callsites that require root nodes). This means the `RootPath` type in the
 // JS codebase is replaced with this one.
-#[derive(Clone, serde::Serialize)]
+#[derive(serde::Serialize)] // We purposely do not derive `Clone`, use `try_clone()` instead.
 pub(crate) struct GraphPath<TTrigger, TEdge>
 where
     TTrigger: Eq + Hash + GraphPathTriggerVariant,
@@ -161,6 +233,21 @@ where
     /// Maps of @fromContext arguments to info about the contexts used in those arguments, for each
     /// edge in the path.
     arguments_to_context_usages: Vec<Option<ArgumentsToContextUsages>>,
+    /// A counter on the total weight of graph paths in use by the current task (e.g. query planning
+    /// or composition). This is here to facilitate dropping and graph paths derived from this one.
+    #[serde(skip)]
+    weight_counter: Arc<GraphPathWeightCounter>,
+}
+
+impl<TTrigger, TEdge> Drop for GraphPath<TTrigger, TEdge>
+where
+    TTrigger: Eq + Hash + GraphPathTriggerVariant,
+    TEdge: Copy + Into<Option<EdgeIndex>>,
+    EdgeIndex: Into<TEdge>,
+{
+    fn drop(&mut self) {
+        self.weight_counter.sub_path(self);
+    }
 }
 
 impl<TTrigger, TEdge> std::fmt::Debug for GraphPath<TTrigger, TEdge>
@@ -186,6 +273,7 @@ where
             defer_on_tail,
             matching_context_ids: _,
             arguments_to_context_usages: _,
+            weight_counter: _,
         } = self;
 
         f.debug_struct("GraphPath")
@@ -492,7 +580,11 @@ where
     }
 
     /// Creates a new (empty) path starting at the provided `head` node.
-    pub(crate) fn new(graph: Arc<QueryGraph>, head: NodeIndex) -> Result<Self, FederationError> {
+    pub(crate) fn new(
+        graph: Arc<QueryGraph>,
+        head: NodeIndex,
+        weight_counter: Arc<GraphPathWeightCounter>,
+    ) -> Result<Self, FederationError> {
         let mut path = Self {
             graph,
             head,
@@ -506,9 +598,36 @@ where
             defer_on_tail: None,
             matching_context_ids: Vec::default(),
             arguments_to_context_usages: Vec::default(),
+            weight_counter,
         };
         path.runtime_types_of_tail = Arc::new(path.head_possible_runtime_types()?);
-        Ok(path)
+        path.update_weight_counter_after_instantiation()
+    }
+
+    fn update_weight_counter_after_instantiation(self) -> Result<Self, FederationError> {
+        self.weight_counter.add_path(&self)?;
+        Ok(self)
+    }
+
+    pub(crate) fn try_clone(&self) -> Result<Self, FederationError> {
+        Self {
+            graph: self.graph.clone(),
+            head: self.head,
+            tail: self.tail,
+            edges: self.edges.clone(),
+            edge_triggers: self.edge_triggers.clone(),
+            edge_conditions: self.edge_conditions.clone(),
+            last_subgraph_entering_edge_info: self.last_subgraph_entering_edge_info.clone(),
+            runtime_types_of_tail: self.runtime_types_of_tail.clone(),
+            runtime_types_before_tail_if_last_is_cast: self
+                .runtime_types_before_tail_if_last_is_cast
+                .clone(),
+            defer_on_tail: self.defer_on_tail.clone(),
+            matching_context_ids: self.matching_context_ids.clone(),
+            arguments_to_context_usages: self.arguments_to_context_usages.clone(),
+            weight_counter: self.weight_counter.clone(),
+        }
+        .update_weight_counter_after_instantiation()
     }
 
     /// Creates a new (empty) path starting from the root node in `graph` corresponding to the
@@ -516,11 +635,12 @@ where
     pub(crate) fn from_graph_root(
         graph: Arc<QueryGraph>,
         root_kind: SchemaRootDefinitionKind,
+        weight_counter: Arc<GraphPathWeightCounter>,
     ) -> Result<Self, FederationError> {
         let Some(root_node) = graph.root_kinds_to_nodes()?.get(&root_kind).copied() else {
             bail!("Unexpectedly no root node for the root kind {}", root_kind);
         };
-        GraphPath::new(graph, root_node)
+        GraphPath::new(graph, root_node, weight_counter)
     }
 
     fn head_possible_runtime_types(
@@ -574,7 +694,7 @@ where
             edge_conditions.push(condition_path_tree);
             matching_context_ids.push(None);
             arguments_to_context_usages.push(None);
-            return Ok(GraphPath {
+            return GraphPath {
                 graph: self.graph.clone(),
                 head: self.head,
                 tail: self.tail,
@@ -593,7 +713,9 @@ where
                 defer_on_tail: defer,
                 matching_context_ids,
                 arguments_to_context_usages,
-            });
+                weight_counter: self.weight_counter.clone(),
+            }
+            .update_weight_counter_after_instantiation();
         };
 
         let (edge_head, edge_tail) = self.graph.edge_endpoints(new_edge)?;
@@ -700,7 +822,7 @@ where
                         edges.push(new_edge.into());
                         edge_triggers.push(Arc::new(trigger));
                         edge_conditions.push(condition_path_tree);
-                        return Ok(GraphPath {
+                        return GraphPath {
                             graph: self.graph.clone(),
                             head: self.head,
                             tail: edge_tail,
@@ -724,7 +846,9 @@ where
                             },
                             matching_context_ids: self.matching_context_ids.clone(),
                             arguments_to_context_usages: self.arguments_to_context_usages.clone(),
-                        });
+                            weight_counter: self.weight_counter.clone(),
+                        }
+                        .update_weight_counter_after_instantiation();
                     }
                 }
             }
@@ -759,7 +883,7 @@ where
                         conditions_cost: condition_cost,
                     });
                 }
-                return Ok(GraphPath {
+                return GraphPath {
                     graph: self.graph.clone(),
                     head: self.head,
                     tail: edge_tail,
@@ -781,7 +905,9 @@ where
                     defer_on_tail: defer,
                     matching_context_ids: self.matching_context_ids.clone(),
                     arguments_to_context_usages: self.arguments_to_context_usages.clone(),
-                });
+                    weight_counter: self.weight_counter.clone(),
+                }
+                .update_weight_counter_after_instantiation();
             }
         }
 
@@ -837,7 +963,7 @@ where
                 conditions_cost: condition_cost,
             });
         }
-        Ok(GraphPath {
+        GraphPath {
             graph: self.graph.clone(),
             head: self.head,
             tail: edge_tail,
@@ -875,7 +1001,9 @@ where
             },
             matching_context_ids: new_matching_context_ids,
             arguments_to_context_usages: new_arguments_to_context_usages,
-        })
+            weight_counter: self.weight_counter.clone(),
+        }
+        .update_weight_counter_after_instantiation()
     }
 
     #[allow(clippy::type_complexity)]

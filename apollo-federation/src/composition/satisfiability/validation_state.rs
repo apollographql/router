@@ -25,6 +25,7 @@ use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::condition_resolver::ConditionResolution;
 use crate::query_graph::condition_resolver::ConditionResolver;
+use crate::query_graph::graph_path::GraphPathWeightCounter;
 use crate::query_graph::graph_path::UnadvanceableClosures;
 use crate::query_graph::graph_path::Unadvanceables;
 use crate::query_graph::graph_path::transition::TransitionGraphPath;
@@ -86,6 +87,7 @@ impl ValidationState {
         api_schema_query_graph: Arc<QueryGraph>,
         federated_query_graph: Arc<QueryGraph>,
         root_kind: SchemaRootDefinitionKind,
+        graph_path_weight_counter: Arc<GraphPathWeightCounter>,
     ) -> Result<Self, FederationError> {
         let Some(federated_root_node) =
             federated_query_graph.root_kinds_to_nodes()?.get(&root_kind)
@@ -102,12 +104,16 @@ impl ValidationState {
             federated_root_node_weight.type_,
             QueryGraphNodeType::FederatedRootType(root_kind),
         );
-        let initial_subgraph_path =
-            TransitionGraphPath::from_graph_root(federated_query_graph.clone(), root_kind)?;
+        let initial_subgraph_path = TransitionGraphPath::from_graph_root(
+            federated_query_graph.clone(),
+            root_kind,
+            graph_path_weight_counter.clone(),
+        )?;
         Ok(Self {
             supergraph_path: TransitionGraphPath::from_graph_root(
                 api_schema_query_graph,
                 root_kind,
+                graph_path_weight_counter,
             )?,
             subgraph_paths: federated_query_graph
                 .out_edges(*federated_root_node)

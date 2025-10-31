@@ -211,6 +211,7 @@ impl QueryPlannerService {
             query_plan_root_node: root_node.map(Arc::new),
             evaluated_plan_count: plan.statistics.evaluated_plan_count.clone().into_inner() as u64,
             evaluated_plan_paths: plan.statistics.evaluated_plan_paths.clone().into_inner() as u64,
+            path_weight_high_water_mark: plan.statistics.path_weight_high_water_mark,
         })
     }
 
@@ -333,6 +334,7 @@ impl QueryPlannerService {
             formatted_query_plan,
             evaluated_plan_count,
             evaluated_plan_paths,
+            path_weight_high_water_mark,
         } = plan_result;
 
         // If the query is filtered, we want to generate the signature using the original query and generate the
@@ -367,6 +369,11 @@ impl QueryPlannerService {
                 "apollo.router.query_planning.plan.evaluated_paths",
                 "Number of paths (including intermediate ones) considered to plan a query before starting to generate a plan",
                 evaluated_plan_paths
+            );
+            u64_histogram!(
+                "apollo.router.query_planning.plan.path_weight_high_water_mark",
+                "High water mark of the number of in-memory paths (weighted by path size) during query planning",
+                path_weight_high_water_mark
             );
 
             Ok(QueryPlannerContent::Plan {
@@ -610,6 +617,7 @@ pub(crate) struct QueryPlanResult {
     pub(super) query_plan_root_node: Option<Arc<PlanNode>>,
     pub(super) evaluated_plan_count: u64,
     pub(super) evaluated_plan_paths: u64,
+    pub(super) path_weight_high_water_mark: u64,
 }
 
 pub(crate) fn metric_query_planning_plan_duration(

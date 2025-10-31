@@ -157,6 +157,19 @@ pub struct QueryPlannerDebugConfig {
     ///
     /// The default value is None, which specifies no limit.
     pub paths_limit: Option<u32>,
+
+    /// Before creating query plans, for each path of fields in the query we compute all the
+    /// possible options to traverse that path via the subgraphs. These options themselves consist
+    /// of paths, and these option paths may consume a significant amount of memory for sufficiently
+    /// complex schemas and operations.
+    ///
+    /// This config allows limiting the number of in-memory paths (weighted by path size). If the
+    /// query planner exceeds this limit while planning an operation, planning will abort and the
+    /// operation will fail. For guidance on what value to configure for this option, please use the
+    /// router metric `apollo.router.query_planning.plan.path_weight_high_water_mark`.
+    ///
+    /// The default value is None, which specifies no limit.
+    pub path_weight_limit: Option<u64>,
 }
 
 impl Default for QueryPlannerDebugConfig {
@@ -164,6 +177,7 @@ impl Default for QueryPlannerDebugConfig {
         Self {
             max_evaluated_plans: NonZeroU32::new(10_000).unwrap(),
             paths_limit: None,
+            path_weight_limit: None,
         }
     }
 }
@@ -173,6 +187,7 @@ impl Default for QueryPlannerDebugConfig {
 pub struct QueryPlanningStatistics {
     pub evaluated_plan_count: Cell<usize>,
     pub evaluated_plan_paths: Cell<usize>,
+    pub path_weight_high_water_mark: u64,
     /// `best_plan_cost` can be NaN, if the cost is not computed or irrelevant.
     pub best_plan_cost: f64,
 }
@@ -456,6 +471,7 @@ impl QueryPlanner {
             // checked at various points in query planning. This is our Rust equivalent of that.
             head_must_be_root: true,
             statistics: &statistics,
+            graph_path_weight_counter: Default::default(),
             abstract_types_with_inconsistent_runtime_types: self
                 .abstract_types_with_inconsistent_runtime_types
                 .clone()
@@ -546,6 +562,7 @@ impl QueryPlanner {
             node: root_node,
             statistics: QueryPlanningStatistics {
                 best_plan_cost: cost,
+                path_weight_high_water_mark: parameters.graph_path_weight_counter.high_water_mark(),
                 ..statistics
             },
         };
