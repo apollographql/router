@@ -389,9 +389,6 @@ fn interface_object_does_not_error_when_optimizing_unnecessary_loops() {
     );
 }
 
-// TODO: Check that we have ported tests for the @interfaceObject field sharing tests from
-// compose.test.ts (lines ~2408-2486)
-
 #[test]
 fn interface_object_fed354_repro_failure() {
     let subgraph1 = ServiceDefinition {
