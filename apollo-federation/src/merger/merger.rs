@@ -539,7 +539,7 @@ impl Merger {
 
         // Lastly, we validate that the API schema of the supergraph can be successfully computed,
         // which currently will surface issues around misuses of `@inaccessible` (there should be
-        // other errors in theory, but if there is, better find it now rather than later).
+        // other errors in theory, but if there are, better to find it now rather than later).
         api_schema::to_api_schema(supergraph_schema.clone(), Default::default()).map_err(
             |err| {
                 // TODO: port `updateInaccessibleErrorsWithLinkToSubgraphs` from JS (FED-882)
