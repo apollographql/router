@@ -267,11 +267,16 @@ impl CacheControl {
         }
     }
 
-    pub(crate) fn merge(&self, other: &CacheControl) -> CacheControl {
-        self.merge_inner(other, now_epoch_seconds())
+    /// Merge cache control values without updating the TTL
+    pub(crate) fn merge_without_update(&self, other: &CacheControl) -> CacheControl {
+        self.merge_inner(other, None)
     }
 
-    fn merge_inner(&self, other: &CacheControl, now: u64) -> CacheControl {
+    pub(crate) fn merge(&self, other: &CacheControl) -> CacheControl {
+        self.merge_inner(other, now_epoch_seconds().into())
+    }
+
+    fn merge_inner(&self, other: &CacheControl, now: Option<u64>) -> CacheControl {
         // Early return to avoid conflicts https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#preventing_storing
         if self.no_store || other.no_store {
             return CacheControl {
@@ -280,29 +285,42 @@ impl CacheControl {
             };
         }
         CacheControl {
-            created: now,
-            max_age: match (self.ttl(), other.ttl()) {
-                (None, None) => None,
-                (None, Some(ttl)) => Some(other.update_ttl(ttl, now)),
-                (Some(ttl), None) => Some(self.update_ttl(ttl, now)),
-                (Some(ttl1), Some(ttl2)) => Some(std::cmp::min(
-                    self.update_ttl(ttl1, now),
-                    other.update_ttl(ttl2, now),
-                )),
+            created: now.unwrap_or_default(),
+            max_age: match now {
+                Some(now) => match (self.ttl(), other.ttl()) {
+                    (None, None) => None,
+                    (None, Some(ttl)) => Some(other.update_ttl(ttl, now)),
+                    (Some(ttl), None) => Some(self.update_ttl(ttl, now)),
+                    (Some(ttl1), Some(ttl2)) => Some(std::cmp::min(
+                        self.update_ttl(ttl1, now),
+                        other.update_ttl(ttl2, now),
+                    )),
+                },
+                None => match (self.ttl(), other.ttl()) {
+                    (None, None) => None,
+                    (None, Some(ttl)) => Some(ttl),
+                    (Some(ttl), None) => Some(ttl),
+                    (Some(ttl1), Some(ttl2)) => Some(std::cmp::min(ttl1, ttl2)),
+                },
             },
             age: None,
             s_max_age: None,
-            stale_while_revalidate: match (
-                self.stale_while_revalidate,
-                other.stale_while_revalidate,
-            ) {
-                (None, None) => None,
-                (None, Some(ttl)) => Some(other.update_ttl(ttl, now)),
-                (Some(ttl), None) => Some(self.update_ttl(ttl, now)),
-                (Some(ttl1), Some(ttl2)) => Some(std::cmp::min(
-                    self.update_ttl(ttl1, now),
-                    other.update_ttl(ttl2, now),
-                )),
+            stale_while_revalidate: match now {
+                Some(now) => match (self.stale_while_revalidate, other.stale_while_revalidate) {
+                    (None, None) => None,
+                    (None, Some(ttl)) => Some(other.update_ttl(ttl, now)),
+                    (Some(ttl), None) => Some(self.update_ttl(ttl, now)),
+                    (Some(ttl1), Some(ttl2)) => Some(std::cmp::min(
+                        self.update_ttl(ttl1, now),
+                        other.update_ttl(ttl2, now),
+                    )),
+                },
+                None => match (self.stale_while_revalidate, other.stale_while_revalidate) {
+                    (None, None) => None,
+                    (None, Some(ttl)) => Some(ttl),
+                    (Some(ttl), None) => Some(ttl),
+                    (Some(ttl1), Some(ttl2)) => Some(std::cmp::min(ttl1, ttl2)),
+                },
             },
             no_cache: self.no_cache || other.no_cache,
             must_revalidate: self.must_revalidate || other.must_revalidate,
@@ -353,6 +371,10 @@ impl CacheControl {
 
     pub(crate) fn public(&self) -> bool {
         self.public
+    }
+
+    pub(crate) fn get_no_store(&self) -> bool {
+        self.no_store
     }
 
     pub(crate) fn can_use(&self) -> bool {
@@ -411,7 +433,7 @@ mod tests {
         assert_eq!(first.remaining_time(now), Some(30));
         assert_eq!(second.remaining_time(now), Some(40));
 
-        let merged = first.merge_inner(&second, now);
+        let merged = first.merge_inner(&second, now.into());
         assert_eq!(merged.created, now);
 
         assert_eq!(merged.ttl(), Some(30));
@@ -438,7 +460,7 @@ mod tests {
             ..Default::default()
         };
 
-        let merged = first.merge_inner(&second, now);
+        let merged = first.merge_inner(&second, now.into());
         assert!(merged.no_store);
         assert!(!merged.public);
         assert!(!merged.can_use());
@@ -481,7 +503,7 @@ mod tests {
             ..Default::default()
         };
 
-        let merged = first.merge_inner(&second, now);
+        let merged = first.merge_inner(&second, now.into());
         assert!(!merged.public);
         assert!(merged.private);
         assert!(merged.can_use());
