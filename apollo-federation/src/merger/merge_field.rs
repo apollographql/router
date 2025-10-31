@@ -11,6 +11,7 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
+use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::FieldDefinition;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
@@ -341,7 +342,6 @@ impl Merger {
         if self.has_external(&field_sources) {
             self.validate_external_fields(&field_sources, &dest.clone().into(), all_types_equal)?;
         }
-        trace!("Adding join field");
         self.add_join_field(sources, dest, all_types_equal, merge_context)?;
         self.add_join_directive_directives(sources, dest)?;
         Ok(())
@@ -1069,10 +1069,13 @@ impl Merger {
         //   2) none of the field instance has a @requires or @provides.
         //   3) none of the field is @external.
         for (&idx, source_opt) in &sources {
+            let subgraph = &self.subgraphs[idx];
+            let provides_directive_name = subgraph.provides_directive_name().ok().flatten();
+            let requires_directive_name = subgraph.requires_directive_name().ok().flatten();
             let overridden = merge_context.is_unused_overridden(idx);
             match source_opt {
                 Some(source_pos) => {
-                    if !overridden && let Some(subgraph) = self.subgraphs.get(idx) {
+                    if !overridden {
                         // Check if field is external
                         let is_external = match source_pos {
                             DirectiveTargetPosition::ObjectField(pos) => self.is_field_external(
@@ -1090,19 +1093,41 @@ impl Merger {
                         }
 
                         // Check for requires and provides directives using subgraph-specific metadata
-                        if let Ok(Some(provides_directive_name)) =
-                            subgraph.provides_directive_name()
-                            && !source_pos
-                                .get_applied_directives(subgraph.schema(), &provides_directive_name)
+                        if provides_directive_name.is_some_and(|provides| {
+                            !source_pos
+                                .get_applied_directives(subgraph.schema(), &provides)
                                 .is_empty()
+                        }) {
+                            return Ok(true);
+                        }
+                        if requires_directive_name.is_some_and(|requires| {
+                            !source_pos
+                                .get_applied_directives(subgraph.schema(), &requires)
+                                .is_empty()
+                        }) {
+                            return Ok(true);
+                        }
+                    }
+
+                    let field_name = match source_pos {
+                        DirectiveTargetPosition::ObjectField(pos) => &pos.field_name,
+                        DirectiveTargetPosition::InterfaceField(pos) => &pos.field_name,
+                        DirectiveTargetPosition::InputObjectField(pos) => &pos.field_name,
+                        _ => {
+                            // We should never reach here because the other targets don't have
+                            // fields, but let's just continue gracefully.
+                            continue;
+                        }
+                    };
+                    for subgraph in self.subgraphs.iter() {
+                        let parent_ty = subgraph.schema().schema().types.get(parent_name);
+                        if let Some(ExtendedType::Object(obj)) = parent_ty
+                            && !obj.fields.contains_key(field_name)
                         {
                             return Ok(true);
                         }
-                        if let Ok(Some(requires_directive_name)) =
-                            subgraph.requires_directive_name()
-                            && !source_pos
-                                .get_applied_directives(subgraph.schema(), &requires_directive_name)
-                                .is_empty()
+                        if let Some(ExtendedType::Interface(intf)) = parent_ty
+                            && !intf.fields.contains_key(field_name)
                         {
                             return Ok(true);
                         }
@@ -1110,11 +1135,10 @@ impl Merger {
                 }
                 None => {
                     // This subgraph does not have the field, so if it has the field type, we need a join__field.
-                    if let Some(subgraph) = self.subgraphs.get(idx)
-                        && subgraph
-                            .schema()
-                            .try_get_type(parent_name.clone())
-                            .is_some()
+                    if subgraph
+                        .schema()
+                        .try_get_type(parent_name.clone())
+                        .is_some()
                     {
                         return Ok(true);
                     }
