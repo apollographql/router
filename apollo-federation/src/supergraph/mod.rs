@@ -89,22 +89,12 @@ use crate::schema::type_and_directive_specification::UnionTypeSpecification;
 use crate::utils::FallibleIterator;
 
 #[derive(Debug)]
-#[allow(unused)]
 pub struct Supergraph<S> {
     pub state: S,
 }
 
 impl Supergraph<Merged> {
-    pub fn new(schema: Valid<Schema>) -> Self {
-        Self {
-            state: Merged {
-                schema,
-                hints: vec![],
-            },
-        }
-    }
-
-    pub fn with_hints(schema: Valid<Schema>, hints: Vec<CompositionHint>) -> Self {
+    pub fn with_hints(schema: ValidFederationSchema, hints: Vec<CompositionHint>) -> Self {
         Self {
             state: Merged { schema, hints },
         }
@@ -112,14 +102,20 @@ impl Supergraph<Merged> {
 
     pub fn parse(schema_str: &str) -> Result<Self, FederationError> {
         let schema = Schema::parse_and_validate(schema_str, "schema.graphql")?;
-        Ok(Self::new(schema))
+        Ok(Self {
+            state: Merged {
+                schema: ValidFederationSchema::new(schema)?,
+                hints: vec![],
+            },
+        })
     }
 
     pub fn assume_satisfiable(self) -> Supergraph<Satisfiable> {
         todo!("unimplemented")
     }
 
-    pub fn schema(&self) -> &Valid<Schema> {
+    /// Supergraph schema
+    pub fn schema(&self) -> &ValidFederationSchema {
         &self.state.schema
     }
 
@@ -135,8 +131,7 @@ impl Supergraph<Merged> {
     pub(crate) fn subgraph_name_to_graph_enum_value(
         &self,
     ) -> Result<IndexMap<String, Name>, FederationError> {
-        // TODO: We can avoid this clone if the `Merged` struct contains a `FederationSchema`.
-        let supergraph_schema = FederationSchema::new(self.schema().clone().into_inner())?;
+        let supergraph_schema = self.schema();
         // PORT_NOTE: The JS version calls the `extractSubgraphsFromSupergraph` function, which
         //            returns the subgraph name to graph enum value mapping, but the corresponding
         //            `extract_subgraphs_from_supergraph` function in Rust does not need it and
@@ -144,9 +139,9 @@ impl Supergraph<Merged> {
         //            `extract_subgraphs_from_supergraph` function is reused here to compute the
         //            mapping, instead of modifying the function itself.
         let (_link_spec_definition, join_spec_definition, _context_spec_definition) =
-            crate::validate_supergraph_for_query_planning(&supergraph_schema)?;
+            crate::validate_supergraph_for_query_planning(supergraph_schema)?;
         let (_subgraphs, _federation_spec_definitions, graph_enum_value_name_to_subgraph_name) =
-            collect_empty_subgraphs(&supergraph_schema, join_spec_definition)?;
+            collect_empty_subgraphs(supergraph_schema, join_spec_definition)?;
         Ok(graph_enum_value_name_to_subgraph_name
             .into_iter()
             .map(|(enum_value_name, subgraph_name)| {
@@ -182,6 +177,7 @@ impl Supergraph<Satisfiable> {
         api_schema::to_api_schema(self.state.schema.clone(), options)
     }
 
+    /// Supergraph schema
     pub fn schema(&self) -> &ValidFederationSchema {
         &self.state.schema
     }
@@ -196,20 +192,12 @@ impl Supergraph<Satisfiable> {
 }
 
 #[derive(Clone, Debug)]
-#[allow(unused)]
 pub struct Merged {
-    schema: Valid<Schema>,
+    schema: ValidFederationSchema,
     hints: Vec<CompositionHint>,
 }
 
-impl Merged {
-    pub fn schema(&self) -> &Valid<Schema> {
-        &self.schema
-    }
-}
-
 #[derive(Clone, Debug)]
-#[allow(unused)]
 pub struct Satisfiable {
     schema: ValidFederationSchema,
     metadata: SupergraphMetadata,
@@ -231,8 +219,6 @@ pub struct SupergraphMetadata {
 // TODO this should be expanded as needed
 //  @see apollo-federation-types BuildMessage for what is currently used by rover
 #[derive(Clone, Debug)]
-#[allow(unused)]
-#[allow(unreachable_pub)]
 pub struct CompositionHint {
     pub message: String,
     pub code: String,
