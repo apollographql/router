@@ -164,52 +164,65 @@ fn interface_object_errors_if_interface_has_key_but_subgraph_doesnt_know_all_imp
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
         type_defs: r#"
-        type Query {
-          iFromA: I
-        }
+          type Query {
+            iFromA: I
+          }
 
-        interface I @key(fields: "id") {
-          id: ID!
-          x: Int
-        }
+          interface I @key(fields: "id") {
+            id: ID!
+            x: Int
+          }
 
-        type A implements I @key(fields: "id") {
-          id: ID!
-          x: Int
-        }
+          type A implements I @key(fields: "id") {
+            id: ID!
+            x: Int
+            w: Int
+          }
 
-        type B implements I @key(fields: "id") {
-          id: ID!
-          x: Int
-        }
+          type B implements I @key(fields: "id") {
+            id: ID!
+            x: Int
+            z: Int
+          }
         "#,
     };
 
     let subgraph_b = ServiceDefinition {
         name: "subgraphB",
         type_defs: r#"
-        type Query {
-          iFromB: I
-        }
+          type Query {
+            iFromB: I
+          }
 
-        type I @interfaceObject @key(fields: "id") {
-          id: ID!
-          y: Int
-        }
-
-        type A @key(fields: "id") {
-          id: ID!
-          y: Int
-        }
+          type I @interfaceObject @key(fields: "id") {
+            id: ID!
+            y: Int
+          }
         "#,
     };
 
-    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    let subgraph_c = ServiceDefinition {
+        name: "subgraphC",
+        type_defs: r#"
+          interface I {
+            id: ID!
+            x: Int
+          }
+
+          type C implements I @key(fields: "id") {
+            id: ID!
+            x: Int
+            w: Int
+          }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b, subgraph_c]);
     assert_composition_errors(
         &result,
         &[(
-            "INTERFACE_OBJECT_USAGE_ERROR",
-            r#"Interface "I" has a @key in subgraph "subgraphB" but that subgraph does not know all the implementations of "I""#,
+            "INTERFACE_KEY_MISSING_IMPLEMENTATION_TYPE",
+            r#"[subgraphA] Interface type "I" has a resolvable key (@key(fields: "id")) in subgraph "subgraphA" but that subgraph is missing some of the supergraph implementation types of "I". Subgraph "subgraphA" should define type "C" (and have it implement "I")."#,
         )],
     );
 }
@@ -375,6 +388,9 @@ fn interface_object_does_not_error_when_optimizing_unnecessary_loops() {
         "Expected composition to succeed - should not error when optimizing unnecessary loops",
     );
 }
+
+// TODO: Check that we have ported tests for the @interfaceObject field sharing tests from
+// compose.test.ts (lines ~2408-2486)
 
 #[test]
 fn interface_object_fed354_repro_failure() {

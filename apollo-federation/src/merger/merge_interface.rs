@@ -1,4 +1,5 @@
 use indexmap::IndexSet;
+use itertools::Itertools;
 use tracing::trace;
 
 use crate::error::CompositionError;
@@ -7,6 +8,7 @@ use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
@@ -37,12 +39,7 @@ impl Merger {
                 continue;
             }
 
-            let source_metadata = self.subgraphs[*idx].metadata();
-            let Ok(key_directive_name) = source_metadata
-                .federation_spec_definition()
-                .key_directive_definition(&self.merged)
-                .map(|def| def.name.clone())
-            else {
+            let Some(key_directive_name) = subgraph.key_directive_name()? else {
                 continue;
             };
             let interface_pos: TypeDefinitionPosition = dest.clone().into();
@@ -54,22 +51,16 @@ impl Merger {
             let implementations_in_subgraph = subgraph
                 .schema()
                 .possible_runtime_types(dest.clone().into())?;
-            if implementations_in_subgraph.len() < supergraph_implementations.len() {
-                let missing_implementations = supergraph_implementations
-                    .iter()
-                    .filter(|implementation| !implementations_in_subgraph.contains(*implementation))
-                    .collect::<IndexSet<_>>();
-
+            let missing_implementations: IndexSet<_> = supergraph_implementations
+                .difference(&implementations_in_subgraph)
+                .collect();
+            let subgraph_name = &subgraph.name;
+            if !missing_implementations.is_empty() {
                 self.error_reporter.add_error(CompositionError::InterfaceKeyMissingImplementationType {
-                            message: format!("Interface type \"{}\" has a resolvable key \"{}\" in subgraph \"{}\" but is missing some of the supergraph implementation types of \"{}\". Subgraph \"{}\" should define {} (and have {} implement \"{}\").",
-                                &dest.type_name,
+                            message: format!("[{subgraph_name}] Interface type \"{dest}\" has a resolvable key ({}) in subgraph \"{subgraph_name}\" but that subgraph is missing some of the supergraph implementation types of \"{dest}\". Subgraph \"{subgraph_name}\" should define {} (and have {} implement \"{dest}\").",
                                 resolvable_key.serialize(),
-                                &self.subgraphs[*idx].name,
-                                &dest.type_name,
-                                &self.subgraphs[*idx].name,
                                 human_readable_types(missing_implementations.iter().map(|impl_type| &impl_type.type_name)),
                                 if missing_implementations.len() > 1 { "them" } else { "it" },
-                                &dest.type_name,
                             )
                         });
             }
@@ -97,7 +88,13 @@ impl Merger {
             } else {
                 continue;
             };
-            if !self.subgraphs[*idx].is_interface_object_type(&dest.clone().into()) {
+            // If `dest` has an interface object in this subgraph, it will be an object type (not
+            // an interface). So we have to check for the object equivalent of `dest` instead of
+            // checking `dest` directly.
+            let ty_as_obj = ObjectTypeDefinitionPosition {
+                type_name: dest.type_name.clone(),
+            };
+            if !self.subgraphs[*idx].is_interface_object_type(&ty_as_obj.into()) {
                 continue;
             }
 
@@ -109,10 +106,7 @@ impl Merger {
                 .collect::<IndexSet<_>>();
             if !defined_implementations.is_empty() {
                 self.error_reporter.add_error(CompositionError::InterfaceObjectUsageError {
-                    message: format!("Interface type \"{}\" is defined as an @interfaceObject in subgraph \"{}\" so that subgraph should not define any of the implementation types of \"{}\", but it defines {}",
-                        &dest.type_name,
-                        &subgraph_name,
-                        &dest.type_name,
+                    message: format!("[{subgraph_name}] Interface type \"{dest}\" is defined as an @interfaceObject in subgraph \"{subgraph_name}\" so that subgraph should not define any of the implementation types of \"{dest}\", but it defines {}",
                         human_readable_types(defined_implementations.iter().map(|impl_type| &impl_type.type_name)),
                     )
                 });
