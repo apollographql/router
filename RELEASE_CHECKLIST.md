@@ -8,7 +8,8 @@ Release Checklist
   - [Starting a release PR](#starting-a-release-pr) - The release PR tracks a branch and gathers commits, allows changelog review.
   - _(optional)_ [Cutting a pre-release](#cutting-a-pre-release) (i.e., release candidate, alpha or beta) - Near-final versions for testing.
   - [Preparing the final release](#preparing-the-final-release) - Final version number bumps and final changelog preparation.
-  - [Finishing the release](#finishing-the-release) - Builds the final release, merges into `main`, reconcile `dev` trunk.
+  - [Finishing the release](#finishing-the-release) - Builds the final release, merges into `main`, reconcile `main` back to `dev`.
+  - [Reconciling `main` back to `dev`](#reconciling-main-back-to-dev) - Merge the release changes from `main` back into the development trunk.
   - Verifying the release (TODO)
   - [Troubleshooting a release](#troubleshooting-a-release) - Something went wrong?
 - [Nightly releases](#nightly-releases)
@@ -69,8 +70,8 @@ This project uses [Semantic Versioning 2.0.0](https://semver.org/).  When releas
 
 Creating a release PR is the first step of starting a release, whether there will be pre-releases or not.  About a release PR:
 
-* A release PR is based on a mainline release line (e.g., `dev`, or `1.x`) and a release branch gathers all the commits for a release.
-* The release PR merges into the mainline at the time that the release becomes official.
+* A release PR is based on `dev` (the main development trunk) and a release branch gathers all the commits for a release.
+* The release PR merges into `main` at the time that the release becomes official.
 * A release can be started from any branch or commit, but it is almost always started from `dev` as that is the main development trunk of the Router.
 * The release PR is in a draft mode until after the preparation PR has been merged into it.
 
@@ -125,15 +126,15 @@ Start following the steps below to start a release PR.  The process is **not ful
 9. Now, open a draft PR with a small boilerplate header from the branch which was just pushed:
 
    ```
-   cat <<EOM | gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr create --draft --label release -B "dev" --title "release: v${APOLLO_ROUTER_RELEASE_VERSION}" --body-file -
+   cat <<EOM | gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr create --draft --label release -B "main" --title "release: v${APOLLO_ROUTER_RELEASE_VERSION}" --body-file -
    > **Note**
-   > **This particular PR must be true-merged to \`dev\`.**
+   > **This particular PR must be true-merged to \`main\`.**
 
-   * This PR is only ready to review when it is marked as "Ready for Review".  It represents the merge to the \`dev\` branch of an upcoming release (version number in the title).
+   * This PR is only ready to review when it is marked as "Ready for Review".  It represents the merge to the \`main\` branch of an upcoming release (version number in the title).
    * It will act as a staging branch until we are ready to finalize the release.
    * We may cut any number of alpha and release candidate (RC) versions off this branch prior to formalizing it.
    * This PR is **primarily a merge commit**, so reviewing every individual commit shown below is **not necessary** since those have been reviewed in their own PR.  However, things important to review on this PR **once it's marked "Ready for Review"**:
-       - Does this PR target the right branch? (usually, \`dev\`)
+       - Does this PR target the right branch? (should be \`main\`)
        - Are the appropriate **version bumps** and **release note edits** in the end of the commit list (or within the last few commits).  In other words, "Did the 'release prep' PR actually land on this branch?"
        - If those things look good, this PR is good to merge!
    EOM
@@ -422,6 +423,91 @@ Start following the steps below to start a release PR.  The process is **not ful
 
     ```
     curl -s "https://github.com/apollographql/router/releases/tag/v${APOLLO_ROUTER_RELEASE_VERSION}" | htmlq 'meta[property="og:image"]' --attribute content
+    ```
+
+### Reconciling `main` back to `dev`
+
+After the release has been merged to `main`, we need to reconcile those changes back to the `dev` branch to keep our development trunk up to date.
+
+1. Make sure the release PR has been fully merged into `main` and that CircleCI has completed successfully.
+
+2. Set up environment variables (if not already set from previous steps):
+
+   ```
+   APOLLO_ROUTER_RELEASE_VERSION="#.#.#"                  # Set me!
+   APOLLO_ROUTER_RELEASE_GIT_ORIGIN=origin
+   APOLLO_ROUTER_RELEASE_GITHUB_REPO=apollographql/router
+   ```
+
+3. Check out `main` and pull the latest changes:
+
+   ```
+   git checkout main && \
+   git pull "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" main
+   ```
+
+4. Create a new branch for the reconciliation:
+
+   ```
+   git checkout -b "reconcile-v${APOLLO_ROUTER_RELEASE_VERSION}"
+   ```
+
+5. Merge `main` into this branch (which is based on the current `dev`):
+
+   ```
+   git fetch "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" dev && \
+   git merge "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}/dev" --no-ff
+   ```
+
+6. Resolve any merge conflicts that arise. Common conflicts might include:
+   - Version numbers in `Cargo.toml` files (typically keep the dev version)
+   - `CHANGELOG.md` entries (keep both, ensuring proper ordering)
+
+7. After resolving conflicts, commit the merge:
+
+   ```
+   git add -A && \
+   git commit -m "Reconcile \`dev\` after merge to \`main\` for v${APOLLO_ROUTER_RELEASE_VERSION}"
+   ```
+
+8. Push the reconciliation branch:
+
+   ```
+   git push --set-upstream "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "reconcile-v${APOLLO_ROUTER_RELEASE_VERSION}"
+   ```
+
+9. Create a PR to merge the reconciliation back into `dev`:
+
+   ```
+   cat <<EOM | gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr create -B "dev" --title "Reconcile \`dev\` after merge to \`main\` for v${APOLLO_ROUTER_RELEASE_VERSION}" --body-file -
+   > **Note**
+   > **This PR must be true-merged (NOT squashed) into \`dev\`.**
+
+   This PR reconciles the \`main\` branch back into \`dev\` after the release of v${APOLLO_ROUTER_RELEASE_VERSION}.
+
+   **What to review**:
+   - Merge conflict resolutions (if any)
+   - That version numbers in \`dev\` remain appropriate for continued development
+   - That the CHANGELOG.md properly reflects both the release and ongoing work
+
+   Once approved, this should be merged using a **merge commit** (not squash).
+   EOM
+   ```
+
+10. 🗣️ **Get the reconciliation PR reviewed and approved by the Router team**
+
+11. Merge the reconciliation PR using a **true merge** (not squash):
+
+    ```
+    gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr merge --merge "reconcile-v${APOLLO_ROUTER_RELEASE_VERSION}"
+    ```
+
+12. Clean up your local branches:
+
+    ```
+    git checkout dev && \
+    git pull "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" dev && \
+    git branch -d "${APOLLO_ROUTER_RELEASE_VERSION}" "prep-${APOLLO_ROUTER_RELEASE_VERSION}" "reconcile-v${APOLLO_ROUTER_RELEASE_VERSION}"
     ```
 
 ## Nightly Releases
