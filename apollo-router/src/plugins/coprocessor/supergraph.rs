@@ -101,8 +101,7 @@ impl SupergraphStage {
                 let sdl = sdl.clone();
 
                 async move {
-                    let mut succeeded = true;
-                    let result = process_supergraph_request_stage(
+                    process_supergraph_request_stage(
                         http_client,
                         coprocessor_url,
                         sdl,
@@ -112,18 +111,9 @@ impl SupergraphStage {
                     )
                     .await
                     .map_err(|error| {
-                        succeeded = false;
                         tracing::error!("coprocessor: supergraph request stage error: {error}");
                         error
-                    });
-                    u64_counter!(
-                        "apollo.router.operations.coprocessor",
-                        "Total operations with co-processors enabled",
-                        1,
-                        "coprocessor.stage" = PipelineStep::SupergraphRequest,
-                        "coprocessor.succeeded" = succeeded
-                    );
-                    result
+                    })
                 }
             })
         });
@@ -140,9 +130,7 @@ impl SupergraphStage {
 
                 async move {
                     let response: supergraph::Response = fut.await?;
-
-                    let mut succeeded = true;
-                    let result = process_supergraph_response_stage(
+                    process_supergraph_response_stage(
                         http_client,
                         coprocessor_url,
                         sdl,
@@ -152,18 +140,9 @@ impl SupergraphStage {
                     )
                     .await
                     .map_err(|error| {
-                        succeeded = false;
                         tracing::error!("coprocessor: supergraph response stage error: {error}");
                         error
-                    });
-                    u64_counter!(
-                        "apollo.router.operations.coprocessor",
-                        "Total operations with co-processors enabled",
-                        1,
-                        "coprocessor.stage" = PipelineStep::SupergraphResponse,
-                        "coprocessor.succeeded" = succeeded
-                    );
-                    result
+                    })
                 }
             })
         });
@@ -240,11 +219,25 @@ where
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::SupergraphRequest, duration);
+
+    record_coprocessor_duration(PipelineStep::SupergraphRequest, start.elapsed());
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
+
+    // Determine logical success before control flow branches
+    let succeeded = match co_processor_output.body.as_ref() {
+        Some(body_value) => {
+            // Try to deserialize a copy of the body just for validation
+            let gql_response =
+                deserialize_coprocessor_response(body_value.clone(), response_validation);
+            gql_response.errors.is_empty()
+        }
+        None => false, // no body = logical failure
+    };
+
+    record_coprocessor_operation(PipelineStep::SupergraphRequest, succeeded);
+
     validate_coprocessor_output(&co_processor_output, PipelineStep::SupergraphRequest)?;
     // unwrap is safe here because validate_coprocessor_output made sure control is available
     let control = co_processor_output.control.expect("validated above; qed");
@@ -385,13 +378,24 @@ where
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
     let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::SupergraphResponse, duration);
+    record_coprocessor_duration(PipelineStep::SupergraphResponse, start.elapsed());
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
-
     validate_coprocessor_output(&co_processor_output, PipelineStep::SupergraphResponse)?;
+
+    // Determine logical success before control flow branches
+    let succeeded = match co_processor_output.body.as_ref() {
+        Some(body_value) => {
+            // Try to deserialize a copy of the body just for validation
+            let gql_response =
+                deserialize_coprocessor_response(body_value.clone(), response_validation);
+            gql_response.errors.is_empty()
+        }
+        None => false, // no body = logical failure
+    };
+
+    record_coprocessor_operation(PipelineStep::SupergraphResponse, succeeded);
 
     // Check if the incoming GraphQL response was valid according to GraphQL spec
     let incoming_payload_was_valid =
@@ -552,8 +556,10 @@ mod tests {
     use super::super::*;
     use super::*;
     use crate::json_ext::Object;
+    use crate::metrics::FutureMetricsExt;
     use crate::plugin::test::MockInternalHttpClientService;
     use crate::plugin::test::MockSupergraphService;
+    use crate::plugins::coprocessor::test::assert_coprocessor_operations_metrics;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::services::router;
     use crate::services::supergraph;
@@ -601,6 +607,279 @@ mod tests {
         });
 
         mock_http_client
+    }
+
+    #[tokio::test]
+    async fn supergraph_request_metric_not_incremented_when_condition_false() {
+        async {
+            for _ in 0..2 {
+                // Create a Supergraph stage with condition = false
+                let _stage = create_supergraph_stage_for_request_with_false_condition();
+
+                let _service = _stage.as_service(
+                    create_mock_http_client_supergraph_request_valid_response(),
+                    create_mock_supergraph_service().boxed(),
+                    "http://test".to_string(),
+                    Arc::default(),
+                    false, // Validation disabled
+                );
+
+                let _request = supergraph::Request::fake_builder().build().unwrap();
+                let _response = _service.oneshot(_request).await;
+            }
+
+            // This call will validate there are no metrics for all stages
+            assert_coprocessor_operations_metrics(&[]);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn supergraph_response_metric_not_incremented_when_condition_false() {
+        async {
+            for _ in 0..2 {
+                // Create a Supergraph stage with condition = false
+                let _stage = create_supergraph_stage_for_response_with_false_condition();
+
+                let _service = _stage.as_service(
+                    create_mock_http_client_supergraph_response_valid_response(),
+                    create_mock_supergraph_service().boxed(),
+                    "http://test".to_string(),
+                    Arc::default(),
+                    false, // Validation disabled
+                );
+
+                let _request = supergraph::Request::fake_builder().build().unwrap();
+                let _response = _service.oneshot(_request).await;
+            }
+
+            assert_coprocessor_operations_metrics(&[]);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn supergraph_request_metric_incremented_when_condition_true() {
+        // Make 2 requests to better validate metric is being incremented correctly
+        async {
+            for _ in 0..2 {
+                // Create a Supergraph stage with condition = false
+                let _stage = create_supergraph_stage_for_request_validation_test();
+
+                let _service = _stage.as_service(
+                    create_mock_http_client_supergraph_request_valid_response(),
+                    create_mock_supergraph_service().boxed(),
+                    "http://test".to_string(),
+                    Arc::default(),
+                    false, // Validation disabled
+                );
+
+                let _request = supergraph::Request::fake_builder().build().unwrap();
+                let _response = _service.oneshot(_request).await;
+            }
+
+            assert_coprocessor_operations_metrics(&[(
+                PipelineStep::SupergraphRequest,
+                2,
+                Some(true),
+            )]);
+        }
+        .with_metrics()
+        .await;
+
+        // Assert — mock ensures it was never called
+        // (if the function were invoked, mockall would panic due to times(0))
+    }
+
+    #[tokio::test]
+    async fn supergraph_response_metric_incremented_when_condition_true() {
+        // Make 3 requests to better validate metric is being incremented correctly
+        async {
+            for _ in 0..3 {
+                // Create a Supergraph stage with condition = false
+                let _stage = create_supergraph_stage_for_response_validation_test();
+
+                let _service = _stage.as_service(
+                    create_mock_http_client_supergraph_response_valid_response(),
+                    create_mock_supergraph_service().boxed(),
+                    "http://test".to_string(),
+                    Arc::default(),
+                    false, // Validation disabled
+                );
+
+                let _request = supergraph::Request::fake_builder().build().unwrap();
+                let _response = _service.oneshot(_request).await;
+            }
+
+            assert_coprocessor_operations_metrics(&[(
+                PipelineStep::SupergraphResponse,
+                3,
+                Some(true),
+            )]);
+        }
+        .with_metrics()
+        .await;
+
+        // Assert — mock ensures it was never called
+        // (if the function were invoked, mockall would panic due to times(0))
+    }
+
+    #[tokio::test]
+    async fn both_supergraph_stages_metric_incremented_when_conditions_true() {
+        async {
+            for _ in 0..3 {
+                let _stage = create_supergraph_stage_for_request_validation_test();
+
+                let _service = _stage.as_service(
+                    create_mock_http_client_supergraph_request_valid_response(),
+                    create_mock_supergraph_service().boxed(),
+                    "http://test".to_string(),
+                    Arc::default(),
+                    false, // Validation disabled
+                );
+
+                let _request = supergraph::Request::fake_builder().build().unwrap();
+                let _response = _service.oneshot(_request).await;
+            }
+
+            for _ in 0..2 {
+                let _stage = create_supergraph_stage_for_response_validation_test();
+
+                let _service = _stage.as_service(
+                    create_mock_http_client_supergraph_response_valid_response(),
+                    create_mock_supergraph_service().boxed(),
+                    "http://test".to_string(),
+                    Arc::default(),
+                    false, // Validation disabled
+                );
+
+                let _request = supergraph::Request::fake_builder().build().unwrap();
+                let _response = _service.oneshot(_request).await;
+            }
+
+            assert_coprocessor_operations_metrics(&[
+                (PipelineStep::SupergraphRequest, 3, Some(true)),
+                (PipelineStep::SupergraphResponse, 2, Some(true)),
+            ]);
+        }
+        .with_metrics()
+        .await;
+
+        // Assert — mock ensures it was never called
+        // (if the function were invoked, mockall would panic due to times(0))
+    }
+
+    #[tokio::test]
+    async fn supergraph_request_metric_incremented_for_errored_stage_processing() {
+        // Make 2 requests to better validate metric is being incremented correctly
+        async {
+            for _ in 0..2 {
+                // Create a Supergraph stage with condition = false
+                let _stage = create_supergraph_stage_for_request_validation_test();
+
+                let _service = _stage.as_service(
+                    create_mock_http_client_supergraph_request_invalid_response(),
+                    create_mock_supergraph_service().boxed(),
+                    "http://test".to_string(),
+                    Arc::default(),
+                    true, // Validation disabled
+                );
+
+                let _request = supergraph::Request::fake_builder().build().unwrap();
+                let _response = _service.oneshot(_request).await;
+            }
+
+            assert_coprocessor_operations_metrics(&[(
+                PipelineStep::SupergraphRequest,
+                2,
+                Some(false),
+            )]);
+        }
+        .with_metrics()
+        .await;
+
+        // Assert — mock ensures it was never called
+        // (if the function were invoked, mockall would panic due to times(0))
+    }
+
+    #[tokio::test]
+    async fn supergraph_response_metric_incremented_for_errored_stage_processing() {
+        // Make 2 requests to better validate metric is being incremented correctly
+        async {
+            for _ in 0..2 {
+                // Create a Supergraph stage with condition = false
+                let _stage = create_supergraph_stage_for_response_validation_test();
+
+                let _service = _stage.as_service(
+                    create_mock_http_client_invalid_response(),
+                    create_mock_supergraph_service().boxed(),
+                    "http://test".to_string(),
+                    Arc::default(),
+                    true, // Validation disabled
+                );
+
+                let _request = supergraph::Request::fake_builder().build().unwrap();
+                let _response = _service.oneshot(_request).await;
+            }
+
+            assert_coprocessor_operations_metrics(&[(
+                PipelineStep::SupergraphResponse,
+                2,
+                Some(false),
+            )]);
+        }
+        .with_metrics()
+        .await;
+
+        // Assert — mock ensures it was never called
+        // (if the function were invoked, mockall would panic due to times(0))
+    }
+
+    #[tokio::test]
+    async fn both_supergraph_stages_metric_incremented_for_errored_stages_processing() {
+        async {
+            for _ in 0..2 {
+                let _stage = create_supergraph_stage_for_request_validation_test();
+
+                let _service = _stage.as_service(
+                    create_mock_http_client_supergraph_request_invalid_response(),
+                    create_mock_supergraph_service().boxed(),
+                    "http://test".to_string(),
+                    Arc::default(),
+                    false, // Validation disabled
+                );
+
+                let _request = supergraph::Request::fake_builder().build().unwrap();
+                let _response = _service.oneshot(_request).await;
+            }
+
+            for _ in 0..3 {
+                let _stage = create_supergraph_stage_for_response_validation_test();
+
+                let _service = _stage.as_service(
+                    create_mock_http_client_invalid_response(),
+                    create_mock_supergraph_service().boxed(),
+                    "http://test".to_string(),
+                    Arc::default(),
+                    false, // Validation disabled
+                );
+
+                let _request = supergraph::Request::fake_builder().build().unwrap();
+                let _response = _service.oneshot(_request).await;
+            }
+
+            assert_coprocessor_operations_metrics(&[
+                (PipelineStep::SupergraphRequest, 2, Some(false)),
+                (PipelineStep::SupergraphResponse, 3, Some(false)),
+            ]);
+        }
+        .with_metrics()
+        .await;
+
+        // Assert — mock ensures it was never called
+        // (if the function were invoked, mockall would panic due to times(0))
     }
 
     #[tokio::test]
@@ -1258,6 +1537,38 @@ mod tests {
             request: Default::default(),
             response: SupergraphResponseConf {
                 condition: Condition::True,
+                headers: true,
+                context: ContextConf::NewContextConf(NewContextConf::All),
+                body: true,
+                sdl: true,
+                status_code: false,
+                url: None,
+            },
+        }
+    }
+
+    // Helper to create a SupergraphStage request with condition always false
+    fn create_supergraph_stage_for_request_with_false_condition() -> SupergraphStage {
+        SupergraphStage {
+            request: SupergraphRequestConf {
+                condition: Condition::False,
+                headers: true,
+                context: ContextConf::NewContextConf(NewContextConf::All),
+                body: true,
+                sdl: false,
+                method: false,
+                url: None,
+            },
+            response: Default::default(),
+        }
+    }
+
+    // Helper to create a SupergraphStage response with condition always false
+    fn create_supergraph_stage_for_response_with_false_condition() -> SupergraphStage {
+        SupergraphStage {
+            request: Default::default(),
+            response: SupergraphResponseConf {
+                condition: Condition::False,
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
                 body: true,

@@ -504,6 +504,16 @@ fn record_coprocessor_duration(stage: PipelineStep, duration: Duration) {
     );
 }
 
+fn record_coprocessor_operation(stage: PipelineStep, succeeded: bool) {
+    u64_counter!(
+        "apollo.router.operations.coprocessor",
+        "Total run operations with co-processors enabled",
+        1,
+        "coprocessor.stage" = stage.to_string(),
+        "coprocessor.succeeded" = succeeded
+    );
+}
+
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default)]
 pub(super) struct RouterStage {
@@ -546,8 +556,7 @@ impl RouterStage {
                 let sdl = sdl.clone();
 
                 async move {
-                    let mut succeeded = true;
-                    let result = process_router_request_stage(
+                    process_router_request_stage(
                         http_client,
                         coprocessor_url,
                         sdl,
@@ -557,18 +566,9 @@ impl RouterStage {
                     )
                     .await
                     .map_err(|error| {
-                        succeeded = false;
                         tracing::error!("coprocessor: router request stage error: {error}");
                         error
-                    });
-                    u64_counter!(
-                        "apollo.router.operations.coprocessor",
-                        "Total operations with co-processors enabled",
-                        1,
-                        "coprocessor.stage" = PipelineStep::RouterRequest,
-                        "coprocessor.succeeded" = succeeded
-                    );
-                    result
+                    })
                 }
             })
         });
@@ -584,9 +584,7 @@ impl RouterStage {
 
                 async move {
                     let response: router::Response = fut.await?;
-
-                    let mut succeeded = true;
-                    let result = process_router_response_stage(
+                    process_router_response_stage(
                         http_client,
                         coprocessor_url,
                         sdl,
@@ -596,18 +594,9 @@ impl RouterStage {
                     )
                     .await
                     .map_err(|error| {
-                        succeeded = false;
                         tracing::error!("coprocessor: router response stage error: {error}");
                         error
-                    });
-                    u64_counter!(
-                        "apollo.router.operations.coprocessor",
-                        "Total operations with co-processors enabled",
-                        1,
-                        "coprocessor.stage" = PipelineStep::RouterResponse,
-                        "coprocessor.succeeded" = succeeded
-                    );
-                    result
+                    })
                 }
             })
         });
@@ -684,8 +673,7 @@ impl SubgraphStage {
                 let request_config = request_config.clone();
 
                 async move {
-                    let mut succeeded = true;
-                    let result = process_subgraph_request_stage(
+                    process_subgraph_request_stage(
                         http_client,
                         coprocessor_url,
                         service_name,
@@ -695,18 +683,9 @@ impl SubgraphStage {
                     )
                     .await
                     .map_err(|error| {
-                        succeeded = false;
                         tracing::error!("coprocessor: subgraph request stage error: {error}");
                         error
-                    });
-                    u64_counter!(
-                        "apollo.router.operations.coprocessor",
-                        "Total operations with co-processors enabled",
-                        1,
-                        "coprocessor.stage" = PipelineStep::SubgraphRequest,
-                        "coprocessor.succeeded" = succeeded
-                    );
-                    result
+                    })
                 }
             })
         });
@@ -723,9 +702,7 @@ impl SubgraphStage {
 
                 async move {
                     let response: subgraph::Response = fut.await?;
-
-                    let mut succeeded = true;
-                    let result = process_subgraph_response_stage(
+                    process_subgraph_response_stage(
                         http_client,
                         coprocessor_url,
                         service_name,
@@ -735,18 +712,9 @@ impl SubgraphStage {
                     )
                     .await
                     .map_err(|error| {
-                        succeeded = false;
                         tracing::error!("coprocessor: subgraph response stage error: {error}");
                         error
-                    });
-                    u64_counter!(
-                        "apollo.router.operations.coprocessor",
-                        "Total operations with co-processors enabled",
-                        1,
-                        "coprocessor.stage" = PipelineStep::SubgraphResponse,
-                        "coprocessor.succeeded" = succeeded
-                    );
-                    result
+                    })
                 }
             })
         });
@@ -834,11 +802,24 @@ where
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::RouterRequest, duration);
+    record_coprocessor_duration(PipelineStep::RouterRequest, start.elapsed());
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let mut co_processor_output = co_processor_result?;
+
+    // Determine logical success before control flow branches
+    let succeeded = match co_processor_output.body.as_ref() {
+        Some(body_value) => {
+            // Try to parse as JSON to look for "errors" key
+            match serde_json::from_str::<serde_json_bytes::Value>(body_value) {
+                Ok(json_val) => json_val.get("errors").is_none(),
+                Err(_) => true, // not JSON, treat as success
+            }
+        }
+        None => false, // no body = logical failure
+    };
+
+    record_coprocessor_operation(PipelineStep::RouterRequest, succeeded);
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::RouterRequest)?;
     // unwrap is safe here because validate_coprocessor_output made sure control is available
@@ -996,15 +977,27 @@ where
         .and_sdl(sdl_to_send.clone())
         .build();
 
-    // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
     let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::RouterResponse, duration);
+    record_coprocessor_duration(PipelineStep::RouterRequest, start.elapsed());
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
+
+    // Determine logical success before control flow branches
+    let succeeded = match co_processor_output.body.as_ref() {
+        Some(body_value) => {
+            // Try to parse as JSON to look for "errors" key
+            match serde_json::from_str::<serde_json_bytes::Value>(body_value) {
+                Ok(json_val) => json_val.get("errors").is_none(),
+                Err(_) => true, // not JSON, treat as success
+            }
+        }
+        None => false, // no body = logical failure
+    };
+
+    record_coprocessor_operation(PipelineStep::RouterResponse, succeeded);
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::RouterResponse)?;
 
@@ -1188,11 +1181,24 @@ where
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::SubgraphRequest, duration);
+    record_coprocessor_duration(PipelineStep::SubgraphRequest, start.elapsed());
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
+
+    // Determine logical success before control flow branches
+    let succeeded = match co_processor_output.body.as_ref() {
+        Some(body_value) => {
+            // Try to deserialize a copy of the body just for validation
+            let gql_response =
+                deserialize_coprocessor_response(body_value.clone(), response_validation);
+            gql_response.errors.is_empty()
+        }
+        None => false, // no body = logical failure
+    };
+
+    record_coprocessor_operation(PipelineStep::SubgraphRequest, succeeded);
+
     validate_coprocessor_output(&co_processor_output, PipelineStep::SubgraphRequest)?;
     // unwrap is safe here because validate_coprocessor_output made sure control is available
     let control = co_processor_output.control.expect("validated above; qed");
@@ -1338,11 +1344,23 @@ where
     tracing::debug!(?payload, "externalized output");
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    let duration = start.elapsed();
-    record_coprocessor_duration(PipelineStep::SubgraphResponse, duration);
+    record_coprocessor_duration(PipelineStep::SubgraphResponse, start.elapsed());
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
+
+    // Determine logical success before control flow branches
+    let succeeded = match co_processor_output.body.as_ref() {
+        Some(body_value) => {
+            // Try to deserialize a copy of the body just for validation
+            let gql_response =
+                deserialize_coprocessor_response(body_value.clone(), response_validation);
+            gql_response.errors.is_empty()
+        }
+        None => false, // no body = logical failure
+    };
+
+    record_coprocessor_operation(PipelineStep::SubgraphResponse, succeeded);
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::SubgraphResponse)?;
 
