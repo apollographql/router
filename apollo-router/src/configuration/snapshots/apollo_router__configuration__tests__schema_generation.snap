@@ -226,6 +226,22 @@ expression: "&schema"
           ],
           "description": "Field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses."
         },
+        "library_name_header": {
+          "default": "apollographql-library-name",
+          "description": "The name of the header to extract from requests when populating 'library name' for traces and metrics in Apollo Studio.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "library_version_header": {
+          "default": "apollographql-library-version",
+          "description": "The name of the header to extract from requests when populating 'library version' for traces and metrics in Apollo Studio.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "metrics": {
           "allOf": [
             {
