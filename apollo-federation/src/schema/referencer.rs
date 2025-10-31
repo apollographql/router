@@ -1,8 +1,11 @@
+use std::fmt;
+
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
+use itertools::Itertools;
 
 use super::FederationSchema;
 use crate::error::FederationError;
@@ -28,7 +31,7 @@ use crate::schema::position::SchemaRootDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
 use crate::schema::position::UnionTypenameFieldDefinitionPosition;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub(crate) struct Referencers {
     pub(crate) scalar_types: IndexMap<Name, ScalarTypeReferencers>,
     pub(crate) object_types: IndexMap<Name, ObjectTypeReferencers>,
@@ -37,6 +40,123 @@ pub(crate) struct Referencers {
     pub(crate) enum_types: IndexMap<Name, EnumTypeReferencers>,
     pub(crate) input_object_types: IndexMap<Name, InputObjectTypeReferencers>,
     pub(crate) directives: IndexMap<Name, DirectiveReferencers>,
+}
+
+impl fmt::Debug for Referencers {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut parts = Vec::new();
+
+        for (name, refs) in &self.scalar_types {
+            let all_refs = refs
+                .object_fields
+                .iter()
+                .map(|p| p.to_string())
+                .chain(refs.object_field_arguments.iter().map(|p| p.to_string()))
+                .chain(refs.interface_fields.iter().map(|p| p.to_string()))
+                .chain(refs.interface_field_arguments.iter().map(|p| p.to_string()))
+                .chain(refs.union_fields.iter().map(|p| p.to_string()))
+                .chain(refs.input_object_fields.iter().map(|p| p.to_string()))
+                .chain(refs.directive_arguments.iter().map(|p| p.to_string()))
+                .filter(|s| !s.contains("__"))
+                .join(", ");
+            if !all_refs.is_empty() {
+                parts.push(format!("{name}: [{all_refs}]"));
+            }
+        }
+
+        for (name, refs) in &self.object_types {
+            let all_refs = refs
+                .schema_roots
+                .iter()
+                .map(|p| p.to_string())
+                .chain(refs.object_fields.iter().map(|p| p.to_string()))
+                .chain(refs.interface_fields.iter().map(|p| p.to_string()))
+                .chain(refs.union_types.iter().map(|p| p.to_string()))
+                .filter(|s| !s.contains("__"))
+                .join(", ");
+            if !all_refs.is_empty() {
+                parts.push(format!("{name}: [{all_refs}]"));
+            }
+        }
+
+        for (name, refs) in &self.interface_types {
+            let all_refs = refs
+                .object_types
+                .iter()
+                .map(|p| p.to_string())
+                .chain(refs.object_fields.iter().map(|p| p.to_string()))
+                .chain(refs.interface_types.iter().map(|p| p.to_string()))
+                .chain(refs.interface_fields.iter().map(|p| p.to_string()))
+                .filter(|s| !s.contains("__"))
+                .join(", ");
+            if !all_refs.is_empty() {
+                parts.push(format!("{name}: [{all_refs}]"));
+            }
+        }
+
+        for (name, refs) in &self.union_types {
+            let all_refs = refs
+                .object_fields
+                .iter()
+                .map(|p| p.to_string())
+                .chain(refs.interface_fields.iter().map(|p| p.to_string()))
+                .filter(|s| !s.contains("__"))
+                .join(", ");
+            if !all_refs.is_empty() {
+                parts.push(format!("{name}: [{all_refs}]"));
+            }
+        }
+
+        for (name, refs) in &self.enum_types {
+            let all_refs = refs
+                .object_fields
+                .iter()
+                .map(|p| p.to_string())
+                .chain(refs.object_field_arguments.iter().map(|p| p.to_string()))
+                .chain(refs.interface_fields.iter().map(|p| p.to_string()))
+                .chain(refs.interface_field_arguments.iter().map(|p| p.to_string()))
+                .chain(refs.input_object_fields.iter().map(|p| p.to_string()))
+                .chain(refs.directive_arguments.iter().map(|p| p.to_string()))
+                .filter(|s| !s.contains("__"))
+                .join(", ");
+            if !all_refs.is_empty() {
+                parts.push(format!("{name}: [{all_refs}]"));
+            }
+        }
+
+        for (name, refs) in &self.input_object_types {
+            let all_refs = refs
+                .object_field_arguments
+                .iter()
+                .map(|p| p.to_string())
+                .chain(refs.interface_field_arguments.iter().map(|p| p.to_string()))
+                .chain(refs.input_object_fields.iter().map(|p| p.to_string()))
+                .chain(refs.directive_arguments.iter().map(|p| p.to_string()))
+                .filter(|s| !s.contains("__"))
+                .join(", ");
+            if !all_refs.is_empty() {
+                parts.push(format!("{name}: [{all_refs}]"));
+            }
+        }
+
+        for (name, refs) in &self.directives {
+            let all_refs = refs
+                .iter()
+                .map(|p| p.to_string())
+                .filter(|s| !s.contains("__"))
+                .join(", ");
+
+            if !all_refs.is_empty() {
+                parts.push(format!("{name}: [{all_refs}]"));
+            }
+        }
+
+        if f.alternate() {
+            write!(f, "{{\n  {}\n}}", parts.join(",\n  "))
+        } else {
+            write!(f, "{{{}}}", parts.join(", "))
+        }
+    }
 }
 
 impl Referencers {

@@ -1,4 +1,5 @@
 use insta::assert_snapshot;
+use test_log::test;
 
 use super::ServiceDefinition;
 use super::assert_composition_errors;
@@ -10,7 +11,6 @@ use super::print_sdl;
 // =============================================================================
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn interface_object_composes_valid_usages_correctly() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -61,7 +61,6 @@ fn interface_object_composes_valid_usages_correctly() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn interface_object_errors_if_used_with_no_corresponding_interface() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -96,13 +95,12 @@ fn interface_object_errors_if_used_with_no_corresponding_interface() {
         &result,
         &[(
             "INTERFACE_OBJECT_USAGE_ERROR",
-            r#"Type "I" is declared with @interfaceObject in all the subgraphs in which is is defined (it is defined in subgraphs "subgraphA" and "subgraphB" but should be defined as an interface in at least one subgraph)"#,
+            r#"Type "I" is declared with @interfaceObject in all the subgraphs in which it is defined (it is defined in subgraphs "subgraphA" and "subgraphB" but should be defined as an interface in at least one subgraph)"#,
         )],
     );
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn interface_object_errors_if_missing_in_some_subgraph() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -162,63 +160,74 @@ fn interface_object_errors_if_missing_in_some_subgraph() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn interface_object_errors_if_interface_has_key_but_subgraph_doesnt_know_all_implementations() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
         type_defs: r#"
-        type Query {
-          iFromA: I
-        }
+          type Query {
+            iFromA: I
+          }
 
-        interface I @key(fields: "id") {
-          id: ID!
-          x: Int
-        }
+          interface I @key(fields: "id") {
+            id: ID!
+            x: Int
+          }
 
-        type A implements I @key(fields: "id") {
-          id: ID!
-          x: Int
-        }
+          type A implements I @key(fields: "id") {
+            id: ID!
+            x: Int
+            w: Int
+          }
 
-        type B implements I @key(fields: "id") {
-          id: ID!
-          x: Int
-        }
+          type B implements I @key(fields: "id") {
+            id: ID!
+            x: Int
+            z: Int
+          }
         "#,
     };
 
     let subgraph_b = ServiceDefinition {
         name: "subgraphB",
         type_defs: r#"
-        type Query {
-          iFromB: I
-        }
+          type Query {
+            iFromB: I
+          }
 
-        type I @interfaceObject @key(fields: "id") {
-          id: ID!
-          y: Int
-        }
-
-        type A @key(fields: "id") {
-          id: ID!
-          y: Int
-        }
+          type I @interfaceObject @key(fields: "id") {
+            id: ID!
+            y: Int
+          }
         "#,
     };
 
-    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    let subgraph_c = ServiceDefinition {
+        name: "subgraphC",
+        type_defs: r#"
+          interface I {
+            id: ID!
+            x: Int
+          }
+
+          type C implements I @key(fields: "id") {
+            id: ID!
+            x: Int
+            w: Int
+          }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b, subgraph_c]);
     assert_composition_errors(
         &result,
         &[(
-            "INTERFACE_OBJECT_USAGE_ERROR",
-            r#"Interface "I" has a @key in subgraph "subgraphB" but that subgraph does not know all the implementations of "I""#,
+            "INTERFACE_KEY_MISSING_IMPLEMENTATION_TYPE",
+            r#"[subgraphA] Interface type "I" has a resolvable key (@key(fields: "id")) in subgraph "subgraphA" but that subgraph is missing some of the supergraph implementation types of "I". Subgraph "subgraphA" should define type "C" (and have it implement "I")."#,
         )],
     );
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn interface_object_errors_if_subgraph_defines_both_interface_object_and_implementations() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -276,7 +285,6 @@ fn interface_object_errors_if_subgraph_defines_both_interface_object_and_impleme
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn interface_object_composes_references_to_interface_object() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -322,7 +330,6 @@ fn interface_object_composes_references_to_interface_object() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn interface_object_does_not_error_when_optimizing_unnecessary_loops() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
@@ -383,7 +390,6 @@ fn interface_object_does_not_error_when_optimizing_unnecessary_loops() {
 }
 
 #[test]
-#[ignore = "until merge implementation completed"]
 fn interface_object_fed354_repro_failure() {
     let subgraph1 = ServiceDefinition {
         name: "Subgraph1",

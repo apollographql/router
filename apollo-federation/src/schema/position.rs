@@ -4403,6 +4403,35 @@ impl InterfaceTypeDefinitionPosition {
             .directives
             .retain(|other_directive| !other_directive.ptr_eq(directive));
     }
+
+    pub(crate) fn implementers<'a>(
+        &'a self,
+        schema: &'a FederationSchema,
+    ) -> Result<impl Iterator<Item = ObjectOrInterfaceTypeDefinitionPosition> + 'a, FederationError>
+    {
+        let referencers = schema
+            .referencers()
+            .interface_types
+            .get(&self.type_name)
+            .ok_or_else(|| {
+                FederationError::internal(format!(
+                    "Schema missing referencers for interface type \"{}\"",
+                    self.type_name
+                ))
+            })?;
+        Ok(referencers
+            .object_types
+            .iter()
+            .cloned()
+            .map(|obj| obj.into())
+            .chain(
+                referencers
+                    .interface_types
+                    .iter()
+                    .cloned()
+                    .map(|interface| interface.into()),
+            ))
+    }
 }
 
 impl Display for InterfaceTypeDefinitionPosition {
