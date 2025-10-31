@@ -1,5 +1,5 @@
 mod cache;
-mod connection_pool;
+mod pool;
 mod timeout;
 
 type Config = crate::configuration::RedisCache;

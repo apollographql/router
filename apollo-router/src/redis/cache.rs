@@ -1,18 +1,14 @@
+use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
 
-use deadpool::managed::PoolError;
 use redis::FromRedisValue;
-use redis::Pipeline;
 use redis::RedisError;
-use redis::SetExpiry;
-use redis::SetOptions;
 use redis::ToRedisArgs;
-use redis::aio::ConnectionLike;
 
 use super::Config;
 use super::Key;
-use super::connection_pool::Pool;
+use super::pool::Pool;
 
 // TODO: does this need a drop impl?
 // TODO: better name than cache
@@ -28,11 +24,9 @@ pub(crate) struct Cache {
 #[derive(thiserror::Error, Debug)]
 enum Error {
     #[error("{0}")]
-    ConnPool(#[from] super::connection_pool::Error),
+    ConnPool(#[from] super::pool::Error),
     #[error("{0}")]
     Redis(#[from] RedisError),
-    #[error("{0}")]
-    Pool(#[from] PoolError<RedisError>),
 }
 
 impl Cache {
@@ -48,18 +42,6 @@ impl Cache {
         })
     }
 
-    async fn conn(&self) -> Result<Box<dyn ConnectionLike>, PoolError<RedisError>> {
-        match self.pool.clone() {
-            Pool::Standard(pool) => Ok(Box::new(pool.get().await?)),
-            Pool::Cluster(pool) => Ok(Box::new(pool.get().await?)),
-            Pool::Sentinel(pool) => Ok(Box::new(pool.get().await?)),
-        }
-    }
-
-    fn is_cluster(&self) -> bool {
-        !matches!(self.pool, Pool::Standard(_))
-    }
-
     fn namespaced_key<S: ToString, K: Into<Key<S>>>(&self, key: K) -> String {
         let key = key.into();
         match (key, self.namespace.as_ref()) {
@@ -68,72 +50,46 @@ impl Cache {
         }
     }
 
-    async fn get<S: ToString, K: Into<Key<S>>, V: FromRedisValue>(
+    async fn get<S: ToString, K: Into<Key<S>>, V: FromRedisValue + std::marker::Send + 'static>(
         &self,
         key: K,
     ) -> Result<V, Error> {
-        // let mut conn = self.conn().await?;
-        // Ok(conn.get(key).await?)
         // TODO: timeout?
-
-        let mut pipeline = Pipeline::with_capacity(1);
-        pipeline.get(self.namespaced_key(key));
-        Ok(self.pool.query_async(pipeline).await?)
+        // TODO: need an option to reset ttl...
+        let key = self.namespaced_key(key);
+        Ok(self.pool.get(key).await?)
     }
 
-    async fn get_multiple<S: ToString, K: Into<Key<S>>, V: FromRedisValue>(
+    async fn get_multiple<
+        S: ToString,
+        K: Into<Key<S>>,
+        V: FromRedisValue + Send + Sync + 'static,
+    >(
         &self,
         keys: Vec<K>,
     ) -> Result<Vec<V>, Error> {
-        let mut pipeline = Pipeline::with_capacity(keys.len());
-        for key in keys {
-            pipeline.get(self.namespaced_key(key));
-        }
+        let keys = keys
+            .into_iter()
+            .map(|key| self.namespaced_key(key))
+            .collect();
 
-        Ok(self.pool.query_async(pipeline).await?)
+        Ok(self.pool.get_multiple(keys).await?)
     }
 
-    //
-    // async fn insert(&self, key: K, value: V, ttl: Option<Duration>) -> Result<(), Error> {
-    //     let mut conn = self.conn().await?;
-    //     let mut options = SetOptions::default().get(false);
-    //     if let Some(ttl) = ttl {
-    //         options.with_expiration(SetExpiry::EX(ttl.as_secs()));
-    //     }
-    //     conn.set_options(key, value, options).await?;
-    //     Ok(())
-    // }
-    //
-    // async fn insert_multiple(&self, data: Vec<(K, V)>, ttl: Option<Duration>) -> Result<(), Error> {
-    //     let mut conn = self.conn().await?;
-    //     let mut pipeline = Pipeline::with_capacity(data.len());
-    //     let mut options = SetOptions::default().get(false);
-    //     if let Some(ttl) = ttl {
-    //         options.with_expiration(SetExpiry::EX(ttl.as_secs()));
-    //     }
-    //
-    //     for (key, value) in data {
-    //         pipeline.set_options(key, value, options);
-    //     }
-    //
-    //     Ok(pipeline.exec_async(&mut conn).await?)
-    // }
-    //
-    async fn insert_multiple<S: ToString, K: Into<Key<S>>, V: FromRedisValue + ToRedisArgs>(
+    async fn insert_multiple<
+        S: ToString,
+        K: Into<Key<S>>,
+        V: FromRedisValue + ToRedisArgs + Send + Sync + 'static + Debug,
+    >(
         &self,
         data: Vec<(K, V)>,
         ttl: Option<Duration>,
     ) -> Result<(), Error> {
-        let mut pipeline = Pipeline::with_capacity(data.len());
-        let mut options = SetOptions::default().get(false);
-        if let Some(ttl) = ttl {
-            options = options.with_expiration(SetExpiry::EX(ttl.as_secs()));
-        }
-
-        for (key, value) in data {
-            pipeline.set_options(self.namespaced_key(key), value, options);
-        }
-        Ok(self.pool.exec_async(pipeline).await?)
+        let data = data
+            .into_iter()
+            .map(|(key, value)| (self.namespaced_key(key), value))
+            .collect();
+        Ok(self.pool.insert_multiple(data, ttl.or(self.ttl)).await?)
     }
 }
 
@@ -186,6 +142,7 @@ mod test {
         });
         let config = serde_json::from_value(config_json).unwrap();
         let storage = Cache::new(config, "test_redis_cluster")?;
+        storage.pool.connect_all().await?;
 
         // insert values which reflect different cluster slots
         let mut data = HashMap::default();
@@ -245,6 +202,7 @@ mod test {
         });
         let config = serde_json::from_value(config_json).unwrap();
         let storage = Cache::new(config, "test_get_multiple_is_ordered")?;
+        storage.pool.connect_all().await?;
 
         let data = [("a", "1"), ("b", "2"), ("c", "3")]
             .iter()

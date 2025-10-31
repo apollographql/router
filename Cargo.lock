@@ -313,8 +313,6 @@ dependencies = [
  "crossbeam-channel",
  "ctor 0.6.0",
  "dashmap",
- "deadpool",
- "deadpool-redis",
  "derivative",
  "derive_more",
  "dhat",
@@ -2154,24 +2152,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "deadpool-redis"
-version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0965b977f1244bc3783bb27cd79cfcff335a8341da18f79232d00504b18eb1a"
-dependencies = [
- "deadpool",
- "redis",
- "tokio",
-]
-
-[[package]]
 name = "deadpool-runtime"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "092966b41edc516079bdf31ec78a2e0588d1d0c08f78b91d8307215928642b2b"
-dependencies = [
- "tokio",
-]
 
 [[package]]
 name = "der"
@@ -7074,6 +7058,7 @@ dependencies = [
  "futures-core",
  "futures-io",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "slab",
  "tokio",
