@@ -112,14 +112,6 @@ pub(crate) mod test_helpers {
         for (i, (expected_code, expected_message)) in expected_errors.iter().enumerate() {
             let (error_code, error_str) = &error_strings[i];
 
-            // Check error message
-            assert!(
-                error_str.contains(expected_message),
-                "Error at index {} does not contain expected message.\nEXPECTED:\n{}\nACTUAL:\n{}",
-                i,
-                expected_message,
-                error_str
-            );
             // Check error code
             assert!(
                 error_code.contains(expected_code),
@@ -127,6 +119,14 @@ pub(crate) mod test_helpers {
                 i,
                 expected_code,
                 error_code
+            );
+            // Check error message
+            assert!(
+                error_str.contains(expected_message),
+                "Error at index {} does not contain expected message.\nEXPECTED:\n{}\nACTUAL:\n{}",
+                i,
+                expected_message,
+                error_str
             );
         }
     }
