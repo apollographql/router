@@ -531,7 +531,7 @@ impl Merger {
         // Given the subgraphs are valid and given how merging works (it takes the union of what is
         // in the subgraphs), there is only so much that can be invalid in the supergraph at
         // this point. We should make sure we add all such validation to `validate_merged_schema()`
-        // with good error messages (that points to subgraphs appropriately). and then simply
+        // with good error messages (that point to subgraphs appropriately), and then simply
         // _assert_ that `Schema.validate()` doesn't throw as a sanity check.
         let supergraph_schema = merged
             .validate_or_return_self()
