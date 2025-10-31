@@ -529,7 +529,7 @@ impl Merger {
         // because they refer to a document they don't know about (the merged-but-not-returned
         // supergraph) and don't point back to the subgraphs in any way.
         // Given the subgraphs are valid and given how merging works (it takes the union of what is
-        // in the subgraphs), there is only so much things that can be invalid in the supergraph at
+        // in the subgraphs), there is only so much that can be invalid in the supergraph at
         // this point. We should make sure we add all such validation to `validate_merged_schema()`
         // with good error messages (that points to subgraphs appropriately). and then simply
         // _assert_ that `Schema.validate()` doesn't throw as a sanity check.
