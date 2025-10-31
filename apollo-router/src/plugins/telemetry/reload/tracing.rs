@@ -78,21 +78,42 @@ impl<'a> TracingBuilder<'a> {
 pub(crate) fn create_propagator(
     propagation: &Propagation,
     tracing: &Tracing,
-) -> TextMapCompositePropagator {
+) -> Result<TextMapCompositePropagator, BoxError> {
     let mut propagators: Vec<Box<dyn TextMapPropagator + Send + Sync + 'static>> = Vec::new();
-    if propagation.jaeger {
+
+    if tracing.is_jaeger_propagation_enabled() {
         propagators.push(Box::<opentelemetry_jaeger_propagator::Propagator>::default());
     }
-    if propagation.baggage {
+    if tracing.is_baggage_propagation_enabled() {
         propagators.push(Box::<opentelemetry_sdk::propagation::BaggagePropagator>::default());
     }
-    if propagation.trace_context || tracing.otlp.enabled {
+    if tracing.is_trace_context_propagation_enabled() {
         propagators.push(Box::<opentelemetry_sdk::propagation::TraceContextPropagator>::default());
     }
-    if propagation.zipkin || tracing.zipkin.enabled {
+    if tracing.is_zipkin_propagation_enabled() {
         propagators.push(Box::<opentelemetry_zipkin::Propagator>::default());
     }
-    if propagation.datadog || tracing.datadog.enabled {
+    if tracing.is_datadog_propagation_enabled() {
+        if tracing.is_jaeger_propagation_enabled()
+            || tracing.is_trace_context_propagation_enabled()
+            || tracing.is_zipkin_propagation_enabled()
+            || tracing.is_aws_xray_propagation_enabled()
+        {
+            if tracing.datadog.enabled && propagation.datadog.unwrap_or(false) {
+                return Err(BoxError::from(
+                    "if the datadog exporter is enabled and any other propagator is enabled, the datadog propagator must be disabled",
+                ));
+            } else if let Some(true) = propagation.datadog {
+                return Err(BoxError::from(
+                    "datadog propagation cannot be used with any other propagator except for baggage",
+                ));
+            } else if propagation.datadog.is_none() {
+                return Err(BoxError::from(
+                    "datadog propagation must be explicitly disabled if the datadog exporter is enabled and any propagator other than baggage is enabled",
+                ));
+            }
+        }
+
         propagators.push(Box::<
             crate::plugins::telemetry::tracing::datadog_exporter::DatadogPropagator,
         >::default());
@@ -109,7 +130,7 @@ pub(crate) fn create_propagator(
             propagation.request.format.clone(),
         )));
     }
-    TextMapCompositePropagator::new(propagators)
+    Ok(TextMapCompositePropagator::new(propagators))
 }
 
 /// Trait for trace exporters to contribute to tracer provider construction

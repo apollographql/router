@@ -192,12 +192,12 @@ async fn test_otlp_request_with_datadog_propagator() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         panic!("Error: test skipped because GraphOS is not enabled");
     }
-    let mock_server = mock_otlp_server(1..).await;
+    let mock_server_uri = "http://will-never-be-used.local";
     let config = include_str!("../fixtures/otlp_datadog_propagation.router.yaml")
-        .replace("<otel-collector-endpoint>", &mock_server.uri());
+        .replace("<otel-collector-endpoint>", mock_server_uri);
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp {
-            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+            endpoint: Some(format!("{}/v1/traces", mock_server_uri)),
         })
         .extra_propagator(Telemetry::Datadog)
         .config(&config)
@@ -205,16 +205,8 @@ async fn test_otlp_request_with_datadog_propagator() -> Result<(), BoxError> {
         .await;
 
     router.start().await;
-    router.assert_started().await;
+    router.wait_for_log_message("could not create router: datadog propagation cannot be used with any other propagator except for baggage").await;
 
-    TraceSpec::builder()
-        .services(["client", "router", "subgraph"].into())
-        .priority_sampled("1")
-        .subgraph_sampled(true)
-        .build()
-        .validate_otlp_trace(&mut router, &mock_server, Query::default())
-        .await?;
-    router.graceful_shutdown().await;
     Ok(())
 }
 
@@ -223,31 +215,20 @@ async fn test_otlp_request_with_datadog_propagator_no_agent() -> Result<(), BoxE
     if !graph_os_enabled() {
         panic!("Error: test skipped because GraphOS is not enabled");
     }
-    let mock_server = mock_otlp_server(1..).await;
+    let mock_server_uri = "http://will-never-be-used.local";
     let config = include_str!("../fixtures/otlp_datadog_propagation_no_agent.router.yaml")
-        .replace("<otel-collector-endpoint>", &mock_server.uri());
+        .replace("<otel-collector-endpoint>", mock_server_uri);
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp {
-            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+            endpoint: Some(format!("{}/v1/traces", mock_server_uri)),
         })
         .config(&config)
         .build()
         .await;
 
     router.start().await;
-    router.assert_started().await;
+    router.wait_for_log_message("could not create router: datadog propagation cannot be used with any other propagator except for baggage").await;
 
-    TraceSpec::builder()
-        .services(["client", "router", "subgraph"].into())
-        .subgraph_sampled(true)
-        .build()
-        .validate_otlp_trace(
-            &mut router,
-            &mock_server,
-            Query::builder().traced(true).build(),
-        )
-        .await?;
-    router.graceful_shutdown().await;
     Ok(())
 }
 
@@ -257,13 +238,13 @@ async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog()
     if !graph_os_enabled() {
         panic!("Error: test skipped because GraphOS is not enabled");
     }
-    let mock_server = mock_otlp_server(1..).await;
+    let mock_server_uri = "http://will-never-be-used.local";
     let config =
         include_str!("../fixtures/otlp_datadog_request_with_zipkin_propagator.router.yaml")
-            .replace("<otel-collector-endpoint>", &mock_server.uri());
+            .replace("<otel-collector-endpoint>", mock_server_uri);
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp {
-            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+            endpoint: Some(format!("{}/v1/traces", mock_server_uri)),
         })
         .extra_propagator(Telemetry::Datadog)
         .config(&config)
@@ -271,105 +252,8 @@ async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog()
         .await;
 
     router.start().await;
-    router.assert_started().await;
+    router.wait_for_log_message("could not create router: datadog propagation cannot be used with any other propagator except for baggage").await;
 
-    TraceSpec::builder()
-        .services(["client", "router", "subgraph"].into())
-        .priority_sampled("1")
-        .subgraph_sampled(true)
-        .build()
-        .validate_otlp_trace(
-            &mut router,
-            &mock_server,
-            Query::builder().traced(true).build(),
-        )
-        .await?;
-    // ---------------------- zipkin propagator with unsampled trace
-    // Testing for an unsampled trace, so it should be sent to the otlp exporter with sampling priority set 0
-    // But it shouldn't send the trace to subgraph as the trace is originally not sampled, the main goal is to measure it at the DD agent level
-    TraceSpec::builder()
-        .services(["router"].into())
-        .priority_sampled("0")
-        .subgraph_sampled(false)
-        .build()
-        .validate_otlp_trace(
-            &mut router,
-            &mock_server,
-            Query::builder()
-                .traced(false)
-                .header("X-B3-TraceId", "80f198ee56343ba864fe8b2a57d3eff7")
-                .header("X-B3-ParentSpanId", "05e3ac9a4f6e3b90")
-                .header("X-B3-SpanId", "e457b5a2e4d86bd1")
-                .header("X-B3-Sampled", "0")
-                .build(),
-        )
-        .await?;
-    // ---------------------- trace context propagation
-    // Testing for a trace containing the right tracestate with m and psr for DD and a sampled trace, so it should be sent to the otlp exporter with sampling priority set to 1
-    // And it should also send the trace to subgraph as the trace is sampled
-    TraceSpec::builder()
-        .services(["client", "router", "subgraph"].into())
-        .priority_sampled("1")
-        .subgraph_sampled(true)
-        .build()
-        .validate_otlp_trace(
-            &mut router,
-            &mock_server,
-            Query::builder()
-                .traced(true)
-                .header(
-                    "traceparent",
-                    "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
-                )
-                .header("tracestate", "m=1,psr=1")
-                .build(),
-        )
-        .await?;
-    // ----------------------
-    // Testing for a trace containing the right tracestate with m and psr for DD and an unsampled trace, so it should be sent to the otlp exporter with sampling priority set to 0
-    // But it shouldn't send the trace to subgraph as the trace is originally not sampled, the main goal is to measure it at the DD agent level
-    TraceSpec::builder()
-        .services(["router"].into())
-        .priority_sampled("0")
-        .subgraph_sampled(false)
-        .build()
-        .validate_otlp_trace(
-            &mut router,
-            &mock_server,
-            Query::builder()
-                .traced(false)
-                .header(
-                    "traceparent",
-                    "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-02",
-                )
-                .header("tracestate", "m=1,psr=0")
-                .build(),
-        )
-        .await?;
-    // ----------------------
-    // Testing for a trace containing a tracestate m and psr with psr set to 1 for DD and an unsampled trace, so it should be sent to the otlp exporter with sampling priority set to 1
-    // It should not send the trace to the subgraph as we didn't use the datadog propagator and therefore the trace will remain unsampled.
-    TraceSpec::builder()
-        .services(["router", "subgraph"].into())
-        .priority_sampled("1")
-        .subgraph_sampled(true)
-        .build()
-        .validate_otlp_trace(
-            &mut router,
-            &mock_server,
-            Query::builder()
-                .traced(false)
-                .header(
-                    "traceparent",
-                    "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-03",
-                )
-                .header("tracestate", "m=1,psr=1")
-                .build(),
-        )
-        .await?;
-
-    // Be careful if you add the same kind of test crafting your own trace id, make sure to increment the previous trace id by 1 if not you'll receive all the previous spans tested with the same trace id before
-    router.graceful_shutdown().await;
     Ok(())
 }
 
@@ -378,33 +262,21 @@ async fn test_untraced_request_no_sample_datadog_agent() -> Result<(), BoxError>
     if !graph_os_enabled() {
         panic!("Error: test skipped because GraphOS is not enabled");
     }
-    let mock_server = mock_otlp_server(1..).await;
+    let mock_server_uri = "http://will-never-be-used.local";
     let config = include_str!("../fixtures/otlp_datadog_agent_no_sample.router.yaml")
-        .replace("<otel-collector-endpoint>", &mock_server.uri());
+        .replace("<otel-collector-endpoint>", mock_server_uri);
     let mut router = IntegrationTest::builder()
         .config(&config)
         .telemetry(Telemetry::Otlp {
-            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+            endpoint: Some(format!("{}/v1/traces", mock_server_uri)),
         })
         .extra_propagator(Telemetry::Datadog)
         .build()
         .await;
 
     router.start().await;
-    router.assert_started().await;
+    router.wait_for_log_message("could not create router: datadog propagation cannot be used with any other propagator except for baggage").await;
 
-    TraceSpec::builder()
-        .services(["router"].into())
-        .priority_sampled("0")
-        .subgraph_sampled(false)
-        .build()
-        .validate_otlp_trace(
-            &mut router,
-            &mock_server,
-            Query::builder().traced(false).build(),
-        )
-        .await?;
-    router.graceful_shutdown().await;
     Ok(())
 }
 
@@ -413,33 +285,21 @@ async fn test_untraced_request_sample_datadog_agent() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         panic!("Error: test skipped because GraphOS is not enabled");
     }
-    let mock_server = mock_otlp_server(1..).await;
+    let mock_server_uri = "http://will-never-be-used.local";
     let config = include_str!("../fixtures/otlp_datadog_agent_sample.router.yaml")
-        .replace("<otel-collector-endpoint>", &mock_server.uri());
+        .replace("<otel-collector-endpoint>", mock_server_uri);
     let mut router = IntegrationTest::builder()
         .config(&config)
         .telemetry(Telemetry::Otlp {
-            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+            endpoint: Some(format!("{}/v1/traces", mock_server_uri)),
         })
         .extra_propagator(Telemetry::Datadog)
         .build()
         .await;
 
     router.start().await;
-    router.assert_started().await;
+    router.wait_for_log_message("could not create router: datadog propagation cannot be used with any other propagator except for baggage").await;
 
-    TraceSpec::builder()
-        .services(["router", "subgraph"].into())
-        .priority_sampled("1")
-        .subgraph_sampled(true)
-        .build()
-        .validate_otlp_trace(
-            &mut router,
-            &mock_server,
-            Query::builder().traced(false).build(),
-        )
-        .await?;
-    router.graceful_shutdown().await;
     Ok(())
 }
 
@@ -448,12 +308,12 @@ async fn test_untraced_request_sample_datadog_agent_unsampled() -> Result<(), Bo
     if !graph_os_enabled() {
         panic!("Error: test skipped because GraphOS is not enabled");
     }
-    let mock_server = mock_otlp_server(1..).await;
+    let mock_server_uri = "http://will-never-be-used.local";
     let config = include_str!("../fixtures/otlp_datadog_agent_sample_no_sample.router.yaml")
-        .replace("<otel-collector-endpoint>", &mock_server.uri());
+        .replace("<otel-collector-endpoint>", mock_server_uri);
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp {
-            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+            endpoint: Some(format!("{}/v1/traces", mock_server_uri)),
         })
         .extra_propagator(Telemetry::Datadog)
         .config(&config)
@@ -461,20 +321,8 @@ async fn test_untraced_request_sample_datadog_agent_unsampled() -> Result<(), Bo
         .await;
 
     router.start().await;
-    router.assert_started().await;
+    router.wait_for_log_message("could not create router: datadog propagation cannot be used with any other propagator except for baggage").await;
 
-    TraceSpec::builder()
-        .services(["router"].into())
-        .priority_sampled("0")
-        .subgraph_sampled(false)
-        .build()
-        .validate_otlp_trace(
-            &mut router,
-            &mock_server,
-            Query::builder().traced(false).build(),
-        )
-        .await?;
-    router.graceful_shutdown().await;
     Ok(())
 }
 
@@ -483,13 +331,13 @@ async fn test_priority_sampling_propagated() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         panic!("Error: test skipped because GraphOS is not enabled");
     }
-    let mock_server = mock_otlp_server(1..).await;
+    let mock_server_uri = "http://will-never-be-used.local";
     let config = include_str!("../fixtures/otlp_datadog_propagation.router.yaml")
-        .replace("<otel-collector-endpoint>", &mock_server.uri());
+        .replace("<otel-collector-endpoint>", mock_server_uri);
     let mut router = IntegrationTest::builder()
         // We're using datadog propagation as this is what we are trying to test.
         .telemetry(Telemetry::Otlp {
-            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+            endpoint: Some(format!("{}/v1/traces", mock_server_uri)),
         })
         .extra_propagator(Telemetry::Datadog)
         .config(config)
@@ -497,68 +345,7 @@ async fn test_priority_sampling_propagated() -> Result<(), BoxError> {
         .await;
 
     router.start().await;
-    router.assert_started().await;
-
-    // Parent based sampling. psr MUST be populated with the value that we pass in.
-    TraceSpec::builder()
-        .services(["client", "router"].into())
-        .priority_sampled("-1")
-        .subgraph_sampled(false)
-        .build()
-        .validate_otlp_trace(
-            &mut router,
-            &mock_server,
-            Query::builder().traced(true).psr("-1").build(),
-        )
-        .await?;
-    TraceSpec::builder()
-        .services(["client", "router"].into())
-        .priority_sampled("0")
-        .subgraph_sampled(false)
-        .build()
-        .validate_otlp_trace(
-            &mut router,
-            &mock_server,
-            Query::builder().traced(true).psr("0").build(),
-        )
-        .await?;
-    TraceSpec::builder()
-        .services(["client", "router", "subgraph"].into())
-        .priority_sampled("1")
-        .subgraph_sampled(true)
-        .build()
-        .validate_otlp_trace(
-            &mut router,
-            &mock_server,
-            Query::builder().traced(true).psr("1").build(),
-        )
-        .await?;
-    TraceSpec::builder()
-        .services(["client", "router", "subgraph"].into())
-        .priority_sampled("2")
-        .subgraph_sampled(true)
-        .build()
-        .validate_otlp_trace(
-            &mut router,
-            &mock_server,
-            Query::builder().traced(true).psr("2").build(),
-        )
-        .await?;
-
-    // No psr was passed in the router is free to set it. This will be 1 as we are going to sample here.
-    TraceSpec::builder()
-        .services(["client", "router", "subgraph"].into())
-        .priority_sampled("1")
-        .subgraph_sampled(true)
-        .build()
-        .validate_otlp_trace(
-            &mut router,
-            &mock_server,
-            Query::builder().traced(true).build(),
-        )
-        .await?;
-
-    router.graceful_shutdown().await;
+    router.wait_for_log_message("could not create router: datadog propagation cannot be used with any other propagator except for baggage").await;
 
     Ok(())
 }
@@ -664,12 +451,12 @@ async fn test_priority_sampling_no_parent_propagated() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
     }
-    let mock_server = mock_otlp_server(1..).await;
+    let mock_server_uri = "http://will-never-be-used.local";
     let config = include_str!("../fixtures/otlp_datadog_propagation_no_parent_sampler.router.yaml")
-        .replace("<otel-collector-endpoint>", &mock_server.uri());
+        .replace("<otel-collector-endpoint>", mock_server_uri);
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Otlp {
-            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+            endpoint: Some(format!("{}/v1/traces", mock_server_uri)),
         })
         .extra_propagator(Telemetry::Datadog)
         .config(config)
@@ -677,68 +464,7 @@ async fn test_priority_sampling_no_parent_propagated() -> Result<(), BoxError> {
         .await;
 
     router.start().await;
-    router.assert_started().await;
-
-    // The router will ignore the upstream PSR as parent based sampling is disabled.
-
-    TraceSpec::builder()
-        .services(["client", "router", "subgraph"].into())
-        .priority_sampled("1")
-        .subgraph_sampled(true)
-        .build()
-        .validate_otlp_trace(
-            &mut router,
-            &mock_server,
-            Query::builder().traced(true).psr("-1").build(),
-        )
-        .await?;
-    TraceSpec::builder()
-        .services(["client", "router", "subgraph"].into())
-        .priority_sampled("1")
-        .subgraph_sampled(true)
-        .build()
-        .validate_otlp_trace(
-            &mut router,
-            &mock_server,
-            Query::builder().traced(true).psr("0").build(),
-        )
-        .await?;
-    TraceSpec::builder()
-        .services(["client", "router", "subgraph"].into())
-        .priority_sampled("1")
-        .subgraph_sampled(true)
-        .build()
-        .validate_otlp_trace(
-            &mut router,
-            &mock_server,
-            Query::builder().traced(true).psr("1").build(),
-        )
-        .await?;
-    TraceSpec::builder()
-        .services(["client", "router", "subgraph"].into())
-        .priority_sampled("1")
-        .subgraph_sampled(true)
-        .build()
-        .validate_otlp_trace(
-            &mut router,
-            &mock_server,
-            Query::builder().traced(true).psr("2").build(),
-        )
-        .await?;
-
-    TraceSpec::builder()
-        .services(["client", "router", "subgraph"].into())
-        .priority_sampled("1")
-        .subgraph_sampled(true)
-        .build()
-        .validate_otlp_trace(
-            &mut router,
-            &mock_server,
-            Query::builder().traced(true).build(),
-        )
-        .await?;
-
-    router.graceful_shutdown().await;
+    router.wait_for_log_message("could not create router: datadog propagation cannot be used with any other propagator except for baggage").await;
 
     Ok(())
 }
