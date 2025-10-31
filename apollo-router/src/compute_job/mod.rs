@@ -25,6 +25,7 @@ use self::metrics::observe_queue_wait_duration;
 use crate::ageing_priority_queue::AgeingPriorityQueue;
 use crate::ageing_priority_queue::Priority;
 use crate::ageing_priority_queue::SendError;
+use crate::allocator::current;
 use crate::metrics::meter_provider;
 use crate::plugins::telemetry::consts::COMPUTE_JOB_EXECUTION_SPAN_NAME;
 use crate::plugins::telemetry::consts::COMPUTE_JOB_SPAN_NAME;

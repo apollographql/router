@@ -40,7 +40,7 @@ pub(crate) struct AllocationStats {
 
 impl AllocationStats {
     /// Create a new root allocation stats context with the given name.
-    pub(crate) fn new(name: &'static str) -> Self {
+    fn new(name: &'static str) -> Self {
         Self {
             name,
             parent: None,
@@ -52,7 +52,7 @@ impl AllocationStats {
     }
 
     /// Create a new child allocation stats context that tracks to a parent.
-    pub(crate) fn with_parent(name: &'static str, parent: Arc<AllocationStats>) -> Self {
+    fn with_parent(name: &'static str, parent: Arc<AllocationStats>) -> Self {
         Self {
             name,
             parent: Some(parent),
@@ -71,6 +71,7 @@ impl AllocationStats {
 
     /// Get the parent context, if any.
     #[inline]
+    #[allow(dead_code)]
     pub(crate) fn parent(&self) -> Option<&Arc<AllocationStats>> {
         self.parent.as_ref()
     }
