@@ -1133,6 +1133,9 @@ impl Merger {
                         }
                     }
                 }
+                // TODO(FED-883): Now that the block above checks for a field's existence in all
+                // subgraphs (without relying on this explicit None being set), we should be able
+                // to switch `Sources` to be `IndexMap<usize, T>` instead of holding `Option<T>`.
                 None => {
                     // This subgraph does not have the field, so if it has the field type, we need a join__field.
                     if subgraph
