@@ -117,16 +117,16 @@ pub(crate) mod test_helpers {
                 error_code.contains(expected_code),
                 "Error at index {} does not contain expected code.\n\nEXPECTED:\n{}\nACTUAL:\n{}",
                 i,
-                format!("code: {}\nmessage: {}\n", expected_code, expected_message),
-                format!("code: {}\nmessage: {}\n", error_code, error_str)
+                format_args!("code: {}\nmessage: {}\n", expected_code, expected_message),
+                format_args!("code: {}\nmessage: {}\n", error_code, error_str)
             );
             // Check error message
             assert!(
                 error_str.contains(expected_message),
                 "Error at index {} does not contain expected message.\n\nEXPECTED:\n{}\nACTUAL:\n{}",
                 i,
-                format!("code: {}\nmessage: {}\n", expected_code, expected_message),
-                format!("code: {}\nmessage: {}\n", error_code, error_str)
+                format_args!("code: {}\nmessage: {}\n", expected_code, expected_message),
+                format_args!("code: {}\nmessage: {}\n", error_code, error_str)
             );
         }
     }
