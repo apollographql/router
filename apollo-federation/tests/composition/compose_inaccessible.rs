@@ -291,8 +291,7 @@ fn inaccessible_errors_if_subgraph_misuses_inaccessible() {
         &result,
         &[(
             "REFERENCED_INACCESSIBLE",
-            r#"The following errors occurred:
-  - Type `A` is @inaccessible but is referenced by `Query.q2`, which is in the API schema."#,
+            r#"Type `A` is @inaccessible but is referenced by `Query.q2`, which is in the API schema."#,
         )],
     );
 }

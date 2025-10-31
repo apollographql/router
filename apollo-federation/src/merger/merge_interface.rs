@@ -133,8 +133,21 @@ impl Merger {
 
         for (dest_field, subgraph_fields) in added {
             if !has_key {
+                let subgraph_types = self
+                    .subgraphs
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, subgraph)| {
+                        let maybe_ty: Option<ObjectOrInterfaceTypeDefinitionPosition> = subgraph
+                            .schema()
+                            .get_type(itf.type_name.clone())
+                            .ok()
+                            .and_then(|ty| ty.try_into().ok());
+                        (idx, maybe_ty)
+                    })
+                    .collect();
                 self.hint_on_inconsistent_value_type_field(
-                    &self.subgraph_sources(),
+                    &subgraph_types,
                     &ObjectOrInterfaceTypeDefinitionPosition::Interface(itf.clone()),
                     &dest_field,
                 )?;

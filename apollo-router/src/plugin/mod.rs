@@ -93,6 +93,9 @@ pub struct PluginInit<T> {
     /// NEVER use this in any other plugin. Plugins should only ever access their pre-defined
     /// configuration subset.
     pub(crate) full_config: Option<Value>,
+
+    /// The full router yaml before it was parsed and env variables expanded
+    pub(crate) raw_yaml: Option<Arc<str>>,
 }
 
 impl<T> PluginInit<T>
@@ -141,6 +144,7 @@ where
         notify: Notify<String, graphql::Response>,
         license: Arc<LicenseState>,
         full_config: Option<Value>,
+        original_config_yaml: Option<Arc<str>>,
     ) -> Self {
         PluginInit {
             config,
@@ -153,6 +157,7 @@ where
             notify,
             license,
             full_config,
+            raw_yaml: original_config_yaml,
         }
     }
 
@@ -172,6 +177,7 @@ where
         notify: Notify<String, graphql::Response>,
         license: Arc<LicenseState>,
         full_config: Option<Value>,
+        original_config_yaml: Option<Arc<str>>,
     ) -> Result<Self, BoxError> {
         let config: T = serde_json::from_value(config)?;
         let previous_config = previous_config.map(serde_json::from_value).transpose()?;
@@ -186,6 +192,7 @@ where
             notify,
             license,
             full_config,
+            raw_yaml: original_config_yaml,
         })
     }
 
@@ -202,6 +209,7 @@ where
         notify: Option<Notify<String, graphql::Response>>,
         license: Option<Arc<LicenseState>>,
         full_config: Option<Value>,
+        original_config_yaml: Option<Arc<str>>,
     ) -> Self {
         PluginInit {
             config,
@@ -215,6 +223,7 @@ where
             notify: notify.unwrap_or_else(Notify::for_tests),
             license: license.unwrap_or_default(),
             full_config,
+            raw_yaml: original_config_yaml,
         }
     }
 }
@@ -235,6 +244,7 @@ impl PluginInit<serde_json::Value> {
             .notify(self.notify.clone())
             .license(self.license)
             .and_full_config(self.full_config)
+            .and_original_config_yaml(self.raw_yaml)
             .build()
     }
 }

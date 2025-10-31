@@ -58,7 +58,15 @@ pub struct Endpoint {
     pub(crate) path: String,
     // Plugins need to be Send + Sync
     // BoxCloneService isn't enough
-    handler: Handler,
+    handler: EndpointHandler,
+}
+
+#[derive(Clone)]
+enum EndpointHandler {
+    /// Legacy handler wrapping a router service
+    Service(Handler),
+    /// Direct axum router (bypasses service conversion)
+    Router(axum::Router),
 }
 
 impl std::fmt::Debug for Endpoint {
@@ -74,23 +82,62 @@ impl Endpoint {
     pub fn from_router_service(path: String, handler: router::BoxService) -> Self {
         Self {
             path,
-            handler: Handler::new(handler),
+            handler: EndpointHandler::Service(Handler::new(handler)),
+        }
+    }
+
+    /// Creates an Endpoint given a path and an axum Router
+    ///
+    /// This is the preferred method for plugins that use axum internally,
+    /// as it avoids unnecessary service wrapping and path manipulation.
+    ///
+    /// The router will be automatically nested at the specified path, allowing
+    /// it to handle all sub-routes. For example, a router registered at `/diagnostics`
+    /// will handle `/diagnostics/`, `/diagnostics/memory/status`, etc.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use axum::{Router, routing::get};
+    ///
+    /// let router = Router::new()
+    ///     .route("/", get(handle_dashboard))
+    ///     .route("/status", get(handle_status));
+    ///
+    /// let endpoint = Endpoint::from_router("/diagnostics".to_string(), router);
+    /// // This will handle:
+    /// // - /diagnostics/
+    /// // - /diagnostics/status
+    /// ```
+    pub(crate) fn from_router(path: String, router: axum::Router) -> Self {
+        Self {
+            path,
+            handler: EndpointHandler::Router(router),
         }
     }
 
     pub(crate) fn into_router(self) -> axum::Router {
-        let handler = move |req: http::Request<axum::body::Body>| {
-            let endpoint = self.handler.clone();
-            async move {
-                Ok(endpoint
-                    .oneshot(req.into())
-                    .await
-                    .map(|res| res.response)
-                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
-                    .into_response())
+        match self.handler {
+            // If we already have a router, just nest it at the path
+            EndpointHandler::Router(router) => axum::Router::new().nest(&self.path, router),
+            // Legacy service handling with path-based routing
+            EndpointHandler::Service(handler) => {
+                let handler_clone = handler.clone();
+                let handler = move |req: http::Request<axum::body::Body>| {
+                    let endpoint = handler_clone.clone();
+                    async move {
+                        Ok(endpoint
+                            .oneshot(req.into())
+                            .await
+                            .map(|res| res.response)
+                            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+                            .into_response())
+                    }
+                };
+
+                axum::Router::new().route_service(self.path.as_str(), service_fn(handler))
             }
-        };
-        axum::Router::new().route_service(self.path.as_str(), service_fn(handler))
+        }
     }
 }
 /// Factory for creating a RouterService
@@ -186,6 +233,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                     .notify(configuration.notify.clone())
                     .license(license.clone())
                     .full_config(configuration.validated_yaml.clone())
+                    .and_original_config_yaml(configuration.raw_yaml.clone())
                     .build();
 
                 match factory.create_instance(telemetry_init).await {
@@ -535,6 +583,7 @@ pub(crate) async fn add_plugin(
     errors: &mut Vec<ConfigurationError>,
     license: Arc<LicenseState>,
     full_config: Option<Value>,
+    original_config_yaml: Option<Arc<str>>,
 ) {
     let plugin_init = PluginInit::builder()
         .config(plugin_config.clone())
@@ -547,6 +596,7 @@ pub(crate) async fn add_plugin(
         .notify(notify.clone())
         .license(license)
         .and_full_config(full_config)
+        .and_original_config_yaml(original_config_yaml)
         .build();
 
     match factory.create_instance(plugin_init).await {
@@ -637,6 +687,7 @@ pub(crate) async fn create_plugins(
                 &mut errors,
                 license.clone(),
                 $maybe_full_config,
+                configuration.raw_yaml.clone(),
             )
             .await;
         }};
@@ -828,6 +879,7 @@ pub(crate) async fn create_plugins(
     add_mandatory_apollo_plugin!("csrf");
     add_mandatory_apollo_plugin!("fleet_detector");
     add_mandatory_apollo_plugin!("enhanced_client_awareness");
+    add_mandatory_apollo_plugin!("experimental_diagnostics");
 
     add_oss_apollo_plugin!("forbid_mutations");
     add_optional_apollo_plugin!("subscription");
@@ -835,8 +887,8 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("authorization");
     add_optional_apollo_plugin!("authentication");
     add_oss_apollo_plugin!("preview_file_uploads");
+    add_optional_apollo_plugin!("preview_response_cache");
     add_optional_apollo_plugin!("preview_entity_cache");
-    add_oss_apollo_plugin!("preview_response_cache");
     add_mandatory_apollo_plugin!("progressive_override");
     add_optional_apollo_plugin!("demand_control");
 
@@ -959,7 +1011,6 @@ mod test {
     const OSS_PLUGINS: &[&str] = &[
         "apollo.forbid_mutations",
         "apollo.override_subgraph_url",
-        "apollo.preview_response_cache",
         "apollo.connectors",
     ];
 
@@ -1126,6 +1177,14 @@ mod test {
                     enabled: true
                 "#
             }
+            "preview_response_cache" => {
+                r#"
+                enabled: true
+                subgraph:
+                  all:
+                    enabled: true
+                "#
+            }
             "demand_control" => {
                 r#"
                 enabled: true
@@ -1144,12 +1203,6 @@ mod test {
             "connectors" => {
                 r#"
                 debug_extensions: false
-                "#
-            }
-            "preview_response_cache" => {
-                r#"
-                enabled: true
-                subgraph: {}
                 "#
             }
             "experimental_mock_subgraphs" => {
@@ -1251,15 +1304,11 @@ mod test {
                 .unwrap();
         let connectors_config =
             serde_yaml::from_str::<serde_json::Value>(get_plugin_config("connectors")).unwrap();
-        let response_cache_config =
-            serde_yaml::from_str::<serde_json::Value>(get_plugin_config("preview_response_cache"))
-                .unwrap();
 
         let router_config = Configuration::builder()
             .apollo_plugin("forbid_mutations", forbid_mutations_config)
             .apollo_plugin("override_subgraph_url", override_subgraph_url_config)
             .apollo_plugin("connectors", connectors_config)
-            .apollo_plugin("preview_response_cache", response_cache_config)
             .build()
             .unwrap();
 
@@ -1312,6 +1361,10 @@ mod test {
         "preview_entity_cache",
         HashSet::from_iter(vec![AllowedFeature::EntityCaching, AllowedFeature::DemandControl]))
     ]
+    #[case::response_cache(
+        "preview_response_cache",
+        HashSet::from_iter(vec![AllowedFeature::DemandControl, AllowedFeature::ResponseCaching]))
+    ]
     #[case::authorization(
         "demand_control",
         HashSet::from_iter(vec![AllowedFeature::Authorization, AllowedFeature::Subscriptions, AllowedFeature::DemandControl]))
@@ -1339,6 +1392,7 @@ mod test {
 
         let plugin_config =
             serde_yaml::from_str::<serde_json::Value>(get_plugin_config(plugin)).unwrap();
+        dbg!(&plugin_config);
         let router_config = Configuration::builder()
             .apollo_plugin(plugin, plugin_config)
             .build()
@@ -1401,6 +1455,10 @@ mod test {
     #[case::entity_caching(
         "preview_entity_cache",
         HashSet::from_iter(vec![AllowedFeature::DemandControl]))
+    ]
+    #[case::response_cache(
+        "preview_response_cache",
+        HashSet::from_iter(vec![AllowedFeature::EntityCaching]))
     ]
     #[case::authorization(
         "demand_control",

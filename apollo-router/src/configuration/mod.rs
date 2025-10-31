@@ -149,6 +149,10 @@ pub struct Configuration {
     #[serde(skip)]
     pub(crate) validated_yaml: Option<Value>,
 
+    /// The full router yaml before it was parsed and env variables expanded
+    #[serde(skip)]
+    pub(crate) raw_yaml: Option<Arc<str>>,
+
     /// Health check configuration
     #[serde(default)]
     pub(crate) health_check: HealthCheck,
@@ -291,6 +295,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             notify,
             uplink: None,
             validated_yaml: None,
+            raw_yaml: None,
         }
         .validate()
         .map_err(|e| serde::de::Error::custom(e.to_string()))
@@ -329,6 +334,7 @@ impl Configuration {
 
         let conf = Self {
             validated_yaml: Default::default(),
+            raw_yaml: None,
             supergraph: supergraph.unwrap_or_default(),
             server: server.unwrap_or_default(),
             health_check: health_check.unwrap_or_default(),
@@ -495,6 +501,7 @@ impl Configuration {
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
             batching: batching.unwrap_or_default(),
+            raw_yaml: None,
         };
 
         configuration.validate()
@@ -725,6 +732,14 @@ pub(crate) struct Supergraph {
     /// but request handling will stop immediately when the client connection is closed.
     pub(crate) early_cancel: bool,
 
+    /// Enable errors generated during response reformatting and result coercion to be returned in
+    /// responses.
+    /// Default: false
+    /// All subgraph responses are checked and corrected to ensure alignment with the schema and
+    /// query. When enabled, misaligned values will generate errors which are included in errors
+    /// array in the response.
+    pub(crate) enable_result_coercion_errors: bool,
+
     /// Log a message if the client closes the connection before the response is sent.
     /// Default: false.
     pub(crate) experimental_log_on_broken_pipe: bool,
@@ -751,6 +766,7 @@ impl Supergraph {
         generate_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
+        insert_result_coercion_errors: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -764,6 +780,7 @@ impl Supergraph {
                 .unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
+            enable_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
         }
     }
 }
@@ -782,6 +799,7 @@ impl Supergraph {
         generate_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
+        insert_result_coercion_errors: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -795,6 +813,7 @@ impl Supergraph {
                 .unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
+            enable_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
         }
     }
 }

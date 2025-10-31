@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/tests.rs
-assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -101,6 +100,20 @@ expression: "&schema"
         }
       },
       "type": "object"
+    },
+    "ActiveSubgraphRequests": {
+      "oneOf": [
+        {
+          "const": "count",
+          "description": "The number of active subgraph requests as a count.",
+          "type": "string"
+        },
+        {
+          "const": "bool",
+          "description": "Whether there are any active subgraph requests as a boolean.",
+          "type": "string"
+        }
+      ]
     },
     "All": {
       "enum": [
@@ -1825,6 +1838,32 @@ expression: "&schema"
     },
     "Config5": {
       "additionalProperties": false,
+      "description": "Configuration for the diagnostics plugin\n\n**Platform Requirements**: This plugin is supported on all platforms.\nHeap dump functionality is only available on Linux platforms due to\njemalloc requirements. Other diagnostic features work across platforms.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Enable the diagnostics plugin",
+          "type": "boolean"
+        },
+        "listen": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ListenAddr"
+            }
+          ],
+          "default": "127.0.0.1:8089",
+          "description": "The socket address and port to listen on\nDefaults to 127.0.0.1:8089\nDo not expose this endpoint to the internet as it exposes sensitive information."
+        },
+        "output_directory": {
+          "default": "/tmp/router-diagnostics",
+          "description": "Directory path for memory dump files\nDefaults to \"/tmp/router-diagnostics\" on Unix, or temp directory on other platforms\n\nThis directory will be created automatically if it doesn't exist.\nNote: Memory dumps are only generated on Linux platforms.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "Config6": {
+      "additionalProperties": false,
       "description": "Configuration for entity caching",
       "properties": {
         "enabled": {
@@ -1870,7 +1909,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config6": {
+    "Config7": {
       "additionalProperties": false,
       "description": "Configuration for response caching",
       "properties": {
@@ -1916,7 +1955,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config7": {
+    "Config8": {
       "additionalProperties": false,
       "description": "Redis cache configuration",
       "properties": {
@@ -2042,7 +2081,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config8": {
+    "Config9": {
       "description": "Configuration for the progressive override plugin",
       "type": "object"
     },
@@ -2501,6 +2540,15 @@ expression: "&schema"
         },
         "preview_connect_v0_3": {
           "default": null,
+          "deprecated": true,
+          "description": "Feature gate for Connect spec v0.3. Set to `true` to enable the using\nthe v0.3 spec during the preview phase.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "preview_connect_v0_4": {
+          "default": null,
           "description": "Feature gate for Connect spec v0.3. Set to `true` to enable the using\nthe v0.3 spec during the preview phase.",
           "type": [
             "boolean",
@@ -2725,7 +2773,8 @@ expression: "&schema"
               ],
               "origins": [
                 "https://studio.apollographql.com"
-              ]
+              ],
+              "private_network_access": null
             }
           ],
           "description": "The origin(s) to allow requests from. The router matches request origins against policies\nin order, first by exact match, then by regex. See module documentation for default behavior.",
@@ -4471,6 +4520,14 @@ expression: "&schema"
         "$ref": "#/definitions/Instrument"
       },
       "properties": {
+        "apollo.router.overhead": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/StandardInstrumentExtendedRouterOverheadAttributesWithRouterSelector"
+            }
+          ],
+          "description": "Histogram of router overhead (time not spent in subgraph requests)"
+        },
         "http.server.active_requests": {
           "allOf": [
             {
@@ -4504,6 +4561,13 @@ expression: "&schema"
           "description": "Histogram of server response body size"
         }
       },
+      "type": "object"
+    },
+    "ExtendedRouterOverheadAttributesWithRouterSelector": {
+      "additionalProperties": {
+        "$ref": "#/definitions/RouterSelector"
+      },
+      "description": "Empty attributes struct for router overhead - no standard attributes, only custom selectors",
       "type": "object"
     },
     "ExtendedSubgraphAttributesWithConditionalSubgraphSelector": {
@@ -7148,6 +7212,40 @@ expression: "&schema"
             "type": "string"
           },
           "type": "array"
+        },
+        "private_network_access": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PrivateNetworkAccessPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "When `Some`, the `Access-Control-Allow-Private-Network` header will be added as well as the\nrespective headers contained within the policy."
+        }
+      },
+      "type": "object"
+    },
+    "PrivateNetworkAccessPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "access_id": {
+          "default": null,
+          "description": "When specified, the `Private-Network-Access-ID` header will be added with the given ID.\nThe ID must be a 48-bit value presented as 6 hexadecimal bytes separated by colons, e.g.\n`01:23:45:67:89:0A`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "access_name": {
+          "default": null,
+          "description": "When `Some`, the `Private-Network-Access-Name` header will be added with the given name.\nThe name can be at most 248 UTF-8 code units and match a RegEx equivalent to the ECMAScript\nRegEx `/^[a-z0-9_-.]+$/.`",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -8213,6 +8311,38 @@ expression: "&schema"
           "type": "object"
         },
         {
+          "additionalProperties": false,
+          "description": "Router overhead duration (time not spent in subgraph requests)",
+          "properties": {
+            "router_overhead": {
+              "description": "Extract router overhead duration in seconds",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "router_overhead"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Number of active subgraph requests at the time of overhead calculation",
+          "properties": {
+            "active_subgraph_requests": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ActiveSubgraphRequests"
+                }
+              ],
+              "description": "The mode for extracting active subgraph request information"
+            }
+          },
+          "required": [
+            "active_subgraph_requests"
+          ],
+          "type": "object"
+        },
+        {
           "description": "Deprecated, should not be used anymore, use static field instead",
           "type": "string"
         },
@@ -8814,6 +8944,28 @@ expression: "&schema"
         }
       ]
     },
+    "StandardInstrumentExtendedRouterOverheadAttributesWithRouterSelector": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attributes": {
+              "$ref": "#/definitions/ExtendedRouterOverheadAttributesWithRouterSelector"
+            }
+          },
+          "required": [
+            "attributes"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "StandardInstrumentExtendedSubgraphAttributesWithSubgraphSelector": {
       "anyOf": [
         {
@@ -9057,7 +9209,7 @@ expression: "&schema"
         "redis": {
           "anyOf": [
             {
-              "$ref": "#/definitions/Config7"
+              "$ref": "#/definitions/Config8"
             },
             {
               "type": "null"
@@ -10386,6 +10538,11 @@ expression: "&schema"
         "early_cancel": {
           "default": false,
           "description": "abort request handling when the client drops the connection.\nDefault: false.\nWhen set to true, some parts of the request pipeline like telemetry will not work properly,\nbut request handling will stop immediately when the client connection is closed.",
+          "type": "boolean"
+        },
+        "enable_result_coercion_errors": {
+          "default": false,
+          "description": "Enable errors generated during response reformatting and result coercion to be returned in\nresponses.\nDefault: false\nAll subgraph responses are checked and corrected to ensure alignment with the schema and\nquery. When enabled, misaligned values will generate errors which are included in errors\narray in the response.",
           "type": "boolean"
         },
         "experimental_log_on_broken_pipe": {
@@ -11725,7 +11882,7 @@ expression: "&schema"
       "type": "object"
     },
     "^preview_response_cache$": {
-      "$ref": "#/definitions/Config6"
+      "$ref": "#/definitions/Config7"
     }
   },
   "properties": {
@@ -11811,7 +11968,8 @@ expression: "&schema"
             ],
             "origins": [
               "https://studio.apollographql.com"
-            ]
+            ],
+            "private_network_access": null
           }
         ]
       },
@@ -11837,6 +11995,9 @@ expression: "&schema"
         "force_schema_reload": null
       },
       "description": "Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.\nYou probably don’t want this in production!"
+    },
+    "experimental_diagnostics": {
+      "$ref": "#/definitions/Config5"
     },
     "experimental_type_conditioned_fetching": {
       "default": false,
@@ -11911,13 +12072,13 @@ expression: "&schema"
       "description": "Plugin configuration"
     },
     "preview_entity_cache": {
-      "$ref": "#/definitions/Config5"
+      "$ref": "#/definitions/Config6"
     },
     "preview_file_uploads": {
       "$ref": "#/definitions/FileUploadsConfig"
     },
     "progressive_override": {
-      "$ref": "#/definitions/Config8"
+      "$ref": "#/definitions/Config9"
     },
     "rhai": {
       "$ref": "#/definitions/RhaiConfig"
@@ -11965,6 +12126,7 @@ expression: "&schema"
         },
         "defer_support": true,
         "early_cancel": false,
+        "enable_result_coercion_errors": false,
         "experimental_log_on_broken_pipe": false,
         "generate_query_fragments": true,
         "introspection": false,

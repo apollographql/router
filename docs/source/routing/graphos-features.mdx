@@ -16,9 +16,8 @@ This page lists the additional features of GraphOS Router that are enabled via i
 - Improved performance with [query batching](/graphos/routing/performance/query-batching)
 - Authentication of inbound requests via [JSON Web Token (JWT)](/graphos/routing/security/jwt)
 - [Authorization of specific fields and types](/graphos/routing/security/authorization) through the [`@requiresScopes`](/graphos/routing/security/authorization#requiresscopes), [`@authenticated`](/graphos/routing/security/authorization#authenticated), and [`@policy`](/graphos/routing/security/authorization#policy) directives
-- Redis-backed [distributed caching of query plans and persisted queries](/graphos/routing/performance/caching/distributed)
-- Redis-backed [response caching of subgraph responses](/graphos/routing/performance/caching/response-caching)
-- Redis-backed [entity caching of subgraph responses](/graphos/routing/performance/caching/entity) (superseded by response caching)
+- Redis-backed [distributed caching of query plans](/graphos/routing/query-planning/caching#distributed-caching-with-redis) and [automatic persisted queries](/graphos/routing/operations/apq#distributed-caching-with-redis)
+- Redis-backed [response caching](/graphos/routing/performance/caching/response-caching) (preview)
 - Custom request handling in any language via [external coprocessing](/graphos/routing/customization/coprocessor)
 - Mitigation of potentially malicious requests via [request limits](/graphos/routing/security/request-limits), [demand control](/graphos/routing/security/demand-control), and [safelisting](/graphos/routing/security/persisted-queries)
 - Custom instrumentation and telemetry, including [custom attributes for spans](/graphos/reference/router/telemetry/instrumentation/spans#attributes).
