@@ -34,7 +34,7 @@ pub(crate) struct AllocationStats {
 
 impl AllocationStats {
     /// Create a new root allocation stats context with the given name.
-    pub(crate) fn new(name: &'static str) -> Self {
+    fn new(name: &'static str) -> Self {
         Self {
             name,
             parent: None,
@@ -46,7 +46,7 @@ impl AllocationStats {
     }
 
     /// Create a new child allocation stats context that tracks to a parent.
-    pub(crate) fn with_parent(name: &'static str, parent: Arc<AllocationStats>) -> Self {
+    fn with_parent(name: &'static str, parent: Arc<AllocationStats>) -> Self {
         Self {
             name,
             parent: Some(parent),
@@ -65,6 +65,7 @@ impl AllocationStats {
 
     /// Get the parent context, if any.
     #[inline]
+    #[allow(dead_code)]
     pub(crate) fn parent(&self) -> Option<&Arc<AllocationStats>> {
         self.parent.as_ref()
     }
@@ -248,9 +249,52 @@ pub(crate) fn current() -> Option<Arc<AllocationStats>> {
     })
 }
 
-/// Run a synchronous closure with memory tracking using the provided stats.
+/// Run a synchronous closure with memory tracking.
+/// If a parent context exists, creates a child context that tracks to the parent.
+/// If no parent exists, creates a new root context with the given name.
 /// This is useful for tracking allocations in synchronous code or threads.
-pub(crate) fn with_memory_tracking<F, R>(stats: Arc<AllocationStats>, f: F) -> R
+pub(crate) fn with_memory_tracking<F, R>(name: &'static str, f: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    // Check if there's a parent context, and create either a child or root stats
+    let stats = CURRENT_TASK_STATS.with(|cell| {
+        cell.get().map_or_else(
+            // No parent context - create a new root
+            || Arc::new(AllocationStats::new(name)),
+            |ptr| {
+                // Parent context exists - create a child that tracks to the parent
+                // SAFETY: The pointer is valid because it's managed by a parent context.
+                // We clone the Arc by manually incrementing the reference count.
+                let parent = unsafe {
+                    Arc::increment_strong_count(ptr.as_ptr());
+                    Arc::from_raw(ptr.as_ptr())
+                };
+                Arc::new(AllocationStats::with_parent(name, parent))
+            },
+        )
+    });
+
+    with_explicit_memory_tracking(stats, f)
+}
+
+/// Run a synchronous closure with memory tracking using an explicit parent.
+/// Creates a child context with the given name that tracks to the provided parent.
+pub(crate) fn with_parented_memory_tracking<F, R>(
+    name: &'static str,
+    parent: Arc<AllocationStats>,
+    f: F,
+) -> R
+where
+    F: FnOnce() -> R,
+{
+    let stats = Arc::new(AllocationStats::with_parent(name, parent));
+    with_explicit_memory_tracking(stats, f)
+}
+
+/// Internal function to run a closure with explicit allocation stats.
+/// Sets the thread-local stats, runs the closure, and restores the previous stats.
+fn with_explicit_memory_tracking<F, R>(stats: Arc<AllocationStats>, f: F) -> R
 where
     F: FnOnce() -> R,
 {
@@ -549,50 +593,56 @@ mod tests {
     #[test]
     fn test_sync_memory_tracking() {
         // Test that synchronous code can use with_memory_tracking for thread propagation
-        let stats = Arc::new(AllocationStats::new("sync_test"));
+        let stats = with_memory_tracking("sync_test", || {
+            let stats = current().expect("stats should be set");
+            assert_eq!(stats.name(), "sync_test");
 
-        assert_eq!(stats.name(), "sync_test");
+            {
+                let _v = Vec::<u8>::with_capacity(8000);
 
-        with_memory_tracking(stats.clone(), || {
-            let _v = Vec::<u8>::with_capacity(8000);
+                // The allocator may allocate more than requested due to alignment, overhead, etc.
+                assert!(
+                    stats.bytes_allocated() >= 8000,
+                    "should track at least 8000 bytes, got {}",
+                    stats.bytes_allocated()
+                );
+            }
+
+            // Net should be near 0 after first Vec is dropped
+            assert!(
+                stats.net_allocated() < 100,
+                "net allocated should be near 0 after Vec is dropped, got {}",
+                stats.net_allocated()
+            );
+
+            let first_allocated = stats.bytes_allocated();
+
+            // Test propagation to child thread with parented context
+            let parent_stats = stats.clone();
+            let handle = thread::spawn(move || {
+                with_parented_memory_tracking("sync_test_child", parent_stats, || {
+                    let child_stats = current().expect("child stats should be set");
+                    assert_eq!(child_stats.name(), "sync_test_child");
+                    let _v = Vec::<u8>::with_capacity(3000);
+                })
+            });
+            handle.join().unwrap();
+
+            // Should have tracked allocations from both contexts (parent propagation)
+            assert!(
+                stats.bytes_allocated() >= first_allocated + 3000,
+                "should track allocations from both contexts, got {} (expected at least {})",
+                stats.bytes_allocated(),
+                first_allocated + 3000
+            );
+
+            stats
         });
 
-        // The allocator may allocate more than requested due to alignment, overhead, etc.
+        // Net should be near 0 after all Vecs are dropped
+        // Allow up to 200 bytes for internal allocations (Arc overhead, thread infrastructure, etc.)
         assert!(
-            stats.bytes_allocated() >= 8000,
-            "should track at least 8000 bytes, got {}",
-            stats.bytes_allocated()
-        );
-
-        // Net should be near 0 after Vec is dropped
-        assert!(
-            stats.net_allocated() < 100,
-            "net allocated should be near 0 after Vec is dropped, got {}",
-            stats.net_allocated()
-        );
-
-        let first_allocated = stats.bytes_allocated();
-
-        // Test propagation across threads
-        let stats_clone = stats.clone();
-        let handle = thread::spawn(move || {
-            with_memory_tracking(stats_clone, || {
-                let _v = Vec::<u8>::with_capacity(3000);
-            })
-        });
-        handle.join().unwrap();
-
-        // Should have tracked allocations from both threads
-        assert!(
-            stats.bytes_allocated() >= first_allocated + 3000,
-            "should track allocations from both threads, got {} (expected at least {})",
-            stats.bytes_allocated(),
-            first_allocated + 3000
-        );
-
-        // Net should still be near 0
-        assert!(
-            stats.net_allocated() < 100,
+            stats.net_allocated() < 200,
             "net allocated should be near 0 after all Vecs are dropped, got {}",
             stats.net_allocated()
         );
