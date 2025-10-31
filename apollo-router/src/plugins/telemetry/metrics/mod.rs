@@ -1,6 +1,7 @@
 use opentelemetry_sdk::metrics::Aggregation;
 use opentelemetry_sdk::metrics::InstrumentKind;
 use opentelemetry_sdk::metrics::reader::AggregationSelector;
+pub(crate) mod allocation;
 pub(crate) mod apollo;
 pub(crate) mod local_type_stats;
 pub(crate) mod otlp;
