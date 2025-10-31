@@ -29,11 +29,13 @@ expression: cache_keys
       "maxAge": 86400,
       "public": true
     },
+    "shouldStore": true,
     "data": {
       "data": {
         "shippingEstimate": 15
       }
-    }
+    },
+    "warnings": []
   },
   {
     "key": "version:1.0:subgraph:products:type:Query:hash:950d73004047e5e88793cb22c0c1d0dedc48244c0a1e0c0b41e2078584b4cb65:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
@@ -56,6 +58,7 @@ expression: cache_keys
       "maxAge": 86400,
       "public": true
     },
+    "shouldStore": true,
     "data": {
       "data": {
         "topProducts": [
@@ -68,6 +71,7 @@ expression: cache_keys
           }
         ]
       }
-    }
+    },
+    "warnings": []
   }
 ]
