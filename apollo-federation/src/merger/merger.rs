@@ -669,7 +669,7 @@ impl Merger {
     fn report_mismatched_type_definitions(
         &mut self,
         mismatched_type: &TypeDefinitionPosition,
-        subgraphs_with_interface_object: &Vec<String>,
+        subgraphs_with_interface_object: &[String],
     ) {
         let sources = self
             .subgraphs
@@ -1223,7 +1223,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                 let itf_field_pos = itf.field(itf_obj_field.field_name.clone());
 
                 // If the interface in the supergraph is missing this field, merge it in.
-                if !itf_field_pos.try_get(self.merged.schema()).is_some() {
+                if itf_field_pos.try_get(self.merged.schema()).is_none() {
                     let subgraph_enum_name = self.join_spec_name(idx)?;
                     let mut missing_itf_node = ast_node_to_add.clone();
                     missing_itf_node.directives.push(
@@ -1239,10 +1239,10 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
 
                 // If an implementer of that interface is missing the field, merge it in.
                 for implementer in itf.implementers(&self.merged)? {
-                    if !implementer
+                    if implementer
                         .field(itf_obj_field.field_name.clone())
                         .try_get(self.merged.schema())
-                        .is_some()
+                        .is_none()
                     {
                         // We add a special @join__field for those added field with no `graph` target. This
                         // clarifies to the later extraction process that this particular field doesn't come
@@ -1922,14 +1922,6 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             result.extend(locations);
         }
         result
-    }
-
-    pub(crate) fn subgraph_sources(&self) -> Sources<Subgraph<Validated>> {
-        self.subgraphs
-            .iter()
-            .enumerate()
-            .map(|(idx, subgraph)| (idx, Some(subgraph.clone())))
-            .collect()
     }
 }
 

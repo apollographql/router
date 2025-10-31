@@ -1,24 +1,19 @@
 use indexmap::IndexSet;
-use itertools::Itertools;
 use tracing::trace;
 
 use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::merger::merge::Merger;
-use crate::merger::merge::Sources;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
-use crate::subgraph::typestate::Subgraph;
-use crate::subgraph::typestate::Validated;
 use crate::utils::human_readable::human_readable_types;
 
 impl Merger {
     // Returns whether the interface has a key (even a non-resolvable one) in any subgraph.
     fn validate_interface_keys(
         &mut self,
-        sources: &Sources<Subgraph<Validated>>,
         dest: &InterfaceTypeDefinitionPosition,
     ) -> Result<bool, FederationError> {
         trace!("Validating interface keys");
@@ -31,10 +26,7 @@ impl Merger {
         // Validate that if a source defines a (resolvable) @key on an interface, then that subgraph defines
         // all the implementations of that interface in the supergraph.
         let mut has_key = false;
-        for (idx, source) in sources.iter() {
-            let Some(subgraph) = source else {
-                continue;
-            };
+        for subgraph in self.subgraphs.iter() {
             if !subgraph.schema().is_interface(&dest.type_name) {
                 continue;
             }
@@ -70,7 +62,6 @@ impl Merger {
 
     fn validate_interface_objects(
         &mut self,
-        sources: &Sources<Subgraph<Validated>>,
         dest: &InterfaceTypeDefinitionPosition,
     ) -> Result<(), FederationError> {
         trace!("Validating interface objects");
@@ -82,27 +73,21 @@ impl Merger {
         // one those implementation would require additional care for shareability and more. This also feel
         // like this can get easily be done by mistake and gets rather confusing, so it's worth some additional
         // consideration before allowing.
-        for (idx, source) in sources.iter() {
-            let schema = if let Some(subgraph) = source {
-                subgraph.schema().schema()
-            } else {
-                continue;
-            };
+        for subgraph in self.subgraphs.iter() {
             // If `dest` has an interface object in this subgraph, it will be an object type (not
             // an interface). So we have to check for the object equivalent of `dest` instead of
             // checking `dest` directly.
             let ty_as_obj = ObjectTypeDefinitionPosition {
                 type_name: dest.type_name.clone(),
             };
-            if !self.subgraphs[*idx].is_interface_object_type(&ty_as_obj.into()) {
+            if !subgraph.is_interface_object_type(&ty_as_obj.into()) {
                 continue;
             }
 
-            let subgraph_name = &self.subgraphs[*idx].name;
-
+            let subgraph_name = &subgraph.name;
             let defined_implementations: IndexSet<_> = supergraph_implementations
                 .iter()
-                .filter(|implementation| implementation.get(schema).is_ok())
+                .filter(|implementation| implementation.get(subgraph.schema().schema()).is_ok())
                 .collect::<IndexSet<_>>();
             if !defined_implementations.is_empty() {
                 self.error_reporter.add_error(CompositionError::InterfaceObjectUsageError {
@@ -120,8 +105,8 @@ impl Merger {
         &mut self,
         itf: InterfaceTypeDefinitionPosition,
     ) -> Result<(), FederationError> {
-        let has_key = self.validate_interface_keys(&self.subgraph_sources(), &itf)?;
-        self.validate_interface_objects(&self.subgraph_sources(), &itf)?;
+        let has_key = self.validate_interface_keys(&itf)?;
+        self.validate_interface_objects(&itf)?;
 
         let added = self.add_fields_shallow(itf.clone())?;
 
