@@ -27,7 +27,6 @@ use parking_lot::Mutex;
 /// that share the same Arc<AllocationStats>. This is critical for performance in the global
 /// allocator hot path where even an uncontended Mutex would add significant overhead.
 #[derive(Debug)]
-#[allow(dead_code)] // bytes_* fields are only read if feature global-allocator is enabled
 pub(crate) struct AllocationStats {
     /// Context name used for metric labeling
     name: &'static str,
@@ -41,7 +40,7 @@ pub(crate) struct AllocationStats {
 
 impl AllocationStats {
     /// Create a new root allocation stats context with the given name.
-    fn new(name: &'static str) -> Self {
+    pub(crate) fn new(name: &'static str) -> Self {
         Self {
             name,
             parent: None,
@@ -53,7 +52,7 @@ impl AllocationStats {
     }
 
     /// Create a new child allocation stats context that tracks to a parent.
-    fn with_parent(name: &'static str, parent: Arc<AllocationStats>) -> Self {
+    pub(crate) fn with_parent(name: &'static str, parent: Arc<AllocationStats>) -> Self {
         Self {
             name,
             parent: Some(parent),
@@ -66,7 +65,6 @@ impl AllocationStats {
 
     /// Get the context name for this allocation stats.
     #[inline]
-    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     pub(crate) fn name(&self) -> &'static str {
         self.name
     }
@@ -495,12 +493,12 @@ static malloc_conf: Option<&'static libc::c_char> = Some(unsafe {
 #[cfg(test)]
 #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 mod tests {
-    use std::ffi::CStr;
-    use std::thread;
 
     use tokio::task;
 
     use super::*;
+    use std::ffi::CStr;
+    use std::thread;
 
     #[test]
     fn test_malloc_conf_is_valid_c_string() {
