@@ -63,6 +63,22 @@ impl AllocationStats {
         self.name
     }
 
+    /// Get the parent context, if any.
+    #[inline]
+    pub(crate) fn parent(&self) -> Option<&Arc<AllocationStats>> {
+        self.parent.as_ref()
+    }
+
+    /// Get the root context by traversing up the parent chain.
+    /// Returns self if this is already a root context.
+    pub(crate) fn root(&self) -> &Self {
+        let mut current = self;
+        while let Some(parent) = &current.parent {
+            current = parent.as_ref();
+        }
+        current
+    }
+
     /// Track allocation in this context and all parent contexts.
     /// Uses loop unwrapping instead of recursion for performance.
     #[inline]
