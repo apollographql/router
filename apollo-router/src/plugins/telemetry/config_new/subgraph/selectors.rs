@@ -22,6 +22,7 @@ use crate::plugins::telemetry::config_new::get_baggage;
 use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
 use crate::plugins::telemetry::config_new::instruments::Standard;
 use crate::plugins::telemetry::config_new::selectors::All;
+use crate::plugins::telemetry::config_new::selectors::CacheControlSelector;
 use crate::plugins::telemetry::config_new::selectors::CacheKind;
 use crate::plugins::telemetry::config_new::selectors::CacheStatus;
 use crate::plugins::telemetry::config_new::selectors::EntityType;
@@ -277,6 +278,10 @@ pub(crate) enum SubgraphSelector {
         response_cache_status: CacheStatus,
         /// Specify the entity type on which you want the cache data status. (default: all)
         entity_type: Option<EntityType>,
+    },
+    ResponseCacheControl {
+        /// Select data you want from the computed cache control from response caching
+        response_cache_control: CacheControlSelector,
     },
 }
 
@@ -651,6 +656,21 @@ impl Selector for SubgraphSelector {
                     }
                 }
             }
+            SubgraphSelector::ResponseCacheControl {
+                response_cache_control,
+            } => response.context.extensions().with_lock(|cc| {
+                let cc = cc
+                    .get::<response_cache::plugin::CacheControls>()?
+                    .get(&response.id)?;
+                match response_cache_control {
+                    CacheControlSelector::Public => Some(cc.public().into()),
+                    CacheControlSelector::Private => Some(cc.private().into()),
+                    CacheControlSelector::NoStore => Some(cc.get_no_store().into()),
+                    CacheControlSelector::MaxAge => cc
+                        .ttl()
+                        .and_then(|ttl| Some(opentelemetry::Value::I64(i64::try_from(ttl).ok()?))),
+                }
+            }),
             SubgraphSelector::ResponseCacheStatus {
                 response_cache_status,
                 entity_type,
@@ -796,6 +816,7 @@ impl Selector for SubgraphSelector {
                     | SubgraphSelector::StaticField { .. }
                     | SubgraphSelector::Cache { .. }
                     | SubgraphSelector::ResponseCache { .. }
+                    | SubgraphSelector::ResponseCacheControl { .. }
             ),
             Stage::ResponseEvent => false,
             Stage::ResponseField => false,
@@ -822,7 +843,10 @@ mod test {
     use std::str::FromStr;
     use std::sync::Arc;
 
+    use http::HeaderMap;
+    use http::HeaderValue;
     use http::StatusCode;
+    use http::header::CACHE_CONTROL;
     use opentelemetry::Context;
     use opentelemetry::KeyValue;
     use opentelemetry::StringValue;
@@ -849,6 +873,7 @@ mod test {
     use crate::plugins::telemetry::config::AttributeValue;
     use crate::plugins::telemetry::config_new::Selector;
     use crate::plugins::telemetry::config_new::selectors::All;
+    use crate::plugins::telemetry::config_new::selectors::CacheControlSelector;
     use crate::plugins::telemetry::config_new::selectors::CacheKind;
     use crate::plugins::telemetry::config_new::selectors::CacheStatus;
     use crate::plugins::telemetry::config_new::selectors::EntityType;
@@ -1644,6 +1669,54 @@ mod test {
                     .build(),
             ),
             Some(opentelemetry::Value::I64(2))
+        );
+    }
+
+    #[test]
+    fn response_cache_control() {
+        let mut header_map = HeaderMap::new();
+        header_map.insert(CACHE_CONTROL, HeaderValue::from_static("public,max-age=60"));
+
+        let cache_control =
+            crate::plugins::response_cache::cache_control::CacheControl::new(&header_map, None)
+                .unwrap();
+        let context = crate::context::Context::new();
+        context.extensions().with_lock(|l| l.insert(cache_control));
+
+        let selector = SubgraphSelector::ResponseCacheControl {
+            response_cache_control: CacheControlSelector::MaxAge,
+        };
+
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
+                    .subgraph_name("test".to_string())
+                    .build(),
+            ),
+            None
+        );
+
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
+                    .subgraph_name("test".to_string())
+                    .context(context.clone())
+                    .build(),
+            ),
+            Some(opentelemetry::Value::I64(60))
+        );
+
+        let selector = SubgraphSelector::ResponseCacheControl {
+            response_cache_control: CacheControlSelector::Public,
+        };
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
+                    .subgraph_name("test".to_string())
+                    .context(context.clone())
+                    .build(),
+            ),
+            Some(opentelemetry::Value::Bool(true))
         );
     }
 

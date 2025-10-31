@@ -119,6 +119,7 @@ fn allocate_port(name: &str) -> std::io::Result<u16> {
     ))
 }
 
+#[derive(Clone)]
 pub struct Query {
     traced: bool,
     psr: Option<&'static str>,
