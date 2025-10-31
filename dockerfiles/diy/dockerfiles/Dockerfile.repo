@@ -28,7 +28,7 @@ RUN mkdir -p /dist/config && \
 COPY dockerfiles/router.yaml /dist/config
 
 # Build our final image
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 ARG DEBUG_IMAGE=false
 
