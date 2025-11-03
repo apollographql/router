@@ -7,6 +7,7 @@ use std::ptr::NonNull;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
+use tokio::sync::mpsc::Sender;
 
 #[cfg(feature = "dhat-heap")]
 use parking_lot::Mutex;
@@ -30,11 +31,19 @@ pub(crate) struct AllocationStats {
     bytes_deallocated: AtomicUsize,
     bytes_zeroed: AtomicUsize,
     bytes_reallocated: AtomicUsize,
+    /// If bytes_allocated exceeds this limit and an allocation fails, a message will be sent to the channel
+    limit: Option<AllocationLimit>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct AllocationLimit {
+    pub(crate) max_bytes: usize,
+    pub(crate) sender: Arc<Sender<usize>>,
 }
 
 impl AllocationStats {
     /// Create a new root allocation stats context with the given name.
-    fn new(name: &'static str) -> Self {
+    fn new(name: &'static str, limit: Option<AllocationLimit>) -> Self {
         Self {
             name,
             parent: None,
@@ -42,11 +51,16 @@ impl AllocationStats {
             bytes_deallocated: AtomicUsize::new(0),
             bytes_zeroed: AtomicUsize::new(0),
             bytes_reallocated: AtomicUsize::new(0),
+            limit,
         }
     }
 
     /// Create a new child allocation stats context that tracks to a parent.
-    fn with_parent(name: &'static str, parent: Arc<AllocationStats>) -> Self {
+    fn with_parent(
+        name: &'static str,
+        parent: Arc<AllocationStats>,
+        limit: Option<AllocationLimit>,
+    ) -> Self {
         Self {
             name,
             parent: Some(parent),
@@ -54,6 +68,7 @@ impl AllocationStats {
             bytes_deallocated: AtomicUsize::new(0),
             bytes_zeroed: AtomicUsize::new(0),
             bytes_reallocated: AtomicUsize::new(0),
+            limit,
         }
     }
 
@@ -78,6 +93,12 @@ impl AllocationStats {
             current = parent.as_ref();
         }
         current
+    }
+
+    /// Get the limit for this context, if any.
+    #[inline]
+    pub(crate) fn limit(&self) -> Option<&AllocationLimit> {
+        self.limit.as_ref()
     }
 
     /// Track allocation in this context and all parent contexts.
@@ -253,7 +274,11 @@ pub(crate) fn current() -> Option<Arc<AllocationStats>> {
 /// If a parent context exists, creates a child context that tracks to the parent.
 /// If no parent exists, creates a new root context with the given name.
 /// This is useful for tracking allocations in synchronous code or threads.
-pub(crate) fn with_memory_tracking<F, R>(name: &'static str, f: F) -> R
+pub(crate) fn with_memory_tracking<F, R>(
+    name: &'static str,
+    limit: Option<AllocationLimit>,
+    f: F,
+) -> R
 where
     F: FnOnce() -> R,
 {
@@ -261,7 +286,7 @@ where
     let stats = CURRENT_TASK_STATS.with(|cell| {
         cell.get().map_or_else(
             // No parent context - create a new root
-            || Arc::new(AllocationStats::new(name)),
+            || Arc::new(AllocationStats::new(name, limit.clone())),
             |ptr| {
                 // Parent context exists - create a child that tracks to the parent
                 // SAFETY: The pointer is valid because it's managed by a parent context.
@@ -270,7 +295,8 @@ where
                     Arc::increment_strong_count(ptr.as_ptr());
                     Arc::from_raw(ptr.as_ptr())
                 };
-                Arc::new(AllocationStats::with_parent(name, parent))
+
+                Arc::new(AllocationStats::with_parent(name, parent, limit.clone()))
             },
         )
     });
@@ -284,11 +310,12 @@ pub(crate) fn with_parented_memory_tracking<F, R>(
     name: &'static str,
     parent: Arc<AllocationStats>,
     f: F,
+    limit: Option<AllocationLimit>,
 ) -> R
 where
     F: FnOnce() -> R,
 {
-    let stats = Arc::new(AllocationStats::with_parent(name, parent));
+    let stats = Arc::new(AllocationStats::with_parent(name, parent, limit));
     with_explicit_memory_tracking(stats, f)
 }
 
@@ -317,16 +344,24 @@ pub(crate) trait WithMemoryTracking: Future + Sized {
     /// Wraps this future to track memory allocations with a named context.
     /// If a parent context exists, creates a child context that tracks to the parent.
     /// If no parent exists, creates a new root context with the given name.
-    fn with_memory_tracking(self, name: &'static str) -> MemoryTrackedFuture<Self>;
+    fn with_memory_tracking(
+        self,
+        name: &'static str,
+        limit: Option<AllocationLimit>,
+    ) -> MemoryTrackedFuture<Self>;
 }
 
 impl<F: Future> WithMemoryTracking for F {
-    fn with_memory_tracking(self, name: &'static str) -> MemoryTrackedFuture<Self> {
+    fn with_memory_tracking(
+        self,
+        name: &'static str,
+        limit: Option<AllocationLimit>,
+    ) -> MemoryTrackedFuture<Self> {
         // Check if there's a parent context, and create either a child or root stats
         let stats = CURRENT_TASK_STATS.with(|cell| {
             cell.get().map_or_else(
                 // No parent context - create a new root
-                || Arc::new(AllocationStats::new(name)),
+                || Arc::new(AllocationStats::new(name, limit.clone())),
                 |ptr| {
                     // Parent context exists - create a child that tracks to the parent
                     // SAFETY: The pointer is valid because it's managed by a parent MemoryTrackedFuture.
@@ -335,7 +370,8 @@ impl<F: Future> WithMemoryTracking for F {
                         Arc::increment_strong_count(ptr.as_ptr());
                         Arc::from_raw(ptr.as_ptr())
                     };
-                    Arc::new(AllocationStats::with_parent(name, parent))
+
+                    Arc::new(AllocationStats::with_parent(name, parent, limit.clone()))
                 },
             )
         });
@@ -381,6 +417,14 @@ unsafe impl GlobalAlloc for CustomAllocator {
                 CURRENT_TASK_STATS.with(|cell| {
                     if let Some(stats_ptr) = cell.get() {
                         stats_ptr.as_ref().track_alloc(layout.size());
+
+                        if let Some(limit) = &stats_ptr.as_ref().limit {
+                            if stats_ptr.as_ref().bytes_allocated() >= limit.max_bytes {
+                                if let Some(limit) = &stats_ptr.as_ref().limit {
+                                    let _ = limit.sender.try_send(layout.size());
+                                }
+                            }
+                        }
                     }
                 });
             }
@@ -533,7 +577,7 @@ mod tests {
             let _v = Vec::<u8>::with_capacity(10000);
             current().expect("stats should be set")
         }
-        .with_memory_tracking("test")
+        .with_memory_tracking("test", None)
         .await;
 
         // Verify context name
@@ -568,7 +612,7 @@ mod tests {
                 assert_eq!(child_stats.name(), "child");
                 let _v = Vec::<u8>::with_capacity(5000);
             }
-            .with_memory_tracking("child");
+            .with_memory_tracking("child", None);
 
             task::spawn(child_future).await.unwrap();
 
@@ -586,14 +630,14 @@ mod tests {
                 "should be the same Arc"
             );
         }
-        .with_memory_tracking("parent")
+        .with_memory_tracking("parent", None)
         .await;
     }
 
     #[test]
     fn test_sync_memory_tracking() {
         // Test that synchronous code can use with_memory_tracking for thread propagation
-        let stats = with_memory_tracking("sync_test", || {
+        let stats = with_memory_tracking("sync_test", None, || {
             let stats = current().expect("stats should be set");
             assert_eq!(stats.name(), "sync_test");
 
@@ -620,11 +664,16 @@ mod tests {
             // Test propagation to child thread with parented context
             let parent_stats = stats.clone();
             let handle = thread::spawn(move || {
-                with_parented_memory_tracking("sync_test_child", parent_stats, || {
-                    let child_stats = current().expect("child stats should be set");
-                    assert_eq!(child_stats.name(), "sync_test_child");
-                    let _v = Vec::<u8>::with_capacity(3000);
-                })
+                with_parented_memory_tracking(
+                    "sync_test_child",
+                    parent_stats,
+                    || {
+                        let child_stats = current().expect("child stats should be set");
+                        assert_eq!(child_stats.name(), "sync_test_child");
+                        let _v = Vec::<u8>::with_capacity(3000);
+                    },
+                    None,
+                )
             });
             handle.join().unwrap();
 
@@ -682,7 +731,7 @@ mod tests {
                         grandchild_stats.bytes_allocated()
                     );
                 }
-                .with_memory_tracking("grandchild")
+                .with_memory_tracking("grandchild", None)
                 .await;
 
                 // After grandchild completes, child should have tracked grandchild's allocations
@@ -692,7 +741,7 @@ mod tests {
                     child_stats.bytes_allocated()
                 );
             }
-            .with_memory_tracking("child")
+            .with_memory_tracking("child", None)
             .await;
 
             // After child completes, root should have tracked all allocations
@@ -702,7 +751,7 @@ mod tests {
                 root_stats.bytes_allocated()
             );
         }
-        .with_memory_tracking("root")
+        .with_memory_tracking("root", None)
         .await;
     }
 }

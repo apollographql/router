@@ -2,6 +2,7 @@ mod metrics;
 
 use std::future::Future;
 use std::ops::ControlFlow;
+use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Instant;
 
@@ -21,6 +22,7 @@ use self::metrics::observe_queue_wait_duration;
 use crate::ageing_priority_queue::AgeingPriorityQueue;
 use crate::ageing_priority_queue::Priority;
 use crate::ageing_priority_queue::SendError;
+use crate::allocator::AllocationLimit;
 use crate::allocator::current;
 use crate::metrics::meter_provider;
 use crate::plugins::telemetry::consts::COMPUTE_JOB_EXECUTION_SPAN_NAME;
@@ -53,6 +55,8 @@ fn thread_pool_size() -> usize {
 
 pub(crate) struct JobStatus<'a, T> {
     result_sender: &'a oneshot::Sender<std::thread::Result<T>>,
+    /// If the job supports cancellation, this sender should be set to allow cancelling the job when the sender is closed.
+    cancel_sender: Option<Arc<tokio::sync::mpsc::Sender<usize>>>,
 }
 
 impl<T> JobStatus<'_, T> {
@@ -65,9 +69,17 @@ impl<T> JobStatus<'_, T> {
     /// In this case, a long-running job should try to cancel itself
     /// to avoid needless resource consumption.
     pub(crate) fn check_for_cooperative_cancellation(&self) -> ControlFlow<()> {
-        if self.result_sender.is_closed() {
+        if self.result_sender.is_closed()
+            || self
+                .cancel_sender
+                .as_ref()
+                .map_or(false, |sender| sender.is_closed())
+        {
+            println!("cancelling job");
             ControlFlow::Break(())
         } else {
+            println!("not cancelling job: {:?}", self.cancel_sender.as_ref());
+            std::thread::sleep(std::time::Duration::from_millis(500));
             ControlFlow::Continue(())
         }
     }
@@ -187,6 +199,18 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
 
                             // Execute job with memory tracking if stats are available
                             if let Some(stats) = job.allocation_stats {
+                                // TODO(memory-tracking): This might not be needed here as its done in query_planning_service.rs
+                                let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+                                let limit = AllocationLimit {
+                                    max_bytes: 100,
+                                    sender: Arc::new(tx),
+                                };
+
+                                std::thread::spawn(move || {
+                                    let _value = rx.blocking_recv();
+                                    rx.close();
+                                });
+
                                 // Create a child context with the job type as the name
                                 let job_name: &'static str = job.ty.into();
                                 crate::allocator::with_parented_memory_tracking(
@@ -198,6 +222,7 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
                                             record_metrics(&allocation_stats);
                                         }
                                     },
+                                    Some(limit)
                                 );
                             } else {
                                 (job.job_fn)();
@@ -283,8 +308,25 @@ where
     span.in_scope(|| {
         let mut job_watcher = JobWatcher::new(compute_job_type);
         let (tx, rx) = oneshot::channel();
+
+        let cancel_tx = if let Some(stats) = crate::allocator::current() {
+            dbg!(&stats);
+            if let Some(limit) = &stats.limit() {
+                Some(limit.sender.clone())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        println!("cancel_tx for job: {} {:?}", compute_job_type_str,  &cancel_tx);
+
         let wrapped_job_fn = Box::new(move || {
-            let status = JobStatus { result_sender: &tx };
+            let status = JobStatus {
+                result_sender: &tx,
+                cancel_sender: cancel_tx.clone(),
+            };
             // `AssertUnwindSafe` here is correct because this `catch_unwind`
             // is paired with `resume_unwind` below, so the overall effect on unwind safety
             // is the same as if the caller had executed `job` directly without a thread pool.

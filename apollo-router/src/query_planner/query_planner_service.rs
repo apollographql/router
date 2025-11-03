@@ -24,6 +24,8 @@ use tower::Service;
 use super::PlanNode;
 use super::QueryKey;
 use crate::Configuration;
+use crate::allocator::AllocationLimit;
+use crate::allocator::WithMemoryTracking;
 use crate::apollo_studio_interop::generate_usage_reporting;
 use crate::compute_job;
 use crate::compute_job::ComputeJobType;
@@ -469,8 +471,21 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
             }
         };
 
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        let limit = AllocationLimit {
+            // TODO(memory-tracking): This should be configurable
+            max_bytes: 100,
+            sender: Arc::new(tx),
+        };
+
+        // TODO(memory-tracking): This needs to be moved as we cannot spawn a thread per request
+        std::thread::spawn(move || {
+            let _value = rx.blocking_recv();
+            rx.close();
+        });
+
         // Return the response as an immediate future
-        Box::pin(fut)
+        Box::pin(fut.with_memory_tracking("query_planner.request", Some(limit)))
     }
 }
 

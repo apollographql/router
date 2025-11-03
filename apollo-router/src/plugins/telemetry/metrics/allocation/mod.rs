@@ -107,7 +107,7 @@ where
 
                 result
             }
-            .with_memory_tracking("router.request"),
+            .with_memory_tracking("router.request", None),
         )
     }
 }
