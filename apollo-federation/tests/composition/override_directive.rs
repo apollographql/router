@@ -789,10 +789,12 @@ mod interface_object {
 
         let errors =
             compose_as_fed2_subgraphs(&[subgraph1, subgraph2]).expect_err("composition failed");
-        assert_eq!(1, errors.len());
+        assert_eq!(1, errors.len(), "Expected 1 error, got: {:#?}", errors);
         assert!(
             matches!(errors.first(), Some(CompositionError::OverrideCollisionWithAnotherDirective { message })
-            if message == r#"@override is not yet supported on fields of @interfaceObject types: cannot be used on field "I.a" on subgraph "Subgraph1"."#)
+            if message == r#"@override is not yet supported on fields of @interfaceObject types: cannot be used on field "I.a" on subgraph "Subgraph1"."#),
+            "Expected OverrideCollisionWithAnotherDirective error, got: {:#?}",
+            errors.first()
         );
     }
 
@@ -987,9 +989,7 @@ type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key
         use super::*;
 
         #[rstest]
-        #[ignore = "until merge implementation completed"]
         #[case::alphanumeric("abc123")]
-        #[ignore = "until merge implementation completed"]
         #[case::alphanumeric_with_special_chars("Z_1-2:3/4.5")]
         fn allows_valid_labels(#[case] label: &str) {
             // labels have to start with a letter and followed with
@@ -1025,9 +1025,7 @@ type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key
         }
 
         #[rstest]
-        #[ignore = "until merge implementation completed"]
         #[case::starts_with_non_alpha("1_starts-with-non-alpha")]
-        #[ignore = "until merge implementation completed"]
         #[case::includes_invalid_chars("includes!@_invalid_chars")]
         fn disallows_invalid_labels(#[case] label: &str) {
             let with_invalid_label = ServiceDefinition {
@@ -1066,13 +1064,9 @@ type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key
         }
 
         #[rstest]
-        #[ignore = "until merge implementation completed"]
         #[case::half_percent("0.5")]
-        #[ignore = "until merge implementation completed"]
         #[case::one("1")]
-        #[ignore = "until merge implementation completed"]
         #[case::one_percent("1.0")]
-        #[ignore = "until merge implementation completed"]
         #[case::ninety_nine("99.9")]
         fn allows_valid_percent_based_labels(#[case] percent: &str) {
             let with_valid_label = ServiceDefinition {
@@ -1085,7 +1079,7 @@ type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key
                   type T @key(fields: "k") {
                     k: ID
                     a: Int
-                      @override(from: "overridden", label: "<LABEL>")
+                      @override(from: "overridden", label: "percent(<LABEL>)")
                   }
                 "#
                 .replace("<LABEL>", percent),
@@ -1106,13 +1100,9 @@ type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key
         }
 
         #[rstest]
-        #[ignore = "until merge implementation completed"]
         #[case::point_one(".1")]
-        #[ignore = "until merge implementation completed"]
         #[case::one_hundred_and_one("101")]
-        #[ignore = "until merge implementation completed"]
         #[case::large_precision("1.1234567879")]
-        #[ignore = "until merge implementation completed"]
         #[case::not_a_number("foo")]
         fn disallows_invalid_percent_based_labels(#[case] percent: &str) {
             let with_invalid_label = ServiceDefinition {
@@ -1154,7 +1144,6 @@ type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key
     mod composition_validation {
         use super::*;
 
-        #[ignore = "until merge implementation completed"]
         #[test]
         fn verify_forced_jump_from_s1_to_s2_due_to_override() {
             let subgraph1 = ServiceDefinition {
@@ -1195,7 +1184,6 @@ type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key
                 .expect("composition was successful");
         }
 
-        #[ignore = "until merge implementation completed"]
         #[test]
         fn errors_on_overridden_fields_in_requires_fieldset() {
             let subgraph1 = ServiceDefinition {
@@ -1240,17 +1228,15 @@ type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key
             assert_eq!(1, errors.len());
             assert!(
                 matches!(errors.first(), Some(CompositionError::SatisfiabilityError { message })
-                if message == r#"
-                    GraphQLError: The following supergraph API query:
-                      {
-                        t {
-                          b
-                        }
-                      }
-                      cannot be satisfied by the subgraphs because:
-                      - from subgraph "Subgraph1": cannot find field "T.b".
-                      - from subgraph "Subgraph2": cannot satisfy @require conditions on field "T.b".
-                    "#)
+                if message == r#"The following supergraph API query:
+{
+  t {
+    b
+  }
+}
+cannot be satisfied by the subgraphs because:
+- from subgraph "Subgraph1": cannot find field "T.b".
+- from subgraph "Subgraph2": cannot satisfy @requires conditions on field "T.b"."#)
             );
         }
     }
