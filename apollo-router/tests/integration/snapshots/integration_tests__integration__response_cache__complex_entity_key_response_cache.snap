@@ -23,6 +23,7 @@ expression: body.extensions
           "created": 0,
           "noStore": true
         },
+        "shouldStore": false,
         "data": {
           "data": {
             "getStatus": {
@@ -37,7 +38,43 @@ expression: body.extensions
               "stuffDetails": "stuff we have"
             }
           }
-        }
+        },
+        "warnings": [
+          {
+            "code": "CACHE_CONTROL_NO_STORE",
+            "links": [
+              {
+                "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cache-Control",
+                "title": "Cache-Control header documentation"
+              }
+            ],
+            "message": "Your subgraph returns a Cache-Control header containing no-store which means don't cache this data."
+          },
+          {
+            "code": "CACHE_CONTROL_WITHOUT_MAX_AGE",
+            "links": [
+              {
+                "url": "https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#configure-default-ttl",
+                "title": "Configure default TTL in the Router"
+              },
+              {
+                "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cache-Control",
+                "title": "Cache-Control header documentation"
+              }
+            ],
+            "message": "Your subgraph returns a 'Cache-Control' header without any max-age set so the Router will use the one configured in Router's configuration."
+          },
+          {
+            "code": "NO_CACHE_TAG_ON_ROOT_FIELD",
+            "links": [
+              {
+                "url": "https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#invalidation-methods",
+                "title": "Add '@cacheTag' in your schema"
+              }
+            ],
+            "message": "No cache tags are specified on your root fields query, if you want to use active invalidation you'll need to add cache tags on your root fields to actively invalidate cached data."
+          }
+        ]
       },
       {
         "key": "version:1.0:subgraph:status:type:Status:representation:d037f5b89075fb6a3fde6b247bec2befe39e360cd0d703e342a8143895b3f92c:hash:37a5901a54e23d59712e2bbecee7dd96030d81c668d01629df96e5a9ec9608c6:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
@@ -77,11 +114,38 @@ expression: body.extensions
           "created": 0,
           "noStore": true
         },
+        "shouldStore": false,
         "data": {
           "data": {
             "statusDetails": "status details"
           }
-        }
+        },
+        "warnings": [
+          {
+            "code": "CACHE_CONTROL_NO_STORE",
+            "links": [
+              {
+                "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cache-Control",
+                "title": "Cache-Control header documentation"
+              }
+            ],
+            "message": "Your subgraph returns a Cache-Control header containing no-store which means don't cache this data."
+          },
+          {
+            "code": "CACHE_CONTROL_WITHOUT_MAX_AGE",
+            "links": [
+              {
+                "url": "https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#configure-default-ttl",
+                "title": "Configure default TTL in the Router"
+              },
+              {
+                "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cache-Control",
+                "title": "Cache-Control header documentation"
+              }
+            ],
+            "message": "Your subgraph returns a 'Cache-Control' header without any max-age set so the Router will use the one configured in Router's configuration."
+          }
+        ]
       }
     ]
   }
