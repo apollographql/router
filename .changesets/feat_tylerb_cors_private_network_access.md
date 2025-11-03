@@ -9,7 +9,7 @@ cors:
       private_netword_access:
         access_id:
     - match_origins: ["^https://(dev|staging|www)?\\.my-app\\.(com|fr|tn)$"]
-      private_netword_access:
+      private_network_access:
         access_id: "01:23:45:67:89:0A"
         access_name: "mega-corp device"
 ```
