@@ -1,6 +1,6 @@
 ### CORS Private Network Access support ([PR #8279](https://github.com/apollographql/router/pull/8279))
 
-Expands CORS configuration and support to for the [private network access](https://wicg.github.io/private-network-access/) (PNA) feature in CORS. To enable PNA for a CORS policy in configuration, specify the field `private_network_access`. The `private_network_access` field has two subfields, `access_id` and `field_name`, both of which are optional.
+Expands CORS configuration and support for the [private network access](https://wicg.github.io/private-network-access/) (PNA) feature in CORS. To enable PNA for a CORS policy in configuration, specify the field `private_network_access`. The `private_network_access` field has two subfields, `access_id` and `field_name`, both of which are optional.
 
 ```yaml
 cors:
