@@ -1,0 +1,100 @@
+---
+source: apollo-router/tests/integration/response_cache.rs
+expression: response
+---
+{
+  "data": {
+    "allProducts": [
+      {
+        "name": "Test",
+        "createdBy": {
+          "name": "test",
+          "country": {
+            "a": "France"
+          }
+        }
+      }
+    ]
+  },
+  "extensions": {
+    "apolloCacheDebugging": {
+      "version": "1.0",
+      "data": [
+        {
+          "key": "version:1.0:subgraph:products:type:Query:hash:f4f41cfa309494d41648c3a3c398c61cb00197696102199454a25a0dcdd2f592:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+          "invalidationKeys": [],
+          "kind": {
+            "rootFields": [
+              "allProducts"
+            ]
+          },
+          "subgraphName": "products",
+          "subgraphRequest": {
+            "query": "{ allProducts { name createdBy { __typename email country { a } } } }"
+          },
+          "source": "subgraph",
+          "cacheControl": {
+            "created": 0,
+            "maxAge": 86400,
+            "public": true
+          },
+          "data": {
+            "data": {
+              "allProducts": [
+                {
+                  "name": "Test",
+                  "createdBy": {
+                    "__typename": "User",
+                    "email": "test@test.com",
+                    "country": {
+                      "a": "France"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "key": "version:1.0:subgraph:users:type:User:representation:b41dfad85edaabac7bb681098e9b23e21b3b8b9b8b1849babbd5a1300af64b43:hash:460b70e698b8c9d8496b0567e0f0848b9f7fef36e841a8a0b0771891150c35e5:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+          "invalidationKeys": [],
+          "kind": {
+            "typename": "User",
+            "entityKey": {
+              "country": {
+                "a": "France"
+              },
+              "email": "test@test.com"
+            }
+          },
+          "subgraphName": "users",
+          "subgraphRequest": {
+            "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { name } } }",
+            "variables": {
+              "representations": [
+                {
+                  "country": {
+                    "a": "France"
+                  },
+                  "email": "test@test.com",
+                  "__typename": "User"
+                }
+              ]
+            }
+          },
+          "source": "subgraph",
+          "cacheControl": {
+            "created": 0,
+            "maxAge": 86400,
+            "public": true
+          },
+          "data": {
+            "data": {
+              "name": "test"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

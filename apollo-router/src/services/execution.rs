@@ -17,7 +17,7 @@ pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxEr
 pub type ServiceResult = Result<Response, BoxError>;
 
 // Reachable from Request
-use super::SubscriptionTaskParams;
+use crate::plugins::subscription::SubscriptionTaskParams;
 pub use crate::query_planner::QueryPlan;
 
 assert_impl_all!(Request: Send);

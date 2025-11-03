@@ -10,14 +10,18 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::Type;
+use either::Either;
+use tracing::trace;
 
 use crate::LinkSpecDefinition;
 use crate::ValidFederationSchema;
 use crate::bail;
 use crate::ensure;
 use crate::error::FederationError;
+use crate::error::Locations;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
+use crate::error::SubgraphLocation;
 use crate::internal_error;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::federation_spec_definition::FED_1;
@@ -36,6 +40,7 @@ use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
 use crate::link::spec::Identity;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
+use crate::query_graph::build_query_graph::FEDERATED_GRAPH_ROOT_SOURCE;
 use crate::schema::FederationSchema;
 use crate::schema::SchemaElement;
 use crate::schema::blueprint::FederationBlueprint;
@@ -70,7 +75,7 @@ pub struct Initial {
 
 #[derive(Clone, Debug)]
 pub struct Expanded {
-    schema: FederationSchema,
+    schema: ValidFederationSchema,
     metadata: SubgraphMetadata,
 }
 
@@ -126,11 +131,14 @@ impl HasMetadata for Validated {
 /// We aim to encode these state transitions using the [typestate pattern](https://cliffle.com/blog/rust-typestate).
 ///
 /// ```text
-///      (expand)                  (validate)
+///                   (upgrade/
+///      (expand)     normalize)   (validate)
 /// Initial ──► Expanded ──► Upgraded ──► Validated
-///                       ▲            │
-///                       └────────────┘
-///                   (mutate/invalidate)
+///                │       ▲          │     ▲
+///                │       └──────────┘     │
+///                │        (normalize)     │
+///                └────────────────────────┘
+///       (no-op transition if not upgraded nor normalized)
 ///  ```
 ///
 /// Subgraph states and their invariants:
@@ -138,7 +146,13 @@ impl HasMetadata for Validated {
 ///   other than that it can be parsed.
 /// - `Expanded`: The schema's links have been expanded to include missing directive definitions and subgraph
 ///   metadata has been computed.
-/// - `Upgraded`: The schema has been upgraded to Federation v2 format (if starting with Fed v2 schema then this is no-op).
+///   - The schema may be fed1 or fed2 schema.
+///   - If fed1, it's partially validated with only some federation rules applied.
+///   - If fed2, it's fully validated with all federation rules.
+/// - `Upgraded`: The schema has been upgraded to Federation v2 format or root type normalized.
+///   - Fed v1 input schemas are always upgraded to fed v2 and may be root type normalized.
+///   - Fed v2 input schemas may only be root type normalized.
+///   - Fed v2 schemas that do not need root type normalization skip this state.
 /// - `Validated`: The schema has been validated according to Federation rules. Iterators over directives are
 ///   infallible at this stage.
 #[derive(Clone, Debug)]
@@ -149,11 +163,21 @@ pub struct Subgraph<S> {
 }
 
 impl Subgraph<Initial> {
-    pub fn new(name: &str, url: &str, schema: Schema) -> Subgraph<Initial> {
-        Subgraph {
-            name: name.to_string(),
-            url: url.to_string(),
-            state: Initial { schema },
+    pub fn new(name: &str, url: &str, schema: Schema) -> Result<Subgraph<Initial>, SubgraphError> {
+        // We use this name as the "source" of root nodes in our federated query graph.
+        if name == FEDERATED_GRAPH_ROOT_SOURCE {
+            Err(SubgraphError::new_without_locations(
+                name.to_string(),
+                SingleFederationError::InvalidSubgraphName {
+                    message: format!("Invalid name {name} for a subgraph: this name is reserved"),
+                },
+            ))
+        } else {
+            Ok(Subgraph {
+                name: name.to_string(),
+                url: url.to_string(),
+                state: Initial { schema },
+            })
         }
     }
 
@@ -162,14 +186,17 @@ impl Subgraph<Initial> {
         url: &str,
         schema_str: &str,
     ) -> Result<Subgraph<Initial>, SubgraphError> {
-        let schema = Schema::builder()
+        let mut schema = Schema::builder()
             .adopt_orphan_extensions()
             .ignore_builtin_redefinitions()
             .parse(schema_str, name)
             .build()
             .map_err(|e| SubgraphError::from_diagnostic_list(name, e.errors))?;
 
-        Ok(Self::new(name, url, schema))
+        // Simulate graphql-js behavior accepting duplicate argument definitions.
+        parser_backward_compatibility::remove_duplicate_arguments(&mut schema);
+
+        Self::new(name, url, schema)
     }
 
     /// Converts the schema to a fed2 schema.
@@ -191,12 +218,16 @@ impl Subgraph<Initial> {
         };
         add_federation_link_to_test_schema(&mut schema, federation_spec.version(), no_imports)
             .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;
-        Ok(Self::new(&self.name, &self.url, schema))
+        Self::new(&self.name, &self.url, schema)
     }
 
     pub fn assume_expanded(self) -> Result<Subgraph<Expanded>, SubgraphError> {
         let schema = FederationSchema::new(self.state.schema)
             .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;
+        let schema =
+            ValidFederationSchema::new_assume_valid(schema).map_err(|(_schema, error)| {
+                SubgraphError::new_without_locations(self.name.clone(), error)
+            })?;
         let metadata = compute_subgraph_metadata(&schema)
             .and_then(|m| {
                 m.ok_or_else(|| {
@@ -215,16 +246,26 @@ impl Subgraph<Initial> {
         })
     }
 
+    /// Expands schema with federation definitions and validates the resulting schema.
+    // PORT_NOTE: This mimics the JS `buildSubgraph()` method's behavior validating after expanding.
     pub fn expand_links(self) -> Result<Subgraph<Expanded>, SubgraphError> {
-        tracing::debug!("expand_links: expand subgraph `{}`", self.name);
+        trace!("expand_links: expand subgraph `{}`", self.name);
         let subgraph_name = self.name.clone();
-        self.expand_links_internal()
+        self.expand_links_internal(true)
             .map_err(|e| SubgraphError::new_without_locations(subgraph_name, e))
     }
 
-    fn expand_links_internal(self) -> Result<Subgraph<Expanded>, FederationError> {
+    /// Only for `@fromContext` testing.
+    pub fn expand_links_without_validation(self) -> Result<Subgraph<Expanded>, SubgraphError> {
+        trace!("expand_links: expand subgraph `{}`", self.name);
+        let subgraph_name = self.name.clone();
+        self.expand_links_internal(false)
+            .map_err(|e| SubgraphError::new_without_locations(subgraph_name, e))
+    }
+
+    fn expand_links_internal(self, validate: bool) -> Result<Subgraph<Expanded>, FederationError> {
         let schema = expand_schema(self.state.schema)?;
-        tracing::debug!("expand_links: compute_subgraph_metadata");
+        trace!("expand_links: compute_subgraph_metadata");
         let metadata = compute_subgraph_metadata(&schema)?.ok_or_else(|| {
             internal_error!(
                 "Unable to detect federation version used in subgraph '{}'",
@@ -232,7 +273,13 @@ impl Subgraph<Initial> {
             )
         })?;
 
-        tracing::debug!("expand_links: finished");
+        let schema = if validate {
+            validate_subgraph_schema(schema, &metadata)?
+        } else {
+            schema.assume_valid()?
+        };
+
+        trace!("expand_links: finished");
         Ok(Subgraph {
             name: self.name,
             url: self.url,
@@ -241,12 +288,111 @@ impl Subgraph<Initial> {
     }
 }
 
+mod parser_backward_compatibility {
+    use apollo_compiler::Schema;
+    use apollo_compiler::collections::IndexMap;
+    use apollo_compiler::schema::ExtendedType;
+
+    use super::*;
+
+    /// Remove duplicate argument definitions in the schema
+    /// * If same argument is defined multiple times, keep the last one.
+    /// * Note: This was the legacy graphql-js behavior before 2025 GraphQL spec revision
+    ///   invalidated duplicate arguments.
+    pub(super) fn remove_duplicate_arguments(schema: &mut Schema) {
+        for (_, type_def) in &mut schema.types {
+            match type_def {
+                ExtendedType::Object(obj) => {
+                    let obj_mut = obj.make_mut();
+                    remove_duplicate_arguments_in_fields(&mut obj_mut.fields);
+                }
+                ExtendedType::Interface(interface) => {
+                    let interface_mut = interface.make_mut();
+                    remove_duplicate_arguments_in_fields(&mut interface_mut.fields);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn remove_duplicate_arguments_in_fields(
+        fields: &mut IndexMap<Name, Component<ast::FieldDefinition>>,
+    ) {
+        for (_, field) in fields {
+            let unique_arguments = deduped_arguments(field.arguments.iter().cloned());
+            if unique_arguments.len() != field.arguments.len() {
+                let field_mut = field.make_mut();
+                field_mut.arguments = unique_arguments;
+            }
+        }
+    }
+
+    /// If same argument is defined multiple times, keep the last one.
+    fn deduped_arguments(
+        arguments: impl Iterator<Item = Node<ast::InputValueDefinition>>,
+    ) -> Vec<Node<ast::InputValueDefinition>> {
+        let mut last_defs = IndexMap::default();
+        for arg in arguments {
+            _ = last_defs.insert(arg.name.clone(), arg);
+        }
+        last_defs.into_values().collect()
+    }
+}
+
 impl Subgraph<Expanded> {
+    /// Normalizes root types if necessary.
+    /// - Returns either `Subgraph<Expanded>` (if unchanged) or `Subgraph<Upgraded>` (if changed).
+    pub fn normalize_root_types(
+        self,
+    ) -> Result<Either<Subgraph<Expanded>, Subgraph<Upgraded>>, SubgraphError> {
+        // Convert `ValidFederationSchema` to `FederationSchema`, so we can call
+        // `normalize_root_types`.
+        let mut schema: FederationSchema = self.state.schema.into();
+        let changed = normalize_root_types_in_subgraph_schema(&mut schema)
+            .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;
+        if changed {
+            Ok(Either::Right(Subgraph {
+                name: self.name,
+                url: self.url,
+                state: Upgraded {
+                    schema,
+                    metadata: self.state.metadata,
+                },
+            }))
+        } else {
+            Ok(Either::Left(Subgraph {
+                name: self.name.clone(),
+                url: self.url,
+                state: Expanded {
+                    // Since schema was unchanged, it should still be valid.
+                    schema: schema
+                        .assume_valid()
+                        .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?,
+                    metadata: self.state.metadata,
+                },
+            }))
+        }
+    }
+
+    /// Transitions from Expanded to Upgraded.
     pub fn assume_upgraded(self) -> Subgraph<Upgraded> {
         Subgraph {
             name: self.name,
             url: self.url,
             state: Upgraded {
+                schema: self.state.schema.into(),
+                metadata: self.state.metadata,
+            },
+        }
+    }
+
+    /// Jumps from Expanded to Validated for Fed2 input schemas, assuming no upgrade/normalization
+    /// is necessary.
+    pub fn assume_validated(self) -> Subgraph<Validated> {
+        Subgraph {
+            name: self.name,
+            url: self.url,
+            state: Validated {
                 schema: self.state.schema,
                 metadata: self.state.metadata,
             },
@@ -254,43 +400,61 @@ impl Subgraph<Expanded> {
     }
 }
 
-impl Subgraph<Upgraded> {
-    pub fn assume_validated(self) -> Result<Subgraph<Validated>, SubgraphError> {
-        let valid_federation_schema = ValidFederationSchema::new_assume_valid(self.state.schema)
-            .map_err(|(_schema, error)| {
-                SubgraphError::new_without_locations(self.name.clone(), error)
-            })?;
-        Ok(Subgraph {
-            name: self.name,
-            url: self.url,
-            state: Validated {
-                schema: valid_federation_schema,
-                metadata: self.state.metadata,
-            },
-        })
-    }
+/// Shared by Subgraph<Initial> and Subgraph<Upgraded>
+fn validate_subgraph_schema(
+    schema: FederationSchema,
+    metadata: &SubgraphMetadata,
+) -> Result<ValidFederationSchema, FederationError> {
+    let schema = schema.validate_or_return_self().map_err(|(schema, err)| {
+        // Specialize GraphQL validation errors.
+        let iter = err.into_errors().into_iter().map(|err| match err {
+            SingleFederationError::InvalidGraphQL { message } => {
+                FederationBlueprint::on_invalid_graphql_error(&schema, message)
+            }
+            _ => err,
+        });
+        MultipleFederationErrors::from_iter(iter)
+    })?;
 
-    pub fn validate(self) -> Result<Subgraph<Validated>, SubgraphError> {
-        let schema = self
-            .state
-            .schema
-            .validate_or_return_self()
-            .map_err(|(schema, err)| {
-                // Specialize GraphQL validation errors.
-                let iter = err.into_errors().into_iter().map(|err| match err {
-                    SingleFederationError::InvalidGraphQL { message } => {
-                        FederationBlueprint::on_invalid_graphql_error(&schema, message)
-                    }
-                    _ => err,
-                });
-                SubgraphError::new_without_locations(
-                    self.name.clone(),
-                    MultipleFederationErrors::from_iter(iter),
+    FederationBlueprint::on_validation(&schema, metadata)?;
+
+    Ok(schema)
+}
+
+/// Shared by Subgraph<Expanded> and Subgraph<Upgraded>
+fn normalize_root_types_in_subgraph_schema(
+    schema: &mut FederationSchema,
+) -> Result<bool, FederationError> {
+    let mut operation_types_to_rename = HashMap::new();
+    for (op_type, op_name) in schema.schema().schema_definition.iter_root_operations() {
+        let default_name = default_operation_name(&op_type);
+        if op_name.name != default_name {
+            operation_types_to_rename.insert(op_name.name.clone(), default_name.clone());
+            if schema.try_get_type(default_name.clone()).is_some() {
+                return Err(SingleFederationError::root_already_used(
+                    op_type,
+                    default_name,
+                    op_name.name.clone(),
                 )
-            })?;
+                .into());
+            }
+        }
+    }
+    let changed = !operation_types_to_rename.is_empty();
+    for (current_name, new_name) in operation_types_to_rename {
+        schema.get_type(current_name)?.rename(schema, new_name)?;
+    }
+    Ok(changed)
+}
 
-        FederationBlueprint::on_validation(&schema, &self.state.metadata)
-            .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;
+impl Subgraph<Upgraded> {
+    pub fn validate(self) -> Result<Subgraph<Validated>, SubgraphError> {
+        tracing::debug!(
+            "Subgraph<Upgraded>: validate_subgraph_schema for `{}`",
+            self.name
+        );
+        let schema = validate_subgraph_schema(self.state.schema, &self.state.metadata)
+            .map_err(|err| SubgraphError::new_without_locations(self.name.clone(), err))?;
 
         Ok(Subgraph {
             name: self.name,
@@ -303,44 +467,8 @@ impl Subgraph<Upgraded> {
     }
 
     pub fn normalize_root_types(&mut self) -> Result<(), SubgraphError> {
-        let mut operation_types_to_rename = HashMap::new();
-        for (op_type, op_name) in self
-            .state
-            .schema
-            .schema()
-            .schema_definition
-            .iter_root_operations()
-        {
-            let default_name = default_operation_name(&op_type);
-            if op_name.name != default_name {
-                operation_types_to_rename.insert(op_name.name.clone(), default_name.clone());
-                if self
-                    .state
-                    .schema
-                    .try_get_type(default_name.clone())
-                    .is_some()
-                {
-                    // TODO: Add locations
-                    return Err(SubgraphError::new_without_locations(
-                        self.name.clone(),
-                        SingleFederationError::root_already_used(
-                            op_type,
-                            default_name,
-                            op_name.name.clone(),
-                        ),
-                    ));
-                }
-            }
-        }
-        for (current_name, new_name) in operation_types_to_rename {
-            self.state
-                .schema
-                .get_type(current_name)
-                .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?
-                .rename(&mut self.state.schema, new_name)
-                .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;
-        }
-
+        normalize_root_types_in_subgraph_schema(&mut self.state.schema)
+            .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;
         Ok(())
     }
 }
@@ -356,21 +484,6 @@ fn default_operation_name(op_type: &OperationType) -> Name {
 impl Subgraph<Validated> {
     pub fn validated_schema(&self) -> &ValidFederationSchema {
         &self.state.schema
-    }
-
-    pub fn invalidate(self) -> Subgraph<Upgraded> {
-        // PORT_NOTE: In JS, the metadata gets invalidated by calling
-        // `federationMetadata.onInvalidate` (via `FederationBlueprint.onValidation`). But, it
-        // doesn't seem necessary in Rust, since the metadata is computed eagerly.
-        Subgraph {
-            name: self.name,
-            url: self.url,
-            state: Upgraded {
-                // Other holders may still need the data in the `Arc`, so we clone the contents to allow mutation later
-                schema: (*self.state.schema).clone(),
-                metadata: self.state.metadata,
-            },
-        }
     }
 }
 
@@ -457,6 +570,16 @@ impl<S: HasMetadata> Subgraph<S> {
             return interface_object_referencers.is_ok_and(|refs| refs.object_types.contains(obj));
         }
         false
+    }
+
+    pub(crate) fn node_locations<T>(&self, node: &Node<T>) -> Locations {
+        self.schema()
+            .node_locations(node)
+            .map(|range| SubgraphLocation {
+                subgraph: self.name.clone(),
+                range,
+            })
+            .collect()
     }
 }
 
@@ -653,12 +776,12 @@ fn new_federation_subgraph_schema(
     let mut schema = FederationSchema::new_uninitialized(inner_schema)?;
 
     // First, copy types over from the underlying schema AST to make sure we have built-ins that directives may reference
-    tracing::debug!("new_federation_subgraph_schema: collect_shallow_references");
+    trace!("new_federation_subgraph_schema: collect_shallow_references");
     schema.collect_shallow_references();
 
     // Backfill missing directive definitions. This is primarily making sure we have a definition for `@link`.
     // Note: Unlike `@core`, `@link` doesn't have to be defined in the schema.
-    tracing::debug!("new_federation_subgraph_schema: missing directive definitions");
+    trace!("new_federation_subgraph_schema: missing directive definitions");
     for directive in &schema.schema().schema_definition.directives.clone() {
         if schema.get_directive_definition(&directive.name).is_none() {
             FederationBlueprint::on_missing_directive_definition(&mut schema, directive)?;
@@ -666,7 +789,7 @@ fn new_federation_subgraph_schema(
     }
 
     // Now that we have the definition for `@link`, the bootstrap directive detection should work.
-    tracing::debug!("new_federation_subgraph_schema: collect_links_metadata");
+    trace!("new_federation_subgraph_schema: collect_links_metadata");
     schema.collect_links_metadata()?;
 
     Ok(schema)
@@ -684,27 +807,27 @@ pub(crate) fn expand_schema(schema: Schema) -> Result<FederationSchema, Federati
     let mut schema = new_federation_subgraph_schema(schema)?;
 
     // If there's a use of `@link` and we successfully added its definition, add the bootstrap directive
-    tracing::debug!("expand_links: bootstrap_spec_links");
+    trace!("expand_links: bootstrap_spec_links");
     bootstrap_spec_links(&mut schema)?;
 
-    tracing::debug!("expand_links: on_directive_definition_and_schema_parsed");
+    trace!("expand_links: on_directive_definition_and_schema_parsed");
     FederationBlueprint::on_directive_definition_and_schema_parsed(&mut schema)?;
 
     // Also, the backfilled definitions mean we can collect deep references.
     // Ignore the error case, which means the schema has invalid references. It will be
     // reported later in the validation phase.
-    tracing::debug!("expand_links: collect_deep_references");
+    trace!("expand_links: collect_deep_references");
     _ = schema.collect_deep_references();
 
     // TODO: Remove this and use metadata from this Subgraph instead of FederationSchema
-    tracing::debug!("expand_links: on_constructed");
+    trace!("expand_links: on_constructed");
     FederationBlueprint::on_constructed(&mut schema)?;
 
     // PORT_NOTE: JS version calls `addFederationOperations` in the `validate` method.
     //            It seems to make sense for it to be a part of expansion stage. We can create
     //            a separate stage for it between `Expanded` and `Validated` if we need a stage
     //            that is expanded, but federation operations are not added.
-    tracing::debug!("expand_links: add_federation_operations");
+    trace!("expand_links: add_federation_operations");
     schema.add_federation_operations()?;
     Ok(schema)
 }
@@ -724,10 +847,10 @@ fn bootstrap_spec_links(schema: &mut FederationSchema) -> Result<(), FederationE
     if let Some(metadata) = schema.metadata() {
         // The schema has a @core or @link spec directive.
         if schema.is_fed_2() {
-            tracing::debug!("bootstrap_spec_links: metadata indicates fed2");
+            trace!("bootstrap_spec_links: metadata indicates fed2");
         } else {
             // This must be a Fed 1 schema.
-            tracing::debug!("bootstrap_spec_links: metadata indicates fed1");
+            trace!("bootstrap_spec_links: metadata indicates fed1");
             if metadata
                 .for_identity(&Identity::federation_identity())
                 .is_none()
@@ -746,14 +869,12 @@ fn bootstrap_spec_links(schema: &mut FederationSchema) -> Result<(), FederationE
         if has_federation_spec_link(schema.schema()) {
             // Has a federation spec link, but no link spec itself. Add the latest link spec.
             // Since `@link` directive is present, this must be a fed 2 schema.
-            tracing::debug!(
-                "bootstrap_spec_links: has a federation spec without a link spec itself"
-            );
+            trace!("bootstrap_spec_links: has a federation spec without a link spec itself");
             LinkSpecDefinition::latest().add_to_schema(schema, /*alias*/ None)?;
         } else {
             // This must be a Fed 1 schema with no link/federation spec.
             // Implicitly add the link spec and federation spec to the schema.
-            tracing::debug!("bootstrap_spec_links: has no link/federation spec");
+            trace!("bootstrap_spec_links: has no link/federation spec");
             let link_spec = LinkSpecDefinition::fed1_latest();
             // PORT_NOTE: JS version doesn't add link specs here, (maybe) due to a potential name
             //            conflict. We generate an alias to avoid conflicts, if necessary.
@@ -795,7 +916,7 @@ fn is_fed_spec_link_directive(schema: &Schema, directive: &Directive) -> bool {
     };
     url_arg
         .as_str()
-        .is_some_and(|url| url.starts_with(&Identity::federation_identity().domain))
+        .is_some_and(|url| url.starts_with(&Identity::federation_identity().to_string()))
 }
 
 impl FederationSchema {
@@ -946,6 +1067,27 @@ mod tests {
         .expect("expands subgraph");
 
         assert!(schema.state.metadata.is_fed_2_schema());
+    }
+
+    #[test]
+    fn avoid_mistaking_wrong_apollo_spec_link_as_federation_spec() {
+        // This used to panic from the `expand_links()` call.
+        let schema = Subgraph::parse(
+            "S",
+            "",
+            r#"
+                extend schema @link(url: "https://specs.apollo.dev/NotFederation/v2.0")
+
+                type Query {
+                    s: String
+                }"#,
+        )
+        .expect("valid schema")
+        .expand_links()
+        .expect("expands subgraph");
+
+        // This schema will be considered a Fed v1 schema.
+        assert!(!schema.metadata().is_fed_2_schema());
     }
 
     #[test]
@@ -1232,12 +1374,11 @@ mod tests {
             .collect::<Vec<_>>();
         defined_type_names.sort();
 
+        // Note: Unused types (Float and ID) are removed by `expand_links` (GraphQL validation).
         assert_eq!(
             defined_type_names,
             vec![
                 name!("Boolean"),
-                name!("Float"),
-                name!("ID"),
                 name!("Int"),
                 name!("Query"),
                 name!("String"),
@@ -1544,7 +1685,10 @@ mod tests {
         // This test used to panic.
         // The `_Entity` type is not expected to be defined, but defined.
         let schema_doc = r#"
-            union _Entity = Int
+            type X {
+                data: Int!
+            }
+            union _Entity = X
         "#;
         Subgraph::parse("subgraph", "subgraph.graphql", schema_doc)
             .expect("parses schema")
@@ -1575,5 +1719,52 @@ mod tests {
             .expect("parses schema")
             .expand_links()
             .expect("expands links");
+    }
+
+    #[test]
+    fn accept_duplicate_argument_definitions() {
+        // Check if we simulate graphql-js behavior of accepting duplicate argument definitions.
+        let schema_doc = r#"
+            type Query {
+                test_root_field(
+                    arg1: Boolean
+
+                    "some description"
+                    arg1: Boolean # duplicate
+                ): Int
+            }
+        "#;
+        // This test used to fail to validate.
+        Subgraph::parse("subgraph", "subgraph.graphql", schema_doc)
+            .expect("parses schema")
+            .expand_links()
+            .expect("expands links")
+            .assume_upgraded()
+            .validate()
+            .expect("validate subgraph");
+    }
+
+    #[test]
+    fn validation_error_on_reserved_input_field_name() {
+        let schema_doc = r#"
+            input P {
+                data: String,
+                __typename: String
+            }
+
+            type Query {
+                start(arg: P): Int
+            }
+        "#;
+        let errors = Subgraph::parse("S", "S.graphql", schema_doc)
+            .expect("parses schema")
+            .expand_links()
+            .expect_err("fail to validate")
+            .format_errors();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(
+            errors[0].1,
+            "[S] Error: an input object field cannot be named `__typename` as names starting with two underscores are reserved\n   ╭─[ S:4:17 ]\n   │\n 4 │                 __typename: String\n   │                 ─────┬────  \n   │                      ╰────── Pick a different name here\n───╯\n"
+        );
     }
 }

@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::num::NonZeroUsize;
@@ -5,16 +6,18 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
-use std::time::Instant;
 
 use apollo_compiler::Schema;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::parser::Parser;
+use apollo_compiler::resolvers;
+use apollo_compiler::schema::ObjectType;
 use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::StringTemplate;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
+use itertools::Itertools;
 use lru::LruCache;
 use multimap::MultiMap;
 use opentelemetry::Array;
@@ -27,8 +30,6 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use tokio::sync::RwLock;
 use tokio::sync::broadcast;
-use tokio::sync::broadcast::Receiver;
-use tokio::sync::broadcast::Sender;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::IntervalStream;
 use tower::BoxError;
@@ -45,10 +46,7 @@ use super::invalidation_endpoint::InvalidationEndpointConfig;
 use super::invalidation_endpoint::InvalidationService;
 use super::invalidation_endpoint::SubgraphInvalidationConfig;
 use super::metrics::CacheMetricContextKey;
-use super::postgres::BatchDocument;
-use super::postgres::CacheEntry;
-use super::postgres::PostgresCacheConfig;
-use super::postgres::PostgresCacheStorage;
+use super::metrics::record_fetch_error;
 use crate::Context;
 use crate::Endpoint;
 use crate::ListenAddr;
@@ -64,13 +62,15 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::authorization::CacheKeyMetadata;
-use crate::plugins::mock_subgraphs::execution::input_coercion::coerce_argument_values;
-use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::response_cache::cache_key::PrimaryCacheKeyEntity;
 use crate::plugins::response_cache::cache_key::PrimaryCacheKeyRoot;
 use crate::plugins::response_cache::cache_key::hash_additional_data;
 use crate::plugins::response_cache::cache_key::hash_query;
-use crate::plugins::response_cache::metrics;
+use crate::plugins::response_cache::storage;
+use crate::plugins::response_cache::storage::CacheEntry;
+use crate::plugins::response_cache::storage::CacheStorage;
+use crate::plugins::response_cache::storage::Document;
+use crate::plugins::response_cache::storage::redis::Storage;
 use crate::plugins::telemetry::LruSizeInstrument;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::span_ext::SpanMarkError;
@@ -99,11 +99,11 @@ const DEFAULT_LRU_PRIVATE_QUERIES_SIZE: NonZeroUsize = NonZeroUsize::new(2048).u
 const LRU_PRIVATE_QUERIES_INSTRUMENT_NAME: &str =
     "apollo.router.response_cache.private_queries.lru.size";
 
-register_private_plugin!("apollo", "experimental_response_cache", ResponseCache);
+register_private_plugin!("apollo", "preview_response_cache", ResponseCache);
 
 #[derive(Clone)]
 pub(crate) struct ResponseCache {
-    pub(super) storage: Arc<Storage>,
+    pub(super) storage: Arc<StorageInterface>,
     endpoint_config: Option<Arc<InvalidationEndpointConfig>>,
     subgraphs: Arc<SubgraphConfiguration<Subgraph>>,
     entity_type: Option<String>,
@@ -114,9 +114,9 @@ pub(crate) struct ResponseCache {
     supergraph_schema: Arc<Valid<Schema>>,
     /// map containing the enum GRAPH
     subgraph_enums: Arc<HashMap<String, String>>,
-    /// To close all related tasks
-    drop_tx: Sender<()>,
     lru_size_instrument: LruSizeInstrument,
+    /// Sender to tell spawned tasks to abort when this struct is dropped
+    drop_tx: broadcast::Sender<()>,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -125,72 +125,43 @@ struct PrivateQueryKey {
     has_private_id: bool,
 }
 
-impl Drop for ResponseCache {
-    fn drop(&mut self) {
-        let _ = self.drop_tx.send(());
+#[derive(Clone, Default)]
+pub(crate) struct StorageInterface {
+    all: Option<Arc<OnceLock<Storage>>>,
+    subgraphs: HashMap<String, Arc<OnceLock<Storage>>>,
+}
+
+impl StorageInterface {
+    pub(crate) fn get(&self, subgraph: &str) -> Option<&Storage> {
+        let storage = self.subgraphs.get(subgraph).or(self.all.as_ref())?;
+        storage.get()
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct Storage {
-    pub(crate) all: Option<Arc<OnceLock<PostgresCacheStorage>>>,
-    pub(crate) subgraphs: HashMap<String, Arc<OnceLock<PostgresCacheStorage>>>,
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
+impl StorageInterface {
+    /// Replace the `all` storage layer in this struct.
+    ///
+    /// This supports tests which initialize the `StorageInterface` without a backing database
+    /// and then add one later, simulating a delayed storage connection.
+    pub(crate) fn replace_storage(&self, storage: Storage) -> Option<()> {
+        self.all.as_ref()?.set(storage).ok()
+    }
 }
 
-impl Storage {
-    pub(crate) fn get(&self, subgraph: &str) -> Option<&PostgresCacheStorage> {
-        match self.subgraphs.get(subgraph) {
-            Some(subgraph) => subgraph.get(),
-            None => self.all.as_ref().and_then(|s| s.get()),
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
+impl From<Storage> for StorageInterface {
+    fn from(storage: Storage) -> Self {
+        Self {
+            all: Some(Arc::new(storage.into())),
+            subgraphs: HashMap::new(),
         }
-    }
-
-    pub(crate) async fn migrate(&self) -> anyhow::Result<()> {
-        if let Some(all) = self.all.as_ref().and_then(|all| all.get()) {
-            all.migrate().await?;
-        }
-        futures::future::try_join_all(
-            self.subgraphs
-                .values()
-                .filter_map(|s| Some(s.get()?.migrate())),
-        )
-        .await?;
-
-        Ok(())
-    }
-
-    /// Spawn tokio task to refresh metrics about expired data count
-    fn expired_data_count_tasks(&self, drop_signal: Receiver<()>) {
-        if let Some(all) = self.all.as_ref().and_then(|all| all.get()) {
-            tokio::task::spawn(metrics::expired_data_task(
-                all.clone(),
-                drop_signal.resubscribe(),
-                None,
-            ));
-        }
-        for (subgraph_name, subgraph_cache_storage) in &self.subgraphs {
-            if let Some(subgraph_cache_storage) = subgraph_cache_storage.get() {
-                tokio::task::spawn(metrics::expired_data_task(
-                    subgraph_cache_storage.clone(),
-                    drop_signal.resubscribe(),
-                    subgraph_name.clone().into(),
-                ));
-            }
-        }
-    }
-
-    pub(crate) async fn update_cron(&self) -> anyhow::Result<()> {
-        if let Some(all) = self.all.as_ref().and_then(|all| all.get()) {
-            all.update_cron().await?;
-        }
-        futures::future::try_join_all(
-            self.subgraphs
-                .values()
-                .filter_map(|s| Some(s.get()?.update_cron())),
-        )
-        .await?;
-
-        Ok(())
     }
 }
 
@@ -225,8 +196,8 @@ const fn default_lru_private_queries_size() -> NonZeroUsize {
 #[derive(Clone, Debug, JsonSchema, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 pub(crate) struct Subgraph {
-    /// PostgreSQL configuration
-    pub(crate) postgres: Option<PostgresCacheConfig>,
+    /// Redis configuration
+    pub(crate) redis: Option<storage::redis::Config>,
 
     /// expiration for all keys for this subgraph, unless overridden by the `Cache-Control` header in subgraph responses
     pub(crate) ttl: Option<Ttl>,
@@ -244,7 +215,7 @@ pub(crate) struct Subgraph {
 impl Default for Subgraph {
     fn default() -> Self {
         Self {
-            postgres: None,
+            redis: None,
             enabled: Some(true),
             ttl: Default::default(),
             private_id: Default::default(),
@@ -289,71 +260,6 @@ impl PluginPrivate for ResponseCache {
             .as_ref()
             .map(|q| q.name.to_string());
 
-        let mut all = None;
-        let (drop_tx, drop_rx) = broadcast::channel(2);
-        let mut task_aborts = Vec::new();
-        if let Some(postgres) = &init.config.subgraph.all.postgres {
-            let postgres_config = postgres.clone();
-            let required_to_start = postgres_config.required_to_start;
-            all = match PostgresCacheStorage::new(&postgres_config).await {
-                Ok(storage) => Some(Arc::new(OnceLock::from(storage))),
-                Err(e) => {
-                    tracing::error!(
-                        cache = "response",
-                        error = %e,
-                        "could not open connection to Postgres for caching",
-                    );
-                    if required_to_start {
-                        return Err(e.into());
-                    } else {
-                        let pg_cache_storage = Arc::new(OnceLock::new());
-                        task_aborts.push(
-                            tokio::spawn(check_pg_connection(
-                                postgres_config,
-                                pg_cache_storage.clone(),
-                                drop_rx,
-                                None,
-                            ))
-                            .abort_handle(),
-                        );
-                        Some(pg_cache_storage)
-                    }
-                }
-            };
-        }
-        let mut subgraph_storages = HashMap::new();
-        for (subgraph, config) in &init.config.subgraph.subgraphs {
-            if let Some(postgres) = &config.postgres {
-                let required_to_start = postgres.required_to_start;
-                let storage = match PostgresCacheStorage::new(postgres).await {
-                    Ok(storage) => Arc::new(OnceLock::from(storage)),
-                    Err(e) => {
-                        tracing::error!(
-                            cache = "response",
-                            error = %e,
-                            "could not open connection to Postgres for caching",
-                        );
-                        if required_to_start {
-                            return Err(e.into());
-                        } else {
-                            let pg_cache_storage = Arc::new(OnceLock::new());
-                            task_aborts.push(
-                                tokio::spawn(check_pg_connection(
-                                    postgres.clone(),
-                                    pg_cache_storage.clone(),
-                                    drop_tx.subscribe(),
-                                    subgraph.clone().into(),
-                                ))
-                                .abort_handle(),
-                            );
-                            pg_cache_storage
-                        }
-                    }
-                };
-                subgraph_storages.insert(subgraph.clone(), storage);
-            }
-        }
-
         if init.config.subgraph.all.ttl.is_none()
             && init
                 .config
@@ -383,17 +289,30 @@ impl PluginPrivate for ResponseCache {
             );
         }
 
-        let storage = Arc::new(Storage {
-            all,
-            subgraphs: subgraph_storages,
-        });
-        storage.migrate().await?;
-        storage.update_cron().await?;
+        let mut storage_interface = StorageInterface::default();
 
-        let invalidation = Invalidation::new(storage.clone()).await?;
+        let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+        if let Some(config) = init.config.subgraph.all.redis.clone() {
+            let storage = Arc::new(OnceLock::new());
+            storage_interface.all = Some(storage.clone());
+            connect_or_spawn_reconnection_task(config, storage, drop_rx).await?;
+        }
+
+        for (subgraph, subgraph_config) in &init.config.subgraph.subgraphs {
+            if let Some(config) = subgraph_config.redis.clone() {
+                let storage = Arc::new(OnceLock::new());
+                storage_interface
+                    .subgraphs
+                    .insert(subgraph.clone(), storage.clone());
+                connect_or_spawn_reconnection_task(config, storage, drop_tx.subscribe()).await?;
+            }
+        }
+
+        let storage_interface = Arc::new(storage_interface);
+        let invalidation = Invalidation::new(storage_interface.clone()).await?;
 
         Ok(Self {
-            storage,
+            storage: storage_interface,
             entity_type,
             enabled: init.config.enabled,
             debug: init.config.debug,
@@ -405,15 +324,12 @@ impl PluginPrivate for ResponseCache {
             invalidation,
             subgraph_enums: Arc::new(get_subgraph_enums(&init.supergraph_schema)),
             supergraph_schema: init.supergraph_schema,
-            drop_tx,
             lru_size_instrument: LruSizeInstrument::new(LRU_PRIVATE_QUERIES_INSTRUMENT_NAME),
+            drop_tx,
         })
     }
 
-    fn activate(&self) {
-        self.storage
-            .expired_data_count_tasks(self.drop_tx.subscribe());
-    }
+    fn activate(&self) {}
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         let debug = self.debug;
@@ -553,11 +469,11 @@ impl ResponseCache {
         any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
     ))]
     pub(crate) async fn for_test(
-        storage: PostgresCacheStorage,
+        storage: Storage,
         subgraphs: HashMap<String, Subgraph>,
         supergraph_schema: Arc<Valid<Schema>>,
         truncate_namespace: bool,
-        update_cron: bool,
+        drop_tx: broadcast::Sender<()>,
     ) -> Result<Self, BoxError>
     where
         Self: Sized,
@@ -565,20 +481,15 @@ impl ResponseCache {
         use std::net::IpAddr;
         use std::net::Ipv4Addr;
         use std::net::SocketAddr;
-        storage.migrate().await?;
-        if update_cron {
-            storage.update_cron().await?;
-        }
         if truncate_namespace {
             storage.truncate_namespace().await?;
         }
 
-        let storage = Arc::new(Storage {
+        let storage = Arc::new(StorageInterface {
             all: Some(Arc::new(storage.into())),
             subgraphs: HashMap::new(),
         });
         let invalidation = Invalidation::new(storage.clone()).await?;
-        let (drop_tx, _drop_rx) = broadcast::channel(2);
         Ok(Self {
             storage,
             entity_type: None,
@@ -605,8 +516,8 @@ impl ResponseCache {
             invalidation,
             subgraph_enums: Arc::new(get_subgraph_enums(&supergraph_schema)),
             supergraph_schema,
-            drop_tx,
             lru_size_instrument: LruSizeInstrument::new(LRU_PRIVATE_QUERIES_INSTRUMENT_NAME),
+            drop_tx,
         })
     }
     #[cfg(all(
@@ -625,7 +536,7 @@ impl ResponseCache {
         use std::net::Ipv4Addr;
         use std::net::SocketAddr;
 
-        let storage = Arc::new(Storage {
+        let storage = Arc::new(StorageInterface {
             all: Some(Default::default()),
             subgraphs: HashMap::new(),
         });
@@ -658,8 +569,8 @@ impl ResponseCache {
             invalidation,
             subgraph_enums: Arc::new(get_subgraph_enums(&supergraph_schema)),
             supergraph_schema,
-            drop_tx,
             lru_size_instrument: LruSizeInstrument::new(LRU_PRIVATE_QUERIES_INSTRUMENT_NAME),
+            drop_tx,
         })
     }
 
@@ -689,6 +600,12 @@ impl ResponseCache {
     }
 }
 
+impl Drop for ResponseCache {
+    fn drop(&mut self) {
+        let _ = self.drop_tx.send(());
+    }
+}
+
 /// Get the map of subgraph enum variant mapped with subgraph name
 fn get_subgraph_enums(supergraph_schema: &Valid<Schema>) -> HashMap<String, String> {
     let mut subgraph_enums = HashMap::new();
@@ -715,7 +632,7 @@ struct CacheService {
     service: subgraph::BoxCloneService,
     name: String,
     entity_type: Option<String>,
-    storage: Arc<Storage>,
+    storage: Arc<StorageInterface>,
     subgraph_ttl: Duration,
     private_queries: Arc<RwLock<LruCache<PrivateQueryKey, ()>>>,
     private_id: Option<String>,
@@ -750,18 +667,14 @@ impl CacheService {
         mut self,
         request: subgraph::Request,
     ) -> Result<subgraph::Response, BoxError> {
-        let storage = match self.storage.get(&self.name) {
-            Some(storage) => storage.clone(),
-            None => {
-                u64_counter_with_unit!(
-                    "apollo.router.operations.response_cache.fetch.error",
-                    "Errors when fetching data from cache",
-                    "{error}",
-                    1,
-                    "subgraph.name" = self.name.clone(),
-                    "code" = "NO_STORAGE"
-                );
-
+        let storage = match self
+            .storage
+            .get(&self.name)
+            .ok_or(storage::Error::NoStorage)
+        {
+            Ok(storage) => storage.clone(),
+            Err(err) => {
+                record_fetch_error(&err, &self.name);
                 return self
                     .service
                     .map_response(move |response: subgraph::Response| {
@@ -818,7 +731,7 @@ impl CacheService {
                         .build());
                 }
             };
-            if cache_control.no_store {
+            if !cache_control.should_store() {
                 let mut resp = self.service.call(request).await?;
                 cache_control.to_headers(resp.response.headers_mut())?;
                 return Ok(resp);
@@ -926,6 +839,7 @@ impl CacheService {
                 .instrument(tracing::info_span!(
                     "response_cache.lookup",
                     kind = "root",
+                    subgraph.name = self.name.clone(),
                     "graphql.type" = self.entity_type.as_deref().unwrap_or_default(),
                     debug = self.debug,
                     private = is_known_private,
@@ -980,10 +894,7 @@ impl CacheService {
                                     self.subgraph_ttl.into(),
                                 )?
                             } else {
-                                CacheControl {
-                                    no_store: true,
-                                    ..Default::default()
-                                }
+                                CacheControl::no_store()
                             };
 
                         if cache_control.private() {
@@ -1105,6 +1016,7 @@ impl CacheService {
             .instrument(tracing::info_span!(
                 "response_cache.lookup",
                 kind = "entity",
+                subgraph.name = self.name.clone(),
                 debug = self.debug,
                 private = is_known_private,
                 contains_private_id = private_id.is_some()
@@ -1120,13 +1032,13 @@ impl CacheService {
                         let debug_cache_keys_ctx = cache_result.0.iter().filter_map(|ir| {
                             ir.cache_entry.as_ref().map(|cache_entry| CacheKeyContext {
                                 hashed_private_id: private_id.clone(),
-                                key: cache_entry.cache_key.clone(),
+                                key: cache_entry.key.clone(),
                                 invalidation_keys: ir.invalidation_keys.clone().into_iter()
                                 .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
                                 .collect(),
                                 kind: CacheEntryKind::Entity {
                                     typename: ir.typename.clone(),
-                                    entity_key: ir.entity_key.clone(),
+                                    entity_key: ir.entity_key.clone().unwrap_or_default(),
                                 },
                                 subgraph_name: self.name.clone(),
                                 subgraph_request: request.subgraph_request.body().clone(),
@@ -1247,7 +1159,7 @@ impl CacheService {
 async fn cache_lookup_root(
     name: String,
     entity_type_opt: Option<&str>,
-    cache: PostgresCacheStorage,
+    cache: Storage,
     is_known_private: bool,
     private_id: Option<&str>,
     debug: bool,
@@ -1274,18 +1186,7 @@ async fn cache_lookup_root(
 
     Span::current().record("cache.key", key.clone());
 
-    let now = Instant::now();
-    let cache_result = cache.get(&key).await;
-    f64_histogram_with_unit!(
-        "apollo.router.operations.response_cache.fetch",
-        "Time to fetch data from cache",
-        "s",
-        now.elapsed().as_secs_f64(),
-        "subgraph.name" = request.subgraph_name.clone(),
-        "kind" = "single"
-    );
-
-    match cache_result {
+    match cache.fetch(&key, &request.subgraph_name).await {
         Ok(value) => {
             if value.control.can_use() {
                 let control = value.control.clone();
@@ -1311,7 +1212,7 @@ async fn cache_lookup_root(
                         CONTEXT_DEBUG_CACHE_KEYS,
                         |mut val| {
                             val.push(CacheKeyContext {
-                                key: value.cache_key.clone(),
+                                key: value.key.clone(),
                                 hashed_private_id: private_id.map(ToString::to_string),
                                 invalidation_keys: invalidation_keys
                                     .clone()
@@ -1356,17 +1257,8 @@ async fn cache_lookup_root(
         }
         Err(err) => {
             let span = Span::current();
-            if !matches!(err, sqlx::Error::RowNotFound) {
+            if !err.is_row_not_found() {
                 span.mark_as_error(format!("cannot get cache entry: {err}"));
-
-                u64_counter_with_unit!(
-                    "apollo.router.operations.response_cache.fetch.error",
-                    "Errors when fetching data from cache",
-                    "{error}",
-                    1,
-                    "subgraph.name" = name,
-                    "code" = err.code()
-                );
             }
 
             span.set_span_dyn_attribute(
@@ -1383,57 +1275,51 @@ fn get_invalidation_root_keys_from_schema(
     subgraph_enums: &HashMap<String, String>,
     supergraph_schema: Arc<Valid<Schema>>,
 ) -> Result<HashSet<String>, anyhow::Error> {
-    let subgraph_name = &request.subgraph_name;
-    let executable_document =
-        request
-            .executable_document
-            .as_ref()
-            .ok_or_else(|| FetchError::MalformedRequest {
-                reason: "cannot get the executable document for subgraph request".to_string(),
-            })?;
-    let root_operation_fields = executable_document
-        .operations
-        .get(request.subgraph_request.body().operation_name.as_deref())
-        .map_err(|_err| FetchError::MalformedRequest {
-            reason: "cannot get the operation from executable document for subgraph request"
-                .to_string(),
-        })?
-        .root_fields(executable_document);
-    let root_query_type = supergraph_schema
-        .root_operation(apollo_compiler::ast::OperationType::Query)
-        .ok_or_else(|| FetchError::MalformedRequest {
-            reason: "cannot get the root operation from supergraph schema".to_string(),
-        })?;
-    let query_object_type = supergraph_schema
-        .get_object(root_query_type.as_str())
-        .ok_or_else(|| FetchError::MalformedRequest {
-            reason: "cannot get the root query type from supergraph schema".to_string(),
-        })?;
+    struct Root<'a> {
+        subgraph_name: &'a str,
+        subgraph_enums: &'a HashMap<String, String>,
+        query_object_type: &'a ObjectType,
+        result: RefCell<Result<HashSet<String>, anyhow::Error>>,
+    }
 
-    let cache_keys = root_operation_fields
-        .map(|field| {
-            // We don't use field.definition because we need the directive set in supergraph schema not in the executable document
-            let field_def = query_object_type.fields.get(&field.name).ok_or_else(|| {
-                FetchError::MalformedRequest {
+    impl resolvers::ObjectValue for Root<'_> {
+        fn type_name(&self) -> &str {
+            "Query"
+        }
+
+        fn resolve_field<'a>(
+            &'a self,
+            info: &'a resolvers::ResolveInfo<'a>,
+        ) -> Result<resolvers::ResolvedValue<'a>, resolvers::FieldError> {
+            let mut result = self.result.borrow_mut();
+            let Ok(keys) = &mut *result else {
+                return Ok(resolvers::ResolvedValue::SkipForPartialExecution);
+            };
+            // We don't use info.field_definition() because we need the directive
+            // set in supergraph schema not in the executable document
+            let Some(field_def) = self.query_object_type.fields.get(info.field_name()) else {
+                *result = Err(FetchError::MalformedRequest {
                     reason: "cannot get the field definition from supergraph schema".to_string(),
                 }
-            })?;
-            let cache_keys = field_def
+                .into());
+                return Ok(resolvers::ResolvedValue::SkipForPartialExecution);
+            };
+            let templates = field_def
                 .directives
                 .get_all("join__directive")
                 .filter_map(|dir| {
-                    let name = dir.argument_by_name("name", &supergraph_schema).ok()?;
+                    let name = dir.argument_by_name("name", info.schema()).ok()?;
                     if name.as_str()? != CACHE_TAG_DIRECTIVE_NAME {
                         return None;
                     }
                     let is_current_subgraph =
-                        dir.argument_by_name("graphs", &supergraph_schema)
+                        dir.argument_by_name("graphs", info.schema())
                             .ok()
                             .and_then(|f| {
                                 Some(f.as_list()?.iter().filter_map(|graph| graph.as_enum()).any(
                                     |g| {
-                                        subgraph_enums.get(g.as_str()).map(|s| s.as_str())
-                                            == Some(subgraph_name)
+                                        self.subgraph_enums.get(g.as_str()).map(|s| s.as_str())
+                                            == Some(self.subgraph_name)
                                     },
                                 ))
                             })
@@ -1443,7 +1329,7 @@ fn get_invalidation_root_keys_from_schema(
                     }
                     let mut format = None;
                     for (field_name, value) in dir
-                        .argument_by_name("args", &supergraph_schema)
+                        .argument_by_name("args", info.schema())
                         .ok()?
                         .as_object()?
                     {
@@ -1455,44 +1341,59 @@ fn get_invalidation_root_keys_from_schema(
                     }
                     format
                 });
-            let mut errors = Vec::new();
-            // Query::validate_variables runs before this
-            let variable_values =
-                Valid::assume_valid_ref(&request.subgraph_request.body().variables);
-            let args = coerce_argument_values(
-                &supergraph_schema,
-                executable_document,
-                variable_values,
-                &mut errors,
-                Default::default(),
-                field_def,
-                field,
-            )
-            .map_err(|_| FetchError::MalformedRequest {
-                reason: format!("cannot argument values for root fields {:?}", field.name),
-            })?;
-
-            if !errors.is_empty() {
-                return Err(FetchError::MalformedRequest {
-                    reason: format!(
-                        "cannot coerce argument values for root fields {:?}, errors: {errors:?}",
-                        field.name,
-                    ),
-                }
-                .into());
-            }
 
             let mut vars = IndexMap::default();
-            vars.insert("$args".to_string(), Value::Object(args));
-            cache_keys
-                .map(|ck| Ok(ck.interpolate(&vars).map(|(res, _)| res)?))
-                .collect::<Result<Vec<String>, anyhow::Error>>()
-        })
-        .collect::<Result<Vec<Vec<String>>, anyhow::Error>>()?;
+            vars.insert("$args".to_string(), Value::Object(info.arguments().clone()));
 
-    let invalidation_cache_keys: HashSet<String> = cache_keys.into_iter().flatten().collect();
+            for template in templates {
+                match template.interpolate(&vars) {
+                    Ok((key, _)) => {
+                        keys.insert(key);
+                    }
+                    Err(e) => {
+                        *result = Err(e.into());
+                        break;
+                    }
+                }
+            }
+            Ok(resolvers::ResolvedValue::SkipForPartialExecution)
+        }
+    }
 
-    Ok(invalidation_cache_keys)
+    let executable_document =
+        request
+            .executable_document
+            .as_ref()
+            .ok_or_else(|| FetchError::MalformedRequest {
+                reason: "cannot get the executable document for subgraph request".to_string(),
+            })?;
+    let root_query_type = supergraph_schema
+        .root_operation(apollo_compiler::ast::OperationType::Query)
+        .ok_or_else(|| FetchError::MalformedRequest {
+            reason: "cannot get the root operation from supergraph schema".to_string(),
+        })?;
+    let query_object_type = supergraph_schema
+        .get_object(root_query_type.as_str())
+        .ok_or_else(|| FetchError::MalformedRequest {
+            reason: "cannot get the root query type from supergraph schema".to_string(),
+        })?;
+    let root = Root {
+        subgraph_name: &request.subgraph_name,
+        subgraph_enums,
+        query_object_type,
+        result: RefCell::new(Ok(HashSet::new())),
+    };
+    let subgraph_request = request.subgraph_request.body();
+    // FIXME: in principle we should use the subgraph schema here.
+    // Maybe this is good enough as far as finding root fields is concerned?
+    resolvers::Execution::new(&supergraph_schema, executable_document)
+        .operation_name(subgraph_request.operation_name.as_deref())
+        .unwrap()
+        .raw_variable_values(&subgraph_request.variables)
+        .execute_sync(&root)
+        .map_err(|e| anyhow::Error::msg(e.message().to_string()))?;
+
+    root.result.into_inner()
 }
 
 struct ResponseCacheResults(Vec<IntermediateResult>, Option<CacheControl>);
@@ -1502,7 +1403,7 @@ async fn cache_lookup_entities(
     name: String,
     supergraph_schema: Arc<Valid<Schema>>,
     subgraph_enums: &HashMap<String, String>,
-    cache: PostgresCacheStorage,
+    cache: Storage,
     is_known_private: bool,
     private_id: Option<&str>,
     mut request: subgraph::Request,
@@ -1515,15 +1416,15 @@ async fn cache_lookup_entities(
         &mut request,
         is_known_private,
         private_id,
+        debug,
     )?;
     let keys_len = cache_metadata.len();
 
-    let now = Instant::now();
     let cache_keys = cache_metadata
         .iter()
         .map(|k| k.cache_key.as_str())
         .collect::<Vec<&str>>();
-    let cache_result = cache.get_multiple(&cache_keys).await;
+    let cache_result = cache.fetch_multiple(&cache_keys, &name).await;
     Span::current().set_span_dyn_attribute(
         "cache.keys".into(),
         opentelemetry::Value::Array(Array::String(
@@ -1532,14 +1433,6 @@ async fn cache_lookup_entities(
                 .map(|ck| StringValue::from(ck.to_string()))
                 .collect(),
         )),
-    );
-    f64_histogram_with_unit!(
-        "apollo.router.operations.response_cache.fetch",
-        "Time to fetch data from cache",
-        "s",
-        now.elapsed().as_secs_f64(),
-        "subgraph.name" = request.subgraph_name.clone(),
-        "kind" = "batch"
     );
 
     let cache_result: Vec<Option<CacheEntry>> = match cache_result {
@@ -1551,18 +1444,9 @@ async fn cache_lookup_entities(
             })
             .collect(),
         Err(err) => {
-            let span = Span::current();
-            if !matches!(err, sqlx::Error::RowNotFound) {
+            if !err.is_row_not_found() {
+                let span = Span::current();
                 span.mark_as_error(format!("cannot get cache entry: {err}"));
-
-                u64_counter_with_unit!(
-                    "apollo.router.operations.response_cache.fetch.error",
-                    "Errors when fetching data from cache",
-                    "{error}",
-                    1,
-                    "subgraph.name" = name.clone(),
-                    "code" = err.code()
-                );
             }
 
             std::iter::repeat_n(None, keys_len).collect()
@@ -1613,7 +1497,7 @@ async fn cache_lookup_entities(
                         .collect(),
                     kind: CacheEntryKind::Entity {
                         typename: ir.typename.clone(),
-                        entity_key: ir.entity_key.clone(),
+                        entity_key: ir.entity_key.clone().unwrap_or_default(),
                     },
                     subgraph_name: name.clone(),
                     subgraph_request: request.subgraph_request.body().clone(),
@@ -1674,7 +1558,7 @@ fn update_cache_control(context: &Context, cache_control: &CacheControl) {
 }
 
 async fn cache_store_root_from_response(
-    cache: PostgresCacheStorage,
+    cache: Storage,
     default_subgraph_ttl: Duration,
     response: &subgraph::Response,
     cache_control: CacheControl,
@@ -1685,7 +1569,7 @@ async fn cache_store_root_from_response(
     if let Some(data) = response.response.body().data.as_ref() {
         let ttl = cache_control
             .ttl()
-            .map(|secs| Duration::from_secs(secs as u64))
+            .map(Duration::from_secs)
             .unwrap_or(default_subgraph_ttl);
 
         if response.response.body().errors.is_empty() && cache_control.should_store() {
@@ -1703,43 +1587,24 @@ async fn cache_store_root_from_response(
                         .map(|s| s.to_owned()),
                 );
             }
-            let data = data.clone();
+
+            let document = Document {
+                key: cache_key,
+                data: data.clone(),
+                control: cache_control,
+                invalidation_keys,
+                expire: ttl,
+            };
 
             let subgraph_name = response.subgraph_name.clone();
             let span = tracing::info_span!("response_cache.store", "kind" = "root", "subgraph.name" = subgraph_name.clone(), "ttl" = ?ttl);
-            // Write to cache in a non-awaited task so it’s on in the request’s critical path
+
+            // Write to cache in a non-awaited task so that it's not on the request’s critical path
             tokio::spawn(async move {
-                let now = Instant::now();
-                if let Err(err) = cache
-                    .insert(
-                        &cache_key,
-                        ttl,
-                        invalidation_keys,
-                        data,
-                        cache_control,
-                        &subgraph_name,
-                    )
+                let _ = cache
+                    .insert(document, &subgraph_name)
                     .instrument(span)
-                    .await
-                {
-                    u64_counter_with_unit!(
-                        "apollo.router.operations.response_cache.insert.error",
-                        "Errors when inserting data in cache",
-                        "{error}",
-                        1,
-                        "subgraph.name" = subgraph_name.clone(),
-                        "code" = err.code()
-                    );
-                    tracing::debug!(error = %err, "cannot insert data in cache");
-                }
-                f64_histogram_with_unit!(
-                    "apollo.router.operations.response_cache.insert",
-                    "Time to insert new data in cache",
-                    "s",
-                    now.elapsed().as_secs_f64(),
-                    "subgraph.name" = subgraph_name,
-                    "kind" = "single"
-                );
+                    .await;
             });
         }
     }
@@ -1749,7 +1614,7 @@ async fn cache_store_root_from_response(
 
 #[allow(clippy::too_many_arguments)]
 async fn cache_store_entities_from_response(
-    cache: PostgresCacheStorage,
+    cache: Storage,
     default_subgraph_ttl: Duration,
     response: &mut subgraph::Response,
     cache_control: CacheControl,
@@ -1858,7 +1723,8 @@ fn extract_cache_key_root(
 struct CacheMetadata {
     cache_key: String,
     invalidation_keys: Vec<String>,
-    entity_key: serde_json_bytes::Map<ByteString, Value>,
+    // Only set when debug mode is enabled
+    entity_key: Option<serde_json_bytes::Map<ByteString, Value>>,
 }
 
 // build a list of keys to get from the cache in one query
@@ -1870,6 +1736,7 @@ fn extract_cache_keys(
     request: &mut subgraph::Request,
     is_known_private: bool,
     private_id: Option<&str>,
+    debug: bool,
 ) -> Result<Vec<CacheMetadata>, BoxError> {
     let context = &request.context;
     let authorization = &request.authorization;
@@ -1918,21 +1785,26 @@ fn extract_cache_keys(
             }
         }
 
-        // Split `representation` into two parts: the entity key part and the rest.
-        let representation_entity_key = take_matching_key_field_set(
-            representation,
-            typename,
-            subgraph_name,
-            &supergraph_schema,
-            subgraph_enums,
-        )?;
+        // Get the entity key from `representation`, only needed in debug for the cache debugger
+        let representation_entity_key = if debug {
+            let selection_set = find_matching_key_field_set(
+                representation,
+                typename,
+                subgraph_name,
+                &supergraph_schema,
+                subgraph_enums,
+            )?;
+
+            get_entity_key_from_selection_set(representation, &selection_set).into()
+        } else {
+            None
+        };
 
         // Create primary cache key for an entity
         let key = PrimaryCacheKeyEntity {
             subgraph_name,
             entity_type: typename,
             representation,
-            entity_key: &representation_entity_key,
             subgraph_query_hash: &query_hash,
             additional_data_hash: &additional_data_hash,
             private_id: if is_known_private { private_id } else { None },
@@ -1950,12 +1822,11 @@ fn extract_cache_keys(
             subgraph_name,
             subgraph_enums,
             typename,
-            &representation_entity_key,
+            representation,
         )?;
 
         // Restore the `representation` back whole again
         representation.insert(TYPENAME, typename_value);
-        merge_representation(representation, representation_entity_key.clone()); //FIXME: not always clone, only on debug
         invalidation_keys.extend(invalidation_cache_keys);
         let cache_key_metadata = CacheMetadata {
             cache_key: key,
@@ -1996,7 +1867,7 @@ fn get_invalidation_entity_keys_from_schema(
     subgraph_name: &str,
     subgraph_enums: &HashMap<String, String>,
     typename: &str,
-    entity_keys: &serde_json_bytes::Map<ByteString, Value>,
+    representations: &serde_json_bytes::Map<ByteString, Value>,
 ) -> Result<HashSet<String>, anyhow::Error> {
     let field_def =
         supergraph_schema
@@ -2043,37 +1914,33 @@ fn get_invalidation_entity_keys_from_schema(
                 })
         });
     let mut vars = IndexMap::default();
-    vars.insert("$key".to_string(), Value::Object(entity_keys.clone()));
+    // It's safe to use representations variables (not only entity keys) because at the composition level we already checked if it was only using entity keys
+    vars.insert("$key".to_string(), Value::Object(representations.clone()));
     let invalidation_cache_keys = cache_keys
         .map(|ck| ck.interpolate(&vars).map(|(res, _)| res))
         .collect::<Result<HashSet<String>, apollo_federation::connectors::StringTemplateError>>()?;
     Ok(invalidation_cache_keys)
 }
 
-fn take_matching_key_field_set(
-    representation: &mut serde_json_bytes::Map<ByteString, Value>,
+pub(in crate::plugins) fn find_matching_key_field_set(
+    representation: &serde_json_bytes::Map<ByteString, Value>,
     typename: &str,
     subgraph_name: &str,
     supergraph_schema: &Valid<Schema>,
     subgraph_enums: &HashMap<String, String>,
-) -> Result<serde_json_bytes::Map<ByteString, Value>, FetchError> {
+) -> Result<apollo_compiler::executable::SelectionSet, FetchError> {
     // find an entry in the `key_field_sets` that matches the `representation`.
-    let matched_key_field_set =
-        collect_key_field_sets(typename, subgraph_name, supergraph_schema, subgraph_enums)?
+    collect_key_field_sets(typename, subgraph_name, supergraph_schema, subgraph_enums)?
         .find(|field_set| {
             matches_selection_set(representation, &field_set.selection_set)
         })
+        .map(|field_set| field_set.selection_set)
         .ok_or_else(|| {
             tracing::trace!("representation does not match any key field set for typename {typename} in subgraph {subgraph_name}");
             FetchError::MalformedRequest {
                 reason: format!("unexpected critical internal error for typename {typename} in subgraph {subgraph_name}"),
             }
-        })?;
-    take_selection_set(representation, &matched_key_field_set.selection_set).ok_or_else(|| {
-        FetchError::MalformedRequest {
-            reason: format!("representation does not match the field set {matched_key_field_set}"),
-        }
-    })
+        })
 }
 
 // Collect `@key` field sets on a `typename` in a `subgraph_name`.
@@ -2109,7 +1976,7 @@ fn collect_key_field_sets(
                                 supergraph_schema,
                                 NamedType::new(typename).ok()?,
                                 arg,
-                                "response_caching.graphql",
+                                "entity_caching.graphql",
                             )
                             .ok()
                     })
@@ -2119,90 +1986,159 @@ fn collect_key_field_sets(
         }))
 }
 
-// Does the shape of `representation`  match the `selection_set`?
-fn matches_selection_set(
+/// Whether the entity, represented as JSON, matches the parsed @key fields (`selection_set`)
+/// * This function mirrors `get_entity_key_from_selection_set` and make sure the representation
+///   matches the the shape of `selection_set`.
+/// * This function and `get_entity_key_from_selection_set` are separate because this is called for
+///   multiple possible `@key` fields to find the matching one, while
+///   `get_entity_key_from_selection_set` is only called once the matching `@key` fields is found.
+pub(in crate::plugins) fn matches_selection_set(
+    // the JSON representation of the entity data
     representation: &serde_json_bytes::Map<ByteString, Value>,
+    // the parsed @key fields to use for matching
     selection_set: &apollo_compiler::executable::SelectionSet,
 ) -> bool {
     for field in selection_set.root_fields(&Default::default()) {
-        // Note: field sets can't have aliases.
+        // the heart of finding the match: we take the field from the selection
+        // set and try to find it in the entity representation;
         let Some(value) = representation.get(field.name.as_str()) else {
             return false;
         };
 
+        // This field selection is not expecting any subdata.
         if field.selection_set.is_empty() {
-            // `value` must be a scalar.
-            if matches!(value, Value::Object(_)) {
+            // Scalar (or array of scalars) fields are always a match.
+            if !is_scalar_or_array_of_scalar(value) {
+                // Mismatch: Scalar value was expected.
                 return false;
             }
             continue;
         }
 
-        // Check the sub-selection set.
-        let Value::Object(sub_value) = value else {
-            return false;
+        // The field selection is expecting a subdata. See if given `value` matches the shape of
+        // its sub-selection set.
+        let result = match value {
+            Value::Object(obj) => {
+                // Recurse into object value
+                matches_selection_set(obj, &field.selection_set)
+            }
+
+            Value::Array(arr) => {
+                // Recurse into array values
+                matches_array_of_objects(arr, &field.selection_set)
+            }
+
+            // scalar values
+            _other => {
+                // Mismatch: object or array value was expected.
+                false
+            }
         };
-        if !matches_selection_set(sub_value, &field.selection_set) {
+        if !result {
             return false;
         }
     }
     true
 }
 
-// Removes the selection set from `representation` and returns the value corresponding to it.
-// - Returns None if the representation doesn't match the selection set.
-fn take_selection_set(
-    representation: &mut serde_json_bytes::Map<ByteString, Value>,
-    selection_set: &apollo_compiler::executable::SelectionSet,
-) -> Option<serde_json_bytes::Map<ByteString, Value>> {
-    let mut result = serde_json_bytes::Map::new();
-    for field in selection_set.root_fields(&Default::default()) {
-        // Note: field sets can't have aliases.
-        if field.selection_set.is_empty() {
-            let value = representation.remove(field.name.as_str())?;
-            // `value` must be a scalar.
-            if matches!(value, Value::Object(_)) {
-                return None;
-            }
-            // Move the scalar field to the `result`.
-            result.insert(ByteString::from(field.name.as_str()), value);
-            continue;
-        } else {
-            let value = representation.get_mut(field.name.as_str())?;
-            // Update the sub-selection set.
-            let Value::Object(sub_value) = value else {
-                return None;
-            };
-            let removed = take_selection_set(sub_value, &field.selection_set)?;
-            result.insert(
-                ByteString::from(field.name.as_str()),
-                Value::Object(removed),
-            );
-        }
+fn is_scalar_or_array_of_scalar(value: &Value) -> bool {
+    match value {
+        Value::Object(_) => false,
+        Value::Array(arr) => arr.iter().all(is_scalar_or_array_of_scalar),
+        _ => true,
     }
-    Some(result)
 }
 
-// The inverse of `take_selection_set`.
-fn merge_representation(
-    dest: &mut serde_json_bytes::Map<ByteString, Value>,
-    source: serde_json_bytes::Map<ByteString, Value>,
-) {
-    source.into_iter().for_each(|(key, src_value)| {
-        // Note: field sets can't have aliases.
-        let Some(dest_value) = dest.get_mut(&key) else {
-            dest.insert(key, src_value);
-            return;
+/// See if all array items match the shape of the `selection_set`.
+/// * Note: The array can be multi-dimensional. (the @key field set can match any levels of nested
+///   arrays)
+/// * Precondition: `selection_set` must be non-empty.
+fn matches_array_of_objects(
+    arr: &[Value],
+    selection_set: &apollo_compiler::executable::SelectionSet,
+) -> bool {
+    for item in arr.iter() {
+        let result = match item {
+            Value::Object(obj) => matches_selection_set(obj, selection_set),
+            Value::Array(arr) => matches_array_of_objects(arr, selection_set),
+            _other => false,
         };
-
-        // Overlapping fields must be objects.
-        if let (Value::Object(dest_sub_value), Value::Object(src_sub_value)) =
-            (dest_value, src_value)
-        {
-            // Merge sub-values
-            merge_representation(dest_sub_value, src_sub_value);
+        if !result {
+            return false;
         }
-    });
+    }
+    true
+}
+
+// Get the selection set from `representation` and returns the value corresponding to it.
+// - Returns None if the representation doesn't match the selection set.
+// Note: This function mirrors `hash_representation_inner` in cache/entity.rs.
+fn get_entity_key_from_selection_set(
+    representation: &serde_json_bytes::Map<ByteString, Value>,
+    selection_set: &apollo_compiler::executable::SelectionSet,
+) -> serde_json_bytes::Map<ByteString, Value> {
+    fn traverse_object(
+        state: &mut serde_json_bytes::Map<ByteString, Value>,
+        fields: &serde_json_bytes::Map<ByteString, Value>,
+        selection_set: &apollo_compiler::executable::SelectionSet,
+    ) {
+        let default_document = Default::default();
+        let sorted_selections = selection_set
+            .root_fields(&default_document)
+            .sorted_by(|a, b| a.name.cmp(&b.name));
+        for field in sorted_selections {
+            let key = field.name.as_str();
+            let Some(val) = fields.get(key) else {
+                continue;
+            };
+            match val {
+                serde_json_bytes::Value::Object(obj) => {
+                    let mut obj_state = serde_json_bytes::Map::new();
+                    traverse_object(&mut obj_state, obj, &field.selection_set);
+                    state.insert(ByteString::from(key), Value::Object(obj_state));
+                }
+                Value::Array(arr) => {
+                    let mut arr_state = Vec::new();
+                    traverse_array(&mut arr_state, arr, &field.selection_set);
+                    state.insert(ByteString::from(key), Value::Array(arr_state));
+                }
+                // scalar value
+                val => {
+                    state.insert(ByteString::from(key), val.clone());
+                }
+            }
+        }
+    }
+
+    fn traverse_array(
+        state: &mut Vec<Value>,
+        items: &[Value],
+        selection_set: &apollo_compiler::executable::SelectionSet,
+    ) {
+        items.iter().for_each(|v| {
+            match v {
+                serde_json_bytes::Value::Object(obj) => {
+                    let mut obj_state = serde_json_bytes::Map::new();
+                    traverse_object(&mut obj_state, obj, selection_set);
+                    state.push(Value::Object(obj_state));
+                }
+                Value::Array(arr) => {
+                    let mut arr_state = Vec::new();
+                    traverse_array(&mut arr_state, arr, selection_set);
+                    state.push(Value::Array(arr_state));
+                }
+                // scalar value
+                _ => {
+                    state.push(v.clone());
+                }
+            }
+        });
+    }
+
+    let mut state = serde_json_bytes::Map::new();
+    traverse_object(&mut state, representation, selection_set);
+
+    state
 }
 
 /// represents the result of a cache lookup for an entity type and key
@@ -2210,7 +2146,8 @@ struct IntermediateResult {
     key: String,
     invalidation_keys: Vec<String>,
     typename: String,
-    entity_key: serde_json_bytes::Map<ByteString, Value>,
+    // Only set when debug mode is enabled
+    entity_key: Option<serde_json_bytes::Map<ByteString, Value>>,
     cache_entry: Option<CacheEntry>,
 }
 
@@ -2298,7 +2235,7 @@ fn filter_representations(
 async fn insert_entities_in_result(
     entities: &mut Vec<Value>,
     errors: &[Error],
-    cache: PostgresCacheStorage,
+    cache: Storage,
     default_subgraph_ttl: Duration,
     cache_control: CacheControl,
     result: &mut Vec<IntermediateResult>,
@@ -2312,7 +2249,7 @@ async fn insert_entities_in_result(
 ) -> Result<(Vec<Value>, Vec<Error>), BoxError> {
     let ttl = cache_control
         .ttl()
-        .map(|secs| Duration::from_secs(secs as u64))
+        .map(Duration::from_secs)
         .unwrap_or(default_subgraph_ttl);
 
     let mut new_entities = Vec::new();
@@ -2390,7 +2327,7 @@ async fn insert_entities_in_result(
                             .collect(),
                         kind: CacheEntryKind::Entity {
                             typename: typename.clone(),
-                            entity_key: entity_key.clone(),
+                            entity_key: entity_key.clone().unwrap_or_default(),
                         },
                         subgraph_name: subgraph_name.to_string(),
                         subgraph_request: subgraph_request.clone(),
@@ -2404,10 +2341,10 @@ async fn insert_entities_in_result(
                         invalidation_keys
                             .extend(keys.iter().filter_map(|v| v.as_str()).map(|s| s.to_owned()));
                     }
-                    to_insert.push(BatchDocument {
-                        control: serde_json::to_string(&cache_control)?,
-                        data: serde_json::to_string(&value)?,
-                        cache_key: key,
+                    to_insert.push(Document {
+                        control: cache_control.clone(),
+                        data: value.clone(),
+                        key,
                         invalidation_keys,
                         expire: ttl,
                     });
@@ -2429,45 +2366,14 @@ async fn insert_entities_in_result(
     if !to_insert.is_empty() {
         let batch_size = to_insert.len();
         let span = tracing::info_span!("response_cache.store", "kind" = "entity", "subgraph.name" = subgraph_name, "ttl" = ?ttl, "batch.size" = %batch_size);
-
-        let batch_size_str = if batch_size <= 10 {
-            "1-10"
-        } else if batch_size <= 20 {
-            "11-20"
-        } else if batch_size <= 50 {
-            "21-50"
-        } else {
-            "50+"
-        };
-
         let subgraph_name = subgraph_name.to_string();
-        // Write to cache in a non-awaited task so it’s on in the request’s critical path
+
+        // Write to cache in a non-awaited task so that it's not on the request’s critical path
         tokio::spawn(async move {
-            let now = Instant::now();
-            if let Err(err) = cache
+            let _ = cache
                 .insert_in_batch(to_insert, &subgraph_name)
                 .instrument(span)
-                .await
-            {
-                u64_counter_with_unit!(
-                    "apollo.router.operations.response_cache.insert.error",
-                    "Errors when inserting data in cache",
-                    "{error}",
-                    1,
-                    "subgraph.name" = subgraph_name.clone(),
-                    "code" = err.code()
-                );
-                tracing::debug!(error = %err, "cannot insert data in cache");
-            }
-            f64_histogram_with_unit!(
-                "apollo.router.operations.response_cache.insert",
-                "Time to insert new data in cache",
-                "s",
-                now.elapsed().as_secs_f64(),
-                "subgraph.name" = subgraph_name,
-                "kind" = "batch",
-                "batch.size" = batch_size_str
-            );
+                .await;
         });
     }
 
@@ -2504,45 +2410,6 @@ fn assemble_response_from_errors(
         }
     }
     (new_entities, new_errors)
-}
-
-async fn check_pg_connection(
-    postgres_config: PostgresCacheConfig,
-    pg_storage: Arc<OnceLock<PostgresCacheStorage>>,
-    mut abort_signal: Receiver<()>,
-    subgraph_name: Option<String>,
-) {
-    let mut interval =
-        IntervalStream::new(tokio::time::interval(std::time::Duration::from_secs(30)));
-    let abort_signal_cloned = abort_signal.resubscribe();
-    loop {
-        tokio::select! {
-            biased;
-            _ = abort_signal.recv() => {
-                break;
-            }
-            _ = interval.next() => {
-                u64_counter_with_unit!(
-                    "apollo.router.response_cache.reconnection",
-                    "Number of reconnections to the cache storage",
-                    "{retry}",
-                    1,
-                    "subgraph.name" = subgraph_name.clone().unwrap_or_default()
-                );
-                if let Ok(storage) = PostgresCacheStorage::new(&postgres_config).await {
-                    if let Err(err) = storage.migrate().await {
-                        tracing::error!(error = %err, "cannot migrate storage");
-                    }
-                    if let Err(err) = storage.update_cron().await {
-                        tracing::error!(error = %err, "cannot update cron storage");
-                    }
-                    let _ = pg_storage.set(storage.clone());
-                    tokio::task::spawn(metrics::expired_data_task(storage, abort_signal_cloned, None));
-                    break;
-                }
-            }
-        }
-    }
 }
 
 pub(crate) type CacheKeysContext = Vec<CacheKeyContext>;
@@ -2606,36 +2473,96 @@ impl Ord for CacheKeySource {
     }
 }
 
+async fn connect_or_spawn_reconnection_task(
+    config: storage::redis::Config,
+    storage: Arc<OnceLock<Storage>>,
+    abort_signal: broadcast::Receiver<()>,
+) -> Result<(), BoxError> {
+    match attempt_connection(&config, storage.clone(), abort_signal.resubscribe()).await {
+        Ok(()) => Ok(()),
+        Err(err) if config.required_to_start => Err(err),
+        Err(_) => {
+            tokio::spawn(reattempt_connection(config.clone(), storage, abort_signal));
+            Ok(())
+        }
+    }
+}
+
+async fn attempt_connection(
+    config: &storage::redis::Config,
+    cache_storage: Arc<OnceLock<Storage>>,
+    abort_signal: broadcast::Receiver<()>,
+) -> Result<(), BoxError> {
+    let storage = Storage::new(config, abort_signal)
+        .await
+        .inspect_err(|err| {
+            tracing::error!(
+                cache = "response",
+                error = %err,
+                "could not open connection to Redis for response caching",
+            )
+        })?;
+    let _ = cache_storage.set(storage);
+
+    Ok(())
+}
+
+async fn reattempt_connection(
+    config: storage::redis::Config,
+    cache_storage: Arc<OnceLock<Storage>>,
+    mut abort_signal: broadcast::Receiver<()>,
+) {
+    let mut interval = IntervalStream::new(tokio::time::interval(Duration::from_secs(30)));
+    loop {
+        tokio::select! {
+            biased;
+            _ = abort_signal.recv() => {
+                break;
+            }
+            _ = interval.next() => {
+                if attempt_connection(&config, cache_storage.clone(), abort_signal.resubscribe()).await.is_ok() {
+                    break;
+                }
+            }
+        }
+    }
+}
+
 #[cfg(all(
     test,
     any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
 ))]
 mod tests {
-    use super::*;
-    use crate::plugins::response_cache::postgres::default_batch_size;
-    use crate::plugins::response_cache::postgres::default_cleanup_interval;
-    use crate::plugins::response_cache::postgres::default_pool_size;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use apollo_compiler::Schema;
+    use apollo_compiler::parser::Parser;
+    use serde_json_bytes::json;
+    use tokio::sync::broadcast;
+
+    use super::Subgraph;
+    use super::Ttl;
+    use crate::configuration::subgraph::SubgraphConfiguration;
+    use crate::plugins::response_cache::plugin::ResponseCache;
+    use crate::plugins::response_cache::plugin::get_entity_key_from_selection_set;
+    use crate::plugins::response_cache::plugin::get_invalidation_root_keys_from_schema;
+    use crate::plugins::response_cache::plugin::matches_selection_set;
+    use crate::plugins::response_cache::storage::redis::Config;
+    use crate::plugins::response_cache::storage::redis::Storage;
+    use crate::services::OperationKind;
+    use crate::services::subgraph;
 
     const SCHEMA: &str = include_str!("../../testdata/orga_supergraph_cache_key.graphql");
 
     #[tokio::test]
     async fn test_subgraph_enabled() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-            tls: Default::default(),
-            cleanup_interval: default_cleanup_interval(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from("test_subgraph_enabled")),
-        })
-        .await
-        .unwrap();
+        let (drop_tx, drop_rx) = broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false, "test_subgraph_enabled"), drop_rx)
+            .await
+            .unwrap();
         let map = serde_json::json!({
             "user": {
                 "private_id": "sub"
@@ -2651,11 +2578,11 @@ mod tests {
         });
 
         let mut response_cache = ResponseCache::for_test(
-            pg_cache.clone(),
+            storage.clone(),
             serde_json::from_value(map).unwrap(),
             valid_schema.clone(),
             true,
-            false,
+            drop_tx,
         )
         .await
         .unwrap();
@@ -2677,21 +2604,10 @@ mod tests {
     #[tokio::test]
     async fn test_subgraph_ttl() {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
-        let pg_cache = PostgresCacheStorage::new(&PostgresCacheConfig {
-            tls: Default::default(),
-            cleanup_interval: default_cleanup_interval(),
-            url: "postgres://127.0.0.1".parse().unwrap(),
-            username: None,
-            password: None,
-            idle_timeout: std::time::Duration::from_secs(5),
-            acquire_timeout: std::time::Duration::from_millis(50),
-            required_to_start: true,
-            pool_size: default_pool_size(),
-            batch_size: default_batch_size(),
-            namespace: Some(String::from("test_subgraph_ttl")),
-        })
-        .await
-        .unwrap();
+        let (drop_tx, drop_rx) = broadcast::channel(2);
+        let storage = Storage::new(&Config::test(false, "test_subgraph_ttl"), drop_rx)
+            .await
+            .unwrap();
         let map = serde_json::json!({
             "user": {
                 "private_id": "sub",
@@ -2709,11 +2625,11 @@ mod tests {
         });
 
         let mut response_cache = ResponseCache::for_test(
-            pg_cache.clone(),
+            storage.clone(),
             serde_json::from_value(map).unwrap(),
             valid_schema.clone(),
             true,
-            false,
+            drop_tx,
         )
         .await
         .unwrap();
@@ -2765,6 +2681,490 @@ mod tests {
         assert_eq!(
             response_cache.subgraph_ttl("archive"),
             Some(Duration::from_millis(5000))
+        );
+    }
+
+    #[test]
+    fn test_matches_selection_set_handles_arrays() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                locale: String!
+                lists: [List!]!
+                list: [List!]!
+            }
+            type List {
+                id: ID!
+                date: Int!
+                quantity: Int!
+                location: String!
+            }
+        "#;
+        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity location } list { id date quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        // Test with complex nested array structure
+        let representation = json!({
+            "id": "TEST123",
+            "locale": "en_US",
+            "lists": [
+                {
+                    "id": "LIST1",
+                    "date": 20240101,
+                    "quantity": 50,
+                    "location": "WAREHOUSE_A"
+                }
+            ],
+            "list": [
+                {
+                    "id": "LIST2",
+                    "date": 20240101,
+                    "quantity": 100,
+                    "location": "WAREHOUSE_A"
+                },
+                {
+                    "id": "LIST3",
+                    "date": 20240102,
+                    "quantity": 75,
+                    "location": "WAREHOUSE_B"
+                }
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        assert!(
+            matches_selection_set(&representation, &field_set.selection_set),
+            "complex nested arrays should match"
+        );
+    }
+
+    #[test]
+    fn test_matches_selection_subset_handles_arrays() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                locale: String!
+                lists: [List!]!
+                list: [List!]!
+            }
+            type List {
+                id: ID!
+                date: Int!
+                quantity: Int!
+                location: String!
+            }
+        "#;
+        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity location } list { id date quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        // Test with complex nested array structure
+        let representation = json!({
+            "id": "TEST123",
+            "locale": "en_US",
+            "lists": [
+                {
+                    "id": "LIST1",
+                    "date": 20240101,
+                    "quantity": 50
+                }
+            ],
+            "list": [
+                {
+                    "id": "LIST2",
+                    "date": 20240101,
+                    "quantity": 100,
+                    "location": "WAREHOUSE_A"
+                },
+                {
+                    "id": "LIST3",
+                    "date": 20240102,
+                    "quantity": 75,
+                    "location": "WAREHOUSE_B"
+                }
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        assert!(!matches_selection_set(
+            &representation,
+            &field_set.selection_set
+        ),);
+
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity } list { id date quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        assert!(
+            matches_selection_set(&representation, &field_set.selection_set),
+            "complex nested arrays should match"
+        );
+    }
+
+    #[test]
+    fn test_take_selection_set_handles_arrays() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                locale: String!
+                lists: [List!]!
+                list: [List!]!
+            }
+            type List {
+                id: ID!
+                date: Int!
+                quantity: Int!
+                location: String!
+            }
+        "#;
+        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity location } list { id date quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        // Test with complex nested array structure
+        let representation = json!({
+            "id": "TEST123",
+            "locale": "en_US",
+            "lists": [
+                {
+                    "id": "LIST1",
+                    "date": 20240101,
+                    "quantity": 50,
+                    "location": "WAREHOUSE_A"
+                }
+            ],
+            "list": [
+                {
+                    "id": "LIST2",
+                    "date": 20240101,
+                    "quantity": 100,
+                    "location": "WAREHOUSE_A"
+                },
+                {
+                    "id": "LIST3",
+                    "date": 20240102,
+                    "quantity": 75,
+                    "location": "WAREHOUSE_B"
+                }
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        assert!(matches_selection_set(
+            &representation,
+            &field_set.selection_set
+        ));
+        let entity_key =
+            get_entity_key_from_selection_set(&representation, &field_set.selection_set);
+        assert_eq!(
+            &entity_key,
+            json!({
+                "id": "TEST123",
+                "locale": "en_US",
+                "lists": [
+                    {
+                        "id": "LIST1",
+                        "date": 20240101,
+                        "quantity": 50,
+                        "location": "WAREHOUSE_A"
+                    }
+                ],
+                "list": [
+                    {
+                        "id": "LIST2",
+                        "date": 20240101,
+                        "quantity": 100,
+                        "location": "WAREHOUSE_A"
+                    },
+                    {
+                        "id": "LIST3",
+                        "date": 20240102,
+                        "quantity": 75,
+                        "location": "WAREHOUSE_B"
+                    }
+                ]
+            })
+            .as_object()
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn test_take_selection_subset_handles_arrays() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                locale: String!
+                lists: [List!]!
+                list: [List!]!
+            }
+            type List {
+                id: ID!
+                date: Int!
+                quantity: Int!
+                location: String!
+            }
+        "#;
+        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity } list { id quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        // Test with complex nested array structure
+        let representation = json!({
+            "id": "TEST123",
+            "locale": "en_US",
+            "lists": [
+                {
+                    "id": "LIST1",
+                    "date": 20240101,
+                    "quantity": 50,
+                    "location": "WAREHOUSE_A"
+                }
+            ],
+            "list": [
+                {
+                    "id": "LIST2",
+                    "date": 20240101,
+                    "quantity": 100,
+                    "location": "WAREHOUSE_A"
+                },
+                {
+                    "id": "LIST3",
+                    "date": 20240102,
+                    "quantity": 75,
+                    "location": "WAREHOUSE_B"
+                }
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        assert!(matches_selection_set(
+            &representation,
+            &field_set.selection_set
+        ));
+        let entity_key =
+            get_entity_key_from_selection_set(&representation, &field_set.selection_set);
+        assert_eq!(
+            &entity_key,
+            json!({
+                "id": "TEST123",
+                "locale": "en_US",
+                "lists": [
+                    {
+                        "id": "LIST1",
+                        "date": 20240101,
+                        "quantity": 50
+                    }
+                ],
+                "list": [
+                    {
+                        "id": "LIST2",
+                        "quantity": 100,
+                        "location": "WAREHOUSE_A"
+                    },
+                    {
+                        "id": "LIST3",
+                        "quantity": 75,
+                        "location": "WAREHOUSE_B"
+                    }
+                ]
+            })
+            .as_object()
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn test_get_invalidation_root_keys_from_schema() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+            directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+            directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+            directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+            directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+            input join__ContextArgument {
+              name: String!
+              type: String!
+              context: String!
+              selection: join__FieldValue!
+            }
+
+            scalar join__DirectiveArguments
+
+            scalar join__FieldSet
+
+            scalar join__FieldValue
+
+            enum join__Graph {
+              USER @join__graph(name: "USER", url: "none")
+              TEST @join__graph(name: "TEST", url: "none")
+            }
+
+            scalar link__Import
+
+            enum link__Purpose {
+              """
+              `SECURITY` features provide metadata necessary to securely resolve fields.
+              """
+              SECURITY
+
+              """
+              `EXECUTION` features provide metadata necessary for operation execution.
+              """
+              EXECUTION
+            }
+
+            type Query {
+                test: Test
+                testByCountry(id: ID!, country: Country!): Test @join__directive(
+                    graphs: [USER]
+                    name: "federation__cacheTag"
+                    args: { format: "test-{$args.id}-{$args.country}" }
+                )
+                @join__directive(
+                    graphs: [USER]
+                    name: "federation__cacheTag"
+                    args: { format: "test-{$args.country}" }
+                )
+                @join__directive(
+                    graphs: [USER]
+                    name: "federation__cacheTag"
+                    args: { format: "test" }
+                )
+            }
+
+            enum Country {
+                BE
+                FR
+            }
+
+            type Test {
+                id: ID!
+                locale: String!
+                lists: [List!]!
+                list: [List!]!
+            }
+            type List {
+                id: ID!
+                date: Int!
+                quantity: Int!
+                location: String!
+            }
+        "#;
+        let schema = Arc::new(Schema::parse_and_validate(schema_text, "test.graphql").unwrap());
+        let query = r#"query Test {
+          testByCountry(id: "2", country: BE) {
+            locale
+          }
+        }"#;
+        let mut sub_request = subgraph::Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(
+                        crate::graphql::Request::builder()
+                            .query(query)
+                            .operation_name("Test")
+                            .build(),
+                    )
+                    .unwrap(),
+            )
+            .operation_kind(OperationKind::Query)
+            .subgraph_name("USER")
+            .build();
+        sub_request.executable_document = Some(Arc::new(
+            apollo_compiler::ExecutableDocument::parse_and_validate(&schema, query, "test.graphql")
+                .unwrap(),
+        ));
+        let subgraph_enums: HashMap<String, String> = [("USER".to_string(), "USER".to_string())]
+            .into_iter()
+            .collect();
+        let cache_tags =
+            get_invalidation_root_keys_from_schema(&sub_request, &subgraph_enums, schema.clone())
+                .unwrap();
+
+        assert_eq!(
+            cache_tags,
+            [
+                "test".to_string(),
+                "test-BE".to_string(),
+                "test-2-BE".to_string()
+            ]
+            .into_iter()
+            .collect()
         );
     }
 }

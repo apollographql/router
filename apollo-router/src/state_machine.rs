@@ -34,7 +34,7 @@ use crate::configuration::Configuration;
 use crate::configuration::Discussed;
 use crate::configuration::ListenAddr;
 use crate::configuration::metrics::Metrics;
-use crate::plugins::telemetry::reload::apollo_opentelemetry_initialized;
+use crate::plugins::telemetry::reload::otel::apollo_opentelemetry_initialized;
 use crate::router::Event::UpdateLicense;
 use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
@@ -604,12 +604,7 @@ where
 
         // Process all the events in turn until we get to error state or we run out of events.
         while let Some(event) = messages.next().await {
-            let event_name = match &event {
-                Event::UpdateLicense(license_state) => {
-                    format!("UpdateLicense({})", license_state.get_name())
-                }
-                event => format!("{event:?}"),
-            };
+            let event_name = event.to_string();
 
             let previous_state = format!("{state:?}");
 
@@ -699,6 +694,7 @@ mod tests {
     use crate::AllowedFeature;
     use crate::configuration::Homepage;
     use crate::http_server_factory::Listener;
+    use crate::metrics::FutureMetricsExt;
     use crate::plugin::DynPlugin;
     use crate::router_factory::Endpoint;
     use crate::router_factory::RouterFactory;
@@ -1898,6 +1894,103 @@ mod tests {
             Ok(())
         );
         assert_eq!(shutdown_receivers.0.lock().len(), 2);
+    }
+
+    #[test(tokio::test)]
+    async fn state_change_metrics() {
+        let router_factory = create_mock_router_configurator(2);
+        let (server_factory, _) = create_mock_server_factory(2);
+        let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
+        async {
+            assert_matches!(
+                execute(
+                    server_factory,
+                    router_factory,
+                    stream::iter(vec![
+                        UpdateConfiguration(Arc::new(Configuration::builder().build().unwrap())),
+                        NoMoreConfiguration,
+                        UpdateSchema(SchemaState {
+                            sdl: minimal_schema.to_owned(),
+                            launch_id: None
+                        }),
+                        NoMoreSchema,
+                        UpdateLicense(Default::default()),
+                        NoMoreLicense,
+                        Reload,
+                        RhaiReload,
+                        Shutdown
+                    ])
+                )
+                .await,
+                Ok(())
+            );
+
+            assert_counter!(
+                "apollo.router.state.change.total",
+                1,
+                "event" = "UpdateConfiguration",
+                "previous_state" = "Startup",
+                "state" = "Startup"
+            );
+            assert_counter!(
+                "apollo.router.state.change.total",
+                1,
+                "event" = "NoMoreConfiguration",
+                "previous_state" = "Startup",
+                "state" = "Startup"
+            );
+            assert_counter!(
+                "apollo.router.state.change.total",
+                1,
+                "event" = "UpdateSchema",
+                "previous_state" = "Startup",
+                "state" = "Startup"
+            );
+            assert_counter!(
+                "apollo.router.state.change.total",
+                1,
+                "event" = "NoMoreSchema",
+                "previous_state" = "Startup",
+                "state" = "Startup"
+            );
+            assert_counter!(
+                "apollo.router.state.change.total",
+                1,
+                "event" = "UpdateLicense(Unlicensed)",
+                "previous_state" = "Startup",
+                "state" = "Running"
+            );
+            assert_counter!(
+                "apollo.router.state.change.total",
+                1,
+                "event" = "NoMoreLicense",
+                "previous_state" = "Running",
+                "state" = "Running"
+            );
+            assert_counter!(
+                "apollo.router.state.change.total",
+                1,
+                "event" = "ForcedHotReload",
+                "previous_state" = "Running",
+                "state" = "Running"
+            );
+            assert_counter!(
+                "apollo.router.state.change.total",
+                1,
+                "event" = "RhaiReload",
+                "previous_state" = "Running",
+                "state" = "Running"
+            );
+            assert_counter!(
+                "apollo.router.state.change.total",
+                1,
+                "event" = "Shutdown",
+                "previous_state" = "Running",
+                "state" = "Stopped"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 
     mock! {

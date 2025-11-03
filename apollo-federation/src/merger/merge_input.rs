@@ -7,6 +7,8 @@ use apollo_compiler::ast::Type;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::InputObjectType;
+use tracing::instrument;
+use tracing::trace;
 
 use crate::error::CompositionError;
 use crate::error::FederationError;
@@ -15,14 +17,13 @@ use crate::merger::hints::HintCode;
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
 use crate::merger::merge_field::FieldMergeContext;
-use crate::merger::merge_field::PLACEHOLDER_TYPE_NAME;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::InputObjectFieldDefinitionPosition;
 use crate::schema::position::InputObjectTypeDefinitionPosition;
 use crate::utils::human_readable::human_readable_subgraph_names;
 
 impl Merger {
-    #[allow(dead_code)]
+    #[instrument(skip(self, sources, dest))]
     pub(crate) fn merge_input(
         &mut self,
         sources: &Sources<Node<InputObjectType>>,
@@ -31,6 +32,7 @@ impl Merger {
         // Like for other inputs, we add all the fields found in any subgraphs initially as a simple mean to have a complete list of
         // field to iterate over, but we will remove those that are not in all subgraphs.
         let added = self.add_input_fields_shallow(sources, dest)?;
+        trace!("Shallow added input fields: {:#?}", added.values());
 
         for (dest_field, subgraph_fields) in added {
             // We merge the details of the field first, even if we may remove it afterwards because 1) this ensure we always checks type
@@ -89,7 +91,7 @@ impl Merger {
                     self.error_reporter.add_error(CompositionError::RequiredInputFieldMissingInSomeSubgraph {
                         message: format!(
                             "Input object field \"{}\" is required in some subgraphs but does not appear in all subgraphs: it is required in {} but does not appear in {}",
-                            dest_field.field_name,
+                            dest_field,
                             non_optional_subgraphs_str,
                             missing_subgraphs_str
                         ),
@@ -120,18 +122,15 @@ impl Merger {
                         }
                     }
 
-                    self.error_reporter.report_mismatch_hint::<InputObjectFieldDefinitionPosition, ()>(
-                            HintCode::InconsistentDescription,
-                            format!("Input object field \"{}\" will not be added to \"{}\" in the supergraph as it does not appear in all subgraphs: it is ",
+                    self.error_reporter.report_mismatch_hint::<InputObjectFieldDefinitionPosition, InputObjectFieldDefinitionPosition, ()>(
+                            HintCode::InconsistentInputObjectField,
+                            format!("Input object field \"{}\" will not be added to \"{}\" in the supergraph as it does not appear in all subgraphs: ",
                                 dest_field.field_name, dest.type_name
                             ),
                             &dest_field,
                             &subgraph_fields,
-                            {
-                                |_, _is_supergraph| {
-                                    Some("yes".to_string())
-                                }
-                            },
+                            |_| Some("yes".to_string()),
+                            |_, _| Some("yes".to_string()),
                             |_, subgraphs| {
                                 format!(
                                     "it is defined in {}", subgraphs.unwrap_or_else(|| "undefined".to_string())
@@ -139,11 +138,10 @@ impl Merger {
                             },
                             |_, subgraphs| {
                                 format!(
-                                    "but not in {}",
+                                    " but not in {}",
                                     subgraphs,
                                 )
                             },
-                            None::<fn(Option<&InputObjectFieldDefinitionPosition>) -> bool>,
                             true,
                             false,
                         );
@@ -188,17 +186,19 @@ impl Merger {
         > = Default::default();
         let mut fields_to_add: HashMap<usize, HashSet<InputObjectFieldDefinitionPosition>> =
             Default::default();
+        let mut field_types: HashMap<InputObjectFieldDefinitionPosition, Node<Type>> =
+            Default::default();
         let mut extra_sources: Sources<InputObjectFieldDefinitionPosition> = Default::default();
 
         for (idx, source) in sources {
             if let Some(source) = source {
-                for field_name in source.fields.keys() {
-                    fields_to_add.entry(*idx).or_default().insert(
-                        InputObjectFieldDefinitionPosition {
-                            type_name: dest.type_name.clone(),
-                            field_name: field_name.clone(),
-                        },
-                    );
+                for field in source.fields.values() {
+                    let pos = InputObjectFieldDefinitionPosition {
+                        type_name: dest.type_name.clone(),
+                        field_name: field.name.clone(),
+                    };
+                    fields_to_add.entry(*idx).or_default().insert(pos.clone());
+                    field_types.insert(pos, field.ty.clone());
                 }
             }
 
@@ -222,14 +222,16 @@ impl Merger {
             for field in field_set {
                 // While the JS implementation checked `isMergedField` here, that would always
                 // return true for input fields, so we omit that check.
-                if !added.contains_key(&field) {
+                if !added.contains_key(&field)
+                    && let Some(ty) = field_types.get(&field)
+                {
                     field.insert(
                         &mut self.merged,
                         Component::new(InputValueDefinition {
                             description: None,
                             name: field.field_name.clone(),
                             default_value: None,
-                            ty: Node::new(Type::Named(PLACEHOLDER_TYPE_NAME)),
+                            ty: ty.clone(),
                             directives: Default::default(),
                         }),
                     )?;
@@ -244,13 +246,15 @@ impl Merger {
         Ok(added)
     }
 
+    #[instrument(skip(self, dest_field, sources))]
     fn merge_input_field(
         &mut self,
         dest_field: &InputObjectFieldDefinitionPosition,
         sources: &Sources<InputObjectFieldDefinitionPosition>,
     ) -> Result<(), FederationError> {
+        trace!("Deep merging input field: {:#?}", dest_field);
         self.merge_description(sources, dest_field)?;
-        self.record_applied_directives_to_merge(sources, dest_field);
+        self.record_applied_directives_to_merge(sources, dest_field)?;
         let all_types_equal = self.merge_type_reference(sources, dest_field, true)?;
         let directive_sources: Sources<DirectiveTargetPosition> = sources
             .iter()
@@ -271,7 +275,7 @@ impl Merger {
             &merge_context,
         )?;
 
-        self.merge_default_value(sources, dest_field, "Input field");
+        self.merge_default_value(sources, dest_field)?;
         Ok(())
     }
 }

@@ -14,7 +14,6 @@ use tracing::info_span;
 use tracing_core::Dispatch;
 use tracing_subscriber::util::SubscriberInitExt;
 
-use self::metrics::ActiveComputeMetric;
 use self::metrics::JobWatcher;
 use self::metrics::Outcome;
 use self::metrics::observe_compute_duration;
@@ -175,7 +174,13 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
                         span.in_scope(|| {
                             observe_queue_wait_duration(job.ty, job.queue_start.elapsed());
 
-                            let _active_metric = ActiveComputeMetric::register(job.ty);
+                            let _active_metric = i64_up_down_counter_with_unit!(
+                                "apollo.router.compute_jobs.active_jobs",
+                                "Number of computation jobs in progress",
+                                "{job}",
+                                1,
+                                job.type = job.ty
+                            );
                             let job_start = Instant::now();
                             (job.job_fn)();
                             observe_compute_duration(job.ty, job_start.elapsed());

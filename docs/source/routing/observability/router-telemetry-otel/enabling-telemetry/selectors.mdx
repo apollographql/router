@@ -1,0 +1,332 @@
+---
+title: Selectors
+subtitle: Select data from the router pipeline to extract
+description: Extract and select data from the Apollo GraphOS Router's pipeline services to attach to telemetry.
+context:
+  - telemetry
+redirectFrom:
+  - /graphos/routing/observability/telemetry/instrumentation/selectors
+---
+
+A _selector_ is used to extract data from the GraphOS Router's request lifecycle (pipeline) services and attach them to telemetry, specifically [spans](/router/configuration/telemetry/instrumentation/spans), [instruments](/router/configuration/telemetry/instrumentation/instruments), [conditions](/router/configuration/telemetry/instrumentation/conditions) and [events](/router/configuration/telemetry/instrumentation/events).
+
+An example of a selector, `request_header`, of the router service on a custom span attribute:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      mode: spec_compliant
+      router:
+        attributes:
+          "my_attribute":
+            # ...
+            request_header: "x-my-header" #highlight-line
+```
+
+## Selector configuration reference
+
+Each service of the router pipeline (`router`, `supergraph`, `subgraph`, `connector`) has its own available selectors.
+You can also extract GraphQL metrics from the response data the router returns to clients.
+
+### Router
+
+The router service is the initial entrypoint for all requests. It is HTTP centric and deals with opaque bytes.
+
+| Selector              | Defaultable | Values                      | Description                                                          |
+|-----------------------|-------------|-----------------------------|----------------------------------------------------------------------|
+| `trace_id`            | Yes         | `open_telemetry` \| `datadog` | The trace ID                                                         |
+| `operation_name`      | Yes         | `string` \| `hash`            | The operation name from the query                                    |
+| `studio_operation_id` | Yes         | `true` \| `false`             | The Apollo Studio operation id                                       |
+| `request_header`      | Yes         |                             | The name of the request header                                       |
+| `request_context`     | Yes         |                             | The name of a request context key                                    |
+| `response_header`     | Yes         |                             | The name of a response header                                        |
+| `response_status`     | Yes         | `code` \| `reason`            | The response status                                                  |
+| `response_context`    | Yes         |                             | The name of a response context key                                   |
+| `response_body`       | Yes         |                             | JSON Path into the router response body data (it might impact performance) |
+| `response_errors`     | Yes         |                             | JSON Path into the router response body errors (it might impact performance) |
+| `baggage`             | Yes         |                             | The name of a baggage item                                           |
+| `env`                 | Yes         |                             | The name of an environment variable                                  |
+| `on_graphql_error`    | No          | `true` \| `false`             | Boolean set to true if the response payload contains a GraphQL error |
+| `static`              | No          |                             | A static string value                                                |
+| `error`               | No          | `reason`                    | a string value containing error reason when it's a critical error    |
+| `router_overhead`     | No          | `true` \| `false`             | Router processing overhead duration in seconds (excludes subgraph wait time) |
+| `active_subgraph_requests` | No     | `count` \| `bool`            | The number of active subgraph requests (`count`) or whether any are active (`bool`) |
+
+### Supergraph
+
+The supergraph service is executed after query parsing but before query execution. It is GraphQL centric and deals with GraphQL queries and responses.
+
+| Selector           | Defaultable | Values                                                                           | Description                                            |
+|--------------------|-------------|-------------------------------------------------------|-----------------------------------------------------------------------------------|
+| `operation_name`   | Yes         | `string` \| `hash`                                      | The operation name from the query                                                 |
+| `operation_kind`   | No          | `string`                                              | The operation kind from the query                                                 |
+| `query`            | Yes         | `string` \| `aliases` \| `depth` \| `height` \| `root_fields` | The GraphQL query                                                                 |
+| `query_variable`   | Yes         |                                                       | The name of a GraphQL query variable                                              |
+| `request_header`   | Yes         |                                                       | The name of a request header                                                      |
+| `response_header`  | Yes         |                                                       | The name of a response header                                                     |
+| `is_primary_response` | No       | `true` \| `false`                                       | Boolean returning true if it's the primary response and not events like subscription events or deferred responses |
+| `response_data`    | Yes         |                                                       | JSON Path into the supergraph response body data (it might impact performance)   |
+| `response_errors`  | Yes         |                                                       | JSON Path into the supergraph response body errors (it might impact performance) |
+| `request_context`  | Yes         |                                                       | The name of a request context key                                                 |
+| `response_context` | Yes         |                                                       | The name of a response context key                                                |
+| `on_graphql_error` | No          | `true` \| `false`                                       | Boolean set to true if the response payload contains a GraphQL error              |
+| `baggage`          | Yes         |                                                       | The name of a baggage item                                                        |
+| `env`              | Yes         |                                                       | The name of an environment variable                                               |
+| `static`           | No          |                                                       | A static string value                                                             |
+| `error`            | No          | `reason`                                              | A string value containing error reason when it's a critical error                 |
+
+### Subgraph
+
+The subgraph service executes multiple times during query execution, with each execution representing a call to a single subgraph. It is GraphQL centric and deals with GraphQL queries and responses.
+
+| Selector                    | Defaultable | Values           | Description                                                                    |
+|-----------------------------|-------------|------------------|--------------------------------------------------------------------------------|
+| `subgraph_operation_name`   | Yes         | `string` \| `hash` | The operation name from the subgraph query                                     |
+| `subgraph_operation_kind`   | No          | `string`         | The operation kind from the subgraph query                                     |
+| `subgraph_query`            | Yes         | `string`         | The GraphQL query to the subgraph                                              |
+| `subgraph_name`             | No          | `true` \| `false`  | The subgraph name                                                              |
+| `subgraph_query_variable`   | Yes         |                  | The name of a subgraph query variable                                          |
+| `subgraph_response_data`    | Yes         |                  | JSON Path into the subgraph response body data (it might impact performance)   |
+| `subgraph_response_errors`  | Yes         |                  | JSON Path into the subgraph response body errors (it might impact performance) |
+| `subgraph_request_header`   | Yes         |                  | The name of a subgraph request header                                          |
+| `subgraph_response_header`  | Yes         |                  | The name of a subgraph response header                                         |
+| `subgraph_response_status`  | Yes         | `code` \| `reason` | The status of a subgraph response                                              |
+| `subgraph_on_graphql_error` | No          | `true` \| `false`  | Boolean set to true if the subgraph response payload contains a GraphQL error  |
+| `supergraph_operation_name` | Yes         | `string` \| `hash` | The operation name from the supergraph query                                   |
+| `supergraph_operation_kind` | Yes         | `string`         | The operation kind from the supergraph query                                   |
+| `supergraph_query`          | Yes         | `string`         | The graphql query to the supergraph                                            |
+| `supergraph_query_variable` | Yes         |                  | The name of a supergraph query variable                                        |
+| `supergraph_request_header` | Yes         |                  | The name of a supergraph request header                                        |
+| `subgraph_resend_count`     | Yes         | `true` \| `false`  | Number of retries for an http request to a subgraph                            |
+| `request_context`           | Yes         |                  | The name of a request context key                                              |
+| `response_context`          | Yes         |                  | The name of a response context key                                             |
+| `baggage`                   | Yes         |                  | The name of a baggage item                                                     |
+| `env`                       | Yes         |                  | The name of an environment variable                                            |
+| `static`                    | No          |                  | A static string value                                                          |
+| `error`                     | No          | `reason`         | A string value containing error reason when it's a critical error              |
+| `cache`                     | No          | `hit` \| `miss`    | Returns the number of cache hit or miss for this subgraph request              |
+
+### HTTP Client
+
+The HTTP client service also executes multiple times, with each execution representing a HTTP request to a single subgraph or REST service. Importantly, this service executes after any Rhai scripts that modify the subgraph requests, so these selectors can be used to observe any headers added by the Rhai script.
+
+| Selector           | Defaultable | Values | Description                   |
+|--------------------|-------------|--------|-------------------------------|
+| `request_header`   | Yes         |        | The name of a request header  |
+| `response_header`  | Yes         |        | The name of a response header |
+
+### Connector
+
+#### HTTP
+
+Apollo Connectors for REST APIs make HTTP calls to the upstream HTTP API. These selectors let you extract metrics from these HTTP requests and responses.
+
+| Selector                              | Defaultable | Values                         | Description                                                                                                  |
+|---------------------------------------|-------------|--------------------------------|--------------------------------------------------------------------------------------------------------------|
+| `subgraph_name`                       | No          | `true`\|`false`                | The name of the subgraph containing the connector                                                            |
+| `connector_source `                   | No          | `name`                         | The name of the `@source` associated with this connector, if any                                             |
+| `connector_http_request_header`       | Yes         |                                | The name of a connector request header                                                                       |
+| `connector_http_response_header`      | Yes         |                                | The name of a connector response header                                                                      |
+| `connector_http_response_status`      | No          | `code`\|`reason`               | The status of a connector response                                                                           |
+| `connector_http_method`               | No          | `true`\|`false`                | The HTTP method of a connector request                                                                       |
+| `connector_url_template `             | No          | `true`\|`false`                | The URL template of a connector request                                                                      |
+| `connector_request_mapping_problems`  | No          | `problems`\|`count`\|`boolean` | Any mapping problems with the connector request                                                              |
+| `connector_response_mapping_problems` | No          | `problems`\|`count`\|`boolean` | Any mapping problems with the connector response                                                             |
+| `connector_on_response_error`         | No          |                                | Returns true if `is_successful` condition is false, or, if unset, if the response has a non-200 status code. |
+| `static`                              | No          |                                | A static string value                                                                                        |
+| `error`                               | No          | `reason`                       | A string value containing error reason when it's a critical error                                            |
+| `request_context`                     | Yes         |                                | The value of a request context key                                                                           |
+| `supergraph_operation_name`           | Yes         | `string`\|`hash`               | The operation name from the supergraph query                                                                 |
+| `supergraph_operation_kind`           | Yes         | `string`                       | The operation kind from the supergraph query                                                                 |
+
+
+### GraphQL
+
+GraphQL metrics are extracted from the response data the router returns to client requests.
+
+| Selector         | Defaultable | Values           | Description                                 |
+|------------------|-------------|------------------|---------------------------------------------|
+| `list_length`    | No          | `value`          | The length of a list from the response data |
+| `field_name`     | No          | `string`         | The name of a field from the response data  |
+| `field_type`     | No          | `string`         | The type of a field from the response data  |
+| `type_name`      | No          |                  | The GraphQL type from the response data     |
+| `operation_name` | Yes         | `string` \| `hash` | The operation name of the query             |
+| `static`         | No          |                  | A static string value                       |
+
+
+## Example selector configurations
+
+Some example configurations of common use cases for selectors:
+
+### Configuring trace ID
+
+Logging the trace ID of a request that has GraphQL errors:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    events:
+      router:
+        my.event:
+          message: 'An event occurred'
+          level: error
+          on: response
+          condition:
+            eq:
+              - on_graphql_error: true
+              - true
+          attributes:
+            # The trace ID from the request
+            id_from_header:
+              trace_id: open_telemetry
+```
+
+### Setting JSON paths
+
+Configuring selectors with JSON paths, such as supergraph `response_data` and `response_errors`:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    metrics:
+      prometheus:
+        enabled: true
+  instrumentation:
+    instruments:
+      supergraph:
+        my.request.on_graphql_error:
+          value: event_unit
+          type: counter
+          unit: error
+          description: my description
+          condition:
+            exists:
+              response_errors: "$.[0].extensions.code"
+          attributes:
+            response_errors:
+              response_errors: "$.[0].extensions.code"
+```
+
+### Capturing the Router Response body
+
+The `response_body` selector allows for accessing the response body in the telemetry
+configurations, enabling more detailed monitoring and logging of response data in the Router.
+
+```yaml
+telemetry:
+  instrumentation:
+    spans:
+      router:
+        attributes:
+          "my_attribute":
+            response_body: true
+```
+
+### Capturing Router Response Errors
+
+The `response_errors` selector allows for a more granular approach towards gathering specific error
+data from the Router response with JSON paths, avoiding capturing the entire response body
+while still providing relevant error information.
+
+```yaml
+telemetry:
+  instrumentation:
+    events:
+      router:
+        router.error:
+          attributes:
+            "my_attribute":
+              response_errors: "$.[0]"
+
+              # Other examples:
+              # response_errors: "$.[0].message"
+              # response_errors: "$.[0].locations"
+              # response_errors: "$.[0].extensions"
+```
+
+### Router overhead selectors
+
+The `router_overhead` and `active_subgraph_requests` selectors enable you to extract router processing overhead metrics. These selectors are available on the router service and can be used with custom instruments to create detailed overhead metrics with custom attributes.
+
+Example using `router_overhead` selector to track overhead as a custom metric value:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        # Create a custom histogram with router overhead as the value
+        my.router.overhead:
+          value:
+            router_overhead: true
+          type: histogram
+          unit: s
+          description: "Router processing overhead duration"
+```
+
+Example using `active_subgraph_requests` selector to add context to overhead metrics:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        apollo.router.overhead:
+          attributes:
+            # Capture the number of active subgraph requests as an attribute
+            active_subgraph_requests:
+              active_subgraph_requests: count
+```
+
+### Getting GraphQL operation info
+
+Configuring the `query` selector to get information about GraphQL operations, with an example for a custom view of operation limits:
+
+```yaml
+telemetry:
+  exporters:
+    metrics:
+      common:
+        views:
+          # Define a custom view because operation limits are different than the default latency-oriented view of OpenTelemetry
+          - name: oplimits.*
+            aggregation:
+              histogram:
+                buckets:
+                  - 0
+                  - 5
+                  - 10
+                  - 25
+                  - 50
+                  - 100
+                  - 500
+                  - 1000
+  instrumentation:
+    instruments:
+      supergraph:
+        oplimits.aliases:
+          value:
+            query: aliases
+          type: histogram
+          unit: number
+          description: "Aliases for an operation"
+        oplimits.depth:
+          value:
+            query: depth
+          type: histogram
+          unit: number
+          description: "Depth for an operation"
+        oplimits.height:
+          value:
+            query: height
+          type: histogram
+          unit: number
+          description: "Height for an operation"
+        oplimits.root_fields:
+          value:
+            query: root_fields
+          type: histogram
+          unit: number
+          description: "Root fields for an operation"
+```

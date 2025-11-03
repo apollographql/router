@@ -1,0 +1,8 @@
+---
+source: apollo-router/src/plugins/response_cache/storage/redis.rs
+expression: cache_tags
+---
+[
+    "test:cache-tag:subgraph-products",
+    "test:cache-tag:subgraph-products:key-invalidation",
+]

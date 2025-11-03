@@ -6,6 +6,9 @@ mod validation_traversal;
 
 use std::sync::Arc;
 
+use tracing::instrument;
+use tracing::trace;
+
 use crate::api_schema;
 use crate::composition::satisfiability::validation_traversal::ValidationTraversal;
 use crate::error::CompositionError;
@@ -20,20 +23,18 @@ use crate::supergraph::Merged;
 use crate::supergraph::Satisfiable;
 use crate::supergraph::Supergraph;
 
+#[instrument(skip(supergraph))]
 pub fn validate_satisfiability(
-    supergraph: Supergraph<Merged>,
+    mut supergraph: Supergraph<Merged>,
 ) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
+    let supergraph_schema = supergraph.schema().clone();
     let mut errors = vec![];
-    let mut hints = vec![];
-    let supergraph_schema = match validate_satisfiability_inner(supergraph, &mut errors, &mut hints)
-    {
-        Ok(supergraph_schema) => supergraph_schema,
-        Err(error) => {
-            return Err(vec![CompositionError::InternalError {
-                message: error.to_string(),
-            }]);
-        }
-    };
+    let mut hints = supergraph.hints_mut().drain(..).collect();
+    validate_satisfiability_inner(supergraph, &mut errors, &mut hints).map_err(|e| {
+        vec![CompositionError::InternalError {
+            message: e.to_string(),
+        }]
+    })?;
     if !errors.is_empty() {
         return Err(errors);
     }
@@ -44,19 +45,20 @@ fn validate_satisfiability_inner(
     supergraph: Supergraph<Merged>,
     errors: &mut Vec<CompositionError>,
     hints: &mut Vec<CompositionHint>,
-) -> Result<ValidFederationSchema, FederationError> {
-    // TODO: Avoid this clone by holding `FederationSchema` directly in `Merged` struct.
-    let supergraph_schema = ValidFederationSchema::new(supergraph.state.schema().clone())?;
+) -> Result<(), FederationError> {
+    let supergraph_schema = supergraph.schema();
     let api_schema = api_schema::to_api_schema(supergraph_schema.clone(), Default::default())?;
 
+    trace!("Building query graphs");
     let api_schema_query_graph =
         build_supergraph_api_query_graph(supergraph_schema.clone(), api_schema.clone())?;
     let federated_query_graph = build_federated_query_graph(
         supergraph_schema.clone(),
-        api_schema,
+        api_schema.clone(),
         Some(true),
         Some(false),
     )?;
+    trace!("Validating graph composition");
     validate_graph_composition(
         supergraph_schema.clone(),
         Arc::new(api_schema_query_graph),
@@ -66,7 +68,7 @@ fn validate_satisfiability_inner(
         errors,
         hints,
     )?;
-    Ok(supergraph_schema)
+    Ok(())
 }
 
 /// Validates that all the queries expressible on the API schema resulting from the composition of
