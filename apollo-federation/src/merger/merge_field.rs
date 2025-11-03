@@ -30,7 +30,7 @@ use crate::link::federation_spec_definition::FEDERATION_FROM_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_GRAPH_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_NAME_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC;
-use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME;
+use crate::link::join_spec_definition::JOIN_OVERRIDE_LABEL_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_SELECTION_ARGUMENT_NAME;
@@ -998,7 +998,7 @@ impl Merger {
                 .maybe_arg(&FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC, requires)
                 .maybe_arg(&FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC, provides)
                 .maybe_arg(&FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC, override_from)
-                .maybe_arg(&FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME, override_label)
+                .maybe_arg(&JOIN_OVERRIDE_LABEL_ARGUMENT_NAME, override_label)
                 .maybe_bool_arg(&FEDERATION_USED_OVERRIDEN_ARGUMENT_NAME, used_overridden)
                 .maybe_arg(&FEDERATION_CONTEXT_ARGUMENT_NAME, context_arguments.clone());
 

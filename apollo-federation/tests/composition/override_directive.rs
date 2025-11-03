@@ -851,7 +851,6 @@ mod interface_object {
 mod progressive_override {
     use super::*;
 
-    #[ignore = "until merge implementation completed"]
     #[test]
     fn verify_override_labels_are_present_in_supergraph() {
         let subgraph1 = ServiceDefinition {
@@ -889,16 +888,12 @@ mod progressive_override {
             .expect("T exists in the schema");
         assert_eq!(
             type_t.to_string(),
-            r#"
-                type T
-                  @join__type(graph: SUBGRAPH1, key: \"k\")
-                  @join__type(graph: SUBGRAPH2, key: \"k\")
-                {
-                  k: ID
-                  a: Int @join__field(graph: SUBGRAPH1, override: \"Subgraph2\", overrideLabel: \"foo\") @join__field(graph: SUBGRAPH2, overrideLabel: \"foo\")
-                  b: Int @join__field(graph: SUBGRAPH2)
-                }
-            "#
+            r#"type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
+  k: ID
+  a: Int @join__field(graph: SUBGRAPH1, override: "Subgraph2", overrideLabel: "foo") @join__field(graph: SUBGRAPH2, overrideLabel: "foo")
+  b: Int @join__field(graph: SUBGRAPH2)
+}
+"#
         );
 
         // match api schema
@@ -907,94 +902,82 @@ mod progressive_override {
             .expect("valid api schema");
         assert_eq!(
             api_schema.schema().to_string(),
-            r#"
-            type Query {
-              t: T
-            }
+            r#"type Query {
+  t: T
+}
 
-            type T {
-              k: ID
-              a: Int
-              b: Int
-            }
-            "#
+type T {
+  k: ID
+  a: Int
+  b: Int
+}
+"#
         );
 
         // match supergraph schema
         assert_eq!(
             supergraph.schema().schema().to_string(),
-            r#"
-            schema
-              @link(url: \"https://specs.apollo.dev/link/v1.0\")
-              @link(url: \"https://specs.apollo.dev/join/v0.5\", for: EXECUTION)
-            {
-              query: Query
-            }
+            r#"schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) {
+  query: Query
+}
 
-            directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-            directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 
-            directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
 
-            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 
-            directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
 
-            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
 
-            directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
-            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
 
-            input join__ContextArgument {
-              name: String!
-              type: String!
-              context: String!
-              selection: join__FieldValue!
-            }
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
 
-            scalar join__DirectiveArguments
+scalar link__Import
 
-            scalar join__FieldSet
+enum join__Graph {
+  SUBGRAPH1 @join__graph(name: "Subgraph1", url: "http://Subgraph1")
+  SUBGRAPH2 @join__graph(name: "Subgraph2", url: "http://Subgraph2")
+}
 
-            scalar join__FieldValue
+scalar join__FieldSet
 
-            enum join__Graph {
-              SUBGRAPH1 @join__graph(name: \"Subgraph1\", url: \"https://Subgraph1\")
-              SUBGRAPH2 @join__graph(name: \"Subgraph2\", url: \"https://Subgraph2\")
-            }
+scalar join__DirectiveArguments
 
-            scalar link__Import
+scalar join__FieldValue
 
-            enum link__Purpose {
-              \"\"\"
-              `SECURITY` features provide metadata necessary to securely resolve fields.
-              \"\"\"
-              SECURITY
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue
+}
 
-              \"\"\"
-              `EXECUTION` features provide metadata necessary for operation execution.
-              \"\"\"
-              EXECUTION
-            }
+type Query @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2) {
+  t: T @join__field(graph: SUBGRAPH1)
+}
 
-            type Query
-              @join__type(graph: SUBGRAPH1)
-              @join__type(graph: SUBGRAPH2)
-            {
-              t: T @join__field(graph: SUBGRAPH1)
-            }
-
-            type T
-              @join__type(graph: SUBGRAPH1, key: \"k\")
-              @join__type(graph: SUBGRAPH2, key: \"k\")
-            {
-              k: ID
-              a: Int @join__field(graph: SUBGRAPH1, override: \"Subgraph2\", overrideLabel: \"foo\") @join__field(graph: SUBGRAPH2, overrideLabel: \"foo\")
-              b: Int @join__field(graph: SUBGRAPH2)
-            }
-            "#
+type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
+  k: ID
+  a: Int @join__field(graph: SUBGRAPH1, override: "Subgraph2", overrideLabel: "foo") @join__field(graph: SUBGRAPH2, overrideLabel: "foo")
+  b: Int @join__field(graph: SUBGRAPH2)
+}
+"#
         );
     }
 
