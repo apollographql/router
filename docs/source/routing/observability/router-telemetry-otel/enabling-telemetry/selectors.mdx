@@ -105,7 +105,9 @@ The subgraph service executes multiple times during query execution, with each e
 | `env`                       | Yes         |                  | The name of an environment variable                                            |
 | `static`                    | No          |                  | A static string value                                                          |
 | `error`                     | No          | `reason`         | A string value containing error reason when it's a critical error              |
-| `cache`                     | No          | `hit` \| `miss`    | Returns the number of cache hit or miss for this subgraph request              |
+| `response_cache`            | No          | `hit` \| `miss`    | Returns the number of cache hit or miss for this subgraph request              |
+| `response_cache_status`    | No          | `hit` \| `partial_hit`\| `miss`\| `status`    | Select if you want to know if it's a cache hit (all data coming from cache), miss (all data coming from subgraph) or partial_hit (not all entities are coming from cache for example)  |
+| `response_cache_control`    | No          | `max_age` \| `public`\| `private`\| `public`\| `no_store`    | Select data you want from the computed cache control from response caching  |
 
 ### HTTP Client
 
