@@ -166,7 +166,7 @@ fn merge_validations_reject_if_no_subgraphs_have_query() {
     assert_composition_errors(
         &result,
         &[(
-            "NO_QUERIES",
+            "QUERY_ROOT_MISSING",
             "No queries found in any subgraph: a supergraph must have a query root type.",
         )],
     );

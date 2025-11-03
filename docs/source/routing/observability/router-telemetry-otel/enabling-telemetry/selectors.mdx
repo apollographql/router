@@ -274,9 +274,9 @@ telemetry:
       router:
         apollo.router.overhead:
           attributes:
-            # Add the graphql operation name as an attribute
-            operation.name:
-              operation_name: string
+            # Capture the number of active subgraph requests as an attribute
+            active_subgraph_requests:
+              active_subgraph_requests: count
 ```
 
 ### Getting GraphQL operation info
