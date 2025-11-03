@@ -1038,6 +1038,28 @@ impl Merger {
 
         let sources = map_sources(sources, |source| source.clone().map(|s| s.into()));
 
+        // Check if any field has @override directive
+        for (&idx, source_opt) in &sources {
+            if let Some(source_pos) = source_opt {
+                if let Some(subgraph) = self.subgraphs.get(idx) {
+                    if let Ok(Some(override_directive_name)) = subgraph.override_directive_name() {
+                        let has_override = match source_pos {
+                            DirectiveTargetPosition::ObjectField(pos) => {
+                                !pos.get_applied_directives(subgraph.schema(), &override_directive_name).is_empty()
+                            }
+                            DirectiveTargetPosition::InterfaceField(pos) => {
+                                !pos.get_applied_directives(subgraph.schema(), &override_directive_name).is_empty()
+                            }
+                            _ => false,
+                        };
+                        if has_override {
+                            return Ok(true);
+                        }
+                    }
+                }
+            }
+        }
+
         // Check if any field has @fromContext directive
         for source in sources.values().flatten() {
             // Check if THIS specific source is in fields_with_from_context

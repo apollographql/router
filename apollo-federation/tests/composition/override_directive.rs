@@ -3,7 +3,6 @@ use apollo_federation::error::CompositionError;
 use crate::composition::ServiceDefinition;
 use crate::composition::compose_as_fed2_subgraphs;
 
-#[ignore = "until merge implementation completed"]
 #[test]
 fn override_single_field() {
     let subgraph1 = ServiceDefinition {
@@ -41,16 +40,12 @@ fn override_single_field() {
         .expect("T exists in the schema");
     assert_eq!(
         type_t.to_string(),
-        r#"
-            type T
-              @join__type(graph: SUBGRAPH1, key: \"k\")
-              @join__type(graph: SUBGRAPH2, key: \"k\")
-            {
-              k: ID
-              a: Int @join__field(graph: SUBGRAPH1, override: \"Subgraph2\")
-              b: Int @join__field(graph: SUBGRAPH2)
-            }
-        "#
+        r#"type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
+  k: ID
+  a: Int @join__field(graph: SUBGRAPH1, override: "Subgraph2")
+  b: Int @join__field(graph: SUBGRAPH2)
+}
+"#
     );
 
     let api_schema = supergraph
@@ -58,17 +53,16 @@ fn override_single_field() {
         .expect("valid API schema");
     assert_eq!(
         api_schema.schema().to_string(),
-        r#"
-          type Query {
-            t: T
-          }
+        r#"type Query {
+  t: T
+}
 
-          type T {
-            k: ID
-            a: Int
-            b: Int
-          }
-        "#
+type T {
+  k: ID
+  a: Int
+  b: Int
+}
+"#
     );
 }
 
