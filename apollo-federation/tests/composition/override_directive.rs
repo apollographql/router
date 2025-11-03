@@ -652,7 +652,6 @@ fn override_with_requires_on_overridden_field() {
     );
 }
 
-#[ignore = "until merge implementation completed"]
 #[test]
 fn override_with_external_on_overridden_field() {
     let subgraph1 = ServiceDefinition {

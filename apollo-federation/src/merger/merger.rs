@@ -1191,11 +1191,11 @@ impl Merger {
 
             // Check for conflicts with other directives
             let from_idx = self.names.iter().position(|n| n == &source_subgraph_name).unwrap();
-            if let Some(conflicting_directive_name) = self.override_conflicts_with_other_directive(idx, from_idx, dest)? {
+            if let Some((conflicting_directive_name, conflicting_subgraph_name)) = self.override_conflicts_with_other_directive(idx, from_idx, dest)? {
                 self.error_reporter.add_error(CompositionError::OverrideCollisionWithAnotherDirective {
                     message: format!(
                         "@override cannot be used on field \"{}\" on subgraph \"{}\" since \"{}\" on \"{}\" is marked with directive \"@{}\"",
-                        dest, subgraph_name, dest, source_subgraph_name, conflicting_directive_name
+                        dest, subgraph_name, dest, conflicting_subgraph_name, conflicting_directive_name
                     ),
                 });
                 continue;
@@ -1364,41 +1364,50 @@ impl Merger {
         overriding_idx: usize,
         from_idx: usize,
         field: &ObjectOrInterfaceFieldDefinitionPosition,
-    ) -> Result<Option<String>, FederationError> {
-        // Check the overriding field for @requires or @provides
+    ) -> Result<Option<(String, String)>, FederationError> {
+        // Check the overriding field for @external, @requires or @provides
         let overriding_subgraph = &self.subgraphs[overriding_idx];
+        let overriding_subgraph_name = &self.names[overriding_idx];
         let field_pos: FieldDefinitionPosition = field.clone().into();
+        
+        // Check if the overriding field itself is marked @external
+        if overriding_subgraph.metadata().is_field_external(&field_pos) {
+            if let Ok(Some(external_name)) = overriding_subgraph.external_directive_name() {
+                return Ok(Some((external_name.to_string(), overriding_subgraph_name.clone())));
+            }
+        }
         
         if let Ok(Some(requires_name)) = overriding_subgraph.requires_directive_name() {
             if field.has_applied_directive(overriding_subgraph.schema(), &requires_name) {
-                return Ok(Some(requires_name.to_string()));
+                return Ok(Some((requires_name.to_string(), overriding_subgraph_name.clone())));
             }
         }
         
         if let Ok(Some(provides_name)) = overriding_subgraph.provides_directive_name() {
             if field.has_applied_directive(overriding_subgraph.schema(), &provides_name) {
-                return Ok(Some(provides_name.to_string()));
+                return Ok(Some((provides_name.to_string(), overriding_subgraph_name.clone())));
             }
         }
 
         // Check the from field for @external, @requires, or @provides
         let from_subgraph = &self.subgraphs[from_idx];
+        let from_subgraph_name = &self.names[from_idx];
         
         if from_subgraph.metadata().is_field_external(&field_pos) {
             if let Ok(Some(external_name)) = from_subgraph.external_directive_name() {
-                return Ok(Some(external_name.to_string()));
+                return Ok(Some((external_name.to_string(), from_subgraph_name.clone())));
             }
         }
         
         if let Ok(Some(requires_name)) = from_subgraph.requires_directive_name() {
             if field.has_applied_directive(from_subgraph.schema(), &requires_name) {
-                return Ok(Some(requires_name.to_string()));
+                return Ok(Some((requires_name.to_string(), from_subgraph_name.clone())));
             }
         }
         
         if let Ok(Some(provides_name)) = from_subgraph.provides_directive_name() {
             if field.has_applied_directive(from_subgraph.schema(), &provides_name) {
-                return Ok(Some(provides_name.to_string()));
+                return Ok(Some((provides_name.to_string(), from_subgraph_name.clone())));
             }
         }
 
