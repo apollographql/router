@@ -154,20 +154,19 @@ telemetry:
 
 ## Selectors
 
-A [_selector_](/router/configuration/telemetry/instrumentation/selectors) is used to extract data from the GraphOS Router's request lifecycle (pipeline) services and attach them to telemetry like spans, metrics and logs. For response cache we have different selectors available on the subgraph service to create either custom metrics or also add custom attributes to your telemetry data.
+A [_selector_](/router/configuration/telemetry/instrumentation/selectors) extracts data from the GraphOS Router's request lifecycle (pipeline) and attaches it to telemetry, such as spans, metrics, and logs. For response caching, the subgraph service provides selectors that you can use to create custom metrics or add custom attributes to your telemetry data.
 
 | Selector                    | Defaultable | Values           | Description                                                                    |
 |-----------------------------|-------------|------------------|--------------------------------------------------------------------------------|
 | `response_cache`            | No          | `hit` \| `miss`    | Returns the number of cache hit or miss for this subgraph request              |
-| `response_cache_status`    | No          | `hit` \| `partial_hit`\| `miss`\| `status`    | Select if you want to know if it's a cache hit (all data coming from cache), miss (all data coming from subgraph) or partial_hit (not all entities are coming from cache for example)  |
-| `response_cache_control`    | No          | `max_age` \| `public`\| `private`\| `public`\| `no_store`    | Select data you want from the computed cache control from response caching  |
+| `response_cache_status`    | No          | `hit` \| `partial_hit`\| `miss`\| `status`    | Indicates the cache status for the subgraph request: `hit` (all data from cache), `miss` (all data from subgraph), or `partial_hit` (some entities from cache).   |
+| `response_cache_control`    | No          | `max_age` \| `public`\| `private`\| `no_store`    | Provides data from the computed `Cache-Control` header, such as `max_age` or scope (`public`/`private`).  |
 
 ### Example
 
-+ If you want a metric to know what's the values of computed `max-age` at the subgraph level to know the TTLs set in your cache you can create your own custom instrument using `response_cache_control` selector. (cf `subgraph.response.cache_control.max_age` instrument).
+- To create a metric that tracks the computed `max-age` (TTL) at the subgraph level, create a custom instrument using the `response_cache_control` selector. For an example, see the `subgraph.response.cache_control.max_age` instrument in the configuration below.
 
-+ If you want to know for a subgraph request duration using the standard otel instrument `http.client.request.duration` if it's a request coming from cache or not. You can use the selector `response_cache_status` and set it to `status` to know if it's a partial hit, a cache hit or a cache miss. (cf `response.cache.status` attribute on `http.client.request.duration`).
-
++ - To determine if a subgraph request was served from the cache, use the `response_cache_status` selector. Setting its value to `status` adds an attribute to the standard `http.client.request.duration` instrument that indicates a `hit`, `partial_hit`, or `miss`.
 
 ```yaml title="router.yaml"
 telemetry:
@@ -199,7 +198,7 @@ telemetry:
             response_cache_control: max_age
           type: histogram
           unit: s # Seconds
-          description: Histogram to know what's the TTL computed for a subgraph response
+          description: A histogram of the computed TTL for a subgraph response
   #highlight-end
 ```
 
