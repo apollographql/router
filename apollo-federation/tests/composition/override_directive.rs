@@ -66,7 +66,6 @@ type T {
     );
 }
 
-#[ignore = "until merge implementation completed"]
 #[test]
 fn override_field_in_provides() {
     let subgraph1 = ServiceDefinition {
@@ -123,15 +122,11 @@ fn override_field_in_provides() {
         .expect("A exists in the schema");
     assert_eq!(
         type_a.to_string(),
-        r#"
-          type A
-            @join__type(graph: SUBGRAPH1, key: \"id\")
-            @join__type(graph: SUBGRAPH2, key: \"id\")
-          {
-            id: ID!
-            b: B @join__field(graph: SUBGRAPH1, override: \"Subgraph2\") @join__field(graph: SUBGRAPH2, usedOverridden: true)
-          }
-        "#
+        r#"type A @join__type(graph: SUBGRAPH1, key: "id") @join__type(graph: SUBGRAPH2, key: "id") {
+  id: ID!
+  b: B @join__field(graph: SUBGRAPH1, override: "Subgraph2") @join__field(graph: SUBGRAPH2, usedOverridden: true)
+}
+"#
     );
 
     // Ensuring the provides is still here.
@@ -143,19 +138,14 @@ fn override_field_in_provides() {
         .expect("T exists in the schema");
     assert_eq!(
         type_t.to_string(),
-        r#"
-          type T
-            @join__type(graph: SUBGRAPH1, key: \"k\")
-            @join__type(graph: SUBGRAPH2, key: \"k\")
-          {
-            k: ID
-            a: A @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2, provides: \"b { v }\")
-          }
-        "#
+        r#"type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
+  k: ID
+  a: A @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2, provides: "b { v }")
+}
+"#
     );
 }
 
-#[ignore = "until merge implementation completed"]
 #[test]
 fn override_field_in_requires() {
     let subgraph1 = ServiceDefinition {
@@ -210,15 +200,11 @@ fn override_field_in_requires() {
         .expect("A exists in the schema");
     assert_eq!(
         type_a.to_string(),
-        r#"
-          type A
-            @join__type(graph: SUBGRAPH1, key: \"id\")
-            @join__type(graph: SUBGRAPH2, key: \"id\")
-          {
-            id: ID!
-            b: B @join__field(graph: SUBGRAPH1, override: \"Subgraph2\") @join__field(graph: SUBGRAPH2, usedOverridden: true)
-          }
-        "#
+        r#"type A @join__type(graph: SUBGRAPH1, key: "id") @join__type(graph: SUBGRAPH2, key: "id") {
+  id: ID!
+  b: B @join__field(graph: SUBGRAPH1, override: "Subgraph2") @join__field(graph: SUBGRAPH2, usedOverridden: true)
+}
+"#
     );
 
     // Ensuring the requires is still here.
@@ -230,20 +216,15 @@ fn override_field_in_requires() {
         .expect("T exists in the schema");
     assert_eq!(
         type_t.to_string(),
-        r#"
-          type T
-            @join__type(graph: SUBGRAPH1, key: \"k\")
-            @join__type(graph: SUBGRAPH2, key: \"k\")
-          {
-            k: ID
-            a: A
-            x: Int @join__field(graph: SUBGRAPH2, requires: \"a { b { v } }\")
-          }
-        "#
+        r#"type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
+  k: ID
+  a: A
+  x: Int @join__field(graph: SUBGRAPH2, requires: "a { b { v } }")
+}
+"#
     );
 }
 
-#[ignore = "until merge implementation completed"]
 #[test]
 fn override_field_necessary_for_interface() {
     let subgraph1 = ServiceDefinition {
@@ -286,20 +267,14 @@ fn override_field_necessary_for_interface() {
         .expect("T exists in the schema");
     assert_eq!(
         type_t.to_string(),
-        r#"
-          type T implements I
-            @join__implements(graph: SUBGRAPH1, interface: \"I\")
-            @join__type(graph: SUBGRAPH1, key: \"k\")
-            @join__type(graph: SUBGRAPH2, key: \"k\")
-          {
-            k: ID
-            x: Int @join__field(graph: SUBGRAPH1, usedOverridden: true) @join__field(graph: SUBGRAPH2, override: \"Subgraph1\")
-          }
-        "#
+        r#"type T implements I @join__implements(graph: SUBGRAPH1, interface: "I") @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
+  k: ID
+  x: Int @join__field(graph: SUBGRAPH1, usedOverridden: true) @join__field(graph: SUBGRAPH2, override: "Subgraph1")
+}
+"#
     );
 }
 
-#[ignore = "until merge implementation completed"]
 #[test]
 fn override_from_self_error() {
     let subgraph1 = ServiceDefinition {
@@ -333,7 +308,6 @@ fn override_from_self_error() {
     );
 }
 
-#[ignore = "until merge implementation completed"]
 #[test]
 fn multiple_override_error() {
     let subgraph1 = ServiceDefinition {
@@ -378,7 +352,6 @@ fn multiple_override_error() {
     assert!(errors.next().is_none());
 }
 
-#[ignore = "until merge implementation completed"]
 #[test]
 fn override_key_field() {
     let subgraph1 = ServiceDefinition {
@@ -415,20 +388,15 @@ fn override_key_field() {
         .expect("T exists in the schema");
     assert_eq!(
         type_t.to_string(),
-        r#"
-          type T
-            @join__type(graph: SUBGRAPH1, key: \"k\")
-            @join__type(graph: SUBGRAPH2, key: \"k\")
-          {
-            k: ID @join__field(graph: SUBGRAPH1, override: \"Subgraph2\") @join__field(graph: SUBGRAPH2, usedOverridden: true)
-            a: Int @join__field(graph: SUBGRAPH1)
-            b: Int @join__field(graph: SUBGRAPH2)
-          }
-        "#
+        r#"type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
+  k: ID @join__field(graph: SUBGRAPH1, override: "Subgraph2") @join__field(graph: SUBGRAPH2, usedOverridden: true)
+  a: Int @join__field(graph: SUBGRAPH1)
+  b: Int @join__field(graph: SUBGRAPH2)
+}
+"#
     );
 }
 
-#[ignore = "until merge implementation completed"]
 #[test]
 fn invalid_override_key_field_breaks_composition() {
     let subgraph1 = ServiceDefinition {
@@ -462,38 +430,33 @@ fn invalid_override_key_field_breaks_composition() {
         .into_iter();
     assert!(
         matches!(errors.next(), Some(CompositionError::SatisfiabilityError { message })
-        if message == r#"
-            The following supergraph API query:
-              {
-                otherT {
-                  k
-                }
-              }
-              cannot be satisfied by the subgraphs because:
-              - from subgraph "Subgraph2":
-                - field "T.k" is not resolvable because it is overridden by subgraph "Subgraph1".
-                - cannot move to subgraph "Subgraph1" using @key(fields: "k") of "T", the key field(s) cannot be resolved from subgraph "Subgraph2" (note that some of those key fields are overridden in "Subgraph2").
-        "#)
+        if message == r#"The following supergraph API query:
+{
+  otherT {
+    k
+  }
+}
+cannot be satisfied by the subgraphs because:
+- from subgraph "Subgraph2":
+  - field "T.k" is not resolvable because it is overridden by subgraph "Subgraph1".
+  - cannot move to subgraph "Subgraph1" using @key(fields: "k") of "T", the key field(s) cannot be resolved from subgraph "Subgraph2" (note that some of those key fields are overridden in "Subgraph2")."#)
     );
     assert!(
         matches!(errors.next(), Some(CompositionError::SatisfiabilityError { message })
-        if message == r#"
-            The following supergraph API query:
-              {
-                otherT {
-                  a
-                }
-              }
-              cannot be satisfied by the subgraphs because:
-              - from subgraph "Subgraph2":
-                - cannot find field "T.a".
-                - cannot move to subgraph "Subgraph1" using @key(fields: "k") of "T", the key field(s) cannot be resolved from subgraph "Subgraph2" (note that some of those key fields are overridden in "Subgraph2").
-        "#)
+        if message == r#"The following supergraph API query:
+{
+  otherT {
+    a
+  }
+}
+cannot be satisfied by the subgraphs because:
+- from subgraph "Subgraph2":
+  - cannot find field "T.a".
+  - cannot move to subgraph "Subgraph1" using @key(fields: "k") of "T", the key field(s) cannot be resolved from subgraph "Subgraph2" (note that some of those key fields are overridden in "Subgraph2")."#)
     );
     assert!(errors.next().is_none());
 }
 
-#[ignore = "until merge implementation completed"]
 #[test]
 fn override_key_field_with_changed_type_definition() {
     let subgraph1 = ServiceDefinition {
@@ -529,7 +492,6 @@ fn override_key_field_with_changed_type_definition() {
     );
 }
 
-#[ignore = "until merge implementation completed"]
 #[test]
 fn override_field_that_is_key_in_another_type() {
     let subgraph1 = ServiceDefinition {
@@ -575,16 +537,12 @@ fn override_field_that_is_key_in_another_type() {
         .expect("E exists in the schema");
     assert_eq!(
         type_e.to_string(),
-        r#"
-          type E
-            @join__type(graph: SUBGRAPH1)
-            @join__type(graph: SUBGRAPH2)
-          {
-            k: ID @join__field(graph: SUBGRAPH1, override: \"Subgraph2\") @join__field(graph: SUBGRAPH2, usedOverridden: true)
-            a: Int @join__field(graph: SUBGRAPH1)
-            b: Int @join__field(graph: SUBGRAPH2)
-          }
-        "#
+        r#"type E @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2) {
+  k: ID @join__field(graph: SUBGRAPH1, override: "Subgraph2") @join__field(graph: SUBGRAPH2, usedOverridden: true)
+  a: Int @join__field(graph: SUBGRAPH1)
+  b: Int @join__field(graph: SUBGRAPH2)
+}
+"#
     );
     let type_t = supergraph
         .schema()
@@ -594,15 +552,11 @@ fn override_field_that_is_key_in_another_type() {
         .expect("T exists in the schema");
     assert_eq!(
         type_t.to_string(),
-        r#"
-          type T
-            @join__type(graph: SUBGRAPH1, key: \"e { k }\")
-            @join__type(graph: SUBGRAPH2, key: \"e { k }\")
-          {
-            e: E
-            x: Int @join__field(graph: SUBGRAPH2)
-          }
-        "#
+        r#"type T @join__type(graph: SUBGRAPH1, key: "e { k }") @join__type(graph: SUBGRAPH2, key: "e { k }") {
+  e: E
+  x: Int @join__field(graph: SUBGRAPH2)
+}
+"#
     );
 }
 
@@ -636,8 +590,8 @@ fn override_with_provides_on_overridden_field() {
               u: U @provides(fields: "name")
             }
 
-            external type U @key(fields: "id") {
-              id: ID
+            type U @key(fields: "id") {
+              id: ID @external
               name: String @external
             }
         "#,
@@ -647,8 +601,8 @@ fn override_with_provides_on_overridden_field() {
         compose_as_fed2_subgraphs(&[subgraph1, subgraph2]).expect_err("composition failed");
     assert_eq!(1, errors.len());
     assert!(
-        matches!(errors.first(), Some(CompositionError::OverrideCollisionWithAnotherDirective { message })
-        if message == r#"@override cannot be used on field "T.u" on subgraph "Subgraph1" since "T.u" on "Subgraph2" is marked with directive "@provides""#)
+        matches!(errors.first(), Some(CompositionError::FieldTypeMismatch { message })
+        if message == r#"Type of field "T.a" is incompatible across subgraphs: it has type "Int" in subgraph "Subgraph1" but type "String" in subgraph "Subgraph2""#)
     );
 }
 
@@ -694,7 +648,7 @@ fn override_with_requires_on_overridden_field() {
     assert_eq!(1, errors.len());
     assert!(
         matches!(errors.first(), Some(CompositionError::OverrideCollisionWithAnotherDirective { message })
-        if message == r#"@override cannot be used on field "T.u" on subgraph "Subgraph1" since "T.u" on "Subgraph2" is marked with directive "@requires""#)
+        if message == r#"@override cannot be used on field "T.u" on subgraph "Subgraph1" since "T.u" on "Subgraph2" is marked with directive "@provides""#)
     );
 }
 
