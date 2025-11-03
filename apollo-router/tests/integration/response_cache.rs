@@ -177,6 +177,20 @@ async fn make_graphql_request(router: &mut HttpService) -> (HeaderMap<String>, g
     make_http_request(router, request.into()).await
 }
 
+async fn make_debug_graphql_request(
+    router: &mut HttpService,
+) -> (HeaderMap<String>, graphql::Response) {
+    let query = "{ topProducts { reviews { id } } }";
+    let request = graphql_request(query);
+    let mut request: http::Request<router::Body> = request.into();
+    request.headers_mut().insert(
+        HeaderName::from_static("apollo-cache-debugging"),
+        HeaderValue::from_static("true"),
+    );
+
+    make_http_request(router, request).await
+}
+
 fn graphql_request(query: &str) -> router::Request {
     supergraph::Request::fake_builder()
         .query(query)
@@ -250,6 +264,96 @@ async fn basic_cache_skips_subgraph_request() {
         - reviews:
             - id: r2
     ");
+    // Unchanged, everything is in cache so we don’t need to make more subgraph requests:
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
+    products: 1
+    reviews: 1
+    ");
+}
+
+fn check_cache_tags(response: &graphql::Response, cache_tags: Vec<Vec<String>>) {
+    let mut debugger_entries = response
+        .extensions
+        .get("apolloCacheDebugging")
+        .unwrap()
+        .as_object()
+        .unwrap()
+        .get("data")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .iter();
+
+    for debug_cache_tags in cache_tags {
+        let entry = debugger_entries.next().unwrap().as_object().unwrap();
+        assert_eq!(
+            entry.get("invalidationKeys"),
+            Some(&serde_json_bytes::Value::Array(
+                debug_cache_tags
+                    .into_iter()
+                    .map(|cache_tag| serde_json_bytes::Value::String(cache_tag.into()))
+                    .collect()
+            ))
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn check_cache_tags_from_debugger_data() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let (mut router, subgraph_request_counters) = harness(base_config(), base_subgraphs()).await;
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
+    products: 0
+    reviews: 0
+    ");
+    let (headers, body) = make_debug_graphql_request(&mut router).await;
+    assert!(headers["cache-control"].contains("public"));
+    assert!(body.errors.is_empty());
+    insta::assert_yaml_snapshot!(body.data, @r"
+    topProducts:
+      - reviews:
+          - id: r1a
+          - id: r1b
+      - reviews:
+          - id: r2
+    ");
+    check_cache_tags(
+        &body,
+        vec![
+            vec!["topProducts".to_string()],
+            vec!["product-1".to_string()],
+            vec!["product-2".to_string()],
+        ],
+    );
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
+    products: 1
+    reviews: 1
+    ");
+    // Needed because insert in the cache is async
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let (headers, body) = make_debug_graphql_request(&mut router).await;
+    assert!(headers["cache-control"].contains("public"));
+    assert!(body.errors.is_empty());
+    insta::assert_yaml_snapshot!(body.data, @r"
+    topProducts:
+      - reviews:
+          - id: r1a
+          - id: r1b
+      - reviews:
+          - id: r2
+    ");
+
+    check_cache_tags(
+        &body,
+        vec![
+            vec!["topProducts".to_string()],
+            vec!["product-1".to_string()],
+            vec!["product-2".to_string()],
+        ],
+    );
     // Unchanged, everything is in cache so we don’t need to make more subgraph requests:
     insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
     products: 1

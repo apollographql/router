@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::time::Duration;
 use std::time::Instant;
 use std::time::SystemTime;
@@ -42,6 +43,8 @@ pub(crate) type Config = super::config::Config;
 struct CacheValue {
     data: serde_json_bytes::Value,
     cache_control: CacheControl,
+    // Only set in debug mode
+    cache_tags: Option<HashSet<String>>,
 }
 
 impl ValueType for CacheValue {}
@@ -52,6 +55,7 @@ impl From<(&str, CacheValue)> for CacheEntry {
             key: cache_key.to_string(),
             data: cache_value.data,
             control: cache_value.cache_control,
+            cache_tags: cache_value.cache_tags,
         }
     }
 }
@@ -258,9 +262,14 @@ impl CacheStorage for Storage {
 
         let now = now();
 
+        // Only useful for caching debugger, it will only contains entries if the doc is set to debug
+        let mut original_cache_tags = VecDeque::new();
         // phase 1
         for document in &mut batch_docs {
             document.key = self.make_key(&document.key);
+            if document.debug {
+                original_cache_tags.push_back(document.invalidation_keys.clone());
+            }
             document.invalidation_keys =
                 self.namespaced_cache_tags(&document.invalidation_keys, subgraph_name);
         }
@@ -270,7 +279,16 @@ impl CacheStorage for Storage {
         let mut cache_tags_to_pcks: HashMap<String, Vec<(f64, String)>> =
             HashMap::with_capacity(num_cache_tags_estimate);
         for document in &mut batch_docs {
-            for cache_tag_key in document.invalidation_keys.drain(..) {
+            // If it's debug put back the original invalidation keys without namespace to be able to display it in cache debugger
+            let invalidation_keys = if document.debug {
+                std::mem::replace(
+                    &mut document.invalidation_keys,
+                    original_cache_tags.pop_front().unwrap_or_default(),
+                )
+            } else {
+                std::mem::take(&mut document.invalidation_keys)
+            };
+            for cache_tag_key in invalidation_keys {
                 let cache_tag_value = (
                     (now + document.expire.as_secs()) as f64,
                     document.key.clone(),
@@ -340,6 +358,9 @@ impl CacheStorage for Storage {
             let value = CacheValue {
                 data: document.data,
                 cache_control: document.control,
+                cache_tags: document
+                    .debug
+                    .then(|| document.invalidation_keys.into_iter().collect()),
             };
             let _: () = pipeline
                 .set::<(), _, _>(
@@ -567,6 +588,7 @@ mod tests {
             control: Default::default(),
             invalidation_keys: vec!["invalidate".to_string()],
             expire: Duration::from_secs(60),
+            debug: true,
         }
     }
 

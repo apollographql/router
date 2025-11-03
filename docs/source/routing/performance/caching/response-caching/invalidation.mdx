@@ -424,7 +424,7 @@ type Country {
 
 If you need to set cache tags programmatically (for example, if the tag depends on neither root field arguments nor entity keys), create the cache tags in your subgraph and set them in the response extensions.
 
-Example of response payload if you want to set cache tags for different entities returned by subgraph:
+For cache tags on _entities_ we set `apolloEntityCacheTags` in `extensions`. Example of response payload if you want to set cache tags for different entities returned by subgraph:
 
 ```json
 {
@@ -441,14 +441,14 @@ Example of response payload if you want to set cache tags for different entities
 }
 ```
 
-Example of response payload if you want to set cache tags for root fields returned by subgraph:
+For cache tags on _root fields_ we set `apolloCacheTags` in `extensions`. Example of response payload if you want to set cache tags for root fields returned by subgraph:
 
 ```json
 {
    "data": {
        "someField": {...}
    },
-   "extensions": {"apolloEntityCacheTags": ["homepage", "user-9001-homepage"]}
+   "extensions": {"apolloCacheTags": ["homepage", "user-9001-homepage"]}
 }
 ```
 
@@ -509,8 +509,8 @@ directive @cacheControl(
   scope: CacheControlScope
 ) on FIELD_DEFINITION | OBJECT | INTERFACE | UNION
 
-type User @key(fields: "id") 
-         @cacheControl(maxAge: 60) 
+type User @key(fields: "id")
+         @cacheControl(maxAge: 60)
          @cacheTag(format: "user-{$key.id}") {
   id: ID!
   name: String!
