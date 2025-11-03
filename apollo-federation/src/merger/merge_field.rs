@@ -350,7 +350,7 @@ impl Merger {
     /// Given a supergraph field `f` for an object type `T` and a given subgraph (identified by its index) where
     /// `T` is not defined, check if that subgraph defines one or more of the interface of `T` as @interfaceObject,
     /// and if so return any instance of `f` on those @interfaceObject.
-    fn fields_in_source_if_abstracted_by_interface_object(
+    pub(in crate::merger) fn fields_in_source_if_abstracted_by_interface_object(
         &self,
         dest_field: &ObjectOrInterfaceFieldDefinitionPosition,
         source_idx: usize,
@@ -424,7 +424,7 @@ impl Merger {
         }
     }
 
-    fn is_field_external(&self, source_idx: usize, field: &FieldDefinitionPosition) -> bool {
+    pub(in crate::merger) fn is_field_external(&self, source_idx: usize, field: &FieldDefinitionPosition) -> bool {
         // Use the subgraph metadata to check if field is external
         self.subgraphs[source_idx]
             .metadata()
