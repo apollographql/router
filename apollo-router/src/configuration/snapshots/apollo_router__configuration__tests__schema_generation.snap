@@ -786,13 +786,8 @@ expression: "&schema"
     "CacheControlSelector": {
       "oneOf": [
         {
-          "const": "public",
-          "description": "Boolean if it's public or not",
-          "type": "string"
-        },
-        {
-          "const": "private",
-          "description": "Boolean if it's private or not",
+          "const": "scope",
+          "description": "Returns the scope, either `public` or `private`",
           "type": "string"
         },
         {
