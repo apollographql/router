@@ -999,13 +999,21 @@ impl Merger {
         let mut result = FieldMergeContext::new(sources.keys().copied());
         
         // Check if this field has any @override directives
+        // Note: A field might be an interface in the merged schema but an object field in a subgraph
+        // (e.g., with @interfaceObject), so we need to check both object and interface fields.
         let field_pos: FieldDefinitionPosition = dest.clone().into();
         let has_override = match &field_pos {
             FieldDefinitionPosition::Object(obj_field) => {
                 self.fields_with_override.object_fields.contains(obj_field)
             }
             FieldDefinitionPosition::Interface(itf_field) => {
+                // Check both interface fields and object fields (for @interfaceObject case)
+                let obj_field = ObjectFieldDefinitionPosition {
+                    type_name: itf_field.type_name.clone(),
+                    field_name: itf_field.field_name.clone(),
+                };
                 self.fields_with_override.interface_fields.contains(itf_field)
+                    || self.fields_with_override.object_fields.contains(&obj_field)
             }
             FieldDefinitionPosition::Union(_) => false,
         };
@@ -1023,26 +1031,73 @@ impl Merger {
             override_directive: Option<Component<Directive>>,
         }
 
-        // Convert sources to a map
+        // Convert sources to a map, and also check for @interfaceObject fields
         let mut mapped: IndexMap<usize, Option<MappedValue>> = IndexMap::default();
-        for (idx, source) in sources.iter() {
-            if source.is_none() {
+        
+        // First, process all subgraphs to check for @interfaceObject fields
+        for idx in 0..self.subgraphs.len() {
+            if !sources.contains_key(&idx) {
                 // Check if the field is abstracted by @interfaceObject
-                let interface_object_abstracting_fields =
-                    self.fields_in_source_if_abstracted_by_interface_object(dest, *idx)?;
+                // This checks if the parent implements interfaces that are @interfaceObject
+                let mut interface_object_abstracting_fields =
+                    self.fields_in_source_if_abstracted_by_interface_object(dest, idx)?;
+                
+                // Also check if the parent itself is an @interfaceObject type
+                // (e.g., interface I in merged schema, but object type I with @interfaceObject in subgraph)
+                if let ObjectOrInterfaceFieldDefinitionPosition::Interface(itf_field) = dest {
+                    let obj_type_pos = ObjectTypeDefinitionPosition {
+                        type_name: itf_field.type_name.clone(),
+                    };
+                    let type_pos = TypeDefinitionPosition::Object(obj_type_pos.clone());
+                    if self.subgraphs[idx].schema().schema().types.contains_key(&itf_field.type_name)
+                        && self.subgraphs[idx].is_interface_object_type(&type_pos)
+                    {
+                        let obj_field = obj_type_pos.field(itf_field.field_name.clone());
+                        if obj_field.try_get(self.subgraphs[idx].schema().schema()).is_some() {
+                            interface_object_abstracting_fields.push(obj_field);
+                        }
+                    }
+                }
+                
                 if !interface_object_abstracting_fields.is_empty() {
+                    // For @interfaceObject, we need to check if the object field has @override
+                    let override_directive = if let Some(obj_field) = interface_object_abstracting_fields.first() {
+                        // Convert to ObjectOrInterfaceFieldDefinitionPosition to check for override
+                        let obj_field_pos = ObjectOrInterfaceFieldDefinitionPosition::Object(obj_field.clone());
+                        self.get_override_directive(idx, &obj_field_pos)?
+                    } else {
+                        None
+                    };
+                    
+                    let is_interface_object = if let Some(obj_field) = interface_object_abstracting_fields.first() {
+                        let type_pos = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
+                            type_name: obj_field.type_name.clone(),
+                        });
+                        self.subgraphs[idx].is_interface_object_type(&type_pos)
+                    } else {
+                        false
+                    };
+                    
                     mapped.insert(
-                        *idx,
+                        idx,
                         Some(MappedValue {
-                            idx: *idx,
-                            name: self.names[*idx].clone(),
+                            idx,
+                            name: self.names[idx].clone(),
                             is_interface_field: false,
-                            is_interface_object: false,
+                            is_interface_object,
                             interface_object_abstracting_fields,
-                            override_directive: None,
+                            override_directive,
                         }),
                     );
-                } else {
+                }
+            }
+        }
+        
+        // Then process the sources
+        for (idx, source) in sources.iter() {
+            if source.is_none() {
+                // Already handled above for @interfaceObject
+                if !mapped.contains_key(idx) {
                     mapped.insert(*idx, None);
                 }
                 continue;

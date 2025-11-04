@@ -742,7 +742,6 @@ fn does_not_allow_override_on_interface_fields() {
 mod interface_object {
     use super::*;
 
-    #[ignore = "until merge implementation completed"]
     #[test]
     fn does_not_allow_override_on_interface_object_fields() {
         // We currently rejects @override on fields of an @interfaceObject type. We could lift
@@ -798,7 +797,6 @@ mod interface_object {
         );
     }
 
-    #[ignore = "until merge implementation completed"]
     #[test]
     fn does_not_allow_override_when_overriden_field_is_an_interface_object_field() {
         // We don't allow @override on a concrete type field when the `from` subgraph has
@@ -842,10 +840,11 @@ mod interface_object {
 
         let errors =
             compose_as_fed2_subgraphs(&[subgraph1, subgraph2]).expect_err("composition failed");
-        assert_eq!(1, errors.len());
+        assert_eq!(1, errors.len(), "Expected 1 error, got: {:#?}", errors);
         assert!(
             matches!(errors.first(), Some(CompositionError::OverrideCollisionWithAnotherDirective { message })
-            if message == r#"Invalid @override on field "A.a" of subgraph "Subgraph2": source subgraph "Subgraph1" does not have field "A.a" but abstract it in type "I" and overriding abstracted fields is not supported."#)
+            if message == r#"Invalid @override on field "A.a" of subgraph "Subgraph2": source subgraph "Subgraph1" does not have field "A.a" but abstracts it through @interfaceObject and overriding abstracted fields is not supported."#),
+            "Expected OverrideCollisionWithAnotherDirective error, got: {:#?}", errors.first()
         );
     }
 }
