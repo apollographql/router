@@ -125,7 +125,7 @@ impl CacheKeyContext {
                 self.warnings.push(Warning {
                     code: "NO_CACHE_TAG_ON_ROOT_FIELD".to_string(),
                     links: vec![Link { url: String::from("https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#invalidation-methods"), title: "Add '@cacheTag' in your schema".to_string() }],
-                    message: "No cache tags are specified on your root fields query, if you want to use active invalidation you'll need to add cache tags on your root fields to actively invalidate cached data.".to_string(),
+                    message: "No cache tags are specified on your root fields query. If you want to use active invalidation, you'll need to add cache tags on your root field.".to_string(),
                 });
             }
 
