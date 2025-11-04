@@ -60,7 +60,8 @@ const CANNOT_ACCESS_STATUS_CODE_ON_A_DEFERRED_RESPONSE: &str =
 
 const CANNOT_GET_ENVIRONMENT_VARIABLE: &str = "environment variable not found";
 
-pub(crate) use types::{OptionDance, SharedMut};
+pub(crate) use types::OptionDance;
+pub(crate) use types::SharedMut;
 
 #[derive(Clone)]
 #[allow(unreachable_pub)]
@@ -265,6 +266,13 @@ mod router_header_map {
     }
 
     // Register a HeaderMap indexer so we can get/set headers
+    //
+    // Note: Both getter and setter are registered globally, even though HeaderMap is
+    // returned from read-only properties in some contexts (e.g., subgraph.headers).
+    // This is safe because Rhai's automatic value propagation is blocked by the
+    // absence of a setter on the property that returns the HeaderMap. The read-only-ness
+    // is determined by the wrapper type (e.g., SharedMut<subgraph::Request>), not by
+    // the HeaderMap type itself. See registration/subgraph.rs for detailed explanation.
     #[rhai_fn(index_get, pure, return_raw)]
     pub(crate) fn header_map_get(
         x: &mut HeaderMap,
@@ -1287,11 +1295,14 @@ mod router_plugin {
     }
 }
 
-pub(crate) use types::{
-    RhaiExecutionDeferredResponse, RhaiExecutionResponse, RhaiRouterChunkedRequest,
-    RhaiRouterChunkedResponse, RhaiRouterFirstRequest, RhaiRouterResponse,
-    RhaiSupergraphDeferredResponse, RhaiSupergraphResponse,
-};
+pub(crate) use types::RhaiExecutionDeferredResponse;
+pub(crate) use types::RhaiExecutionResponse;
+pub(crate) use types::RhaiRouterChunkedRequest;
+pub(crate) use types::RhaiRouterChunkedResponse;
+pub(crate) use types::RhaiRouterFirstRequest;
+pub(crate) use types::RhaiRouterResponse;
+pub(crate) use types::RhaiSupergraphDeferredResponse;
+pub(crate) use types::RhaiSupergraphResponse;
 
 #[derive(Clone, Debug)]
 pub(crate) struct RhaiService {
@@ -1344,16 +1355,9 @@ impl Rhai {
         Ok(())
     }
 
-    pub(super) fn new_rhai_engine(path: Option<PathBuf>, sdl: String, main: PathBuf) -> Engine {
-        let mut engine = Engine::new();
-        // If we pass in a path, use it to configure our engine
-        // with a FileModuleResolver which allows import to work
-        // in scripts.
-        if let Some(scripts) = path {
-            let resolver = FileModuleResolver::new_with_path(scripts);
-            engine.set_module_resolver(resolver);
-        }
-
+    /// Register global modules and common functionality needed by Rhai scripts.
+    /// This is used by both production and test code to ensure consistent engine configuration.
+    pub(crate) fn register_global_modules(engine: &mut Engine) {
         // The macro call creates a Rhai module from the plugin module.
         let mut module = exported_module!(router_plugin);
         combine_with_exported_module!(&mut module, "header", router_header_map);
@@ -1364,8 +1368,39 @@ impl Rhai {
         let base64_module = exported_module!(router_base64);
         let json_module = exported_module!(router_json);
         let sha256_module = exported_module!(router_sha256);
-
         let expansion_module = exported_module!(router_expansion);
+
+        engine
+            // Register our plugin module
+            .register_global_module(module.into())
+            // Register our base64 module (not global)
+            .register_static_module("base64", base64_module.into())
+            // Register our json module (not global)
+            .register_static_module("json", json_module.into())
+            // Register our SHA256 module (not global)
+            .register_static_module("sha256", sha256_module.into())
+            // Register our expansion module (not global)
+            // Hide the fact that it is an expansion module by calling it "env"
+            .register_static_module("env", expansion_module.into())
+            // Register HeaderMap as an iterator so we can loop over contents
+            .register_iterator::<HeaderMap>();
+
+        // Add common getter/setters for different types
+        registration::register_all(engine);
+    }
+
+    pub(super) fn new_rhai_engine(path: Option<PathBuf>, sdl: String, main: PathBuf) -> Engine {
+        let mut engine = Engine::new();
+        // If we pass in a path, use it to configure our engine
+        // with a FileModuleResolver which allows import to work
+        // in scripts.
+        if let Some(scripts) = path {
+            let resolver = FileModuleResolver::new_with_path(scripts);
+            engine.set_module_resolver(resolver);
+        }
+
+        // Register global modules and common functionality
+        Self::register_global_modules(&mut engine);
 
         // Share main so we can move copies into each closure as required for logging
         let shared_main = Arc::new(main.display().to_string());
@@ -1384,19 +1419,6 @@ impl Rhai {
             .on_print(move |message| {
                 tracing::info!(%message, target = %print_main);
             })
-            // Register our plugin module
-            .register_global_module(module.into())
-            // Register our base64 module (not global)
-            .register_static_module("base64", base64_module.into())
-            // Register our json module (not global)
-            .register_static_module("json", json_module.into())
-            // Register our SHA256 module (not global)
-            .register_static_module("sha256", sha256_module.into())
-            // Register our expansion module (not global)
-            // Hide the fact that it is an expansion module by calling it "env"
-            .register_static_module("env", expansion_module.into())
-            // Register HeaderMap as an iterator so we can loop over contents
-            .register_iterator::<HeaderMap>()
             // Register a series of logging functions
             .register_fn("log_trace", move |message: Dynamic| {
                 tracing::trace!(%message, target = %trace_main);
@@ -1413,8 +1435,6 @@ impl Rhai {
             .register_fn("log_error", move |message: Dynamic| {
                 tracing::error!(%message, target = %error_main);
             });
-        // Add common getter/setters for different types
-        registration::register_all(&mut engine);
 
         // Since constants in Rhai don't give us the behaviour we expect, let's create some global
         // variables which we use in a variable resolver when we create our engine.
