@@ -48,7 +48,7 @@ expression: body.extensions
                 "title": "Cache-Control header documentation"
               }
             ],
-            "message": "Your subgraph returns a Cache-Control header containing no-store which means don't cache this data."
+            "message": "The subgraph returned a Cache-Control header containing no-store, so the data was not cached"
           },
           {
             "code": "CACHE_CONTROL_WITHOUT_MAX_AGE",
@@ -62,7 +62,7 @@ expression: body.extensions
                 "title": "Cache-Control header documentation"
               }
             ],
-            "message": "Your subgraph returns a 'Cache-Control' header without any max-age set so the Router will use the one configured in Router's configuration."
+            "message": "The subgraph returned a 'Cache-Control' header without any max-age set so the Router will use the one configured in Router's configuration."
           },
           {
             "code": "NO_CACHE_TAG_ON_ROOT_FIELD",
@@ -129,7 +129,7 @@ expression: body.extensions
                 "title": "Cache-Control header documentation"
               }
             ],
-            "message": "Your subgraph returns a Cache-Control header containing no-store which means don't cache this data."
+            "message": "The subgraph returned a Cache-Control header containing no-store, so the data was not cached"
           },
           {
             "code": "CACHE_CONTROL_WITHOUT_MAX_AGE",
@@ -143,7 +143,7 @@ expression: body.extensions
                 "title": "Cache-Control header documentation"
               }
             ],
-            "message": "Your subgraph returns a 'Cache-Control' header without any max-age set so the Router will use the one configured in Router's configuration."
+            "message": "The subgraph returned a 'Cache-Control' header without any max-age set so the Router will use the one configured in Router's configuration."
           }
         ]
       }

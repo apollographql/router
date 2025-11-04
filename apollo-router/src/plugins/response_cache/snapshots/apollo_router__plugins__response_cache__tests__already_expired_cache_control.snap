@@ -91,7 +91,7 @@ expression: cache_keys
             "title": "Cache-Control header documentation"
           }
         ],
-        "message": "Your subgraph returns a 'Cache-Control' header with a max-age smaller than the value of 'Age' header which means it's already expired, the Router won't cache this data."
+        "message": "The subgraph returned a 'Cache-Control' header with a max-age smaller than the value of 'Age' header which means it's already expired, the Router won't cache this data."
       }
     ]
   }

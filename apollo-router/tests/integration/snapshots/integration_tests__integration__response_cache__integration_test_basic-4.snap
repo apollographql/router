@@ -142,7 +142,7 @@ expression: response
                   "title": "Cache-Control header documentation"
                 }
               ],
-              "message": "Your subgraph returns a 'Cache-Control' header with a small max-age (less than a minute) which could end up with less cache hits."
+              "message": "The subgraph returned a 'Cache-Control' header with a small max-age (less than a minute) which could end up with less cache hits."
             }
           ]
         },
@@ -194,7 +194,7 @@ expression: response
                   "title": "Cache-Control header documentation"
                 }
               ],
-              "message": "Your subgraph returns a 'Cache-Control' header with a small max-age (less than a minute) which could end up with less cache hits."
+              "message": "The subgraph returned a 'Cache-Control' header with a small max-age (less than a minute) which could end up with less cache hits."
             }
           ]
         },
@@ -249,7 +249,7 @@ expression: response
                   "title": "Cache-Control header documentation"
                 }
               ],
-              "message": "Your subgraph returns a 'Cache-Control' header with a small max-age (less than a minute) which could end up with less cache hits."
+              "message": "The subgraph returned a 'Cache-Control' header with a small max-age (less than a minute) which could end up with less cache hits."
             }
           ]
         }

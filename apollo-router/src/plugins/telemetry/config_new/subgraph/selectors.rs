@@ -670,7 +670,7 @@ impl Selector for SubgraphSelector {
                             Some(opentelemetry::Value::String("public".to_string().into()))
                         }
                     }
-                    CacheControlSelector::NoStore => Some(cc.get_no_store().into()),
+                    CacheControlSelector::NoStore => Some(cc.is_no_store().into()),
                     CacheControlSelector::MaxAge => cc
                         .ttl()
                         .and_then(|ttl| Some(opentelemetry::Value::I64(i64::try_from(ttl).ok()?))),

@@ -49,7 +49,7 @@ expression: cache_keys
             "title": "Cache-Control header documentation"
           }
         ],
-        "message": "Your subgraph returns a Cache-Control header containing no-store which means don't cache this data."
+        "message": "The subgraph returned a Cache-Control header containing no-store, so the data was not cached"
       }
     ]
   },
