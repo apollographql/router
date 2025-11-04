@@ -3,6 +3,7 @@ mod error;
 pub(super) mod redis;
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -28,6 +29,7 @@ pub(super) struct Document {
     pub(super) control: CacheControl,
     pub(super) invalidation_keys: Vec<String>,
     pub(super) expire: Duration,
+    pub(super) debug: bool,
 }
 
 /// A `CacheEntry` is a unit of data returned from the cache. It contains the cache key, value, and
@@ -37,6 +39,8 @@ pub(super) struct CacheEntry {
     pub(super) key: String,
     pub(super) data: serde_json_bytes::Value,
     pub(super) control: CacheControl,
+    // Only set in debug mode
+    pub(super) cache_tags: Option<HashSet<String>>,
 }
 
 /// The `CacheStorage` trait defines an API that the backing storage layer must implement for

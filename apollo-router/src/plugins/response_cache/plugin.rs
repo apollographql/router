@@ -869,7 +869,7 @@ impl CacheService {
 
                         Ok(response)
                     }
-                    ControlFlow::Continue((request, mut root_cache_key, invalidation_keys)) => {
+                    ControlFlow::Continue((request, mut root_cache_key, mut invalidation_keys)) => {
                         cache_hit.insert("Query".to_string(), CacheHitMiss { hit: 0, miss: 1 });
                         let _ = request.context.insert(
                             CacheMetricContextKey::new(request.subgraph_name.clone()),
@@ -909,6 +909,20 @@ impl CacheService {
                                 CacheControl::no_store()
                             };
 
+                        // Support cache tags coming from subgraph response extensions
+                        if let Some(Value::Array(cache_tags)) = response
+                            .response
+                            .body()
+                            .extensions
+                            .get(GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS)
+                        {
+                            invalidation_keys.extend(
+                                cache_tags
+                                    .iter()
+                                    .filter_map(|v| v.as_str())
+                                    .map(|s| s.to_owned()),
+                            );
+                        }
                         save_original_cache_control(
                             response.id.clone(),
                             &response.context,
@@ -1256,11 +1270,16 @@ async fn cache_lookup_root(
                                 CacheKeyContext {
                                     key: value.key.clone(),
                                     hashed_private_id: private_id.map(ToString::to_string),
-                                    invalidation_keys: invalidation_keys
-                                        .clone()
-                                        .into_iter()
-                                        .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
-                                        .collect(),
+                                    invalidation_keys: value
+                                        .cache_tags
+                                        .map(|ct| {
+                                            ct.into_iter()
+                                                .filter(|k| {
+                                                    !k.starts_with(INTERNAL_CACHE_TAG_PREFIX)
+                                                })
+                                                .collect::<Vec<_>>()
+                                        })
+                                        .unwrap_or_default(),
                                     kind: CacheEntryKind::RootFields {
                                         root_fields: root_operation_fields,
                                     },
@@ -1538,12 +1557,15 @@ async fn cache_lookup_entities(
                     CacheKeyContext {
                         key: ir.key.clone(),
                         hashed_private_id: private_id.map(ToString::to_string),
-                        invalidation_keys: ir
-                            .invalidation_keys
+                        invalidation_keys: cache_entry
+                            .cache_tags
                             .clone()
-                            .into_iter()
-                            .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
-                            .collect(),
+                            .map(|ct| {
+                                ct.into_iter()
+                                    .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default(),
                         kind: CacheEntryKind::Entity {
                             typename: ir.typename.clone(),
                             entity_key: ir.entity_key.clone().unwrap_or_default(),
@@ -1629,8 +1651,8 @@ async fn cache_store_root_from_response(
     response: &subgraph::Response,
     cache_control: CacheControl,
     cache_key: String,
-    mut invalidation_keys: Vec<String>,
-    _debug: bool,
+    invalidation_keys: Vec<String>,
+    debug: bool,
 ) -> Result<(), BoxError> {
     if let Some(data) = response.response.body().data.as_ref() {
         let ttl = cache_control
@@ -1639,27 +1661,13 @@ async fn cache_store_root_from_response(
             .unwrap_or(default_subgraph_ttl);
 
         if response.response.body().errors.is_empty() && cache_control.should_store() {
-            // Support surrogate keys coming from subgraph response extensions
-            if let Some(Value::Array(cache_tags)) = response
-                .response
-                .body()
-                .extensions
-                .get(GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS)
-            {
-                invalidation_keys.extend(
-                    cache_tags
-                        .iter()
-                        .filter_map(|v| v.as_str())
-                        .map(|s| s.to_owned()),
-                );
-            }
-
             let document = Document {
                 key: cache_key,
                 data: data.clone(),
                 control: cache_control,
                 invalidation_keys,
                 expire: ttl,
+                debug,
             };
 
             let subgraph_name = response.subgraph_name.clone();
@@ -1707,7 +1715,7 @@ async fn cache_store_entities_from_response(
             None
         };
 
-        // Support surrogate keys coming from subgraph extensions
+        // Support cache tags coming from subgraph extensions
         let per_entity_surrogate_keys = response
             .response
             .body()
@@ -2328,6 +2336,7 @@ async fn insert_entities_in_result(
     // Only Some if debug is enabled
     subgraph_request: Option<graphql::Request>,
 ) -> Result<(Vec<Value>, Vec<Error>), BoxError> {
+    let debug = subgraph_request.is_some();
     let ttl = cache_control
         .ttl()
         .map(Duration::from_secs)
@@ -2396,6 +2405,11 @@ async fn insert_entities_in_result(
                     has_errors = true;
                 }
 
+                if let Some(Value::Array(keys)) = specific_surrogate_keys {
+                    invalidation_keys
+                        .extend(keys.iter().filter_map(|v| v.as_str()).map(|s| s.to_owned()));
+                }
+
                 // Only in debug mode
                 if let Some(subgraph_request) = &subgraph_request {
                     debug_ctx_entries.push(
@@ -2423,16 +2437,13 @@ async fn insert_entities_in_result(
                     );
                 }
                 if !has_errors && cache_control.should_store() && should_cache_private {
-                    if let Some(Value::Array(keys)) = specific_surrogate_keys {
-                        invalidation_keys
-                            .extend(keys.iter().filter_map(|v| v.as_str()).map(|s| s.to_owned()));
-                    }
                     to_insert.push(Document {
                         control: cache_control.clone(),
                         data: value.clone(),
                         key,
                         invalidation_keys,
                         expire: ttl,
+                        debug,
                     });
                 }
 

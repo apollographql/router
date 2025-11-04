@@ -14,6 +14,8 @@ use apollo_federation::Supergraph;
 use apollo_federation::connectors::expand::Connectors;
 use apollo_federation::connectors::expand::ExpansionResult;
 use apollo_federation::connectors::expand::expand_connectors;
+use apollo_federation::link::database::links_metadata;
+use apollo_federation::link::spec::Identity;
 use apollo_federation::router_supported_supergraph_specs;
 use apollo_federation::schema::ValidFederationSchema;
 use http::Uri;
@@ -300,80 +302,39 @@ impl Schema {
         None
     }
 
-    pub(crate) fn has_spec(&self, base_url: &str, expected_version_range: &str) -> bool {
-        self.supergraph_schema()
-            .schema_definition
-            .directives
-            .iter()
-            .filter(|dir| dir.name.as_str() == "link")
-            .any(|link| {
-                if let Some(url_in_link) = link
-                    .specified_argument_by_name("url")
-                    .and_then(|value| value.as_str())
-                {
-                    let Some((base_url_in_link, version_in_link)) = url_in_link.rsplit_once("/v")
-                    else {
-                        return false;
-                    };
-
-                    let Some(version_in_url) =
-                        Version::parse(format!("{version_in_link}.0").as_str()).ok()
-                    else {
-                        return false;
-                    };
-
-                    let Some(version_range) = VersionReq::parse(expected_version_range).ok() else {
-                        return false;
-                    };
-
-                    base_url_in_link == base_url && version_range.matches(&version_in_url)
-                } else {
-                    false
-                }
-            })
+    /// This function assumes `@link` usage is valid in the schema, and will return `false` if not.
+    pub(crate) fn has_spec(&self, spec_identity: &Identity, expected_version_range: &str) -> bool {
+        let Ok(Some(metadata)) = links_metadata(self.supergraph_schema()) else {
+            return false;
+        };
+        let Some(link) = metadata.for_identity(spec_identity) else {
+            return false;
+        };
+        let Some(semver_version) = Version::parse(format!("{}.0", link.url.version).as_str()).ok()
+        else {
+            return false;
+        };
+        let Some(version_range) = VersionReq::parse(expected_version_range).ok() else {
+            return false;
+        };
+        version_range.matches(&semver_version)
     }
 
+    /// This function assumes `@link` usage is valid in the schema, and will return `None` if not.
     pub(crate) fn directive_name(
         schema: &apollo_compiler::schema::Schema,
-        base_url: &str,
+        spec_identity: &Identity,
         expected_version_range: &str,
-        default: &str,
+        default: &Name,
     ) -> Option<String> {
-        schema
-            .schema_definition
-            .directives
-            .iter()
-            .filter(|dir| dir.name.as_str() == "link")
-            .find(|link| {
-                if let Some(url_in_link) = link
-                    .specified_argument_by_name("url")
-                    .and_then(|value| value.as_str())
-                {
-                    let Some((base_url_in_link, version_in_link)) = url_in_link.rsplit_once("/v")
-                    else {
-                        return false;
-                    };
-
-                    let Some(version_in_url) =
-                        Version::parse(format!("{version_in_link}.0").as_str()).ok()
-                    else {
-                        return false;
-                    };
-
-                    let Some(version_range) = VersionReq::parse(expected_version_range).ok() else {
-                        return false;
-                    };
-
-                    base_url_in_link == base_url && version_range.matches(&version_in_url)
-                } else {
-                    false
-                }
-            })
-            .map(|link| {
-                link.specified_argument_by_name("as")
-                    .and_then(|value| value.as_str().map(|s| s.to_string()))
-                    .unwrap_or_else(|| default.to_string())
-            })
+        let metadata = links_metadata(schema).ok()??;
+        let link = metadata.for_identity(spec_identity)?;
+        let semver_version = Version::parse(format!("{}.0", link.url.version).as_str()).ok()?;
+        let version_range = VersionReq::parse(expected_version_range).ok()?;
+        if !version_range.matches(&semver_version) {
+            return None;
+        }
+        Some(link.directive_name_in_schema(default).to_string())
     }
 }
 
