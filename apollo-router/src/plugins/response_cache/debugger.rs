@@ -135,7 +135,7 @@ impl CacheKeyContext {
                 self.warnings.push(Warning {
                     code: "SEVERAL_ROOT_FIELDS".to_string(),
                     links: vec![Link { url: String::from("https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/faq#how-does-caching-work-for-operations-with-multiple-root-fields"), title: "Caching for operations with multiple root fields".to_string() }],
-                    message: format!("The query contains several root field queries. These will be cached in the same cache entry per subgraph and will be invalidated together, regardless of whether you set separate cache tags on each root field."),
+                    message: "The query contains several root field queries. These will be cached in the same cache entry per subgraph and will be invalidated together, regardless of whether you set separate cache tags on each root field.".to_string(),
                 });
             }
         }

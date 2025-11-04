@@ -62,7 +62,7 @@ expression: body.extensions
                 "title": "Cache-Control header documentation"
               }
             ],
-            "message": "The subgraph returned a 'Cache-Control' header without any max-age set so the Router will use the one configured in Router's configuration."
+            "message": "The subgraph returned a 'Cache-Control' header without any max-age set, so the Router will use the default (configured in the Router configuration file)."
           },
           {
             "code": "NO_CACHE_TAG_ON_ROOT_FIELD",
@@ -72,7 +72,7 @@ expression: body.extensions
                 "title": "Add '@cacheTag' in your schema"
               }
             ],
-            "message": "No cache tags are specified on your root fields query, if you want to use active invalidation you'll need to add cache tags on your root fields to actively invalidate cached data."
+            "message": "No cache tags are specified on your root fields query. If you want to use active invalidation, you'll need to add cache tags on your root field."
           }
         ]
       },
@@ -143,7 +143,7 @@ expression: body.extensions
                 "title": "Cache-Control header documentation"
               }
             ],
-            "message": "The subgraph returned a 'Cache-Control' header without any max-age set so the Router will use the one configured in Router's configuration."
+            "message": "The subgraph returned a 'Cache-Control' header without any max-age set, so the Router will use the default (configured in the Router configuration file)."
           }
         ]
       }
