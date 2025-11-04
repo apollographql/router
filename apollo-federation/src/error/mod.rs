@@ -143,6 +143,8 @@ pub enum CompositionError {
         error: SingleFederationError,
         locations: Locations,
     },
+    #[error("{error}")]
+    MergeError { error: SingleFederationError },
     #[error("{message}")]
     ContextualArgumentNotContextualInAllSubgraphs {
         message: String,
@@ -260,12 +262,15 @@ pub enum CompositionError {
         message: String,
         locations: Locations,
     },
+    #[error("{message}")]
+    InterfaceFieldNoImplem { message: String },
 }
 
 impl CompositionError {
     pub fn code(&self) -> ErrorCode {
         match self {
             Self::SubgraphError { error, .. } => error.code(),
+            Self::MergeError { error, .. } => error.code(),
             Self::ContextualArgumentNotContextualInAllSubgraphs { .. } => {
                 ErrorCode::ContextualArgumentNotContextualInAllSubgraphs
             }
@@ -325,6 +330,7 @@ impl CompositionError {
             Self::QueryRootMissing { .. } => ErrorCode::QueryRootMissing,
             Self::ArgumentDefaultMismatch { .. } => ErrorCode::FieldArgumentDefaultMismatch,
             Self::InputFieldDefaultMismatch { .. } => ErrorCode::InputFieldDefaultMismatch,
+            Self::InterfaceFieldNoImplem { .. } => ErrorCode::InterfaceFieldNoImplem,
         }
     }
 
@@ -450,8 +456,12 @@ impl CompositionError {
                     locations,
                 }
             }
+            Self::InterfaceFieldNoImplem { message } => Self::InterfaceFieldNoImplem {
+                message: format!("{message}{appendix}"),
+            },
             // Remaining errors do not have an obvious way to appending a message, so we just return self.
             Self::SubgraphError { .. }
+            | Self::MergeError { .. }
             | Self::InvalidGraphQLName(..)
             | Self::FromContextParseError { .. }
             | Self::UnsupportedSpreadDirective { .. }

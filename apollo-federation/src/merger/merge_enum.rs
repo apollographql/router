@@ -193,18 +193,25 @@ impl Merger {
                 );
             }
             EnumTypeUsage::Input { .. } if violates_intersection_requirement => {
-                self.report_mismatch_hint(
+                self.error_reporter.report_mismatch_hint::<_, _, ()>(
                     HintCode::InconsistentEnumValueForInputEnum,
                     format!(
-                        "Value \"{}\" of enum type \"{}\" will not be part of the supergraph as it is not defined in all the subgraphs defining \"{}\": ",
-                        &value_pos.value_name, &value_pos.type_name, &value_pos.type_name
+                        "Value \"{}\" of enum type \"{}\" will not be part of the supergraph as it is not defined in all the subgraphs defining \"{}\": ", value_pos.value_name, value_pos.type_name, value_pos.type_name
                     ),
+                    &value_pos,
                     sources,
-                    |source| {
-                        source.as_ref().is_some_and(|enum_type| {
-                            enum_type.values.contains_key(&value_pos.value_name)
-                        })
+                    |_| Some("yes".to_string()),
+                    |source, _| {
+                        if source.values.contains_key(&value_pos.value_name) {
+                            Some("yes".to_string())
+                        } else {
+                            Some("no".to_string())
+                        }
                     },
+                    |_, subgraphs| format!("\"{}\" is defined in {}", value_pos.value_name, subgraphs.unwrap_or_else(|| "no subgraphs".to_string())),
+                    |_, subgraphs| format!(" but not in {subgraphs}"),
+                    false,
+                    false,
                 );
                 value_pos.remove(&mut self.merged)?;
             }
@@ -248,7 +255,6 @@ impl Merger {
         Ok(())
     }
 
-    // TODO: These error reporting functions are not yet fully implemented
     fn hint_on_inconsistent_output_enum_value(
         &mut self,
         sources: &Sources<Node<EnumType>>,
@@ -258,17 +264,25 @@ impl Merger {
         // As soon as we find a subgraph that has the type but not the member, we hint.
         for enum_type in sources.values().flatten() {
             if !enum_type.values.contains_key(value_name) {
-                self.report_mismatch_hint(
+                self.error_reporter.report_mismatch_hint::<_, _, ()>(
                     HintCode::InconsistentEnumValueForOutputEnum,
                     format!(
-                        "Value \"{value_name}\" of enum type \"{dest_name}\" has been added to the supergraph but is only defined in a subset of the subgraphs defining \"{dest_name}\": "
+                        "Value \"{value_name}\" of enum type \"{dest_name}\" has been added to the supergraph but is only defined in a subset of the subgraphs defining \"{dest_name}\": ",
                     ),
+                    dest_name,
                     sources,
-                    |source| {
-                        source.as_ref().is_some_and(|enum_type| {
-                            enum_type.values.contains_key(value_name)
-                        })
+                    |_| Some("yes".to_string()),
+                    |source, _| {
+                        if source.values.contains_key(value_name) {
+                            Some("yes".to_string())
+                        } else {
+                            Some("no".to_string())
+                        }
                     },
+                    |_, subgraphs| format!("\"{}\" is defined in {}", value_name, subgraphs.unwrap_or_else(|| "no subgraphs".to_string())),
+                    |_, subgraphs| format!(" but not in {subgraphs}"),
+                    false,
+                    false,
                 );
                 return;
             }

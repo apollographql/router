@@ -7,18 +7,18 @@ telemetry:
         path: /metrics
       common:
         views:
-        - name: apollo_router_http_request_duration_seconds
-          aggregation:
-            histogram:
-              buckets:
-              - 0.1
-              - 0.5
-              - 1
-              - 2
-              - 3
-              - 4
-              - 5
-              - 100
+          - name: apollo_router_http_request_duration_seconds
+            aggregation:
+              histogram:
+                buckets:
+                  - 0.1
+                  - 0.5
+                  - 1
+                  - 2
+                  - 3
+                  - 4
+                  - 5
+                  - 100
 headers:
   all:
     request:
