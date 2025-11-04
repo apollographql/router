@@ -1189,6 +1189,7 @@ mod tests {
                         queries.push('\n');
                         Ok(subgraph::Response::builder()
                             .extensions(crate::json_ext::Object::new())
+                            .id(request.id)
                             .context(request.context)
                             .subgraph_name(String::default())
                             .build())
