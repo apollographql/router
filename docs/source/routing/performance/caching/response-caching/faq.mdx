@@ -94,7 +94,7 @@ If you're currently using the `preview_entity_caching` plugin, migrate to respon
 
 Follow these steps to migrate your configuration:
 
-1. **Update the plugin name:** Replace `preview_entity_cache` with `preview_response_cache` in your router configuration.
+1. **Update the plugin name:** Replace `preview_entity_caching` with `preview_response_caching` in your router configuration.
 
 2. **Remove the `scan_count` setting:** Delete the `redis.scan_count` configuration option if you have it set. Response caching uses an approach that doesn't require Redis `SCAN` operations, eliminating a key performance bottleneck from the previous entity caching version.
 
@@ -111,6 +111,6 @@ Follow these steps to migrate your configuration:
 
 TTL-based caching works in earlier versions. For API-based invalidation, use the current router version.
 
-### Why can't I see my cache tags generated from subgraph response in the debugger once cached?
+### Why can't I see my cache tags generated from responses in the debugger once cached?
 
-For performance, cache tags derived from a subgraph response are written to Redis in a debugger‑readable form only when the cache‑populating request runs in debug mode. Cache tags coming from subgraph responses written outside debug mode aren’t visible in the debugger.
+For performance, cache tags derived from responses are written to Redis in a debugger‑readable form only when the cache‑populating request runs in debug mode. Cache tags coming from responses written outside debug mode aren’t visible in the debugger.
