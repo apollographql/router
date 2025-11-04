@@ -75,6 +75,7 @@ use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::span_ext::SpanMarkError;
 use crate::query_planner::OperationKind;
 use crate::services::subgraph;
+use crate::services::subgraph::SubgraphRequestId;
 use crate::services::supergraph;
 use crate::spec::QueryHash;
 use crate::spec::TYPENAME;
@@ -719,6 +720,7 @@ impl CacheService {
                 Err(err) => {
                     return Ok(subgraph::Response::builder()
                         .subgraph_name(request.subgraph_name)
+                        .id(request.id)
                         .context(request.context)
                         .error(
                             graphql::Error::builder()
@@ -896,6 +898,12 @@ impl CacheService {
                                 CacheControl::no_store()
                             };
 
+                        save_original_cache_control(
+                            response.id.clone(),
+                            &response.context,
+                            cache_control.clone(),
+                        );
+
                         if cache_control.private() {
                             // we did not know in advance that this was a query with a private scope, so we update the cache key
                             if !is_known_private {
@@ -1057,7 +1065,7 @@ impl CacheService {
                             },
                         )?;
                     }
-
+                    let req_id = request.id.clone();
                     let mut response = match self.service.call(request).await {
                         Ok(response) => response,
                         Err(e) => {
@@ -1090,6 +1098,7 @@ impl CacheService {
                             let mut response = subgraph::Response::builder()
                                 .context(context)
                                 .data(Value::Object(data))
+                                .id(req_id)
                                 .errors(new_errors)
                                 .subgraph_name(self.name)
                                 .extensions(Object::new())
@@ -1109,6 +1118,12 @@ impl CacheService {
                     } else {
                         CacheControl::no_store()
                     };
+
+                    save_original_cache_control(
+                        response.id.clone(),
+                        &response.context,
+                        cache_control.clone(),
+                    );
 
                     if let Some(control_from_cached) = cache_result.1 {
                         cache_control = cache_control.merge(&control_from_cached);
@@ -1189,6 +1204,8 @@ async fn cache_lookup_root(
         Ok(value) => {
             if value.control.can_use() {
                 let control = value.control.clone();
+                // Keep original cache control for every subgraph request (useful for telemetry)
+                save_original_cache_control(request.id.clone(), &request.context, control.clone());
                 update_cache_control(&request.context, &control);
                 if debug {
                     let root_operation_fields: Vec<String> = request
@@ -1240,6 +1257,7 @@ async fn cache_lookup_root(
                 let mut response = subgraph::Response::builder()
                     .data(value.data)
                     .extensions(Object::new())
+                    .id(request.id)
                     .context(request.context)
                     .subgraph_name(request.subgraph_name.clone())
                     .build();
@@ -1461,6 +1479,7 @@ async fn cache_lookup_entities(
     // remove from representations the entities we already obtained from the cache
     let (new_representations, cache_result, cache_control) = filter_representations(
         &name,
+        &request.id,
         representations,
         cache_metadata,
         cache_result,
@@ -1529,6 +1548,7 @@ async fn cache_lookup_entities(
 
         let mut response = subgraph::Response::builder()
             .data(data)
+            .id(request.id.clone())
             .extensions(Object::new())
             .subgraph_name(request.subgraph_name)
             .context(request.context)
@@ -1554,6 +1574,18 @@ fn update_cache_control(context: &Context, cache_control: &CacheControl) {
             lock.insert(new_cache_control);
         }
     })
+}
+
+// Keep original cache control for every subgraph request (useful for telemetry)
+fn save_original_cache_control(
+    req_id: SubgraphRequestId,
+    context: &Context,
+    cache_control: CacheControl,
+) {
+    context.extensions().with_lock(|l| {
+        l.get_or_default_mut::<CacheControls>()
+            .insert(req_id, cache_control)
+    });
 }
 
 async fn cache_store_root_from_response(
@@ -2067,6 +2099,7 @@ struct IntermediateResult {
 #[allow(clippy::type_complexity)]
 fn filter_representations(
     subgraph_name: &str,
+    subgraph_req_id: &SubgraphRequestId,
     representations: &mut Vec<Value>,
     // keys: Vec<(String, Vec<String>)>,
     keys: Vec<CacheMetadata>,
@@ -2077,6 +2110,8 @@ fn filter_representations(
     let mut result = Vec::new();
     let mut cache_hit: HashMap<String, CacheHitMiss> = HashMap::new();
     let mut cache_control = None;
+    // Useful for telemetry
+    let mut non_updated_cache_control = None;
 
     for (
         (
@@ -2122,6 +2157,10 @@ fn filter_representations(
                     None => cache_control = Some(entry.control.clone()),
                     Some(c) => *c = c.merge(&entry.control),
                 }
+                match non_updated_cache_control.as_mut() {
+                    None => non_updated_cache_control = Some(entry.control.clone()),
+                    Some(c) => *c = c.merge_without_update(&entry.control),
+                }
             }
         }
 
@@ -2132,6 +2171,10 @@ fn filter_representations(
             cache_entry,
             entity_key,
         });
+    }
+
+    if let Some(non_updated_cache_control) = non_updated_cache_control {
+        save_original_cache_control(subgraph_req_id.clone(), context, non_updated_cache_control);
     }
 
     let _ = context.insert(
@@ -2439,6 +2482,8 @@ async fn reattempt_connection(
         }
     }
 }
+
+pub(crate) type CacheControls = HashMap<SubgraphRequestId, CacheControl>;
 
 #[cfg(all(
     test,
