@@ -7,7 +7,7 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 ## 🔒 Security
 
 > [!NOTE]
-> For more information on the impact of the fixes in this release and how your deployment might be affected or remediated, see [GHSA-x33c-7c2v-mrj9 & CVE-2025-64173](https://github.com/apollographql/router/security/advisories/GHSA-x33c-7c2v-mrj9)
+> For more information on the impact of the fixes in this release and how your deployment might be affected or remediated, see the corresponding GitHub Security Advisory (GHSA) linked on the entries below.  In both listed cases, updating to a patched Router version will resolve any vulnerabilities.
 
 ### Fix authorization plugin handling of polymorphic types
 
@@ -17,6 +17,8 @@ When querying interface fields, the authorization plugin was verifying only whet
 
 The authorization plugin was updated to correctly verify that all polymorphic authorization requirements are satisfied by the current context.
 
+See [GHSA-x33c-7c2v-mrj9](https://github.com/apollographql/router/security/advisories/GHSA-x33c-7c2v-mrj9) for additional details and the associated CVE number.
+
 By [@dariuszkuc](https://github.com/dariuszkuc)
 
 ### Fixed authorization plugin handling of directive renames
@@ -24,6 +26,8 @@ By [@dariuszkuc](https://github.com/dariuszkuc)
 The router authorization plugin did not properly handle authorization requirements when subgraphs renamed their authentication directives through imports. When such renames occurred, the plugin’s `@link`-processing code ignored the imported directives entirely, causing authentication constraints defined by the renamed directives to be ignored.
 
 The plugin code was updated to call the appropriate functionality in the `apollo-federation` crate, which correctly handles both because spec and imports directive renames.
+
+See [GHSA-g8jh-vg5j-4h3f](https://github.com/apollographql/router/security/advisories/GHSA-g8jh-vg5j-4h3f) for additional details.  A CVE number assignment is still pending at the time of this writing.
 
 By [@sachindshinde](https://github.com/sachindshinde)
 
