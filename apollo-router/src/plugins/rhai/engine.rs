@@ -1372,340 +1372,430 @@ pub(crate) struct RhaiExecutionDeferredResponse {
     pub(crate) response: Response,
 }
 
-macro_rules! if_subgraph {
-    ( subgraph => $subgraph: block else $not_subgraph: block ) => {
-        $subgraph
-    };
-    ( $base: ident => $subgraph: block else $not_subgraph: block ) => {
-        $not_subgraph
-    };
+/// Register properties for router request/response types.
+///
+/// All originating request properties (headers, body, uri) are mutable in the router context.
+fn register_router_context(engine: &mut Engine) {
+    engine.register_get(
+        "context",
+        |obj: &mut SharedMut<router::FirstRequest>| -> Result<Context, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|request| request.context.clone()))
+        }
+    )
+    .register_get(
+        "context",
+        |obj: &mut SharedMut<router::ChunkedRequest>| -> Result<Context, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|request| request.context.clone()))
+        }
+    )
+    .register_get(
+        "context",
+        |obj: &mut SharedMut<router::FirstResponse>| -> Result<Context, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|response| response.context.clone()))
+        }
+    )
+    .register_get(
+        "context",
+        |obj: &mut SharedMut<router::DeferredResponse>| -> Result<Context, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|response| response.context.clone()))
+        }
+    );
+
+    engine.register_set(
+        "context",
+        |obj: &mut SharedMut<router::FirstRequest>, context: Context| {
+            obj.with_mut(|request| request.context = context);
+            Ok(())
+        }
+    )
+    .register_set(
+        "context",
+        |obj: &mut SharedMut<router::ChunkedRequest>, context: Context| {
+            obj.with_mut(|request| request.context = context);
+            Ok(())
+        }
+    )
+    .register_set(
+        "context",
+        |obj: &mut SharedMut<router::FirstResponse>, context: Context| {
+            obj.with_mut(|response| response.context = context);
+            Ok(())
+        }
+    )
+    .register_set(
+        "context",
+        |obj: &mut SharedMut<router::DeferredResponse>, context: Context| {
+            obj.with_mut(|response| response.context = context);
+            Ok(())
+        }
+    );
+
+    engine.register_get(
+        "id",
+        |obj: &mut SharedMut<router::FirstRequest>| -> String {
+            obj.with_mut(|request| request.context.id.clone())
+        }
+    )
+    .register_get(
+        "id",
+        |obj: &mut SharedMut<router::ChunkedRequest>| -> String {
+            obj.with_mut(|request| request.context.id.clone())
+        }
+    )
+    .register_get(
+        "id",
+        |obj: &mut SharedMut<router::FirstResponse>| -> String {
+            obj.with_mut(|response| response.context.id.clone())
+        }
+    )
+    .register_get(
+        "id",
+        |obj: &mut SharedMut<router::DeferredResponse>| -> String {
+            obj.with_mut(|response| response.context.id.clone())
+        }
+    );
+
+    engine.register_get_set(
+        "headers",
+        |obj: &mut SharedMut<router::FirstRequest>| -> Result<HeaderMap, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|request| request.request.headers().clone()))
+        },
+        |obj: &mut SharedMut<router::FirstRequest>, headers: HeaderMap| {
+            obj.with_mut(|request| *request.request.headers_mut() = headers);
+            Ok(())
+        }
+    );
+
+    engine.register_get_set(
+        "headers",
+        |obj: &mut SharedMut<router::FirstResponse>| -> Result<HeaderMap, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|response| response.response.headers().clone()))
+        },
+        |obj: &mut SharedMut<router::FirstResponse>, headers: HeaderMap| {
+            obj.with_mut(|response| *response.response.headers_mut() = headers);
+            Ok(())
+        }
+    );
+
+    engine.register_get(
+        "uri",
+        |obj: &mut SharedMut<router::FirstRequest>| -> Result<Uri, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|request| request.request.uri().clone()))
+        }
+    );
+
+    engine.register_get(
+        "uri",
+        |obj: &mut SharedMut<router::Request>| -> Result<Uri, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|request| request.router_request.uri().clone()))
+        }
+    );
+
+    engine.register_set(
+        "uri",
+        |obj: &mut SharedMut<router::FirstRequest>, uri: Uri| {
+            obj.with_mut(|request| *request.request.uri_mut() = uri);
+            Ok(())
+        }
+    );
+
+    engine.register_set(
+        "uri",
+        |obj: &mut SharedMut<router::Request>, uri: Uri| {
+            obj.with_mut(|request| *request.router_request.uri_mut() = uri);
+            Ok(())
+        }
+    );
+
+    engine.register_get(
+        "method",
+        |obj: &mut SharedMut<router::FirstRequest>| -> Result<Method, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|request| request.request.method().clone()))
+        }
+    );
 }
 
-macro_rules! register_rhai_router_interface {
-    ($engine: ident, $($base: ident), *) => {
-        $(
-            // Context stuff
-            $engine.register_get(
-                "context",
-                |obj: &mut SharedMut<$base::FirstRequest>| -> Result<Context, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|request| request.context.clone()))
-                }
-            )
-            .register_get(
-                "context",
-                |obj: &mut SharedMut<$base::ChunkedRequest>| -> Result<Context, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|request| request.context.clone()))
-                }
-            ).register_get(
-                "context",
-                |obj: &mut SharedMut<$base::Response>| -> Result<Context, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|response| response.context.clone()))
-                }
-            )
-            .register_get(
-                "context",
-                |obj: &mut SharedMut<$base::DeferredResponse>| -> Result<Context, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|response| response.context.clone()))
-                }
-            );
+/// Register properties for supergraph request/response types.
+///
+/// All originating request properties (headers, body, uri) are mutable in the supergraph context.
+fn register_supergraph_context(engine: &mut Engine) {
+    engine.register_get(
+        "context",
+        |obj: &mut SharedMut<supergraph::Request>| -> Result<Context, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|request| request.context.clone()))
+        }
+    )
+    .register_get(
+        "context",
+        |obj: &mut SharedMut<supergraph::Response>| -> Result<Context, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|response| response.context.clone()))
+        }
+    );
 
-            $engine.register_set(
-                "context",
-                |obj: &mut SharedMut<$base::FirstRequest>, context: Context| {
-                    obj.with_mut(|request| request.context = context);
-                    Ok(())
-                }
-            )
-            .register_set(
-                "context",
-                |obj: &mut SharedMut<$base::ChunkedRequest>, context: Context| {
-                    obj.with_mut(|request| request.context = context);
-                    Ok(())
-                }
-            )
-            .register_set(
-                "context",
-                |obj: &mut SharedMut<$base::Response>, context: Context| {
-                    obj.with_mut(|response| response.context = context);
-                    Ok(())
-                }
-            ).register_set(
-                "context",
-                |obj: &mut SharedMut<$base::DeferredResponse>, context: Context| {
-                    obj.with_mut(|response| response.context = context);
-                    Ok(())
-                }
-            );
+    engine.register_get(
+        "status_code",
+        |obj: &mut SharedMut<supergraph::Response>| -> Result<StatusCode, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|response| response.response.status()))
+        }
+    );
 
-            // Id
-            $engine.register_get(
-                "id",
-                |obj: &mut SharedMut<$base::FirstRequest>| -> String {
-                    obj.with_mut(|request| request.context.id.clone())
-                }
-            )
-            .register_get(
-                "id",
-                |obj: &mut SharedMut<$base::ChunkedRequest>| -> String {
-                    obj.with_mut(|request| request.context.id.clone())
-                }
-            )
-            .register_get(
-                "id",
-                |obj: &mut SharedMut<$base::Response>| -> String {
-                    obj.with_mut(|response| response.context.id.clone())
-                }
-            )
-            .register_get(
-                "id",
-                |obj: &mut SharedMut<$base::DeferredResponse>| -> String {
-                    obj.with_mut(|response| response.context.id.clone())
-                }
-            );
+    engine.register_set(
+        "context",
+        |obj: &mut SharedMut<supergraph::Request>, context: Context| {
+            obj.with_mut(|request| request.context = context);
+            Ok(())
+        }
+    )
+    .register_set(
+        "context",
+        |obj: &mut SharedMut<supergraph::Response>, context: Context| {
+            obj.with_mut(|response| response.context = context);
+            Ok(())
+        }
+    );
 
-            // Originating Request
-            $engine.register_get(
-                "headers",
-                |obj: &mut SharedMut<$base::FirstRequest>| -> Result<HeaderMap, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|request| request.request.headers().clone()))
-                }
-            ).register_get(
-                "headers",
-                |obj: &mut SharedMut<$base::Response>| -> Result<HeaderMap, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|response| response.response.headers().clone()))
-                }
-            );
+    engine.register_get(
+        "id",
+        |obj: &mut SharedMut<supergraph::Request>| -> String {
+            obj.with_mut(|request| request.context.id.clone())
+        }
+    )
+    .register_get(
+        "id",
+        |obj: &mut SharedMut<supergraph::Response>| -> String {
+            obj.with_mut(|response| response.context.id.clone())
+        }
+    );
 
-            $engine.register_set(
-                "headers",
-                |obj: &mut SharedMut<$base::FirstRequest>, headers: HeaderMap| {
-                    if_subgraph! {
-                        $base => {
-                            let _unused = (obj, headers);
-                            Err("cannot mutate originating request on a subgraph".into())
-                        } else {
-                            obj.with_mut(|request| *request.request.headers_mut() = headers);
-                            Ok(())
-                        }
-                    }
-                }
-            ).register_set(
-                "headers",
-                |obj: &mut SharedMut<$base::Response>, headers: HeaderMap| {
-                    if_subgraph! {
-                        $base => {
-                            let _unused = (obj, headers);
-                            Err("cannot mutate originating request on a subgraph".into())
-                        } else {
-                            obj.with_mut(|response| *response.response.headers_mut() = headers);
-                            Ok(())
-                        }
-                    }
-                }
-            );
+    engine.register_get_set(
+        "headers",
+        |obj: &mut SharedMut<supergraph::Request>| -> Result<HeaderMap, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|request| request.supergraph_request.headers().clone()))
+        },
+        |obj: &mut SharedMut<supergraph::Request>, headers: HeaderMap| {
+            obj.with_mut(|request| *request.supergraph_request.headers_mut() = headers);
+            Ok(())
+        }
+    );
 
-            /*TODO: reenable when https://github.com/apollographql/router/issues/3642 is decided
-            $engine.register_get(
-                "body",
-                |obj: &mut SharedMut<$base::ChunkedRequest>| -> Result<Vec<u8>, Box<EvalAltResult>> {
-                    Ok( obj.with_mut(|request| { request.request.to_vec()}))
-                }
-            );
+    engine.register_get(
+        "method",
+        |obj: &mut SharedMut<supergraph::Request>| -> Result<Method, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|request| request.supergraph_request.method().clone()))
+        }
+    );
 
-            $engine.register_set(
-                "body",
-                |obj: &mut SharedMut<$base::ChunkedRequest>, body: Vec<u8>| {
-                    if_subgraph! {
-                        $base => {
-                            let _unused = (obj, body);
-                            Err("cannot mutate originating request on a subgraph".into())
-                        } else {
-                            let bytes = Bytes::from(body);
-                            obj.with_mut(|request| request.request = bytes);
-                            Ok(())
-                        }
-                    }
-                }
-            );*/
+    engine.register_get_set(
+        "body",
+        |obj: &mut SharedMut<supergraph::Request>| -> Result<Request, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|request| request.supergraph_request.body().clone()))
+        },
+        |obj: &mut SharedMut<supergraph::Request>, body: Request| {
+            obj.with_mut(|request| *request.supergraph_request.body_mut() = body);
+            Ok(())
+        }
+    );
 
-            $engine.register_get(
-                "uri",
-                |obj: &mut SharedMut<$base::FirstRequest>| -> Result<Uri, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|request| request.request.uri().clone()))
-                }
-            ).register_get(
-                "uri",
-                |obj: &mut SharedMut<$base::Request>| -> Result<Uri, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|request| request.router_request.uri().clone()))
-                }
-            );
-
-            $engine.register_set(
-                "uri",
-                |obj: &mut SharedMut<$base::FirstRequest>, uri: Uri| {
-                    if_subgraph! {
-                        $base => {
-                            let _unused = (obj, headers);
-                            Err("cannot mutate originating request on a subgraph".into())
-                        } else {
-                            obj.with_mut(|request| *request.request.uri_mut() = uri);
-                            Ok(())
-                        }
-                    }
-                }
-            ).register_set(
-                "uri",
-                |obj: &mut SharedMut<$base::Request>, uri: Uri| {
-                    if_subgraph! {
-                        $base => {
-                            let _unused = (obj, uri);
-                            Err("cannot mutate originating request on a subgraph".into())
-                        } else {
-                            obj.with_mut(|request| *request.router_request.uri_mut() = uri);
-                            Ok(())
-                        }
-                    }
-                }
-            );
-
-            $engine.register_get(
-                "method",
-                |obj: &mut SharedMut<$base::FirstRequest>| -> Result<Method, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|request| request.request.method().clone()))
-                }
-            );
-        )*
-    };
+    engine.register_get_set(
+        "uri",
+        |obj: &mut SharedMut<supergraph::Request>| -> Result<Uri, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|request| request.supergraph_request.uri().clone()))
+        },
+        |obj: &mut SharedMut<supergraph::Request>, uri: Uri| {
+            obj.with_mut(|request| *request.supergraph_request.uri_mut() = uri);
+            Ok(())
+        }
+    );
 }
 
-macro_rules! register_rhai_interface {
-    ($engine: ident, $($base: ident), *) => {
-        $(
-            // Context stuff
-            $engine.register_get(
-                "context",
-                |obj: &mut SharedMut<$base::Request>| -> Result<Context, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|request| request.context.clone()))
-                }
-            )
-            .register_get(
-                "context",
-                |obj: &mut SharedMut<$base::Response>| -> Result<Context, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|response| response.context.clone()))
-                }
-            );
+/// Register properties for execution request/response types.
+///
+/// All originating request properties (headers, body, uri) are mutable in the execution context.
+fn register_execution_context(engine: &mut Engine) {
+    engine.register_get(
+        "context",
+        |obj: &mut SharedMut<execution::Request>| -> Result<Context, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|request| request.context.clone()))
+        }
+    )
+    .register_get(
+        "context",
+        |obj: &mut SharedMut<execution::Response>| -> Result<Context, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|response| response.context.clone()))
+        }
+    );
 
-            $engine.register_get(
-                "status_code",
-                |obj: &mut SharedMut<$base::Response>| -> Result<StatusCode, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|response| response.response.status()))
-                }
-            );
+    engine.register_get(
+        "status_code",
+        |obj: &mut SharedMut<execution::Response>| -> Result<StatusCode, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|response| response.response.status()))
+        }
+    );
 
-            $engine.register_set(
-                "context",
-                |obj: &mut SharedMut<$base::Request>, context: Context| {
-                    obj.with_mut(|request| request.context = context);
-                    Ok(())
-                }
-            )
-            .register_set(
-                "context",
-                |obj: &mut SharedMut<$base::Response>, context: Context| {
-                    obj.with_mut(|response| response.context = context);
-                    Ok(())
-                }
-            );
+    engine.register_set(
+        "context",
+        |obj: &mut SharedMut<execution::Request>, context: Context| {
+            obj.with_mut(|request| request.context = context);
+            Ok(())
+        }
+    )
+    .register_set(
+        "context",
+        |obj: &mut SharedMut<execution::Response>, context: Context| {
+            obj.with_mut(|response| response.context = context);
+            Ok(())
+        }
+    );
 
-            // Id
-            $engine.register_get(
-                "id",
-                |obj: &mut SharedMut<$base::Request>| -> String {
-                    obj.with_mut(|request| request.context.id.clone())
-                }
-            )
-            .register_get(
-                "id",
-                |obj: &mut SharedMut<$base::Response>| -> String {
-                    obj.with_mut(|response| response.context.id.clone())
-                }
-            );
+    engine.register_get(
+        "id",
+        |obj: &mut SharedMut<execution::Request>| -> String {
+            obj.with_mut(|request| request.context.id.clone())
+        }
+    )
+    .register_get(
+        "id",
+        |obj: &mut SharedMut<execution::Response>| -> String {
+            obj.with_mut(|response| response.context.id.clone())
+        }
+    );
 
-            // Originating Request
-            $engine.register_get(
-                "headers",
-                |obj: &mut SharedMut<$base::Request>| -> Result<HeaderMap, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|request| request.supergraph_request.headers().clone()))
-                }
-            );
+    engine.register_get_set(
+        "headers",
+        |obj: &mut SharedMut<execution::Request>| -> Result<HeaderMap, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|request| request.supergraph_request.headers().clone()))
+        },
+        |obj: &mut SharedMut<execution::Request>, headers: HeaderMap| {
+            obj.with_mut(|request| *request.supergraph_request.headers_mut() = headers);
+            Ok(())
+        }
+    );
 
-            $engine.register_set(
-                "headers",
-                |obj: &mut SharedMut<$base::Request>, headers: HeaderMap| {
-                    if_subgraph! {
-                        $base => {
-                            let _unused = (obj, headers);
-                            Err("cannot mutate originating request on a subgraph".into())
-                        } else {
-                            obj.with_mut(|request| *request.supergraph_request.headers_mut() = headers);
-                            Ok(())
-                        }
-                    }
-                }
-            );
+    engine.register_get(
+        "method",
+        |obj: &mut SharedMut<execution::Request>| -> Result<Method, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|request| request.supergraph_request.method().clone()))
+        }
+    );
 
-            $engine.register_get(
-                "method",
-                |obj: &mut SharedMut<$base::Request>| -> Result<Method, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|request| request.supergraph_request.method().clone()))
-                }
-            );
+    engine.register_get_set(
+        "body",
+        |obj: &mut SharedMut<execution::Request>| -> Result<Request, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|request| request.supergraph_request.body().clone()))
+        },
+        |obj: &mut SharedMut<execution::Request>, body: Request| {
+            obj.with_mut(|request| *request.supergraph_request.body_mut() = body);
+            Ok(())
+        }
+    );
 
-            $engine.register_get(
-                "body",
-                |obj: &mut SharedMut<$base::Request>| -> Result<Request, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|request| request.supergraph_request.body().clone()))
-                }
-            );
+    engine.register_get_set(
+        "uri",
+        |obj: &mut SharedMut<execution::Request>| -> Result<Uri, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|request| request.supergraph_request.uri().clone()))
+        },
+        |obj: &mut SharedMut<execution::Request>, uri: Uri| {
+            obj.with_mut(|request| *request.supergraph_request.uri_mut() = uri);
+            Ok(())
+        }
+    );
+}
 
-            $engine.register_set(
-                "body",
-                |obj: &mut SharedMut<$base::Request>, body: Request| {
-                    if_subgraph! {
-                        $base => {
-                            let _unused = (obj, body);
-                            Err("cannot mutate originating request on a subgraph".into())
-                        } else {
-                            obj.with_mut(|request| *request.supergraph_request.body_mut() = body);
-                            Ok(())
-                        }
-                    }
-                }
-            );
+/// Register properties for subgraph request/response types.
+///
+/// The originating (supergraph) request properties (headers, body, uri) are intentionally
+/// READ-ONLY in the subgraph context. Setters are NOT registered for these properties.
+///
+/// ## Why no setters?
+///
+/// Rhai uses automatic property value propagation through chains. When calling a method
+/// on a property chain like `request.headers["cookie"].split(';')`, Rhai will attempt to
+/// propagate the result back by calling setters on the property chain, even when the method
+/// is non-mutating (like `split()` or `trim()`).
+///
+/// If a setter exists but throws an error (as it would for read-only supergraph request
+/// in subgraph context), this causes scripts to fail even for simple read operations.
+/// By not registering setters at all, Rhai knows the property is truly read-only and
+/// doesn't attempt value propagation, allowing read operations to work correctly.
+///
+/// Scripts can still modify `request.subgraph.headers`, `request.subgraph.body`, etc.
+/// which are the actual outgoing subgraph request properties.
+fn register_subgraph_context(engine: &mut Engine) {
+    engine.register_get(
+        "context",
+        |obj: &mut SharedMut<subgraph::Request>| -> Result<Context, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|request| request.context.clone()))
+        }
+    )
+    .register_get(
+        "context",
+        |obj: &mut SharedMut<subgraph::Response>| -> Result<Context, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|response| response.context.clone()))
+        }
+    );
 
-            $engine.register_get(
-                "uri",
-                |obj: &mut SharedMut<$base::Request>| -> Result<Uri, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|request| request.supergraph_request.uri().clone()))
-                }
-            );
+    engine.register_get(
+        "status_code",
+        |obj: &mut SharedMut<subgraph::Response>| -> Result<StatusCode, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|response| response.response.status()))
+        }
+    );
 
-            $engine.register_set(
-                "uri",
-                |obj: &mut SharedMut<$base::Request>, uri: Uri| {
-                    if_subgraph! {
-                        $base => {
-                            let _unused = (obj, uri);
-                            Err("cannot mutate originating request on a subgraph".into())
-                        } else {
-                            obj.with_mut(|request| *request.supergraph_request.uri_mut() = uri);
-                            Ok(())
-                        }
-                    }
-                }
-            );
-        )*
-    };
+    engine.register_set(
+        "context",
+        |obj: &mut SharedMut<subgraph::Request>, context: Context| {
+            obj.with_mut(|request| request.context = context);
+            Ok(())
+        }
+    )
+    .register_set(
+        "context",
+        |obj: &mut SharedMut<subgraph::Response>, context: Context| {
+            obj.with_mut(|response| response.context = context);
+            Ok(())
+        }
+    );
+
+    engine.register_get(
+        "id",
+        |obj: &mut SharedMut<subgraph::Request>| -> String {
+            obj.with_mut(|request| request.context.id.clone())
+        }
+    )
+    .register_get(
+        "id",
+        |obj: &mut SharedMut<subgraph::Response>| -> String {
+            obj.with_mut(|response| response.context.id.clone())
+        }
+    );
+
+    engine.register_get(
+        "headers",
+        |obj: &mut SharedMut<subgraph::Request>| -> Result<HeaderMap, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|request| request.supergraph_request.headers().clone()))
+        }
+    );
+
+    engine.register_get(
+        "method",
+        |obj: &mut SharedMut<subgraph::Request>| -> Result<Method, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|request| request.supergraph_request.method().clone()))
+        }
+    );
+
+    engine.register_get(
+        "body",
+        |obj: &mut SharedMut<subgraph::Request>| -> Result<Request, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|request| request.supergraph_request.body().clone()))
+        }
+    );
+
+    engine.register_get(
+        "uri",
+        |obj: &mut SharedMut<subgraph::Request>| -> Result<Uri, Box<EvalAltResult>> {
+            Ok(obj.with_mut(|request| request.supergraph_request.uri().clone()))
+        }
+    );
 }
 
 #[derive(Clone, Debug)]
@@ -1828,10 +1918,11 @@ impl Rhai {
             .register_fn("log_error", move |message: Dynamic| {
                 tracing::error!(%message, target = %error_main);
             });
-        // Add common getter/setters for different types
-        register_rhai_router_interface!(engine, router);
-        // Add common getter/setters for different types
-        register_rhai_interface!(engine, supergraph, execution, subgraph);
+        // Add common getter/setters for different types (explicit functions replace macros)
+        register_router_context(&mut engine);
+        register_supergraph_context(&mut engine);
+        register_execution_context(&mut engine);
+        register_subgraph_context(&mut engine);
 
         // Since constants in Rhai don't give us the behaviour we expect, let's create some global
         // variables which we use in a variable resolver when we create our engine.
