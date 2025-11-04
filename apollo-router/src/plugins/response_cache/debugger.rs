@@ -104,7 +104,7 @@ impl CacheKeyContext {
                     && maxage < age
                 {
                     self.warnings.push(Warning {
-                        code: "CACHE_CONTROLL_MAX_AGE_SMALLER_AGE".to_string(),
+                        code: "CACHE_CONTROL_MAX_AGE_SMALLER_AGE".to_string(),
                         links: vec![Link { url: String::from("https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Caching#fresh_and_stale_based_on_age"), title: "Fresh and stale data based on age".to_string() }, cache_control_mdn_docs.clone()],
                         message: "The subgraph returned a 'Cache-Control' header with a max-age smaller than the value of 'Age' header which means it's already expired, the Router won't cache this data.".to_string(),
                     });
