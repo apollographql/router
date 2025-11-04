@@ -1,6 +1,7 @@
 //! Authentication plugin
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -17,7 +18,9 @@ use jsonwebtoken::decode_header;
 use once_cell::sync::Lazy;
 use reqwest::Client;
 use schemars::JsonSchema;
+use schemars::SchemaGenerator;
 use serde::Deserialize;
+use serde::Deserializer;
 use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -131,6 +134,9 @@ struct JwksConf {
     /// Expected audiences for tokens verified by that JWKS
     ///
     /// If not specified, the audience will not be checked.
+    /// Accepts either a single string or an array of strings.
+    #[serde(default, deserialize_with = "deserialize_audiences")]
+    #[schemars(schema_with = "audiences_schema")]
     audiences: Option<Audiences>,
     /// List of accepted algorithms. Possible values are `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`
     #[schemars(with = "Option<Vec<String>>", default)]
@@ -207,6 +213,69 @@ fn default_header_value_prefix() -> String {
 
 fn default_poll_interval() -> Duration {
     DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL
+}
+
+/// Custom deserializer for the `audiences` field.
+///
+/// Accepts either:
+/// - a single `String` value (e.g., `"aud1;aud2"`) that is split by `;` into multiple entries, or
+/// - an array of strings (e.g., `["aud1", "aud2"]`).
+///
+/// Returns an `Option<HashSet<String>>` where:
+/// - `None` means the field was not present.
+/// - `Some(set)` contains the parsed and normalized audience values.
+fn deserialize_audiences<'de, D>(deserializer: D) -> Result<Option<HashSet<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMany {
+        One(String),
+        Many(Vec<String>),
+    }
+
+    // Deserialize into either a single string or a vector of strings.
+    let value = Option::<OneOrMany>::deserialize(deserializer)?;
+
+    // Convert the parsed value into a HashSet<String>, handling splitting and trimming.
+    let result = match value {
+        None => None,
+        Some(OneOrMany::One(s)) => {
+            let set = s
+                .split(';')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .collect::<HashSet<_>>();
+            Some(set)
+        }
+        Some(OneOrMany::Many(vec)) => Some(vec.into_iter().collect::<HashSet<_>>()),
+    };
+
+    Ok(result)
+}
+
+/// Custom schema generator for the `audiences` field, used by `schemars`.
+///
+/// Produces a JSON Schema that accepts:
+/// - either a string (e.g., `"aud1;aud2"`)
+/// - or an array of strings (e.g., `["aud1", "aud2"]`)
+fn audiences_schema(generator: &mut SchemaGenerator) -> schemars::schema::Schema {
+    use schemars::schema::*;
+
+    // Generate schemas for a string and a list of strings
+    let string_subschema = generator.subschema_for::<String>();
+    let array_of_string_subschema = generator.subschema_for::<Vec<String>>();
+
+    // Return a union type schema allowing either
+    Schema::Object(SchemaObject {
+        subschemas: Some(Box::new(SubschemaValidation {
+            any_of: Some(vec![string_subschema, array_of_string_subschema]),
+            ..Default::default()
+        })),
+        ..Default::default()
+    })
 }
 
 #[async_trait::async_trait]
