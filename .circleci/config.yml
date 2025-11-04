@@ -1039,7 +1039,6 @@ workflows:
       - build_release:
           requires:
             - test
-            - coverage
             - check_helm
             - check_compliance
           nightly: true

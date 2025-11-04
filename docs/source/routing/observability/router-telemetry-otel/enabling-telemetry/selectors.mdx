@@ -105,7 +105,9 @@ The subgraph service executes multiple times during query execution, with each e
 | `env`                       | Yes         |                  | The name of an environment variable                                            |
 | `static`                    | No          |                  | A static string value                                                          |
 | `error`                     | No          | `reason`         | A string value containing error reason when it's a critical error              |
-| `cache`                     | No          | `hit` \| `miss`    | Returns the number of cache hit or miss for this subgraph request              |
+| `response_cache`            | No          | `hit` \| `miss`    | Returns the number of cache hit or miss for this subgraph request              |
+| `response_cache_status`    | No          | `hit` \| `partial_hit`\| `miss`\| `status`    | Indicates the cache status for the subgraph request: `hit` (all data from cache), `miss` (all data from subgraph), or `partial_hit` (some entities from cache).  |
+| `response_cache_control`    | No          | `max_age` \| `scope`\| `no_store`    | Provides data from the computed `Cache-Control` header, such as `max_age`, `scope` (`public`/`private`), or `no_store` status.  |
 
 ### HTTP Client
 
@@ -274,9 +276,9 @@ telemetry:
       router:
         apollo.router.overhead:
           attributes:
-            # Add the graphql operation name as an attribute
-            operation.name:
-              operation_name: string
+            # Capture the number of active subgraph requests as an attribute
+            active_subgraph_requests:
+              active_subgraph_requests: count
 ```
 
 ### Getting GraphQL operation info

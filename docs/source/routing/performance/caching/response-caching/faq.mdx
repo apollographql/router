@@ -86,8 +86,31 @@ The 2024 preview used a linear scan approach for active invalidation that scaled
 
 ### How does the current release affect existing users?
 
-All changes are backward-compatible. If you're using the `preview_entity_caching` plugin, you're automatically migrated to `preview_response_caching` with no action required.
+Response caching is backward-compatible with entity caching. You can switch to response caching without breaking changes.
+
+If you're currently using the `preview_entity_caching` plugin, migrate to response caching as soon as possible. The new implementation provides better performance and more flexible caching controls.
+
+### How do I migrate from entity caching to response caching?
+
+Follow these steps to migrate your configuration:
+
+1. **Update the plugin name:** Replace `preview_entity_caching` with `preview_response_caching` in your router configuration.
+
+2. **Remove the `scan_count` setting:** Delete the `redis.scan_count` configuration option if you have it set. Response caching uses an approach that doesn't require Redis `SCAN` operations, eliminating a key performance bottleneck from the previous entity caching version.
+
+3. **Update timeout configuration:** Replace the single `redis.timeout` setting with more granular timeout options as appropriate:
+   - `redis.fetch_timeout`: Controls how long to wait when retrieving data from cache
+   - `redis.insert_timeout`: Controls how long to wait when storing new data in cache
+   - `redis.invalidate_timeout`: Controls how long to wait when removing data from cache
+
+   All timeout settings are optional. Set timeouts based on your application's performance requirements for specific cache operations.
+
+4. **Update your metrics and monitoring:** Response caching introduces new metric names and additional observability options. Check the [observability documentation](/graphos/routing/performance/caching/response-caching/observability) for the complete list of available metrics and their updated names. The new implementation also provides additional metrics for better insight into cache performance.
 
 ### Can I use response caching in production with earlier router versions?
 
 TTL-based caching works in earlier versions. For API-based invalidation, use the current router version.
+
+### Why can't I see my cache tags generated from responses in the debugger once cached?
+
+For performance, cache tags derived from responses are written to Redis in a debugger‑readable form only when the cache‑populating request runs in debug mode. Cache tags coming from responses written outside debug mode aren’t visible in the debugger.
