@@ -1,3 +1,4 @@
+#![cfg(test)]
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,9 +20,9 @@ use crate::graphql;
 use crate::metrics::FutureMetricsExt;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::MockSubgraphService;
+use crate::plugins::response_cache::debugger::CacheKeysContext;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
 use crate::plugins::response_cache::plugin::CACHE_DEBUG_HEADER_NAME;
-use crate::plugins::response_cache::plugin::CacheKeysContext;
 use crate::plugins::response_cache::plugin::Subgraph;
 use crate::plugins::response_cache::storage::CacheStorage;
 use crate::plugins::response_cache::storage::redis::Config;

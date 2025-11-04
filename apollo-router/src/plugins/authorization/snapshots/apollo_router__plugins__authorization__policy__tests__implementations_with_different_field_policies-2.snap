@@ -10,8 +10,13 @@ query:
           }
         }
     
-extracted_policies: {"read"}
+extracted_policies: {}
 successful policies: ["read"]
 filtered:
+query TestIssue {
+  index(id: "1") {
+    index
+  }
+}
 
-paths: ["/index"]
+paths: []
