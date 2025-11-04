@@ -135,6 +135,7 @@ fn invalid_context_name_shouldnt_throw() {
         "Expected error message about invalid context name, but got: {}",
         error_message
     );
+   
 }
 
 #[test]
@@ -504,7 +505,6 @@ fn context_selection_references_interface_object() {
     };
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
-
     let errors = result.expect_err("Expected composition to fail");
     assert_eq!(errors.len(), 1, "Expected exactly 1 error");
 
