@@ -2,6 +2,31 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.8.1] - 2025-11-04
+
+## 🔒 Security
+
+> [!NOTE]
+> For more information on the impact of the fixes in this release and how your deployment might be affected or remediated, see [GHSA-x33c-7c2v-mrj9 & CVE-2025-64173](https://github.com/apollographql/router/security/advisories/GHSA-x33c-7c2v-mrj9)
+
+### Fix authorization plugin handling of polymorphic types
+
+Updates the authorization plugin to correctly handle authorization requirements when processing polymorphic types.
+
+When querying interface fields, the authorization plugin was verifying only whether all implementations shared the same authorization requirements. In cases where interface did not specify any authorization requirements, this could result in unauthorized access to protected data.
+
+The authorization plugin was updated to correctly verify that all polymorphic authorization requirements are satisfied by the current context.
+
+By [@dariuszkuc](https://github.com/dariuszkuc)
+
+### Fixed authorization plugin handling of directive renames
+
+The router authorization plugin did not properly handle authorization requirements when subgraphs renamed their authentication directives through imports. When such renames occurred, the plugin’s `@link`-processing code ignored the imported directives entirely, causing authentication constraints defined by the renamed directives to be ignored.
+
+The plugin code was updated to call the appropriate functionality in the `apollo-federation` crate, which correctly handles both because spec and imports directive renames.
+
+By [@sachindshinde](https://github.com/sachindshinde)
+
 # [2.8.0] - 2025-10-27
 
 ## 🚀 Features
