@@ -115,7 +115,7 @@ impl CacheKeyContext {
                 self.warnings.push(Warning {
                     code: "CACHE_CONTROL_WITHOUT_MAX_AGE".to_string(),
                     links: vec![Link { url: String::from("https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#configure-default-ttl"), title: "Configure default TTL in the Router".to_string() }, cache_control_mdn_docs.clone()],
-                    message: "The subgraph returned a 'Cache-Control' header without any max-age set so the Router will use the one configured in Router's configuration.".to_string(),
+                    message: "The subgraph returned a 'Cache-Control' header without any max-age set, so the Router will use the default (configured in the Router configuration file).".to_string(),
                 });
             }
         }
