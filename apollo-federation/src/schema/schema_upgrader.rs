@@ -149,15 +149,7 @@ impl SchemaUpgrader {
 
         // Note that this should come _after_ all the other changes that may remove/update federation directives, since those may create unused
         // externals. Which is why this is toward  the end.
-        tracing::trace!(
-            "Removing unused externals...\nCurrent Subgraph:\n{}",
-            schema.schema()
-        );
         self.remove_unused_externals(&upgrade_metadata, &mut schema)?;
-        tracing::trace!(
-            "Finished removing unused externals...\nCurrent Subgraph:\n{}",
-            schema.schema()
-        );
 
         self.add_shareable(&upgrade_metadata, &mut schema)?;
 
