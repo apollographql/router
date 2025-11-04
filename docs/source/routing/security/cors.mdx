@@ -94,13 +94,23 @@ For examples of sending cookies and authorization headers from Apollo Client, se
 
 ## CORS private network access
 
-If your router requires requests to [a device or service on a private network](https://wicg.github.io/private-network-access/), you need to enable this behavior in your CORS configuration. Without this change, browsers block any requests to be sent to a device on the private network.
+By default, browsers block any requests sent to [a device or service on a private network](https://wicg.github.io/private-network-access/). If your router requires requests to a device or service on a private network, you need to enable this behavior in your CORS configuration.
 
-To enable private network access with CORS, your router must return the [`Access-Control-Allow-Private-Network`](http://wicg.github.io/private-network-access/#http-headerdef-access-control-allow-private-network) HTTP header with a value of `true`.
+To enable private network access with CORS, your router must return the [`Access-Control-Allow-Private-Network`](http://wicg.github.io/private-network-access/#http-headerdef-access-control-allow-private-network) HTTP header with a value of `true`. To do so, add the `private_network_access` with an empty `access_id` value in the `policies` of your `cors` config.
 
-You can enable private network access by including `private_network_access` in the policies of your `cors` config. Although optional, specifying the `access_id` and `access_name` subfields clarifies what in the private network is being accessed when the browser prompts the user for permission.
+```yaml title="router.yaml" {6-7}
+cors:
+  policies:
+    - origins:
+        - https://www.your-app.example.com
+        - https://studio.apollographql.com
+      private_network_access:
+        access_id:
+```
 
-```yaml title="router.yaml"
+Optionally, you can specify the `access_id` and `access_name` subfields to identify what is being accessed in the private network when the browser prompts the user for permission. These fields return the `Private-Network-Access-ID` and `Private-Network-Access-Name` HTTP headers, respectively, along with the specified strings.
+
+```yaml title="router.yaml" {6-8}
 cors:
   policies:
     - origins:
@@ -110,8 +120,6 @@ cors:
         access_id: "01:23:45:67:89:0A"
         access_name: "mega-corp device"
 ```
-
-When specified, the `access_id` and `access_name` fields return the `Private-Network-Access-ID` and `Private-Network-Access-Name` HTTP headers, respectively, along with the specified strings.
 
 ## Policy inheritance
 
