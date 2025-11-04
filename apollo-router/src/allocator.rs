@@ -7,7 +7,7 @@ use std::ptr::NonNull;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
-use tokio::sync::mpsc::Sender;
+use tokio::sync::oneshot::Sender;
 
 #[cfg(feature = "dhat-heap")]
 use parking_lot::Mutex;
@@ -32,13 +32,22 @@ pub(crate) struct AllocationStats {
     bytes_zeroed: AtomicUsize,
     bytes_reallocated: AtomicUsize,
     /// If bytes_allocated exceeds this limit and an allocation fails, a message will be sent to the channel
-    limit: Option<AllocationLimit>,
+    pub(crate) limit: Option<AllocationLimit>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct AllocationLimit {
     pub(crate) max_bytes: usize,
-    pub(crate) sender: Arc<Sender<usize>>,
+    pub(crate) sender: Option<Sender<usize>>,
+}
+
+impl AllocationLimit {
+    pub(crate) fn new(max_bytes: usize, sender: Sender<usize>) -> Self {
+        Self {
+            max_bytes,
+            sender: Some(sender),
+        }
+    }
 }
 
 impl AllocationStats {
@@ -93,12 +102,6 @@ impl AllocationStats {
             current = parent.as_ref();
         }
         current
-    }
-
-    /// Get the limit for this context, if any.
-    #[inline]
-    pub(crate) fn limit(&self) -> Option<&AllocationLimit> {
-        self.limit.as_ref()
     }
 
     /// Track allocation in this context and all parent contexts.
@@ -284,21 +287,20 @@ where
 {
     // Check if there's a parent context, and create either a child or root stats
     let stats = CURRENT_TASK_STATS.with(|cell| {
-        cell.get().map_or_else(
-            // No parent context - create a new root
-            || Arc::new(AllocationStats::new(name, limit.clone())),
-            |ptr| {
-                // Parent context exists - create a child that tracks to the parent
-                // SAFETY: The pointer is valid because it's managed by a parent context.
-                // We clone the Arc by manually incrementing the reference count.
-                let parent = unsafe {
-                    Arc::increment_strong_count(ptr.as_ptr());
-                    Arc::from_raw(ptr.as_ptr())
-                };
+        if let Some(ptr) = cell.get() {
+            // Parent context exists - create a child that tracks to the parent
+            // SAFETY: The pointer is valid because it's managed by a parent MemoryTrackedFuture.
+            // We clone the Arc by manually incrementing the reference count.
+            let parent = unsafe {
+                Arc::increment_strong_count(ptr.as_ptr());
+                Arc::from_raw(ptr.as_ptr())
+            };
 
-                Arc::new(AllocationStats::with_parent(name, parent, limit.clone()))
-            },
-        )
+            Arc::new(AllocationStats::with_parent(name, parent, limit))
+        } else {
+            // No parent context - create a new root
+            Arc::new(AllocationStats::new(name, limit))
+        }
     });
 
     with_explicit_memory_tracking(stats, f)
@@ -359,21 +361,20 @@ impl<F: Future> WithMemoryTracking for F {
     ) -> MemoryTrackedFuture<Self> {
         // Check if there's a parent context, and create either a child or root stats
         let stats = CURRENT_TASK_STATS.with(|cell| {
-            cell.get().map_or_else(
-                // No parent context - create a new root
-                || Arc::new(AllocationStats::new(name, limit.clone())),
-                |ptr| {
-                    // Parent context exists - create a child that tracks to the parent
-                    // SAFETY: The pointer is valid because it's managed by a parent MemoryTrackedFuture.
-                    // We clone the Arc by manually incrementing the reference count.
-                    let parent = unsafe {
-                        Arc::increment_strong_count(ptr.as_ptr());
-                        Arc::from_raw(ptr.as_ptr())
-                    };
+            if let Some(ptr) = cell.get() {
+                // Parent context exists - create a child that tracks to the parent
+                // SAFETY: The pointer is valid because it's managed by a parent MemoryTrackedFuture.
+                // We clone the Arc by manually incrementing the reference count.
+                let parent = unsafe {
+                    Arc::increment_strong_count(ptr.as_ptr());
+                    Arc::from_raw(ptr.as_ptr())
+                };
 
-                    Arc::new(AllocationStats::with_parent(name, parent, limit.clone()))
-                },
-            )
+                Arc::new(AllocationStats::with_parent(name, parent, limit))
+            } else {
+                // No parent context - create a new root
+                Arc::new(AllocationStats::new(name, limit))
+            }
         });
 
         MemoryTrackedFuture { inner: self, stats }
@@ -399,6 +400,10 @@ impl CustomAllocator {
     }
 }
 
+unsafe extern "C" {
+    unsafe fn printf(format: *const libc::c_char, ...) -> libc::c_int;
+}
+
 // SAFETY: All methods below properly delegate to jemalloc and only add tracking
 // on top. The tracking uses thread-locals with raw pointers to avoid TLS destructor
 // issues (see CURRENT_TASK_STATS documentation above).
@@ -411,17 +416,21 @@ unsafe impl GlobalAlloc for CustomAllocator {
                 // Track to the current task's stats if available.
                 // SAFETY: The pointer was set by MemoryTrackedFuture::poll() or
                 // with_memory_tracking(), and is guaranteed to be valid during the
-                // execution of the tracked future/closure. We only dereference it to
-                // call track_alloc(), which is safe because AllocationStats uses
-                // AtomicUsize internally (no Drop, no allocation).
+                // execution of the tracked future/closure.
                 CURRENT_TASK_STATS.with(|cell| {
                     if let Some(stats_ptr) = cell.get() {
                         stats_ptr.as_ref().track_alloc(layout.size());
 
-                        if let Some(limit) = &stats_ptr.as_ref().limit {
-                            if stats_ptr.as_ref().bytes_allocated() >= limit.max_bytes {
-                                if let Some(limit) = &stats_ptr.as_ref().limit {
-                                    let _ = limit.sender.try_send(layout.size());
+                        let stats = &mut (*stats_ptr.as_ptr());
+                        let bytes_allocated = stats.bytes_allocated();
+                        if let Some(limit) = &mut stats.limit {
+                            if bytes_allocated >= limit.max_bytes {
+                                if let Some(sender) = limit.sender.take() {
+                                    let _ = sender.send(bytes_allocated).unwrap();
+
+                                    let format: *const libc::c_char =
+                                        "total allocated: %u, limit: %u \n\0".as_ptr().cast();
+                                    let _ = printf(format, bytes_allocated, limit.max_bytes);
                                 }
                             }
                         }

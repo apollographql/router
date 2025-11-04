@@ -1,11 +1,12 @@
 mod metrics;
 
+use std::any::Any;
 use std::future::Future;
 use std::ops::ControlFlow;
-use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Instant;
 
+use apollo_federation::error::FederationError;
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::ObservableGauge;
 use tokio::sync::oneshot;
@@ -55,8 +56,6 @@ fn thread_pool_size() -> usize {
 
 pub(crate) struct JobStatus<'a, T> {
     result_sender: &'a oneshot::Sender<std::thread::Result<T>>,
-    /// If the job supports cancellation, this sender should be set to allow cancelling the job when the sender is closed.
-    cancel_sender: Option<Arc<tokio::sync::mpsc::Sender<usize>>>,
 }
 
 impl<T> JobStatus<'_, T> {
@@ -69,17 +68,10 @@ impl<T> JobStatus<'_, T> {
     /// In this case, a long-running job should try to cancel itself
     /// to avoid needless resource consumption.
     pub(crate) fn check_for_cooperative_cancellation(&self) -> ControlFlow<()> {
-        if self.result_sender.is_closed()
-            || self
-                .cancel_sender
-                .as_ref()
-                .map_or(false, |sender| sender.is_closed())
-        {
-            println!("cancelling job");
+        if self.result_sender.is_closed() {
+            println!("result sender is closed");
             ControlFlow::Break(())
         } else {
-            println!("not cancelling job: {:?}", self.cancel_sender.as_ref());
-            std::thread::sleep(std::time::Duration::from_millis(500));
             ControlFlow::Continue(())
         }
     }
@@ -123,6 +115,25 @@ impl crate::graphql::IntoGraphQLErrors for ComputeBackPressureError {
     }
 }
 
+/// Job was cancelled due to cooperative cancellation
+#[derive(thiserror::Error, Debug, displaydoc::Display, Clone)]
+pub(crate) struct ComputeCooperativeCancellationError;
+
+impl ComputeCooperativeCancellationError {
+    pub(crate) fn to_graphql_error(&self) -> crate::graphql::Error {
+        crate::graphql::Error::builder()
+            .message("Your request has been cancelled due to cooperative cancellation")
+            .extension_code("REQUEST_COOPERATIVE_CANCELLATION")
+            .build()
+    }
+}
+
+impl crate::graphql::IntoGraphQLErrors for ComputeCooperativeCancellationError {
+    fn into_graphql_errors(self) -> Result<Vec<crate::graphql::Error>, Self> {
+        Ok(vec![self.to_graphql_error()])
+    }
+}
+
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Debug, strum_macros::IntoStaticStr)]
 #[strum(serialize_all = "snake_case")]
 pub(crate) enum ComputeJobType {
@@ -159,6 +170,7 @@ pub(crate) struct Job {
     queue_start: Instant,
     job_fn: Box<dyn FnOnce() + Send + 'static>,
     allocation_stats: Option<std::sync::Arc<crate::allocator::AllocationStats>>,
+    cancel_tx: Option<tokio::sync::oneshot::Sender<usize>>,
 }
 
 pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
@@ -199,20 +211,14 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
 
                             // Execute job with memory tracking if stats are available
                             if let Some(stats) = job.allocation_stats {
-                                // TODO(memory-tracking): This might not be needed here as its done in query_planning_service.rs
-                                let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-                                let limit = AllocationLimit {
-                                    max_bytes: 100,
-                                    sender: Arc::new(tx),
-                                };
-
-                                std::thread::spawn(move || {
-                                    let _value = rx.blocking_recv();
-                                    rx.close();
-                                });
+                                let max_bytes =
+                                    std::env::var("APOLLO_ROUTER_QUERY_PLANNER_MEMORY_LIMIT")
+                                        .ok()
+                                        .and_then(|s| s.parse::<usize>().ok());
 
                                 // Create a child context with the job type as the name
                                 let job_name: &'static str = job.ty.into();
+
                                 crate::allocator::with_parented_memory_tracking(
                                     job_name,
                                     stats,
@@ -222,7 +228,11 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
                                             record_metrics(&allocation_stats);
                                         }
                                     },
-                                    Some(limit)
+                                    Option::zip(max_bytes, job.cancel_tx).map(
+                                        |(max_bytes, sender)| {
+                                            AllocationLimit::new(max_bytes, sender)
+                                        },
+                                    ),
                                 );
                             } else {
                                 (job.job_fn)();
@@ -307,26 +317,19 @@ where
     );
     span.in_scope(|| {
         let mut job_watcher = JobWatcher::new(compute_job_type);
-        let (tx, rx) = oneshot::channel();
+        let (tx, mut rx) = oneshot::channel();
 
-        let cancel_tx = if let Some(stats) = crate::allocator::current() {
-            dbg!(&stats);
-            if let Some(limit) = &stats.limit() {
-                Some(limit.sender.clone())
-            } else {
-                None
-            }
+        let is_cancellable = crate::allocator::current().is_some();
+
+        let (cancel_tx, cancel_rx) = if is_cancellable {
+            let (sender, receiver) = tokio::sync::oneshot::channel();
+            (Some(sender), Some(receiver))
         } else {
-            None
+            (None, None)
         };
 
-        println!("cancel_tx for job: {} {:?}", compute_job_type_str,  &cancel_tx);
-
         let wrapped_job_fn = Box::new(move || {
-            let status = JobStatus {
-                result_sender: &tx,
-                cancel_sender: cancel_tx.clone(),
-            };
+            let status = JobStatus { result_sender: &tx };
             // `AssertUnwindSafe` here is correct because this `catch_unwind`
             // is paired with `resume_unwind` below, so the overall effect on unwind safety
             // is the same as if the caller had executed `job` directly without a thread pool.
@@ -348,6 +351,7 @@ where
             job_fn: wrapped_job_fn,
             queue_start: Instant::now(),
             allocation_stats: crate::allocator::current(),
+            cancel_tx,
         };
 
         queue
@@ -371,7 +375,23 @@ where
             })?;
 
         Ok(async move {
-            let result = rx.await;
+            let result: Result<Result<T, Box<dyn Any + Send>>, oneshot::error::RecvError> =
+                if let Some(mut cancel_rx) = cancel_rx {
+                    println!("waiting for cancel or result");
+                    tokio::select! {
+                        biased;
+                        cancellation = &mut cancel_rx => {
+                            if let Ok(bytes_requested) = cancellation {
+                                // TODO(memory-tracking): How can we get the operation name here?
+                                tracing::error!("job {compute_job_type_str} cancelled as it exceeded memory limit (requested {bytes_requested} bytes)");
+                            }
+                            Ok(Err(Box::new(ComputeCooperativeCancellationError)))
+                        }
+                        result = &mut rx => result
+                    }
+                } else {
+                    rx.await
+                };
 
             // This local variable MUST exist. Otherwise, only the field from the JobWatcher struct is moved and drop will occur before the outcome is set.
             // This is predicated on all the fields in the struct being Copy!!!
