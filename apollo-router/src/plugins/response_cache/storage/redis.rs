@@ -263,7 +263,7 @@ impl CacheStorage for Storage {
         let now = now();
 
         // Only useful for caching debugger, it will only contains entries if the doc is set to debug
-        let mut original_cache_tags = VecDeque::new();
+        let mut original_cache_tags = Vec::with_capacity(batch_docs.len());
         // phase 1
         for document in &mut batch_docs {
             document.key = self.make_key(&document.key);
@@ -280,15 +280,12 @@ impl CacheStorage for Storage {
             HashMap::with_capacity(num_cache_tags_estimate);
         for document in &mut batch_docs {
             // If it's debug put back the original invalidation keys without namespace to be able to display it in cache debugger
-            let invalidation_keys = if document.debug {
-                std::mem::replace(
-                    &mut document.invalidation_keys,
-                    original_cache_tags.pop_front().unwrap_or_default(),
-                )
+            if document.debug {
+                original_cache_tags.push(document.invalidation_keys.clone());
             } else {
-                std::mem::take(&mut document.invalidation_keys)
-            };
-            for cache_tag_key in invalidation_keys {
+                original_cache_tags.push(Vec::new());
+            }
+            for cache_tag_key in document.invalidation_keys.drain(..) {
                 let cache_tag_value = (
                     (now + document.expire.as_secs()) as f64,
                     document.key.clone(),
@@ -354,13 +351,11 @@ impl CacheStorage for Storage {
 
         // phase 3
         let pipeline = self.storage.client().pipeline().with_options(&options);
-        for document in batch_docs.into_iter() {
+        for (document, cache_tags) in batch_docs.into_iter().zip(original_cache_tags.into_iter()) {
             let value = CacheValue {
                 data: document.data,
                 cache_control: document.control,
-                cache_tags: document
-                    .debug
-                    .then(|| document.invalidation_keys.into_iter().collect()),
+                cache_tags: document.debug.then(|| cache_tags.into_iter().collect()),
             };
             let _: () = pipeline
                 .set::<(), _, _>(

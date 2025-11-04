@@ -424,7 +424,7 @@ type Country {
 
 If you need to set cache tags programmatically (for example, if the tag depends on neither root field arguments nor entity keys), create the cache tags in your subgraph and set them in the response extensions.
 
-For cache tags on _entities_ we set `apolloEntityCacheTags` in `extensions`. Example of response payload if you want to set cache tags for different entities returned by subgraph:
+For cache tags on _entities_, set `apolloEntityCacheTags` in `extensions`. The following example shows a response payload that sets cache tags for entities returned by a subgraph:
 
 ```json
 {
@@ -441,7 +441,7 @@ For cache tags on _entities_ we set `apolloEntityCacheTags` in `extensions`. Exa
 }
 ```
 
-For cache tags on _root fields_ we set `apolloCacheTags` in `extensions`. Example of response payload if you want to set cache tags for root fields returned by subgraph:
+For cache tags on _root fields_, set `apolloCacheTags` in `extensions`. The following example shows a response payload that sets cache tags for root fields returned by a subgraph:
 
 ```json
 {
