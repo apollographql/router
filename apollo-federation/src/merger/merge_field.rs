@@ -30,12 +30,12 @@ use crate::link::federation_spec_definition::FEDERATION_FROM_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_GRAPH_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_NAME_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC;
-use crate::link::join_spec_definition::JOIN_OVERRIDE_LABEL_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_SELECTION_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_TYPE_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_USED_OVERRIDEN_ARGUMENT_NAME;
+use crate::link::join_spec_definition::JOIN_OVERRIDE_LABEL_ARGUMENT_NAME;
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
 use crate::merger::merge::map_sources;
@@ -424,7 +424,11 @@ impl Merger {
         }
     }
 
-    pub(in crate::merger) fn is_field_external(&self, source_idx: usize, field: &FieldDefinitionPosition) -> bool {
+    pub(in crate::merger) fn is_field_external(
+        &self,
+        source_idx: usize,
+        field: &FieldDefinitionPosition,
+    ) -> bool {
         // Use the subgraph metadata to check if field is external
         self.subgraphs[source_idx]
             .metadata()
@@ -705,7 +709,7 @@ impl Merger {
 
             let extra_hint = if let Some(s) = subgraph_with_targetless_override {
                 format!(
-                    " (please note that \"{}.{}\" has an @override directive in {} that targets an unknown subgraph so this could be due to misspelling the @override(from:) argument)",
+                    " (please note that \"{}.{}\" has an @override directive in \"{}\" that targets an unknown subgraph so this could be due to misspelling the @override(from:) argument)",
                     dest.type_name(),
                     dest.field_name(),
                     s.subgraph,
@@ -1040,22 +1044,21 @@ impl Merger {
 
         // Check if any field has @override directive
         for (&idx, source_opt) in &sources {
-            if let Some(source_pos) = source_opt {
-                if let Some(subgraph) = self.subgraphs.get(idx) {
-                    if let Ok(Some(override_directive_name)) = subgraph.override_directive_name() {
-                        let has_override = match source_pos {
-                            DirectiveTargetPosition::ObjectField(pos) => {
-                                !pos.get_applied_directives(subgraph.schema(), &override_directive_name).is_empty()
-                            }
-                            DirectiveTargetPosition::InterfaceField(pos) => {
-                                !pos.get_applied_directives(subgraph.schema(), &override_directive_name).is_empty()
-                            }
-                            _ => false,
-                        };
-                        if has_override {
-                            return Ok(true);
-                        }
-                    }
+            if let Some(source_pos) = source_opt
+                && let Some(subgraph) = self.subgraphs.get(idx)
+                && let Ok(Some(override_directive_name)) = subgraph.override_directive_name()
+            {
+                let has_override = match source_pos {
+                    DirectiveTargetPosition::ObjectField(pos) => !pos
+                        .get_applied_directives(subgraph.schema(), &override_directive_name)
+                        .is_empty(),
+                    DirectiveTargetPosition::InterfaceField(pos) => !pos
+                        .get_applied_directives(subgraph.schema(), &override_directive_name)
+                        .is_empty(),
+                    _ => false,
+                };
+                if has_override {
+                    return Ok(true);
                 }
             }
         }

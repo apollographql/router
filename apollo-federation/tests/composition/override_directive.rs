@@ -844,7 +844,8 @@ mod interface_object {
         assert!(
             matches!(errors.first(), Some(CompositionError::OverrideCollisionWithAnotherDirective { message })
             if message == r#"Invalid @override on field "A.a" of subgraph "Subgraph2": source subgraph "Subgraph1" does not have field "A.a" but abstracts it through @interfaceObject and overriding abstracted fields is not supported."#),
-            "Expected OverrideCollisionWithAnotherDirective error, got: {:#?}", errors.first()
+            "Expected OverrideCollisionWithAnotherDirective error, got: {:#?}",
+            errors.first()
         );
     }
 }

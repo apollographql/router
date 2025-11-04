@@ -997,7 +997,7 @@ impl Merger {
         dest: &ObjectOrInterfaceFieldDefinitionPosition,
     ) -> Result<FieldMergeContext, FederationError> {
         let mut result = FieldMergeContext::new(sources.keys().copied());
-        
+
         // Check if this field has any @override directives
         // Note: A field might be an interface in the merged schema but an object field in a subgraph
         // (e.g., with @interfaceObject), so we need to check both object and interface fields.
@@ -1012,7 +1012,9 @@ impl Merger {
                     type_name: itf_field.type_name.clone(),
                     field_name: itf_field.field_name.clone(),
                 };
-                self.fields_with_override.interface_fields.contains(itf_field)
+                self.fields_with_override
+                    .interface_fields
+                    .contains(itf_field)
                     || self.fields_with_override.object_fields.contains(&obj_field)
             }
             FieldDefinitionPosition::Union(_) => false,
@@ -1033,7 +1035,7 @@ impl Merger {
 
         // Convert sources to a map, and also check for @interfaceObject fields
         let mut mapped: IndexMap<usize, Option<MappedValue>> = IndexMap::default();
-        
+
         // First, process all subgraphs to check for @interfaceObject fields
         for idx in 0..self.subgraphs.len() {
             if !sources.contains_key(&idx) {
@@ -1041,7 +1043,7 @@ impl Merger {
                 // This checks if the parent implements interfaces that are @interfaceObject
                 let mut interface_object_abstracting_fields =
                     self.fields_in_source_if_abstracted_by_interface_object(dest, idx)?;
-                
+
                 // Also check if the parent itself is an @interfaceObject type
                 // (e.g., interface I in merged schema, but object type I with @interfaceObject in subgraph)
                 if let ObjectOrInterfaceFieldDefinitionPosition::Interface(itf_field) = dest {
@@ -1049,35 +1051,46 @@ impl Merger {
                         type_name: itf_field.type_name.clone(),
                     };
                     let type_pos = TypeDefinitionPosition::Object(obj_type_pos.clone());
-                    if self.subgraphs[idx].schema().schema().types.contains_key(&itf_field.type_name)
+                    if self.subgraphs[idx]
+                        .schema()
+                        .schema()
+                        .types
+                        .contains_key(&itf_field.type_name)
                         && self.subgraphs[idx].is_interface_object_type(&type_pos)
                     {
                         let obj_field = obj_type_pos.field(itf_field.field_name.clone());
-                        if obj_field.try_get(self.subgraphs[idx].schema().schema()).is_some() {
+                        if obj_field
+                            .try_get(self.subgraphs[idx].schema().schema())
+                            .is_some()
+                        {
                             interface_object_abstracting_fields.push(obj_field);
                         }
                     }
                 }
-                
+
                 if !interface_object_abstracting_fields.is_empty() {
                     // For @interfaceObject, we need to check if the object field has @override
-                    let override_directive = if let Some(obj_field) = interface_object_abstracting_fields.first() {
-                        // Convert to ObjectOrInterfaceFieldDefinitionPosition to check for override
-                        let obj_field_pos = ObjectOrInterfaceFieldDefinitionPosition::Object(obj_field.clone());
-                        self.get_override_directive(idx, &obj_field_pos)?
-                    } else {
-                        None
-                    };
-                    
-                    let is_interface_object = if let Some(obj_field) = interface_object_abstracting_fields.first() {
-                        let type_pos = TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
-                            type_name: obj_field.type_name.clone(),
-                        });
-                        self.subgraphs[idx].is_interface_object_type(&type_pos)
-                    } else {
-                        false
-                    };
-                    
+                    let override_directive =
+                        if let Some(obj_field) = interface_object_abstracting_fields.first() {
+                            // Convert to ObjectOrInterfaceFieldDefinitionPosition to check for override
+                            let obj_field_pos =
+                                ObjectOrInterfaceFieldDefinitionPosition::Object(obj_field.clone());
+                            self.get_override_directive(idx, &obj_field_pos)?
+                        } else {
+                            None
+                        };
+
+                    let is_interface_object =
+                        if let Some(obj_field) = interface_object_abstracting_fields.first() {
+                            let type_pos =
+                                TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
+                                    type_name: obj_field.type_name.clone(),
+                                });
+                            self.subgraphs[idx].is_interface_object_type(&type_pos)
+                        } else {
+                            false
+                        };
+
                     mapped.insert(
                         idx,
                         Some(MappedValue {
@@ -1092,7 +1105,7 @@ impl Merger {
                 }
             }
         }
-        
+
         // Then process the sources
         for (idx, source) in sources.iter() {
             if source.is_none() {
@@ -1104,12 +1117,10 @@ impl Merger {
             }
 
             let subgraph = &self.subgraphs[*idx];
-            let is_interface_field = matches!(
-                dest,
-                ObjectOrInterfaceFieldDefinitionPosition::Interface(_)
-            );
-            let is_interface_object = subgraph
-                .is_interface_object_type(&dest.parent().clone().into());
+            let is_interface_field =
+                matches!(dest, ObjectOrInterfaceFieldDefinitionPosition::Interface(_));
+            let is_interface_object =
+                subgraph.is_interface_object_type(&dest.parent().clone().into());
 
             // Get the @override directive if present
             let override_directive = self.get_override_directive(*idx, dest)?;
@@ -1137,14 +1148,19 @@ impl Merger {
                 if elem.override_directive.is_some() {
                     subgraphs_with_override.push(name.clone());
                 }
-                subgraph_map.insert(name, MappedValue {
-                    idx: elem.idx,
-                    name: elem.name.clone(),
-                    is_interface_field: elem.is_interface_field,
-                    is_interface_object: elem.is_interface_object,
-                    interface_object_abstracting_fields: elem.interface_object_abstracting_fields.clone(),
-                    override_directive: elem.override_directive.clone(),
-                });
+                subgraph_map.insert(
+                    name,
+                    MappedValue {
+                        idx: elem.idx,
+                        name: elem.name.clone(),
+                        is_interface_field: elem.is_interface_field,
+                        is_interface_object: elem.is_interface_object,
+                        interface_object_abstracting_fields: elem
+                            .interface_object_abstracting_fields
+                            .clone(),
+                        override_directive: elem.override_directive.clone(),
+                    },
+                );
             }
         }
 
@@ -1245,8 +1261,14 @@ impl Merger {
             }
 
             // Check for conflicts with other directives
-            let from_idx = self.names.iter().position(|n| n == &source_subgraph_name).unwrap();
-            if let Some((conflicting_directive_name, conflicting_subgraph_name)) = self.override_conflicts_with_other_directive(idx, from_idx, dest)? {
+            let from_idx = self
+                .names
+                .iter()
+                .position(|n| n == &source_subgraph_name)
+                .unwrap();
+            if let Some((conflicting_directive_name, conflicting_subgraph_name)) =
+                self.override_conflicts_with_other_directive(idx, from_idx, dest)?
+            {
                 self.error_reporter.add_error(CompositionError::OverrideCollisionWithAnotherDirective {
                     message: format!(
                         "@override cannot be used on field \"{}\" on subgraph \"{}\" since \"{}\" on \"{}\" is marked with directive \"@{}\"",
@@ -1280,9 +1302,8 @@ impl Merger {
             // Handle override label
             if let Some(override_label) = self.get_override_label_argument(override_directive)? {
                 use std::sync::LazyLock;
-                static LABEL_REGEX: LazyLock<regex::Regex> = LazyLock::new(|| {
-                    regex::Regex::new(r"^[a-zA-Z][a-zA-Z0-9_\-:./]*$").unwrap()
-                });
+                static LABEL_REGEX: LazyLock<regex::Regex> =
+                    LazyLock::new(|| regex::Regex::new(r"^[a-zA-Z][a-zA-Z0-9_\-:./]*$").unwrap());
                 static PERCENT_REGEX: LazyLock<regex::Regex> = LazyLock::new(|| {
                     regex::Regex::new(r"^percent\((\d{1,2}(\.\d{1,8})?|100)\)$").unwrap()
                 });
@@ -1292,7 +1313,7 @@ impl Merger {
                 } else if let Some(captures) = PERCENT_REGEX.captures(&override_label) {
                     if let Some(percent_str) = captures.get(1) {
                         if let Ok(percent) = percent_str.as_str().parse::<f64>() {
-                            percent >= 0.0 && percent <= 100.0
+                            (0.0..=100.0).contains(&percent)
                         } else {
                             false
                         }
@@ -1391,10 +1412,10 @@ impl Merger {
         directive: &Component<Directive>,
     ) -> Result<String, FederationError> {
         for arg in directive.arguments.iter() {
-            if arg.name.as_str() == "from" {
-                if let apollo_compiler::ast::Value::String(s) = arg.value.as_ref() {
-                    return Ok(s.to_string());
-                }
+            if arg.name.as_str() == "from"
+                && let apollo_compiler::ast::Value::String(s) = arg.value.as_ref()
+            {
+                return Ok(s.to_string());
             }
         }
         bail!("@override directive missing 'from' argument")
@@ -1405,10 +1426,10 @@ impl Merger {
         directive: &Component<Directive>,
     ) -> Result<Option<String>, FederationError> {
         for arg in directive.arguments.iter() {
-            if arg.name.as_str() == "label" {
-                if let apollo_compiler::ast::Value::String(s) = arg.value.as_ref() {
-                    return Ok(Some(s.to_string()));
-                }
+            if arg.name.as_str() == "label"
+                && let apollo_compiler::ast::Value::String(s) = arg.value.as_ref()
+            {
+                return Ok(Some(s.to_string()));
             }
         }
         Ok(None)
@@ -1424,46 +1445,64 @@ impl Merger {
         let overriding_subgraph = &self.subgraphs[overriding_idx];
         let overriding_subgraph_name = &self.names[overriding_idx];
         let field_pos: FieldDefinitionPosition = field.clone().into();
-        
+
         // Check if the overriding field itself is marked @external
-        if overriding_subgraph.metadata().is_field_external(&field_pos) {
-            if let Ok(Some(external_name)) = overriding_subgraph.external_directive_name() {
-                return Ok(Some((external_name.to_string(), overriding_subgraph_name.clone())));
-            }
+        if overriding_subgraph.metadata().is_field_external(&field_pos)
+            && let Ok(Some(external_name)) = overriding_subgraph.external_directive_name()
+        {
+            return Ok(Some((
+                external_name.to_string(),
+                overriding_subgraph_name.clone(),
+            )));
         }
-        
-        if let Ok(Some(requires_name)) = overriding_subgraph.requires_directive_name() {
-            if field.has_applied_directive(overriding_subgraph.schema(), &requires_name) {
-                return Ok(Some((requires_name.to_string(), overriding_subgraph_name.clone())));
-            }
+
+        if let Ok(Some(requires_name)) = overriding_subgraph.requires_directive_name()
+            && field.has_applied_directive(overriding_subgraph.schema(), &requires_name)
+        {
+            return Ok(Some((
+                requires_name.to_string(),
+                overriding_subgraph_name.clone(),
+            )));
         }
-        
-        if let Ok(Some(provides_name)) = overriding_subgraph.provides_directive_name() {
-            if field.has_applied_directive(overriding_subgraph.schema(), &provides_name) {
-                return Ok(Some((provides_name.to_string(), overriding_subgraph_name.clone())));
-            }
+
+        if let Ok(Some(provides_name)) = overriding_subgraph.provides_directive_name()
+            && field.has_applied_directive(overriding_subgraph.schema(), &provides_name)
+        {
+            return Ok(Some((
+                provides_name.to_string(),
+                overriding_subgraph_name.clone(),
+            )));
         }
 
         // Check the from field for @external, @requires, or @provides
         let from_subgraph = &self.subgraphs[from_idx];
         let from_subgraph_name = &self.names[from_idx];
-        
-        if from_subgraph.metadata().is_field_external(&field_pos) {
-            if let Ok(Some(external_name)) = from_subgraph.external_directive_name() {
-                return Ok(Some((external_name.to_string(), from_subgraph_name.clone())));
-            }
+
+        if from_subgraph.metadata().is_field_external(&field_pos)
+            && let Ok(Some(external_name)) = from_subgraph.external_directive_name()
+        {
+            return Ok(Some((
+                external_name.to_string(),
+                from_subgraph_name.clone(),
+            )));
         }
-        
-        if let Ok(Some(requires_name)) = from_subgraph.requires_directive_name() {
-            if field.has_applied_directive(from_subgraph.schema(), &requires_name) {
-                return Ok(Some((requires_name.to_string(), from_subgraph_name.clone())));
-            }
+
+        if let Ok(Some(requires_name)) = from_subgraph.requires_directive_name()
+            && field.has_applied_directive(from_subgraph.schema(), &requires_name)
+        {
+            return Ok(Some((
+                requires_name.to_string(),
+                from_subgraph_name.clone(),
+            )));
         }
-        
-        if let Ok(Some(provides_name)) = from_subgraph.provides_directive_name() {
-            if field.has_applied_directive(from_subgraph.schema(), &provides_name) {
-                return Ok(Some((provides_name.to_string(), from_subgraph_name.clone())));
-            }
+
+        if let Ok(Some(provides_name)) = from_subgraph.provides_directive_name()
+            && field.has_applied_directive(from_subgraph.schema(), &provides_name)
+        {
+            return Ok(Some((
+                provides_name.to_string(),
+                from_subgraph_name.clone(),
+            )));
         }
 
         Ok(None)
