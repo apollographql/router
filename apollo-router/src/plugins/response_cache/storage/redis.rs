@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::collections::VecDeque;
 use std::time::Duration;
 use std::time::Instant;
 use std::time::SystemTime;
@@ -268,7 +267,9 @@ impl CacheStorage for Storage {
         for document in &mut batch_docs {
             document.key = self.make_key(&document.key);
             if document.debug {
-                original_cache_tags.push_back(document.invalidation_keys.clone());
+                original_cache_tags.push(document.invalidation_keys.clone());
+            } else {
+                original_cache_tags.push(Vec::new());
             }
             document.invalidation_keys =
                 self.namespaced_cache_tags(&document.invalidation_keys, subgraph_name);
@@ -279,12 +280,6 @@ impl CacheStorage for Storage {
         let mut cache_tags_to_pcks: HashMap<String, Vec<(f64, String)>> =
             HashMap::with_capacity(num_cache_tags_estimate);
         for document in &mut batch_docs {
-            // If it's debug put back the original invalidation keys without namespace to be able to display it in cache debugger
-            if document.debug {
-                original_cache_tags.push(document.invalidation_keys.clone());
-            } else {
-                original_cache_tags.push(Vec::new());
-            }
             for cache_tag_key in document.invalidation_keys.drain(..) {
                 let cache_tag_value = (
                     (now + document.expire.as_secs()) as f64,
