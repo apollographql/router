@@ -856,7 +856,7 @@ impl CacheService {
 
                         Ok(response)
                     }
-                    ControlFlow::Continue((request, mut root_cache_key, invalidation_keys)) => {
+                    ControlFlow::Continue((request, mut root_cache_key, mut invalidation_keys)) => {
                         cache_hit.insert("Query".to_string(), CacheHitMiss { hit: 0, miss: 1 });
                         let _ = request.context.insert(
                             CacheMetricContextKey::new(request.subgraph_name.clone()),
@@ -896,6 +896,29 @@ impl CacheService {
                                 CacheControl::no_store()
                             };
 
+<<<<<<< HEAD
+=======
+                        // Support cache tags coming from subgraph response extensions
+                        if let Some(Value::Array(cache_tags)) = response
+                            .response
+                            .body()
+                            .extensions
+                            .get(GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS)
+                        {
+                            invalidation_keys.extend(
+                                cache_tags
+                                    .iter()
+                                    .filter_map(|v| v.as_str())
+                                    .map(|s| s.to_owned()),
+                            );
+                        }
+                        save_original_cache_control(
+                            response.id.clone(),
+                            &response.context,
+                            cache_control.clone(),
+                        );
+
+>>>>>>> 3c16634b (fix(response_cache): display cache tags generated from subgraph response in debugger (#8531))
                         if cache_control.private() {
                             // we did not know in advance that this was a query with a private scope, so we update the cache key
                             if !is_known_private {
@@ -1210,6 +1233,7 @@ async fn cache_lookup_root(
                     request.context.upsert::<_, CacheKeysContext>(
                         CONTEXT_DEBUG_CACHE_KEYS,
                         |mut val| {
+<<<<<<< HEAD
                             val.push(CacheKeyContext {
                                 key: value.key.clone(),
                                 hashed_private_id: private_id.map(ToString::to_string),
@@ -1227,6 +1251,35 @@ async fn cache_lookup_root(
                                 cache_control: value.control.clone(),
                                 data: serde_json_bytes::json!({"data": value.data.clone()}),
                             });
+=======
+                            val.push(
+                                CacheKeyContext {
+                                    key: value.key.clone(),
+                                    hashed_private_id: private_id.map(ToString::to_string),
+                                    invalidation_keys: value
+                                        .cache_tags
+                                        .map(|ct| {
+                                            ct.into_iter()
+                                                .filter(|k| {
+                                                    !k.starts_with(INTERNAL_CACHE_TAG_PREFIX)
+                                                })
+                                                .collect::<Vec<_>>()
+                                        })
+                                        .unwrap_or_default(),
+                                    kind: CacheEntryKind::RootFields {
+                                        root_fields: root_operation_fields,
+                                    },
+                                    subgraph_name: request.subgraph_name.clone(),
+                                    subgraph_request: request.subgraph_request.body().clone(),
+                                    source: CacheKeySource::Cache,
+                                    cache_control: value.control.clone(),
+                                    data: serde_json_bytes::json!({"data": value.data.clone()}),
+                                    warnings: Vec::new(),
+                                    should_store: false,
+                                }
+                                .update_metadata(),
+                            );
+>>>>>>> 3c16634b (fix(response_cache): display cache tags generated from subgraph response in debugger (#8531))
 
                             val
                         },
@@ -1485,6 +1538,7 @@ async fn cache_lookup_entities(
     } else {
         if debug {
             let debug_cache_keys_ctx = cache_result.iter().filter_map(|ir| {
+<<<<<<< HEAD
                 ir.cache_entry.as_ref().map(|cache_entry| CacheKeyContext {
                     key: ir.key.clone(),
                     hashed_private_id: private_id.map(ToString::to_string),
@@ -1503,6 +1557,34 @@ async fn cache_lookup_entities(
                     source: CacheKeySource::Cache,
                     cache_control: cache_entry.control.clone(),
                     data: serde_json_bytes::json!({"data": cache_entry.data.clone()}),
+=======
+                ir.cache_entry.as_ref().map(|cache_entry| {
+                    CacheKeyContext {
+                        key: ir.key.clone(),
+                        hashed_private_id: private_id.map(ToString::to_string),
+                        invalidation_keys: cache_entry
+                            .cache_tags
+                            .clone()
+                            .map(|ct| {
+                                ct.into_iter()
+                                    .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default(),
+                        kind: CacheEntryKind::Entity {
+                            typename: ir.typename.clone(),
+                            entity_key: ir.entity_key.clone().unwrap_or_default(),
+                        },
+                        subgraph_name: name.clone(),
+                        subgraph_request: request.subgraph_request.body().clone(),
+                        source: CacheKeySource::Cache,
+                        cache_control: cache_entry.control.clone(),
+                        data: serde_json_bytes::json!({"data": cache_entry.data.clone()}),
+                        warnings: Vec::new(),
+                        should_store: false,
+                    }
+                    .update_metadata()
+>>>>>>> 3c16634b (fix(response_cache): display cache tags generated from subgraph response in debugger (#8531))
                 })
             });
             request.context.upsert::<_, CacheKeysContext>(
@@ -1562,8 +1644,8 @@ async fn cache_store_root_from_response(
     response: &subgraph::Response,
     cache_control: CacheControl,
     cache_key: String,
-    mut invalidation_keys: Vec<String>,
-    _debug: bool,
+    invalidation_keys: Vec<String>,
+    debug: bool,
 ) -> Result<(), BoxError> {
     if let Some(data) = response.response.body().data.as_ref() {
         let ttl = cache_control
@@ -1572,27 +1654,13 @@ async fn cache_store_root_from_response(
             .unwrap_or(default_subgraph_ttl);
 
         if response.response.body().errors.is_empty() && cache_control.should_store() {
-            // Support surrogate keys coming from subgraph response extensions
-            if let Some(Value::Array(cache_tags)) = response
-                .response
-                .body()
-                .extensions
-                .get(GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS)
-            {
-                invalidation_keys.extend(
-                    cache_tags
-                        .iter()
-                        .filter_map(|v| v.as_str())
-                        .map(|s| s.to_owned()),
-                );
-            }
-
             let document = Document {
                 key: cache_key,
                 data: data.clone(),
                 control: cache_control,
                 invalidation_keys,
                 expire: ttl,
+                debug,
             };
 
             let subgraph_name = response.subgraph_name.clone();
@@ -1639,7 +1707,7 @@ async fn cache_store_entities_from_response(
             None
         };
 
-        // Support surrogate keys coming from subgraph extensions
+        // Support cache tags coming from subgraph extensions
         let per_entity_surrogate_keys = response
             .response
             .body()
@@ -2159,6 +2227,7 @@ async fn insert_entities_in_result(
     // Only Some if debug is enabled
     subgraph_request: Option<graphql::Request>,
 ) -> Result<(Vec<Value>, Vec<Error>), BoxError> {
+    let debug = subgraph_request.is_some();
     let ttl = cache_control
         .ttl()
         .map(Duration::from_secs)
@@ -2227,6 +2296,11 @@ async fn insert_entities_in_result(
                     has_errors = true;
                 }
 
+                if let Some(Value::Array(keys)) = specific_surrogate_keys {
+                    invalidation_keys
+                        .extend(keys.iter().filter_map(|v| v.as_str()).map(|s| s.to_owned()));
+                }
+
                 // Only in debug mode
                 if let Some(subgraph_request) = &subgraph_request {
                     debug_ctx_entries.push(CacheKeyContext {
@@ -2249,16 +2323,13 @@ async fn insert_entities_in_result(
                     });
                 }
                 if !has_errors && cache_control.should_store() && should_cache_private {
-                    if let Some(Value::Array(keys)) = specific_surrogate_keys {
-                        invalidation_keys
-                            .extend(keys.iter().filter_map(|v| v.as_str()).map(|s| s.to_owned()));
-                    }
                     to_insert.push(Document {
                         control: cache_control.clone(),
                         data: value.clone(),
                         key,
                         invalidation_keys,
                         expire: ttl,
+                        debug,
                     });
                 }
 
