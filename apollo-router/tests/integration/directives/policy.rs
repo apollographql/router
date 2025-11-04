@@ -245,13 +245,8 @@ async fn policy_directive_should_not_pass_if_coproc_disallowed() -> Result<(), B
     Ok(())
 }
 
-// FIXME: this expresses the wrong behavior despite being the current behavior; in the future,
-// after a fix in composition, no data should be returned but errors for an unauthorized field
-// TODO: fix during FED-790; make the return type `Result<(), BoxError>` and return `Ok(())`
 #[tokio::test(flavor = "multi_thread")]
-#[should_panic(expected = "called `Option::unwrap()` on a `None` value")]
-async fn policy_directive_interfaces_with_different_implementors_without_policy_should_return_data()
-{
+async fn implementations_without_policy_should_return_data() {
     // GIVEN
     //   * a schema with @policy
     //   * an interface using the @policy with implementors that have different policies
@@ -260,7 +255,6 @@ async fn policy_directive_interfaces_with_different_implementors_without_policy_
     //   * a mock subgraph serving both public and private data
     //   * a context object with the admin policy set to false
     //   * the supergraph service layer
-    //   * a request for a policy-gated field
 
     let mock_coprocessor = MockServer::start().await;
     let coprocessor_address = mock_coprocessor.uri();
@@ -298,8 +292,8 @@ async fn policy_directive_interfaces_with_different_implementors_without_policy_
                 serde_json::json!({"data": {"public": {"id": "456"}}}),
             )
             .with_json(
-                serde_json::json!({"query": "{opensecret{id}}"}),
-                serde_json::json!({"data": {"opensecret": {"id": "789"}}}),
+                serde_json::json!({"query": "{secure{id}}"}),
+                serde_json::json!({"data": {"secure": {"id": "789"}}}),
             )
             .build(),
     );
@@ -327,24 +321,23 @@ async fn policy_directive_interfaces_with_different_implementors_without_policy_
         .await
         .unwrap();
 
+    // WHEN
+    //   * we make a request to an implementation without the policy directive
     let context = Context::new();
     context
         // NOTE: there is no `admin` policy in the context
         .insert("apollo::authorization::required_policies", json! { [] })
         .unwrap();
 
-    // WHEN
-    //   * we make a request to an implementor without the policy directive
     let request = supergraph::Request::fake_builder()
-        .query(r#"{ opensecret { id } }"#)
+        .query(r#"{ public { id } }"#)
         .context(context)
         .method(Method::POST)
         .build()
         .unwrap();
 
     // THEN
-    //   * we don't get any data, but we do get errors
-
+    //   * we get the data
     let response = supergraph_harness
         .oneshot(request)
         .await
@@ -353,29 +346,30 @@ async fn policy_directive_interfaces_with_different_implementors_without_policy_
         .await
         .unwrap();
 
-    let data = response.data.unwrap();
-    let error = response.errors.first().unwrap();
+    let error = response.errors.first();
+    assert!(error.is_none());
+    let binding = response.data.unwrap();
+    let response = binding
+        .get("public")
+        .unwrap()
+        .get("id")
+        .unwrap()
+        .as_str()
+        .unwrap();
 
-    assert!(data.as_object().unwrap().is_empty());
-    assert_eq!(
-        error.extension_code().unwrap(),
-        "UNAUTHORIZED_FIELD_OR_TYPE".to_string()
-    );
+    assert_eq!(response, "456");
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn policy_directive_interfaces_with_different_implementors_disallowed() -> Result<(), BoxError>
-{
+async fn interface_with_different_implementation_policies_should_require_auth() {
     // GIVEN
     //   * a schema with @policy
     //   * an interface using the @policy with implementors that have different policies
     //     * see the fixture for notes
-    //   * requesting the interface directly, not one of its implementors
     //   * a mock coprocessor that marks the admin policy as false (unused, see note above)
     //   * a mock subgraph serving both public and private data
     //   * a context object with the admin policy set to false
     //   * the supergraph service layer
-    //   * a request for a policy-gated field
 
     let mock_coprocessor = MockServer::start().await;
     let coprocessor_address = mock_coprocessor.uri();
@@ -413,12 +407,8 @@ async fn policy_directive_interfaces_with_different_implementors_disallowed() ->
                 serde_json::json!({"data": {"public": {"id": "456"}}}),
             )
             .with_json(
-                serde_json::json!({"query": "{opensecret{id}}"}),
-                serde_json::json!({"data": {"opensecret": {"id": "789"}}}),
-            )
-            .with_json(
                 serde_json::json!({"query": "{secure{id}}"}),
-                serde_json::json!({"data": {"secure": {"id": "000"}}}),
+                serde_json::json!({"data": {"secure": {"id": "789"}}}),
             )
             .build(),
     );
@@ -446,14 +436,14 @@ async fn policy_directive_interfaces_with_different_implementors_disallowed() ->
         .await
         .unwrap();
 
+    // WHEN
+    //   * we make a request to an interface with the policy directive
     let context = Context::new();
     context
         // NOTE: there is no `admin` policy in the context
         .insert("apollo::authorization::required_policies", json! { [] })
         .unwrap();
 
-    // WHEN
-    //   * we make a request with the interface itself off of Query
     let request = supergraph::Request::fake_builder()
         .query(r#"{ secure { id } }"#)
         .context(context)
@@ -462,127 +452,7 @@ async fn policy_directive_interfaces_with_different_implementors_disallowed() ->
         .unwrap();
 
     // THEN
-    //   * we don't get data
-
-    let response = supergraph_harness
-        .oneshot(request)
-        .await
-        .unwrap()
-        .next_response()
-        .await
-        .unwrap()
-        .data
-        .unwrap();
-
-    let response = response.as_object().unwrap();
-
-    assert!(response.is_empty());
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn policy_directive_interfaces_with_different_implementors_open_question()
--> Result<(), BoxError> {
-    // GIVEN
-    //   * a schema with @policy
-    //   * an interface using the @policy with implementors that have different policies
-    //     * see the fixture for notes
-    //   * requesting the interface directly, not one of its implementors
-    //   * a mock coprocessor that marks the admin policy as true (unused, see note above)
-    //   * a mock subgraph serving both public and private data
-    //   * a context object with the admin policy set to true
-    //   * the supergraph service layer
-    //   * a request for a policy-gated field
-
-    let mock_coprocessor = MockServer::start().await;
-    let coprocessor_address = mock_coprocessor.uri();
-
-    Mock::given(method("POST"))
-        .and(path("/"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "version": 1,
-            "stage": "SupergraphRequest",
-            "control": "continue",
-            "context": {
-                "entries": {
-                    "apollo::authorization::required_policies": {
-                        // NOTE: see the note above, but this shouldn't govern how the test
-                        // behaves; it's the context object that does the dirt for the TestHarness.
-                        // Change this value if you use it with the IntegrationTest builder
-                        "admin": true
-                    }
-                }
-            }
-        })))
-        .mount(&mock_coprocessor)
-        .await;
-
-    let mut subgraphs = MockedSubgraphs::default();
-    subgraphs.insert(
-        "subgraph_a",
-        MockSubgraph::builder()
-            .with_json(
-                serde_json::json!({"query": "{private{id}}"}),
-                serde_json::json!({"data": {"private": {"id": "123"}}}),
-            )
-            .with_json(
-                serde_json::json!({"query": "{public{id}}"}),
-                serde_json::json!({"data": {"public": {"id": "456"}}}),
-            )
-            .with_json(
-                serde_json::json!({"query": "{opensecret{id}}"}),
-                serde_json::json!({"data": {"opensecret": {"id": "789"}}}),
-            )
-            .with_json(
-                serde_json::json!({"query": "{secure{id}}"}),
-                serde_json::json!({"data": {"secure": {"id": "000"}}}),
-            )
-            .build(),
-    );
-
-    let supergraph_harness = TestHarness::builder()
-        .configuration_json(serde_json::json!({
-            "coprocessor": {
-                "url": coprocessor_address,
-                "supergraph": {
-                    "request": {
-                        "context": "all"
-                    }
-                }
-            },
-            "include_subgraph_errors": {
-                "all": true
-            }
-        }))
-        .unwrap()
-        .schema(include_str!(
-            "../../fixtures/directives/policy/policy_schema_with_interfaces.graphql"
-        ))
-        .extra_plugin(subgraphs)
-        .build_supergraph()
-        .await
-        .unwrap();
-
-    let context = Context::new();
-    context
-        .insert(
-            "apollo::authorization::required_policies",
-            json! {[ "admin" ]},
-        )
-        .unwrap();
-
-    // WHEN
-    //   * we make a request with the interface itself off of Query
-    let request = supergraph::Request::fake_builder()
-        .query(r#"{ secure { id } }"#)
-        .context(context)
-        .method(Method::POST)
-        .build()
-        .unwrap();
-
-    // THEN
-    //   * we don't get any data, but we do get errors
-
+    //   * we don't get the data and get UNAUTHORIZED_FIELD_OR_TYPE error
     let response = supergraph_harness
         .oneshot(request)
         .await
@@ -590,6 +460,7 @@ async fn policy_directive_interfaces_with_different_implementors_open_question()
         .next_response()
         .await
         .unwrap();
+
     let data = response.data.unwrap();
     let error = response.errors.first().unwrap();
 
@@ -598,6 +469,4 @@ async fn policy_directive_interfaces_with_different_implementors_open_question()
         error.extension_code().unwrap(),
         "UNAUTHORIZED_FIELD_OR_TYPE".to_string()
     );
-
-    Ok(())
 }
