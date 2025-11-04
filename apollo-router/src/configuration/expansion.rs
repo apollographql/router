@@ -119,6 +119,32 @@ impl Expansion {
         } else {
             listen_override.build()
         };
+
+        // Graph artifact reference override: env > CLI > config
+        let graph_artifact_ref_override = {
+            let cli_value = crate::executable::APOLLO_ROUTER_GRAPH_ARTIFACT_REFERENCE.lock().clone();
+            let mut builder = Override::builder()
+                .config_path("graph_artifact_reference")
+                .env_name("APOLLO_GRAPH_ARTIFACT_REFERENCE")
+                .value_type(ValueType::String);
+            if let Some(cli_value) = cli_value {
+                builder = builder.value(cli_value);
+            }
+            builder.build()
+        };
+
+        // Hot reload override: CLI > config (no env var)
+        let hot_reload_override = {
+            let cli_value = *crate::executable::APOLLO_ROUTER_HOT_RELOAD_CLI.lock();
+            let mut builder = Override::builder()
+                .config_path("hot_reload")
+                .value_type(ValueType::Bool);
+            if let Some(cli_value) = cli_value {
+                builder = builder.value(Value::Bool(cli_value));
+            }
+            builder.build()
+        };
+
         Ok(builder
             .and_prefix(prefix)
             .supported_modes(supported_modes)
@@ -138,6 +164,8 @@ impl Expansion {
                     .build(),
             )
             .override_config(listen_override)
+            .override_config(graph_artifact_ref_override)
+            .override_config(hot_reload_override)
             .override_configs(dev_mode_defaults)
             .build())
     }

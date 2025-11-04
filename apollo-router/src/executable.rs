@@ -47,6 +47,8 @@ pub(crate) static APOLLO_ROUTER_LICENCE_IS_SET: AtomicBool = AtomicBool::new(fal
 pub(crate) static APOLLO_ROUTER_LICENCE_PATH_IS_SET: AtomicBool = AtomicBool::new(false);
 pub(crate) static APOLLO_TELEMETRY_DISABLED: AtomicBool = AtomicBool::new(false);
 pub(crate) static APOLLO_ROUTER_LISTEN_ADDRESS: Mutex<Option<SocketAddr>> = Mutex::new(None);
+pub(crate) static APOLLO_ROUTER_GRAPH_ARTIFACT_REFERENCE: Mutex<Option<String>> = Mutex::new(None);
+pub(crate) static APOLLO_ROUTER_HOT_RELOAD_CLI: Mutex<Option<bool>> = Mutex::new(None);
 
 const INITIAL_UPLINK_POLL_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -237,30 +239,47 @@ impl Opt {
     }
 
     pub(crate) fn oci_config(&self) -> Result<OciConfig, anyhow::Error> {
+        let graph_artifact_ref = self
+            .graph_artifact_reference
+            .clone()
+            .ok_or(Self::err_require_opt("APOLLO_GRAPH_ARTIFACT_REFERENCE"))?;
+        let (reference, oci_reference_type) = Self::validate_oci_reference(&graph_artifact_ref)?;
+        
         Ok(OciConfig {
             apollo_key: self
                 .apollo_key
                 .clone()
                 .ok_or(Self::err_require_opt("APOLLO_KEY"))?,
-            reference: Self::validate_oci_reference(
-                &self
-                    .graph_artifact_reference
-                    .clone()
-                    .ok_or(Self::err_require_opt("APOLLO_GRAPH_ARTIFACT_REFERENCE"))?,
-            )?,
+            reference,
+            hot_reload: self.hot_reload,
+            oci_reference_type,
         })
     }
 
-    pub fn validate_oci_reference(reference: &str) -> std::result::Result<String, anyhow::Error> {
-        // Currently only shas are allowed to be passed as graph artifact references
-        // TODO Update when tag reloading is implemented
-        let valid_regex = Regex::new(r"@sha256:[0-9a-fA-F]{64}$").unwrap();
-        if valid_regex.is_match(reference) {
-            tracing::debug!("validated OCI configuration");
-            Ok(reference.to_string())
-        } else {
-            Err(anyhow!("invalid graph artifact reference: {reference}"))
+    pub fn validate_oci_reference(reference: &str) -> std::result::Result<(String, crate::registry::OciReferenceType), anyhow::Error> {
+        use crate::registry::OciReferenceType;
+        
+        // Check for SHA256 digest reference: @sha256:64-hex-chars
+        let sha_regex = Regex::new(r"@sha256:[0-9a-fA-F]{64}$").unwrap();
+        if sha_regex.is_match(reference) {
+            tracing::debug!("validated OCI SHA reference");
+            return Ok((reference.to_string(), OciReferenceType::Sha));
         }
+        
+        // Check for tag reference: :tag-name (tag regex: [a-zA-Z0-9_][a-zA-Z0-9._-]{0,127})
+        // Tags appear after a colon in the reference
+        let tag_regex = Regex::new(r":([a-zA-Z0-9_][a-zA-Z0-9._-]{0,127})$").unwrap();
+        if let Some(caps) = tag_regex.captures(reference) {
+            // Extract the tag part to validate it matches the full pattern
+            let tag = &caps[1];
+            let full_tag_regex = Regex::new(r"^[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}$").unwrap();
+            if full_tag_regex.is_match(tag) {
+                tracing::debug!("validated OCI tag reference");
+                return Ok((reference.to_string(), OciReferenceType::Tag));
+            }
+        }
+        
+        Err(anyhow!("invalid graph artifact reference: {reference}. Must be either a SHA256 digest (@sha256:...) or a tag (:tag-name)"))
     }
 
     fn parse_endpoints(endpoints: &str) -> std::result::Result<Endpoints, anyhow::Error> {
@@ -372,6 +391,8 @@ impl Executable {
         *crate::services::APOLLO_KEY.lock() = opt.apollo_key.clone();
         *crate::services::APOLLO_GRAPH_REF.lock() = opt.apollo_graph_ref.clone();
         *APOLLO_ROUTER_LISTEN_ADDRESS.lock() = opt.listen_address;
+        *APOLLO_ROUTER_GRAPH_ARTIFACT_REFERENCE.lock() = opt.graph_artifact_reference.clone();
+        *APOLLO_ROUTER_HOT_RELOAD_CLI.lock() = Some(opt.hot_reload);
         APOLLO_ROUTER_DEV_MODE.store(opt.dev, Ordering::Relaxed);
         APOLLO_ROUTER_SUPERGRAPH_PATH_IS_SET
             .store(opt.supergraph_path.is_some(), Ordering::Relaxed);
@@ -824,6 +845,8 @@ mod tests {
 
     #[test]
     fn test_validate_oci_reference_valid_cases() {
+        use crate::registry::OciReferenceType;
+        
         // Test valid OCI references with different hash values
         let valid_hashes = vec![
             "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
@@ -836,7 +859,29 @@ mod tests {
         for hash in valid_hashes {
             let result = super::Opt::validate_oci_reference(hash);
             assert!(result.is_ok(), "Hash '{}' should be valid", hash);
-            assert_eq!(result.unwrap(), hash);
+            let (reference, ref_type) = result.unwrap();
+            assert_eq!(reference, hash);
+            assert_eq!(ref_type, OciReferenceType::Sha);
+        }
+        
+        // Test valid tag references
+        let valid_tags = vec![
+            "registry.example.com/my-graph:latest",
+            "my-graph:v1.0.0",
+            "graph:tag_name",
+            "graph:tag-name",
+            "graph:tag.name",
+            "graph:v1_2_3",
+            "graph:a",
+            "graph:01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567",
+        ];
+        
+        for tag_ref in valid_tags {
+            let result = super::Opt::validate_oci_reference(tag_ref);
+            assert!(result.is_ok(), "Tag reference '{}' should be valid", tag_ref);
+            let (reference, ref_type) = result.unwrap();
+            assert_eq!(reference, tag_ref);
+            assert_eq!(ref_type, OciReferenceType::Tag);
         }
     }
 
@@ -873,6 +918,16 @@ mod tests {
             // Extra characters at the end
             "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef:latest",
             "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef@tag",
+            // Invalid tag references
+            ":",
+            "graph:",
+            "graph:-invalid",
+            "graph:.invalid",
+            "graph:_invalid-start",
+            "graph:012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678", // 128 chars (too long)
+            "graph:tag with spaces",
+            "graph:tag@invalid",
+            "graph:tag#invalid",
         ];
 
         for reference in invalid_references {

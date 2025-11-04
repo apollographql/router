@@ -256,6 +256,8 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             experimental_chaos: chaos::Config,
             batching: Batching,
             experimental_type_conditioned_fetching: bool,
+            graph_artifact_reference: Option<String>,
+            hot_reload: bool,
         }
         let mut ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -356,6 +358,8 @@ impl Configuration {
             batching: batching.unwrap_or_default(),
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
+            graph_artifact_reference: None,
+            hot_reload: false,
             notify,
         };
 
@@ -500,6 +504,8 @@ impl Configuration {
             uplink,
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
+            graph_artifact_reference: None,
+            hot_reload: false,
             batching: batching.unwrap_or_default(),
             raw_yaml: None,
         };

@@ -10,6 +10,15 @@ use oci_client::errors::OciDistributionError;
 use oci_client::secrets::RegistryAuth;
 use thiserror::Error;
 
+/// Type of OCI reference
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OciReferenceType {
+    /// Tag reference (e.g., `:latest`, `:v1.0.0`)
+    Tag,
+    /// SHA256 digest reference (e.g., `@sha256:...`)
+    Sha,
+}
+
 /// Configuration for fetching an OCI Bundle
 /// This struct does not change on router reloads - they are all sourced from CLI options.
 #[derive(Debug, Clone)]
@@ -19,6 +28,12 @@ pub struct OciConfig {
 
     /// OCI Compliant URL pointing to the release bundle
     pub reference: String,
+
+    /// Hot reload configuration option
+    pub hot_reload: bool,
+
+    /// Type of OCI reference (tag or sha)
+    pub oci_reference_type: OciReferenceType,
 }
 
 #[derive(Debug, Clone)]
