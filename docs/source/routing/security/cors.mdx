@@ -147,6 +147,9 @@ cors:
   policies:
     - origins:
         - https://studio.apollographql.com # Keep this so GraphOS Studio can still run queries against your router
+      # Enable private network access for the router
+      private_network_access:
+        access_id:
 
   # Set to true to add the `Access-Control-Allow-Credentials` header
   allow_credentials: false
