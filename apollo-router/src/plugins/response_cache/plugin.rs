@@ -66,6 +66,10 @@ use crate::plugins::response_cache::cache_key::PrimaryCacheKeyEntity;
 use crate::plugins::response_cache::cache_key::PrimaryCacheKeyRoot;
 use crate::plugins::response_cache::cache_key::hash_additional_data;
 use crate::plugins::response_cache::cache_key::hash_query;
+use crate::plugins::response_cache::debugger::CacheEntryKind;
+use crate::plugins::response_cache::debugger::CacheKeyContext;
+use crate::plugins::response_cache::debugger::CacheKeySource;
+use crate::plugins::response_cache::debugger::CacheKeysContext;
 use crate::plugins::response_cache::storage;
 use crate::plugins::response_cache::storage::CacheEntry;
 use crate::plugins::response_cache::storage::CacheStorage;
@@ -369,7 +373,7 @@ impl PluginPrivate for ResponseCache {
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         let subgraph_ttl = self
             .subgraph_ttl(name)
-            .unwrap_or_else(|| Duration::from_secs(60 * 60 * 24)); // The unwrap should not happen because it's checked when creating the plugin
+            .unwrap_or_else(|| Duration::from_secs(60 * 60 * 24)); // The unwrap should not happen because it's checked when creating the plugin (except for tests)
         let subgraph_enabled = self.subgraph_enabled(name);
         let private_id = self.subgraphs.get(name).private_id.clone();
 
@@ -381,7 +385,7 @@ impl PluginPrivate for ResponseCache {
                 .map_response(move |response: subgraph::Response| {
                     update_cache_control(
                         &response.context,
-                        &CacheControl::new(response.response.headers(), None)
+                        &CacheControl::new(response.response.headers(), subgraph_ttl.into())
                             .ok()
                             .unwrap_or_else(CacheControl::no_store),
                     );
@@ -410,7 +414,7 @@ impl PluginPrivate for ResponseCache {
                 .map_response(move |response: subgraph::Response| {
                     update_cache_control(
                         &response.context,
-                        &CacheControl::new(response.response.headers(), None)
+                        &CacheControl::new(response.response.headers(), subgraph_ttl.into())
                             .ok()
                             .unwrap_or_else(CacheControl::no_store),
                     );
@@ -784,7 +788,8 @@ impl CacheService {
                 .contains_key(REPRESENTATIONS);
             let resp = self.service.call(request).await?;
             if self.debug {
-                let cache_control = CacheControl::new(resp.response.headers(), None)?;
+                let cache_control =
+                    CacheControl::new(resp.response.headers(), self.subgraph_ttl.into())?;
                 let kind = if is_entity {
                     CacheEntryKind::Entity {
                         typename: "".to_string(),
@@ -798,18 +803,23 @@ impl CacheService {
                 resp.context.upsert::<_, CacheKeysContext>(
                     CONTEXT_DEBUG_CACHE_KEYS,
                     |mut val| {
-                        val.push(CacheKeyContext {
-                            key: "-".to_string(),
-                            invalidation_keys: vec![],
-                            kind,
-                            hashed_private_id: private_id.clone(),
-                            subgraph_name: self.name.clone(),
-                            subgraph_request: debug_subgraph_request.unwrap_or_default(),
-                            source: CacheKeySource::Subgraph,
-                            cache_control,
-                            data: serde_json_bytes::to_value(resp.response.body().clone())
-                                .unwrap_or_default(),
-                        });
+                        val.push(
+                            CacheKeyContext {
+                                key: "-".to_string(),
+                                invalidation_keys: vec![],
+                                kind,
+                                hashed_private_id: private_id.clone(),
+                                subgraph_name: self.name.clone(),
+                                subgraph_request: debug_subgraph_request.unwrap_or_default(),
+                                source: CacheKeySource::Subgraph,
+                                cache_control,
+                                data: serde_json_bytes::to_value(resp.response.body().clone())
+                                    .unwrap_or_default(),
+                                warnings: Vec::new(),
+                                should_store: false,
+                            }
+                            .update_metadata(),
+                        );
 
                         val
                     },
@@ -924,7 +934,51 @@ impl CacheService {
                                 response.context.upsert::<_, CacheKeysContext>(
                                     CONTEXT_DEBUG_CACHE_KEYS,
                                     |mut val| {
-                                        val.push(CacheKeyContext {
+                                        val.push(
+                                            CacheKeyContext {
+                                                key: root_cache_key.clone(),
+                                                hashed_private_id: private_id.clone(),
+                                                invalidation_keys: invalidation_keys
+                                                    .clone()
+                                                    .into_iter()
+                                                    .filter(|k| {
+                                                        !k.starts_with(INTERNAL_CACHE_TAG_PREFIX)
+                                                    })
+                                                    .collect(),
+                                                kind: CacheEntryKind::RootFields {
+                                                    root_fields: root_operation_fields,
+                                                },
+                                                subgraph_name: self.name.clone(),
+                                                subgraph_request: debug_subgraph_request
+                                                    .unwrap_or_default(),
+                                                source: CacheKeySource::Subgraph,
+                                                cache_control: cache_control.clone(),
+                                                data: serde_json_bytes::to_value(
+                                                    response.response.body().clone(),
+                                                )
+                                                .unwrap_or_default(),
+                                                warnings: Vec::new(),
+                                                should_store: false,
+                                            }
+                                            .update_metadata(),
+                                        );
+
+                                        val
+                                    },
+                                )?;
+                            }
+
+                            if private_id.is_none() {
+                                // the response has a private scope but we don't have a way to differentiate users, so we do not store the response in cache
+                                // We don't need to fill the context with this cache key as it will never be cached
+                                return Ok(response);
+                            }
+                        } else if self.debug {
+                            response.context.upsert::<_, CacheKeysContext>(
+                                CONTEXT_DEBUG_CACHE_KEYS,
+                                |mut val| {
+                                    val.push(
+                                        CacheKeyContext {
                                             key: root_cache_key.clone(),
                                             hashed_private_id: private_id.clone(),
                                             invalidation_keys: invalidation_keys
@@ -946,43 +1000,11 @@ impl CacheService {
                                                 response.response.body().clone(),
                                             )
                                             .unwrap_or_default(),
-                                        });
-
-                                        val
-                                    },
-                                )?;
-                            }
-
-                            if private_id.is_none() {
-                                // the response has a private scope but we don't have a way to differentiate users, so we do not store the response in cache
-                                // We don't need to fill the context with this cache key as it will never be cached
-                                return Ok(response);
-                            }
-                        } else if self.debug {
-                            response.context.upsert::<_, CacheKeysContext>(
-                                CONTEXT_DEBUG_CACHE_KEYS,
-                                |mut val| {
-                                    val.push(CacheKeyContext {
-                                        key: root_cache_key.clone(),
-                                        hashed_private_id: private_id.clone(),
-                                        invalidation_keys: invalidation_keys
-                                            .clone()
-                                            .into_iter()
-                                            .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
-                                            .collect(),
-                                        kind: CacheEntryKind::RootFields {
-                                            root_fields: root_operation_fields,
-                                        },
-                                        subgraph_name: self.name.clone(),
-                                        subgraph_request: debug_subgraph_request
-                                            .unwrap_or_default(),
-                                        source: CacheKeySource::Subgraph,
-                                        cache_control: cache_control.clone(),
-                                        data: serde_json_bytes::to_value(
-                                            response.response.body().clone(),
-                                        )
-                                        .unwrap_or_default(),
-                                    });
+                                            warnings: Vec::new(),
+                                            should_store: true,
+                                        }
+                                        .update_metadata(),
+                                    );
 
                                     val
                                 },
@@ -1055,7 +1077,9 @@ impl CacheService {
                                 data: serde_json_bytes::json!({
                                     "data": serde_json_bytes::to_value(cache_entry.data.clone()).unwrap_or_default()
                                 }),
-                            })
+                                warnings: Vec::new(),
+                                should_store: false,
+                            }.update_metadata())
                         });
                         request.context.upsert::<_, CacheKeysContext>(
                             CONTEXT_DEBUG_CACHE_KEYS,
@@ -1228,23 +1252,28 @@ async fn cache_lookup_root(
                     request.context.upsert::<_, CacheKeysContext>(
                         CONTEXT_DEBUG_CACHE_KEYS,
                         |mut val| {
-                            val.push(CacheKeyContext {
-                                key: value.key.clone(),
-                                hashed_private_id: private_id.map(ToString::to_string),
-                                invalidation_keys: invalidation_keys
-                                    .clone()
-                                    .into_iter()
-                                    .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
-                                    .collect(),
-                                kind: CacheEntryKind::RootFields {
-                                    root_fields: root_operation_fields,
-                                },
-                                subgraph_name: request.subgraph_name.clone(),
-                                subgraph_request: request.subgraph_request.body().clone(),
-                                source: CacheKeySource::Cache,
-                                cache_control: value.control.clone(),
-                                data: serde_json_bytes::json!({"data": value.data.clone()}),
-                            });
+                            val.push(
+                                CacheKeyContext {
+                                    key: value.key.clone(),
+                                    hashed_private_id: private_id.map(ToString::to_string),
+                                    invalidation_keys: invalidation_keys
+                                        .clone()
+                                        .into_iter()
+                                        .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
+                                        .collect(),
+                                    kind: CacheEntryKind::RootFields {
+                                        root_fields: root_operation_fields,
+                                    },
+                                    subgraph_name: request.subgraph_name.clone(),
+                                    subgraph_request: request.subgraph_request.body().clone(),
+                                    source: CacheKeySource::Cache,
+                                    cache_control: value.control.clone(),
+                                    data: serde_json_bytes::json!({"data": value.data.clone()}),
+                                    warnings: Vec::new(),
+                                    should_store: false,
+                                }
+                                .update_metadata(),
+                            );
 
                             val
                         },
@@ -1505,24 +1534,29 @@ async fn cache_lookup_entities(
     } else {
         if debug {
             let debug_cache_keys_ctx = cache_result.iter().filter_map(|ir| {
-                ir.cache_entry.as_ref().map(|cache_entry| CacheKeyContext {
-                    key: ir.key.clone(),
-                    hashed_private_id: private_id.map(ToString::to_string),
-                    invalidation_keys: ir
-                        .invalidation_keys
-                        .clone()
-                        .into_iter()
-                        .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
-                        .collect(),
-                    kind: CacheEntryKind::Entity {
-                        typename: ir.typename.clone(),
-                        entity_key: ir.entity_key.clone().unwrap_or_default(),
-                    },
-                    subgraph_name: name.clone(),
-                    subgraph_request: request.subgraph_request.body().clone(),
-                    source: CacheKeySource::Cache,
-                    cache_control: cache_entry.control.clone(),
-                    data: serde_json_bytes::json!({"data": cache_entry.data.clone()}),
+                ir.cache_entry.as_ref().map(|cache_entry| {
+                    CacheKeyContext {
+                        key: ir.key.clone(),
+                        hashed_private_id: private_id.map(ToString::to_string),
+                        invalidation_keys: ir
+                            .invalidation_keys
+                            .clone()
+                            .into_iter()
+                            .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
+                            .collect(),
+                        kind: CacheEntryKind::Entity {
+                            typename: ir.typename.clone(),
+                            entity_key: ir.entity_key.clone().unwrap_or_default(),
+                        },
+                        subgraph_name: name.clone(),
+                        subgraph_request: request.subgraph_request.body().clone(),
+                        source: CacheKeySource::Cache,
+                        cache_control: cache_entry.control.clone(),
+                        data: serde_json_bytes::json!({"data": cache_entry.data.clone()}),
+                        warnings: Vec::new(),
+                        should_store: false,
+                    }
+                    .update_metadata()
                 })
             });
             request.context.upsert::<_, CacheKeysContext>(
@@ -1666,8 +1700,9 @@ async fn cache_store_entities_from_response(
         // if the scope is private but we do not have a way to differentiate users, do not store anything in the cache
         let should_cache_private = !cache_control.private() || private_id.is_some();
 
+        // We check it's not known as a private query because if it's known as a private query that means the private id is already part of the hash
         let update_key_private = if !is_known_private && cache_control.private() {
-            private_id
+            private_id.clone()
         } else {
             None
         };
@@ -1693,6 +1728,7 @@ async fn cache_store_entities_from_response(
             default_subgraph_ttl,
             cache_control,
             &mut result_from_cache,
+            private_id,
             update_key_private,
             should_cache_private,
             &response.subgraph_name,
@@ -2282,6 +2318,8 @@ async fn insert_entities_in_result(
     default_subgraph_ttl: Duration,
     cache_control: CacheControl,
     result: &mut Vec<IntermediateResult>,
+    // The original private id fetched from context and hashed to put it in the debug entry
+    private_id_for_dbg: Option<String>,
     update_key_private: Option<String>,
     should_cache_private: bool,
     subgraph_name: &str,
@@ -2360,24 +2398,29 @@ async fn insert_entities_in_result(
 
                 // Only in debug mode
                 if let Some(subgraph_request) = &subgraph_request {
-                    debug_ctx_entries.push(CacheKeyContext {
-                        key: key.clone(),
-                        hashed_private_id: update_key_private.clone(),
-                        invalidation_keys: invalidation_keys
-                            .clone()
-                            .into_iter()
-                            .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
-                            .collect(),
-                        kind: CacheEntryKind::Entity {
-                            typename: typename.clone(),
-                            entity_key: entity_key.clone().unwrap_or_default(),
-                        },
-                        subgraph_name: subgraph_name.to_string(),
-                        subgraph_request: subgraph_request.clone(),
-                        source: CacheKeySource::Subgraph,
-                        cache_control: cache_control.clone(),
-                        data: serde_json_bytes::json!({"data": value.clone()}),
-                    });
+                    debug_ctx_entries.push(
+                        CacheKeyContext {
+                            key: key.clone(),
+                            hashed_private_id: private_id_for_dbg.clone(),
+                            invalidation_keys: invalidation_keys
+                                .clone()
+                                .into_iter()
+                                .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
+                                .collect(),
+                            kind: CacheEntryKind::Entity {
+                                typename: typename.clone(),
+                                entity_key: entity_key.clone().unwrap_or_default(),
+                            },
+                            subgraph_name: subgraph_name.to_string(),
+                            subgraph_request: subgraph_request.clone(),
+                            source: CacheKeySource::Subgraph,
+                            cache_control: cache_control.clone(),
+                            data: serde_json_bytes::json!({"data": value.clone()}),
+                            warnings: Vec::new(),
+                            should_store: false,
+                        }
+                        .update_metadata(),
+                    );
                 }
                 if !has_errors && cache_control.should_store() && should_cache_private {
                     if let Some(Value::Array(keys)) = specific_surrogate_keys {
@@ -2453,67 +2496,6 @@ fn assemble_response_from_errors(
         }
     }
     (new_entities, new_errors)
-}
-
-pub(crate) type CacheKeysContext = Vec<CacheKeyContext>;
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct CacheKeyContext {
-    pub(super) key: String,
-    pub(super) invalidation_keys: Vec<String>,
-    pub(super) kind: CacheEntryKind,
-    pub(super) subgraph_name: String,
-    pub(super) subgraph_request: graphql::Request,
-    pub(super) source: CacheKeySource,
-    pub(super) cache_control: CacheControl,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) hashed_private_id: Option<String>,
-    pub(super) data: serde_json_bytes::Value,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[cfg_attr(test, derive(PartialEq, Eq, Hash))]
-#[serde(rename_all = "camelCase", untagged)]
-pub(crate) enum CacheEntryKind {
-    Entity {
-        typename: String,
-        #[serde(rename = "entityKey")]
-        entity_key: Object,
-    },
-    RootFields {
-        #[serde(rename = "rootFields")]
-        root_fields: Vec<String>,
-    },
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[cfg_attr(test, derive(PartialEq, Eq, Hash))]
-#[serde(rename_all = "camelCase")]
-pub(crate) enum CacheKeySource {
-    /// Data fetched from subgraph
-    Subgraph,
-    /// Data fetched from cache
-    Cache,
-}
-
-#[cfg(test)]
-impl PartialOrd for CacheKeySource {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-#[cfg(test)]
-impl Ord for CacheKeySource {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        match (self, other) {
-            (CacheKeySource::Subgraph, CacheKeySource::Subgraph) => std::cmp::Ordering::Equal,
-            (CacheKeySource::Subgraph, CacheKeySource::Cache) => std::cmp::Ordering::Greater,
-            (CacheKeySource::Cache, CacheKeySource::Subgraph) => std::cmp::Ordering::Less,
-            (CacheKeySource::Cache, CacheKeySource::Cache) => std::cmp::Ordering::Equal,
-        }
-    }
 }
 
 async fn connect_or_spawn_reconnection_task(
