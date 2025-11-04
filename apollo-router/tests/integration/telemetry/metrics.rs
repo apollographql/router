@@ -131,7 +131,7 @@ async fn test_response_cache_metrics() {
     );
     let metrics = metrics_response.text().await.unwrap();
 
-    check_metrics_contains(&metrics, r#"cache_control_public="true""#);
+    check_metrics_contains(&metrics, r#"cache_control_scope="public""#);
     let regexp = Regex::new(r#"cache_control_max_age="([0-9]+)""#).unwrap();
     let captures: BTreeSet<&str> = regexp.find_iter(&metrics).map(|m| m.as_str()).collect();
     // Checking they all have the same values to avoid computed max age
