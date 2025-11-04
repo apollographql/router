@@ -149,7 +149,15 @@ impl SchemaUpgrader {
 
         // Note that this should come _after_ all the other changes that may remove/update federation directives, since those may create unused
         // externals. Which is why this is toward  the end.
+        tracing::trace!(
+            "Removing unused externals...\nCurrent Subgraph:\n{}",
+            schema.schema()
+        );
         self.remove_unused_externals(&upgrade_metadata, &mut schema)?;
+        tracing::trace!(
+            "Finished removing unused externals...\nCurrent Subgraph:\n{}",
+            schema.schema()
+        );
 
         self.add_shareable(&upgrade_metadata, &mut schema)?;
 
@@ -687,12 +695,14 @@ impl SchemaUpgrader {
             if let Ok(pos) = ObjectTypeDefinitionPosition::try_from(type_) {
                 let mut has_fields = false;
                 for field in pos.fields(schema.schema())? {
-                    has_fields = true;
                     let field_def = FieldDefinitionPosition::from(field.clone());
                     let metadata = &upgrade_metadata.metadata;
                     if metadata.is_field_external(&field_def) && !metadata.is_field_used(&field_def)
                     {
                         fields_to_remove.insert(field);
+                    } else {
+                        // Any non-removed field will set this boolean
+                        has_fields = true;
                     }
                 }
                 if !has_fields {
