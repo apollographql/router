@@ -102,6 +102,27 @@ impl Identity {
             name: name!("context"),
         }
     }
+
+    pub fn requires_scopes_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: name!("requiresScopes"),
+        }
+    }
+
+    pub fn authenticated_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: name!("authenticated"),
+        }
+    }
+
+    pub fn policy_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: name!("policy"),
+        }
+    }
 }
 
 /// The version of a `@link` specification, in the form of a major and minor version numbers.
