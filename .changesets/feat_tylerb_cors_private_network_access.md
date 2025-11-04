@@ -6,7 +6,7 @@ Expands CORS configuration and support for the [private network access](https://
 cors:
   policies:
     - origins: ["https://studio.apollographql.com"]
-      private_netword_access:
+      private_network_access:
         access_id:
     - match_origins: ["^https://(dev|staging|www)?\\.my-app\\.(com|fr|tn)$"]
       private_network_access:
