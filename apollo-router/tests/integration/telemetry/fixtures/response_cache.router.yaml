@@ -7,8 +7,8 @@ telemetry:
             subgraph.name: true
             cache_control.max_age:
               response_cache_control: max_age
-            cache_control.public:
-              response_cache_control: public
+            cache_control.scope:
+              response_cache_control: scope
   exporters:
     metrics:
       prometheus:

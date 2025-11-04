@@ -6,23 +6,29 @@ Example of attributes added to metrics:
 
 ```yaml
 telemetry:
-  apollo:
-    field_level_instrumentation_sampler: 0.3
-    errors:
-      subgraph:
-        all:
-          redact: false
-          send: true
-  instrumentation:
+  exporters:
     metrics:
+      common:
+        service_name: apollo-router
+        views:
+          - name: subgraph.response.cache_control.max_age # This is to make sure it will use the correct buckets for the max age histogram
+            aggregation:
+              histogram:
+                buckets: # Override default buckets configured for this histogram
+                - 10
+                - 100
+                - 1000
+                - 10000
+                - 100000
+  instrumentation:
+    instruments:
       subgraph:
-        http.client.request.duration:
-          attributes:
-            subgraph.name: true
-            cache_control.max_age: # Value of max-age
-              response_cache_control: max_age
-            cache_control.public: # Is public data (from cache-control header)
-              response_cache_control: public
+        subgraph.response.cache_control.max_age:
+          value:
+            response_cache_control: max_age
+          type: histogram
+          unit: s # Seconds
+          description: A histogram of the computed TTL for a subgraph response
 ```
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/8524

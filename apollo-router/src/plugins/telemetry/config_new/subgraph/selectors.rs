@@ -663,8 +663,13 @@ impl Selector for SubgraphSelector {
                     .get::<response_cache::plugin::CacheControls>()?
                     .get(&response.id)?;
                 match response_cache_control {
-                    CacheControlSelector::Public => Some(cc.public().into()),
-                    CacheControlSelector::Private => Some(cc.private().into()),
+                    CacheControlSelector::Scope => {
+                        if cc.private() {
+                            Some(opentelemetry::Value::String("private".to_string().into()))
+                        } else {
+                            Some(opentelemetry::Value::String("public".to_string().into()))
+                        }
+                    }
                     CacheControlSelector::NoStore => Some(cc.get_no_store().into()),
                     CacheControlSelector::MaxAge => cc
                         .ttl()
@@ -1713,7 +1718,7 @@ mod test {
         );
 
         let selector = SubgraphSelector::ResponseCacheControl {
-            response_cache_control: CacheControlSelector::Public,
+            response_cache_control: CacheControlSelector::Scope,
         };
         assert_eq!(
             selector.on_response(
@@ -1723,7 +1728,7 @@ mod test {
                     .context(context.clone())
                     .build(),
             ),
-            Some(opentelemetry::Value::Bool(true))
+            Some(opentelemetry::Value::String("public".to_string().into()))
         );
     }
 

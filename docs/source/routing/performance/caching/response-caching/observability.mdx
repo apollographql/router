@@ -160,7 +160,7 @@ A [_selector_](/router/configuration/telemetry/instrumentation/selectors) extrac
 |-----------------------------|-------------|------------------|--------------------------------------------------------------------------------|
 | `response_cache`            | No          | `hit` \| `miss`    | Returns the number of cache hit or miss for this subgraph request              |
 | `response_cache_status`    | No          | `hit` \| `partial_hit`\| `miss`\| `status`    | Indicates the cache status for the subgraph request: `hit` (all data from cache), `miss` (all data from subgraph), or `partial_hit` (some entities from cache).   |
-| `response_cache_control`    | No          | `max_age` \| `public`\| `private`\| `no_store`    | Provides data from the computed `Cache-Control` header, such as `max_age` or scope (`public`/`private`).  |
+| `response_cache_control`    | No          | `max_age` \| `scope`\| `no_store`    | Provides data from the computed `Cache-Control` header, such as `max_age` or scope (`public`/`private`).  |
 
 ### Example
 

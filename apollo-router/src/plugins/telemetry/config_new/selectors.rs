@@ -99,10 +99,8 @@ pub(crate) enum CacheStatus {
 #[derive(Deserialize, JsonSchema, Clone, PartialEq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum CacheControlSelector {
-    /// Boolean if it's public or not
-    Public,
-    /// Boolean if it's private or not
-    Private,
+    /// Returns the scope, either `public` or `private`
+    Scope,
     /// Boolean to know the value of no-store
     NoStore,
     /// Value of s-maxage or max-age in cache-control
