@@ -373,10 +373,6 @@ impl CacheControl {
         self.public
     }
 
-    pub(crate) fn get_no_store(&self) -> bool {
-        self.no_store
-    }
-
     pub(crate) fn can_use(&self) -> bool {
         let elapsed = self.elapsed();
         let expired = if elapsed < 0 {
@@ -388,6 +384,18 @@ impl CacheControl {
         // FIXME: we don't honor stale-while-revalidate yet
         // !expired || self.stale_while_revalidate
         !expired && !self.no_store
+    }
+
+    pub(crate) fn is_no_store(&self) -> bool {
+        self.no_store
+    }
+
+    pub(crate) fn s_max_age_or_max_age(&self) -> Option<u64> {
+        self.s_max_age.or(self.max_age)
+    }
+
+    pub(crate) fn age(&self) -> Option<u64> {
+        self.age
     }
 
     #[cfg(test)]
