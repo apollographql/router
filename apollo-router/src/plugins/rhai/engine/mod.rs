@@ -1384,9 +1384,6 @@ impl Rhai {
             .register_static_module("env", expansion_module.into())
             // Register HeaderMap as an iterator so we can loop over contents
             .register_iterator::<HeaderMap>();
-
-        // Add common getter/setters for different types
-        registration::register_all(engine);
     }
 
     pub(super) fn new_rhai_engine(path: Option<PathBuf>, sdl: String, main: PathBuf) -> Engine {
@@ -1401,6 +1398,8 @@ impl Rhai {
 
         // Register global modules and common functionality
         Self::register_global_modules(&mut engine);
+        // Add common getter/setters for different types
+        registration::register(&mut engine);
 
         // Share main so we can move copies into each closure as required for logging
         let shared_main = Arc::new(main.display().to_string());

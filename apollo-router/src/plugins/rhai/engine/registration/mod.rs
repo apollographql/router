@@ -12,7 +12,7 @@ use rhai::Engine;
 /// - Supergraph: After parsing GraphQL, can mutate supergraph request
 /// - Execution: During query execution, can mutate supergraph request
 /// - Subgraph: Before calling subgraphs, originating request is read-only
-pub(super) fn register_all(engine: &mut Engine) {
+pub(super) fn register(engine: &mut Engine) {
     router::register(engine);
     supergraph::register(engine);
     execution::register(engine);

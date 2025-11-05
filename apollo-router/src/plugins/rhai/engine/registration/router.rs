@@ -161,6 +161,7 @@ mod tests {
 
     use super::*;
     use crate::context::Context;
+    use crate::plugins::rhai::engine::registration;
     use crate::plugins::rhai::router;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
@@ -170,6 +171,8 @@ mod tests {
 
         // Register global modules (HeaderMap indexer, Context, Request, etc.)
         crate::plugins::rhai::Rhai::register_global_modules(&mut engine);
+        // Add common getter/setters for different types
+        registration::register(&mut engine);
 
         engine
     }
