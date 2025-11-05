@@ -1,5 +1,8 @@
+use std::collections::BTreeSet;
+use std::path::PathBuf;
 use std::time::Duration;
 
+use regex::Regex;
 use serde_json::json;
 
 use crate::integration::IntegrationTest;
@@ -8,6 +11,7 @@ use crate::integration::common::graph_os_enabled;
 
 const PROMETHEUS_CONFIG: &str = include_str!("fixtures/prometheus.router.yaml");
 const SUBGRAPH_AUTH_CONFIG: &str = include_str!("fixtures/subgraph_auth.router.yaml");
+const RESPONSE_CACHE_CONFIG: &str = include_str!("fixtures/response_cache.router.yaml");
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_metrics_reloading() {
@@ -84,6 +88,62 @@ fn check_metrics_contains(metrics: &str, text: &str) {
     assert!(
         metrics.contains(text),
         "'{text}' not detected in metrics\n{metrics}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_response_cache_metrics() {
+    if !graph_os_enabled() {
+        eprintln!("test skipped");
+        return;
+    }
+    let mut router = IntegrationTest::builder()
+        .config(RESPONSE_CACHE_CONFIG)
+        .supergraph(PathBuf::from("./testing_schema.graphql"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    let json_query = json!({"query":"{ topProducts { name reviews { body } } }","variables":{}});
+    let query = Query::builder()
+        // .header("apollo-cache-debugging", "true")
+        .body(json_query.clone())
+        .build();
+    let (_, _resp) = router.execute_query(query.clone()).await;
+    router.execute_query(query.clone()).await;
+    // To make sure to update the TTL and it's not reflected in metrics
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    router.execute_query(query.clone()).await;
+
+    // Get Prometheus metrics.
+    let metrics_response = router.get_metrics_response().await.unwrap();
+
+    // Validate metric headers.
+    let metrics_headers = metrics_response.headers();
+    assert!(
+        "text/plain; version=0.0.4"
+            == metrics_headers
+                .get(http::header::CONTENT_TYPE)
+                .unwrap()
+                .to_str()
+                .unwrap()
+    );
+    let metrics = metrics_response.text().await.unwrap();
+
+    check_metrics_contains(&metrics, r#"cache_control_scope="public""#);
+    let regexp = Regex::new(r#"cache_control_max_age="([0-9]+)""#).unwrap();
+    let captures: BTreeSet<&str> = regexp.find_iter(&metrics).map(|m| m.as_str()).collect();
+    // Checking they all have the same values to avoid computed max age
+    assert_eq!(captures.len(), 2);
+    let mut captures_iter = captures.iter();
+    assert_eq!(
+        captures_iter.next().unwrap(),
+        &"cache_control_max_age=\"10\""
+    );
+    assert_eq!(
+        captures_iter.next().unwrap(),
+        &"cache_control_max_age=\"60\""
     );
 }
 
@@ -397,5 +457,116 @@ async fn test_prom_reset_on_reload() {
             None,
         )
         .await;
+    router.graceful_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_prometheus_metric_rename() {
+    let mut router = IntegrationTest::builder()
+        .config(include_str!(
+            "fixtures/prometheus_metric_rename.router.yaml"
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Execute queries to generate metrics
+    router.execute_default_query().await;
+    router.execute_default_query().await;
+
+    // Get Prometheus metrics
+    let metrics = router
+        .get_metrics_response()
+        .await
+        .expect("failed to fetch metrics")
+        .text()
+        .await
+        .unwrap();
+
+    // Verify the renamed metric exists with Prometheus transformations
+    // custom.http.duration → custom_http_duration_seconds (dots to underscores, unit suffix added)
+    check_metrics_contains(&metrics, r#"custom_http_duration_seconds_count"#);
+    check_metrics_contains(&metrics, r#"custom_http_duration_seconds_sum"#);
+    check_metrics_contains(&metrics, r#"custom_http_duration_seconds_bucket"#);
+
+    // Verify the original metric name does NOT exist
+    assert!(
+        !metrics.contains(r#"http_server_request_duration_seconds"#),
+        "Original metric name should not exist after rename"
+    );
+
+    // Verify renamed operations metric
+    check_metrics_contains(&metrics, r#"custom_operations_count"#);
+
+    // Verify metric is actually recording data
+    check_metrics_contains(
+        &metrics,
+        r#"custom_http_duration_seconds_count{http_request_method="POST",status="200",otel_scope_name="apollo/router"} 2"#,
+    );
+
+    router.graceful_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_metric_rename_on_reload() {
+    // This test verifies that changing the rename field in a view triggers a proper reload
+    // and that the new renamed metric appears correctly
+    let mut router = IntegrationTest::builder()
+        .config(include_str!(
+            "fixtures/prometheus_metric_rename.router.yaml"
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    router.execute_default_query().await;
+    router.execute_default_query().await;
+
+    // Verify initial renamed metric exists
+    router
+        .assert_metrics_contains(
+            r#"custom_http_duration_seconds_count{http_request_method="POST",status="200",otel_scope_name="apollo/router"} 2"#,
+            None,
+        )
+        .await;
+
+    // Reload with different rename
+    router
+        .update_config(include_str!(
+            "fixtures/prometheus_rename_reload.router.yaml"
+        ))
+        .await;
+    router.assert_reloaded().await;
+
+    // Execute another query after reload
+    router.execute_default_query().await;
+
+    let metrics = router
+        .get_metrics_response()
+        .await
+        .expect("failed to fetch metrics")
+        .text()
+        .await
+        .unwrap();
+
+    // After reload, the new renamed metric should exist
+    check_metrics_contains(&metrics, r#"reloaded_http_duration_seconds_count"#);
+
+    // Verify metric is recording data with new name
+    check_metrics_contains(
+        &metrics,
+        r#"reloaded_http_duration_seconds_count{http_request_method="POST",status="200",otel_scope_name="apollo/router"} 1"#,
+    );
+
+    // Old renamed metric should not exist (metrics reset on reload)
+    assert!(
+        !metrics.contains(r#"custom_http_duration_seconds"#),
+        "Old renamed metric should not exist after reload with different rename"
+    );
+
     router.graceful_shutdown().await;
 }

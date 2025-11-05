@@ -13,6 +13,7 @@
 retries = 2
 filter = '''
    ( binary_id(=apollo-router-benchmarks) & test(=tests::test) )
+or ( binary_id(=apollo-router::integration_tests) & test(#integration::subscriptions::ws_passthrough::*) )
 or ( binary_id(=apollo-router::apollo_otel_traces) & test(=connector_error) )
 or ( binary_id(=apollo-router::apollo_otel_traces) & test(=non_defer) )
 or ( binary_id(=apollo-router::apollo_otel_traces) & test(=test_batch_send_header) )
@@ -78,6 +79,7 @@ or ( binary_id(=apollo-router::integration_tests) & test(=integration::file_uplo
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::file_upload::it_uploads_file_to_subgraph) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::file_upload::it_uploads_to_multiple_subgraphs) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::introspection::integration) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::lifecycle::test_force_config_reload_via_chaos) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::lifecycle::test_force_reload) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::lifecycle::test_graceful_shutdown) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::lifecycle::test_happy) )
@@ -115,9 +117,6 @@ or ( binary_id(=apollo-router::integration_tests) & test(=integration::subgraph_
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::subgraph_response::test_valid_extensions_service_is_preserved_for_subgraph_error) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::subscriptions::callback::test_subscription_callback_pure_error_payload) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::subscriptions::callback::test_subscription_callback) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::subscriptions::ws_passthrough::test_subscription_ws_passthrough_dedup_close_early) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::subscriptions::ws_passthrough::test_subscription_ws_passthrough_dedup) )
-or ( binary_id(=apollo-router::integration_tests) & test(=integration::subscriptions::ws_passthrough::test_subscription_ws_passthrough) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::supergraph::test_supergraph_errors_on_http1_header_that_does_not_fit_inside_buffer) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::apollo_otel_metrics::test_connector_request_emits_histogram) )
 or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::apollo_otel_metrics::test_execution_layer_error_emits_metric) )
@@ -235,6 +234,7 @@ or ( binary_id(=apollo-router) & test(=plugins::include_subgraph_errors::test::i
 or ( binary_id(=apollo-router) & test(=plugins::include_subgraph_errors::test::it_redacts_all_subgraphs_implicit_redact) )
 or ( binary_id(=apollo-router) & test(=plugins::include_subgraph_errors::test::it_returns_valid_response) )
 or ( binary_id(=apollo-router) & test(=plugins::telemetry::config_new::instruments::tests::test_instruments) )
+or ( binary_id(=apollo-router) & test(=plugins::telemetry::config_new::router_overhead::tracker::tests::test_sequential_subgraph_requests) )
 or ( binary_id(=apollo-router) & test(=plugins::telemetry::metrics::apollo::test::apollo_metrics_enabled) )
 or ( binary_id(=apollo-router) & test(=plugins::telemetry::metrics::apollo::test::apollo_metrics_for_subscription_error) )
 or ( binary_id(=apollo-router) & test(=plugins::telemetry::metrics::apollo::test::apollo_metrics_multiple_operations) )

@@ -1,14 +1,5 @@
 version: "3.9"
 services:
-  postgres:
-    image: cimg/postgres:17.6
-    security_opt:
-      - no-new-privileges:true
-    environment:
-      POSTGRES_USER: ${USER}
-      POSTGRES_DB: ${USER}
-    ports:
-      - 5432:5432
   zipkin:
     image: openzipkin/zipkin:latest
     security_opt:

@@ -188,8 +188,14 @@ The `default_requirement_level` option sets the default attributes to attach to 
 
 Valid values:
 
-* `required` (default) - required attributes will be attached to standard instruments by default.
-* `recommended` - recommended attributes will be attached to standard instruments by default.
+* `required` (default, Apollo recommended) - required attributes will be attached to standard instruments by default.
+* `recommended` - experimental attributes from OpenTelemetry's development-status conventions will be attached to standard instruments by default.
+
+<Note>
+
+Apollo recommends using `required`, rather than `recommended`. Using `recommended` includes experimental attributes from OpenTelemetry's [development-status GraphQL semantic conventions](https://opentelemetry.io/docs/specs/semconv/graphql/graphql-spans/), such as `graphql.document` and `subgraph.graphql.document`. These attributes can create high cardinality and may contain sensitive information. See the [standard attributes documentation](/router/configuration/telemetry/instrumentation/standard-attributes) for details.
+
+</Note>
 
 ```yaml title="router.yaml"
 telemetry:
@@ -400,9 +406,48 @@ telemetry:
   instrumentation:
     instruments:
       router:
-        acme.metric: 
+        acme.metric:
           # ...
           unit: s # seconds
+```
+
+##### Duration unit conversion
+
+For instruments with `value: duration` or `value: event_duration`, the router automatically converts the measured duration to match the configured `unit`. This feature supports the following time units:
+
+- `s` - seconds (default, recommended)
+- `ms` - milliseconds
+- `us` - microseconds
+- `ns` - nanoseconds
+
+<Note>
+
+Best practice: Follow the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/#instrument-units) and use seconds (`s`) as the unit for duration measurements.
+
+Only use non-second units (`ms`, `us`, `ns`) when integrating with an observability platform that requires a specific unit and doesn't automatically convert time units.
+
+</Note>
+
+Example:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        # Recommended: use seconds (values recorded as seconds)
+        acme.request.duration:
+          value: duration
+          type: histogram
+          unit: s
+          description: "Request Duration (s)"
+
+        # Only if required by your observability platform
+        otheracme.request.duration:
+          value: duration
+          type: histogram
+          unit: ms # Values automatically converted to milliseconds
+          description: "Request Duration (ms)"
 ```
 
 #### `description`

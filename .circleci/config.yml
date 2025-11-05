@@ -27,10 +27,6 @@ executors:
     docker:
       - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.19.0
       - image: cimg/redis:7.4.6
-      - image: cimg/postgres:17.6
-        environment:
-          POSTGRES_USER: root
-          POSTGRES_DB: root
       - image: openzipkin/zipkin:3.5.1
       - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.36.0
       # redis cluster - 3 primaries, 3 replicas
@@ -381,7 +377,7 @@ commands:
             # Use the settings from the "ci" profile in nextest configuration.
             NEXTEST_PROFILE: ci
           command: |
-            cargo xtask test --workspace --locked --features ci,snapshot
+            cargo xtask test --no-fail-fast --workspace --locked --features ci,snapshot
 
       - run:
           name: Delete large files from cache
@@ -1043,7 +1039,6 @@ workflows:
       - build_release:
           requires:
             - test
-            - coverage
             - check_helm
             - check_compliance
           nightly: true

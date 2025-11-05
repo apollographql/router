@@ -42,6 +42,8 @@ pub(crate) type Config = super::config::Config;
 struct CacheValue {
     data: serde_json_bytes::Value,
     cache_control: CacheControl,
+    // Only set in debug mode
+    cache_tags: Option<HashSet<String>>,
 }
 
 impl ValueType for CacheValue {}
@@ -52,6 +54,7 @@ impl From<(&str, CacheValue)> for CacheEntry {
             key: cache_key.to_string(),
             data: cache_value.data,
             control: cache_value.cache_control,
+            cache_tags: cache_value.cache_tags,
         }
     }
 }
@@ -258,9 +261,16 @@ impl CacheStorage for Storage {
 
         let now = now();
 
+        // Only useful for caching debugger, it will only contains entries if the doc is set to debug
+        let mut original_cache_tags = Vec::with_capacity(batch_docs.len());
         // phase 1
         for document in &mut batch_docs {
             document.key = self.make_key(&document.key);
+            if document.debug {
+                original_cache_tags.push(document.invalidation_keys.clone());
+            } else {
+                original_cache_tags.push(Vec::new());
+            }
             document.invalidation_keys =
                 self.namespaced_cache_tags(&document.invalidation_keys, subgraph_name);
         }
@@ -336,10 +346,11 @@ impl CacheStorage for Storage {
 
         // phase 3
         let pipeline = self.storage.pipeline().with_options(&options);
-        for document in batch_docs.into_iter() {
+        for (document, cache_tags) in batch_docs.into_iter().zip(original_cache_tags.into_iter()) {
             let value = CacheValue {
                 data: document.data,
                 cache_control: document.control,
+                cache_tags: document.debug.then(|| cache_tags.into_iter().collect()),
             };
             let _: () = pipeline
                 .set::<(), _, _>(
@@ -567,6 +578,7 @@ mod tests {
             control: Default::default(),
             invalidation_keys: vec!["invalidate".to_string()],
             expire: Duration::from_secs(60),
+            debug: true,
         }
     }
 
@@ -998,11 +1010,10 @@ mod tests {
                 storage.namespaced_cache_tags(&document.invalidation_keys, SUBGRAPH_NAME);
 
             let insert_invalid_cache_tag = |key: String| async {
-                let expiration = config.ttl.map(|ttl| Expiration::EX(ttl.as_secs() as i64));
                 let _: () = storage
                     .storage
                     .client()
-                    .set(key, 1, expiration, None, false)
+                    .set(key, 1, Some(Expiration::EX(60)), None, false)
                     .await?;
                 Ok::<(), BoxError>(())
             };

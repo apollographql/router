@@ -58,11 +58,6 @@ pub(crate) struct Config {
     /// Maintenance tasks are processed asynchronously, so this will not affect response duration.
     pub(crate) maintenance_timeout: Duration,
 
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
-    #[schemars(with = "Option<String>", default)]
-    /// TTL for entries
-    pub(crate) ttl: Option<Duration>,
-
     /// namespace used to prefix Redis keys
     pub(crate) namespace: Option<String>,
 
@@ -124,7 +119,7 @@ impl From<&Config> for RedisCache {
             username: value.username.clone(),
             password: value.password.clone(),
             timeout,
-            ttl: value.ttl,
+            ttl: None,
             namespace: value.namespace.clone(),
             tls: value.tls.clone(),
             required_to_start: value.required_to_start,
@@ -153,7 +148,6 @@ impl Config {
             "namespace": namespace,
             "pool_size": 1,
             "required_to_start": true,
-            "ttl": "5m"
         }))
         .unwrap()
     }

@@ -41,7 +41,8 @@ impl<'a> PrimaryCacheKeyRoot<'a> {
         } = self;
 
         let query_hash = hash_query(subgraph_query_hash);
-        let additional_data_hash = hash_additional_data(body, context, auth_cache_key_metadata);
+        let additional_data_hash =
+            hash_additional_data(subgraph_name, body, context, auth_cache_key_metadata);
 
         // - response cache version: current version of the hash
         // - subgraph name: subgraph name
@@ -64,7 +65,6 @@ pub(super) struct PrimaryCacheKeyEntity<'a> {
     pub(super) subgraph_name: &'a str,
     pub(super) entity_type: &'a str,
     pub(super) representation: &'a Map<ByteString, Value>,
-    pub(super) entity_key: &'a Map<ByteString, Value>,
     /// NB: hashed before insertion into this struct, so that the hashed representation can be reused for all entities in this query
     pub(super) subgraph_query_hash: &'a str,
     pub(super) additional_data_hash: &'a str,
@@ -80,7 +80,6 @@ impl<'a> PrimaryCacheKeyEntity<'a> {
             additional_data_hash,
             private_id,
             representation,
-            entity_key,
         } = self;
 
         let hashed_representation = if representation.is_empty() {
@@ -88,17 +87,15 @@ impl<'a> PrimaryCacheKeyEntity<'a> {
         } else {
             hash_representation(representation)
         };
-        let hashed_entity_key = hash_entity_key(entity_key);
 
         // - response cache version: current version of the hash
         // - subgraph name: caching is done per subgraph
         // - type: can invalidate all instances of a type
-        // - entity key: invalidate a specific entity
         // - representation: representation variable value
         // - query hash: invalidate the entry for a specific query and operation name
         // - additional data: separate cache entries depending on info like authorization status
         let mut key = format!(
-            "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}:entity:{hashed_entity_key}:representation:{hashed_representation}:hash:{subgraph_query_hash}:data:{additional_data_hash}"
+            "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}:representation:{hashed_representation}:hash:{subgraph_query_hash}:data:{additional_data_hash}"
         );
 
         if let Some(private_id) = private_id {
@@ -119,6 +116,7 @@ pub(super) fn hash_query(query_hash: &QueryHash) -> String {
 }
 
 pub(super) fn hash_additional_data(
+    subgraph_name: &str,
     body: &graphql::Request,
     context: &Context,
     cache_key: &CacheKeyMetadata,
@@ -137,8 +135,16 @@ pub(super) fn hash_additional_data(
         .serialize(Blake3Serializer::new(&mut hasher))
         .expect("this serializer doesn't throw any errors; qed");
 
+    // Takes value specific for a subgraph, if it doesn't exist take value for all subgraphs, and if you have data specific for an operation name add it in the hash
     if let Ok(Some(cache_data)) = context.get::<&str, Object>(CONTEXT_CACHE_KEY) {
-        if let Some(v) = cache_data.get("all") {
+        if let Some(v) = cache_data
+            .get("subgraphs")
+            .and_then(|s| s.as_object())
+            .and_then(|subgraph_data| subgraph_data.get(subgraph_name))
+        {
+            v.serialize(Blake3Serializer::new(&mut hasher))
+                .expect("this serializer doesn't throw any errors; qed");
+        } else if let Some(v) = cache_data.get("all") {
             v.serialize(Blake3Serializer::new(&mut hasher))
                 .expect("this serializer doesn't throw any errors; qed");
         }
@@ -187,11 +193,69 @@ where
     });
 }
 
-// Only hash the list of entity keys
-pub(super) fn hash_entity_key(
-    entity_keys: &serde_json_bytes::Map<ByteString, serde_json_bytes::Value>,
-) -> String {
-    tracing::trace!("entity keys: {entity_keys:?}");
-    // We have to hash the representation because it can contains PII
-    hash_representation(entity_keys)
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hash_additional_data() {
+        let context = Context::new();
+        context.insert_json_value(
+            CONTEXT_CACHE_KEY,
+            serde_json_bytes::json!({
+                "all": {
+                  "locale": "be"
+                },
+                "subgraphs": {
+                    "test": {
+                        "foo": "bar"
+                    },
+                    "test_2": {
+                        "bar": "foo"
+                    }
+                }
+            }),
+        );
+        let hashed_data = hash_additional_data(
+            "test",
+            &graphql::Request::builder()
+                .query("{ me { name } }")
+                .variable("key", "value")
+                .build(),
+            &context,
+            &Default::default(),
+        );
+        let hashed_data_2 = hash_additional_data(
+            "test_2",
+            &graphql::Request::builder()
+                .query("{ me { name } }")
+                .variable("key", "value")
+                .build(),
+            &context,
+            &Default::default(),
+        );
+        // Because it takes different data from context
+        assert!(hashed_data != hashed_data_2);
+
+        let hashed_data_3 = hash_additional_data(
+            "test_3",
+            &graphql::Request::builder()
+                .query("{ me { name } }")
+                .variable("key", "value")
+                .build(),
+            &context,
+            &Default::default(),
+        );
+        let hashed_data_4 = hash_additional_data(
+            "test_4",
+            &graphql::Request::builder()
+                .query("{ me { name } }")
+                .variable("key", "value")
+                .build(),
+            &context,
+            &Default::default(),
+        );
+        // Because it takes the same data from context `all`
+        assert_eq!(hashed_data_3, hashed_data_4);
+    }
 }

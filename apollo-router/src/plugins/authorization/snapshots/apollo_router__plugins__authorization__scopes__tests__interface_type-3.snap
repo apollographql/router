@@ -1,6 +1,7 @@
 ---
 source: apollo-router/src/plugins/authorization/scopes.rs
-expression: "TestResult {\n    query: QUERY2,\n    extracted_scopes: &extracted_scopes,\n    scopes: Vec::new(),\n    result: doc,\n    paths,\n}"
+assertion_line: 1224
+expression: "TestResult\n{\n    query: QUERY2, extracted_scopes: &extracted_scopes, scopes:\n    [\"itf\".to_string(), \"a\".to_string(),\n    \"b\".to_string()].into_iter().collect(), result: doc, paths\n}"
 ---
 query:
 
@@ -16,11 +17,16 @@ query:
             }
         }
         
-extracted_scopes: {"a", "b", "c", "d", "itf"}
-request scopes: []
+extracted_scopes: {"a", "b", "c", "d"}
+request scopes: ["a", "b"]
 filtered:
 {
   test
+  itf {
+    ... on A {
+      id
+    }
+  }
 }
 
-paths: ["/itf"]
+paths: ["/itf/... on B"]
