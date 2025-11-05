@@ -90,7 +90,7 @@ use crate::utils::FallibleIterator;
 
 #[derive(Debug)]
 pub struct Supergraph<S> {
-    pub state: S,
+    state: S,
 }
 
 impl Supergraph<Merged> {
