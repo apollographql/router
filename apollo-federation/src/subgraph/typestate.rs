@@ -26,6 +26,7 @@ use crate::internal_error;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::federation_spec_definition::FED_1;
 use crate::link::federation_spec_definition::FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC;
@@ -546,6 +547,12 @@ impl<S: HasMetadata> Subgraph<S> {
         self.metadata()
             .federation_spec_definition()
             .directive_name_in_schema(self.schema(), &FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC)
+    }
+
+    pub(crate) fn external_directive_name(&self) -> Result<Option<Name>, FederationError> {
+        self.metadata()
+            .federation_spec_definition()
+            .directive_name_in_schema(self.schema(), &FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC)
     }
 
     pub(crate) fn tag_directive_name(&self) -> Result<Option<Name>, FederationError> {

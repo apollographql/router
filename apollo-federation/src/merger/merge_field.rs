@@ -31,12 +31,12 @@ use crate::link::federation_spec_definition::FEDERATION_FROM_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_GRAPH_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_NAME_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC;
-use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_SELECTION_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_TYPE_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_USED_OVERRIDEN_ARGUMENT_NAME;
+use crate::link::join_spec_definition::JOIN_OVERRIDE_LABEL_ARGUMENT_NAME;
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
 use crate::merger::merge::map_sources;
@@ -350,7 +350,7 @@ impl Merger {
     /// Given a supergraph field `f` for an object type `T` and a given subgraph (identified by its index) where
     /// `T` is not defined, check if that subgraph defines one or more of the interface of `T` as @interfaceObject,
     /// and if so return any instance of `f` on those @interfaceObject.
-    fn fields_in_source_if_abstracted_by_interface_object(
+    pub(in crate::merger) fn fields_in_source_if_abstracted_by_interface_object(
         &self,
         dest_field: &ObjectOrInterfaceFieldDefinitionPosition,
         source_idx: usize,
@@ -424,7 +424,11 @@ impl Merger {
         }
     }
 
-    fn is_field_external(&self, source_idx: usize, field: &FieldDefinitionPosition) -> bool {
+    pub(in crate::merger) fn is_field_external(
+        &self,
+        source_idx: usize,
+        field: &FieldDefinitionPosition,
+    ) -> bool {
         // Use the subgraph metadata to check if field is external
         self.subgraphs[source_idx]
             .metadata()
@@ -705,7 +709,7 @@ impl Merger {
 
             let extra_hint = if let Some(s) = subgraph_with_targetless_override {
                 format!(
-                    " (please note that \"{}.{}\" has an @override directive in {} that targets an unknown subgraph so this could be due to misspelling the @override(from:) argument)",
+                    " (please note that \"{}.{}\" has an @override directive in \"{}\" that targets an unknown subgraph so this could be due to misspelling the @override(from:) argument)",
                     dest.type_name(),
                     dest.field_name(),
                     s.subgraph,
@@ -998,7 +1002,7 @@ impl Merger {
                 .maybe_arg(&FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC, requires)
                 .maybe_arg(&FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC, provides)
                 .maybe_arg(&FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC, override_from)
-                .maybe_arg(&FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME, override_label)
+                .maybe_arg(&JOIN_OVERRIDE_LABEL_ARGUMENT_NAME, override_label)
                 .maybe_bool_arg(&FEDERATION_USED_OVERRIDEN_ARGUMENT_NAME, used_overridden)
                 .maybe_arg(&FEDERATION_CONTEXT_ARGUMENT_NAME, context_arguments.clone());
 
@@ -1037,6 +1041,27 @@ impl Merger {
         }
 
         let sources = map_sources(sources, |source| source.clone().map(|s| s.into()));
+
+        // Check if any field has @override directive
+        for (&idx, source_opt) in &sources {
+            if let Some(source_pos) = source_opt
+                && let Some(subgraph) = self.subgraphs.get(idx)
+                && let Ok(Some(override_directive_name)) = subgraph.override_directive_name()
+            {
+                let has_override = match source_pos {
+                    DirectiveTargetPosition::ObjectField(pos) => !pos
+                        .get_applied_directives(subgraph.schema(), &override_directive_name)
+                        .is_empty(),
+                    DirectiveTargetPosition::InterfaceField(pos) => !pos
+                        .get_applied_directives(subgraph.schema(), &override_directive_name)
+                        .is_empty(),
+                    _ => false,
+                };
+                if has_override {
+                    return Ok(true);
+                }
+            }
+        }
 
         // Check if any field has @fromContext directive
         for source in sources.values().flatten() {
