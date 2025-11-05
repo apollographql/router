@@ -687,12 +687,14 @@ impl SchemaUpgrader {
             if let Ok(pos) = ObjectTypeDefinitionPosition::try_from(type_) {
                 let mut has_fields = false;
                 for field in pos.fields(schema.schema())? {
-                    has_fields = true;
                     let field_def = FieldDefinitionPosition::from(field.clone());
                     let metadata = &upgrade_metadata.metadata;
                     if metadata.is_field_external(&field_def) && !metadata.is_field_used(&field_def)
                     {
                         fields_to_remove.insert(field);
+                    } else {
+                        // Any non-removed field will set this boolean
+                        has_fields = true;
                     }
                 }
                 if !has_fields {
