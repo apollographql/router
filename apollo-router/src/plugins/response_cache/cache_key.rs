@@ -194,8 +194,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use insta::assert_snapshot;
+
+    use super::*;
 
     #[test]
     fn test_hash_additional_data() {
