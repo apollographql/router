@@ -1,6 +1,5 @@
-use apollo_federation::error::CompositionError;
-
 use crate::composition::ServiceDefinition;
+use crate::composition::assert_composition_errors;
 use crate::composition::compose_as_fed2_subgraphs;
 
 #[test]
@@ -38,32 +37,28 @@ fn override_single_field() {
         .types
         .get("T")
         .expect("T exists in the schema");
-    assert_eq!(
-        type_t.to_string(),
-        r#"type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
-  k: ID
-  a: Int @join__field(graph: SUBGRAPH1, override: "Subgraph2")
-  b: Int @join__field(graph: SUBGRAPH2)
-}
-"#
-    );
+    insta::assert_snapshot!(type_t.to_string(), @r#"
+    type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
+      k: ID
+      a: Int @join__field(graph: SUBGRAPH1, override: "Subgraph2")
+      b: Int @join__field(graph: SUBGRAPH2)
+    }
+    "#);
 
     let api_schema = supergraph
         .to_api_schema(Default::default())
         .expect("valid API schema");
-    assert_eq!(
-        api_schema.schema().to_string(),
-        r#"type Query {
-  t: T
-}
+    insta::assert_snapshot!(api_schema.schema().to_string(), @r#"
+    type Query {
+      t: T
+    }
 
-type T {
-  k: ID
-  a: Int
-  b: Int
-}
-"#
-    );
+    type T {
+      k: ID
+      a: Int
+      b: Int
+    }
+    "#);
 }
 
 #[test]
@@ -120,14 +115,12 @@ fn override_field_in_provides() {
         .types
         .get("A")
         .expect("A exists in the schema");
-    assert_eq!(
-        type_a.to_string(),
-        r#"type A @join__type(graph: SUBGRAPH1, key: "id") @join__type(graph: SUBGRAPH2, key: "id") {
-  id: ID!
-  b: B @join__field(graph: SUBGRAPH1, override: "Subgraph2") @join__field(graph: SUBGRAPH2, usedOverridden: true)
-}
-"#
-    );
+    insta::assert_snapshot!(type_a.to_string(), @r#"
+    type A @join__type(graph: SUBGRAPH1, key: "id") @join__type(graph: SUBGRAPH2, key: "id") {
+      id: ID!
+      b: B @join__field(graph: SUBGRAPH1, override: "Subgraph2") @join__field(graph: SUBGRAPH2, usedOverridden: true)
+    }
+    "#);
 
     // Ensuring the provides is still here.
     let type_t = supergraph
@@ -136,14 +129,12 @@ fn override_field_in_provides() {
         .types
         .get("T")
         .expect("T exists in the schema");
-    assert_eq!(
-        type_t.to_string(),
-        r#"type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
-  k: ID
-  a: A @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2, provides: "b { v }")
-}
-"#
-    );
+    insta::assert_snapshot!(type_t.to_string(), @r#"
+    type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
+      k: ID
+      a: A @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2, provides: "b { v }")
+    }
+    "#);
 }
 
 #[test]
@@ -198,14 +189,12 @@ fn override_field_in_requires() {
         .types
         .get("A")
         .expect("A exists in the schema");
-    assert_eq!(
-        type_a.to_string(),
-        r#"type A @join__type(graph: SUBGRAPH1, key: "id") @join__type(graph: SUBGRAPH2, key: "id") {
-  id: ID!
-  b: B @join__field(graph: SUBGRAPH1, override: "Subgraph2") @join__field(graph: SUBGRAPH2, usedOverridden: true)
-}
-"#
-    );
+    insta::assert_snapshot!(type_a.to_string(), @r#"
+    type A @join__type(graph: SUBGRAPH1, key: "id") @join__type(graph: SUBGRAPH2, key: "id") {
+      id: ID!
+      b: B @join__field(graph: SUBGRAPH1, override: "Subgraph2") @join__field(graph: SUBGRAPH2, usedOverridden: true)
+    }
+    "#);
 
     // Ensuring the requires is still here.
     let type_t = supergraph
@@ -214,15 +203,13 @@ fn override_field_in_requires() {
         .types
         .get("T")
         .expect("T exists in the schema");
-    assert_eq!(
-        type_t.to_string(),
-        r#"type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
-  k: ID
-  a: A
-  x: Int @join__field(graph: SUBGRAPH2, requires: "a { b { v } }")
-}
-"#
-    );
+    insta::assert_snapshot!(type_t.to_string(), @r#"
+    type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
+      k: ID
+      a: A
+      x: Int @join__field(graph: SUBGRAPH2, requires: "a { b { v } }")
+    }
+    "#);
 }
 
 #[test]
@@ -265,14 +252,12 @@ fn override_field_necessary_for_interface() {
         .types
         .get("T")
         .expect("T exists in the schema");
-    assert_eq!(
-        type_t.to_string(),
-        r#"type T implements I @join__implements(graph: SUBGRAPH1, interface: "I") @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
-  k: ID
-  x: Int @join__field(graph: SUBGRAPH1, usedOverridden: true) @join__field(graph: SUBGRAPH2, override: "Subgraph1")
-}
-"#
-    );
+    insta::assert_snapshot!(type_t.to_string(), @r#"
+    type T implements I @join__implements(graph: SUBGRAPH1, interface: "I") @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
+      k: ID
+      x: Int @join__field(graph: SUBGRAPH1, usedOverridden: true) @join__field(graph: SUBGRAPH2, override: "Subgraph1")
+    }
+    "#);
 }
 
 #[test]
@@ -300,11 +285,13 @@ fn override_from_self_error() {
         "#,
     };
 
-    let errors =
-        compose_as_fed2_subgraphs(&[subgraph1, subgraph2]).expect_err("composition should fail");
-    assert_eq!(1, errors.len());
-    assert!(
-        matches!(errors.first(), Some(CompositionError::OverrideFromSelfError { message }) if message == r#"Source and destination subgraphs "Subgraph1" are the same for overridden field "T.a""#)
+    let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "OVERRIDE_FROM_SELF_ERROR",
+            r#"Source and destination subgraphs "Subgraph1" are the same for overridden field "T.a""#,
+        )],
     );
 }
 
@@ -334,22 +321,27 @@ fn multiple_override_error() {
         "#,
     };
 
-    let mut errors = compose_as_fed2_subgraphs(&[subgraph1, subgraph2])
-        .expect_err("composition should fail")
-        .into_iter();
     // port note: below note is an existing comment from JS implementation
     // TODO(JS): This test really should not cause the shareable error to be raised, but to fix it would be a bit of a pain, so punting
     // for now
-    assert!(
-        matches!(errors.next(), Some(CompositionError::OverrideSourceHasOverride { message }) if message == r#"Field "T.a" on subgraph "Subgraph1" is also marked with directive @override in subgraph "Subgraph2". Only one @override directive is allowed per field."#)
+    let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+    assert_composition_errors(
+        &result,
+        &[
+            (
+                "OVERRIDE_SOURCE_HAS_OVERRIDE",
+                r#"Field "T.a" on subgraph "Subgraph1" is also marked with directive @override in subgraph "Subgraph2". Only one @override directive is allowed per field."#,
+            ),
+            (
+                "OVERRIDE_SOURCE_HAS_OVERRIDE",
+                r#"Field "T.a" on subgraph "Subgraph2" is also marked with directive @override in subgraph "Subgraph1". Only one @override directive is allowed per field."#,
+            ),
+            (
+                "INVALID_FIELD_SHARING",
+                r#"Non-shareable field "T.a" is resolved from multiple subgraphs: it is resolved from subgraphs "Subgraph1" and "Subgraph2" and defined as non-shareable in all of them"#,
+            ),
+        ],
     );
-    assert!(
-        matches!(errors.next(), Some(CompositionError::OverrideSourceHasOverride { message }) if message == r#"Field "T.a" on subgraph "Subgraph2" is also marked with directive @override in subgraph "Subgraph1". Only one @override directive is allowed per field."#)
-    );
-    assert!(
-        matches!(errors.next(), Some(CompositionError::InvalidFieldSharing { message,.. }) if message == r#"Non-shareable field "T.a" is resolved from multiple subgraphs: it is resolved from subgraphs "Subgraph1" and "Subgraph2" and defined as non-shareable in all of them"#)
-    );
-    assert!(errors.next().is_none());
 }
 
 #[test]
@@ -386,15 +378,13 @@ fn override_key_field() {
         .types
         .get("T")
         .expect("T exists in the schema");
-    assert_eq!(
-        type_t.to_string(),
-        r#"type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
-  k: ID @join__field(graph: SUBGRAPH1, override: "Subgraph2") @join__field(graph: SUBGRAPH2, usedOverridden: true)
-  a: Int @join__field(graph: SUBGRAPH1)
-  b: Int @join__field(graph: SUBGRAPH2)
-}
-"#
-    );
+    insta::assert_snapshot!(type_t.to_string(), @r#"
+    type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
+      k: ID @join__field(graph: SUBGRAPH1, override: "Subgraph2") @join__field(graph: SUBGRAPH2, usedOverridden: true)
+      a: Int @join__field(graph: SUBGRAPH1)
+      b: Int @join__field(graph: SUBGRAPH2)
+    }
+    "#);
 }
 
 #[test]
@@ -425,36 +415,33 @@ fn invalid_override_key_field_breaks_composition() {
         "#,
     };
 
-    let mut errors = compose_as_fed2_subgraphs(&[subgraph1, subgraph2])
-        .expect_err("composition failed")
-        .into_iter();
-    assert!(
-        matches!(errors.next(), Some(CompositionError::SatisfiabilityError { message })
-        if message == r#"The following supergraph API query:
-{
-  otherT {
-    k
-  }
-}
-cannot be satisfied by the subgraphs because:
-- from subgraph "Subgraph2":
-  - field "T.k" is not resolvable because it is overridden by subgraph "Subgraph1".
-  - cannot move to subgraph "Subgraph1" using @key(fields: "k") of "T", the key field(s) cannot be resolved from subgraph "Subgraph2" (note that some of those key fields are overridden in "Subgraph2")."#)
-    );
-    assert!(
-        matches!(errors.next(), Some(CompositionError::SatisfiabilityError { message })
-        if message == r#"The following supergraph API query:
-{
-  otherT {
-    a
-  }
-}
-cannot be satisfied by the subgraphs because:
-- from subgraph "Subgraph2":
-  - cannot find field "T.a".
-  - cannot move to subgraph "Subgraph1" using @key(fields: "k") of "T", the key field(s) cannot be resolved from subgraph "Subgraph2" (note that some of those key fields are overridden in "Subgraph2")."#)
-    );
-    assert!(errors.next().is_none());
+    let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+    let errors = result.as_ref().expect_err("composition failed");
+    assert_eq!(errors.len(), 2);
+    insta::assert_snapshot!(errors[0].to_string(), @r#"
+    The following supergraph API query:
+    {
+      otherT {
+        k
+      }
+    }
+    cannot be satisfied by the subgraphs because:
+    - from subgraph "Subgraph2":
+      - field "T.k" is not resolvable because it is overridden by subgraph "Subgraph1".
+      - cannot move to subgraph "Subgraph1" using @key(fields: "k") of "T", the key field(s) cannot be resolved from subgraph "Subgraph2" (note that some of those key fields are overridden in "Subgraph2").
+    "#);
+    insta::assert_snapshot!(errors[1].to_string(), @r#"
+    The following supergraph API query:
+    {
+      otherT {
+        a
+      }
+    }
+    cannot be satisfied by the subgraphs because:
+    - from subgraph "Subgraph2":
+      - cannot find field "T.a".
+      - cannot move to subgraph "Subgraph1" using @key(fields: "k") of "T", the key field(s) cannot be resolved from subgraph "Subgraph2" (note that some of those key fields are overridden in "Subgraph2").
+    "#);
 }
 
 #[test]
@@ -483,12 +470,13 @@ fn override_key_field_with_changed_type_definition() {
         "#,
     };
 
-    let errors =
-        compose_as_fed2_subgraphs(&[subgraph1, subgraph2]).expect_err("composition failed");
-    assert_eq!(1, errors.len());
-    assert!(
-        matches!(errors.first(), Some(CompositionError::FieldTypeMismatch { message })
-        if message == r#"Type of field "T.a" is incompatible across subgraphs: it has type "Int" in subgraph "Subgraph1" but type "String" in subgraph "Subgraph2""#)
+    let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "FIELD_TYPE_MISMATCH",
+            r#"Type of field "T.a" is incompatible across subgraphs: it has type "Int" in subgraph "Subgraph1" but type "String" in subgraph "Subgraph2""#,
+        )],
     );
 }
 
@@ -535,29 +523,25 @@ fn override_field_that_is_key_in_another_type() {
         .types
         .get("E")
         .expect("E exists in the schema");
-    assert_eq!(
-        type_e.to_string(),
-        r#"type E @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2) {
-  k: ID @join__field(graph: SUBGRAPH1, override: "Subgraph2") @join__field(graph: SUBGRAPH2, usedOverridden: true)
-  a: Int @join__field(graph: SUBGRAPH1)
-  b: Int @join__field(graph: SUBGRAPH2)
-}
-"#
-    );
+    insta::assert_snapshot!(type_e.to_string(), @r#"
+    type E @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2) {
+      k: ID @join__field(graph: SUBGRAPH1, override: "Subgraph2") @join__field(graph: SUBGRAPH2, usedOverridden: true)
+      a: Int @join__field(graph: SUBGRAPH1)
+      b: Int @join__field(graph: SUBGRAPH2)
+    }
+    "#);
     let type_t = supergraph
         .schema()
         .schema()
         .types
         .get("T")
         .expect("T exists in the schema");
-    assert_eq!(
-        type_t.to_string(),
-        r#"type T @join__type(graph: SUBGRAPH1, key: "e { k }") @join__type(graph: SUBGRAPH2, key: "e { k }") {
-  e: E
-  x: Int @join__field(graph: SUBGRAPH2)
-}
-"#
-    );
+    insta::assert_snapshot!(type_t.to_string(), @r#"
+    type T @join__type(graph: SUBGRAPH1, key: "e { k }") @join__type(graph: SUBGRAPH2, key: "e { k }") {
+      e: E
+      x: Int @join__field(graph: SUBGRAPH2)
+    }
+    "#);
 }
 
 #[test]
@@ -596,12 +580,11 @@ fn override_with_provides_on_overridden_field() {
         "#,
     };
 
-    let errors =
-        compose_as_fed2_subgraphs(&[subgraph1, subgraph2]).expect_err("composition failed");
+    let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
     // Check that we get the override collision error (there may be additional errors)
+    let errors = result.as_ref().expect_err("composition failed");
     assert!(
-        errors.iter().any(|e| matches!(e, CompositionError::OverrideCollisionWithAnotherDirective { message }
-        if message == r#"@override cannot be used on field "T.u" on subgraph "Subgraph1" since "T.u" on "Subgraph2" is marked with directive "@provides""#)),
+        errors.iter().any(|e| e.to_string() == r#"@override cannot be used on field "T.u" on subgraph "Subgraph1" since "T.u" on "Subgraph2" is marked with directive "@provides""#),
         "Expected OverrideCollisionWithAnotherDirective error not found"
     );
 }
@@ -642,12 +625,11 @@ fn override_with_requires_on_overridden_field() {
         "#,
     };
 
-    let errors =
-        compose_as_fed2_subgraphs(&[subgraph1, subgraph2]).expect_err("composition failed");
+    let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
     // Check that we get the override collision error (there may be additional errors)
+    let errors = result.as_ref().expect_err("composition failed");
     assert!(
-        errors.iter().any(|e| matches!(e, CompositionError::OverrideCollisionWithAnotherDirective { message }
-        if message == r#"@override cannot be used on field "T.u" on subgraph "Subgraph1" since "T.u" on "Subgraph2" is marked with directive "@requires""#)),
+        errors.iter().any(|e| e.to_string() == r#"@override cannot be used on field "T.u" on subgraph "Subgraph1" since "T.u" on "Subgraph2" is marked with directive "@requires""#),
         "Expected OverrideCollisionWithAnotherDirective error not found"
     );
 }
@@ -678,12 +660,13 @@ fn override_with_external_on_overridden_field() {
         "#,
     };
 
-    let errors =
-        compose_as_fed2_subgraphs(&[subgraph1, subgraph2]).expect_err("composition failed");
-    assert_eq!(1, errors.len());
-    assert!(
-        matches!(errors.first(), Some(CompositionError::OverrideCollisionWithAnotherDirective { message })
-        if message == r#"@override cannot be used on field "T.k" on subgraph "Subgraph1" since "T.k" on "Subgraph1" is marked with directive "@external""#)
+    let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "OVERRIDE_COLLISION_WITH_ANOTHER_DIRECTIVE",
+            r#"@override cannot be used on field "T.k" on subgraph "Subgraph1" since "T.k" on "Subgraph1" is marked with directive "@external""#,
+        )],
     );
 }
 
@@ -727,12 +710,13 @@ fn does_not_allow_override_on_interface_fields() {
         "#,
     };
 
-    let errors =
-        compose_as_fed2_subgraphs(&[subgraph1, subgraph2]).expect_err("composition failed");
-    assert_eq!(1, errors.len());
-    assert!(
-        matches!(errors.first(), Some(CompositionError::OverrideOnInterface { message })
-        if message == r#"@override cannot be used on field "I.a" on subgraph "Subgraph1": @override is not supported on interface type fields."#)
+    let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "OVERRIDE_ON_INTERFACE",
+            r#"@override cannot be used on field "I.a" on subgraph "Subgraph1": @override is not supported on interface type fields."#,
+        )],
     );
 }
 
@@ -786,14 +770,13 @@ mod interface_object {
             "#,
         };
 
-        let errors =
-            compose_as_fed2_subgraphs(&[subgraph1, subgraph2]).expect_err("composition failed");
-        assert_eq!(1, errors.len(), "Expected 1 error, got: {:#?}", errors);
-        assert!(
-            matches!(errors.first(), Some(CompositionError::OverrideCollisionWithAnotherDirective { message })
-            if message == r#"@override is not yet supported on fields of @interfaceObject types: cannot be used on field "I.a" on subgraph "Subgraph1"."#),
-            "Expected OverrideCollisionWithAnotherDirective error, got: {:#?}",
-            errors.first()
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        assert_composition_errors(
+            &result,
+            &[(
+                "OVERRIDE_COLLISION_WITH_ANOTHER_DIRECTIVE",
+                r#"@override is not yet supported on fields of @interfaceObject types: cannot be used on field "I.a" on subgraph "Subgraph1"."#,
+            )],
         );
     }
 
@@ -838,14 +821,13 @@ mod interface_object {
             "#,
         };
 
-        let errors =
-            compose_as_fed2_subgraphs(&[subgraph1, subgraph2]).expect_err("composition failed");
-        assert_eq!(1, errors.len(), "Expected 1 error, got: {:#?}", errors);
-        assert!(
-            matches!(errors.first(), Some(CompositionError::OverrideCollisionWithAnotherDirective { message })
-            if message == r#"Invalid @override on field "A.a" of subgraph "Subgraph2": source subgraph "Subgraph1" does not have field "A.a" but abstracts it through @interfaceObject and overriding abstracted fields is not supported."#),
-            "Expected OverrideCollisionWithAnotherDirective error, got: {:#?}",
-            errors.first()
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+        assert_composition_errors(
+            &result,
+            &[(
+                "OVERRIDE_COLLISION_WITH_ANOTHER_DIRECTIVE",
+                r#"Invalid @override on field "A.a" of subgraph "Subgraph2": source subgraph "Subgraph1" does not have field "A.a" but abstracts it through @interfaceObject and overriding abstracted fields is not supported."#,
+            )],
         );
     }
 }
@@ -888,99 +870,92 @@ mod progressive_override {
             .types
             .get("T")
             .expect("T exists in the schema");
-        assert_eq!(
-            type_t.to_string(),
-            r#"type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
-  k: ID
-  a: Int @join__field(graph: SUBGRAPH1, override: "Subgraph2", overrideLabel: "foo") @join__field(graph: SUBGRAPH2, overrideLabel: "foo")
-  b: Int @join__field(graph: SUBGRAPH2)
-}
-"#
-        );
+        insta::assert_snapshot!(type_t.to_string(), @r#"
+        type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
+          k: ID
+          a: Int @join__field(graph: SUBGRAPH1, override: "Subgraph2", overrideLabel: "foo") @join__field(graph: SUBGRAPH2, overrideLabel: "foo")
+          b: Int @join__field(graph: SUBGRAPH2)
+        }
+        "#);
 
         // match api schema
         let api_schema = supergraph
             .to_api_schema(Default::default())
             .expect("valid api schema");
-        assert_eq!(
-            api_schema.schema().to_string(),
-            r#"type Query {
-  t: T
-}
+        insta::assert_snapshot!(api_schema.schema().to_string(), @r#"
+        type Query {
+          t: T
+        }
 
-type T {
-  k: ID
-  a: Int
-  b: Int
-}
-"#
-        );
+        type T {
+          k: ID
+          a: Int
+          b: Int
+        }
+        "#);
 
-        // match supergraph schema
-        assert_eq!(
-            supergraph.schema().schema().to_string(),
-            r#"schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) {
-  query: Query
-}
+        insta::assert_snapshot!(supergraph.schema().schema(), @r#"
+        schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) {
+          query: Query
+        }
 
-directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 
-directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+        directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
 
-directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+        directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 
-directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+        directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
 
-directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+        directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
 
-directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+        directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
-directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+        directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
 
-enum link__Purpose {
-  """
-  `SECURITY` features provide metadata necessary to securely resolve fields.
-  """
-  SECURITY
-  """
-  `EXECUTION` features provide metadata necessary for operation execution.
-  """
-  EXECUTION
-}
+        enum link__Purpose {
+          """
+          `SECURITY` features provide metadata necessary to securely resolve fields.
+          """
+          SECURITY
+          """
+          `EXECUTION` features provide metadata necessary for operation execution.
+          """
+          EXECUTION
+        }
 
-scalar link__Import
+        scalar link__Import
 
-enum join__Graph {
-  SUBGRAPH1 @join__graph(name: "Subgraph1", url: "http://Subgraph1")
-  SUBGRAPH2 @join__graph(name: "Subgraph2", url: "http://Subgraph2")
-}
+        enum join__Graph {
+          SUBGRAPH1 @join__graph(name: "Subgraph1", url: "http://Subgraph1")
+          SUBGRAPH2 @join__graph(name: "Subgraph2", url: "http://Subgraph2")
+        }
 
-scalar join__FieldSet
+        scalar join__FieldSet
 
-scalar join__DirectiveArguments
+        scalar join__DirectiveArguments
 
-scalar join__FieldValue
+        scalar join__FieldValue
 
-input join__ContextArgument {
-  name: String!
-  type: String!
-  context: String!
-  selection: join__FieldValue
-}
+        input join__ContextArgument {
+          name: String!
+          type: String!
+          context: String!
+          selection: join__FieldValue
+        }
 
-type Query @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2) {
-  t: T @join__field(graph: SUBGRAPH1)
-}
+        type Query @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2) {
+          t: T @join__field(graph: SUBGRAPH1)
+        }
 
-type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
-  k: ID
-  a: Int @join__field(graph: SUBGRAPH1, override: "Subgraph2", overrideLabel: "foo") @join__field(graph: SUBGRAPH2, overrideLabel: "foo")
-  b: Int @join__field(graph: SUBGRAPH2)
-}
-"#
-        );
+        type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
+          k: ID
+          a: Int @join__field(graph: SUBGRAPH1, override: "Subgraph2", overrideLabel: "foo") @join__field(graph: SUBGRAPH2, overrideLabel: "foo")
+          b: Int @join__field(graph: SUBGRAPH2)
+        }
+        "#);
     }
 
     mod label_validation {
@@ -1054,12 +1029,15 @@ type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key
                 "#,
             };
 
-            let errors = compose_as_fed2_subgraphs(&[with_invalid_label, overridden])
-                .expect_err("composition failed");
-            assert_eq!(1, errors.len());
-            assert!(
-                matches!(errors.first(), Some(CompositionError::OverrideLabelInvalid { message })
-                if *message == format!("Invalid @override label \"{label}\" on field \"T.a\" on subgraph \"invalidLabel\": labels must start with a letter and after that may contain alphanumerics, underscores, minuses, colons, periods, or slashes. Alternatively, labels may be of the form \"percent(x)\" where x is a float between 0-100 inclusive."))
+            let result = compose_as_fed2_subgraphs(&[with_invalid_label, overridden]);
+            assert_composition_errors(
+                &result,
+                &[(
+                    "OVERRIDE_LABEL_INVALID",
+                    &format!(
+                        "Invalid @override label \"{label}\" on field \"T.a\" on subgraph \"invalidLabel\": labels must start with a letter and after that may contain alphanumerics, underscores, minuses, colons, periods, or slashes. Alternatively, labels may be of the form \"percent(x)\" where x is a float between 0-100 inclusive."
+                    ),
+                )],
             );
         }
 
@@ -1131,12 +1109,15 @@ type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key
                 "#,
             };
 
-            let errors = compose_as_fed2_subgraphs(&[with_invalid_label, overridden])
-                .expect_err("composition failed");
-            assert_eq!(1, errors.len());
-            assert!(
-                matches!(errors.first(), Some(CompositionError::OverrideLabelInvalid { message })
-                if *message == format!("Invalid @override label \"percent({percent})\" on field \"T.a\" on subgraph \"invalidLabel\": labels must start with a letter and after that may contain alphanumerics, underscores, minuses, colons, periods, or slashes. Alternatively, labels may be of the form \"percent(x)\" where x is a float between 0-100 inclusive."))
+            let result = compose_as_fed2_subgraphs(&[with_invalid_label, overridden]);
+            assert_composition_errors(
+                &result,
+                &[(
+                    "OVERRIDE_LABEL_INVALID",
+                    &format!(
+                        "Invalid @override label \"percent({percent})\" on field \"T.a\" on subgraph \"invalidLabel\": labels must start with a letter and after that may contain alphanumerics, underscores, minuses, colons, periods, or slashes. Alternatively, labels may be of the form \"percent(x)\" where x is a float between 0-100 inclusive."
+                    ),
+                )],
             );
         }
     }
@@ -1223,21 +1204,20 @@ type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key
                 "#,
             };
 
-            let errors =
-                compose_as_fed2_subgraphs(&[subgraph1, subgraph2]).expect_err("composition failed");
-            assert_eq!(1, errors.len());
-            assert!(
-                matches!(errors.first(), Some(CompositionError::SatisfiabilityError { message })
-                if message == r#"The following supergraph API query:
-{
-  t {
-    b
-  }
-}
-cannot be satisfied by the subgraphs because:
-- from subgraph "Subgraph1": cannot find field "T.b".
-- from subgraph "Subgraph2": cannot satisfy @requires conditions on field "T.b"."#)
-            );
+            let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+            let errors = result.as_ref().expect_err("composition failed");
+            assert_eq!(errors.len(), 1);
+            insta::assert_snapshot!(errors[0].to_string(), @r#"
+            The following supergraph API query:
+            {
+              t {
+                b
+              }
+            }
+            cannot be satisfied by the subgraphs because:
+            - from subgraph "Subgraph1": cannot find field "T.b".
+            - from subgraph "Subgraph2": cannot satisfy @requires conditions on field "T.b".
+            "#);
         }
     }
 }

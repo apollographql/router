@@ -1427,7 +1427,7 @@ impl Merger {
     ) -> Result<String, FederationError> {
         for arg in directive.arguments.iter() {
             if arg.name.as_str() == "from"
-                && let apollo_compiler::ast::Value::String(s) = arg.value.as_ref()
+                && let Value::String(s) = arg.value.as_ref()
             {
                 return Ok(s.to_string());
             }
@@ -1441,7 +1441,7 @@ impl Merger {
     ) -> Result<Option<String>, FederationError> {
         for arg in directive.arguments.iter() {
             if arg.name.as_str() == "label"
-                && let apollo_compiler::ast::Value::String(s) = arg.value.as_ref()
+                && let Value::String(s) = arg.value.as_ref()
             {
                 return Ok(Some(s.to_string()));
             }
