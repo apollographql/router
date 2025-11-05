@@ -24,6 +24,7 @@ expression: cache_keys
       "maxAge": 86400,
       "public": true
     },
+    "shouldStore": true,
     "data": {
       "data": {
         "currentUser": {
@@ -33,7 +34,8 @@ expression: cache_keys
           }
         }
       }
-    }
+    },
+    "warnings": []
   },
   {
     "key": "version:1.0:subgraph:orga:type:Organization:representation:f6e8c0c4f36d6c0d11330be52b76316559e0390ff75fd002ed3fa73f9b6470f7:hash:f6acbaaee10175327fa6a7882704a4e85b732d7561e7c399fd49069486da68b8:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
@@ -65,6 +67,7 @@ expression: cache_keys
       "maxAge": 86400,
       "public": true
     },
+    "shouldStore": true,
     "data": {
       "data": {
         "creatorUser": {
@@ -72,6 +75,7 @@ expression: cache_keys
           "id": 2
         }
       }
-    }
+    },
+    "warnings": []
   }
 ]

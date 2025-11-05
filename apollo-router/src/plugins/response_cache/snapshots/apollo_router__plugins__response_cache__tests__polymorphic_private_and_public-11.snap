@@ -21,13 +21,26 @@ expression: cache_keys
       "maxAge": 86400,
       "public": true
     },
+    "shouldStore": true,
     "data": {
       "data": {
         "orga": {
           "name": "test_orga_public"
         }
       }
-    }
+    },
+    "warnings": [
+      {
+        "code": "NO_CACHE_TAG_ON_ROOT_FIELD",
+        "links": [
+          {
+            "url": "https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#invalidation-methods",
+            "title": "Add '@cacheTag' in your schema"
+          }
+        ],
+        "message": "No cache tags are specified on your root fields query. If you want to use active invalidation, you'll need to add cache tags on your root field."
+      }
+    ]
   },
   {
     "key": "version:1.0:subgraph:user:type:Query:hash:fa8ff6a034f5ccb3f49e51bc30ff031104ba420310e67764f9e9f82702437592:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
@@ -49,6 +62,7 @@ expression: cache_keys
       "maxAge": 86400,
       "public": true
     },
+    "shouldStore": true,
     "data": {
       "data": {
         "currentUser": {
@@ -58,7 +72,8 @@ expression: cache_keys
           }
         }
       }
-    }
+    },
+    "warnings": []
   },
   {
     "key": "version:1.0:subgraph:orga:type:Organization:representation:f6e8c0c4f36d6c0d11330be52b76316559e0390ff75fd002ed3fa73f9b6470f7:hash:f6acbaaee10175327fa6a7882704a4e85b732d7561e7c399fd49069486da68b8:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
@@ -85,6 +100,7 @@ expression: cache_keys
       "maxAge": 86400,
       "public": true
     },
+    "shouldStore": true,
     "data": {
       "data": {
         "creatorUser": {
@@ -92,6 +108,7 @@ expression: cache_keys
           "id": 3
         }
       }
-    }
+    },
+    "warnings": []
   }
 ]

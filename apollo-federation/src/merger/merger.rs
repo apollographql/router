@@ -13,10 +13,10 @@ use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::ast::Type;
+use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::validation::Valid;
 use indexmap::IndexSet;
 use itertools::Itertools;
 use strum::IntoEnumIterator as _;
@@ -24,6 +24,7 @@ use tracing::instrument;
 use tracing::trace;
 
 use crate::LinkSpecDefinition;
+use crate::api_schema;
 use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
@@ -35,6 +36,7 @@ use crate::link::Link;
 use crate::link::federation_spec_definition::FEDERATION_OPERATION_TYPES;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::join_spec_definition::JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::join_spec_definition::JOIN_GRAPH_ARGUMENT_NAME;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
 use crate::link::link_spec_definition::LINK_VERSIONS;
@@ -53,6 +55,7 @@ use crate::merger::merge_enum::EnumTypeUsage;
 use crate::merger::merge_field::FieldMergeContext;
 use crate::merger::merge_field::JoinFieldBuilder;
 use crate::schema::FederationSchema;
+use crate::schema::ValidFederationSchema;
 use crate::schema::directive_location::DirectiveLocationExt;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
@@ -74,6 +77,7 @@ use crate::schema::validators::merged::validate_merged_schema;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
+use crate::utils::MultiIndexMap;
 use crate::utils::first_max_by_key;
 use crate::utils::human_readable::human_readable_subgraph_names;
 use crate::utils::iter_into_single_item;
@@ -103,11 +107,8 @@ pub(crate) type Sources<T> = IndexMap<usize, Option<T>>;
 
 #[derive(Debug)]
 pub(crate) struct MergeResult {
-    #[allow(dead_code)]
-    pub(crate) supergraph: Option<Valid<FederationSchema>>,
-    #[allow(dead_code)]
+    pub(crate) supergraph: Option<ValidFederationSchema>,
     pub(crate) errors: Vec<CompositionError>,
-    #[allow(dead_code)]
     pub(crate) hints: Vec<CompositionHint>,
 }
 
@@ -507,13 +508,58 @@ impl Merger {
                     hints,
                 });
             }
-            let valid_schema = Valid::assume_valid(self.merged);
-            Ok(MergeResult {
-                supergraph: Some(valid_schema),
-                errors,
-                hints,
-            })
+            match Self::validate_supergraph_schema(self.merged) {
+                Ok(supergraph) => Ok(MergeResult {
+                    supergraph: Some(supergraph),
+                    errors: Vec::default(),
+                    hints,
+                }),
+                Err(composition_errors) => Ok(MergeResult {
+                    supergraph: None,
+                    errors: composition_errors,
+                    hints,
+                }),
+            }
         }
+    }
+
+    /// Validate the merged supergraph as a GraphQL schema and check if its API schema can be
+    /// computed.
+    fn validate_supergraph_schema(
+        merged: FederationSchema,
+    ) -> Result<ValidFederationSchema, Vec<CompositionError>> {
+        // TODO: Errors thrown by the `validate` below are likely to be confusing for users,
+        // because they refer to a document they don't know about (the merged-but-not-returned
+        // supergraph) and don't point back to the subgraphs in any way.
+        // Given the subgraphs are valid and given how merging works (it takes the union of what is
+        // in the subgraphs), there is only so much that can be invalid in the supergraph at
+        // this point. We should make sure we add all such validation to `validate_merged_schema()`
+        // with good error messages (that point to subgraphs appropriately), and then simply
+        // _assert_ that `Schema.validate()` doesn't throw as a sanity check.
+        let supergraph_schema = merged
+            .validate_or_return_self()
+            .map_err(|(_partial_schema, err)| Self::convert_to_merge_errors(err))?;
+
+        // Lastly, we validate that the API schema of the supergraph can be successfully computed,
+        // which currently will surface issues around misuses of `@inaccessible` (there should be
+        // other errors in theory, but if there are, better to find it now rather than later).
+        api_schema::to_api_schema(supergraph_schema.clone(), Default::default()).map_err(
+            |err| {
+                // TODO: port `updateInaccessibleErrorsWithLinkToSubgraphs` from JS (FED-882)
+                Self::convert_to_merge_errors(err)
+            },
+        )?;
+
+        Ok(supergraph_schema)
+    }
+
+    /// Convert a FederationError into a Vec<CompositionError> for merge errors.
+    fn convert_to_merge_errors(error: FederationError) -> Vec<CompositionError> {
+        error
+            .into_errors()
+            .into_iter()
+            .map(|e| CompositionError::MergeError { error: e })
+            .collect()
     }
 
     fn add_core_features(&mut self) -> Result<(), FederationError> {
@@ -560,7 +606,10 @@ impl Merger {
 
     fn add_types_shallow(&mut self) -> Result<(), FederationError> {
         let mut mismatched_types = IndexSet::new();
-        let mut types_with_interface_object = IndexSet::new();
+        // A mapping of Ty -> [SubgraphA, SubgraphB] where Ty is a interface object in those
+        // subgraphs
+        let mut subgraphs_with_interface_obj =
+            MultiIndexMap::<TypeDefinitionPosition, String>::new();
 
         for subgraph in &self.subgraphs {
             for pos in subgraph.schema().get_types() {
@@ -571,7 +620,10 @@ impl Merger {
                 let mut expects_interface = false;
                 if subgraph.is_interface_object_type(&pos) {
                     expects_interface = true;
-                    types_with_interface_object.insert(pos.clone());
+                    let itf_pos = InterfaceTypeDefinitionPosition {
+                        type_name: pos.type_name().clone(),
+                    };
+                    subgraphs_with_interface_obj.insert(itf_pos.into(), subgraph.name.clone());
                 }
                 if let Ok(previous) = self.merged.get_type(pos.type_name().clone()) {
                     if expects_interface
@@ -596,19 +648,23 @@ impl Merger {
         }
 
         for mismatched_type in mismatched_types.iter() {
-            self.report_mismatched_type_definitions(mismatched_type, &types_with_interface_object);
+            let subgraphs = subgraphs_with_interface_obj
+                .get(mismatched_type)
+                .cloned()
+                .unwrap_or_default();
+            self.report_mismatched_type_definitions(mismatched_type, &subgraphs);
         }
 
         // Most invalid use of @interfaceObject are reported as a mismatch above, but one exception is the
         // case where a type is used only with @interfaceObject, but there is no corresponding interface
         // definition in any subgraph.
-        for type_ in types_with_interface_object.iter() {
+        for type_ in subgraphs_with_interface_obj.keys() {
             if mismatched_types.contains(type_) {
                 continue;
             }
 
             let mut found_interface = false;
-            let mut subgraphs_with_type = HashSet::new();
+            let mut subgraphs_with_type = IndexSet::new();
             for subgraph in &self.subgraphs {
                 let type_in_subgraph = subgraph.schema().get_type(type_.type_name().clone());
                 if matches!(type_in_subgraph, Ok(TypeDefinitionPosition::Interface(_))) {
@@ -656,7 +712,7 @@ impl Merger {
     fn report_mismatched_type_definitions(
         &mut self,
         mismatched_type: &TypeDefinitionPosition,
-        types_with_interface_object: &IndexSet<TypeDefinitionPosition>,
+        subgraphs_with_interface_object: &[String],
     ) {
         let sources = self
             .subgraphs
@@ -671,12 +727,13 @@ impl Merger {
                 )
             })
             .collect();
-        let type_kind_to_string = |type_def: &TypeDefinitionPosition| {
-            let type_kind_description = if types_with_interface_object.contains(type_def) {
-                "Interface Object Type (Object Type with @interfaceObject)".to_string()
-            } else {
-                type_def.kind().replace("Type", " Type")
-            };
+        let type_kind_to_string = |idx: usize, type_def: &TypeDefinitionPosition| {
+            let type_kind_description =
+                if subgraphs_with_interface_object.contains(&self.subgraphs[idx].name) {
+                    "Interface Object Type (Object Type with @interfaceObject)".to_string()
+                } else {
+                    type_def.kind().replace("Type", " Type")
+                };
             Some(type_kind_description)
         };
         // TODO: Third type param is supposed to be representation of AST nodes
@@ -690,8 +747,8 @@ impl Merger {
                 },
                 mismatched_type,
                 &sources,
-                type_kind_to_string,
-                |ty, _| type_kind_to_string(ty),
+                |ty| Some(ty.kind().replace("Type", " Type")),
+                |ty, idx| type_kind_to_string(idx, ty),
             );
     }
 
@@ -1192,86 +1249,69 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
     fn add_missing_interface_object_fields_to_implementations(
         &mut self,
     ) -> Result<(), FederationError> {
-        let mut fields_to_insert = HashMap::new();
+        let mut fields_to_insert: HashMap<
+            ObjectOrInterfaceFieldDefinitionPosition,
+            FieldDefinition,
+        > = HashMap::new();
         // For each merged object types, we check if we're missing a field from one of the implemented interface.
         // If we do, then we look if one of the subgraph provides that field as a (non-external) interface object
         // type, and if that's the case, we add the field to the object.
-        for obj_ty_name in self.merged.referencers().object_types.keys() {
-            let Some(obj_ty) = self.merged.schema().get_object(obj_ty_name) else {
-                bail!(
-                    "Referencers contains Object type named \"{obj_ty_name}\", but that Object type does not exist in the schema."
-                )
-            };
-            for implemented_itf_name in obj_ty.implements_interfaces.iter() {
-                let Some(implemented_itf) =
-                    self.merged.schema().get_interface(implemented_itf_name)
-                else {
-                    bail!(
-                        "Object type \"{obj_ty_name}\" implements interface \"{implemented_itf_name}\", but that Interface type does not exist in the schema."
-                    )
+        for (idx, subgraph) in self.subgraphs.iter().enumerate() {
+            for itf_obj_field in subgraph.interface_object_fields() {
+                let ast_node_to_add =
+                    (*itf_obj_field.get(subgraph.schema().schema())?.node).clone();
+                let itf = InterfaceTypeDefinitionPosition {
+                    type_name: itf_obj_field.type_name.clone(),
                 };
-                for itf_field in implemented_itf.fields.values() {
-                    if obj_ty.fields.contains_key(&itf_field.name) {
-                        continue;
-                    }
+                let itf_field_pos = itf.field(itf_obj_field.field_name.clone());
 
-                    // Note that we don't blindly add the field yet, that would be incorrect in many cases (and we
-                    // have a specific validation that return a user-friendly error in such incorrect cases, see
-                    // `postMergeValidations`). We must first check that there is some subgraph that implement
-                    // that field as an "interface object", since in that case the field will genuinely be provided
-                    // by that subgraph at runtime.
-                    if self.is_field_provided_by_an_interface_object(
-                        &itf_field.name,
-                        implemented_itf_name,
-                    ) {
-                        // Note it's possible that interface is abstracted away (as an interface object) in multiple
-                        // subgraphs, so we don't bother with the field definition in those subgraphs, but rather
-                        // just copy the merged definition from the interface.
-                        //
-                        // Cases could probably be made for both either copying or not copying the description
-                        // and applied directives from the interface field, but we copy both here as it feels
-                        // more likely to be what user expects.
-                        let mut new_field = itf_field.as_ref().clone();
-                        new_field.directives.retain(|d| {
-                            self.join_spec_definition
-                                .is_spec_directive_name(&self.merged, &d.name)
-                                .is_ok_and(|from_join_spec| !from_join_spec)
-                        });
-                        for arg in new_field.arguments.iter_mut() {
-                            arg.make_mut().directives.retain(|d| {
-                                self.join_spec_definition
-                                    .is_spec_directive_name(&self.merged, &d.name)
-                                    .is_ok_and(|from_join_spec| !from_join_spec)
-                            });
-                        }
+                // If the interface in the supergraph is missing this field, merge it in.
+                if itf_field_pos.try_get(self.merged.schema()).is_none() {
+                    let subgraph_enum_name = self.join_spec_name(idx)?;
+                    let mut missing_itf_node = ast_node_to_add.clone();
+                    missing_itf_node.directives.push(
+                        JoinFieldBuilder::new()
+                            .arg(
+                                &JOIN_GRAPH_ARGUMENT_NAME,
+                                Value::Enum(subgraph_enum_name.clone()),
+                            )
+                            .build(),
+                    );
+                    fields_to_insert.insert(itf_field_pos.into(), missing_itf_node);
+                }
+
+                // If an implementer of that interface is missing the field, merge it in.
+                for implementer in itf.implementers(&self.merged)? {
+                    if implementer
+                        .field(itf_obj_field.field_name.clone())
+                        .try_get(self.merged.schema())
+                        .is_none()
+                    {
                         // We add a special @join__field for those added field with no `graph` target. This
-                        // clarify to the later extraction process that this particular field doesn't come
+                        // clarifies to the later extraction process that this particular field doesn't come
                         // from any particular subgraph.
-                        new_field.directives.push(JoinFieldBuilder::new().build());
+                        let mut missing_obj_node = ast_node_to_add.clone();
+                        missing_obj_node
+                            .directives
+                            .push(JoinFieldBuilder::new().build());
                         fields_to_insert.insert(
                             ObjectFieldDefinitionPosition {
-                                type_name: obj_ty_name.clone(),
-                                field_name: itf_field.name.clone(),
-                            },
-                            new_field,
+                                type_name: implementer.type_name().clone(),
+                                field_name: itf_obj_field.field_name.clone(),
+                            }
+                            .into(),
+                            missing_obj_node,
                         );
                     }
                 }
             }
         }
 
-        let sources: Sources<()> = (0..self.subgraphs.len()).map(|idx| (idx, None)).collect();
-        for (pos, field) in fields_to_insert {
-            pos.insert(&mut self.merged, Component::new(field))?;
-            // If we had to add a field here, it means that, for this particular implementation, the
-            // field is only provided through the @interfaceObject. But because the field wasn't
-            // merged, it also mean we haven't validated field sharing for that field, and we could
-            // have field sharing concerns if the field is provided by multiple @interfaceObject.
-            // So we validate field sharing now (it's convenient to wait until now as now that
-            // the field is part of the supergraph, we can just call `validateFieldSharing` with
-            // all sources `undefined` and it wil still find and check the `@interfaceObject`).
-            self.validate_field_sharing(&sources, &pos.into(), &FieldMergeContext::default())?;
+        for (dest, ast_node) in fields_to_insert {
+            trace!("Filling in missing interface object field {dest} with {ast_node}",);
+            dest.insert(&mut self.merged, Component::new(ast_node))?;
         }
+
         Ok(())
     }
 
@@ -1925,14 +1965,6 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             result.extend(locations);
         }
         result
-    }
-
-    pub(crate) fn subgraph_sources(&self) -> Sources<Subgraph<Validated>> {
-        self.subgraphs
-            .iter()
-            .enumerate()
-            .map(|(idx, subgraph)| (idx, Some(subgraph.clone())))
-            .collect()
     }
 }
 

@@ -41,7 +41,8 @@ impl<'a> PrimaryCacheKeyRoot<'a> {
         } = self;
 
         let query_hash = hash_query(subgraph_query_hash);
-        let additional_data_hash = hash_additional_data(body, context, auth_cache_key_metadata);
+        let additional_data_hash =
+            hash_additional_data(subgraph_name, body, context, auth_cache_key_metadata);
 
         // - response cache version: current version of the hash
         // - subgraph name: subgraph name
@@ -115,6 +116,7 @@ pub(super) fn hash_query(query_hash: &QueryHash) -> String {
 }
 
 pub(super) fn hash_additional_data(
+    subgraph_name: &str,
     body: &graphql::Request,
     context: &Context,
     cache_key: &CacheKeyMetadata,
@@ -133,8 +135,16 @@ pub(super) fn hash_additional_data(
         .serialize(Blake3Serializer::new(&mut hasher))
         .expect("this serializer doesn't throw any errors; qed");
 
+    // Takes value specific for a subgraph, if it doesn't exist take value for all subgraphs, and if you have data specific for an operation name add it in the hash
     if let Ok(Some(cache_data)) = context.get::<&str, Object>(CONTEXT_CACHE_KEY) {
-        if let Some(v) = cache_data.get("all") {
+        if let Some(v) = cache_data
+            .get("subgraphs")
+            .and_then(|s| s.as_object())
+            .and_then(|subgraph_data| subgraph_data.get(subgraph_name))
+        {
+            v.serialize(Blake3Serializer::new(&mut hasher))
+                .expect("this serializer doesn't throw any errors; qed");
+        } else if let Some(v) = cache_data.get("all") {
             v.serialize(Blake3Serializer::new(&mut hasher))
                 .expect("this serializer doesn't throw any errors; qed");
         }
@@ -184,7 +194,70 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use insta::assert_snapshot;
+
+    #[test]
+    fn test_hash_additional_data() {
+        let context = Context::new();
+        context.insert_json_value(
+            CONTEXT_CACHE_KEY,
+            serde_json_bytes::json!({
+                "all": {
+                  "locale": "be"
+                },
+                "subgraphs": {
+                    "test": {
+                        "foo": "bar"
+                    },
+                    "test_2": {
+                        "bar": "foo"
+                    }
+                }
+            }),
+        );
+        let hashed_data = hash_additional_data(
+            "test",
+            &graphql::Request::builder()
+                .query("{ me { name } }")
+                .variable("key", "value")
+                .build(),
+            &context,
+            &Default::default(),
+        );
+        let hashed_data_2 = hash_additional_data(
+            "test_2",
+            &graphql::Request::builder()
+                .query("{ me { name } }")
+                .variable("key", "value")
+                .build(),
+            &context,
+            &Default::default(),
+        );
+        // Because it takes different data from context
+        assert!(hashed_data != hashed_data_2);
+
+        let hashed_data_3 = hash_additional_data(
+            "test_3",
+            &graphql::Request::builder()
+                .query("{ me { name } }")
+                .variable("key", "value")
+                .build(),
+            &context,
+            &Default::default(),
+        );
+        let hashed_data_4 = hash_additional_data(
+            "test_4",
+            &graphql::Request::builder()
+                .query("{ me { name } }")
+                .variable("key", "value")
+                .build(),
+            &context,
+            &Default::default(),
+        );
+        // Because it takes the same data from context `all`
+        assert_eq!(hashed_data_3, hashed_data_4);
+    }
 
     #[test]
     fn top_level_hash_is_order_insensitive() {
