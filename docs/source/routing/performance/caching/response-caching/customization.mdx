@@ -99,7 +99,16 @@ Use custom cache keys when you need to:
 
 ### Configure cache keys
 
-This entry contains an object with an `all` field to affect all subgraph requests under one client request, and fields named after subgraph operation names to affect individual subgraph queries. The field's value can be any valid JSON value, such as an object or a string.
+You can customize the response cache key with the `apollo::response_cache::key` context entry. Data in this entry modifies the data used to generate the cache key, and it can be any valid JSON.
+
+You can apply customizations at multiple scales using different fields in `apollo::response_cache::key`:
+- An `all` field, which affects all subgraph requests
+- A `subgraphs` field, which contains an object with per-subgraph customization
+- A field for each operation name, which affects only a specific operation
+
+Data within these customizations are _not_ merged. The router chooses data in order of precedence: operation name, subgraph, then `all`. To set common data, you must also add it to the more specific sections.
+
+Example:
 
 ```json
 {
@@ -107,6 +116,11 @@ This entry contains an object with an `all` field to affect all subgraph request
     "subgraph_operation1": "key1",
     "subgraph_operation2": {
       "data": "key2"
+    },
+    "subgraphs": {
+      "my_subgraph": {
+        "locale": "be"
+      }
     }
 }
 ```
