@@ -5,18 +5,13 @@ expression: "TestResult\n{\n    query: QUERY, extracted_policies: &extracted_pol
 query:
 
         query TestIssue {
-          idList(id: "1") {
-            activeId 
+          index(id: "1") {
+            index
           }
         }
     
-extracted_policies: {"read"}
-successful policies: ["read"]
+extracted_policies: {}
+successful policies: []
 filtered:
-query TestIssue {
-  idList(id: "1") {
-    activeId
-  }
-}
 
-paths: []
+paths: ["/index"]

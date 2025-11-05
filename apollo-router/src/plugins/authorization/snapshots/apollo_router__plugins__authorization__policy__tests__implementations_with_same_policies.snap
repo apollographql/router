@@ -4,14 +4,22 @@ expression: "TestResult\n{\n    query: QUERY, extracted_policies: &extracted_pol
 ---
 query:
 
-        query TestIssue {
-          index(id: "1") {
-            index
-          }
+      query {
+        test
+        itf {
+          id
+          other
         }
+      }
     
-extracted_policies: {"read"}
+extracted_policies: {}
 successful policies: []
 filtered:
+{
+  test
+  itf {
+    other
+  }
+}
 
-paths: ["/index/index"]
+paths: ["/itf/id"]
