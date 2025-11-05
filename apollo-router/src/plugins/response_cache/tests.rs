@@ -329,7 +329,7 @@ async fn insert_with_custom_key() {
     });
 
     let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
-    let storage = Storage::new(&Config::test(false, "test_insert_simple"), drop_rx)
+    let storage = Storage::new(&Config::test(false, "insert_with_custom_key"), drop_rx)
         .await
         .unwrap();
     let map = [
