@@ -16,7 +16,7 @@ services:
       - 8126:8126
 
   # Note: we run both standalone redis and clustered redis because different integration tests focus on different
-  # modes of redis. In the future, it'd be great to
+  # modes of redis. In the future, we should probably add redis sentinel.
 
   # standalone redis
   redis:
