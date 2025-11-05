@@ -874,8 +874,13 @@ impl RedisCacheStorage {
 mod test {
     use std::time::SystemTime;
 
+    use serde_json::json;
+    use tower::BoxError;
     use url::Url;
 
+    use super::RedisCacheStorage;
+    use super::RedisKey;
+    use super::RedisValue;
     use crate::cache::storage::ValueType;
 
     #[test]
@@ -901,109 +906,114 @@ mod test {
     }
 
     #[test]
-    fn it_preprocesses_redis_schemas_correctly() {
+    fn it_preprocesses_redis_schemas_correctly() -> Result<(), url::ParseError> {
         // Base Format
         for scheme in ["redis", "rediss"] {
             let url_s = format!("{scheme}://username:password@host:6666/database");
-            let url = Url::parse(&url_s).expect("it's a valid url");
-            assert!(super::RedisCacheStorage::preprocess_urls(vec![url.clone()]).is_ok());
-            assert!(super::RedisCacheStorage::preprocess_urls(vec![url.clone(), url]).is_ok());
+            let url = Url::parse(&url_s)?;
+            assert!(RedisCacheStorage::preprocess_urls(vec![url.clone()]).is_ok());
+            assert!(RedisCacheStorage::preprocess_urls(vec![url.clone(), url]).is_ok());
         }
         // Cluster Format
         for scheme in ["redis-cluster", "rediss-cluster"] {
             let url_s =
                 format!("{scheme}://username:password@host:6666?node=host1:6667&node=host2:6668");
-            let url = Url::parse(&url_s).expect("it's a valid url");
-            assert!(super::RedisCacheStorage::preprocess_urls(vec![url.clone()]).is_ok());
-            assert!(super::RedisCacheStorage::preprocess_urls(vec![url.clone(), url]).is_ok());
+            let url = Url::parse(&url_s)?;
+            assert!(RedisCacheStorage::preprocess_urls(vec![url.clone()]).is_ok());
+            assert!(RedisCacheStorage::preprocess_urls(vec![url.clone(), url]).is_ok());
         }
         // Sentinel Format
         for scheme in ["redis-sentinel", "rediss-sentinel"] {
             let url_s = format!(
                 "{scheme}://username:password@host:6666?node=host1:6667&node=host2:6668&sentinelServiceName=myservice&sentinelUserName=username2&sentinelPassword=password2"
             );
-            let url = Url::parse(&url_s).expect("it's a valid url");
-            assert!(super::RedisCacheStorage::preprocess_urls(vec![url.clone()]).is_ok());
-            assert!(super::RedisCacheStorage::preprocess_urls(vec![url.clone(), url]).is_ok());
+            let url = Url::parse(&url_s)?;
+            assert!(RedisCacheStorage::preprocess_urls(vec![url.clone()]).is_ok());
+            assert!(RedisCacheStorage::preprocess_urls(vec![url.clone(), url]).is_ok());
         }
         // Make sure it fails on sample invalid schemes
         for scheme in ["wrong", "something"] {
             let url_s = format!("{scheme}://username:password@host:6666/database");
-            let url = Url::parse(&url_s).expect("it's a valid url");
-            assert!(super::RedisCacheStorage::preprocess_urls(vec![url.clone()]).is_err());
-            assert!(super::RedisCacheStorage::preprocess_urls(vec![url.clone(), url]).is_err());
+            let url = Url::parse(&url_s)?;
+            assert!(RedisCacheStorage::preprocess_urls(vec![url.clone()]).is_err());
+            assert!(RedisCacheStorage::preprocess_urls(vec![url.clone(), url]).is_err());
         }
+
+        Ok(())
     }
 
     // This isn't an exhaustive list of combinations, but some of the more common likely mistakes
     // that we should catch.
     #[test]
-    fn it_preprocesses_redis_schemas_correctly_backwards_compatibility() {
+    fn it_preprocesses_redis_schemas_correctly_backwards_compatibility()
+    -> Result<(), url::ParseError> {
         // Two redis schemes
         let url_s = "redis://username:password@host:6666/database";
-        let url = Url::parse(url_s).expect("it's a valid url");
+        let url = Url::parse(url_s)?;
         let url_s1 = "redis://username:password@host:6666/database";
-        let url_1 = Url::parse(url_s1).expect("it's a valid url");
+        let url_1 = Url::parse(url_s1)?;
         let urls = vec![url, url_1];
-        assert!(super::RedisCacheStorage::preprocess_urls(urls.clone()).is_ok());
+        assert!(RedisCacheStorage::preprocess_urls(urls.clone()).is_ok());
         for url in urls {
-            assert!(super::RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
+            assert!(RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
         }
 
         // redis-cluster, redis
         let url_s = "redis-cluster://username:password@host:6666/database";
-        let url = Url::parse(url_s).expect("it's a valid url");
+        let url = Url::parse(url_s)?;
         let url_s1 = "redis://username:password@host:6666/database";
-        let url_1 = Url::parse(url_s1).expect("it's a valid url");
+        let url_1 = Url::parse(url_s1)?;
         let urls = vec![url, url_1];
-        assert!(super::RedisCacheStorage::preprocess_urls(urls.clone()).is_ok());
+        assert!(RedisCacheStorage::preprocess_urls(urls.clone()).is_ok());
         for url in urls {
-            assert!(super::RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
+            assert!(RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
         }
 
         // redis, redis-cluster
         let url_s = "redis://username:password@host:6666/database";
-        let url = Url::parse(url_s).expect("it's a valid url");
+        let url = Url::parse(url_s)?;
         let url_s1 = "redis-cluster://username:password@host:6666/database";
-        let url_1 = Url::parse(url_s1).expect("it's a valid url");
+        let url_1 = Url::parse(url_s1)?;
         let urls = vec![url, url_1];
-        assert!(super::RedisCacheStorage::preprocess_urls(urls.clone()).is_err());
+        assert!(RedisCacheStorage::preprocess_urls(urls.clone()).is_err());
         for url in urls {
-            assert!(super::RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
+            assert!(RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
         }
 
         // redis-sentinel, redis
         let url_s = "redis-sentinel://username:password@host:6666/database";
-        let url = Url::parse(url_s).expect("it's a valid url");
+        let url = Url::parse(url_s)?;
         let url_s1 = "redis://username:password@host:6666/database";
-        let url_1 = Url::parse(url_s1).expect("it's a valid url");
+        let url_1 = Url::parse(url_s1)?;
         let urls = vec![url, url_1];
-        assert!(super::RedisCacheStorage::preprocess_urls(urls.clone()).is_err());
+        assert!(RedisCacheStorage::preprocess_urls(urls.clone()).is_err());
         for url in urls {
-            assert!(super::RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
+            assert!(RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
         }
 
         // redis, rediss
         let url_s = "redis://username:password@host:6666/database";
-        let url = Url::parse(url_s).expect("it's a valid url");
+        let url = Url::parse(url_s)?;
         let url_s1 = "rediss://username:password@host:6666/database";
-        let url_1 = Url::parse(url_s1).expect("it's a valid url");
+        let url_1 = Url::parse(url_s1)?;
         let urls = vec![url, url_1];
-        assert!(super::RedisCacheStorage::preprocess_urls(urls.clone()).is_err());
+        assert!(RedisCacheStorage::preprocess_urls(urls.clone()).is_err());
         for url in urls {
-            assert!(super::RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
+            assert!(RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
         }
 
         // redis, rediss-cluster
         let url_s = "redis://username:password@host:6666/database";
-        let url = Url::parse(url_s).expect("it's a valid url");
+        let url = Url::parse(url_s)?;
         let url_s1 = "rediss-cluster://username:password@host:6666/database";
-        let url_1 = Url::parse(url_s1).expect("it's a valid url");
+        let url_1 = Url::parse(url_s1)?;
         let urls = vec![url, url_1];
-        assert!(super::RedisCacheStorage::preprocess_urls(urls.clone()).is_err());
+        assert!(RedisCacheStorage::preprocess_urls(urls.clone()).is_err());
         for url in urls {
-            assert!(super::RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
+            assert!(RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
         }
+
+        Ok(())
     }
 
     /// Module that collects tests which apply to a real cluster.
@@ -1090,52 +1100,52 @@ mod test {
 
             Ok(())
         }
+    }
 
-        /// Test that `get_multiple` returns items in the correct order.
-        #[tokio::test]
-        async fn test_get_multiple_is_ordered() -> Result<(), BoxError> {
-            let config_json = json!({
-                "urls": ["redis://localhost:6379"],
-                "namespace": "test_get_multiple_is_ordered",
-                "required_to_start": true,
-                "ttl": "60s"
-            });
-            let config = serde_json::from_value(config_json).unwrap();
-            let storage = RedisCacheStorage::new(config, "test_get_multiple_is_ordered").await?;
+    /// Test that `get_multiple` returns items in the correct order.
+    #[tokio::test]
+    async fn test_get_multiple_is_ordered() -> Result<(), BoxError> {
+        let config_json = json!({
+            "urls": ["redis://localhost:6379"],
+            "namespace": "test_get_multiple_is_ordered",
+            "required_to_start": true,
+            "ttl": "60s"
+        });
+        let config = serde_json::from_value(config_json).unwrap();
+        let storage = RedisCacheStorage::new(config, "test_get_multiple_is_ordered").await?;
 
-            let data = [("a", "1"), ("b", "2"), ("c", "3")]
-                .map(|(k, v)| (RedisKey(k.to_string()), RedisValue(v.to_string())));
-            storage.insert_multiple(&data, None).await;
+        let data = [("a", "1"), ("b", "2"), ("c", "3")]
+            .map(|(k, v)| (RedisKey(k.to_string()), RedisValue(v.to_string())));
+        storage.insert_multiple(&data, None).await;
 
-            // check different orders of fetches to make everything is ordered correctly, including
-            // when some values are none
-            let test_cases = vec![
-                (vec!["a", "b", "c"], vec![Some("1"), Some("2"), Some("3")]),
-                (vec!["c", "b", "a"], vec![Some("3"), Some("2"), Some("1")]),
-                (vec!["d", "b", "c"], vec![None, Some("2"), Some("3")]),
-                (
-                    vec!["d", "3", "s", "b", "s", "1", "c", "Y"],
-                    vec![None, None, None, Some("2"), None, None, Some("3"), None],
-                ),
-            ];
+        // check different orders of fetches to make everything is ordered correctly, including
+        // when some values are none
+        let test_cases = vec![
+            (vec!["a", "b", "c"], vec![Some("1"), Some("2"), Some("3")]),
+            (vec!["c", "b", "a"], vec![Some("3"), Some("2"), Some("1")]),
+            (vec!["d", "b", "c"], vec![None, Some("2"), Some("3")]),
+            (
+                vec!["d", "3", "s", "b", "s", "1", "c", "Y"],
+                vec![None, None, None, Some("2"), None, None, Some("3"), None],
+            ),
+        ];
 
-            for (keys, expected_values) in test_cases {
-                let keys: Vec<RedisKey<_>> = keys
-                    .into_iter()
-                    .map(|key| RedisKey(key.to_string()))
-                    .collect();
-                let expected_values: Vec<Option<String>> = expected_values
-                    .into_iter()
-                    .map(|value| value.map(ToString::to_string))
-                    .collect();
+        for (keys, expected_values) in test_cases {
+            let keys: Vec<RedisKey<_>> = keys
+                .into_iter()
+                .map(|key| RedisKey(key.to_string()))
+                .collect();
+            let expected_values: Vec<Option<String>> = expected_values
+                .into_iter()
+                .map(|value| value.map(ToString::to_string))
+                .collect();
 
-                let values = storage.get_multiple(keys).await;
-                let parsed_values: Vec<Option<String>> =
-                    values.into_iter().map(|v| v.map(|v| v.0)).collect();
-                assert_eq!(parsed_values, expected_values);
-            }
-
-            Ok(())
+            let values = storage.get_multiple(keys).await;
+            let parsed_values: Vec<Option<String>> =
+                values.into_iter().map(|v| v.map(|v| v.0)).collect();
+            assert_eq!(parsed_values, expected_values);
         }
+
+        Ok(())
     }
 }
