@@ -477,9 +477,9 @@ fn authenticate(
         span.record("authentication.jwt.failed", true);
         if let Some(src) = source {
             span.record("authentication.jwt.source", src.as_textual_representation());
-            tracing::info!(message = %error, jwtsource = %src.as_textual_representation(), "jwt authentication failure");
+            tracing::debug!(message = %error, jwtsource = %src.as_textual_representation(), "jwt authentication failure");
         } else {
-            tracing::info!(message = %error, "jwt authentication failure");
+            tracing::debug!(message = %error, "jwt authentication failure");
         }
 
         let _ = request.context.insert_json_value(
