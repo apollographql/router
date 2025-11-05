@@ -46,6 +46,15 @@ pub(crate) enum ResponseStatus {
 
 #[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum ActiveSubgraphRequests {
+    /// The number of active subgraph requests as a count.
+    Count,
+    /// Whether there are any active subgraph requests as a boolean.
+    Bool,
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum OperationKind {
     /// The raw operation kind.
     String,
@@ -85,4 +94,15 @@ pub(crate) enum CacheStatus {
     Miss,
     PartialHit,
     Status,
+}
+
+#[derive(Deserialize, JsonSchema, Clone, PartialEq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum CacheControlSelector {
+    /// Returns the scope, either `public` or `private`
+    Scope,
+    /// Boolean to know the value of no-store
+    NoStore,
+    /// Value of s-maxage or max-age in cache-control
+    MaxAge,
 }

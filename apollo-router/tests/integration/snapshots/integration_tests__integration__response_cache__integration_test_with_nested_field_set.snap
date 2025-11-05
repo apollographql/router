@@ -38,6 +38,7 @@ expression: response
             "maxAge": 86400,
             "public": true
           },
+          "shouldStore": true,
           "data": {
             "data": {
               "allProducts": [
@@ -53,18 +54,30 @@ expression: response
                 }
               ]
             }
-          }
+          },
+          "warnings": [
+            {
+              "code": "NO_CACHE_TAG_ON_ROOT_FIELD",
+              "links": [
+                {
+                  "url": "https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#invalidation-methods",
+                  "title": "Add '@cacheTag' in your schema"
+                }
+              ],
+              "message": "No cache tags are specified on your root fields query. If you want to use active invalidation, you'll need to add cache tags on your root field."
+            }
+          ]
         },
         {
-          "key": "version:1.0:subgraph:users:type:User:entity:b41dfad85edaabac7bb681098e9b23e21b3b8b9b8b1849babbd5a1300af64b43:representation:68fd4df7c06fd234bd0feb24e3300abcc06136ea8a9dd7533b7378f5fce7cfc4:hash:460b70e698b8c9d8496b0567e0f0848b9f7fef36e841a8a0b0771891150c35e5:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+          "key": "version:1.0:subgraph:users:type:User:representation:b41dfad85edaabac7bb681098e9b23e21b3b8b9b8b1849babbd5a1300af64b43:hash:460b70e698b8c9d8496b0567e0f0848b9f7fef36e841a8a0b0771891150c35e5:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
           "invalidationKeys": [],
           "kind": {
             "typename": "User",
             "entityKey": {
-              "email": "test@test.com",
               "country": {
                 "a": "France"
-              }
+              },
+              "email": "test@test.com"
             }
           },
           "subgraphName": "users",
@@ -88,11 +101,13 @@ expression: response
             "maxAge": 86400,
             "public": true
           },
+          "shouldStore": true,
           "data": {
             "data": {
               "name": "test"
             }
-          }
+          },
+          "warnings": []
         }
       ]
     }

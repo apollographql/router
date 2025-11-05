@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use apollo_router::graphql;
 use apollo_router::services::router;
+use apollo_router::services::router::body::RouterBody;
 use apollo_router::services::supergraph;
 use apollo_router::test_harness::HttpService;
 use fred::clients::Client;
@@ -12,6 +13,7 @@ use fred::interfaces::ClientLike;
 use fred::interfaces::KeysInterface;
 use fred::types::Builder;
 use http::HeaderMap;
+use http::HeaderName;
 use http::HeaderValue;
 use http_body_util::BodyExt as _;
 use indexmap::IndexMap;
@@ -48,6 +50,7 @@ fn base_config() -> Value {
         },
         "preview_response_cache": {
             "enabled": true,
+            "debug": true,
             "subgraph": {
                 "all": {
                     "redis": {
@@ -174,6 +177,20 @@ async fn make_graphql_request(router: &mut HttpService) -> (HeaderMap<String>, g
     make_http_request(router, request.into()).await
 }
 
+async fn make_debug_graphql_request(
+    router: &mut HttpService,
+) -> (HeaderMap<String>, graphql::Response) {
+    let query = "{ topProducts { reviews { id } } }";
+    let request = graphql_request(query);
+    let mut request: http::Request<router::Body> = request.into();
+    request.headers_mut().insert(
+        HeaderName::from_static("apollo-cache-debugging"),
+        HeaderValue::from_static("true"),
+    );
+
+    make_http_request(router, request).await
+}
+
 fn graphql_request(query: &str) -> router::Request {
     supergraph::Request::fake_builder()
         .query(query)
@@ -247,6 +264,96 @@ async fn basic_cache_skips_subgraph_request() {
         - reviews:
             - id: r2
     ");
+    // Unchanged, everything is in cache so we don’t need to make more subgraph requests:
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
+    products: 1
+    reviews: 1
+    ");
+}
+
+fn check_cache_tags(response: &graphql::Response, cache_tags: Vec<Vec<String>>) {
+    let mut debugger_entries = response
+        .extensions
+        .get("apolloCacheDebugging")
+        .unwrap()
+        .as_object()
+        .unwrap()
+        .get("data")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .iter();
+
+    for debug_cache_tags in cache_tags {
+        let entry = debugger_entries.next().unwrap().as_object().unwrap();
+        assert_eq!(
+            entry.get("invalidationKeys"),
+            Some(&serde_json_bytes::Value::Array(
+                debug_cache_tags
+                    .into_iter()
+                    .map(|cache_tag| serde_json_bytes::Value::String(cache_tag.into()))
+                    .collect()
+            ))
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn check_cache_tags_from_debugger_data() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let (mut router, subgraph_request_counters) = harness(base_config(), base_subgraphs()).await;
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
+    products: 0
+    reviews: 0
+    ");
+    let (headers, body) = make_debug_graphql_request(&mut router).await;
+    assert!(headers["cache-control"].contains("public"));
+    assert!(body.errors.is_empty());
+    insta::assert_yaml_snapshot!(body.data, @r"
+    topProducts:
+      - reviews:
+          - id: r1a
+          - id: r1b
+      - reviews:
+          - id: r2
+    ");
+    check_cache_tags(
+        &body,
+        vec![
+            vec!["topProducts".to_string()],
+            vec!["product-1".to_string()],
+            vec!["product-2".to_string()],
+        ],
+    );
+    insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
+    products: 1
+    reviews: 1
+    ");
+    // Needed because insert in the cache is async
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let (headers, body) = make_debug_graphql_request(&mut router).await;
+    assert!(headers["cache-control"].contains("public"));
+    assert!(body.errors.is_empty());
+    insta::assert_yaml_snapshot!(body.data, @r"
+    topProducts:
+      - reviews:
+          - id: r1a
+          - id: r1b
+      - reviews:
+          - id: r2
+    ");
+
+    check_cache_tags(
+        &body,
+        vec![
+            vec!["topProducts".to_string()],
+            vec!["product-1".to_string()],
+            vec!["product-2".to_string()],
+        ],
+    );
     // Unchanged, everything is in cache so we don’t need to make more subgraph requests:
     insta::assert_yaml_snapshot!(subgraph_request_counters, @r"
     products: 1
@@ -478,6 +585,88 @@ async fn cache_control_merging_single_fetch() {
 }
 
 #[tokio::test]
+async fn complex_entity_key_response_cache() {
+    // GIVEN:
+    //   * that graphOS is enabled
+    //   * that we have a supergraph with:
+    //     * join__type with a complex key (ie, using an array)
+    //     * two subgraphs that both have the
+    //       type Status, but with an extra field given by those subgraphs
+    //       (ie, stuffDetails and statusDetails)
+    //   * a router running the above
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let subgraphs = json!({
+        "stuff": {
+            "query": {
+                "getStatus": {
+                    "id": "1",
+                    "items": [{"id": "i1", "name": "Item"}],
+                    "stuffDetails": "stuff we have"
+                }
+            }
+        },
+        "status": {
+            "entities": [{
+                "__typename": "Status",
+                "id": "1",
+                "items": [{"id": "i1", "name": "Item"}],
+                "statusDetails": "status details"
+            }]
+        }
+    });
+
+    let mut config = base_config();
+    config
+        .as_object_mut()
+        .unwrap()
+        .insert("experimental_mock_subgraphs".into(), subgraphs);
+
+    let router = apollo_router::TestHarness::builder()
+        .schema(include_str!("./fixtures/entity_key_complex.graphql"))
+        .configuration_json(config)
+        .unwrap()
+        .build_http_service()
+        .await
+        .unwrap();
+
+    let mut router = router;
+
+    // WHEN:
+    //   * a query for the Status type but with data from both the stuff and
+    //     status subgraphs
+
+    let query = r#"{
+        getStatus(id: "1") {
+            id
+            items { id name }
+            stuffDetails
+            statusDetails
+        }
+    }"#;
+    let mut http_req: http::Request<RouterBody> = graphql_request(query).into();
+    http_req.headers_mut().insert(
+        HeaderName::from_static("apollo-cache-debugging"),
+        HeaderValue::from_static("true"),
+    );
+    let (_, body) = make_http_request::<graphql::Response>(&mut router, http_req).await;
+
+    // THEN:
+    //   * no errors emitted! This means that the key was parsed correctly, or
+    //     else we'd see malformed request errors
+    //   * we get data from both subgraphs
+    //
+    assert!(body.errors.is_empty());
+    let expectation: serde_json_bytes::Value = json!({"getStatus":{"id":"1","items":[{"id":"i1","name":"Item"}],"stuffDetails":"stuff we have","statusDetails":"status details"}}).into();
+    assert_eq!(body.data, Some(expectation));
+    insta::assert_json_snapshot!(body.extensions, {
+        ".apolloCacheDebugging.data[].cacheControl.created" => 0
+    });
+}
+
+#[tokio::test]
 async fn cache_control_merging_multi_fetch() {
     if !graph_os_enabled() {
         return;
@@ -682,7 +871,7 @@ async fn integration_test_basic() -> Result<(), BoxError> {
     let cache_key = "version:1.0:subgraph:products:type:Query:hash:bf44683f0c222652b509d6efb8f324610c8671181de540a96a5016bd71daa7cc:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
     check_cache_key!(&namespace, cache_key, &client);
 
-    let cache_key = "version:1.0:subgraph:reviews:type:Product:entity:cf4952a1e511b1bf2561a6193b4cdfc95f265a79e5cae4fd3e46fd9e75bc512f:representation::hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    let cache_key = "version:1.0:subgraph:reviews:type:Product:representation:cf4952a1e511b1bf2561a6193b4cdfc95f265a79e5cae4fd3e46fd9e75bc512f:hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
     check_cache_key!(&namespace, cache_key, &client);
 
     let supergraph = apollo_router::TestHarness::builder()
@@ -740,7 +929,7 @@ async fn integration_test_basic() -> Result<(), BoxError> {
         ".extensions.apolloCacheDebugging.data[].cacheControl.created" => 0
     });
 
-    let cache_key = "version:1.0:subgraph:reviews:type:Product:entity:cf4952a1e511b1bf2561a6193b4cdfc95f265a79e5cae4fd3e46fd9e75bc512f:representation::hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    let cache_key = "version:1.0:subgraph:reviews:type:Product:representation:cf4952a1e511b1bf2561a6193b4cdfc95f265a79e5cae4fd3e46fd9e75bc512f:hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
     check_cache_key!(&namespace, cache_key, &client);
 
     const SECRET_SHARED_KEY: &str = "supersecret";
@@ -835,7 +1024,7 @@ async fn integration_test_basic() -> Result<(), BoxError> {
     assert!(response_status.is_success());
 
     // This should be in error because we invalidated this entity
-    let cache_key = "version:1.0:subgraph:reviews:type:Product:entity:cf4952a1e511b1bf2561a6193b4cdfc95f265a79e5cae4fd3e46fd9e75bc512f:representation::hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    let cache_key = "version:1.0:subgraph:reviews:type:Product:representation:cf4952a1e511b1bf2561a6193b4cdfc95f265a79e5cae4fd3e46fd9e75bc512f:hash:06a24c8b3861c95f53d224071ee9627ee81b4826d23bc3de69bdc0031edde6ed:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
     assert!(!cache_key_exists(&namespace, cache_key, &client).await?);
 
     // This entry should still be in redis because we didn't invalidate this entry
@@ -928,7 +1117,7 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
     let cache_key = "version:1.0:subgraph:products:type:Query:hash:f4f41cfa309494d41648c3a3c398c61cb00197696102199454a25a0dcdd2f592:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
     check_cache_key!(&namespace, cache_key, &client);
 
-    let cache_key = "version:1.0:subgraph:users:type:User:entity:b41dfad85edaabac7bb681098e9b23e21b3b8b9b8b1849babbd5a1300af64b43:representation:68fd4df7c06fd234bd0feb24e3300abcc06136ea8a9dd7533b7378f5fce7cfc4:hash:460b70e698b8c9d8496b0567e0f0848b9f7fef36e841a8a0b0771891150c35e5:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    let cache_key = "version:1.0:subgraph:users:type:User:representation:b41dfad85edaabac7bb681098e9b23e21b3b8b9b8b1849babbd5a1300af64b43:hash:460b70e698b8c9d8496b0567e0f0848b9f7fef36e841a8a0b0771891150c35e5:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
     check_cache_key!(&namespace, cache_key, &client);
 
     let supergraph = apollo_router::TestHarness::builder()
@@ -985,7 +1174,7 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
         ".extensions.apolloCacheDebugging.data[].cacheControl.created" => 0
     });
 
-    let cache_key = "version:1.0:subgraph:users:type:User:entity:b41dfad85edaabac7bb681098e9b23e21b3b8b9b8b1849babbd5a1300af64b43:representation:68fd4df7c06fd234bd0feb24e3300abcc06136ea8a9dd7533b7378f5fce7cfc4:hash:460b70e698b8c9d8496b0567e0f0848b9f7fef36e841a8a0b0771891150c35e5:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    let cache_key = "version:1.0:subgraph:users:type:User:representation:b41dfad85edaabac7bb681098e9b23e21b3b8b9b8b1849babbd5a1300af64b43:hash:460b70e698b8c9d8496b0567e0f0848b9f7fef36e841a8a0b0771891150c35e5:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
     check_cache_key!(&namespace, cache_key, &client);
 
     const SECRET_SHARED_KEY: &str = "supersecret";
@@ -1081,7 +1270,7 @@ async fn integration_test_with_nested_field_set() -> Result<(), BoxError> {
     assert!(response_status.is_success());
 
     // This should be in error because we invalidated this entity
-    let cache_key = "version:1.0:subgraph:users:type:User:entity:b41dfad85edaabac7bb681098e9b23e21b3b8b9b8b1849babbd5a1300af64b43:representation:68fd4df7c06fd234bd0feb24e3300abcc06136ea8a9dd7533b7378f5fce7cfc4:hash:460b70e698b8c9d8496b0567e0f0848b9f7fef36e841a8a0b0771891150c35e5:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
+    let cache_key = "version:1.0:subgraph:users:type:User:representation:b41dfad85edaabac7bb681098e9b23e21b3b8b9b8b1849babbd5a1300af64b43:hash:460b70e698b8c9d8496b0567e0f0848b9f7fef36e841a8a0b0771891150c35e5:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
     assert!(!cache_key_exists(&namespace, cache_key, &client).await?);
 
     // This entry should still be in redis because we didn't invalidate this entry

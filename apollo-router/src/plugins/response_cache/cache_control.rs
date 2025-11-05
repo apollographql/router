@@ -11,38 +11,38 @@ use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CacheControl {
-    pub(super) created: u64,
+    created: u64,
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub(super) max_age: Option<u32>,
+    max_age: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub(super) age: Option<u32>,
+    age: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub(super) s_max_age: Option<u32>,
+    s_max_age: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub(super) stale_while_revalidate: Option<u32>,
+    stale_while_revalidate: Option<u64>,
     #[serde(skip_serializing_if = "is_false", default)]
-    pub(super) no_cache: bool,
+    no_cache: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    pub(super) must_revalidate: bool,
+    must_revalidate: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    pub(super) proxy_revalidate: bool,
+    proxy_revalidate: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    pub(super) no_store: bool,
+    no_store: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    pub(super) private: bool,
+    private: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    pub(super) public: bool,
+    public: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    pub(super) must_understand: bool,
+    must_understand: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    pub(super) no_transform: bool,
+    no_transform: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    pub(super) immutable: bool,
+    immutable: bool,
     #[serde(skip_serializing_if = "is_false", default)]
-    pub(super) stale_if_error: bool,
+    stale_if_error: bool,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -85,7 +85,7 @@ impl CacheControl {
     ) -> Result<Self, BoxError> {
         let mut result = CacheControl::default();
         if let Some(duration) = default_ttl {
-            result.max_age = Some(duration.as_secs() as u32);
+            result.max_age = Some(duration.as_secs());
         }
 
         let mut found = false;
@@ -149,7 +149,7 @@ impl CacheControl {
             result.no_store = true;
         }
 
-        if let Some(value) = headers.get("Age") {
+        if let Some(value) = headers.get(http::header::AGE) {
             result.age = Some(value.to_str()?.trim().parse()?);
         }
 
@@ -251,23 +251,32 @@ impl CacheControl {
         Ok(s)
     }
 
-    pub(super) fn no_store() -> Self {
+    pub(crate) fn no_store() -> Self {
         CacheControl {
             no_store: true,
             ..Default::default()
         }
     }
 
-    fn update_ttl(&self, ttl: u32, now: u64) -> u32 {
+    fn update_ttl(&self, ttl: u64, now: u64) -> u64 {
         let elapsed = self.elapsed_inner(now);
-        ttl.saturating_sub(elapsed)
+        if elapsed < 0 {
+            0
+        } else {
+            ttl.saturating_sub(elapsed as u64)
+        }
+    }
+
+    /// Merge cache control values without updating the TTL
+    pub(crate) fn merge_without_update(&self, other: &CacheControl) -> CacheControl {
+        self.merge_inner(other, None)
     }
 
     pub(crate) fn merge(&self, other: &CacheControl) -> CacheControl {
-        self.merge_inner(other, now_epoch_seconds())
+        self.merge_inner(other, now_epoch_seconds().into())
     }
 
-    fn merge_inner(&self, other: &CacheControl, now: u64) -> CacheControl {
+    fn merge_inner(&self, other: &CacheControl, now: Option<u64>) -> CacheControl {
         // Early return to avoid conflicts https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#preventing_storing
         if self.no_store || other.no_store {
             return CacheControl {
@@ -276,29 +285,42 @@ impl CacheControl {
             };
         }
         CacheControl {
-            created: now,
-            max_age: match (self.ttl(), other.ttl()) {
-                (None, None) => None,
-                (None, Some(ttl)) => Some(other.update_ttl(ttl, now)),
-                (Some(ttl), None) => Some(self.update_ttl(ttl, now)),
-                (Some(ttl1), Some(ttl2)) => Some(std::cmp::min(
-                    self.update_ttl(ttl1, now),
-                    other.update_ttl(ttl2, now),
-                )),
+            created: now.unwrap_or_default(),
+            max_age: match now {
+                Some(now) => match (self.ttl(), other.ttl()) {
+                    (None, None) => None,
+                    (None, Some(ttl)) => Some(other.update_ttl(ttl, now)),
+                    (Some(ttl), None) => Some(self.update_ttl(ttl, now)),
+                    (Some(ttl1), Some(ttl2)) => Some(std::cmp::min(
+                        self.update_ttl(ttl1, now),
+                        other.update_ttl(ttl2, now),
+                    )),
+                },
+                None => match (self.ttl(), other.ttl()) {
+                    (None, None) => None,
+                    (None, Some(ttl)) => Some(ttl),
+                    (Some(ttl), None) => Some(ttl),
+                    (Some(ttl1), Some(ttl2)) => Some(std::cmp::min(ttl1, ttl2)),
+                },
             },
             age: None,
             s_max_age: None,
-            stale_while_revalidate: match (
-                self.stale_while_revalidate,
-                other.stale_while_revalidate,
-            ) {
-                (None, None) => None,
-                (None, Some(ttl)) => Some(other.update_ttl(ttl, now)),
-                (Some(ttl), None) => Some(self.update_ttl(ttl, now)),
-                (Some(ttl1), Some(ttl2)) => Some(std::cmp::min(
-                    self.update_ttl(ttl1, now),
-                    other.update_ttl(ttl2, now),
-                )),
+            stale_while_revalidate: match now {
+                Some(now) => match (self.stale_while_revalidate, other.stale_while_revalidate) {
+                    (None, None) => None,
+                    (None, Some(ttl)) => Some(other.update_ttl(ttl, now)),
+                    (Some(ttl), None) => Some(self.update_ttl(ttl, now)),
+                    (Some(ttl1), Some(ttl2)) => Some(std::cmp::min(
+                        self.update_ttl(ttl1, now),
+                        other.update_ttl(ttl2, now),
+                    )),
+                },
+                None => match (self.stale_while_revalidate, other.stale_while_revalidate) {
+                    (None, None) => None,
+                    (None, Some(ttl)) => Some(ttl),
+                    (Some(ttl), None) => Some(ttl),
+                    (Some(ttl1), Some(ttl2)) => Some(std::cmp::min(ttl1, ttl2)),
+                },
             },
             no_cache: self.no_cache || other.no_cache,
             must_revalidate: self.must_revalidate || other.must_revalidate,
@@ -318,29 +340,29 @@ impl CacheControl {
         }
     }
 
-    pub(crate) fn elapsed(&self) -> u32 {
+    pub(crate) fn elapsed(&self) -> i128 {
         self.elapsed_inner(now_epoch_seconds())
     }
 
-    pub(crate) fn elapsed_inner(&self, now: u64) -> u32 {
-        (now - self.created) as u32
+    pub(crate) fn elapsed_inner(&self, now: u64) -> i128 {
+        now as i128 - self.created as i128
     }
 
-    pub(crate) fn ttl(&self) -> Option<u32> {
+    pub(crate) fn ttl(&self) -> Option<u64> {
         match (
             self.s_max_age.as_ref().or(self.max_age.as_ref()),
             self.age.as_ref(),
         ) {
             (None, _) => None,
             (Some(max_age), None) => Some(*max_age),
-            (Some(max_age), Some(age)) => Some(max_age - age),
+            (Some(max_age), Some(age)) => Some(max_age.saturating_sub(*age)),
         }
     }
 
     pub(crate) fn should_store(&self) -> bool {
         // FIXME: should we add support for must-understand?
         // public will be the default case
-        !self.no_store
+        !self.no_store && self.ttl().map(|ttl| ttl > 0).unwrap_or(true)
     }
 
     pub(crate) fn private(&self) -> bool {
@@ -353,19 +375,46 @@ impl CacheControl {
 
     pub(crate) fn can_use(&self) -> bool {
         let elapsed = self.elapsed();
-        let expired = self.ttl().map(|ttl| ttl < elapsed).unwrap_or(false);
+        let expired = if elapsed < 0 {
+            true
+        } else {
+            self.ttl().map(|ttl| ttl < elapsed as u64).unwrap_or(false)
+        };
 
         // FIXME: we don't honor stale-while-revalidate yet
         // !expired || self.stale_while_revalidate
         !expired && !self.no_store
     }
 
+    pub(crate) fn is_no_store(&self) -> bool {
+        self.no_store
+    }
+
+    pub(crate) fn s_max_age_or_max_age(&self) -> Option<u64> {
+        self.s_max_age.or(self.max_age)
+    }
+
+    pub(crate) fn age(&self) -> Option<u64> {
+        self.age
+    }
+
     #[cfg(test)]
-    pub(crate) fn remaining_time(&self, now: u64) -> Option<u32> {
+    pub(crate) fn remaining_time(&self, now: u64) -> Option<u64> {
         self.ttl().map(|ttl| {
             let elapsed = self.elapsed_inner(now);
-            ttl.saturating_sub(elapsed)
+            if elapsed < 0 {
+                0
+            } else {
+                ttl.saturating_sub(elapsed as u64)
+            }
         })
+    }
+
+    // Export this for tests to avoid exporting field in pub(super) and create mistakes
+    #[cfg(test)]
+    #[allow(dead_code)] //False positive in clippy
+    pub(crate) fn set_created(&mut self, created: u64) {
+        self.created = created;
     }
 }
 
@@ -392,7 +441,7 @@ mod tests {
         assert_eq!(first.remaining_time(now), Some(30));
         assert_eq!(second.remaining_time(now), Some(40));
 
-        let merged = first.merge_inner(&second, now);
+        let merged = first.merge_inner(&second, now.into());
         assert_eq!(merged.created, now);
 
         assert_eq!(merged.ttl(), Some(30));
@@ -419,7 +468,7 @@ mod tests {
             ..Default::default()
         };
 
-        let merged = first.merge_inner(&second, now);
+        let merged = first.merge_inner(&second, now.into());
         assert!(merged.no_store);
         assert!(!merged.public);
         assert!(!merged.can_use());
@@ -462,9 +511,34 @@ mod tests {
             ..Default::default()
         };
 
-        let merged = first.merge_inner(&second, now);
+        let merged = first.merge_inner(&second, now.into());
         assert!(!merged.public);
         assert!(merged.private);
         assert!(merged.can_use());
+    }
+
+    #[test]
+    fn create_expired_cache_control() {
+        let now = now_epoch_seconds();
+        let cc = CacheControl {
+            created: now,
+            max_age: Some(40),
+            age: Some(50),
+            public: true,
+            private: false,
+            ..Default::default()
+        };
+        assert!(!cc.should_store()); // Because age is bigger than max_age
+
+        let cc = CacheControl {
+            created: now + 1000,
+            max_age: Some(40),
+            age: Some(50),
+            public: true,
+            private: false,
+            ..Default::default()
+        };
+        assert!(!cc.can_use()); // Because created is bigger than now
+        assert!(!cc.should_store()); // Because age is bigger than max_age
     }
 }

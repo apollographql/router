@@ -396,11 +396,6 @@ The following keys are populated by the demand control plugin:
 - `apollo::response_cache::debug_cached_keys` - Debug info for cached keys
 - `apollo::router::response_cache::cache_info_subgraph_{subgraph_name}` - Response cache info per subgraph (dynamic key with subgraph name suffix)
 
-#### Entity cache
-- `apollo_entity_cache::key` - Entity cache key
-- `apollo::entity_cache::cached_keys_status` - A map of cache control statuses for cached entities, keyed by subgraph request ID; populated by the entity caching plugin when `expose_keys_in_context` is enabled
-- `apollo::router::entity_cache_info_subgraph_{subgraph_name}` - Entity cache info per subgraph (dynamic key with subgraph name suffix)
-
 #### Automatic persisted queries (APQ)
 - `apollo::apq::cache_hit` - Present if the request used APQ; true if we got a cache hit for the query ID, false otherwise
 - `apollo::apq::registered` - `true` if the request registered a query in APQ
