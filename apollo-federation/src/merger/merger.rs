@@ -29,6 +29,8 @@ use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::error::SubgraphLocation;
+use crate::error::suggestion::did_you_mean;
+use crate::error::suggestion::suggestion_list;
 use crate::internal_error;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Import;
@@ -101,6 +103,12 @@ static BUILT_IN_DIRECTIVES: [&str; 6] = [
     "defer",
     "stream",
 ];
+
+// Patterns for parsing @override labels
+static LABEL_REGEX: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"^[a-zA-Z][a-zA-Z0-9_\-:./]*$").unwrap());
+static PERCENT_REGEX: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"^percent\((\d{1,2}(\.\d{1,8})?|100)\)$").unwrap());
 
 /// Type alias for Sources mapping - maps subgraph indices to optional values
 pub(crate) type Sources<T> = IndexMap<usize, Option<T>>;
@@ -1215,11 +1223,12 @@ impl Merger {
             // Check if the source subgraph exists
             if !self.names.contains(&source_subgraph_name) {
                 result.set_override_with_unknown_target(idx);
-                // TODO: Add suggestion list (didYouMean)
+                let suggestions = suggestion_list(&source_subgraph_name, self.names.clone());
+                let extra_msg = did_you_mean(suggestions);
                 self.error_reporter.add_hint(CompositionHint {
                     code: HintCode::FromSubgraphDoesNotExist.code().to_string(),
                     message: format!(
-                        "Source subgraph \"{}\" for field \"{}\" on subgraph \"{}\" does not exist.",
+                        "Source subgraph \"{}\" for field \"{}\" on subgraph \"{}\" does not exist. {extra_msg}",
                         source_subgraph_name, dest, subgraph_name
                     ),
                     locations: Default::default(),
@@ -1293,6 +1302,7 @@ impl Merger {
             }
 
             // If we get here, the @override is valid
+            let override_label = self.get_override_label_argument(override_directive)?;
             let overridden_field_is_referenced = self.subgraphs[from_idx]
                 .metadata()
                 .is_field_used(&dest.clone().into());
@@ -1309,31 +1319,42 @@ impl Merger {
                 });
             } else if overridden_field_is_referenced {
                 result.set_used_overridden(from_idx);
+                if override_label.is_none() {
+                    // No label, but field is referenced - add hint
+                    self.error_reporter.add_hint(CompositionHint {
+                    code: HintCode::OverriddenFieldCanBeRemoved.code().to_string(),
+                    message: format!(
+                        "Field \"{}\" on subgraph \"{}\" is overridden. It is still used in some federation directive(s) (@key, @requires, and/or @provides) and/or to satisfy interface constraint(s), but consider marking it @external explicitly or removing it along with its references.",
+                        dest, source_subgraph_name
+                    ),
+                    locations: Default::default(),
+                });
+                }
             } else {
                 result.set_unused_overridden(from_idx);
+                if override_label.is_none() {
+                    // No label and field is not referenced - suggest removal
+                    self.error_reporter.add_hint(CompositionHint {
+                        code: HintCode::OverriddenFieldCanBeRemoved.code().to_string(),
+                        message: format!(
+                            "Field \"{}\" on subgraph \"{}\" is overridden. Consider removing it.",
+                            dest, source_subgraph_name
+                        ),
+                        locations: Default::default(),
+                    });
+                }
             }
 
             // Handle override label
-            if let Some(override_label) = self.get_override_label_argument(override_directive)? {
-                use std::sync::LazyLock;
-                static LABEL_REGEX: LazyLock<regex::Regex> =
-                    LazyLock::new(|| regex::Regex::new(r"^[a-zA-Z][a-zA-Z0-9_\-:./]*$").unwrap());
-                static PERCENT_REGEX: LazyLock<regex::Regex> = LazyLock::new(|| {
-                    regex::Regex::new(r"^percent\((\d{1,2}(\.\d{1,8})?|100)\)$").unwrap()
-                });
-
+            if let Some(override_label) = override_label {
                 let is_valid = if LABEL_REGEX.is_match(&override_label) {
                     true
-                } else if let Some(captures) = PERCENT_REGEX.captures(&override_label) {
-                    if let Some(percent_str) = captures.get(1) {
-                        if let Ok(percent) = percent_str.as_str().parse::<f64>() {
-                            (0.0..=100.0).contains(&percent)
-                        } else {
-                            false
-                        }
-                    } else {
-                        false
-                    }
+                } else if let Some(percent) = PERCENT_REGEX
+                    .captures(&override_label)
+                    .and_then(|captures| captures.get(1))
+                    .and_then(|percent_str| percent_str.as_str().parse::<f64>().ok())
+                {
+                    (0.0..=100.0).contains(&percent)
                 } else {
                     false
                 };
@@ -1370,26 +1391,6 @@ impl Merger {
                         locations: Default::default(),
                     });
                 }
-            } else if overridden_field_is_referenced {
-                // No label, but field is referenced - add hint
-                self.error_reporter.add_hint(CompositionHint {
-                    code: HintCode::OverriddenFieldCanBeRemoved.code().to_string(),
-                    message: format!(
-                        "Field \"{}\" on subgraph \"{}\" is overridden. It is still used in some federation directive(s) (@key, @requires, and/or @provides) and/or to satisfy interface constraint(s), but consider marking it @external explicitly or removing it along with its references.",
-                        dest, source_subgraph_name
-                    ),
-                    locations: Default::default(),
-                });
-            } else {
-                // No label and field is not referenced - suggest removal
-                self.error_reporter.add_hint(CompositionHint {
-                    code: HintCode::OverriddenFieldCanBeRemoved.code().to_string(),
-                    message: format!(
-                        "Field \"{}\" on subgraph \"{}\" is overridden. Consider removing it.",
-                        dest, source_subgraph_name
-                    ),
-                    locations: Default::default(),
-                });
             }
         }
 
@@ -2098,7 +2099,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             }
             (Type::NonNullNamed(a), Type::NonNullNamed(b)) if a == b => Ok(false),
 
-            // NonNull downgrade: T! ? T
+            // NonNull downgrade: T! ⊑ T
             (Type::NonNullNamed(sub), Type::Named(super_)) if sub == super_ => Ok(true),
 
             // Interface/Union relationships (includes downgrade handled above)
