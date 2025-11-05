@@ -387,7 +387,7 @@ mod tests {
         let sdl = print_sdl(schema);
         assert!(sdl.contains(
             r#"@link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])"#
-        ),);
+        ));
 
         let t = coord!(Query.t)
             .lookup_field(schema)

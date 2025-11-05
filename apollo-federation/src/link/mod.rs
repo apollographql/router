@@ -425,7 +425,7 @@ impl Link {
             })
     }
 
-    /// Returns true if this link has an import assigning a alias to the given element.
+    /// Returns true if this link has an import assigning an alias to the given element.
     pub(crate) fn renames(&self, element: &Name) -> bool {
         self.imports
             .iter()
