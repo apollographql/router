@@ -1819,8 +1819,12 @@ fn extract_cache_keys(
     // hash the query and operation name
     let query_hash = hash_query(&request.query_hash);
     // hash more data like variables and authorization status
-    let additional_data_hash =
-        hash_additional_data(request.subgraph_request.body_mut(), context, authorization);
+    let additional_data_hash = hash_additional_data(
+        subgraph_name,
+        request.subgraph_request.body_mut(),
+        context,
+        authorization,
+    );
 
     let representations = request
         .subgraph_request
