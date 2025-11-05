@@ -98,7 +98,7 @@ By default, browsers block any requests sent to [a device or service on a privat
 
 To enable private network access with CORS, your router must return the [`Access-Control-Allow-Private-Network`](http://wicg.github.io/private-network-access/#http-headerdef-access-control-allow-private-network) HTTP header with a value of `true`. To do so, add the `private_network_access` with an empty `access_id` value in the `policies` of your `cors` config.
 
-```yaml title="router.yaml" {6-7}
+```yaml {7} title="router.yaml"
 cors:
   policies:
     - origins:
@@ -110,7 +110,7 @@ cors:
 
 Optionally, you can specify the `access_id` and `access_name` subfields to identify what is being accessed in the private network when the browser prompts the user for permission. These fields return the `Private-Network-Access-ID` and `Private-Network-Access-Name` HTTP headers, respectively, along with the specified strings.
 
-```yaml title="router.yaml" {6-8}
+```yaml {8} title="router.yaml"
 cors:
   policies:
     - origins:
