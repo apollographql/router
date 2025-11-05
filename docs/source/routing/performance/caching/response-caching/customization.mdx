@@ -99,7 +99,7 @@ Use custom cache keys when you need to:
 
 ### Configure cache keys
 
-This entry contains an object with an `all` field to affect all subgraph requests under one client request, and fields named after subgraph operation names to affect individual subgraph queries. The field's value can be any valid JSON value, such as an object or a string. There's a field `subgraphs` which can contain all the data you need for specific subgraphs. The data for a specific subgraph takes precedence over data contained in `all` field which means it doesn't merge the data between `all` and `subgraphs.your_subgraph_name`. If you need common fields you'll have to add it by yourself in the subgraph specific section.
+This entry contains an object with an `all` field to affect all subgraph requests under one client request, and fields named after subgraph operation names to affect individual subgraph queries. The field's value can be any valid JSON value, such as an object or a string. There's a field `subgraphs` which can contain all the data you need for specific subgraphs. The data for a specific subgraph takes precedence over data contained in `all` field which means it doesn't merge the data between `all` and `subgraphs.your_subgraph_name`. To set common data it has to be added in the subgraph specific section.
 
 ```json
 {
