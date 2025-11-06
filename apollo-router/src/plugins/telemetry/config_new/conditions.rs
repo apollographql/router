@@ -15,6 +15,7 @@ use crate::plugins::telemetry::config_new::Selector;
 #[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 #[schemars(rename = "Condition{T}")]
+#[derive(Default)]
 pub(crate) enum Condition<T> {
     /// A condition to check a selection against a value.
     Eq([SelectorOrValue<T>; 2]),
@@ -31,16 +32,12 @@ pub(crate) enum Condition<T> {
     /// The sub-condition must not be true
     Not(Box<Condition<T>>),
     /// Static true condition
+    #[default]
     True,
     /// Static false condition
     False,
 }
 
-impl<T> Default for Condition<T> {
-    fn default() -> Self {
-        Self::True
-    }
-}
 
 impl Condition<()> {
     pub(crate) fn empty<T>() -> Condition<T> {

@@ -401,8 +401,10 @@ schemar_fn!(
 /// Forward headers
 #[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[derive(Default)]
 pub(crate) enum ForwardHeaders {
     /// Don't send any headers
+    #[default]
     None,
 
     /// Send all headers
@@ -419,11 +421,6 @@ pub(crate) enum ForwardHeaders {
     Except(Vec<HeaderName>),
 }
 
-impl Default for ForwardHeaders {
-    fn default() -> Self {
-        Self::None
-    }
-}
 
 schemar_fn!(
     forward_variables_except,
@@ -440,8 +437,10 @@ schemar_fn!(
 /// Forward GraphQL variables
 #[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[derive(Default)]
 pub(crate) enum ForwardValues {
     /// Dont send any variables
+    #[default]
     None,
     /// Send all variables
     All,
@@ -453,11 +452,6 @@ pub(crate) enum ForwardValues {
     Except(Vec<String>),
 }
 
-impl Default for ForwardValues {
-    fn default() -> Self {
-        Self::None
-    }
-}
 
 #[derive(Debug, Serialize)]
 pub(crate) enum SingleReport {

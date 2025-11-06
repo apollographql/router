@@ -75,16 +75,13 @@ struct AuthenticationPlugin {
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
+#[derive(Default)]
 enum OnError {
     Continue,
+    #[default]
     Error,
 }
 
-impl Default for OnError {
-    fn default() -> Self {
-        Self::Error
-    }
-}
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields)]
