@@ -7,29 +7,58 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 ## 🔒 Security
 
 > [!NOTE]
-> For more information on the impact of the fixes in this release and how your deployment might be affected or remediated, see [GHSA-x33c-7c2v-mrj9 & CVE-2025-64173](https://github.com/apollographql/router/security/advisories/GHSA-x33c-7c2v-mrj9)
+> For more information on the impact of the fixes in this release and how your deployment might be affected or remediated, see the corresponding GitHub Security Advisory (GHSA) linked on the entries below.  In both listed cases, updating to a patched Router version will resolve any vulnerabilities.
 
 ### Fix authorization plugin handling of polymorphic types
 
-Updates the authorization plugin to correctly handle authorization requirements when processing polymorphic types.
+Updates the auth plugin to correctly handle access control requirements when processing polymorphic types.
 
-When querying interface fields, the authorization plugin was verifying only whether all implementations shared the same authorization requirements. In cases where interface did not specify any authorization requirements, this could result in unauthorized access to protected data.
+When querying interface types/fields, the auth plugin was verifying only whether all implementations shared the same access control requirements. In cases where interface types/fields did not specify the same access control requirements as the implementations, this could result in unauthorized access to protected data.
 
-The authorization plugin was updated to correctly verify that all polymorphic authorization requirements are satisfied by the current context.
+The auth plugin was updated to correctly verify that all polymorphic access control requirements are satisfied by the current context.
 
-By [@dariuszkuc](https://github.com/dariuszkuc)
+See [GHSA-x33c-7c2v-mrj9](https://github.com/apollographql/router/security/advisories/GHSA-x33c-7c2v-mrj9) for additional details and the associated CVE number.
+
+By @dariuszkuc
 
 ### Fixed authorization plugin handling of directive renames
 
-The router authorization plugin did not properly handle authorization requirements when subgraphs renamed their authentication directives through imports. When such renames occurred, the plugin’s `@link`-processing code ignored the imported directives entirely, causing authentication constraints defined by the renamed directives to be ignored.
+The router auth plugin did not properly handle access control requirements when subgraphs renamed their access control directives through imports. When such renames occurred, the plugin’s `@link`-processing code ignored the imported directives entirely, causing access control constraints defined by the renamed directives to be ignored.
 
 The plugin code was updated to call the appropriate functionality in the `apollo-federation` crate, which correctly handles both because spec and imports directive renames.
 
-By [@sachindshinde](https://github.com/sachindshinde)
+See [GHSA-g8jh-vg5j-4h3f](https://github.com/apollographql/router/security/advisories/GHSA-g8jh-vg5j-4h3f) for additional details and the associated CVE number.
+
+By @sachindshinde
 
 # [2.8.0] - 2025-10-27
 
 ## 🚀 Features
+
+### Response caching
+
+**Available on [all GraphOS plans](https://www.apollographql.com/pricing) including Free, Developer, Standard and Enterprise.**
+
+Response caching enables the router to cache GraphQL subgraph origin responses using Redis, delivering performance improvements by reducing subgraph load and query latency. Unlike traditional HTTP caching or client-side caching, response caching works at the GraphQL entity level—caching reusable portions of query responses that can be shared across different operations and users.
+
+Response caching caches two types of data:
+
+- **Root query fields**: Responses for root field fetches
+- **Entity representations**: Individual entities, offering reuse across queries
+
+Benefits include:
+
+- **Active cache invalidation**: Target specific cached data for immediate removal using cache tags
+- **Cache debugger**: Debugging in Apollo Sandbox shows cache status, TTLs, and cache tags during development
+- **GraphQL-aware**: Understands GraphQL operations to improve partial cache hit rates while respecting data visibility and authorization
+- **Entity-level granularity**: Caches at the entity level rather than entire responses
+- **Flexible TTL control**: Data cached using HTTP `Cache-Control` headers from subgraph origins
+
+Response caching solves traditional GraphQL caching challenges including mixed TTL requirements across a single response, personalized versus public data mixing, and high data duplication.
+
+Configure response caching using the `preview_response_cache` configuration option with Redis as the cache backend.  For complete setup instructions and advanced configuration, see the [Response Caching documentation](https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/overview).
+
+**Migration from entity caching**: For existing entity caching users, migration is as simple as renaming configuration options. For migration details see the [Response Caching FAQ](https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/faq).
 
 ### Support per-stage coprocessor URLs ([PR #8384](https://github.com/apollographql/router/pull/8384))
 
