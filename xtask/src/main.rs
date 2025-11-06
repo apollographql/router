@@ -31,6 +31,9 @@ pub enum Command {
     /// Check the code for licence and security compliance.
     CheckCompliance(commands::Compliance),
 
+    /// Check if all specified dependencies are actually in use.
+    Unused(commands::Unused),
+
     /// Build Router's binaries for distribution.
     Dist(commands::Dist),
 
@@ -64,6 +67,7 @@ impl Xtask {
             Command::All(command) => command.run(),
             Command::Changeset(command) => command.run(),
             Command::CheckCompliance(command) => command.run(),
+            Command::Unused(command) => command.run(),
             Command::Dist(command) => command.run(),
             Command::Dev(command) => command.run(),
             Command::Flame(command) => command.run(),

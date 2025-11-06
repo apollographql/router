@@ -6,49 +6,49 @@ input_file: apollo-federation/src/connectors/validation/test_data/headers/invali
 [
     Message {
         code: InvalidHeader,
-        message: "In `@source(http.headers:)`: unknown variable `$foo`, must be one of $config, $context, $request",
+        message: "In `@source(http.headers:)`: unknown variable `$foo`, must be one of $config, $context, $request, $env",
         locations: [
             11:49..11:53,
         ],
     },
     Message {
         code: InvalidHeader,
-        message: "In `@source(http.headers:)`: $this is not valid here, must be one of $config, $context, $request",
+        message: "In `@source(http.headers:)`: $this is not valid here, must be one of $config, $context, $request, $env",
         locations: [
             12:62..12:71,
         ],
     },
     Message {
         code: InvalidHeader,
-        message: "In `@source(http.headers:)`: `config.bar` must start with one of $config, $context, $request",
+        message: "In `@source(http.headers:)`: `config.bar` must start with one of $config, $context, $request, $env",
         locations: [
             13:56..13:62,
         ],
     },
     Message {
         code: InvalidHeader,
-        message: "In `@connect(http.headers:)` on `Query.scalar`: unknown variable `$foo`, must be one of $args, $config, $context, $request",
+        message: "In `@connect(http.headers:)` on `Query.scalar`: unknown variable `$foo`, must be one of $args, $config, $context, $request, $env",
         locations: [
             24:49..24:53,
         ],
     },
     Message {
         code: InvalidHeader,
-        message: "In `@connect(http.headers:)` on `Query.scalar`: $status is not valid here, must be one of $args, $config, $context, $request",
+        message: "In `@connect(http.headers:)` on `Query.scalar`: $status is not valid here, must be one of $args, $config, $context, $request, $env",
         locations: [
             25:62..25:69,
         ],
     },
     Message {
         code: InvalidHeader,
-        message: "In `@connect(http.headers:)` on `Query.scalar`: $this is not valid here, must be one of $args, $config, $context, $request",
+        message: "In `@connect(http.headers:)` on `Query.scalar`: $this is not valid here, must be one of $args, $config, $context, $request, $env",
         locations: [
             26:47..26:52,
         ],
     },
     Message {
         code: InvalidHeader,
-        message: "In `@connect(http.headers:)` on `Query.scalar`: `config.bar` must start with one of $args, $config, $context, $request",
+        message: "In `@connect(http.headers:)` on `Query.scalar`: `config.bar` must start with one of $args, $config, $context, $request, $env",
         locations: [
             27:56..27:62,
         ],

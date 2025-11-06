@@ -71,9 +71,41 @@ You can create Rhai scripts that throw custom status codes. See [Terminating cli
 
 </Note>
 
-## GraphQL error codes
+## GraphQL spec error codes
 
-GraphQL error codes can appear in client responses under `errors[].extensions.code`, which is an established convention found in [GraphQL error extensions](https://spec.graphql.org/October2021/#sec-Errors.Error-result-format). Learn how to see these error codes in Studio via [extended error metrics](/graphos/routing/graphos-reporting#enabling-extended-error-reporting).
+These error codes are defined in the [GraphQL spec](https://spec.graphql.org/October2021/) and can appear in client responses under `errors[].extensions.code`, which is an established convention found in [GraphQL error extensions](https://spec.graphql.org/October2021/#sec-Errors.Error-result-format). Because these error codes are part of the core spec, you can't disable them. Only Apollo Router-specific features or subgraph errors can be disabled.
+
+Changing these errors makes your router non-compliant with the GraphQL spec. If you need to change these errors, you need to use an external system, such as an HTTP proxy layer.
+
+Learn how to see these error codes in Studio with [extended error reporting](/graphos/routing/graphos-reporting#enabling-extended-error-reporting).
+
+<PropertyList kind="errCodes">
+
+
+<Property name="GRAPHQL_VALIDATION_FAILED">
+
+The operation failed during GraphQL validation.
+
+</Property>
+<Property name="GRAPHQL_UNKNOWN_OPERATION_NAME">
+
+The operation could not be executed because the operation name was invalid or
+did not match an operation in the query document.
+
+</Property>
+<Property name="PARSING_ERROR">
+
+The operation could not be parsed as GraphQL.
+
+</Property>
+
+</PropertyList>
+
+## Apollo Router error codes
+
+Additional error codes can appear in client responses under `errors[].extensions.code`, which is an established convention found in [GraphQL error extensions](https://spec.graphql.org/October2021/#sec-Errors.Error-result-format). Learn how to see these error codes in Studio with [extended error reporting](/graphos/routing/graphos-reporting#enabling-extended-error-reporting).
+
+You can suppress or disable these error codes using [router customizations](/graphos/routing/customization/overview).
 
 <PropertyList kind="errCodes">
 
@@ -113,17 +145,6 @@ The response from a subgraph did not match the GraphQL schema.
 The request timed out when fetching data from a connector service.
 
 </Property>
-<Property name="GRAPHQL_VALIDATION_FAILED">
-
-The operation failed during GraphQL validation.
-
-</Property>
-<Property name="GRAPHQL_UNKNOWN_OPERATION_NAME">
-
-The operation could not be executed because the operation name was invalid or
-did not match an operation in the query document.
-
-</Property>
 <Property name="HTTP_CLIENT_ERROR">
 
 There was an error at the HTTP transport layer when fetching data from a
@@ -152,13 +173,7 @@ The operation was not executed due to exceeding the `max_root_fields` limit.
 </Property>
 <Property name="QUERY_NOT_IN_SAFELIST">
 
-The operation was not executed because it was not found in the persisted query
-safelist.
-
-</Property>
-<Property name="PARSING_ERROR">
-
-The operation could not be parsed as GraphQL.
+The operation was not executed because safelisting is enabled and the freeform GraphQL document provided was not found in the persisted query safelist.
 
 </Property>
 <Property name="PERSISTED_QUERY_HASH_MISMATCH">
@@ -180,8 +195,12 @@ An operation attempted to use automatic persisted queries, but the feature was n
 </Property>
 <Property name="PERSISTED_QUERY_NOT_IN_LIST">
 
-The operation was not executed because it was not found in the persisted query
-safelist.
+The operation (specified by ID) was not executed because the ID was not found in the persisted query manifest, and APQs are not enabled.
+
+</Property>
+<Property name="PERSISTED_QUERY_ID_REQUIRED">
+
+The router is configured to only execute operations specified by persisted query ID, but the request contained freeform GraphQL instead.
 
 </Property>
 <Property name="REQUEST_LIMIT_EXCEEDED">

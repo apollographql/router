@@ -5,6 +5,7 @@ use apollo_compiler::ast::Type;
 use apollo_compiler::name;
 use apollo_compiler::schema::DirectiveLocation;
 
+use crate::link::Purpose;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
@@ -66,7 +67,7 @@ impl PolicySpecDefinition {
                 DirectiveLocation::Enum,
             ],
             true, // composes
-            Some(&|v| POLICY_VERSIONS.get_minimum_required_version(v)),
+            Some(&|v| POLICY_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
     }
@@ -94,6 +95,10 @@ impl SpecDefinition for PolicySpecDefinition {
     fn minimum_federation_version(&self) -> &Version {
         &self.minimum_federation_version
     }
+
+    fn purpose(&self) -> Option<Purpose> {
+        Some(Purpose::SECURITY)
+    }
 }
 
 pub(crate) static POLICY_VERSIONS: LazyLock<SpecDefinitions<PolicySpecDefinition>> =
@@ -108,19 +113,9 @@ pub(crate) static POLICY_VERSIONS: LazyLock<SpecDefinitions<PolicySpecDefinition
 
 #[cfg(test)]
 mod test {
-    use apollo_compiler::Node;
-    use apollo_compiler::ast::Argument;
-    use apollo_compiler::ast::Directive;
-    use apollo_compiler::ast::Value;
-    use apollo_compiler::name;
     use itertools::Itertools;
 
-    use super::*;
-    use crate::link::DEFAULT_LINK_NAME;
-    use crate::link::link_spec_definition::LINK_DIRECTIVE_FOR_ARGUMENT_NAME;
-    use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
     use crate::schema::FederationSchema;
-    use crate::schema::position::SchemaDefinitionPosition;
     use crate::subgraph::test_utils::BuildOption;
     use crate::subgraph::test_utils::build_inner_expanded;
 
@@ -129,29 +124,6 @@ mod test {
             .unwrap()
             .schema()
             .to_owned()
-    }
-
-    fn get_schema_with_policy(version: Version) -> FederationSchema {
-        let mut schema = trivial_schema();
-        let spec = POLICY_VERSIONS.find(&version).unwrap();
-        let link = Directive {
-            name: DEFAULT_LINK_NAME,
-            arguments: vec![
-                Node::new(Argument {
-                    name: LINK_DIRECTIVE_URL_ARGUMENT_NAME,
-                    value: spec.url().to_string().into(),
-                }),
-                Node::new(Argument {
-                    name: LINK_DIRECTIVE_FOR_ARGUMENT_NAME,
-                    value: Node::new(Value::Enum(name!("SECURITY"))),
-                }),
-            ],
-        };
-        SchemaDefinitionPosition
-            .insert_directive(&mut schema, link.into())
-            .unwrap();
-        spec.add_elements_to_schema(&mut schema).unwrap();
-        schema
     }
 
     fn policy_spec_directives_snapshot(schema: &FederationSchema) -> String {
@@ -175,7 +147,7 @@ mod test {
             .types
             .iter()
             .filter_map(|(name, ty)| {
-                if name.as_str().starts_with("policy__") {
+                if name.as_str().ends_with("__Policy") {
                     Some(ty.to_string())
                 } else {
                     None
@@ -186,13 +158,13 @@ mod test {
 
     #[test]
     fn policy_spec_v0_1_definitions() {
-        let schema = get_schema_with_policy(Version { major: 0, minor: 1 });
+        let schema = trivial_schema();
         let types_snapshot = policy_spec_types_snapshot(&schema);
-        let expected_types = r#"scalar policy__Policy"#;
+        let expected_types = r#"scalar federation__Policy"#;
         assert_eq!(types_snapshot.trim(), expected_types.trim());
 
         let directives_snapshot = policy_spec_directives_snapshot(&schema);
-        let expected_directives = r#"directive @policy(policies: [[policy__Policy!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM"#;
+        let expected_directives = r#"directive @policy(policies: [[federation__Policy!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM"#;
         assert_eq!(directives_snapshot.trim(), expected_directives.trim());
     }
 }

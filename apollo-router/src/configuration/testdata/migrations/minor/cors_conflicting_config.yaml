@@ -1,0 +1,7 @@
+cors:
+  origins:
+    - "https://studio.apollographql.com"
+  policies:
+    - origins:
+      - "https://example.com"
+

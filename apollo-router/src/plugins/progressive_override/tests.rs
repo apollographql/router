@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use apollo_compiler::Schema;
+use apollo_federation::link::spec::Identity;
 use tower::ServiceExt;
 
 use crate::Context;
@@ -12,7 +13,6 @@ use crate::plugin::test::MockRouterService;
 use crate::plugin::test::MockSupergraphService;
 use crate::plugins::progressive_override::Config;
 use crate::plugins::progressive_override::JOIN_FIELD_DIRECTIVE_NAME;
-use crate::plugins::progressive_override::JOIN_SPEC_BASE_URL;
 use crate::plugins::progressive_override::JOIN_SPEC_VERSION_RANGE;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::progressive_override::ProgressiveOverridePlugin;
@@ -30,13 +30,32 @@ const SCHEMA_NO_USAGES: &str = include_str!("testdata/supergraph_no_usages.graph
 fn test_progressive_overrides_are_recognised_vor_join_v0_4_and_above() {
     let schema_for_version = |version| {
         format!(
-            r#"schema
-                @link(url: "https://specs.apollo.dev/link/v1.0")
-                @link(url: "https://specs.apollo.dev/join/{}", for: EXECUTION)
-                @link(url: "https://specs.apollo.dev/context/v0.1", for: SECURITY)
+            r#"
+            schema
+              @link(url: "https://specs.apollo.dev/link/v1.0")
+              @link(url: "https://specs.apollo.dev/join/{version}", for: EXECUTION)
+              @link(url: "https://specs.apollo.dev/context/v0.1", for: SECURITY)
 
-                directive @join__field repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION"#,
-            version
+            directive @link(
+              url: String
+              as: String
+              for: link__Purpose
+              import: [link__Import]
+            ) repeatable on SCHEMA
+            scalar link__Import
+            enum link__Purpose {{
+              """
+              `SECURITY` features provide metadata necessary to securely resolve fields.
+              """
+              SECURITY
+
+              """
+              `EXECUTION` features provide metadata necessary for operation execution.
+              """
+              EXECUTION
+            }}
+            directive @join__field repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+            "#
         )
     };
 
@@ -44,9 +63,9 @@ fn test_progressive_overrides_are_recognised_vor_join_v0_4_and_above() {
     assert!(
         crate::spec::Schema::directive_name(
             &join_v3_schema,
-            JOIN_SPEC_BASE_URL,
+            &Identity::join_identity(),
             JOIN_SPEC_VERSION_RANGE,
-            JOIN_FIELD_DIRECTIVE_NAME,
+            &JOIN_FIELD_DIRECTIVE_NAME,
         )
         .is_none()
     );
@@ -55,9 +74,9 @@ fn test_progressive_overrides_are_recognised_vor_join_v0_4_and_above() {
     assert!(
         crate::spec::Schema::directive_name(
             &join_v4_schema,
-            JOIN_SPEC_BASE_URL,
+            &Identity::join_identity(),
             JOIN_SPEC_VERSION_RANGE,
-            JOIN_FIELD_DIRECTIVE_NAME,
+            &JOIN_FIELD_DIRECTIVE_NAME,
         )
         .is_some()
     );
@@ -67,9 +86,9 @@ fn test_progressive_overrides_are_recognised_vor_join_v0_4_and_above() {
     assert!(
         crate::spec::Schema::directive_name(
             &join_v5_schema,
-            JOIN_SPEC_BASE_URL,
+            &Identity::join_identity(),
             JOIN_SPEC_VERSION_RANGE,
-            JOIN_FIELD_DIRECTIVE_NAME,
+            &JOIN_FIELD_DIRECTIVE_NAME,
         )
         .is_some()
     )

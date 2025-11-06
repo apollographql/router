@@ -1,3 +1,9 @@
+[[ rules ]]
+    id = "generic-api-key"
+    [ rules.allowlist ]
+        paths = [
+            '''Cargo.lock$'''
+        ]
 
 [[ rules ]]
     id = "generic-api-key"
@@ -7,10 +13,14 @@
             "e1e6f93341aea383da2ec6b36a9bfcf7e63a111e",
             "e5590027506337381887dadef9baadd063e05830",
             "b4fdf65c5eaca08057886e5b30553201302b9764",
+            "c8ae92e47de4e1bb3ae56e9beed27fbc2a1e136a",
 
             # https://github.com/apollographql/router/blob/d826844c8cf433f78938059f02feecc108468e49/licenses.html#L8558
-            # https://github.com/apollographql/router-private/blob/d826844c8cf433f78938059f02feecc108468e49/licenses.html#L8558
-            "d826844c8cf433f78938059f02feecc108468e49", 
+            "d826844c8cf433f78938059f02feecc108468e49",
+            # Not a key: https://github.com/apollographql/router/pull/8193#issuecomment-3249460075
+            "77700b93798ce98eaf75c3b02b70198e7b730ddb",
+            # not a key: https://github.com/apollographql/router/pull/8326#issuecomment-3325655427
+            "58bca0271d5a2046dfa7705a5418781bc456c787",
         ]
 
         paths = [
@@ -32,10 +42,6 @@
             # https://github.com/apollographql/router/blob/3fcb78de7c6444cd1f7fe4cca6533bcc6bf8a085/apollo-router/src/services/testdata/client.key#L1
             # https://github.com/apollographql/router/blob/3fcb78de7c6444cd1f7fe4cca6533bcc6bf8a085/apollo-router/src/services/testdata/server.key#L1
             # https://github.com/apollographql/router/blob/3fcb78de7c6444cd1f7fe4cca6533bcc6bf8a085/apollo-router/src/configuration/testdata/metrics/tls.router.yaml#L41
-            # https://github.com/apollographql/router-private/blob/3fcb78de7c6444cd1f7fe4cca6533bcc6bf8a085/apollo-router/src/services/testdata/client.key#L1
-            # https://github.com/apollographql/router-private/blob/3fcb78de7c6444cd1f7fe4cca6533bcc6bf8a085/apollo-router/src/services/testdata/CA/ca.key#L1
-            # https://github.com/apollographql/router-private/blob/3fcb78de7c6444cd1f7fe4cca6533bcc6bf8a085/apollo-router/src/services/testdata/server.key#L1
-            # https://github.com/apollographql/router-private/blob/3fcb78de7c6444cd1f7fe4cca6533bcc6bf8a085/apollo-router/src/configuration/testdata/metrics/tls.router.yaml#L41
             "3fcb78de7c6444cd1f7fe4cca6533bcc6bf8a085",
         ]
 
@@ -58,13 +64,13 @@
             "d2b85acee5cf94120b47093f87ae80a7365d7b28",
             "f107c2a42292d0c8068395f5cb8f491377559a42",
 
-            # https://github.com/apollographql/router-private/blob/0a9f1a720dc532e8c090541a59d32c9377a6320b/apollo-router/src/uplink/license_enforcement.rs#L336
-            # https://github.com/apollographql/router-private/blob/15c337ee5ee5003fc72ef93d570d11e73a7bd7fb/apollo-router/src/uplink/license_enforcement.rs#L341
+            # https://github.com/apollographql/router/blob/0a9f1a720dc532e8c090541a59d32c9377a6320b/apollo-router/src/uplink/license_enforcement.rs#L336
+            # https://github.com/apollographql/router/blob/15c337ee5ee5003fc72ef93d570d11e73a7bd7fb/apollo-router/src/uplink/license_enforcement.rs#L341
             "0a9f1a720dc532e8c090541a59d32c9377a6320b",
             "15c337ee5ee5003fc72ef93d570d11e73a7bd7fb",
 
-            # https://github.com/apollographql/router-private/blob/0a9f1a720dc532e8c090541a59d32c9377a6320b/apollo-router/src/uplink/license_enforcement.rs#L351
-            # https://github.com/apollographql/router-private/blob/15c337ee5ee5003fc72ef93d570d11e73a7bd7fb/apollo-router/src/uplink/license_enforcement.rs#L356
+            # https://github.com/apollographql/router/blob/0a9f1a720dc532e8c090541a59d32c9377a6320b/apollo-router/src/uplink/license_enforcement.rs#L351
+            # https://github.com/apollographql/router/blob/15c337ee5ee5003fc72ef93d570d11e73a7bd7fb/apollo-router/src/uplink/license_enforcement.rs#L356
             "0a9f1a720dc532e8c090541a59d32c9377a6320b",
             "15c337ee5ee5003fc72ef93d570d11e73a7bd7fb",
 
@@ -89,9 +95,9 @@
         commits = [
             # https://github.com/apollographql/router/blob/fe1c3cb5d597a6521e02b3cdb1db980cf7c202b5/examples/telemetry/jaeger-collector.router.yaml#L9
             # https://github.com/apollographql/router/blob/3fa7c11b0f3dfcdcade1971bd8a3996431459565/examples/telemetry/jaeger-collector.router.yaml#L11
-            # https://github.com/apollographql/router-private/blob/422307d33d300c896f949c2af53803f42aee9485/examples/telemetry/jaeger-collector.router.yaml#L11
-            # https://github.com/apollographql/router-private/blob/3fa7c11b0f3dfcdcade1971bd8a3996431459565/examples/telemetry/jaeger-collector.router.yaml#L11
-            # https://github.com/apollographql/router-private/blob/fe1c3cb5d597a6521e02b3cdb1db980cf7c202b5/examples/telemetry/jaeger-collector.router.yaml#L9
+            # https://github.com/apollographql/router/blob/422307d33d300c896f949c2af53803f42aee9485/examples/telemetry/jaeger-collector.router.yaml#L11
+            # https://github.com/apollographql/router/blob/3fa7c11b0f3dfcdcade1971bd8a3996431459565/examples/telemetry/jaeger-collector.router.yaml#L11
+            # https://github.com/apollographql/router/blob/fe1c3cb5d597a6521e02b3cdb1db980cf7c202b5/examples/telemetry/jaeger-collector.router.yaml#L9
             "fe1c3cb5d597a6521e02b3cdb1db980cf7c202b5",
             "3fa7c11b0f3dfcdcade1971bd8a3996431459565",
             "422307d33d300c896f949c2af53803f42aee9485",
@@ -100,4 +106,32 @@
         paths = [
             '''^apollo-router\/src\/.+\/testdata\/.+''',
             '''^examples/telemetry/jaeger-collector.router.yaml$'''
+        ]
+
+[[ rules ]]
+    id = "apollo-graphos-api-key"
+    [ rules.allowlist ]
+        commits = [
+            "8cf818fce53083c14580f3c02581ccf9c9fb737d",
+            "16fdf3249dfe7e9d7841a78ca9e3fc333e70faaf",
+        ]
+
+        paths = [
+            '''^apollo-router/tests/integration/oci.rs$''',
+        ]
+
+[[ rules ]]
+    id = "generic-api-key"
+
+    [ rules.allowlist ]
+        paths = [
+            '''^docs/source/routing/performance/caching/response_caching/invalidation.mdx$''',
+        ]
+
+[[ rules ]]
+    id = "curl-auth-header"
+
+    [ rules.allowlist ]
+        paths = [
+            '''^docs/source/routing/performance/caching/response_caching/invalidation.mdx$''',
         ]

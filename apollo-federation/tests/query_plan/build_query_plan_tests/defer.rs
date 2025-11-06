@@ -2093,7 +2093,7 @@ fn defer_test_defer_on_query_root_type() {
             Flatten(path: "op2.next") {
               Fetch(service: "Subgraph2") {
                 {
-                  ... on Query {
+                  ... {
                     op3
                   }
                 }
@@ -2107,7 +2107,7 @@ fn defer_test_defer_on_query_root_type() {
               Flatten(path: "op2.next") {
                 Fetch(service: "Subgraph1") {
                   {
-                    ... on Query {
+                    ... {
                       op1
                     }
                   }
@@ -2116,7 +2116,7 @@ fn defer_test_defer_on_query_root_type() {
               Flatten(path: "op2.next") {
                 Fetch(service: "Subgraph2") {
                   {
-                    ... on Query {
+                    ... {
                       op4
                     }
                   }
@@ -2174,7 +2174,7 @@ fn defer_test_defer_on_everything_queried() {
               Flatten(path: "") {
                 Fetch(service: "Subgraph1") {
                   {
-                    ... on Query {
+                    ... {
                       t {
                         __typename
                         id
@@ -3467,6 +3467,56 @@ fn defer_test_the_path_in_defer_includes_traversed_fragments() {
                 {
                   ... on T {
                     v2
+                  }
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "###
+    );
+}
+
+#[test]
+fn defer_on_renamed_root_type() {
+    let planner = planner!(
+        config = config_with_defer(),
+        Subgraph1: r#"
+          type MyQuery {
+            thing: Thing
+          }
+
+          type Thing {
+            i: Int
+          }
+
+          schema { query: MyQuery }
+          "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+        {
+          ... @defer {
+            thing { i }
+          }
+        }
+        "#,
+        @r###"
+    QueryPlan {
+      Defer {
+        Primary {}, [
+          Deferred(depends: [], path: "") {
+            { thing { i } }:
+            Flatten(path: "") {
+              Fetch(service: "Subgraph1") {
+                {
+                  ... {
+                    thing {
+                      i
+                    }
                   }
                 }
               },

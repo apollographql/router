@@ -1,11 +1,15 @@
+use derivative::Derivative;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json::from_str;
+use serde_json_bytes::path::JsonPathInst;
 use sha2::Digest;
 
 use super::events::DisplayRouterResponse;
 use crate::Context;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_NAME;
+use crate::plugin::serde::deserialize_jsonpath;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::TraceIdFormat;
 use crate::plugins::telemetry::config_new::Selector;
@@ -15,6 +19,8 @@ use crate::plugins::telemetry::config_new::get_baggage;
 use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
 use crate::plugins::telemetry::config_new::instruments::Standard;
 use crate::plugins::telemetry::config_new::router::events::RouterResponseBodyExtensionType;
+use crate::plugins::telemetry::config_new::router_overhead::RouterOverheadTracker;
+use crate::plugins::telemetry::config_new::selectors::ActiveSubgraphRequests;
 use crate::plugins::telemetry::config_new::selectors::ErrorRepr;
 use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
@@ -38,8 +44,9 @@ impl From<&RouterValue> for InstrumentValue<RouterSelector> {
     }
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
+#[derive(Derivative, Deserialize, JsonSchema, Clone)]
 #[serde(deny_unknown_fields, untagged)]
+#[derivative(Debug, PartialEq)]
 pub(crate) enum RouterSelector {
     /// A value from baggage.
     Baggage {
@@ -117,6 +124,14 @@ pub(crate) enum RouterSelector {
         /// The response body enabled or not
         response_body: bool,
     },
+    /// The body response errors
+    ResponseErrors {
+        /// The router response body json path of the chunks.
+        #[schemars(with = "String")]
+        #[derivative(Debug = "ignore", PartialEq = "ignore")]
+        #[serde(deserialize_with = "deserialize_jsonpath")]
+        response_errors: JsonPathInst,
+    },
     /// A header from the response
     ResponseHeader {
         /// The name of the request header.
@@ -144,6 +159,16 @@ pub(crate) enum RouterSelector {
         /// The http response status code.
         response_status: ResponseStatus,
     },
+    /// Router overhead duration (time not spent in subgraph requests)
+    RouterOverhead {
+        /// Extract router overhead duration in seconds
+        router_overhead: bool,
+    },
+    /// Number of active subgraph requests at the time of overhead calculation
+    ActiveSubgraphRequests {
+        /// The mode for extracting active subgraph request information
+        active_subgraph_requests: ActiveSubgraphRequests,
+    },
     /// Deprecated, should not be used anymore, use static field instead
     Static(String),
     StaticField {
@@ -168,6 +193,13 @@ impl Selector for RouterSelector {
     type EventResponse = ();
 
     fn on_request(&self, request: &router::Request) -> Option<opentelemetry::Value> {
+        // Helper function to insert DisplayRouterResponse into request context extensions
+        fn insert_display_router_response(request: &router::Request) {
+            request.context.extensions().with_lock(|ext| {
+                ext.insert(DisplayRouterResponse);
+            });
+        }
+
         match self {
             RouterSelector::RequestMethod { request_method } if *request_method => {
                 Some(request.router_request.method().to_string().into())
@@ -217,9 +249,11 @@ impl Selector for RouterSelector {
             RouterSelector::Static(val) => Some(val.clone().into()),
             RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
             RouterSelector::ResponseBody { response_body } if *response_body => {
-                request.context.extensions().with_lock(|ext| {
-                    ext.insert(DisplayRouterResponse);
-                });
+                insert_display_router_response(request);
+                None
+            }
+            RouterSelector::ResponseErrors { .. } => {
+                insert_display_router_response(request);
                 None
             }
             // Related to Response
@@ -239,6 +273,24 @@ impl Selector for RouterSelector {
                     })
                     .map(|v| opentelemetry::Value::String(v.0.into()))
             }
+            RouterSelector::ResponseErrors { response_errors } => response
+                .context
+                .extensions()
+                .with_lock(|ext| ext.get::<RouterResponseBodyExtensionType>().cloned())
+                .and_then(|v| {
+                    from_str::<serde_json::Value>(&v.0)
+                        .ok()
+                        .and_then(|body_json| {
+                            let errors = body_json.get("errors");
+
+                            let data: serde_json_bytes::Value =
+                                serde_json_bytes::to_value(errors).ok()?;
+
+                            let val = response_errors.find(&data);
+
+                            val.maybe_to_otel_value()
+                        })
+                }),
             RouterSelector::ResponseHeader {
                 response_header,
                 default,
@@ -259,6 +311,31 @@ impl Selector for RouterSelector {
                     .canonical_reason()
                     .map(|reason| reason.to_string().into()),
             },
+            RouterSelector::RouterOverhead { router_overhead } if *router_overhead => response
+                .context
+                .extensions()
+                .with_lock(|ext| ext.get::<RouterOverheadTracker>().cloned())
+                .map(|tracker| {
+                    let result = tracker.calculate_overhead();
+                    opentelemetry::Value::F64(result.overhead.as_secs_f64())
+                }),
+            RouterSelector::ActiveSubgraphRequests {
+                active_subgraph_requests,
+            } => response
+                .context
+                .extensions()
+                .with_lock(|ext| ext.get::<RouterOverheadTracker>().cloned())
+                .map(|tracker| {
+                    let result = tracker.calculate_overhead();
+                    match active_subgraph_requests {
+                        ActiveSubgraphRequests::Count => {
+                            opentelemetry::Value::I64(result.active_subgraph_requests as i64)
+                        }
+                        ActiveSubgraphRequests::Bool => {
+                            opentelemetry::Value::Bool(result.active_subgraph_requests > 0)
+                        }
+                    }
+                }),
             RouterSelector::ResponseContext {
                 response_context,
                 default,
@@ -290,13 +367,12 @@ impl Selector for RouterSelector {
                 baggage, default, ..
             } => get_baggage(baggage).or_else(|| default.maybe_to_otel_value()),
             RouterSelector::OnGraphQLError { on_graphql_error } if *on_graphql_error => {
-                if response.context.get_json_value(CONTAINS_GRAPHQL_ERROR)
-                    == Some(serde_json_bytes::Value::Bool(true))
-                {
-                    Some(opentelemetry::Value::Bool(true))
-                } else {
-                    None
-                }
+                let contains_error = response
+                    .context
+                    .get_json_value(CONTAINS_GRAPHQL_ERROR)
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or_default();
+                Some(opentelemetry::Value::Bool(contains_error))
             }
             RouterSelector::Static(val) => Some(val.clone().into()),
             RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
@@ -383,6 +459,8 @@ impl Selector for RouterSelector {
                     | RouterSelector::ResponseHeader { .. }
                     | RouterSelector::ResponseContext { .. }
                     | RouterSelector::ResponseStatus { .. }
+                    | RouterSelector::RouterOverhead { .. }
+                    | RouterSelector::ActiveSubgraphRequests { .. }
                     | RouterSelector::OnGraphQLError { .. }
             ),
             Stage::ResponseField => false,
@@ -419,6 +497,7 @@ mod test {
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
     use serde_json::json;
+    use serde_json_bytes::path::JsonPathInst;
     use tower::BoxError;
     use tracing::span;
     use tracing::subscriber;
@@ -909,6 +988,29 @@ mod test {
         assert_eq!(
             selector.on_response(res).unwrap().as_str(),
             r#"{"data":"some data"}"#
+        );
+    }
+
+    #[test]
+    fn router_response_body_errors() {
+        let selector = RouterSelector::ResponseErrors {
+            response_errors: JsonPathInst::new("$.[0]").unwrap(),
+        };
+        let res = &crate::services::RouterResponse::fake_builder()
+            .status_code(StatusCode::BAD_REQUEST)
+            .data("some data")
+            .errors(vec![
+                crate::graphql::Error::builder()
+                    .message("Something went wrong")
+                    .locations(vec![crate::graphql::Location { line: 1, column: 1 }])
+                    .extension_code("GRAPHQL_VALIDATION_FAILED")
+                    .build(),
+            ])
+            .build()
+            .unwrap();
+        assert_eq!(
+            selector.on_response(res).unwrap().as_str(),
+            r#"{"message":"Something went wrong","locations":[{"line":1,"column":1}],"extensions":{"code":"GRAPHQL_VALIDATION_FAILED"}}"#
         );
     }
 }

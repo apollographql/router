@@ -1,7 +1,7 @@
 ---
 title: Native Query Planner
 subtitle: Run the Rust-native query planner in GraphOS Router
-minVersion: 1.49.0
+minVersion: Router v1.49.0
 redirectFrom:
   - /router/configuration/experimental_query_planner_mode
   - /router/executing-operations/native-query-planner
@@ -25,7 +25,7 @@ The native query planner achieves better performance for a variety of graphs. In
 - 2.9x improvement in router’s CPU utilization
 - 2.2x improvement in router’s memory usage
 
-You can expect generated plans and subgraph operations in the native query planner to have slight differences when compared to the legacy, JavaScript-based query planner. We've determines these differences to be semantically insignificant, based on an analysis of approximately 2.5 million unique user operations in GraphOS and a comparison of about 630 million operations from actual router deployments running in shadow mode over four months.
+You can expect generated plans and subgraph operations in the native query planner to have slight differences when compared to the legacy, JavaScript-based query planner. We've determined these differences to be semantically insignificant, based on an analysis of approximately 2.5 million unique user operations in GraphOS and a comparison of about 630 million operations from actual router deployments running in shadow mode over four months.
 
 <Note>
 

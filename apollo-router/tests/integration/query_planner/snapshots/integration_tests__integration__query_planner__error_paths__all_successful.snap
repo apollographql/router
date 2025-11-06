@@ -1,0 +1,43 @@
+---
+source: apollo-router/tests/integration/query_planner/error_paths.rs
+expression: response
+---
+{
+  "data": {
+    "topProducts": [
+      {
+        "name": "Table",
+        "inStock": true,
+        "reviews": [
+          {
+            "id": "1",
+            "author": {
+              "username": "@ada",
+              "name": "Ada"
+            }
+          },
+          {
+            "id": "2",
+            "author": {
+              "username": "@alan",
+              "name": "Alan"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Chair",
+        "inStock": false,
+        "reviews": [
+          {
+            "id": "3",
+            "author": {
+              "username": "@alan",
+              "name": "Alan"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

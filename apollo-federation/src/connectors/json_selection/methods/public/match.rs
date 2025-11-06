@@ -1,12 +1,11 @@
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
-use shape::location::SourceId;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
 use crate::connectors::json_selection::PathList;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::apply_to::ApplyToResultMethods;
 use crate::connectors::json_selection::helpers::vec_push;
@@ -16,6 +15,7 @@ use crate::connectors::json_selection::lit_expr::LitExpr;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
 use crate::connectors::json_selection::location::merge_ranges;
+use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(MatchMethod, match_method, match_shape);
@@ -36,25 +36,28 @@ fn match_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
+    spec: ConnectSpec,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     let mut errors = Vec::new();
 
     if let Some(MethodArgs { args, .. }) = method_args {
         for pair in args {
             if let LitExpr::Array(pair) = pair.as_ref() {
-                if pair.len() == 2 {
-                    let (candidate_opt, candidate_errors) =
-                        pair[0].apply_to_path(data, vars, input_path);
-                    errors.extend(candidate_errors);
+                let (pattern, value) = match pair.as_slice() {
+                    [pattern, value] => (pattern, value),
+                    _ => continue,
+                };
+                let (candidate_opt, candidate_errors) =
+                    pattern.apply_to_path(data, vars, input_path, spec);
+                errors.extend(candidate_errors);
 
-                    if let Some(candidate) = candidate_opt {
-                        if candidate == *data {
-                            return pair[1]
-                                .apply_to_path(data, vars, input_path)
-                                .prepend_errors(errors);
-                        }
-                    };
-                }
+                if let Some(candidate) = candidate_opt
+                    && candidate == *data
+                {
+                    return value
+                        .apply_to_path(data, vars, input_path, spec)
+                        .prepend_errors(errors);
+                };
             }
         }
     }
@@ -73,18 +76,18 @@ fn match_method(
                     method_name.range(),
                     method_args.and_then(|args| args.range()),
                 ),
+                spec,
             ),
         ),
     )
 }
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 pub(crate) fn match_shape(
+    context: &ShapeContext,
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
 ) -> Shape {
     if let Some(MethodArgs { args, .. }) = method_args {
         let mut result_union = Vec::new();
@@ -92,23 +95,20 @@ pub(crate) fn match_shape(
 
         for pair in args {
             if let LitExpr::Array(pair) = pair.as_ref() {
-                if pair.len() == 2 {
-                    if let LitExpr::Path(path) = pair[0].as_ref() {
-                        if let PathList::Var(known_var, _tail) = path.path.as_ref() {
-                            if known_var.as_ref() == &KnownVariable::AtSign {
-                                has_infallible_case = true;
-                            }
-                        }
-                    };
+                let (pattern, value) = match pair.as_slice() {
+                    [pattern, value] => (pattern, value),
+                    _ => continue,
+                };
+                if let LitExpr::Path(path) = pattern.as_ref()
+                    && let PathList::Var(known_var, _tail) = path.path.as_ref()
+                    && known_var.as_ref() == &KnownVariable::AtSign
+                {
+                    has_infallible_case = true;
+                };
 
-                    let value_shape = pair[1].compute_output_shape(
-                        input_shape.clone(),
-                        dollar_shape.clone(),
-                        named_var_shapes,
-                        source_id,
-                    );
-                    result_union.push(value_shape);
-                }
+                let value_shape =
+                    value.compute_output_shape(context, input_shape.clone(), dollar_shape.clone());
+                result_union.push(value_shape);
             }
         }
 
@@ -126,10 +126,13 @@ pub(crate) fn match_shape(
                     method_name.range(),
                     method_args.and_then(|args| args.range()),
                 )
-                .map(|range| source_id.location(range)),
+                .map(|range| context.source_id().location(range)),
             )
         } else {
-            Shape::one(result_union, method_name.shape_location(source_id))
+            Shape::one(
+                result_union,
+                method_name.shape_location(context.source_id()),
+            )
         }
     } else {
         Shape::error(
@@ -137,7 +140,7 @@ pub(crate) fn match_shape(
                 "Method ->{} requires at least one [candidate, value] pair",
                 method_name.as_ref(),
             ),
-            method_name.shape_location(source_id),
+            method_name.shape_location(context.source_id()),
         )
     }
 }
@@ -146,6 +149,8 @@ pub(crate) fn match_shape(
 mod tests {
     use serde_json_bytes::json;
 
+    use crate::connectors::ConnectSpec;
+    use crate::connectors::json_selection::ApplyToError;
     use crate::selection;
 
     #[test]
@@ -229,6 +234,34 @@ mod tests {
                 .1
                 .iter()
                 .any(|e| e.message() == "Method ->match did not match any [candidate, value] pair")
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    fn match_should_return_none_when_pattern_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!("$.a->match([$.missing, 'default'])", spec).apply_to(&json!({
+                "a": "test",
+            })),
+            (
+                None,
+                vec![
+                    ApplyToError::from_json(&json!({
+                        "message": "Property .missing not found in object",
+                        "path": ["missing"],
+                        "range": [14, 21],
+                        "spec": spec.to_string(),
+                    })),
+                    ApplyToError::from_json(&json!({
+                        "message": "Method ->match did not match any [candidate, value] pair",
+                        "path": ["a", "->match"],
+                        "range": [5, 34],
+                        "spec": spec.to_string(),
+                    }))
+                ]
+            ),
         );
     }
 }

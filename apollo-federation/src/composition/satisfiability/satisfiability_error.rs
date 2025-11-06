@@ -1,13 +1,21 @@
+use std::collections::BTreeSet;
+use std::sync::Arc;
+
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast;
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
+use itertools::Itertools;
 use petgraph::graph::EdgeIndex;
 
 use crate::bail;
+use crate::composition::satisfiability::validation_state::ValidationState;
 use crate::ensure;
+use crate::error::CompositionError;
 use crate::error::FederationError;
-use crate::error::SingleFederationError;
+use crate::merger::hints::HintCode;
 use crate::operation::FieldSelection;
 use crate::operation::InlineFragment;
 use crate::operation::InlineFragmentSelection;
@@ -22,15 +30,20 @@ use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
+use crate::supergraph::CompositionHint;
 use crate::utils::MultiIndexMap;
+use crate::utils::human_readable::HumanReadableListOptions;
+use crate::utils::human_readable::HumanReadableListPrefix;
+use crate::utils::human_readable::human_readable_list;
+use crate::utils::human_readable::human_readable_subgraph_names;
+use crate::utils::human_readable::human_readable_types;
 
 /// Returns a satisfiability error in Ok case; Otherwise, returns another error in Err case.
-#[allow(dead_code)]
-fn satisfiability_error(
+pub(super) fn satisfiability_error(
     unsatisfiable_path: &TransitionGraphPath,
-    _subgraphs_paths: &[TransitionGraphPath],
+    _subgraphs_paths: &[&TransitionGraphPath],
     subgraphs_paths_unadvanceables: &[Unadvanceables],
-    errors: &mut Vec<SingleFederationError>,
+    errors: &mut Vec<CompositionError>,
 ) -> Result<(), FederationError> {
     let witness = build_witness_operation(unsatisfiable_path)?;
     let operation = witness.to_string();
@@ -43,7 +56,116 @@ fn satisfiability_error(
     );
     // PORT_NOTE: We're not using `_subgraphs_paths` parameter, since we didn't port
     //            the `ValidationError` class, yet.
-    errors.push(SingleFederationError::SatisfiabilityError { message });
+    errors.push(CompositionError::SatisfiabilityError { message });
+    Ok(())
+}
+
+pub(super) fn shareable_field_non_intersecting_runtime_types_error(
+    invalid_state: &ValidationState,
+    field_definition_position: &FieldDefinitionPosition,
+    runtime_types_to_subgraphs: &IndexMap<Arc<BTreeSet<Name>>, IndexSet<Arc<str>>>,
+    errors: &mut Vec<CompositionError>,
+) -> Result<(), FederationError> {
+    let witness = build_witness_operation(invalid_state.supergraph_path())?;
+    let operation = witness.to_string();
+    let type_strings = runtime_types_to_subgraphs
+        .iter()
+        .map(|(runtime_types, subgraphs)| {
+            format!(
+                " - in {}, {}",
+                human_readable_subgraph_names(subgraphs.iter()),
+                human_readable_list(
+                    runtime_types
+                        .iter()
+                        .map(|runtime_type| format!("\"{runtime_type}\"")),
+                    HumanReadableListOptions {
+                        prefix: Some(HumanReadableListPrefix {
+                            singular: "type",
+                            plural: "types",
+                        }),
+                        empty_output: "no runtime type is defined",
+                        ..Default::default()
+                    }
+                )
+            )
+        })
+        .join(";\n");
+    let field = field_definition_position
+        .get(invalid_state.supergraph_path().graph().schema()?.schema())?;
+    let message = format!(
+        "For the following supergraph API query:\n\
+        {}\n\
+        Shared field \"{}\" return type \"{}\" has a non-intersecting set of possible runtime \
+        types across subgraphs. Runtime types in subgraphs are:\n\
+        {}.\n\
+        This is not allowed as shared fields must resolve the same way in all subgraphs, and that \
+        implies at least some common runtime types between the subgraphs.",
+        operation,
+        field_definition_position,
+        field.ty.inner_named_type(),
+        type_strings,
+    );
+    errors.push(CompositionError::ShareableHasMismatchedRuntimeTypes { message });
+    Ok(())
+}
+
+pub(super) fn shareable_field_mismatched_runtime_types_hint(
+    state: &ValidationState,
+    field_definition_position: &FieldDefinitionPosition,
+    common_runtime_types: &BTreeSet<Name>,
+    runtime_types_per_subgraphs: &IndexMap<Arc<str>, Arc<BTreeSet<Name>>>,
+    hints: &mut Vec<CompositionHint>,
+) -> Result<(), FederationError> {
+    let witness = build_witness_operation(state.supergraph_path())?;
+    let operation = witness.to_string();
+    let all_subgraphs = state.current_subgraph_names()?;
+    let subgraphs_with_type_not_in_intersection_string = all_subgraphs
+        .iter()
+        .map(|subgraph| {
+            let Some(runtime_types) = runtime_types_per_subgraphs.get(subgraph) else {
+                bail!("Unexpectedly no runtime types for path's tail's subgraph");
+            };
+            let types_to_not_implement = runtime_types
+                .iter()
+                .filter(|type_name| !common_runtime_types.contains(*type_name))
+                .collect::<Vec<_>>();
+            if types_to_not_implement.is_empty() {
+                return Ok::<_, FederationError>(None);
+            };
+            Ok(Some(format!(
+                " - subgraph \"{}\" should never resolve \"{}\" to an object of {}",
+                subgraph,
+                field_definition_position,
+                human_readable_types(types_to_not_implement.into_iter()),
+            )))
+        })
+        .process_results(|iter| iter.flatten().join(";\n"))?;
+    let field =
+        field_definition_position.get(state.supergraph_path().graph().schema()?.schema())?;
+    let message = format!(
+        "For the following supergraph API query:\n\
+        {}\n\
+        Shared field \"{}\" return type \"{}\" has different sets of possible runtime types across \
+        subgraphs.\n\
+        Since a shared field must be resolved the same way in all subgraphs, make sure that {} \
+        only resolve \"{}\" to objects of {}. In particular:\n\
+        {}.\n\
+        Otherwise the @shareable contract will be broken.",
+        operation,
+        field_definition_position,
+        field.ty,
+        human_readable_subgraph_names(all_subgraphs.iter()),
+        field_definition_position,
+        human_readable_types(common_runtime_types.iter()),
+        subgraphs_with_type_not_in_intersection_string,
+    );
+    hints.push(CompositionHint {
+        message,
+        code: HintCode::InconsistentRuntimeTypesForShareableReturn
+            .code()
+            .to_string(),
+        locations: Default::default(), // TODO
+    });
     Ok(())
 }
 
@@ -415,7 +537,8 @@ mod tests {
 
         let schema = parse_schema(schema_str);
         let query_graph = Arc::new(
-            build_query_graph("test".into(), schema.clone()).expect("building query graph"),
+            build_query_graph("test".into(), schema.clone(), Default::default())
+                .expect("building query graph"),
         );
         let result: Vec<_> = build_graph_paths(&query_graph, SchemaRootDefinitionKind::Query, 3)
             .expect("building graph paths")

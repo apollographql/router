@@ -4,7 +4,12 @@ subtitle: Restrict access to credentialed users and systems
 description: Protect sensitive data by enabling JWT authentication in the Apollo GraphOS Router. Restrict access to credentialed users and systems.
 ---
 
-<PremiumFeature />
+<PlanRequired plans={["Free", "Developer", "Standard", "Enterprise"]}>
+
+Rate limits apply on the Free plan.
+Developer and Standard plans require Router v2.6.0 or later.
+
+</PlanRequired>
 
 Authentication is crucial to prevent illegitimate access and protect sensitive data in your graph. The GraphOS Router supports request authentication and key rotation via the [JSON Web Token](https://www.rfc-editor.org/rfc/rfc7519) (**JWT**) and [JSON Web Key](https://www.rfc-editor.org/rfc/rfc7517) (**JWK**) standards. This support is compatible with popular identity providers (**IdPs**) like Okta and Auth0.
 
@@ -51,9 +56,6 @@ Otherwise, if you issue JWTs via a popular third-party IdP (Auth0, Okta, PingOne
              issuers: # optional list of issuers
                - https://issuer.one
                - https://issuer.two
-             audiences: # optional list of audiences
-               - https://my.api
-               - https://my.other.api
              poll_interval: <optional poll interval>
              headers: # optional list of static headers added to the HTTP request to the JWKS URL
                - name: User-Agent
@@ -116,7 +118,6 @@ The following configuration options are supported:
   - **If you use a third-party IdP,** consult its documentation to determine its JWKS URL.
   - **If you use your own custom IdP,** you need to make its JWKS available at a router-accessible URL if you haven't already. For more information, see [Creating your own JWKS](#creating-your-own-jwks-advanced).
 - `issuers`: **optional** list of issuers accepted, that will be compared to the `iss` claim in the JWT if present. If none match, the request will be rejected.
-- `audiences`: **optional** list of audiences accepted, that will be compared to the `aud` claim in the JWT if present. If none match, the request will be rejected.
 - `algorithms`: **optional** list of accepted algorithms. Possible values are `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`
 - `poll_interval`: **optional** interval in human-readable format (e.g. `60s` or `1hour 30s`) at which the JWKS will be polled for changes. If not specified, the JWKS endpoint will be polled every 60 seconds.
 - `headers`: **optional** a list of headers sent when downloading from the JWKS URL
@@ -195,6 +196,12 @@ Regardless of whether JWT authentication succeeds, the status of JWT processing 
     name: string
 }
 ```
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
 
 ##### `sources`
 

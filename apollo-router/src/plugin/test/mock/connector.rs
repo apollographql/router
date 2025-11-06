@@ -6,18 +6,18 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::task::Poll;
 
+use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
 use futures::future;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
-use serde_json::json;
+use serde_json_bytes::json;
 use tower::BoxError;
 use tower::Service;
 
 use crate::json_ext::Object;
 use crate::services::connector::request_service::Request as ConnectorRequest;
 use crate::services::connector::request_service::Response as ConnectorResponse;
-use crate::services::connector::request_service::TransportRequest;
 
 type MockResponses = HashMap<String, String>;
 
@@ -108,39 +108,21 @@ impl Service<ConnectorRequest> for MockConnector {
         let body = http.inner.body();
 
         let response = if let Some(response) = self.mocks.get(body) {
-            let context = req.context;
-            let connector = req.connector;
             let response_key = req.key;
             let data = json!(response);
             let headers = self.headers.clone();
 
-            ConnectorResponse::test_builder()
-                .context(context)
-                .connector(connector)
-                .response_key(response_key)
-                .problems(Default::default())
-                .data(data)
-                .headers(headers)
-                .build()
+            ConnectorResponse::test_new(response_key, Default::default(), data, Some(headers))
         } else {
             let error_message = format!(
                 "couldn't find mock for query {}",
                 serde_json::to_string(&body).unwrap()
             );
-            let context = req.context;
-            let connector = req.connector;
             let response_key = req.key;
             let data = json!(error_message);
             let headers = self.headers.clone();
 
-            ConnectorResponse::test_builder()
-                .context(context)
-                .connector(connector)
-                .response_key(response_key)
-                .problems(Default::default())
-                .data(data)
-                .headers(headers)
-                .build()
+            ConnectorResponse::test_new(response_key, Default::default(), data, Some(headers))
         };
         future::ok(response)
     }

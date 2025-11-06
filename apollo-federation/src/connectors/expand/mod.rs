@@ -1,7 +1,9 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use apollo_compiler::Name;
 use apollo_compiler::Schema;
+use apollo_compiler::collections::HashMap;
 use apollo_compiler::validation::Valid;
 use carryover::carryover_directives;
 use indexmap::IndexMap;
@@ -14,7 +16,6 @@ use crate::ValidFederationSubgraph;
 use crate::connectors::ConnectSpec;
 use crate::connectors::Connector;
 use crate::error::FederationError;
-use crate::link::Link;
 use crate::merge::merge_subgraphs;
 use crate::schema::FederationSchema;
 use crate::subgraph::Subgraph;
@@ -23,6 +24,8 @@ use crate::subgraph::ValidSubgraph;
 mod carryover;
 pub(crate) mod visitors;
 use visitors::filter_directives;
+
+use crate::connectors::spec::ConnectLink;
 
 pub struct Connectors {
     pub by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
@@ -64,25 +67,34 @@ pub fn expand_connectors(
     let supergraph = Supergraph::new_with_router_specs(supergraph_str)?;
     let api_schema = supergraph.to_api_schema(api_schema_options.clone())?;
 
-    let (connect_subgraphs, graphql_subgraphs): (Vec<_>, Vec<_>) = supergraph
-        .extract_subgraphs()?
+    let all_subgraphs: Vec<_> = supergraph.extract_subgraphs()?.into_iter().collect();
+    let subgraph_connect_directive_names: HashMap<String, [Name; 2]> = all_subgraphs
+        .iter()
+        .flat_map(|(_, sub)| {
+            let Some(Ok(link)) = ConnectLink::new(sub.schema.schema()) else {
+                return None;
+            };
+            Some((
+                sub.name.clone(),
+                [link.connect_directive_name, link.source_directive_name],
+            ))
+        })
+        .collect::<HashMap<_, _>>();
+
+    let (connect_subgraphs, graphql_subgraphs): (Vec<_>, Vec<_>) = all_subgraphs
         .into_iter()
-        .partition_map(
-            |(_, sub)| match ConnectSpec::get_from_schema(sub.schema.schema()) {
-                Some((spec, link)) if contains_connectors(&link, &sub) => {
-                    either::Either::Left((spec, link, sub))
-                }
-                _ => either::Either::Right(ValidSubgraph::from(sub)),
-            },
-        );
+        .partition_map(|(_, sub)| match ConnectLink::new(sub.schema.schema()) {
+            Some(Ok(link)) if contains_connectors(&link, &sub) => either::Either::Left((link, sub)),
+            _ => either::Either::Right(ValidSubgraph::from(sub)),
+        });
 
     // Expand just the connector subgraphs
     let mut expanded_subgraphs = Vec::new();
     let mut spec_versions = HashSet::new();
 
-    for (spec, link, sub) in connect_subgraphs {
-        expanded_subgraphs.extend(split_subgraph(&link, sub, spec)?);
-        spec_versions.insert(spec);
+    for (link, sub) in connect_subgraphs {
+        expanded_subgraphs.extend(split_subgraph(&link, sub)?);
+        spec_versions.insert(link.spec);
     }
 
     // Merge the subgraphs into one supergraph
@@ -110,6 +122,7 @@ pub fn expand_connectors(
         &mut new_supergraph,
         spec_versions.into_iter(),
         &subgraph_name_replacements,
+        subgraph_connect_directive_names,
     )
     .map_err(|e| FederationError::internal(format!("could not carry over directives: {e:?}")))?;
 
@@ -120,7 +133,7 @@ pub fn expand_connectors(
 
     let labels_by_service_name = connectors_by_service_name
         .iter()
-        .map(|(service_name, connector)| (service_name.clone(), connector.id.label.clone()))
+        .map(|(service_name, connector)| (service_name.clone(), connector.label.0.clone()))
         .collect();
 
     let source_config_keys = connectors_by_service_name
@@ -139,15 +152,13 @@ pub fn expand_connectors(
     })
 }
 
-fn contains_connectors(link: &Link, subgraph: &ValidFederationSubgraph) -> bool {
-    let connect_name = ConnectSpec::connect_directive_name(link);
-    let source_name = ConnectSpec::source_directive_name(link);
-
+fn contains_connectors(link: &ConnectLink, subgraph: &ValidFederationSubgraph) -> bool {
     subgraph
         .schema
         .get_directive_definitions()
         .any(|directive| {
-            directive.directive_name == connect_name || directive.directive_name == source_name
+            directive.directive_name == link.connect_directive_name
+                || directive.directive_name == link.source_directive_name
         })
 }
 
@@ -155,20 +166,19 @@ fn contains_connectors(link: &Link, subgraph: &ValidFederationSubgraph) -> bool 
 ///
 /// Subgraphs passed to this function should contain connector directives.
 fn split_subgraph(
-    link: &Link,
+    link: &ConnectLink,
     subgraph: ValidFederationSubgraph,
-    spec: ConnectSpec,
 ) -> Result<Vec<(Connector, ValidSubgraph)>, FederationError> {
-    let connector_map = Connector::from_schema(subgraph.schema.schema(), &subgraph.name, spec)?;
+    let connector_map = Connector::from_schema(subgraph.schema.schema(), &subgraph.name)?;
 
     let expander = helpers::Expander::new(link, &subgraph);
     connector_map
         .into_iter()
-        .map(|(id, connector)| {
+        .map(|connector| {
             // Build a subgraph using only the necessary fields from the directive
             let schema = expander.expand(&connector)?;
             let subgraph = Subgraph::new(
-                id.synthetic_name().as_str(),
+                connector.id.synthetic_name().as_str(),
                 &subgraph.url,
                 &schema.schema().serialize().to_string(),
             )?;
@@ -219,14 +229,13 @@ mod helpers {
     use super::visitors::try_insert;
     use super::visitors::try_pre_insert;
     use crate::ValidFederationSubgraph;
-    use crate::connectors::ConnectSpec;
     use crate::connectors::Connector;
     use crate::connectors::EntityResolver;
     use crate::connectors::JSONSelection;
     use crate::connectors::id::ConnectedElement;
+    use crate::connectors::spec::ConnectLink;
     use crate::error::FederationError;
     use crate::internal_error;
-    use crate::link::Link;
     use crate::link::spec::Identity;
     use crate::schema::FederationSchema;
     use crate::schema::ValidFederationSchema;
@@ -243,14 +252,6 @@ mod helpers {
 
     /// A helper struct for expanding a subgraph into one per connect directive.
     pub(super) struct Expander<'a> {
-        /// The name of the connect directive, possibly aliased.
-        #[allow(unused)]
-        connect_name: Name,
-
-        /// The name of the connect directive, possibly aliased.
-        #[allow(unused)]
-        source_name: Name,
-
         /// The name of the @key directive, as known in the subgraph
         key_name: Name,
 
@@ -266,10 +267,7 @@ mod helpers {
     }
 
     impl<'a> Expander<'a> {
-        pub(super) fn new(link: &Link, subgraph: &'a ValidFederationSubgraph) -> Self {
-            let connect_name = ConnectSpec::connect_directive_name(link);
-            let source_name = ConnectSpec::source_directive_name(link);
-
+        pub(super) fn new(link: &ConnectLink, subgraph: &'a ValidFederationSubgraph) -> Self {
             // When we go to expand all output types, we'll need to make sure that we don't carry over
             // any connect-related directives. The following directives are also special because they
             // influence planning and satisfiability:
@@ -307,13 +305,11 @@ mod helpers {
                 });
             let directive_deny_list = IndexSet::from_iter(extra_excluded.chain([
                 key_name.clone(),
-                connect_name.clone(),
-                source_name.clone(),
+                link.connect_directive_name.clone(),
+                link.source_directive_name.clone(),
             ]));
 
             Self {
-                connect_name,
-                source_name,
                 key_name,
                 interface_object_name,
                 original_schema: &subgraph.schema,
@@ -538,8 +534,11 @@ mod helpers {
                 _ => parent_type,
             };
 
-            let parsed = JSONSelection::parse(&resolvable_key.serialize().no_indent().to_string())
-                .map_err(|e| FederationError::internal(format!("error parsing key: {e}")))?;
+            let parsed = JSONSelection::parse_with_spec(
+                &resolvable_key.serialize().no_indent().to_string(),
+                connector.spec,
+            )
+            .map_err(|e| FederationError::internal(format!("error parsing key: {e}")))?;
 
             let visitor =
                 SchemaVisitor::new(self.original_schema, to_schema, &self.directive_deny_list);

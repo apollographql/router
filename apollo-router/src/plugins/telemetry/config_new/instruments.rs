@@ -33,18 +33,20 @@ use super::graphql::selectors::ListLength;
 use super::http_server::attributes::HttpServerAttributes;
 use super::router::instruments::RouterInstruments;
 use super::router::instruments::RouterInstrumentsConfig;
+use super::router_overhead;
 use super::selectors::CacheKind;
 use super::subgraph::instruments::SubgraphInstruments;
 use super::subgraph::instruments::SubgraphInstrumentsConfig;
 use super::supergraph::instruments::SupergraphCustomInstruments;
 use super::supergraph::instruments::SupergraphInstrumentsConfig;
 use crate::Context;
-use crate::axum_factory::connection_handle::ConnectionState;
-use crate::axum_factory::connection_handle::OPEN_CONNECTIONS_METRIC;
 use crate::metrics;
-use crate::metrics::meter_provider;
+use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::config_new::Selectors;
+use crate::plugins::telemetry::config_new::apollo::instruments::ApolloConnectorInstruments;
+use crate::plugins::telemetry::config_new::apollo::instruments::ApolloSubgraphInstruments;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
+use crate::plugins::telemetry::config_new::cache::RESPONSE_CACHE_METRIC;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes;
 use crate::plugins::telemetry::config_new::connector::instruments::ConnectorInstruments;
@@ -68,8 +70,6 @@ use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphSele
 use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphValue;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::router;
-use crate::services::router::pipeline_handle::PIPELINE_METRIC;
-use crate::services::router::pipeline_handle::pipeline_counts;
 use crate::services::supergraph;
 
 pub(crate) const METER_NAME: &str = "apollo/router";
@@ -121,6 +121,8 @@ pub(super) const HTTP_CLIENT_REQUEST_DURATION_METRIC: &str = "http.client.reques
 pub(super) const HTTP_CLIENT_REQUEST_BODY_SIZE_METRIC: &str = "http.client.request.body.size";
 pub(super) const HTTP_CLIENT_RESPONSE_BODY_SIZE_METRIC: &str = "http.client.response.body.size";
 
+pub(super) const APOLLO_ROUTER_OPERATIONS_FETCH_DURATION: &str =
+    "apollo.router.operations.fetch.duration";
 impl InstrumentsConfig {
     pub(crate) fn validate(&self) -> Result<(), String> {
         for (name, custom) in &self.router.custom {
@@ -248,6 +250,12 @@ impl InstrumentsConfig {
             );
         }
 
+        if let Some((name, instrument)) = router_overhead::instruments::create_static_instrument(
+            self.router.attributes.router_overhead.is_enabled(),
+        ) {
+            static_instruments.insert(name, instrument);
+        }
+
         for (instrument_name, instrument) in &self.router.custom {
             match instrument.ty {
                 InstrumentType::Counter => {
@@ -291,7 +299,7 @@ impl InstrumentsConfig {
             .is_enabled()
             .then(|| CustomHistogram {
                 inner: Mutex::new(CustomHistogramInner {
-                    increment: Increment::Duration(Instant::now()),
+                    increment: Increment::Duration(Instant::now(), "s".to_string()),
                     condition: Condition::True,
                     histogram: Some(
                         static_instruments
@@ -433,11 +441,18 @@ impl InstrumentsConfig {
                     attributes: Vec::new(),
                 }),
             });
+
+        let router_overhead = router_overhead::instruments::initialize_custom_histogram(
+            &self.router.attributes.router_overhead,
+            &static_instruments,
+        );
+
         RouterInstruments {
             http_server_request_duration,
             http_server_request_body_size,
             http_server_response_body_size,
             http_server_active_requests,
+            router_overhead,
             custom: CustomInstruments::new(&self.router.custom, static_instruments),
         }
     }
@@ -604,7 +619,7 @@ impl InstrumentsConfig {
                     };
                     CustomHistogram {
                         inner: Mutex::new(CustomHistogramInner {
-                            increment: Increment::Duration(Instant::now()),
+                            increment: Increment::Duration(Instant::now(), "s".to_string()),
                             condition: Condition::True,
                             histogram: Some(static_instruments
                                 .get(HTTP_CLIENT_REQUEST_DURATION_METRIC)
@@ -717,6 +732,20 @@ impl InstrumentsConfig {
         }
     }
 
+    pub(crate) fn new_builtin_apollo_subgraph_instruments(
+        &self,
+    ) -> HashMap<String, StaticInstrument> {
+        ApolloSubgraphInstruments::new_builtin()
+    }
+
+    pub(crate) fn new_apollo_subgraph_instruments(
+        &self,
+        static_instruments: Arc<HashMap<String, StaticInstrument>>,
+        apollo_config: Config,
+    ) -> ApolloSubgraphInstruments {
+        ApolloSubgraphInstruments::new(static_instruments, apollo_config)
+    }
+
     pub(crate) fn new_connector_instruments(
         &self,
         static_instruments: Arc<HashMap<String, StaticInstrument>>,
@@ -758,6 +787,20 @@ impl InstrumentsConfig {
         }
 
         static_instruments
+    }
+
+    pub(crate) fn new_builtin_apollo_connector_instruments(
+        &self,
+    ) -> HashMap<String, StaticInstrument> {
+        ApolloConnectorInstruments::new_builtin()
+    }
+
+    pub(crate) fn new_apollo_connector_instruments(
+        &self,
+        static_instruments: Arc<HashMap<String, StaticInstrument>>,
+        apollo_config: Config,
+    ) -> ApolloConnectorInstruments {
+        ApolloConnectorInstruments::new(static_instruments, apollo_config)
     }
 
     pub(crate) fn new_builtin_graphql_instruments(&self) -> HashMap<String, StaticInstrument> {
@@ -912,7 +955,23 @@ impl InstrumentsConfig {
                     meter
                         .f64_counter(CACHE_METRIC)
                         .with_unit("ops")
-                        .with_description("Entity cache hit/miss operations at the subgraph level")
+                        .with_description(
+                            "Entity cache hit/miss operations at the subgraph level (deprecated)",
+                        )
+                        .init(),
+                ),
+            );
+        }
+        if self.cache.attributes.response_cache.is_enabled() {
+            static_instruments.insert(
+                RESPONSE_CACHE_METRIC.to_string(),
+                StaticInstrument::CounterF64(
+                    meter
+                        .f64_counter(RESPONSE_CACHE_METRIC)
+                        .with_unit("ops")
+                        .with_description(
+                            "Response cache hit/miss operations at the subgraph level",
+                        )
                         .init(),
                 ),
             );
@@ -963,81 +1022,44 @@ impl InstrumentsConfig {
                     }),
                 }
             }),
+            cache_hit_response_cache: self.cache.attributes.response_cache.is_enabled().then(|| {
+                let mut nb_attributes = 0;
+                let selectors = match &self.cache.attributes.response_cache {
+                    DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => {
+                        None
+                    }
+                    DefaultedStandardInstrument::Extendable { attributes } => {
+                        nb_attributes = attributes.custom.len();
+                        Some(attributes.clone())
+                    }
+                };
+                CustomCounter {
+                    inner: Mutex::new(CustomCounterInner {
+                        increment: Increment::Custom(None),
+                        condition: Condition::True,
+                        counter: Some(static_instruments
+                            .get(RESPONSE_CACHE_METRIC)
+                            .expect(
+                                "cannot get static instrument for cache; this should not happen",
+                            )
+                            .as_counter_f64()
+                            .cloned()
+                            .expect(
+                                "cannot convert instrument to counter for cache; this should not happen",
+                            )
+                        ),
+                        attributes: Vec::with_capacity(nb_attributes),
+                        selector: Some(Arc::new(SubgraphSelector::Cache {
+                            cache: CacheKind::Hit,
+                            entity_type: None,
+                        })),
+                        selectors,
+                        incremented: false,
+                        _phantom: PhantomData,
+                    }),
+                }
+            }),
         }
-    }
-
-    pub(crate) fn new_pipeline_instruments(&self) -> HashMap<String, StaticInstrument> {
-        let meter = meter_provider().meter("apollo/router");
-        let mut instruments = HashMap::new();
-        instruments.insert(
-            PIPELINE_METRIC.to_string(),
-            StaticInstrument::GaugeU64(
-                meter
-                    .u64_observable_gauge(PIPELINE_METRIC)
-                    .with_description("The number of request pipelines active in the router")
-                    .with_callback(|i| {
-                        for (pipeline, count) in &*pipeline_counts() {
-                            let mut attributes = Vec::with_capacity(3);
-                            attributes.push(KeyValue::new("schema.id", pipeline.schema_id.clone()));
-                            if let Some(launch_id) = &pipeline.launch_id {
-                                attributes.push(KeyValue::new("launch.id", launch_id.clone()));
-                            }
-                            attributes
-                                .push(KeyValue::new("config.hash", pipeline.config_hash.clone()));
-
-                            i.observe(*count, &attributes);
-                        }
-                    })
-                    .init(),
-            ),
-        );
-        instruments.insert(
-            OPEN_CONNECTIONS_METRIC.to_string(),
-            StaticInstrument::GaugeU64(
-                meter
-                    .u64_observable_gauge(OPEN_CONNECTIONS_METRIC)
-                    .with_description("Number of currently connected clients")
-                    .with_callback(move |gauge| {
-                        let connections =
-                            crate::axum_factory::connection_handle::connection_counts();
-                        for (connection, count) in connections.iter() {
-                            let mut attributes = Vec::with_capacity(6);
-                            if let Some((ip, port)) = connection.address.ip_and_port() {
-                                attributes.push(KeyValue::new("server.address", ip.to_string()));
-                                attributes.push(KeyValue::new("server.port", port.to_string()));
-                            } else {
-                                // Unix socket
-                                attributes.push(KeyValue::new(
-                                    "server.address",
-                                    connection.address.to_string(),
-                                ));
-                            }
-                            attributes.push(KeyValue::new(
-                                "schema.id",
-                                connection.pipeline_ref.schema_id.clone(),
-                            ));
-                            if let Some(launch_id) = &connection.pipeline_ref.launch_id {
-                                attributes.push(KeyValue::new("launch.id", launch_id.clone()));
-                            }
-                            attributes.push(KeyValue::new(
-                                "config.hash",
-                                connection.pipeline_ref.config_hash.clone(),
-                            ));
-                            // Technically we need to support `idle` state, but that will have to be a follow-up,
-                            attributes.push(KeyValue::new(
-                                "http.connection.state",
-                                match connection.state {
-                                    ConnectionState::Active => "active",
-                                    ConnectionState::Terminating => "terminating",
-                                },
-                            ));
-                            gauge.observe(*count, &attributes);
-                        }
-                    })
-                    .init(),
-            ),
-        );
-        instruments
     }
 }
 
@@ -1113,6 +1135,7 @@ impl DefaultForLevel for ActiveRequestsAttributes {
 
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, untagged)]
+#[schemars(rename = "StandardInstrument{T}")]
 pub(crate) enum DefaultedStandardInstrument<T> {
     #[default]
     Unset,
@@ -1431,7 +1454,9 @@ where
                     let (selector, increment) = match (&instrument.value).into() {
                         InstrumentValue::Standard(incr) => {
                             let incr = match incr {
-                                Standard::Duration => Increment::Duration(Instant::now()),
+                                Standard::Duration => {
+                                    Increment::Duration(Instant::now(), instrument.unit.clone())
+                                }
                                 Standard::Unit => Increment::Unit,
                             };
                             (None, incr)
@@ -1440,7 +1465,10 @@ where
                             (Some(Arc::new(selector)), Increment::Custom(None))
                         }
                         InstrumentValue::Chunked(incr) => match incr {
-                            Event::Duration => (None, Increment::EventDuration(Instant::now())),
+                            Event::Duration => (
+                                None,
+                                Increment::EventDuration(Instant::now(), instrument.unit.clone()),
+                            ),
                             Event::Unit => (None, Increment::EventUnit),
                             Event::Custom(selector) => {
                                 (Some(Arc::new(selector)), Increment::EventCustom(None))
@@ -1487,7 +1515,9 @@ where
                     let (selector, increment) = match (&instrument.value).into() {
                         InstrumentValue::Standard(incr) => {
                             let incr = match incr {
-                                Standard::Duration => Increment::Duration(Instant::now()),
+                                Standard::Duration => {
+                                    Increment::Duration(Instant::now(), instrument.unit.clone())
+                                }
                                 Standard::Unit => Increment::Unit,
                             };
                             (None, incr)
@@ -1496,7 +1526,10 @@ where
                             (Some(Arc::new(selector)), Increment::Custom(None))
                         }
                         InstrumentValue::Chunked(incr) => match incr {
-                            Event::Duration => (None, Increment::EventDuration(Instant::now())),
+                            Event::Duration => (
+                                None,
+                                Increment::EventDuration(Instant::now(), instrument.unit.clone()),
+                            ),
                             Event::Unit => (None, Increment::EventUnit),
                             Event::Custom(selector) => {
                                 (Some(Arc::new(selector)), Increment::EventCustom(None))
@@ -1651,21 +1684,37 @@ pub(crate) enum Increment {
     Unit,
     EventUnit,
     FieldUnit,
-    Duration(Instant),
-    EventDuration(Instant),
-    Custom(Option<i64>),
-    EventCustom(Option<i64>),
-    FieldCustom(Option<i64>),
+    Duration(Instant, String),
+    EventDuration(Instant, String),
+    Custom(Option<opentelemetry::Value>),
+    EventCustom(Option<opentelemetry::Value>),
+    FieldCustom(Option<opentelemetry::Value>),
 }
 
-fn to_i64(value: opentelemetry::Value) -> Option<i64> {
+fn value_to_f64(value: &opentelemetry::Value) -> Option<f64> {
     match value {
-        opentelemetry::Value::I64(i) => Some(i),
-        opentelemetry::Value::String(s) => s.as_str().parse::<i64>().ok(),
-        opentelemetry::Value::F64(f) => Some(f.floor() as i64),
+        opentelemetry::Value::F64(f) => Some(*f),
+        opentelemetry::Value::I64(i) => Some(*i as f64),
+        opentelemetry::Value::String(s) => s.as_str().parse::<f64>().ok(),
         opentelemetry::Value::Bool(_) => None,
         opentelemetry::Value::Array(_) => None,
     }
+}
+
+/// Convert a duration to f64 based on the specified unit.
+/// Supported units: "s" (seconds), "ms" (milliseconds), "us" (microseconds), "ns" (nanoseconds)
+/// Defaults to seconds for any other unit string.
+fn duration_to_f64(duration: std::time::Duration, unit: &str) -> f64 {
+    match unit {
+        "ms" => duration.as_secs_f64() * 1000.0,
+        "us" => duration.as_micros() as f64,
+        "ns" => duration.as_nanos() as f64,
+        _ => duration.as_secs_f64(), // Default to seconds for "s" or any other unit
+    }
+}
+
+fn duration_to_value(duration: std::time::Duration, unit: &str) -> opentelemetry::Value {
+    opentelemetry::Value::F64(duration_to_f64(duration, unit))
 }
 
 pub(crate) struct CustomCounter<Request, Response, EventResponse, A, T>
@@ -1749,8 +1798,8 @@ where
 
         if let Some(selected_value) = inner.selector.as_ref().and_then(|s| s.on_request(request)) {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
-                Increment::Custom(None) => Increment::Custom(to_i64(selected_value)),
+                Increment::EventCustom(None) => Increment::EventCustom(Some(selected_value)),
+                Increment::Custom(None) => Increment::Custom(Some(selected_value)),
                 other => {
                     failfast_error!(
                         "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
@@ -1768,7 +1817,7 @@ where
             if !matches!(
                 &inner.increment,
                 Increment::EventCustom(_)
-                    | Increment::EventDuration(_)
+                    | Increment::EventDuration(_, _)
                     | Increment::EventUnit
                     | Increment::FieldCustom(_)
                     | Increment::FieldUnit
@@ -1791,8 +1840,8 @@ where
             .and_then(|s| s.on_response(response))
         {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => Increment::Custom(to_i64(selected_value)),
-                Increment::Custom(None) => Increment::Custom(to_i64(selected_value)),
+                Increment::EventCustom(None) => Increment::Custom(Some(selected_value)),
+                Increment::Custom(None) => Increment::Custom(Some(selected_value)),
                 other => {
                     failfast_error!(
                         "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
@@ -1803,26 +1852,23 @@ where
             inner.increment = new_incr;
         }
 
-        let increment = match inner.increment {
-            Increment::Unit => 1f64,
-            Increment::Duration(instant) => instant.elapsed().as_secs_f64(),
-            Increment::Custom(val) => match val {
-                Some(incr) => incr as f64,
-                None => 0f64,
-            },
+        if let Some(increment) = match &inner.increment {
+            Increment::Unit => Some(opentelemetry::Value::F64(1.0)),
+            Increment::Duration(instant, unit) => Some(duration_to_value(instant.elapsed(), unit)),
+            Increment::Custom(val) => val.clone(),
             Increment::EventUnit
-            | Increment::EventDuration(_)
+            | Increment::EventDuration(_, _)
             | Increment::EventCustom(_)
             | Increment::FieldUnit
             | Increment::FieldCustom(_) => {
                 // Nothing to do because we're incrementing on events or fields
                 return;
             }
-        };
-
-        if increment != 0.0 {
-            if let Some(counter) = &inner.counter {
-                counter.add(increment, &inner.attributes);
+        } {
+            if let Some(counter) = &inner.counter
+                && let Some(value) = value_to_f64(&increment)
+            {
+                counter.add(value, &inner.attributes);
             }
             inner.incremented = true;
         }
@@ -1850,8 +1896,8 @@ where
             .and_then(|s| s.on_response_event(response, ctx))
         {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
-                Increment::Custom(None) => Increment::EventCustom(to_i64(selected_value)),
+                Increment::EventCustom(None) => Increment::EventCustom(Some(selected_value)),
+                Increment::Custom(None) => Increment::EventCustom(Some(selected_value)),
                 other => {
                     failfast_error!(
                         "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
@@ -1864,15 +1910,15 @@ where
 
         let increment = match &mut inner.increment {
             Increment::EventUnit => 1f64,
-            Increment::EventDuration(instant) => {
-                let incr = instant.elapsed().as_secs_f64();
+            Increment::EventDuration(instant, unit) => {
+                let incr = duration_to_f64(instant.elapsed(), unit);
                 // Set it to new instant for the next event
                 *instant = Instant::now();
                 incr
             }
             Increment::Custom(val) | Increment::EventCustom(val) => {
                 let incr = match val {
-                    Some(incr) => *incr as f64,
+                    Some(incr) => value_to_f64(incr).unwrap_or(0f64),
                     None => 0f64,
                 };
                 // Set it to None again for the next event
@@ -1901,21 +1947,24 @@ where
             );
         }
 
-        let increment = match inner.increment {
-            Increment::Unit | Increment::EventUnit | Increment::FieldUnit => 1f64,
-            Increment::Duration(instant) | Increment::EventDuration(instant) => {
-                instant.elapsed().as_secs_f64()
+        let increment = match &inner.increment {
+            Increment::Unit | Increment::EventUnit | Increment::FieldUnit => {
+                opentelemetry::Value::F64(1.0)
+            }
+            Increment::Duration(instant, unit) | Increment::EventDuration(instant, unit) => {
+                duration_to_value(instant.elapsed(), unit)
             }
             Increment::Custom(val) | Increment::EventCustom(val) | Increment::FieldCustom(val) => {
-                match val {
-                    Some(incr) => incr as f64,
-                    None => 0f64,
-                }
+                val.as_ref()
+                    .cloned()
+                    .unwrap_or(opentelemetry::Value::F64(0.0))
             }
         };
 
-        if let Some(counter) = inner.counter.take() {
-            counter.add(increment, &attrs);
+        if let Some(counter) = inner.counter.take()
+            && let Some(value) = value_to_f64(&increment)
+        {
+            counter.add(value, &attrs);
         }
     }
 
@@ -1940,8 +1989,8 @@ where
             .and_then(|s| s.on_response_field(ty, field, value, ctx))
         {
             let new_incr = match &inner.increment {
-                Increment::FieldCustom(None) => Increment::FieldCustom(to_i64(selected_value)),
-                Increment::Custom(None) => Increment::FieldCustom(to_i64(selected_value)),
+                Increment::FieldCustom(None) => Increment::FieldCustom(Some(selected_value)),
+                Increment::Custom(None) => Increment::FieldCustom(Some(selected_value)),
                 other => {
                     failfast_error!(
                         "this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}"
@@ -1952,18 +2001,13 @@ where
             inner.increment = new_incr;
         }
 
-        let increment: Option<f64> = match &mut inner.increment {
-            Increment::FieldUnit => Some(1f64),
-            Increment::FieldCustom(val) => {
-                let incr = val.map(|incr| incr as f64);
-                // Set it to None again
-                *val = None;
-                incr
-            }
+        let increment: Option<opentelemetry::Value> = match &mut inner.increment {
+            Increment::FieldUnit => Some(opentelemetry::Value::F64(1.0)),
+            Increment::FieldCustom(val) => val.take(),
             Increment::Unit
-            | Increment::Duration(_)
+            | Increment::Duration(_, _)
             | Increment::Custom(_)
-            | Increment::EventDuration(_)
+            | Increment::EventDuration(_, _)
             | Increment::EventCustom(_)
             | Increment::EventUnit => {
                 // Nothing to do because we're incrementing on fields
@@ -1984,8 +2028,10 @@ where
             }
         }
 
-        if let (Some(counter), Some(increment)) = (&inner.counter, increment) {
-            counter.add(increment, &inner.attributes);
+        if let (Some(counter), Some(increment)) = (&inner.counter, increment.as_ref()) {
+            if let Some(value) = value_to_f64(increment) {
+                counter.add(value, &inner.attributes);
+            }
             // Reset the attributes to the original length, this will discard the new attributes added from selectors.
             inner.attributes.truncate(original_length);
         }
@@ -2006,16 +2052,16 @@ where
             if inner.incremented || matches!(inner.condition.evaluate_drop(), Some(false) | None) {
                 return;
             }
-            if let Some(counter) = inner.counter.take() {
-                let incr: f64 = match &inner.increment {
-                    Increment::Unit | Increment::EventUnit => 1f64,
-                    Increment::Duration(instant) | Increment::EventDuration(instant) => {
-                        instant.elapsed().as_secs_f64()
+            if let Some(counter) = inner.counter.take()
+                && let Some(incr) = match &inner.increment {
+                    Increment::Unit | Increment::EventUnit => Some(1f64),
+                    Increment::Duration(instant, unit)
+                    | Increment::EventDuration(instant, unit) => {
+                        Some(duration_to_f64(instant.elapsed(), unit))
                     }
-                    Increment::Custom(val) | Increment::EventCustom(val) => match val {
-                        Some(incr) => *incr as f64,
-                        None => 0f64,
-                    },
+                    Increment::Custom(val) | Increment::EventCustom(val) => {
+                        val.as_ref().and_then(value_to_f64)
+                    }
                     Increment::FieldUnit | Increment::FieldCustom(_) => {
                         // Dropping a metric on a field will never increment.
                         // We can't increment graphql metrics unless we actually process the result.
@@ -2023,7 +2069,8 @@ where
                         // with the data that we know so far if the request stops.
                         return;
                     }
-                };
+                }
+            {
                 counter.add(incr, &inner.attributes);
             }
         }
@@ -2047,39 +2094,36 @@ impl Instrumented for ActiveRequestsCounter {
 
     fn on_request(&self, request: &Self::Request) {
         let mut inner = self.inner.lock();
-        if inner.attrs_config.http_request_method {
-            if let Some(attr) = (RouterSelector::RequestMethod {
+        if inner.attrs_config.http_request_method
+            && let Some(attr) = (RouterSelector::RequestMethod {
                 request_method: true,
             })
             .on_request(request)
-            {
-                inner
-                    .attributes
-                    .push(KeyValue::new(HTTP_REQUEST_METHOD, attr));
-            }
+        {
+            inner
+                .attributes
+                .push(KeyValue::new(HTTP_REQUEST_METHOD, attr));
         }
-        if inner.attrs_config.server_address {
-            if let Some(attr) = HttpServerAttributes::forwarded_host(request)
+        if inner.attrs_config.server_address
+            && let Some(attr) = HttpServerAttributes::forwarded_host(request)
                 .and_then(|h| h.host().map(|h| h.to_string()))
-            {
-                inner.attributes.push(KeyValue::new(SERVER_ADDRESS, attr));
-            }
+        {
+            inner.attributes.push(KeyValue::new(SERVER_ADDRESS, attr));
         }
-        if inner.attrs_config.server_port {
-            if let Some(attr) =
+        if inner.attrs_config.server_port
+            && let Some(attr) =
                 HttpServerAttributes::forwarded_host(request).and_then(|h| h.port_u16())
-            {
-                inner
-                    .attributes
-                    .push(KeyValue::new(SERVER_PORT, attr as i64));
-            }
+        {
+            inner
+                .attributes
+                .push(KeyValue::new(SERVER_PORT, attr as i64));
         }
-        if inner.attrs_config.url_scheme {
-            if let Some(attr) = request.router_request.uri().scheme_str() {
-                inner
-                    .attributes
-                    .push(KeyValue::new(URL_SCHEME, attr.to_string()));
-            }
+        if inner.attrs_config.url_scheme
+            && let Some(attr) = request.router_request.uri().scheme_str()
+        {
+            inner
+                .attributes
+                .push(KeyValue::new(URL_SCHEME, attr.to_string()));
         }
         if let Some(counter) = &inner.counter {
             counter.add(1, &inner.attributes);
@@ -2104,10 +2148,10 @@ impl Instrumented for ActiveRequestsCounter {
 impl Drop for ActiveRequestsCounter {
     fn drop(&mut self) {
         let inner = self.inner.try_lock();
-        if let Some(mut inner) = inner {
-            if let Some(counter) = &inner.counter.take() {
-                counter.add(-1, &inner.attributes);
-            }
+        if let Some(mut inner) = inner
+            && let Some(counter) = &inner.counter.take()
+        {
+            counter.add(-1, &inner.attributes);
         }
     }
 }
@@ -2138,6 +2182,37 @@ where
     pub(crate) _phantom: PhantomData<EventResponse>,
 }
 
+#[buildstructor::buildstructor]
+impl<Request, Response, EventResponse, A: Default, T>
+    CustomHistogram<Request, Response, EventResponse, A, T>
+where
+    A: Selectors<Request, Response, EventResponse> + Default,
+    T: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
+{
+    #[builder(visibility = "pub")]
+    fn new(
+        increment: Increment,
+        condition: Option<Condition<T>>,
+        selector: Option<Arc<T>>,
+        selectors: Option<Arc<Extendable<A, T>>>,
+        histogram: Option<Histogram<f64>>,
+        attributes: Vec<KeyValue>,
+    ) -> Self {
+        Self {
+            inner: Mutex::new(CustomHistogramInner {
+                increment,
+                condition: condition.unwrap_or(Condition::True),
+                attributes,
+                selector,
+                selectors,
+                histogram,
+                updated: false,
+                _phantom: PhantomData,
+            }),
+        }
+    }
+}
+
 impl<A, T, Request, Response, EventResponse> Instrumented
     for CustomHistogram<Request, Response, EventResponse, A, T>
 where
@@ -2159,9 +2234,9 @@ where
         }
         if let Some(selected_value) = inner.selector.as_ref().and_then(|s| s.on_request(request)) {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
-                Increment::FieldCustom(None) => Increment::FieldCustom(to_i64(selected_value)),
-                Increment::Custom(None) => Increment::Custom(to_i64(selected_value)),
+                Increment::EventCustom(None) => Increment::EventCustom(Some(selected_value)),
+                Increment::FieldCustom(None) => Increment::FieldCustom(Some(selected_value)),
+                Increment::Custom(None) => Increment::Custom(Some(selected_value)),
                 other => {
                     failfast_error!(
                         "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
@@ -2179,7 +2254,7 @@ where
             if !matches!(
                 &inner.increment,
                 Increment::EventCustom(_)
-                    | Increment::EventDuration(_)
+                    | Increment::EventDuration(_, _)
                     | Increment::EventUnit
                     | Increment::FieldCustom(_)
                     | Increment::FieldUnit
@@ -2200,9 +2275,9 @@ where
             .and_then(|s| s.on_response(response))
         {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
-                Increment::FieldCustom(None) => Increment::FieldCustom(to_i64(selected_value)),
-                Increment::Custom(None) => Increment::Custom(to_i64(selected_value)),
+                Increment::EventCustom(None) => Increment::EventCustom(Some(selected_value)),
+                Increment::FieldCustom(None) => Increment::FieldCustom(Some(selected_value)),
+                Increment::Custom(None) => Increment::Custom(Some(selected_value)),
                 other => {
                     failfast_error!(
                         "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
@@ -2213,12 +2288,12 @@ where
             inner.increment = new_incr;
         }
 
-        let increment = match inner.increment {
-            Increment::Unit => Some(1f64),
-            Increment::Duration(instant) => Some(instant.elapsed().as_secs_f64()),
-            Increment::Custom(val) => val.map(|incr| incr as f64),
+        let increment = match &inner.increment {
+            Increment::Unit => Some(opentelemetry::Value::F64(1.0)),
+            Increment::Duration(instant, unit) => Some(duration_to_value(instant.elapsed(), unit)),
+            Increment::Custom(val) => val.clone(),
             Increment::EventUnit
-            | Increment::EventDuration(_)
+            | Increment::EventDuration(_, _)
             | Increment::EventCustom(_)
             | Increment::FieldUnit
             | Increment::FieldCustom(_) => {
@@ -2227,8 +2302,10 @@ where
             }
         };
 
-        if let (Some(histogram), Some(increment)) = (&inner.histogram, increment) {
-            histogram.record(increment, &inner.attributes);
+        if let (Some(histogram), Some(increment)) = (&inner.histogram, increment.as_ref()) {
+            if let Some(value) = value_to_f64(increment) {
+                histogram.record(value, &inner.attributes);
+            }
             inner.updated = true;
         }
     }
@@ -2256,8 +2333,8 @@ where
             .and_then(|s| s.on_response_event(response, ctx))
         {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
-                Increment::Custom(None) => Increment::EventCustom(to_i64(selected_value)),
+                Increment::EventCustom(None) => Increment::EventCustom(Some(selected_value)),
+                Increment::Custom(None) => Increment::EventCustom(Some(selected_value)),
                 other => {
                     failfast_error!(
                         "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
@@ -2268,22 +2345,17 @@ where
             inner.increment = new_incr;
         }
 
-        let increment: Option<f64> = match &mut inner.increment {
-            Increment::EventUnit => Some(1f64),
-            Increment::EventDuration(instant) => {
-                let incr = Some(instant.elapsed().as_secs_f64());
+        let increment: Option<opentelemetry::Value> = match &mut inner.increment {
+            Increment::EventUnit => Some(opentelemetry::Value::F64(1.0)),
+            Increment::EventDuration(instant, unit) => {
+                let incr = Some(duration_to_value(instant.elapsed(), unit));
                 // Need a new instant for the next event
                 *instant = Instant::now();
                 incr
             }
-            Increment::EventCustom(val) => {
-                let incr = val.map(|incr| incr as f64);
-                // Set it to None again
-                *val = None;
-                incr
-            }
+            Increment::EventCustom(val) => val.take(),
             Increment::Unit
-            | Increment::Duration(_)
+            | Increment::Duration(_, _)
             | Increment::Custom(_)
             | Increment::FieldUnit
             | Increment::FieldCustom(_) => {
@@ -2291,8 +2363,10 @@ where
                 return;
             }
         };
-        if let (Some(histogram), Some(increment)) = (&inner.histogram, increment) {
-            histogram.record(increment, &attrs);
+        if let (Some(histogram), Some(increment)) = (&inner.histogram, increment.as_ref()) {
+            if let Some(value) = value_to_f64(increment) {
+                histogram.record(value, &attrs);
+            }
             inner.updated = true;
         }
     }
@@ -2306,18 +2380,22 @@ where
             .unwrap_or_default();
         attrs.append(&mut inner.attributes);
 
-        let increment = match inner.increment {
-            Increment::Unit | Increment::EventUnit | Increment::FieldUnit => Some(1f64),
-            Increment::Duration(instant) | Increment::EventDuration(instant) => {
-                Some(instant.elapsed().as_secs_f64())
+        let increment = match &inner.increment {
+            Increment::Unit | Increment::EventUnit | Increment::FieldUnit => {
+                Some(opentelemetry::Value::F64(1.0))
+            }
+            Increment::Duration(instant, unit) | Increment::EventDuration(instant, unit) => {
+                Some(duration_to_value(instant.elapsed(), unit))
             }
             Increment::Custom(val) | Increment::EventCustom(val) | Increment::FieldCustom(val) => {
-                val.map(|incr| incr as f64)
+                val.clone()
             }
         };
 
-        if let (Some(histogram), Some(increment)) = (inner.histogram.take(), increment) {
-            histogram.record(increment, &attrs);
+        if let (Some(histogram), Some(increment)) = (inner.histogram.take(), increment.as_ref())
+            && let Some(value) = value_to_f64(increment)
+        {
+            histogram.record(value, &attrs);
         }
     }
 
@@ -2342,8 +2420,8 @@ where
             .and_then(|s| s.on_response_field(ty, field, value, ctx))
         {
             let new_incr = match &inner.increment {
-                Increment::FieldCustom(None) => Increment::FieldCustom(to_i64(selected_value)),
-                Increment::Custom(None) => Increment::FieldCustom(to_i64(selected_value)),
+                Increment::FieldCustom(None) => Increment::FieldCustom(Some(selected_value)),
+                Increment::Custom(None) => Increment::FieldCustom(Some(selected_value)),
                 other => {
                     failfast_error!(
                         "this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}"
@@ -2354,18 +2432,13 @@ where
             inner.increment = new_incr;
         }
 
-        let increment: Option<f64> = match &mut inner.increment {
-            Increment::FieldUnit => Some(1f64),
-            Increment::FieldCustom(val) => {
-                let incr = val.map(|incr| incr as f64);
-                // Set it to None again
-                *val = None;
-                incr
-            }
+        let increment: Option<opentelemetry::Value> = match &mut inner.increment {
+            Increment::FieldUnit => Some(opentelemetry::Value::F64(1.0)),
+            Increment::FieldCustom(val) => val.take(),
             Increment::Unit
-            | Increment::Duration(_)
+            | Increment::Duration(_, _)
             | Increment::Custom(_)
-            | Increment::EventDuration(_)
+            | Increment::EventDuration(_, _)
             | Increment::EventCustom(_)
             | Increment::EventUnit => {
                 // Nothing to do because we're incrementing on fields
@@ -2386,8 +2459,10 @@ where
             }
         }
 
-        if let (Some(histogram), Some(increment)) = (&inner.histogram, increment) {
-            histogram.record(increment, &inner.attributes);
+        if let (Some(histogram), Some(increment)) = (&inner.histogram, increment.as_ref()) {
+            if let Some(value) = value_to_f64(increment) {
+                histogram.record(value, &inner.attributes);
+            }
             // Reset the attributes to the original length, this will discard the new attributes added from selectors.
             inner.attributes.truncate(original_length);
         }
@@ -2409,13 +2484,12 @@ where
             }
             if let Some(histogram) = inner.histogram.take() {
                 let increment = match &inner.increment {
-                    Increment::Unit | Increment::EventUnit => Some(1f64),
-                    Increment::Duration(instant) | Increment::EventDuration(instant) => {
-                        Some(instant.elapsed().as_secs_f64())
+                    Increment::Unit | Increment::EventUnit => Some(opentelemetry::Value::F64(1.0)),
+                    Increment::Duration(instant, unit)
+                    | Increment::EventDuration(instant, unit) => {
+                        Some(duration_to_value(instant.elapsed(), unit))
                     }
-                    Increment::Custom(val) | Increment::EventCustom(val) => {
-                        val.map(|incr| incr as f64)
-                    }
+                    Increment::Custom(val) | Increment::EventCustom(val) => val.clone(),
                     Increment::FieldUnit | Increment::FieldCustom(_) => {
                         // Dropping a metric on a field will never increment.
                         // We can't increment graphql metrics unless we actually process the result.
@@ -2425,8 +2499,10 @@ where
                     }
                 };
 
-                if let Some(increment) = increment {
-                    histogram.record(increment, &inner.attributes);
+                if let Some(increment) = increment.as_ref()
+                    && let Some(value) = value_to_f64(increment)
+                {
+                    histogram.record(value, &inner.attributes);
                 }
             }
         }
@@ -2450,7 +2526,15 @@ mod tests {
     use apollo_federation::connectors::HTTPMethod;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::SourceName;
     use apollo_federation::connectors::StringTemplate;
+    use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
+    use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
+    use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
+    use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
+    use apollo_federation::connectors::runtime::key::ResponseKey;
+    use apollo_federation::connectors::runtime::mapping::Problem;
+    use apollo_federation::connectors::runtime::responses::MappedResponse;
     use http::HeaderMap;
     use http::HeaderName;
     use http::Method;
@@ -2458,7 +2542,7 @@ mod tests {
     use http::Uri;
     use multimap::MultiMap;
     use rust_embed::RustEmbed;
-    use schemars::r#gen::SchemaGenerator;
+    use schemars::generate::SchemaSettings;
     use serde::Deserialize;
     use serde_json::json;
     use serde_json_bytes::ByteString;
@@ -2474,9 +2558,6 @@ mod tests {
     use crate::http_ext::TryIntoHeaderValue;
     use crate::json_ext::Path;
     use crate::metrics::FutureMetricsExt;
-    use crate::plugins::connectors::handle_responses::MappedResponse;
-    use crate::plugins::connectors::make_requests::ResponseKey;
-    use crate::plugins::connectors::mapping::Problem;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ALIASES;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;
@@ -2491,9 +2572,6 @@ mod tests {
     use crate::services::RouterResponse;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
-    use crate::services::connector::request_service::TransportRequest;
-    use crate::services::connector::request_service::TransportResponse;
-    use crate::services::connector::request_service::transport;
     use crate::spec::operation_limits::OperationLimits;
 
     type JsonMap = serde_json_bytes::Map<ByteString, Value>;
@@ -2609,18 +2687,16 @@ mod tests {
             headers: HashMap<String, String>,
             body: Option<String>,
             #[serde(default)]
+            #[schemars(with = "Option<serde_json::Value>")]
             mapping_problems: Vec<Problem>,
         },
         ConnectorResponse {
-            subgraph_name: String,
-            source_name: String,
-            http_method: String,
-            url_template: String,
             status: u16,
             #[serde(default)]
             headers: HashMap<String, String>,
             body: String,
             #[serde(default)]
+            #[schemars(with = "Option<serde_json::Value>")]
             mapping_problems: Vec<Problem>,
         },
     }
@@ -2773,6 +2849,7 @@ mod tests {
         events: Vec<Vec<Event>>,
     }
 
+    const DEFAULT_CONNECT_SPEC: ConnectSpec = ConnectSpec::V0_2;
     #[tokio::test]
     async fn test_instruments() {
         // This test is data driven.
@@ -2783,7 +2860,7 @@ mod tests {
             // There's no async in this test, but introducing an async block allows us to separate metrics for each fixture.
             async move {
                 if fixture.ends_with("test.yaml") {
-                    println!("Running test for fixture: {}", fixture);
+                    println!("Running test for fixture: {fixture}");
                     let path = PathBuf::from_str(&fixture).unwrap();
                     let fixture_name = path
                         .parent()
@@ -2801,6 +2878,7 @@ mod tests {
 
                     let mut config = load_config(&router_config_file.data);
                     config.update_defaults();
+                    let apollo_config = load_apollo_config(&router_config_file.data);
 
                     for request in test_definition.events {
                         // each array of actions is a separate request
@@ -2808,6 +2886,8 @@ mod tests {
                         let mut supergraph_instruments = None;
                         let mut subgraph_instruments = None;
                         let mut connector_instruments = None;
+                        let mut apollo_subgraph_instruments = None;
+                        let mut apollo_connector_instruments = None;
                         let mut cache_instruments: Option<CacheInstruments> = None;
                         let graphql_instruments: GraphQLInstruments = config
                             .new_graphql_instruments(Arc::new(
@@ -2925,6 +3005,10 @@ mod tests {
                                     subgraph_instruments = Some(config.new_subgraph_instruments(
                                         Arc::new(config.new_builtin_subgraph_instruments()),
                                     ));
+                                    apollo_subgraph_instruments = Some(config.new_apollo_subgraph_instruments(
+                                        Arc::new(config.new_builtin_apollo_subgraph_instruments()),
+                                        apollo_config.clone()
+                                    ));
                                     cache_instruments = Some(config.new_cache_instruments(
                                         Arc::new(config.new_builtin_cache_instruments()),
                                     ));
@@ -2945,6 +3029,7 @@ mod tests {
                                         .build();
 
                                     subgraph_instruments.as_mut().unwrap().on_request(&request);
+                                    apollo_subgraph_instruments.as_mut().unwrap().on_request(&request);
                                     cache_instruments.as_mut().unwrap().on_request(&request);
                                 }
                                 Event::SubgraphResponse {
@@ -2966,6 +3051,10 @@ mod tests {
                                         .build()
                                         .unwrap();
                                     subgraph_instruments
+                                        .take()
+                                        .expect("subgraph request must have been made first")
+                                        .on_response(&response);
+                                    apollo_subgraph_instruments
                                         .take()
                                         .expect("subgraph request must have been made first")
                                         .on_response(&response);
@@ -3065,22 +3154,23 @@ mod tests {
                                         .unwrap();
                                     *http_request.headers_mut() = convert_http_headers(headers);
                                     let transport_request =
-                                        TransportRequest::Http(transport::http::HttpRequest {
+                                        TransportRequest::Http(HttpRequest {
                                             inner: http_request,
-                                            debug: None,
+                                            debug: Default::default(),
                                         });
                                     let connector = Connector {
                                         id: ConnectId::new(
                                             subgraph_name,
-                                            Some(source_name),
+                                            Some(SourceName::cast(&source_name)),
                                             name!(Query),
                                             name!(field),
+                                            None,
                                             0,
-                                            "label",
                                         ),
                                         transport: HttpJsonTransport {
-                                            connect_template: StringTemplate::from_str(
+                                            connect_template: StringTemplate::parse_with_spec(
                                                 url_template.as_str(),
+                                                DEFAULT_CONNECT_SPEC,
                                             )
                                             .unwrap(),
                                             method: HTTPMethod::from_str(http_method.as_str())
@@ -3091,25 +3181,25 @@ mod tests {
                                         config: None,
                                         max_requests: None,
                                         entity_resolver: None,
-                                        spec: ConnectSpec::V0_1,
-                                        request_variables: Default::default(),
-                                        response_variables: Default::default(),
+                                        spec: DEFAULT_CONNECT_SPEC,
                                         batch_settings: None,
                                         request_headers: Default::default(),
                                         response_headers: Default::default(),
+                                        request_variable_keys: Default::default(),
+                                        response_variable_keys: Default::default(),
                                         error_settings: Default::default(),
+                                        label: "label".into(),
                                     };
                                     let response_key = ResponseKey::RootField {
                                         name: "hello".to_string(),
                                         inputs: Default::default(),
                                         selection: Arc::new(
-                                            JSONSelection::parse("$.data").unwrap(),
+                                            JSONSelection::parse_with_spec("$.data", DEFAULT_CONNECT_SPEC).unwrap(),
                                         ),
                                     };
                                     let request = Request {
-                                        context: Context::default(),
+                                        context: context.clone(),
                                         connector: Arc::new(connector),
-                                        service_name: Default::default(),
                                         transport_request,
                                         key: response_key.clone(),
                                         mapping_problems,
@@ -3123,52 +3213,28 @@ mod tests {
                                         connector_instruments.on_request(&request);
                                         connector_instruments
                                     });
+                                    apollo_connector_instruments = Some({
+                                        let apollo_connector_instruments = config
+                                            .new_apollo_connector_instruments(
+                                                Arc::new(config.new_builtin_apollo_connector_instruments()),
+                                                apollo_config.clone(),
+                                            );
+                                        apollo_connector_instruments.on_request(&request);
+                                        apollo_connector_instruments
+                                    })
                                 }
                                 Event::ConnectorResponse {
-                                    subgraph_name,
-                                    source_name,
-                                    http_method,
-                                    url_template,
                                     status,
                                     headers,
                                     body,
                                     mapping_problems,
+                                    ..
                                 } => {
-                                    let connector = Connector {
-                                        id: ConnectId::new(
-                                            subgraph_name,
-                                            Some(source_name),
-                                            name!(Query),
-                                            name!(field),
-                                            0,
-                                            "label",
-                                        ),
-                                        transport: HttpJsonTransport {
-                                            connect_template: StringTemplate::from_str(
-                                                url_template.as_str(),
-                                            )
-                                            .unwrap(),
-                                            method: HTTPMethod::from_str(http_method.as_str())
-                                                .unwrap(),
-                                            ..Default::default()
-                                        },
-                                        selection: JSONSelection::empty(),
-                                        config: None,
-                                        max_requests: None,
-                                        entity_resolver: None,
-                                        spec: ConnectSpec::V0_1,
-                                        request_variables: Default::default(),
-                                        response_variables: Default::default(),
-                                        batch_settings: None,
-                                        request_headers: Default::default(),
-                                        response_headers: Default::default(),
-                                        error_settings: Default::default(),
-                                    };
                                     let response_key = ResponseKey::RootField {
                                         name: "hello".to_string(),
                                         inputs: Default::default(),
                                         selection: Arc::new(
-                                            JSONSelection::parse("$.data").unwrap(),
+                                            JSONSelection::parse_with_spec("$.data", DEFAULT_CONNECT_SPEC).unwrap(),
                                         ),
                                     };
                                     let mut http_response = http::Response::builder()
@@ -3177,10 +3243,8 @@ mod tests {
                                         .unwrap();
                                     *http_response.headers_mut() = convert_http_headers(headers);
                                     let response = Response {
-                                        context: Context::default(),
-                                        connector: connector.into(),
                                         transport_result: Ok(TransportResponse::Http(
-                                            transport::http::HttpResponse {
+                                            HttpResponse {
                                                 inner: http_response.into_parts().0,
                                             },
                                         )),
@@ -3193,6 +3257,10 @@ mod tests {
                                         },
                                     };
                                     connector_instruments
+                                        .take()
+                                        .expect("connector request must have been made first")
+                                        .on_response(&response);
+                                    apollo_connector_instruments
                                         .take()
                                         .expect("connector request must have been made first")
                                         .on_response(&response);
@@ -3266,10 +3334,16 @@ mod tests {
         serde_json::from_value(instruments.clone()).unwrap()
     }
 
+    fn load_apollo_config(config: &[u8]) -> Config {
+        let val: serde_json::Value = serde_yaml::from_slice(config).unwrap();
+        let apollo_config = &val["telemetry"]["apollo"];
+        serde_json::from_value(apollo_config.clone()).unwrap_or_default()
+    }
+
     #[test]
     fn write_schema() {
         // Write a json schema for the above test
-        let mut schema_gen = SchemaGenerator::default();
+        let mut schema_gen = SchemaSettings::draft07().into_generator();
         let schema = schema_gen.root_schema_for::<TestDefinition>();
         let schema = serde_json::to_string_pretty(&schema);
         let mut path = PathBuf::from_str(env!("CARGO_MANIFEST_DIR")).expect("manifest dir");
@@ -3804,5 +3878,45 @@ mod tests {
         }
         .with_metrics()
         .await;
+    }
+
+    #[test]
+    fn test_duration_to_f64_seconds() {
+        let duration = std::time::Duration::from_secs(2);
+        assert_eq!(duration_to_f64(duration, "s"), 2.0);
+        assert_eq!(duration_to_f64(duration, ""), 2.0); // empty unit defaults to seconds
+        assert_eq!(duration_to_f64(duration, "unknown"), 2.0); // unknown unit defaults to seconds
+    }
+
+    #[test]
+    fn test_duration_to_f64_milliseconds() {
+        let duration = std::time::Duration::from_millis(1500);
+        assert_eq!(duration_to_f64(duration, "ms"), 1500.0);
+    }
+
+    #[test]
+    fn test_duration_to_f64_microseconds() {
+        let duration = std::time::Duration::from_micros(500);
+        assert_eq!(duration_to_f64(duration, "us"), 500.0);
+    }
+
+    #[test]
+    fn test_duration_to_f64_nanoseconds() {
+        let duration = std::time::Duration::from_nanos(1234567);
+        assert_eq!(duration_to_f64(duration, "ns"), 1234567.0);
+    }
+
+    #[test]
+    fn test_duration_to_f64_fractional_seconds() {
+        let duration = std::time::Duration::from_millis(1500);
+        // When unit is "s", 1500ms should be 1.5 seconds
+        assert_eq!(duration_to_f64(duration, "s"), 1.5);
+    }
+
+    #[test]
+    fn test_duration_to_f64_fractional_milliseconds() {
+        let duration = std::time::Duration::from_micros(1500);
+        // When unit is "ms", 1500us should be 1.5 milliseconds
+        assert_eq!(duration_to_f64(duration, "ms"), 1.5);
     }
 }

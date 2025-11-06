@@ -2,4 +2,4 @@
 source: apollo-router/tests/integration/traffic_shaping.rs
 expression: response
 ---
-"{\"data\":null,\"errors\":[{\"message\":\"Your request has been timed out\",\"path\":[],\"extensions\":{\"code\":\"GATEWAY_TIMEOUT\"}}]}"
+"{\"data\":null,\"errors\":[{\"message\":\"Your request has been timed out\",\"path\":[\"posts\"],\"extensions\":{\"code\":\"GATEWAY_TIMEOUT\"}}]}"

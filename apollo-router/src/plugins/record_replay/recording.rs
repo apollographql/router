@@ -34,7 +34,7 @@ impl Recording {
         digest.update(req);
         let hash = hex::encode(digest.finalize().as_slice());
 
-        PathBuf::from(format!("{}-{}.json", operation_name, hash))
+        PathBuf::from(format!("{operation_name}-{hash}.json"))
     }
 }
 
@@ -44,6 +44,8 @@ pub(crate) struct RequestDetails {
     pub(crate) operation_name: Option<String>,
     pub(crate) variables: Map<ByteString, Value>,
     pub(crate) headers: HashMap<String, Vec<String>>,
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub(crate) header_errors: HashMap<String, Vec<String>>,
     pub(crate) method: String,
     pub(crate) uri: String,
 }
@@ -52,6 +54,8 @@ pub(crate) struct RequestDetails {
 pub(crate) struct ResponseDetails {
     pub(crate) chunks: Vec<Response>,
     pub(crate) headers: HashMap<String, Vec<String>>,
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub(crate) header_errors: HashMap<String, Vec<String>>,
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]

@@ -11,11 +11,13 @@ use itertools::Itertools;
 
 use super::get_subgraph;
 use super::subgraph::FederationSubgraphs;
-use crate::connectors::ConnectSpec;
+use crate::connectors::spec::ConnectSpecDefinition;
 use crate::error::FederationError;
 use crate::link::DEFAULT_LINK_NAME;
+use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::position::ObjectFieldDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 
 static JOIN_DIRECTIVE: &str = "join__directive";
@@ -73,8 +75,8 @@ pub(super) fn extract(
                     Component::new(link_directive.clone()),
                 )?;
 
-                if ConnectSpec::from_directive(&link_directive)?.is_some() {
-                    ConnectSpec::check_or_add(&mut subgraph.schema)?;
+                if let Some(spec) = ConnectSpecDefinition::from_directive(&link_directive)? {
+                    spec.add_elements_to_schema(&mut subgraph.schema)?;
                 }
             }
         }
@@ -118,6 +120,52 @@ pub(super) fn extract(
 
                 object_field_pos
                     .insert_directive(&mut subgraph.schema, Node::new(directive.clone()))?;
+            }
+        }
+    }
+
+    for intf_pos in &join_directives.interface_types {
+        let intf = intf_pos.get(supergraph_schema.schema())?;
+        let directives = intf
+            .directives
+            .iter()
+            .filter_map(|d| {
+                if d.name == JOIN_DIRECTIVE {
+                    Some(to_real_directive(d))
+                } else {
+                    None
+                }
+            })
+            .collect_vec();
+
+        for (directive, subgraph_enum_values) in directives {
+            for subgraph_enum_value in subgraph_enum_values {
+                let subgraph = get_subgraph(
+                    subgraphs,
+                    graph_enum_value_name_to_subgraph_name,
+                    &subgraph_enum_value,
+                )?;
+
+                if subgraph
+                    .schema
+                    .try_get_type(intf_pos.type_name.clone())
+                    .map(|t| matches!(t, TypeDefinitionPosition::Interface(_)))
+                    .unwrap_or_default()
+                {
+                    intf_pos.insert_directive(
+                        &mut subgraph.schema,
+                        Component::new(directive.clone()),
+                    )?;
+                } else {
+                    // In the subgraph it's defined as an object with @interfaceObject
+                    let object_field_pos = ObjectTypeDefinitionPosition {
+                        type_name: intf_pos.type_name.clone(),
+                    };
+                    object_field_pos.insert_directive(
+                        &mut subgraph.schema,
+                        Component::new(directive.clone()),
+                    )?;
+                }
             }
         }
     }
@@ -209,7 +257,6 @@ pub(super) fn extract(
     // - join_directives.input_object_fields
     // - join_directives.input_object_types
     // - join_directives.interface_field_arguments
-    // - join_directives.interface_types
     // - join_directives.object_field_arguments
     // - join_directives.scalar_types
     // - join_directives.union_types

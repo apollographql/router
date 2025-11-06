@@ -18,62 +18,27 @@ use serde::Serialize;
 use tower::BoxError;
 
 use crate::json_ext::Value;
-use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
-use crate::plugins::authentication::DEPRECATED_APOLLO_AUTHENTICATION_JWT_CLAIMS;
-use crate::plugins::authorization::AUTHENTICATION_REQUIRED_KEY;
-use crate::plugins::authorization::DEPRECATED_AUTHENTICATION_REQUIRED_KEY;
-use crate::plugins::authorization::DEPRECATED_REQUIRED_POLICIES_KEY;
-use crate::plugins::authorization::DEPRECATED_REQUIRED_SCOPES_KEY;
-use crate::plugins::authorization::REQUIRED_POLICIES_KEY;
-use crate::plugins::authorization::REQUIRED_SCOPES_KEY;
-use crate::plugins::demand_control::COST_ACTUAL_KEY;
-use crate::plugins::demand_control::COST_ESTIMATED_KEY;
-use crate::plugins::demand_control::COST_RESULT_KEY;
-use crate::plugins::demand_control::COST_STRATEGY_KEY;
-use crate::plugins::demand_control::DEPRECATED_COST_ACTUAL_KEY;
-use crate::plugins::demand_control::DEPRECATED_COST_ESTIMATED_KEY;
-use crate::plugins::demand_control::DEPRECATED_COST_RESULT_KEY;
-use crate::plugins::demand_control::DEPRECATED_COST_STRATEGY_KEY;
-use crate::plugins::expose_query_plan::DEPRECATED_ENABLED_CONTEXT_KEY;
-use crate::plugins::expose_query_plan::DEPRECATED_FORMATTED_QUERY_PLAN_CONTEXT_KEY;
-use crate::plugins::expose_query_plan::DEPRECATED_QUERY_PLAN_CONTEXT_KEY;
-use crate::plugins::expose_query_plan::ENABLED_CONTEXT_KEY;
-use crate::plugins::expose_query_plan::FORMATTED_QUERY_PLAN_CONTEXT_KEY;
-use crate::plugins::expose_query_plan::QUERY_PLAN_CONTEXT_KEY;
-use crate::plugins::progressive_override::DEPRECATED_LABELS_TO_OVERRIDE_KEY;
-use crate::plugins::progressive_override::DEPRECATED_UNRESOLVED_LABELS_KEY;
-use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
-use crate::plugins::progressive_override::UNRESOLVED_LABELS_KEY;
-use crate::plugins::telemetry::CLIENT_NAME;
-use crate::plugins::telemetry::CLIENT_VERSION;
-use crate::plugins::telemetry::DEPRECATED_CLIENT_NAME;
-use crate::plugins::telemetry::DEPRECATED_CLIENT_VERSION;
-use crate::plugins::telemetry::DEPRECATED_STUDIO_EXCLUDE;
-use crate::plugins::telemetry::DEPRECATED_SUBGRAPH_FTV1;
-use crate::plugins::telemetry::STUDIO_EXCLUDE;
-use crate::plugins::telemetry::SUBGRAPH_FTV1;
-use crate::query_planner::APOLLO_OPERATION_ID;
-use crate::query_planner::DEPRECATED_APOLLO_OPERATION_ID;
-use crate::services::DEPRECATED_FIRST_EVENT_CONTEXT_KEY;
-use crate::services::FIRST_EVENT_CONTEXT_KEY;
-use crate::services::layers::apq::DEPRECATED_PERSISTED_QUERY_CACHE_HIT;
-use crate::services::layers::apq::DEPRECATED_PERSISTED_QUERY_REGISTERED;
-use crate::services::layers::apq::PERSISTED_QUERY_CACHE_HIT;
-use crate::services::layers::apq::PERSISTED_QUERY_REGISTERED;
 use crate::services::layers::query_analysis::ParsedDocument;
 
+pub(crate) mod deprecated;
 pub(crate) mod extensions;
 
-/// The key of the resolved operation name. This is subject to change and should not be relied on.
+/// Context key for the operation name.
 pub(crate) const OPERATION_NAME: &str = "apollo::supergraph::operation_name";
-/// The deprecated key (1.x) of the resolved operation name. This is subject to change and should not be relied on.
-pub(crate) const DEPRECATED_OPERATION_NAME: &str = "operation_name";
-/// The key of the resolved operation kind. This is subject to change and should not be relied on.
+/// Context key for the operation kind.
 pub(crate) const OPERATION_KIND: &str = "apollo::supergraph::operation_kind";
-/// The deprecated key (1.x) of the resolved operation kind. This is subject to change and should not be relied on.
-pub(crate) const DEPRECATED_OPERATION_KIND: &str = "operation_kind";
 /// The key to know if the response body contains at least 1 GraphQL error
 pub(crate) const CONTAINS_GRAPHQL_ERROR: &str = "apollo::telemetry::contains_graphql_error";
+/// The key to a map of errors that were already counted in a previous layer. This is subject to
+/// change and is NOT supported for user access.
+pub(crate) const COUNTED_ERRORS: &str = "apollo::telemetry::counted_errors";
+/// The key for the full list of errors in the router response. This allows us to pull the value in
+/// plugins without having to deserialize the router response. This is subject to change and is NOT
+/// supported for user access.
+pub(crate) const ROUTER_RESPONSE_ERRORS: &str = "apollo::router::response_errors";
+
+pub(crate) use deprecated::context_key_from_deprecated;
+pub(crate) use deprecated::context_key_to_deprecated;
 
 /// Holds [`Context`] entries.
 pub(crate) type Entries = Arc<DashMap<String, Value>>;
@@ -300,68 +265,6 @@ impl Context {
 impl Default for Context {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-/// Convert context key to the deprecated context key (mainly useful for coprocessor/rhai)
-/// If the context key is not part of a deprecated one it just returns the original one because it doesn't have to be renamed
-pub(crate) fn context_key_to_deprecated(key: String) -> String {
-    match key.as_str() {
-        OPERATION_NAME => DEPRECATED_OPERATION_NAME.to_string(),
-        OPERATION_KIND => DEPRECATED_OPERATION_KIND.to_string(),
-        APOLLO_AUTHENTICATION_JWT_CLAIMS => DEPRECATED_APOLLO_AUTHENTICATION_JWT_CLAIMS.to_string(),
-        AUTHENTICATION_REQUIRED_KEY => DEPRECATED_AUTHENTICATION_REQUIRED_KEY.to_string(),
-        REQUIRED_SCOPES_KEY => DEPRECATED_REQUIRED_SCOPES_KEY.to_string(),
-        REQUIRED_POLICIES_KEY => DEPRECATED_REQUIRED_POLICIES_KEY.to_string(),
-        APOLLO_OPERATION_ID => DEPRECATED_APOLLO_OPERATION_ID.to_string(),
-        UNRESOLVED_LABELS_KEY => DEPRECATED_UNRESOLVED_LABELS_KEY.to_string(),
-        LABELS_TO_OVERRIDE_KEY => DEPRECATED_LABELS_TO_OVERRIDE_KEY.to_string(),
-        FIRST_EVENT_CONTEXT_KEY => DEPRECATED_FIRST_EVENT_CONTEXT_KEY.to_string(),
-        CLIENT_NAME => DEPRECATED_CLIENT_NAME.to_string(),
-        CLIENT_VERSION => DEPRECATED_CLIENT_VERSION.to_string(),
-        STUDIO_EXCLUDE => DEPRECATED_STUDIO_EXCLUDE.to_string(),
-        SUBGRAPH_FTV1 => DEPRECATED_SUBGRAPH_FTV1.to_string(),
-        COST_ESTIMATED_KEY => DEPRECATED_COST_ESTIMATED_KEY.to_string(),
-        COST_ACTUAL_KEY => DEPRECATED_COST_ACTUAL_KEY.to_string(),
-        COST_RESULT_KEY => DEPRECATED_COST_RESULT_KEY.to_string(),
-        COST_STRATEGY_KEY => DEPRECATED_COST_STRATEGY_KEY.to_string(),
-        ENABLED_CONTEXT_KEY => DEPRECATED_ENABLED_CONTEXT_KEY.to_string(),
-        FORMATTED_QUERY_PLAN_CONTEXT_KEY => DEPRECATED_FORMATTED_QUERY_PLAN_CONTEXT_KEY.to_string(),
-        QUERY_PLAN_CONTEXT_KEY => DEPRECATED_QUERY_PLAN_CONTEXT_KEY.to_string(),
-        PERSISTED_QUERY_CACHE_HIT => DEPRECATED_PERSISTED_QUERY_CACHE_HIT.to_string(),
-        PERSISTED_QUERY_REGISTERED => DEPRECATED_PERSISTED_QUERY_REGISTERED.to_string(),
-        _ => key,
-    }
-}
-
-/// Convert context key from deprecated to new one (mainly useful for coprocessor/rhai)
-/// If the context key is not part of a deprecated one it just returns the original one because it doesn't have to be renamed
-pub(crate) fn context_key_from_deprecated(key: String) -> String {
-    match key.as_str() {
-        DEPRECATED_OPERATION_NAME => OPERATION_NAME.to_string(),
-        DEPRECATED_OPERATION_KIND => OPERATION_KIND.to_string(),
-        DEPRECATED_APOLLO_AUTHENTICATION_JWT_CLAIMS => APOLLO_AUTHENTICATION_JWT_CLAIMS.to_string(),
-        DEPRECATED_AUTHENTICATION_REQUIRED_KEY => AUTHENTICATION_REQUIRED_KEY.to_string(),
-        DEPRECATED_REQUIRED_SCOPES_KEY => REQUIRED_SCOPES_KEY.to_string(),
-        DEPRECATED_REQUIRED_POLICIES_KEY => REQUIRED_POLICIES_KEY.to_string(),
-        DEPRECATED_APOLLO_OPERATION_ID => APOLLO_OPERATION_ID.to_string(),
-        DEPRECATED_UNRESOLVED_LABELS_KEY => UNRESOLVED_LABELS_KEY.to_string(),
-        DEPRECATED_LABELS_TO_OVERRIDE_KEY => LABELS_TO_OVERRIDE_KEY.to_string(),
-        DEPRECATED_FIRST_EVENT_CONTEXT_KEY => FIRST_EVENT_CONTEXT_KEY.to_string(),
-        DEPRECATED_CLIENT_NAME => CLIENT_NAME.to_string(),
-        DEPRECATED_CLIENT_VERSION => CLIENT_VERSION.to_string(),
-        DEPRECATED_STUDIO_EXCLUDE => STUDIO_EXCLUDE.to_string(),
-        DEPRECATED_SUBGRAPH_FTV1 => SUBGRAPH_FTV1.to_string(),
-        DEPRECATED_COST_ESTIMATED_KEY => COST_ESTIMATED_KEY.to_string(),
-        DEPRECATED_COST_ACTUAL_KEY => COST_ACTUAL_KEY.to_string(),
-        DEPRECATED_COST_RESULT_KEY => COST_RESULT_KEY.to_string(),
-        DEPRECATED_COST_STRATEGY_KEY => COST_STRATEGY_KEY.to_string(),
-        DEPRECATED_ENABLED_CONTEXT_KEY => ENABLED_CONTEXT_KEY.to_string(),
-        DEPRECATED_FORMATTED_QUERY_PLAN_CONTEXT_KEY => FORMATTED_QUERY_PLAN_CONTEXT_KEY.to_string(),
-        DEPRECATED_QUERY_PLAN_CONTEXT_KEY => QUERY_PLAN_CONTEXT_KEY.to_string(),
-        DEPRECATED_PERSISTED_QUERY_CACHE_HIT => PERSISTED_QUERY_CACHE_HIT.to_string(),
-        DEPRECATED_PERSISTED_QUERY_REGISTERED => PERSISTED_QUERY_REGISTERED.to_string(),
-        _ => key,
     }
 }
 

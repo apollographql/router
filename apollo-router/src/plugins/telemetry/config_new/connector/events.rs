@@ -105,18 +105,18 @@ impl CustomEvents<ConnectorRequest, ConnectorResponse, (), ConnectorAttributes, 
     }
 
     pub(crate) fn on_error(&mut self, error: &BoxError, ctx: &Context) {
-        if let Some(error_event) = &mut self.error {
-            if error_event.condition.evaluate_error(error, ctx) {
-                log_event(
-                    error_event.level,
-                    "connector.http.error",
-                    vec![KeyValue::new(
-                        Key::from_static_str("error"),
-                        opentelemetry::Value::String(error.to_string().into()),
-                    )],
-                    "",
-                );
-            }
+        if let Some(error_event) = &mut self.error
+            && error_event.condition.evaluate_error(error, ctx)
+        {
+            log_event(
+                error_event.level,
+                "connector.http.error",
+                vec![KeyValue::new(
+                    Key::from_static_str("error"),
+                    opentelemetry::Value::String(error.to_string().into()),
+                )],
+                "",
+            );
         }
         for custom_event in &mut self.custom {
             custom_event.on_error(error, ctx);
@@ -134,21 +134,23 @@ mod tests {
     use apollo_federation::connectors::Connector;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::SourceName;
     use apollo_federation::connectors::StringTemplate;
+    use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
+    use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
+    use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
+    use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
+    use apollo_federation::connectors::runtime::key::ResponseKey;
+    use apollo_federation::connectors::runtime::responses::MappedResponse;
     use http::HeaderValue;
     use tracing::instrument::WithSubscriber;
 
     use super::*;
     use crate::assert_snapshot_subscriber;
-    use crate::plugins::connectors::handle_responses::MappedResponse;
-    use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::test::PluginTestHarness;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
-    use crate::services::connector::request_service::TransportRequest;
-    use crate::services::connector::request_service::TransportResponse;
-    use crate::services::connector::request_service::transport;
     use crate::services::router::body;
 
     #[tokio::test(flavor = "multi_thread")]
@@ -165,21 +167,21 @@ mod tests {
             http_request
                 .headers_mut()
                 .insert("x-log-request", HeaderValue::from_static("log"));
-            let transport_request = TransportRequest::Http(transport::http::HttpRequest {
+            let transport_request = TransportRequest::Http(HttpRequest {
                 inner: http_request,
-                debug: None,
+                debug: Default::default(),
             });
             let connector = Connector {
                 id: ConnectId::new(
                     "subgraph".into(),
-                    Some("source".into()),
+                    Some(SourceName::cast("source")),
                     name!(Query),
                     name!(users),
+                    None,
                     0,
-                    "label",
                 ),
                 transport: HttpJsonTransport {
-                    source_url: None,
+                    source_template: None,
                     connect_template: StringTemplate::from_str("/test").unwrap(),
                     ..Default::default()
                 },
@@ -188,12 +190,13 @@ mod tests {
                 max_requests: None,
                 entity_resolver: None,
                 spec: ConnectSpec::V0_1,
-                request_variables: Default::default(),
-                response_variables: Default::default(),
                 batch_settings: None,
                 request_headers: Default::default(),
                 response_headers: Default::default(),
+                request_variable_keys: Default::default(),
+                response_variable_keys: Default::default(),
                 error_settings: Default::default(),
+                label: "label".into(),
             };
             let response_key = ResponseKey::RootField {
                 name: "hello".to_string(),
@@ -203,7 +206,6 @@ mod tests {
             let connector_request = Request {
                 context: context.clone(),
                 connector: Arc::new(connector.clone()),
-                service_name: Default::default(),
                 transport_request,
                 key: response_key.clone(),
                 mapping_problems: vec![],
@@ -211,9 +213,7 @@ mod tests {
             };
             test_harness
                 .call_connector_request_service(connector_request, |request| Response {
-                    context: request.context.clone(),
-                    connector: request.connector.clone(),
-                    transport_result: Ok(TransportResponse::Http(transport::http::HttpResponse {
+                    transport_result: Ok(TransportResponse::Http(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)
                             .header("x-log-request", HeaderValue::from_static("log"))
@@ -251,21 +251,21 @@ mod tests {
             http_request
                 .headers_mut()
                 .insert("x-log-response", HeaderValue::from_static("log"));
-            let transport_request = TransportRequest::Http(transport::http::HttpRequest {
+            let transport_request = TransportRequest::Http(HttpRequest {
                 inner: http_request,
-                debug: None,
+                debug: Default::default(),
             });
             let connector = Connector {
                 id: ConnectId::new(
                     "subgraph".into(),
-                    Some("source".into()),
+                    Some(SourceName::cast("source")),
                     name!(Query),
                     name!(users),
+                    None,
                     0,
-                    "label",
                 ),
                 transport: HttpJsonTransport {
-                    source_url: None,
+                    source_template: None,
                     connect_template: StringTemplate::from_str("/test").unwrap(),
                     ..Default::default()
                 },
@@ -274,12 +274,13 @@ mod tests {
                 max_requests: None,
                 entity_resolver: None,
                 spec: ConnectSpec::V0_1,
-                request_variables: Default::default(),
-                response_variables: Default::default(),
                 batch_settings: None,
                 request_headers: Default::default(),
                 response_headers: Default::default(),
+                request_variable_keys: Default::default(),
+                response_variable_keys: Default::default(),
                 error_settings: Default::default(),
+                label: "label".into(),
             };
             let response_key = ResponseKey::RootField {
                 name: "hello".to_string(),
@@ -289,7 +290,6 @@ mod tests {
             let connector_request = Request {
                 context: context.clone(),
                 connector: Arc::new(connector.clone()),
-                service_name: Default::default(),
                 transport_request,
                 key: response_key.clone(),
                 mapping_problems: vec![],
@@ -297,9 +297,7 @@ mod tests {
             };
             test_harness
                 .call_connector_request_service(connector_request, |request| Response {
-                    context: request.context.clone(),
-                    connector: request.connector.clone(),
-                    transport_result: Ok(TransportResponse::Http(transport::http::HttpResponse {
+                    transport_result: Ok(TransportResponse::Http(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)
                             .header("x-log-response", HeaderValue::from_static("log"))

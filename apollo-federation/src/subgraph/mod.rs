@@ -1,19 +1,24 @@
 use std::fmt::Display;
 use std::fmt::Formatter;
+use std::ops::Range;
 
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
+use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
+use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::Valid;
 use indexmap::map::Entry;
 
 use crate::ValidFederationSubgraph;
 use crate::error::FederationError;
+use crate::error::MultipleFederationErrors;
+use crate::error::SingleFederationError;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Link;
 use crate::link::LinkError;
@@ -326,31 +331,93 @@ impl From<ValidFederationSubgraph> for ValidSubgraph {
     }
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct SingleSubgraphError {
+    pub(crate) error: SingleFederationError,
+    pub(crate) locations: Vec<Range<LineColumn>>,
+}
+
 /// Currently, this is making up for the fact that we don't have an equivalent of `addSubgraphToErrors`.
 /// In JS, that manipulates the underlying `GraphQLError` message to prepend the subgraph name. In Rust,
 /// it's idiomatic to have strongly typed errors which defer conversion to strings via `thiserror`, so
 /// for now we wrap the underlying error until we figure out a longer-term replacement that accounts
 /// for missing error codes and the like.
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct SubgraphError {
     pub(crate) subgraph: String,
-    pub(crate) error: FederationError,
+    pub(crate) errors: Vec<SingleSubgraphError>,
 }
 
 impl SubgraphError {
-    pub fn new(subgraph: impl Into<String>, error: impl Into<FederationError>) -> Self {
+    // Legacy constructor without locations info.
+    pub(crate) fn new_without_locations(
+        subgraph: impl Into<String>,
+        error: impl Into<FederationError>,
+    ) -> Self {
         let subgraph = subgraph.into();
-        let error = error.into();
-        SubgraphError { subgraph, error }
+        let error: FederationError = error.into();
+        SubgraphError {
+            subgraph,
+            errors: error
+                .errors()
+                .into_iter()
+                .map(|e| SingleSubgraphError {
+                    error: e.clone(),
+                    locations: Vec::new(),
+                })
+                .collect(),
+        }
     }
 
-    pub fn error(&self) -> &FederationError {
-        &self.error
+    /// Construct from a FederationError.
+    ///
+    /// Note: FederationError may hold multiple errors. In that case, all individual errors in the
+    ///       FederationError will share the same locations.
+    #[allow(dead_code)]
+    pub(crate) fn from_federation_error(
+        subgraph: impl Into<String>,
+        error: impl Into<FederationError>,
+        locations: Vec<Range<LineColumn>>,
+    ) -> Self {
+        let error: FederationError = error.into();
+        let errors = error
+            .errors()
+            .into_iter()
+            .map(|e| SingleSubgraphError {
+                error: e.clone(),
+                locations: locations.clone(),
+            })
+            .collect();
+        SubgraphError {
+            subgraph: subgraph.into(),
+            errors,
+        }
     }
 
-    pub fn into_inner(self) -> FederationError {
-        self.error
+    /// Constructing from GraphQL errors.
+    pub(crate) fn from_diagnostic_list(
+        subgraph: impl Into<String>,
+        errors: DiagnosticList,
+    ) -> Self {
+        let subgraph = subgraph.into();
+        SubgraphError {
+            subgraph,
+            errors: errors
+                .iter()
+                .map(|d| SingleSubgraphError {
+                    error: SingleFederationError::InvalidGraphQL {
+                        message: d.to_string(),
+                    },
+                    locations: d.line_column_range().iter().cloned().collect(),
+                })
+                .collect(),
+        }
+    }
+
+    /// Convert SubgraphError to FederationError.
+    /// * WARNING: This is a lossy conversion, losing location information.
+    pub(crate) fn into_federation_error(self) -> FederationError {
+        MultipleFederationErrors::from_iter(self.errors.into_iter().map(|e| e.error)).into()
     }
 
     // Format subgraph errors in the same way as `Rover` does.
@@ -358,14 +425,16 @@ impl SubgraphError {
     // - Gather associated errors from the validation error.
     // - Split each error into its code and message.
     // - Add the subgraph name prefix to CompositionError message.
+    //
+    // This is mainly for internal testing. Consider using `to_composition_errors` method instead.
     pub fn format_errors(&self) -> Vec<(String, String)> {
-        self.error
-            .errors()
+        self.errors
             .iter()
             .map(|e| {
+                let error = &e.error;
                 (
-                    e.code_string(),
-                    format!("[{subgraph}] {e}", subgraph = self.subgraph),
+                    error.code_string(),
+                    format!("[{subgraph}] {error}", subgraph = self.subgraph),
                 )
             })
             .collect()
@@ -374,11 +443,17 @@ impl SubgraphError {
 
 impl Display for SubgraphError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{}] {}", self.subgraph, self.error)
+        let subgraph = &self.subgraph;
+        for (code, message) in self.format_errors() {
+            writeln!(f, "{code} [{subgraph}] {message}")?;
+        }
+        Ok(())
     }
 }
 
 pub mod test_utils {
+    use either::Either;
+
     use super::SubgraphError;
     use super::typestate::Expanded;
     use super::typestate::Subgraph;
@@ -397,13 +472,15 @@ pub mod test_utils {
         let subgraph =
             Subgraph::parse(name, &format!("http://{name}"), schema_str).expect("valid schema");
         let subgraph = if matches!(build_option, BuildOption::AsFed2) {
-            subgraph.into_fed2_test_subgraph()?
+            subgraph.into_fed2_test_subgraph(true, false)?
         } else {
             subgraph
         };
-        let mut subgraph = subgraph.expand_links()?.assume_upgraded();
-        subgraph.normalize_root_types()?;
-        subgraph.validate()
+        let subgraph = subgraph.expand_links()?;
+        match subgraph.normalize_root_types()? {
+            Either::Left(s) => Ok(s.assume_validated()),
+            Either::Right(s) => s.validate(),
+        }
     }
 
     pub fn build_inner_expanded(
@@ -414,11 +491,11 @@ pub mod test_utils {
         let subgraph =
             Subgraph::parse(name, &format!("http://{name}"), schema_str).expect("valid schema");
         let subgraph = if matches!(build_option, BuildOption::AsFed2) {
-            subgraph.into_fed2_test_subgraph()?
+            subgraph.into_fed2_test_subgraph(true, false)?
         } else {
             subgraph
         };
-        subgraph.expand_links()
+        subgraph.expand_links_without_validation()
     }
 
     pub fn build_and_validate(schema_str: &str) -> Subgraph<Validated> {
@@ -485,11 +562,11 @@ pub mod test_utils {
                 b.len(),
                 a.len(),
                 b.iter()
-                    .map(|(code, msg)| { format!("- {}: {}", code, msg) })
+                    .map(|(code, msg)| { format!("- {code}: {msg}") })
                     .collect::<Vec<_>>()
                     .join("\n"),
                 a.iter()
-                    .map(|(code, msg)| { format!("+ {}: {}", code, msg) })
+                    .map(|(code, msg)| { format!("+ {code}: {msg}") })
                     .collect::<Vec<_>>()
                     .join("\n"),
             ));
@@ -530,5 +607,179 @@ pub mod test_utils {
                 }
             }
         };
+    }
+}
+
+// INTERNAL: For use by Language Server Protocol (LSP) team
+// WARNING: Any changes to this function signature will result in breakages in the dependency chain
+// Generates a diff string containing directives and types not included in initial schema string
+pub fn schema_diff_expanded_from_initial(schema_str: String) -> Result<String, FederationError> {
+    // Parse schema string as Schema
+    let initial_schema = Schema::parse(schema_str, "")?;
+
+    // Initialize and expand subgraph, without validation
+    let initial_subgraph = typestate::Subgraph::new("S", "http://S", initial_schema.clone());
+    let expanded_subgraph = initial_subgraph
+        .map_err(|e| e.into_federation_error())?
+        .expand_links()
+        .map_err(|e| e.into_federation_error())?;
+
+    // Build string of missing directives and types from initial to expanded
+    let mut diff = String::new();
+
+    // Push newly added directives onto diff
+    for (dir_name, dir_def) in &expanded_subgraph.schema().schema().directive_definitions {
+        if !initial_schema.directive_definitions.contains_key(dir_name) {
+            diff.push_str(&dir_def.to_string());
+            diff.push('\n');
+        }
+    }
+
+    // Push newly added types onto diff
+    for (named_ty, extended_ty) in &expanded_subgraph.schema().schema().types {
+        if !initial_schema.types.contains_key(named_ty) {
+            diff.push_str(&extended_ty.to_string());
+        }
+    }
+
+    Ok(diff)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::subgraph::schema_diff_expanded_from_initial;
+
+    #[test]
+    fn returns_correct_schema_diff_for_fed_2_0() {
+        let schema_string = r#"
+                extend schema @link(url: "https://specs.apollo.dev/federation/v2.0")
+
+                type Query {
+                    s: String
+                }"#
+        .to_string();
+
+        let diff = schema_diff_expanded_from_initial(schema_string);
+
+        insta::assert_snapshot!(diff.unwrap_or_default(), @r#"directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+directive @federation__key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+directive @federation__requires(fields: federation__FieldSet!) on FIELD_DEFINITION
+directive @federation__provides(fields: federation__FieldSet!) on FIELD_DEFINITION
+directive @federation__external(reason: String) on OBJECT | FIELD_DEFINITION
+directive @federation__tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+directive @federation__extends on OBJECT | INTERFACE
+directive @federation__shareable on OBJECT | FIELD_DEFINITION
+directive @federation__inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+directive @federation__override(from: String!) on FIELD_DEFINITION
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+scalar link__Import
+scalar federation__FieldSet
+scalar _Any
+type _Service {
+  sdl: String
+}"#);
+    }
+
+    #[test]
+    fn returns_correct_schema_diff_for_fed_2_4() {
+        let schema_string = r#"
+                extend schema @link(url: "https://specs.apollo.dev/federation/v2.4")
+
+                type Query {
+                    s: String
+                }"#
+        .to_string();
+
+        let diff = schema_diff_expanded_from_initial(schema_string);
+
+        insta::assert_snapshot!(diff.unwrap_or_default(), @r#"directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+directive @federation__key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+directive @federation__requires(fields: federation__FieldSet!) on FIELD_DEFINITION
+directive @federation__provides(fields: federation__FieldSet!) on FIELD_DEFINITION
+directive @federation__external(reason: String) on OBJECT | FIELD_DEFINITION
+directive @federation__tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
+directive @federation__extends on OBJECT | INTERFACE
+directive @federation__shareable repeatable on OBJECT | FIELD_DEFINITION
+directive @federation__inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+directive @federation__override(from: String!) on FIELD_DEFINITION
+directive @federation__composeDirective(name: String) repeatable on SCHEMA
+directive @federation__interfaceObject on OBJECT
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+scalar link__Import
+scalar federation__FieldSet
+scalar _Any
+type _Service {
+  sdl: String
+}"#);
+    }
+
+    #[test]
+    fn returns_correct_schema_diff_for_fed_2_9() {
+        let schema_string = r#"
+                extend schema @link(url: "https://specs.apollo.dev/federation/v2.9")
+
+                type Query {
+                    s: String
+                }"#
+        .to_string();
+
+        let diff = schema_diff_expanded_from_initial(schema_string);
+
+        insta::assert_snapshot!(diff.unwrap_or_default(), @r#"directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+directive @federation__key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+directive @federation__requires(fields: federation__FieldSet!) on FIELD_DEFINITION
+directive @federation__provides(fields: federation__FieldSet!) on FIELD_DEFINITION
+directive @federation__external(reason: String) on OBJECT | FIELD_DEFINITION
+directive @federation__tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
+directive @federation__extends on OBJECT | INTERFACE
+directive @federation__shareable repeatable on OBJECT | FIELD_DEFINITION
+directive @federation__inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+directive @federation__override(from: String!, label: String) on FIELD_DEFINITION
+directive @federation__composeDirective(name: String) repeatable on SCHEMA
+directive @federation__interfaceObject on OBJECT
+directive @federation__authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+directive @federation__requiresScopes(scopes: [[federation__Scope!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+directive @federation__policy(policies: [[federation__Policy!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+directive @federation__context(name: String!) repeatable on INTERFACE | OBJECT | UNION
+directive @federation__fromContext(field: federation__ContextFieldValue) on ARGUMENT_DEFINITION
+directive @federation__cost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
+directive @federation__listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+scalar link__Import
+scalar federation__FieldSet
+scalar federation__Scope
+scalar federation__Policy
+scalar federation__ContextFieldValue
+scalar _Any
+type _Service {
+  sdl: String
+}"#);
     }
 }

@@ -99,10 +99,10 @@ pub(crate) fn check(
     if exceeded.any() {
         let mut messages = Vec::new();
         max.combine(measured, |ident, max, measured| {
-            if let Some(max) = max {
-                if measured > max {
-                    messages.push(format!("{ident}: {measured}, max_{ident}: {max}"))
-                }
+            if let Some(max) = max
+                && measured > max
+            {
+                messages.push(format!("{ident}: {measured}, max_{ident}: {max}"))
             }
         });
         let message = messages.join(", ");

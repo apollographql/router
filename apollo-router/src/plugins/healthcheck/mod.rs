@@ -98,6 +98,7 @@ impl Default for ReadinessConfig {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
+#[schemars(rename = "HealthCheckConfig")]
 pub(crate) struct Config {
     /// The socket address and port to listen on
     /// Defaults to 127.0.0.1:8088
@@ -290,14 +291,14 @@ impl PluginPrivate for HealthCheck {
                     };
                     tracing::trace!(?health, request = ?req.router_request, "health check");
                     async move {
-                        Ok(router::Response {
-                            response: http::Response::builder().status(status_code).body(
+                        router::Response::http_response_builder()
+                            .response(http::Response::builder().status(status_code).body(
                                 router::body::from_bytes(
                                     serde_json::to_vec(&health).map_err(BoxError::from)?,
                                 ),
-                            )?,
-                            context: req.context,
-                        })
+                            )?)
+                            .context(req.context)
+                            .build()
                     }
                 })
                 .boxed(),
@@ -404,7 +405,7 @@ mod test {
             get_axum_router(listen_addr, config, response_status_code).await;
 
         let request = http::Request::builder()
-            .uri(format!("http://{}/health?ready=", router_addr))
+            .uri(format!("http://{router_addr}/health?ready="))
             .body(http_body_util::Empty::new())
             .expect("valid request");
 

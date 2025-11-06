@@ -12,7 +12,7 @@ subgraphs:
           @source(name: "example", http: { baseURL: "http://example" })
 
         type Query {
-          users: [User] @connect(source: "example", http: { GET: "/" }, selection: "id a")
+          users: [User] @connect(source: "example", id: "alpha_num_123", http: { GET: "/" }, selection: "id a")
 
           user(id: ID!): User
             @connect(source: "example", http: { GET: "/{$$args.id}" }, selection: "id a b", entity: true)

@@ -1,0 +1,23 @@
+preview_response_cache:
+  enabled: true
+  debug: true
+  invalidation:
+    listen: 127.0.0.1:4000
+    path: /invalidation
+  subgraph:
+    all:
+      redis:
+        urls: [ "redis://test" ]
+        required_to_start: true
+      enabled: true
+      invalidation:
+        enabled: true
+        shared_key: "invalidate"
+    subgraphs:
+      accounts:
+        enabled: false
+      products:
+        ttl: 120s
+        invalidation:
+          enabled: true
+          shared_key: "invalidate"

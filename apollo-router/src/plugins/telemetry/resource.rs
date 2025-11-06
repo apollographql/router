@@ -81,7 +81,7 @@ pub trait ConfigResource {
             resource.merge(&Resource::new(vec![KeyValue::new(
                 opentelemetry_semantic_conventions::resource::SERVICE_NAME,
                 executable_name
-                    .map(|executable_name| format!("{}:{}", UNKNOWN_SERVICE, executable_name))
+                    .map(|executable_name| format!("{UNKNOWN_SERVICE}:{executable_name}"))
                     .unwrap_or_else(|| UNKNOWN_SERVICE.to_string()),
             )]))
         } else {

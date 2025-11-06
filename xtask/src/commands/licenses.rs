@@ -1,7 +1,7 @@
 use anyhow::Result;
 use xtask::*;
 
-#[derive(Debug, clap::Parser)]
+#[derive(Debug, clap::Parser, Default)]
 pub struct Licenses {}
 
 impl Licenses {

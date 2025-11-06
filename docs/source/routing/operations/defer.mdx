@@ -2,7 +2,7 @@
 title: "@defer Directive Support"
 subtitle: Improve performance by delivering fields incrementally
 description: Improve your GraphQL query performance with GraphOS Router and Apollo Router Core's support for the @defer directive. Incrementally deliver response data by deferring certain fields.
-minVersion: 1.8.0
+minVersion: Router v1.8.0
 ---
 
 Apollo Router's support of the `@defer` directive helps client developers tackle the common challenge of how to create a responsive user experience when certain fields of a query take longer to resolve than others. `@defer` improves application performance by delivering response data incrementally. This is important for real-time applications like dashboards or reports. By deferring data for some fields, the router can resolve and return data for the query's other fields more quickly, improving responsiveness.

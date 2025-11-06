@@ -27,7 +27,7 @@ fn is_whitespace_line(line: &str) -> bool {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) enum GraphQLString<'schema> {
+enum GraphQLString<'schema> {
     Standard {
         data: Data<'schema>,
     },
@@ -40,10 +40,7 @@ pub(crate) enum GraphQLString<'schema> {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct Data<'schema> {
-    /// The GraphQL string literal with the rules from the spec applied by the compiler
-    compiled_string: &'schema str,
-
+struct Data<'schema> {
     /// The original string from the source file, excluding the surrounding quotes
     raw_string: &'schema str,
 
@@ -52,15 +49,7 @@ pub(crate) struct Data<'schema> {
 }
 
 impl<'schema> GraphQLString<'schema> {
-    pub(crate) fn new(
-        value: &'schema Node<Value>,
-        sources: &'schema SourceMap,
-    ) -> Result<Self, ()> {
-        // The node value has escape sequences removed (for standard strings) and block string
-        // rules applied (for block strings) which affect whitespace and newlines. Offsets into
-        // the node value string will not match what is in the source file.
-        let compiled_string = value.as_str().ok_or(())?;
-
+    fn new(value: &'schema Node<Value>, sources: &'schema SourceMap) -> Result<Self, ()> {
         // Get the raw string value from the source file. This is just the raw string without any
         // of the escape sequence processing or whitespace/newline modifications mentioned above.
         let source_span = value.location().ok_or(())?;
@@ -84,7 +73,6 @@ impl<'schema> GraphQLString<'schema> {
         Ok(if num_quotes == 3 {
             GraphQLString::Block {
                 data: Data {
-                    compiled_string,
                     raw_string,
                     raw_offset: start_of_quotes + num_quotes,
                 },
@@ -102,7 +90,6 @@ impl<'schema> GraphQLString<'schema> {
         } else {
             GraphQLString::Standard {
                 data: Data {
-                    compiled_string,
                     raw_string,
                     raw_offset: start_of_quotes + num_quotes,
                 },
@@ -110,14 +97,7 @@ impl<'schema> GraphQLString<'schema> {
         })
     }
 
-    pub(crate) const fn as_str(&self) -> &str {
-        match self {
-            GraphQLString::Standard { data } => data.compiled_string,
-            GraphQLString::Block { data, .. } => data.compiled_string,
-        }
-    }
-
-    pub(crate) fn line_col_for_subslice(
+    fn line_col_for_subslice(
         &self,
         substring_location: Range<usize>,
         schema_info: &SchemaInfo,
@@ -210,6 +190,16 @@ impl<'schema> GraphQLString<'schema> {
     }
 }
 
+pub(crate) fn subslice_location(
+    value: &Node<Value>,
+    substring_location: Range<usize>,
+    schema: &SchemaInfo,
+) -> Option<Range<LineColumn>> {
+    GraphQLString::new(value, &schema.sources)
+        .ok()
+        .and_then(|string| string.line_col_for_subslice(substring_location, schema))
+}
+
 #[cfg(test)]
 mod tests {
     use apollo_compiler::Node;
@@ -219,8 +209,8 @@ mod tests {
     use apollo_compiler::schema::ExtendedType;
     use pretty_assertions::assert_eq;
 
+    use super::*;
     use crate::connectors::validation::ConnectLink;
-    use crate::connectors::validation::graphql::GraphQLString;
     use crate::connectors::validation::graphql::SchemaInfo;
 
     const SCHEMA: &str = r#"extend schema @link(url: "https://specs.apollo.dev/connect/v0.1")
@@ -255,7 +245,6 @@ mod tests {
         let value = &http[0].1;
 
         let string = GraphQLString::new(value, &schema.sources).unwrap();
-        assert_eq!(string.as_str(), "https://example.com");
         let schema_info =
             SchemaInfo::new(&schema, SCHEMA, ConnectLink::new(&schema).unwrap().unwrap());
         assert_eq!(
@@ -278,10 +267,8 @@ mod tests {
         let value = connect_argument(&schema, "selection");
 
         let string = GraphQLString::new(value, &schema.sources).unwrap();
-        assert_eq!(string.as_str(), "something\nsomethingElse {\n  nested\n}");
         let schema_info =
             SchemaInfo::new(&schema, SCHEMA, ConnectLink::new(&schema).unwrap().unwrap());
-        assert_eq!("nested", &string.as_str()[28..34]);
         assert_eq!(
             string.line_col_for_subslice(28..34, &schema_info),
             Some(

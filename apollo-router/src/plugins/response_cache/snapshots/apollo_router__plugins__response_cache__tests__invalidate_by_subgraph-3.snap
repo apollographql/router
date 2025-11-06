@@ -1,0 +1,69 @@
+---
+source: apollo-router/src/plugins/response_cache/tests.rs
+expression: cache_keys
+---
+[
+  {
+    "key": "test_invalidate_by_subgraph-version:1.0:subgraph:user:type:Query:hash:26ab4118dbabffe5dfbef4462513caa8b6c8941363cf2eafa874bf1d47a3c468:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
+    "invalidationKeys": [
+      "currentUser"
+    ],
+    "kind": {
+      "rootFields": [
+        "currentUser"
+      ]
+    },
+    "subgraphName": "user",
+    "subgraphRequest": {
+      "query": "{ currentUser { activeOrganization { __typename id } } }"
+    },
+    "status": "cached",
+    "cacheControl": {
+      "created": 0,
+      "maxAge": 86400,
+      "public": true
+    },
+    "data": {
+      "data": {
+        "currentUser": {
+          "activeOrganization": {
+            "__typename": "Organization",
+            "id": "1"
+          }
+        }
+      }
+    }
+  },
+  {
+    "key": "version:1.0:subgraph:orga:type:Organization:entity:bcc0a4a9f8c595510c0ff8849bc36b402ac3f52506392d67107c623528ff11f4:representation::hash:a7ccf1576978c6598f6d10d8855fc683f71242533dc6d5a706743bd9bbfa554c:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
+    "invalidationKeys": [
+      "organization",
+      "organization-1"
+    ],
+    "kind": {
+      "typename": "Organization",
+      "entityKey": {
+        "id": "1"
+      }
+    },
+    "subgraphName": "orga",
+    "subgraphRequest": {
+      "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Organization { creatorUser { __typename id } } } }",
+      "variables": {
+        "representations": []
+      }
+    },
+    "status": "cached",
+    "cacheControl": {
+      "created": 0,
+      "maxAge": 86400,
+      "public": true
+    },
+    "data": {
+      "creatorUser": {
+        "__typename": "User",
+        "id": 2
+      }
+    }
+  }
+]

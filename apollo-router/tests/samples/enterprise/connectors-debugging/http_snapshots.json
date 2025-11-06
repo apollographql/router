@@ -2,10 +2,12 @@
   {
     "request": {
       "method": "GET",
-      "path": "posts/1",
+      "path": "posts/1?invalidInConnectUri=",
       "body": null,
       "headers": {
-        "x-test-from": "client-value"
+        "x-test-from": "client-value",
+        "x-invalid-from-connect": "",
+        "x-invalid-from-source": ""
       }
     },
     "response": {
@@ -59,6 +61,27 @@
           "catchPhrase": "Multi-layered client-server neural-net",
           "bs": "harness real-time e-markets"
         }
+      }
+    }
+  },
+  {
+    "request": {
+      "method": "GET",
+      "path": "broken",
+      "body": null,
+      "headers": {
+        "x-test-from": "client-value"
+      }
+    },
+    "response": {
+      "status": 500,
+      "headers": {
+        "content-type": ["application/json; charset=utf-8"],
+        "date": ["Tue, 07 Jan 2025 18:34:52 GMT"]
+      },
+      "body": {
+        "message": "It broke!",
+        "errorCode": "BROKEN_THING"
       }
     }
   }

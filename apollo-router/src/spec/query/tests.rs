@@ -40,6 +40,7 @@ macro_rules! assert_eq_and_ordered_json {
 }
 
 #[derive(Default)]
+#[must_use = "Must call .test() to run the test"]
 struct FormatTest {
     schema: Option<&'static str>,
     query_type_name: Option<&'static str>,
@@ -100,6 +101,11 @@ impl FormatTest {
         self
     }
 
+    fn expected_errors(mut self, v: serde_json_bytes::Value) -> Self {
+        self.expected_errors = Some(v);
+        self
+    }
+
     fn expected_extensions(mut self, v: serde_json_bytes::Value) -> Self {
         self.expected_extensions = Some(v);
         self
@@ -138,6 +144,7 @@ impl FormatTest {
                 .clone(),
             api_schema,
             BooleanValues { bits: 0 },
+            true,
         );
 
         if let Some(e) = self.expected {
@@ -407,7 +414,7 @@ fn inline_fragment_on_top_level_operation() {
 #[test]
 fn reformat_response_data_fragment_spread() {
     let schema = "type Query {
-      thing: Thing    
+      thing: Thing
     }
 
     type Foo {
@@ -855,7 +862,7 @@ fn reformat_response_array_of_type_alias() {
             type Element {
                 stuff: String
             }
-            
+
         ",
         )
         .query("{get { aliased: array {stuff}}}")
@@ -912,7 +919,7 @@ fn reformat_response_array_of_type_duplicate_alias() {
         type Thing {
             array: [Element]
         }
-        
+
         type Element {
             stuff: String
         }",
@@ -1179,6 +1186,1136 @@ fn reformat_response_array_of_id_duplicate() {
                 "array": ["hello","world"],
             },
         }})
+        .test();
+}
+
+#[test]
+fn reformat_response_expected_types() {
+    FormatTest::builder()
+        .schema(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                i: Int
+                s: String
+                f: Float
+                b: Boolean
+                e: E
+                u: U
+                id: ID
+                l: [Int]
+            }
+
+            enum E {
+              A
+              B
+            }
+            union U = ObjA | ObjB
+            type ObjA {
+                a: String
+            }
+            type ObjB {
+                a: String
+            }
+            ",
+        )
+        .query(
+            r#"{
+            get {
+                i
+                s
+                f
+                ... on Thing {
+                  b
+                  e
+                  u {
+                    ... on ObjA {
+                      a
+                    }
+                  }
+                  id
+                }
+                l
+            }
+        }"#,
+        )
+        .response(json! {{
+            "get": {
+                "i": "hello",
+                "s": 1.0,
+                "f": [1],
+                "b": 0,
+                "e": "X",
+                "u": 1,
+                "id": {
+                    "test": "test",
+                },
+                "l": "A"
+            },
+        }})
+        .expected(json! {{
+            "get": {
+                "i": null,
+                "s": null,
+                "f": null,
+                "b": null,
+                "e": null,
+                "u": null,
+                // FIXME(@goto-bus-stop): this should be null, but we do not
+                // validate ID values today
+                "id": {
+                    "test": "test",
+                },
+                "l": null
+            },
+        }})
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["get", "i"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type String",
+                "path": ["get", "s"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type Float",
+                "path": ["get", "f"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type Boolean",
+                "path": ["get", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
+         * does not produce these errors.
+            {
+                "message": "Expected a valid enum value for type E",
+                "path": ["get", "e"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid non-object value of type number for composite type U",
+                "path": ["get", "u"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid non-list value of type string for list type [Int]",
+                "path": ["get", "l"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        */
+        ]))
+        .test();
+}
+
+#[test]
+fn reformat_response_expected_int() {
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                a: Int
+                b: Int
+                c: Int
+                d: Int
+                e: Int
+                f: Int
+                g: Int
+            }
+            "#,
+        )
+        .query(r#"{ a b c d e f g }"#)
+        .response(json!({
+            "a": 1,
+            "b": 1.0, // Should be accepted as Int 1
+            "c": 1.2, // Float should not be truncated
+            "d": "1234", // Optional to be coerced by spec: we do not do so
+            "e": true,
+            "f": [1],
+            "g": { "value": 1 },
+        }))
+        .expected(json!({
+            "a": 1,
+            // FIXME(@goto-bus-stop): we should accept this, and truncate it
+            // to Int value `1`, but do not do so today
+            "b": null,
+            "c": null,
+            "d": null,
+            "e": null,
+            "f": null,
+            "g": null,
+        }))
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["d"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["e"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["f"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["g"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        .test();
+}
+
+#[test]
+fn reformat_response_expected_int_range() {
+    let schema = "type Query {
+        me: User
+    }
+
+    type User {
+        id: String!
+        name: String
+        someNumber: Int
+        someOtherNumber: Int!
+    }
+    ";
+
+    let query = "query  { me { id name someNumber  } }";
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(query)
+        .response(json!({
+            "me": {
+                "id": "123",
+                "name": "Guy Guyson",
+                "someNumber": 51049694213_i64
+            },
+        }))
+        .expected(json!({
+            "me": {
+                "id": "123",
+                "name": "Guy Guyson",
+                "someNumber": null,
+            },
+        }))
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["me", "someNumber"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
+            }
+        ]))
+        .test();
+
+    let query2 = "query  { me { id name someOtherNumber  } }";
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(query2)
+        .response(json!({
+            "me": {
+                "id": "123",
+                "name": "Guy Guyson",
+                "someOtherNumber": 51049694213_i64
+            },
+        }))
+        .expected(json!({
+            "me": null,
+        }))
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["me", "someOtherNumber"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" },
+            },
+            {
+                "message": "Null value found for non-nullable type Int",
+                "path": ["me", "someOtherNumber"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        .test();
+}
+
+#[test]
+fn reformat_response_expected_float() {
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                a: Float
+                b: Float
+                c: Float
+                d: Float
+                e: Float
+                f: Float
+            }
+            "#,
+        )
+        .query(r#"{ a b c d e f }"#)
+        .response(json!({
+            // Note: NaNs and Infinitys are not supported by GraphQL Floats,
+            // and handily not representable in JSON, so we don't need to handle them.
+            "a": 1, // Int can be interpreted as Float
+            "b": 1.2,
+            "c": "2.2", // Optional to be coerced by spec: we do not do so
+            "d": true,
+            "e": [1.234],
+            "f": { "value": 12.34 },
+        }))
+        .expected(json!({
+            "a": 1, // Representing int-valued float without the decimals is okay in JSON
+            "b": 1.2,
+            "c": null,
+            "d": null,
+            "e": null,
+            "f": null,
+        }))
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for the type Float",
+                "path": ["c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type Float",
+                "path": ["d"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type Float",
+                "path": ["e"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type Float",
+                "path": ["f"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        .test();
+}
+
+#[test]
+fn reformat_response_expected_string() {
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                a: String
+                b: String
+                c: String
+                d: String
+                e: String
+                f: String
+            }
+            "#,
+        )
+        .query(r#"{ a b c d e f }"#)
+        .response(json!({
+            "a": "text",
+            "b": 1, // Optional to be coerced by spec: we do not do so
+            "c": false, // Optional to be coerced by spec: we do not do so
+            "d": 1234.5678, // Optional to be coerced by spec: we do not do so
+            "e": ["s"],
+            "f": { "text": "text" },
+        }))
+        .expected(json!({
+            "a": "text",
+            "b": null,
+            "c": null,
+            "d": null,
+            "e": null,
+            "f": null,
+        }))
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for the type String",
+                "path": ["b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type String",
+                "path": ["c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type String",
+                "path": ["d"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type String",
+                "path": ["e"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type String",
+                "path": ["f"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        /* FIXME(@TylerBloom): This, per the spec, *is* expected. However, persently, the router
+         * does not produce these errors.
+        */
+        ]))
+        .test();
+}
+
+#[test]
+fn reformat_response_expected_id() {
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                a: ID
+                b: ID
+                c: ID
+                d: ID
+                e: ID
+                f: ID
+                g: ID
+            }
+            "#,
+        )
+        .query(r#"{ a b c d e f g }"#)
+        .response(json!({
+            "a": "1234",
+            "b": "ABCD",
+            "c": 1234,
+            "d": 1234.0, // Integer represented as a float should be coerced
+            "e": false,
+            "f": 1234.5678, // Float should not be truncated
+            "g": ["s"],
+        }))
+        .expected(json!({
+            // Note technically IDs should always be represented as a String in JSON,
+            // though the value returned from a field can be either Int or String.
+            // We do not coerce the acceptable types to strings today.
+            "a": "1234",
+            "b": "ABCD",
+            "c": 1234,
+            // FIXME(@goto-bus-stop): We should coerce this to string "1234" (without .0),
+            // but we don't do so today
+            "d": 1234.0,
+            // FIXME(@goto-bus-stop): We should null out all these values,
+            // but we don't validate IDs today
+            "e": false,
+            "f": 1234.5678,
+            "g": ["s"],
+        }))
+        .expected_errors(json!([
+            // FIXME(@goto-bus-stop): we should expect these errors:
+            // {
+            //     "message": "Invalid value found for field Query.e",
+            //     "path": ["e"],
+            //     "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            // },
+            // {
+            //     "message": "Invalid value found for field Query.f",
+            //     "path": ["f"],
+            //     "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            // },
+            // {
+            //     "message": "Invalid value found for field Query.g",
+            //     "path": ["g"],
+            //     "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            // },
+        ]))
+        .test();
+}
+
+#[test]
+fn reformat_response_coercion_propagation_into_list() {
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                thing: Thing
+            }
+
+            type Thing {
+                a: [Int]
+            }
+            "#,
+        )
+        .query(r#"{ thing { a } }"#)
+        .response(json!({
+            "thing": {
+                "a": [1, 1.1, 1.2]
+            }
+        }))
+        .expected(json!({
+            "thing": {
+                "a": [1, null, null]
+            }
+        }))
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "a", 1],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "a", 2],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        .test();
+
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                thing: Thing
+            }
+
+            type Thing {
+                a: [Int!]
+            }
+            "#,
+        )
+        .query(r#"{ thing { a } }"#)
+        .response(json!({
+            "thing": {
+                "a": [1, 1.1, 1.2]
+            }
+        }))
+        .expected(json!({
+            "thing": {
+                "a": null
+            }
+        }))
+        // NOTE: The array validation stops at its first invalid value and "bubbles" up the
+        // nullification from there
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "a", 1],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Null value found for non-nullable type Int",
+                "path": ["thing", "a", 1],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found inside the array of type [Int!]",
+                "path": ["thing", "a"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        ]))
+        .test();
+
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                thing: Thing
+            }
+
+            type Thing {
+                a: [Int!]!
+            }
+            "#,
+        )
+        .query(r#"{ thing { a } }"#)
+        .response(json!({
+            "thing": {
+                "a": [1, 1.1, 1.2]
+            }
+        }))
+        .expected(json!({
+            "thing": null
+        }))
+        // NOTE: The array validation stops at its first invalid value and "bubbles" up the
+        // nullification from there
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "a", 1],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Null value found for non-nullable type Int",
+                "path": ["thing", "a", 1],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found inside the array of type [Int!]",
+                "path": ["thing", "a"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Null value found for non-nullable type [Int!]",
+                "path": ["thing", "a"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        ]))
+        .test();
+}
+
+#[test]
+fn reformat_response_coercion_propagation_into_object() {
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                thing: Thing
+            }
+
+            type Thing {
+                a: Int
+                b: Int
+                c: Int
+            }
+            "#,
+        )
+        .query(r#"{ thing { a, b, c } }"#)
+        .response(json!({
+            "thing": {
+                "a": 1,
+                "b": 1.1,
+                "c": 1.2
+            }
+        }))
+        .expected(json!({
+            "thing": {
+                "a": 1,
+                "b": null,
+                "c": null
+            }
+        }))
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        .test();
+
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                thing: Thing
+            }
+
+            type Thing {
+                a: Int!
+                b: Int!
+                c: Int!
+            }
+            "#,
+        )
+        .query(r#"{ thing { a, b, c } }"#)
+        .response(json!({
+            "thing": {
+                "a": 1,
+                "b": 1.1,
+                "c": 1.2
+            }
+        }))
+        .expected(json!({
+            "thing": null
+        }))
+        // NOTE: The array validation stops at its first invalid value and "bubbles" up the
+        // nullification from there
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Null value found for non-nullable type Int",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        .test();
+
+    FormatTest::builder()
+        .schema(
+            r#"
+            type Query {
+                thing: Thing!
+            }
+
+            type Thing {
+                a: Int!
+                b: Int!
+                c: Int!
+            }
+            "#,
+        )
+        .query(r#"{ thing { a, b, c } }"#)
+        .response(json!({
+            "thing": {
+                "a": 1,
+                "b": 1.1,
+                "c": 1.2
+            }
+        }))
+        // NOTE: The array validation stops at its first invalid value and "bubbles" up the
+        // nullification from there
+        .expected_errors(json!([            {
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Null value found for non-nullable type Int",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },            {
+                "message": "Null value found for non-nullable type Thing",
+                "path": ["thing"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        ]))
+        .test();
+}
+
+// There are four cases we need to account for: the type info is(n't) queried and type info
+// is(n't) returned.
+//
+// We can only follow the spec/client expection of response validation if we have the type info. If
+// we get it (regardless of asking for it), our validation can follow the spec and we can act like
+// a normal GQL server. If we ask and don't receive it, we need to return an error stating this
+// issue regardless of validation issues. Validation without type info will lead to an unexpected
+// result for the client.
+//
+// Lastly, this test points out an underlying assumption for what the router needs to do in order
+// to appear as a normal GQL server: we always query type info. This assumption lies at the
+// router-QP boundary and needs to be tested elsewhere. This test is just for ensuring we can
+// follow the spec as closely as possible.
+#[test]
+fn reformat_response_coercion_propagation_into_union() {
+    let nullable_schema = r#"
+        type Query {
+            thing: Thing
+        }
+
+        union Thing = Bar | Foo
+
+        type Foo {
+            a: Int
+            b: Int
+            c: Int
+        }
+
+        type Bar {
+            bar: String
+        }"#;
+
+    let non_nullable_schema = r#"
+        type Query {
+            thing: Thing
+        }
+
+        union Thing = Bar | Foo
+
+        type Foo {
+            a: Int!
+            b: Int!
+            c: Int!
+        }
+
+        type Bar {
+            bar: String
+        }"#;
+
+    let query_wo_type_info = r#"{ thing { ... on Foo { a, b, c } } }"#;
+    let query_with_type_info = r#"{ thing { __typename ... on Foo { a, b, c } } }"#;
+
+    let resp_wo_type_info = json!({
+        "thing": {
+            "a": 1,
+            "b": 1.1,
+            "c": 1.2
+        }
+    });
+    let resp_with_type_info = json!({
+        "thing": {
+            "__typename": "Foo",
+            "a": 1,
+            "b": 1.1,
+            "c": 1.2
+        }
+    });
+
+    // Case 1: __typename isn't queried and isn't returned
+    FormatTest::builder()
+        .schema(nullable_schema)
+        .query(query_wo_type_info)
+        .response(resp_wo_type_info.clone())
+        .expected(json!({ "thing": { } }))
+        .expected_errors(json!([]))
+        .test();
+
+    FormatTest::builder()
+        .schema(non_nullable_schema)
+        .query(query_wo_type_info)
+        .response(resp_wo_type_info.clone())
+        // NOTE: This is seemingly strange behavior but is consistent. Because we can't *always*
+        // resolve the type of `thing`, we can't determine if the result is valid or not.
+        .expected(json!({ "thing": { } }))
+        // NOTE: Same issue. We can not *always* know what type was intented, so we drop the data.
+        .expected_errors(json!([]))
+        .test();
+
+    // Case 2: __typename isn't queried but is returned
+    FormatTest::builder()
+        .schema(nullable_schema)
+        .query(query_wo_type_info)
+        .response(resp_with_type_info.clone())
+        // NOTE: Since `__typename` is not requested, it is dropped from the actual response;
+        // however, we can still use it for the validation of `thing` as a `Foo`
+        .expected(json!({
+            "thing": {
+                "a": 1,
+                "b": null,
+                "c": null,
+            }
+        }))
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        .test();
+
+    FormatTest::builder()
+        .schema(non_nullable_schema)
+        .query(query_wo_type_info)
+        .response(resp_with_type_info.clone())
+        .expected(json!({ "thing": null }))
+        // NOTE: The array validation stops at its first invalid value and "bubbles" up the
+        // nullification from there
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Null value found for non-nullable type Int",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        ]))
+        .test();
+
+    // Case 3: __typename is queried but isn't returned
+    FormatTest::builder()
+        .schema(nullable_schema)
+        .query(query_with_type_info)
+        .response(resp_wo_type_info.clone())
+        .expected(json!({ "thing": null }))
+        .expected_errors(json!([]))
+        .test();
+
+    FormatTest::builder()
+        .schema(non_nullable_schema)
+        .query(query_with_type_info)
+        .response(resp_wo_type_info.clone())
+        .expected(json!({ "thing": null }))
+        .expected_errors(json!([]))
+        .test();
+
+    // Case 4: __typename is queried and is returned
+    FormatTest::builder()
+        .schema(nullable_schema)
+        .query(query_with_type_info)
+        .response(resp_with_type_info.clone())
+        .expected(json!({
+            "thing": {
+                "__typename": "Foo",
+                "a": 1,
+                "b": null,
+                "c": null
+            }
+        }))
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        ]))
+        .test();
+
+    FormatTest::builder()
+        .schema(non_nullable_schema)
+        .query(query_with_type_info)
+        .response(resp_with_type_info.clone())
+        .expected(json!({ "thing": null }))
+        // NOTE: The array validation stops at its first invalid value and "bubbles" up the
+        // nullification from there
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Null value found for non-nullable type Int",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        ]))
+        .test();
+}
+
+// This test covers similar cases to the union test. Without the type info of an interface, we can
+// get strange looking results from the prespective of the client. Without that info, we can not
+// properly identify the type of a return object. This leads to selection sets for any inlined
+// fragments to be coersed into empty object, not nullified sets or sets with null values.
+//
+// This behavior diverges from the spec. So, like the union tests, there are four cases we need to
+// account for: the type info is(n't) queried and type info is(n't) returned.
+//
+// Unlike the union tests, if a fragment is part of the query but type info is not
+// returned, the return fragment data is ignored, regardless of validity.
+#[test]
+fn reformat_response_coercion_propagation_into_interfaces() {
+    let nullable_schema = r#"
+        type Query {
+            thing: Thing
+        }
+
+        interface Thing {
+            a: Int
+        }
+
+        type Foo implements Thing {
+            a: Int
+            b: Int
+            c: Int
+        }
+
+        type Bar implements Thing {
+            a: Int
+            bar: String
+        }"#;
+
+    let non_nullable_schema = r#"
+        type Query {
+            thing: Thing
+        }
+
+        interface Thing {
+            a: Int!
+        }
+
+        type Foo implements Thing {
+            a: Int!
+            b: Int!
+            c: Int!
+        }
+
+        type Bar implements Thing {
+            a: Int!
+            bar: String!
+        }"#;
+
+    let query_wo_type_info = r#"{ thing { a ... on Foo { b, c } } }"#;
+    let query_with_type_info = r#"{ thing { __typename a ... on Foo { b, c } } }"#;
+
+    let resp_wo_type_info = json!({
+            "thing": {
+                "a": 1,
+                "b": 1.1,
+                "c": 1.2
+            }
+    });
+    let resp_with_type_info = json!({
+        "thing": {
+            "__typename": "Foo",
+            "a": 1,
+            "b": 1.1,
+            "c": 1.2
+        }
+    });
+
+    // Case 1: __typename isn't queried and isn't returned
+    FormatTest::builder()
+        .schema(nullable_schema)
+        .query(query_wo_type_info)
+        .response(resp_wo_type_info.clone())
+        .expected(json!({
+            "thing": {
+                "a": 1,
+            }
+        }))
+        .expected_errors(json!([]))
+        .test();
+
+    FormatTest::builder()
+        .schema(non_nullable_schema)
+        .query(query_wo_type_info)
+        .response(resp_wo_type_info.clone())
+        // NOTE: This is seemingly strange behavior but is consistent. Because we can't *always*
+        // resolve the type of `thing` with __typename, we can't determine if the result is valid
+        // or not. Thus, the nullification of the fragment doesn't "bubble up" to nullifying the
+        // either "thing".
+        .expected(json!({
+            "thing": {
+                "a": 1
+            }
+        }))
+        .expected_errors(json!([]))
+        .test();
+
+    // Case 2: __typename isn't queried but is returned
+    FormatTest::builder()
+        .schema(nullable_schema)
+        .query(query_wo_type_info)
+        .response(resp_with_type_info.clone())
+        .expected(json!({
+            "thing": {
+                "a": 1,
+                "b": null,
+                "c": null,
+            }
+        }))
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+        ]))
+        .test();
+
+    FormatTest::builder()
+        .schema(non_nullable_schema)
+        .query(query_wo_type_info)
+        .response(resp_with_type_info.clone())
+        .expected(json!({ "thing": null }))
+        // NOTE: The array validation stops at its first invalid value and "bubbles" up the
+        // nullification from there
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Null value found for non-nullable type Int",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        ]))
+        .test();
+
+    // Case 3: __typename is queried but isn't returned
+    FormatTest::builder()
+        .schema(nullable_schema)
+        .query(query_with_type_info)
+        .response(resp_wo_type_info.clone())
+        // FIXME(@TylerBloom): This is not expected. This should behave the same with(out)
+        // `__typename` being queried.
+        .expected(json!({ "thing": null }))
+        .expected_errors(json!([]))
+        .test();
+
+    FormatTest::builder()
+        .schema(non_nullable_schema)
+        .query(query_with_type_info)
+        .response(resp_wo_type_info.clone())
+        .expected(json!({ "thing": null }))
+        .expected_errors(json!([]))
+        .test();
+
+    // Case 4: __typename is queried and is returned
+    FormatTest::builder()
+        .schema(nullable_schema)
+        .query(query_with_type_info)
+        .response(resp_with_type_info.clone())
+        .expected(json!({
+            "thing": {
+                "__typename": "Foo",
+                "a": 1,
+                "b": null,
+                "c": null
+            }
+        }))
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "c"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        ]))
+        .test();
+
+    FormatTest::builder()
+        .schema(non_nullable_schema)
+        .query(query_with_type_info)
+        .response(resp_with_type_info.clone())
+        .expected(json!({ "thing": null }))
+        .expected_errors(json!([
+            {
+                "message": "Invalid value found for the type Int",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            },
+            {
+                "message": "Null value found for non-nullable type Int",
+                "path": ["thing", "b"],
+                "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
+            }
+        ]))
         .test();
 }
 
@@ -1829,7 +2966,7 @@ fn variable_validation() {
         }}",
         json!({"input":{}})
     );
-    assert!(res.is_ok(), "validation should have succeeded: {:?}", res);
+    assert!(res.is_ok(), "validation should have succeeded: {res:?}");
 }
 
 #[test]
@@ -2063,11 +3200,11 @@ fn filter_list_errors() {
         .expected_extensions(json! {{
             "valueCompletion": [
                 {
-                    "message": "Cannot return null for non-nullable array element of type String at index 1",
+                    "message": "Null value found for non-nullable type String",
                     "path": ["list", "l2", 1]
-                }
+                },
             ]
-        }},)
+        }})
         .test();
 
     FormatTest::builder()
@@ -2176,7 +3313,7 @@ fn filter_nested_object_errors() {
         reviews2: [Review!]
         reviews3: [Review!]!
     }
-    
+
     type Review {
         text1: String
         text2: String!
@@ -2266,7 +3403,7 @@ fn filter_nested_object_errors() {
         .expected_extensions(json! {{
             "valueCompletion": [
                 {
-                    "message": "Cannot return null for non-nullable field Review.text2",
+                    "message": "Null value found for non-nullable type String",
                     "path": ["me", "reviews1", 0]
                 }
             ]
@@ -2709,7 +3846,7 @@ fn filter_scalar_errors() {
         a: A
         b: A!
     }
-    
+
     scalar A
     ";
 
@@ -3207,7 +4344,7 @@ fn filter_extended_interface_errors() {
 #[test]
 fn filter_errors_top_level_fragment() {
     let schema = "type Query {
-        get: Thing   
+        get: Thing
       }
 
       type Thing {
@@ -3360,7 +4497,7 @@ fn merge_selections() {
         name: String
         review: Review
     }
-    
+
     type Review {
         id: String!
         body: String
@@ -3799,7 +4936,7 @@ fn skip() {
         .query(
             "query($skip: Boolean = false)  {
                 get @skip(if: $skip) {
-                    id 
+                    id
                     review {
                         id
                     }
@@ -3825,7 +4962,7 @@ fn skip() {
         .query(
             "query {
                 get @skip(if: true) {
-                    id 
+                    id
                     review {
                         id
                     }
@@ -4940,7 +6077,7 @@ fn inaccessible_on_interface() {
         test_union: U
         test_enum: E
     }
-    
+
     type Object implements Interface @inaccessible {
         foo: String
         other: String
@@ -4950,7 +6087,7 @@ fn inaccessible_on_interface() {
         foo: String
         other: String @inaccessible
     }
-      
+
     interface Interface {
         foo: String
     }
@@ -4964,7 +6101,7 @@ fn inaccessible_on_interface() {
         common: String
         b: String
     }
-    
+
     union U = A | B
 
     enum E {
@@ -5118,6 +6255,7 @@ fn fragment_on_interface_on_query() {
         Default::default(),
         api_schema,
         BooleanValues { bits: 0 },
+        true,
     );
     assert_eq_and_ordered!(
         response.data.as_ref().unwrap(),
@@ -5481,7 +6619,7 @@ fn query_operation_nullification() {
             "query {
                 ...F
              }
-             
+
              fragment F on Query {
                  get {
                      name
@@ -5677,7 +6815,7 @@ fn test_query_not_named_query() {
           `SECURITY` features provide metadata necessary to securely resolve fields.
           """
           SECURITY
-  
+
           """
           `EXECUTION` features provide metadata necessary for operation execution.
           """
@@ -5829,6 +6967,7 @@ fn filtered_defer_fragment() {
         Object::new(),
         schema.api_schema(),
         BooleanValues { bits: 0 },
+        true,
     );
 
     assert_json_snapshot!(response);
@@ -5838,6 +6977,7 @@ fn filtered_defer_fragment() {
         Object::new(),
         schema.api_schema(),
         BooleanValues { bits: 0 },
+        true,
     );
 
     assert_json_snapshot!(response);

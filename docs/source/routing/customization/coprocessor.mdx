@@ -6,7 +6,12 @@ description: Customize the Apollo GraphOS Router with external coprocessing. Wri
 
 import CoprocTypicalConfig from "../../../shared/coproc-typical-config.mdx";
 
-<PremiumFeature />
+<PlanRequired plans={["Free", "Developer", "Standard", "Enterprise"]}>
+
+Rate limits apply on the Free plan.
+Developer and Standard plans require Router v2.6.0 or later.
+
+</PlanRequired>
 
 With **external coprocessing**, you can hook into the GraphOS Router's request-handling lifecycle by writing standalone code in any language and framework. This code (i.e., your **coprocessor**) can run anywhere on your network that's accessible to the router over HTTP.
 
@@ -91,6 +96,28 @@ coprocessor:
 ```
 
 In this case, the `RouterService` only sends a coprocessor request whenever it receives a client request. The coprocessor request body includes _no_ data related to the client request (only "control" data, which is [covered below](#coprocessor-request-format)).
+
+### Per-stage coprocessor URLs
+
+Override the global coprocessor URL on a per-stage basis:
+
+```yaml title="router.yaml"
+coprocessor:
+  url: http://127.0.0.1:3000 # mandatory URL which is the address of the coprocessor
+  router:
+    request:
+      headers: false
+  supergraph:
+    request:
+      url: http://127.0.0.1:3001 # overrides the top level URL for supergraph request
+      headers: true
+      body: true
+    response: # uses the top level coprocessor URL for supergraph response
+      headers: true
+      body: true
+```
+
+This enables targeted coprocessors for individual stages.
 
 ### Conditions
 

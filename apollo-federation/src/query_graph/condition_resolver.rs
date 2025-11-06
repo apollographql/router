@@ -1,6 +1,3 @@
-// PORT_NOTE: Unlike in JS version, `QueryPlanningTraversal` does not have a
-//            `CachingConditionResolver` as a field, but instead implements the `ConditionResolver`
-//            trait directly using `ConditionResolverCache`.
 use std::sync::Arc;
 
 use apollo_compiler::Name;
@@ -11,6 +8,7 @@ use petgraph::graph::EdgeIndex;
 
 use crate::error::FederationError;
 use crate::operation::SelectionSet;
+use crate::query_graph::QueryGraph;
 use crate::query_graph::graph_path::ExcludedConditions;
 use crate::query_graph::graph_path::ExcludedDestinations;
 use crate::query_graph::graph_path::operation::OpGraphPathContext;
@@ -74,7 +72,7 @@ impl std::fmt::Display for ConditionResolution {
                 Ok(())
             }
             ConditionResolution::Unsatisfied { reason } => {
-                writeln!(f, "Unsatisfied: reason={:?}", reason)
+                writeln!(f, "Unsatisfied: reason={reason:?}")
             }
         }
     }
@@ -176,6 +174,92 @@ impl ConditionResolverCache {
     ) {
         self.edge_states
             .insert(edge, (resolution, excluded_destinations));
+    }
+}
+
+/// A query plan resolver for edge conditions that caches the outcome per edge.
+// PORT_NOTE: This ports the `cachingConditionResolver` function from JS. In JS version, the
+//            function creates a closure capturing the QueryPlanningTraversal/ValidationTraversal
+//            instance itself The same would be infeasible to implement in Rust due to the cyclic
+//            references. Instead, in Rust, it is implemented as `CachingConditionResolver` and
+//            `ConditionResolver` traits that will be implemented by `QueryPlanningTraversal` and
+//            `ValidationTraversal` structs.
+pub(crate) trait CachingConditionResolver {
+    fn query_graph(&self) -> &QueryGraph;
+
+    fn resolve_without_cache(
+        &self,
+        edge: EdgeIndex,
+        context: &OpGraphPathContext,
+        excluded_destinations: &ExcludedDestinations,
+        excluded_conditions: &ExcludedConditions,
+        extra_conditions: Option<&SelectionSet>,
+    ) -> Result<ConditionResolution, FederationError>;
+
+    fn resolver_cache(&mut self) -> &mut ConditionResolverCache;
+
+    fn resolve_with_cache(
+        &mut self,
+        edge: EdgeIndex,
+        context: &OpGraphPathContext,
+        excluded_destinations: &ExcludedDestinations,
+        excluded_conditions: &ExcludedConditions,
+        extra_conditions: Option<&SelectionSet>,
+    ) -> Result<ConditionResolution, FederationError> {
+        let cache_result = self.resolver_cache().contains(
+            edge,
+            context,
+            excluded_destinations,
+            excluded_conditions,
+            extra_conditions,
+        );
+
+        if let ConditionResolutionCacheResult::Hit(cached_resolution) = cache_result {
+            return Ok(cached_resolution);
+        }
+
+        let resolution = self.resolve_without_cache(
+            edge,
+            context,
+            excluded_destinations,
+            excluded_conditions,
+            extra_conditions,
+        )?;
+        // See if this resolution is eligible to be inserted into the cache.
+        if cache_result.is_miss() {
+            self.resolver_cache()
+                .insert(edge, resolution.clone(), excluded_destinations.clone());
+        }
+        Ok(resolution)
+    }
+}
+
+/// Blanket implementation of `ConditionResolver` for any type that implements
+/// `CachingConditionResolver`.
+impl<T: CachingConditionResolver> ConditionResolver for T {
+    fn resolve(
+        &mut self,
+        edge: EdgeIndex,
+        context: &OpGraphPathContext,
+        excluded_destinations: &ExcludedDestinations,
+        excluded_conditions: &ExcludedConditions,
+        extra_conditions: Option<&SelectionSet>,
+    ) -> Result<ConditionResolution, FederationError> {
+        // Invariant check: The edge must have conditions.
+        let graph = &self.query_graph();
+        let edge_data = graph.edge_weight(edge)?;
+        assert!(
+            edge_data.conditions.is_some() || extra_conditions.is_some(),
+            "Should not have been called for edge without conditions"
+        );
+
+        self.resolve_with_cache(
+            edge,
+            context,
+            excluded_destinations,
+            excluded_conditions,
+            extra_conditions,
+        )
     }
 }
 

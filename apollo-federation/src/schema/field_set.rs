@@ -1,3 +1,4 @@
+use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::executable;
 use apollo_compiler::executable::FieldSet;
@@ -92,21 +93,204 @@ pub(crate) fn parse_field_set(
     Ok(selection_set)
 }
 
-/// This exists because there's a single callsite in extract_subgraphs_from_supergraph() that needs
-/// to parse field sets before the schema has finished building. Outside that case, you should
-/// always use `parse_field_set()` instead.
-// TODO: As noted in the single callsite, ideally we could move the parsing to after extraction, but
-// it takes time to determine whether that impacts correctness, so we're leaving it for later.
+/// When we first see a field set in a GraphQL document, there are some constraints which can make
+/// calling `parse_field_set()` on it difficult to do.
+/// 1. We may not have a `ValidFederationSchema` yet, since we may be in the process of building
+///    one. This is the case in `extract_subgraphs_from_supergraph()`.
+///    TODO: As noted in the callsite in `extract_subgraphs_from_supergraph()`, ideally we could
+///    move the parsing to after extraction, but it takes time to determine whether that impacts
+///    correctness, so we're leaving it for later.
+/// 2. GraphQL documents, due to historical reasons, may have field sets containing enum values that
+///    are mistakenly written as strings, but which we still want to support for backwards
+///    compatibility.
+/// 3. We may prefer an apollo_compiler `SelectionSet` during tests.
+///
+/// This function exists for these purposes, and returns an apollo_compiler `SelectionSet`,
+/// optionally trying to fix the aforementioned string/enum value issues. This function also returns
+/// a boolean indicating whether the field set was modified to fix such string/enum value issues.
+///
+/// Outside these specific purposes, you should prefer to use `parse_field_set()` instead.
 pub(crate) fn parse_field_set_without_normalization(
     schema: &Valid<Schema>,
     parent_type_name: NamedType,
     field_set: &str,
-) -> Result<executable::SelectionSet, FederationError> {
+    fix_string_enum_values: bool,
+) -> Result<(executable::SelectionSet, bool), FederationError> {
     // Note this parsing takes care of adding curly braces ("{" and "}") if they aren't in the
     // string.
-    let field_set =
-        FieldSet::parse_and_validate(schema, parent_type_name, field_set, "field_set.graphql")?;
-    Ok(field_set.into_inner().selection_set)
+    let (field_set, is_modified) = if fix_string_enum_values {
+        let mut field_set = FieldSet::parse(
+            schema,
+            parent_type_name.clone(),
+            field_set,
+            "field_set.graphql",
+        )?;
+        let is_modified = fix_string_enum_values_in_field_set(schema, &mut field_set);
+        field_set.validate(schema)?;
+        // `FieldSet::validate()` strangely doesn't return `Valid<FieldSet>`, so we instead use
+        // `Valid::assume_valid()` here.
+        (Valid::assume_valid(field_set), is_modified)
+    } else {
+        (
+            FieldSet::parse_and_validate(schema, parent_type_name, field_set, "field_set.graphql")?,
+            false,
+        )
+    };
+    Ok((field_set.into_inner().selection_set, is_modified))
+}
+
+/// In the past, arguments in field sets may have mistakenly provided strings when they meant to
+/// provide enum values. This was erroneously permitted because the representation of a GraphQL
+/// value in JS doesn't really distinguish between the two, and the JS GraphQL value validation code
+/// strangely permits enum values when a string type is expected. This ends up being okay-ish in the
+/// JS code, since it later ends up using the type of the argument to try inferring whether it
+/// should be a string or enum value.
+///
+/// This doesn't occur in Rust, since the representation of a GraphQL value properly distinguishes
+/// between strings and enum values, and validation checks this accordingly. However, to continue
+/// accepting supergraph schemas that may have this mistake, the Rust code does this type inference
+/// when extracting subgraphs instead. This inference is performed by this function, flipping the
+/// type from string to enum value when relevant (if the field set is invalid in some other way,
+/// this function skips the invalidity, assuming that later field set validation will catch this).
+/// In a future major release, we may error on such string/enum value mistakes instead.
+fn fix_string_enum_values_in_field_set(schema: &Valid<Schema>, field_set: &mut FieldSet) -> bool {
+    fix_string_enum_values_in_selection_set(schema, &mut field_set.selection_set)
+}
+
+fn fix_string_enum_values_in_selection_set(
+    schema: &Valid<Schema>,
+    selection_set: &mut executable::SelectionSet,
+) -> bool {
+    let mut is_modified = false;
+    for selection in selection_set.selections.iter_mut() {
+        match selection {
+            executable::Selection::Field(field) => {
+                let field = field.make_mut();
+                for argument in field.arguments.iter_mut() {
+                    let Some(type_) = field
+                        .definition
+                        .argument_by_name(&argument.name)
+                        .map(|def| &def.ty)
+                    else {
+                        continue;
+                    };
+                    let argument = argument.make_mut();
+                    if fix_string_enum_values_in_input_value(schema, type_, &mut argument.value) {
+                        is_modified = true;
+                    }
+                }
+                if fix_string_enum_values_in_directives(schema, &mut field.directives) {
+                    is_modified = true;
+                }
+                if fix_string_enum_values_in_selection_set(schema, &mut field.selection_set) {
+                    is_modified = true;
+                }
+            }
+            executable::Selection::FragmentSpread(fragment_spread) => {
+                let fragment_spread = fragment_spread.make_mut();
+                if fix_string_enum_values_in_directives(schema, &mut fragment_spread.directives) {
+                    is_modified = true;
+                }
+            }
+            executable::Selection::InlineFragment(inline_fragment) => {
+                let inline_fragment = inline_fragment.make_mut();
+                if fix_string_enum_values_in_directives(schema, &mut inline_fragment.directives) {
+                    is_modified = true;
+                }
+                if fix_string_enum_values_in_selection_set(
+                    schema,
+                    &mut inline_fragment.selection_set,
+                ) {
+                    is_modified = true;
+                }
+            }
+        }
+    }
+    is_modified
+}
+
+fn fix_string_enum_values_in_directives(
+    schema: &Valid<Schema>,
+    directives: &mut executable::DirectiveList,
+) -> bool {
+    let mut is_modified = false;
+    for directive in directives.iter_mut() {
+        let Some(directive_definition) = schema.directive_definitions.get(&directive.name) else {
+            continue;
+        };
+        let directive = directive.make_mut();
+        for argument in directive.arguments.iter_mut() {
+            let Some(type_) = directive_definition
+                .argument_by_name(&argument.name)
+                .map(|def| &def.ty)
+            else {
+                continue;
+            };
+            let argument = argument.make_mut();
+            if fix_string_enum_values_in_input_value(schema, type_, &mut argument.value) {
+                is_modified = true;
+            }
+        }
+    }
+    is_modified
+}
+
+fn fix_string_enum_values_in_input_value(
+    schema: &Valid<Schema>,
+    type_: &executable::Type,
+    value: &mut Node<executable::Value>,
+) -> bool {
+    let mut is_modified = false;
+    let Some(type_definition) = schema.types.get(type_.inner_named_type()) else {
+        return is_modified;
+    };
+    let value = value.make_mut();
+    match value {
+        executable::Value::Int(_)
+        | executable::Value::Float(_)
+        | executable::Value::Boolean(_)
+        | executable::Value::Null
+        | executable::Value::Variable(_)
+        | executable::Value::Enum(_) => {}
+        executable::Value::String(string_value) => {
+            let ExtendedType::Enum(type_definition) = type_definition else {
+                return is_modified;
+            };
+            let Ok(enum_value) = executable::Name::new(string_value) else {
+                return is_modified;
+            };
+            if !type_definition.values.contains_key(&enum_value) {
+                return is_modified;
+            }
+            *value = executable::Value::Enum(enum_value);
+            is_modified = true;
+        }
+        executable::Value::List(values) => {
+            if !type_.is_list() {
+                return is_modified;
+            }
+            let type_ = type_.item_type();
+            for value in values {
+                if fix_string_enum_values_in_input_value(schema, type_, value) {
+                    is_modified = true;
+                }
+            }
+        }
+        executable::Value::Object(values) => {
+            let ExtendedType::InputObject(type_definition) = type_definition else {
+                return is_modified;
+            };
+            for (key, value) in values {
+                let Some(type_) = type_definition.fields.get(key).map(|def| &def.ty) else {
+                    continue;
+                };
+                if fix_string_enum_values_in_input_value(schema, type_, value) {
+                    is_modified = true;
+                }
+            }
+        }
+    }
+    is_modified
 }
 
 // PORT_NOTE: The JS codebase called this `collectTargetFields()`, but this naming didn't make it

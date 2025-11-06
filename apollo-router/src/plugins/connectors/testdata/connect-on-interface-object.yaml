@@ -1,0 +1,45 @@
+subgraphs:
+  graphql:
+    routing_url: http://none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.11", import: ["@key"])
+
+        type Query {
+          users: [User!]!
+        }
+
+        interface User @key(fields: "id") {
+          id: ID!
+        }
+
+        type Employee implements User @key(fields: "id") {
+          id: ID!
+          name: String
+        }
+
+        type Customer implements User @key(fields: "id") {
+          id: ID!
+          name: String
+        }
+
+  connectors:
+    routing_url: http://none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.11", import: ["@key", "@interfaceObject"])
+          @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@source", "@connect"])
+          @source(name: "json", http: { baseURL: "http://localhost:4001/api" })
+
+        type User
+          @connect(source: "json"
+            http: { GET: "/users/{$$this.id}" }
+            selection: "id favoriteColor"
+          )
+          @interfaceObject @key(fields: "id")
+        {
+          id: ID!
+          favoriteColor: String
+        }

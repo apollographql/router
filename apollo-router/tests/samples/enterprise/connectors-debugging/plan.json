@@ -27,23 +27,33 @@
         "query": "query { post(id: 1) { id author { name } title } }"
       },
       "expected_response": {
-        "data": {
-          "post": {
-            "id": 1,
-            "author": { "name": "Leanne Graham" },
-            "title": null
-          }
-        },
+        "data": { "post": { "id": 1, "author": { "name": "Leanne Graham" }, "title": null } },
         "extensions": {
           "apolloConnectorsDebugging": {
-            "version": "1",
+            "version": "2",
             "data": [
               {
                 "request": {
-                  "url": "http://127.0.0.1:61000/posts/1",
+                  "url": "http://127.0.0.1:61000/posts/1?invalidInConnectUri=",
                   "method": "GET",
-                  "headers": [["x-from", "client-value"]],
-                  "body": null
+                  "headers": [
+                    ["x-invalid-from-connect", ""],
+                    ["x-from", "client-value"],
+                    ["x-invalid-from-source", ""]
+                  ],
+                  "body": null,
+                  "sourceUrl": {
+                    "base": "http://127.0.0.1:61000/",
+                    "path": null,
+                    "queryParams": "invalidFromSource: $config.abcd"
+                  },
+                  "connectUrl": {
+                    "base": "/posts/{$args.id}?invalidInConnectUri={$config.aaa}",
+                    "path": null,
+                    "queryParams": "invalidFromConnect: $config.abcdef"
+                  },
+                  "sourceHeaders": [["x-invalid-from-source", "{$context.abcd}"]],
+                  "connectHeaders": [["x-invalid-from-connect", "{$config.aaa}"]]
                 },
                 "response": {
                   "status": 200,
@@ -63,27 +73,63 @@
                     "selection": {
                       "source": "id\ntitle: postTitle\nbody\nauthor: {\n  id: userId\n}",
                       "transformed": "id\ntitle: postTitle\nauthor: {\n  __typename: $->echo(\"User\")\n  id: userId\n}",
-                      "result": {
-                        "id": 1,
-                        "author": { "__typename": "User", "id": 1 }
-                      },
-                      "errors": [
-                        {
-                          "message": "Property .postTitle not found in object",
-                          "path": "postTitle",
-                          "count": 1
-                        }
-                      ]
+                      "result": { "id": 1, "author": { "__typename": "User", "id": 1 } }
                     }
+                  },
+                  "errors": {
+                    "message": "$context.aaaaa",
+                    "sourceExtensions": "fromSource: $config.aaaaa",
+                    "connectExtensions": null
                   }
-                }
+                },
+                "problems": [
+                  {
+                    "location": "SourceQueryParams",
+                    "details": { "message": "Property .abcd not found in object", "path": "$config.abcd", "count": 1 }
+                  },
+                  {
+                    "location": "ConnectUrl",
+                    "details": { "message": "Property .aaa not found in object", "path": "$config.aaa", "count": 1 }
+                  },
+                  {
+                    "location": "ConnectQueryParams",
+                    "details": {
+                      "message": "Property .abcdef not found in object",
+                      "path": "$config.abcdef",
+                      "count": 1
+                    }
+                  },
+                  {
+                    "location": "SourceHeaders",
+                    "details": { "message": "Property .abcd not found in object", "path": "$context.abcd", "count": 1 }
+                  },
+                  {
+                    "location": "ConnectHeaders",
+                    "details": { "message": "Property .aaa not found in object", "path": "$config.aaa", "count": 1 }
+                  },
+                  {
+                    "location": "Selection",
+                    "details": { "message": "Property .postTitle not found in object", "path": "postTitle", "count": 1 }
+                  }
+                ]
               },
               {
                 "request": {
                   "url": "http://127.0.0.1:61000/users/1",
                   "method": "GET",
-                  "headers": [["x-from", "client-value"]],
-                  "body": null
+                  "headers": [
+                    ["x-from", "client-value"],
+                    ["x-invalid-from-source", ""]
+                  ],
+                  "body": null,
+                  "sourceUrl": {
+                    "base": "http://127.0.0.1:61000/",
+                    "path": null,
+                    "queryParams": "invalidFromSource: $config.abcd"
+                  },
+                  "connectUrl": { "base": "/users/{$args.id}", "path": null, "queryParams": null },
+                  "sourceHeaders": [["x-invalid-from-source", "{$context.abcd}"]],
+                  "connectHeaders": null
                 },
                 "response": {
                   "status": 200,
@@ -117,11 +163,120 @@
                     "selection": {
                       "source": "id\nname\nusername",
                       "transformed": "name",
-                      "result": { "name": "Leanne Graham" },
-                      "errors": []
+                      "result": { "name": "Leanne Graham" }
+                    }
+                  },
+                  "errors": {
+                    "message": "$context.aaaaa",
+                    "sourceExtensions": "fromSource: $config.aaaaa",
+                    "connectExtensions": null
+                  }
+                },
+                "problems": [
+                  {
+                    "location": "SourceQueryParams",
+                    "details": { "message": "Property .abcd not found in object", "path": "$config.abcd", "count": 1 }
+                  },
+                  {
+                    "location": "SourceHeaders",
+                    "details": { "message": "Property .abcd not found in object", "path": "$context.abcd", "count": 1 }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "Request",
+      "headers": {
+        "Apollo-Connectors-Debugging": "true",
+        "x-test-from": "client-value"
+      },
+      "request": {
+        "query": "query { broken { id author { name } title } }"
+      },
+      "expected_response": {
+        "data": { "broken": null },
+        "errors": [
+          {
+            "message": "",
+            "path": ["broken"],
+            "extensions": {
+              "http": { "status": 500 },
+              "connector": { "coordinate": "connectors:Query.broken[0]" },
+              "code": "BROKEN_THING",
+              "service": "connectors"
+            }
+          }
+        ],
+        "extensions": {
+          "apolloConnectorsDebugging": {
+            "version": "2",
+            "data": [
+              {
+                "request": {
+                  "url": "http://127.0.0.1:61000/broken",
+                  "method": "GET",
+                  "headers": [
+                    ["x-from", "client-value"],
+                    ["x-invalid-from-source", ""]
+                  ],
+                  "body": null,
+                  "sourceUrl": {
+                    "base": "http://127.0.0.1:61000/",
+                    "path": null,
+                    "queryParams": "invalidFromSource: $config.abcd"
+                  },
+                  "connectUrl": { "base": "/broken", "path": null, "queryParams": null },
+                  "sourceHeaders": [["x-invalid-from-source", "{$context.abcd}"]],
+                  "connectHeaders": null
+                },
+                "response": {
+                  "status": 500,
+                  "headers": [
+                    ["content-type", "application/json; charset=utf-8"],
+                    ["date", "Tue, 07 Jan 2025 18:34:52 GMT"],
+                    ["content-length", "50"]
+                  ],
+                  "body": {
+                    "kind": "json",
+                    "content": { "message": "It broke!", "errorCode": "BROKEN_THING" },
+                    "selection": null
+                  },
+                  "errors": {
+                    "message": "$config.bbbbb",
+                    "sourceExtensions": "fromSource: $config.aaaaa",
+                    "connectExtensions": "fromSource: $context.bbbbb\ncode: errorCode"
+                  }
+                },
+                "problems": [
+                  {
+                    "location": "SourceQueryParams",
+                    "details": { "message": "Property .abcd not found in object", "path": "$config.abcd", "count": 1 }
+                  },
+                  {
+                    "location": "SourceHeaders",
+                    "details": { "message": "Property .abcd not found in object", "path": "$context.abcd", "count": 1 }
+                  },
+                  {
+                    "location": "ErrorsMessage",
+                    "details": { "message": "Property .bbbbb not found in object", "path": "$config.bbbbb", "count": 1 }
+                  },
+                  {
+                    "location": "SourceErrorsExtensions",
+                    "details": { "message": "Property .aaaaa not found in object", "path": "$config.aaaaa", "count": 1 }
+                  },
+                  {
+                    "location": "ConnectErrorsExtensions",
+                    "details": {
+                      "message": "Property .bbbbb not found in object",
+                      "path": "$context.bbbbb",
+                      "count": 1
                     }
                   }
-                }
+                ]
               }
             ]
           }

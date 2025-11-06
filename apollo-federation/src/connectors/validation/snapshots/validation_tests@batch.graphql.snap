@@ -22,7 +22,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/batch.graphql
         code: SourceNameMismatch,
         message: "`@connect(source: \"missing\")` on `T` does not match any defined sources. Did you mean \"json\"?",
         locations: [
-            31:5..31:22,
+            31:13..31:22,
         ],
     },
     Message {
@@ -41,7 +41,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/batch.graphql
     },
     Message {
         code: InvalidUrl,
-        message: "In `GET` in `@connect(http:)` on `T`: $args is not valid here, must be one of $this, $batch, $config, $context, $request",
+        message: "In `GET` in `@connect(http:)` on `T`: $args is not valid here, must be one of $this, $batch, $config, $context, $request, $env",
         locations: [
             37:29..37:37,
         ],
@@ -70,7 +70,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/batch.graphql
     },
     Message {
         code: InvalidSelection,
-        message: "In `@connect(selection:)` on `T`: variable `$batch` is not valid at this location, must be one of $args, $config, $context, $request, $response, $status, $this",
+        message: "In `@connect(selection:)` on `T`: variable `$batch` is not valid at this location, must be one of $args, $config, $context, $env, $request, $response, $status, $this",
         locations: [
             64:35..64:41,
         ],

@@ -6,14 +6,21 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use apollo_federation::connectors::Connector;
+use apollo_federation::connectors::runtime::debug::ConnectorContext;
+use apollo_federation::connectors::runtime::errors::Error;
+use apollo_federation::connectors::runtime::errors::RuntimeError;
+#[cfg(test)]
+use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
+use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
+use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
+use apollo_federation::connectors::runtime::key::ResponseKey;
+use apollo_federation::connectors::runtime::mapping::Problem;
+use apollo_federation::connectors::runtime::responses::MappedResponse;
 use futures::future::BoxFuture;
-use http::HeaderMap;
-use http::HeaderValue;
 use indexmap::IndexMap;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
-use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 use tower::ServiceExt;
@@ -22,15 +29,8 @@ use tower::buffer::Buffer;
 use crate::Context;
 use crate::error::FetchError;
 use crate::graphql;
-use crate::graphql::ErrorExtension;
-use crate::json_ext::Path;
 use crate::layers::DEFAULT_BUFFER_SIZE;
-use crate::plugins::connectors::handle_responses::MappedResponse;
 use crate::plugins::connectors::handle_responses::process_response;
-use crate::plugins::connectors::make_requests::ResponseKey;
-use crate::plugins::connectors::mapping::Problem;
-use crate::plugins::connectors::plugin::debug::ConnectorContext;
-use crate::plugins::connectors::plugin::debug::ConnectorDebugHttpRequest;
 use crate::plugins::connectors::request_limit::RequestLimits;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
@@ -41,12 +41,8 @@ use crate::plugins::telemetry::config_new::connector::events::ConnectorEventRequ
 use crate::plugins::telemetry::config_new::events::EventLevel;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::services::Plugins;
-use crate::services::connector::request_service::transport::http::HttpRequest;
-use crate::services::connector::request_service::transport::http::HttpResponse;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::router;
-
-pub(crate) mod transport;
 
 pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub(crate) type ServiceResult = Result<Response, BoxError>;
@@ -56,7 +52,6 @@ assert_impl_all!(Response: Send);
 
 /// Request type for a single connector request
 #[derive(Debug)]
-#[non_exhaustive]
 pub struct Request {
     /// The request context
     pub(crate) context: Context,
@@ -66,10 +61,6 @@ pub struct Request {
     // internal information about the connector. A new type may be needed which exposes only
     // what is necessary for customizations.
     pub(crate) connector: Arc<Connector>,
-
-    /// The service name for this connector
-    #[allow(dead_code)]
-    pub(crate) service_name: String,
 
     /// The request to the underlying transport
     pub(crate) transport_request: TransportRequest,
@@ -86,16 +77,7 @@ pub struct Request {
 
 /// Response type for a connector
 #[derive(Debug)]
-#[non_exhaustive]
 pub struct Response {
-    /// The response context
-    #[allow(dead_code)]
-    pub(crate) context: Context,
-
-    /// The connector associated with this response
-    #[allow(dead_code)]
-    pub(crate) connector: Arc<Connector>,
-
     /// The result of the transport request
     pub(crate) transport_result: Result<TransportResponse, Error>,
 
@@ -103,42 +85,32 @@ pub struct Response {
     pub(crate) mapped_response: MappedResponse,
 }
 
-#[buildstructor::buildstructor]
 impl Response {
-    #[builder(visibility = "pub")]
     pub(crate) fn error_new(
-        context: Context,
-        connector: Arc<Connector>,
         error: Error,
-        message: String,
+        message: impl Into<String>,
         response_key: ResponseKey,
     ) -> Self {
-        let graphql_error = graphql::Error::builder()
-            .message(message)
-            .extension_code(error.extension_code())
-            .build();
+        let graphql_error = RuntimeError::new(message, &response_key).with_code(error.code());
 
         let mapped_response = MappedResponse::Error {
             error: graphql_error,
             key: response_key,
+            problems: Vec::new(),
         };
 
         Self {
-            context,
-            connector,
             transport_result: Err(error),
             mapped_response,
         }
     }
 
-    #[builder(visibility = "pub")]
+    #[cfg(test)]
     pub(crate) fn test_new(
-        context: Context,
-        connector: Arc<Connector>,
         response_key: ResponseKey,
         problems: Vec<Problem>,
-        data: Value,
-        headers: Option<HeaderMap<HeaderValue>>,
+        data: serde_json_bytes::Value,
+        headers: Option<http::HeaderMap<http::HeaderValue>>,
     ) -> Self {
         let mapped_response = MappedResponse::Data {
             data: data.clone(),
@@ -156,106 +128,9 @@ impl Response {
         let http_response = HttpResponse { inner: parts };
 
         Self {
-            context,
-            connector,
             transport_result: Ok(http_response.into()),
             mapped_response,
         }
-    }
-}
-
-/// Request to an underlying transport
-#[derive(Debug)]
-#[non_exhaustive]
-pub(crate) enum TransportRequest {
-    /// A request to an HTTP transport
-    Http(HttpRequest),
-}
-
-/// Response from an underlying transport
-#[derive(Debug)]
-#[non_exhaustive]
-pub(crate) enum TransportResponse {
-    /// A response from an HTTP transport
-    Http(HttpResponse),
-}
-
-impl From<HttpRequest> for TransportRequest {
-    fn from(value: HttpRequest) -> Self {
-        Self::Http(value)
-    }
-}
-
-impl From<HttpResponse> for TransportResponse {
-    fn from(value: HttpResponse) -> Self {
-        Self::Http(value)
-    }
-}
-
-/// An error sending a connector request. This represents a problem with sending the request
-/// to the connector, rather than an error returned from the connector itself.
-#[derive(Debug, thiserror::Error, displaydoc::Display)]
-pub(crate) enum Error {
-    /// Request limit exceeded
-    RequestLimitExceeded,
-
-    /// Rate limit exceeded
-    RateLimited,
-
-    /// Timeout
-    GatewayTimeout,
-
-    /// {0}
-    TransportFailure(#[from] BoxError),
-}
-
-impl Clone for Error {
-    fn clone(&self) -> Self {
-        match self {
-            Self::TransportFailure(err) => Self::TransportFailure(BoxError::from(err.to_string())),
-            err => err.clone(),
-        }
-    }
-}
-
-impl Error {
-    /// Create a GraphQL error from this error.
-    #[must_use]
-    pub(crate) fn to_graphql_error(
-        &self,
-        connector: Arc<Connector>,
-        path: Option<Path>,
-    ) -> crate::error::Error {
-        use serde_json_bytes::*;
-
-        let builder = graphql::Error::builder()
-            .message(self.to_string())
-            .extension_code(self.extension_code())
-            .extension("service", connector.id.subgraph_name.clone())
-            .extension(
-                "connector",
-                Value::Object(Map::from_iter([(
-                    "coordinate".into(),
-                    Value::String(connector.id.coordinate().into()),
-                )])),
-            );
-        if let Some(path) = path {
-            builder.path(path).build()
-        } else {
-            builder.build()
-        }
-    }
-}
-
-impl ErrorExtension for Error {
-    fn extension_code(&self) -> String {
-        match self {
-            Self::RequestLimitExceeded => "REQUEST_LIMIT_EXCEEDED",
-            Self::TransportFailure(_) => "HTTP_CLIENT_ERROR",
-            Self::RateLimited => "REQUEST_RATE_LIMITED",
-            Self::GatewayTimeout => "GATEWAY_TIMEOUT",
-        }
-        .to_string()
     }
 }
 
@@ -331,7 +206,7 @@ impl tower::Service<Request> for ConnectorRequestService {
                     lock.get::<Arc<RequestLimits>>()
                         .map(|limits| {
                             limits.get(
-                                (&request.connector.id).into(),
+                                request.connector.as_ref().into(),
                                 request.connector.max_requests,
                             )
                         })
@@ -348,7 +223,7 @@ impl tower::Service<Request> for ConnectorRequestService {
         });
 
         Box::pin(async move {
-            let mut debug_request: Option<Box<ConnectorDebugHttpRequest>> = None;
+            let mut debug_request = (None, Default::default());
             let result = if request_limit.is_some_and(|request_limit| !request_limit.allow()) {
                 Err(Error::RequestLimitExceeded)
             } else {
@@ -359,7 +234,7 @@ impl tower::Service<Request> for ConnectorRequestService {
                         log_request(
                             &http_request.inner,
                             log_request_level,
-                            &request.connector.id.label,
+                            request.connector.label.as_ref(),
                         );
 
                         let source_name = request.connector.source_config_key();
@@ -379,7 +254,11 @@ impl tower::Service<Request> for ConnectorRequestService {
                                 })
                                 .await
                                 .map(|result| result.http_response)
-                                .map_err(|e| replace_subgraph_name(e, &request.connector).into())
+                                .map_err(|e|
+                                    // Note: this previously used `#[from] BoxError` but when we moved `Error` into the
+                                    // `apollo-federation` crate, we could longer reference `BoxError` from there.
+                                    Error::TransportFailure((replace_subgraph_name(e, &request.connector)).to_string())
+                                )
                         } else {
                             Err(Error::TransportFailure("no http client found".into()))
                         }
@@ -399,11 +278,11 @@ impl tower::Service<Request> for ConnectorRequestService {
 
             Ok(process_response(
                 result,
-                request.key.clone(),
+                request.key,
                 request.connector,
                 &request.context,
                 debug_request,
-                &debug,
+                debug.as_ref(),
                 request.supergraph_request,
             )
             .await)
@@ -436,7 +315,7 @@ fn log_request(
 
         attrs.push(KeyValue::new(
             HTTP_REQUEST_HEADERS,
-            opentelemetry::Value::String(format!("{:?}", headers).into()),
+            opentelemetry::Value::String(format!("{headers:?}").into()),
         ));
         attrs.push(KeyValue::new(
             HTTP_REQUEST_METHOD,

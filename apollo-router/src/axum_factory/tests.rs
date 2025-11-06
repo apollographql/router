@@ -23,11 +23,14 @@ use http::header::CONTENT_TYPE;
 use http::header::{self};
 #[cfg(unix)]
 use http_body_util::BodyExt;
+#[cfg(unix)]
 use hyper::rt::ReadBufCursor;
+#[cfg(unix)]
 use hyper_util::rt::TokioIo;
 use mime::APPLICATION_JSON;
 use mockall::mock;
 use multimap::MultiMap;
+#[cfg(unix)]
 use pin_project_lite::pin_project;
 use reqwest::Client;
 use reqwest::Method;
@@ -40,13 +43,14 @@ use reqwest::header::ACCESS_CONTROL_MAX_AGE;
 use reqwest::header::ACCESS_CONTROL_REQUEST_HEADERS;
 use reqwest::header::ACCESS_CONTROL_REQUEST_METHOD;
 use reqwest::header::ORIGIN;
-use reqwest::redirect::Policy;
 use serde_json::json;
 use test_log::test;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncReadExt;
+#[cfg(unix)]
 use tokio::io::AsyncWrite;
 use tokio::io::AsyncWriteExt;
+#[cfg(unix)]
 use tokio::io::ReadBuf;
 use tokio::sync::mpsc;
 use tokio_util::io::StreamReader;
@@ -60,21 +64,21 @@ use crate::ApolloRouterError;
 use crate::Configuration;
 use crate::ListenAddr;
 use crate::TestHarness;
-use crate::axum_factory::connection_handle::connection_counts;
+use crate::assert_response_eq_ignoring_error_id;
 use crate::configuration::Homepage;
 use crate::configuration::Sandbox;
 use crate::configuration::Supergraph;
 use crate::configuration::cors::Cors;
+use crate::configuration::cors::Policy;
 use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::json_ext::Path;
-use crate::metrics::FutureMetricsExt;
-use crate::plugins::content_negotiation::MULTIPART_DEFER_ACCEPT_HEADER_VALUE;
-use crate::plugins::content_negotiation::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
 use crate::plugins::healthcheck::Config as HealthCheck;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
+use crate::services::MULTIPART_DEFER_ACCEPT;
+use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphResponse;
@@ -220,7 +224,7 @@ async fn init(
             None,
             vec![],
             MultiMap::new(),
-            LicenseState::Unlicensed,
+            Arc::new(LicenseState::Unlicensed),
             all_connections_stopped_sender,
         )
         .await
@@ -238,7 +242,7 @@ async fn init(
     let client = reqwest::Client::builder()
         .no_gzip()
         .default_headers(default_headers)
-        .redirect(Policy::none())
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .unwrap();
     (server, client)
@@ -278,7 +282,7 @@ pub(super) async fn init_with_config(
             None,
             vec![],
             web_endpoints,
-            LicenseState::Unlicensed,
+            Arc::new(LicenseState::Unlicensed),
             all_connections_stopped_sender,
         )
         .await?;
@@ -295,7 +299,7 @@ pub(super) async fn init_with_config(
     let client = reqwest::Client::builder()
         .no_gzip()
         .default_headers(default_headers)
-        .redirect(Policy::none())
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .unwrap();
     Ok((server, client))
@@ -345,7 +349,7 @@ async fn init_unix(
             None,
             vec![],
             MultiMap::new(),
-            LicenseState::Unlicensed,
+            Arc::new(LicenseState::Unlicensed),
             all_connections_stopped_sender,
         )
         .await
@@ -1066,7 +1070,7 @@ async fn response_failure() -> Result<(), ApolloRouterError> {
         .await
         .unwrap();
 
-    assert_eq!(
+    assert_response_eq_ignoring_error_id!(
         response,
         crate::error::FetchError::SubrequestHttpError {
             status_code: Some(200),
@@ -1109,7 +1113,7 @@ async fn cors_preflight() -> Result<(), ApolloRouterError> {
         .header(ACCESS_CONTROL_REQUEST_METHOD, "POST")
         .header(
             ACCESS_CONTROL_REQUEST_HEADERS,
-            "Content-type, x-an-other-test-header, apollo-require-preflight",
+            "content-type, x-an-other-test-header, apollo-require-preflight",
         )
         .send()
         .await
@@ -1125,7 +1129,11 @@ async fn cors_preflight() -> Result<(), ApolloRouterError> {
     assert_header_contains!(
         &response,
         ACCESS_CONTROL_ALLOW_HEADERS,
-        &["Content-type, x-an-other-test-header, apollo-require-preflight"],
+        &[
+            "content-type",
+            "x-an-other-test-header",
+            "apollo-require-preflight"
+        ],
         "Incorrect access control allow header header {headers:?}"
     );
     assert_header_contains!(
@@ -1473,7 +1481,7 @@ async fn cors_origin_default() -> Result<(), ApolloRouterError> {
 
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://studio.apollographql.com").await;
-    assert_cors_origin(response, "https://studio.apollographql.com");
+    assert_cors_origin(response, "https://studio.apollographql.com").await;
 
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://this.wont.work.com").await;
@@ -1516,7 +1524,33 @@ async fn cors_allow_any_origin() -> Result<(), ApolloRouterError> {
     let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
     let response = request_cors_with_origin(&client, url.as_str(), "https://thisisatest.com").await;
-    assert_cors_origin(response, "*");
+    assert_cors_origin(response, "*").await;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn cors_allow_any_origin_but_no_origin_header() -> Result<(), ApolloRouterError> {
+    let conf = Configuration::fake_builder()
+        .cors(Cors::builder().allow_any_origin(true).build())
+        .build()
+        .unwrap();
+    let (server, client) = init_with_config(
+        router::service::empty().await,
+        Arc::new(conf),
+        MultiMap::new(),
+    )
+    .await?;
+    let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
+
+    let response = client
+        .request(Method::OPTIONS, url)
+        .header("Access-Control-Request-Method", "POST")
+        .header("Access-Control-Request-Headers", "content-type")
+        .send()
+        .await
+        .unwrap();
+    assert_not_cors_origin(response, "*");
 
     Ok(())
 }
@@ -1528,7 +1562,11 @@ async fn cors_origin_list() -> Result<(), ApolloRouterError> {
     let conf = Configuration::fake_builder()
         .cors(
             Cors::builder()
-                .origins(vec![valid_origin.to_string()])
+                .policies(vec![
+                    Policy::builder()
+                        .origins(vec![valid_origin.to_string()])
+                        .build(),
+                ])
                 .build(),
         )
         .build()
@@ -1542,7 +1580,7 @@ async fn cors_origin_list() -> Result<(), ApolloRouterError> {
     let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
     let response = request_cors_with_origin(&client, url.as_str(), valid_origin).await;
-    assert_cors_origin(response, valid_origin);
+    assert_cors_origin(response, valid_origin).await;
 
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://thisoriginisinvalid").await;
@@ -1558,8 +1596,17 @@ async fn cors_origin_regex() -> Result<(), ApolloRouterError> {
     let conf = Configuration::fake_builder()
         .cors(
             Cors::builder()
-                .origins(vec!["https://anexactmatchorigin.com".to_string()])
-                .match_origins(vec![apollo_subdomains.to_string()])
+                .policies(vec![
+                    Policy::builder()
+                        .origins(vec!["https://anexactmatchorigin.com".to_string()])
+                        .match_origins(vec![regex::Regex::new(apollo_subdomains).unwrap()])
+                        .allow_headers(vec![
+                            "content-type".into(),
+                            "x-an-other-test-header".into(),
+                            "apollo-require-preflight".into(),
+                        ])
+                        .build(),
+                ])
                 .build(),
         )
         .build()
@@ -1575,10 +1622,10 @@ async fn cors_origin_regex() -> Result<(), ApolloRouterError> {
     // regex tests
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://www.apollographql.com").await;
-    assert_cors_origin(response, "https://www.apollographql.com");
+    assert_cors_origin(response, "https://www.apollographql.com").await;
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://staging.apollographql.com").await;
-    assert_cors_origin(response, "https://staging.apollographql.com");
+    assert_cors_origin(response, "https://staging.apollographql.com").await;
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://thisshouldnotwork.com").await;
     assert_not_cors_origin(response, "https://thisshouldnotwork.com");
@@ -1586,7 +1633,7 @@ async fn cors_origin_regex() -> Result<(), ApolloRouterError> {
     // exact match tests
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://anexactmatchorigin.com").await;
-    assert_cors_origin(response, "https://anexactmatchorigin.com");
+    assert_cors_origin(response, "https://anexactmatchorigin.com").await;
 
     // won't match
     let response =
@@ -1607,8 +1654,19 @@ async fn request_cors_with_origin(client: &Client, url: &str, origin: &str) -> r
         .unwrap()
 }
 
-fn assert_cors_origin(response: reqwest::Response, origin: &str) {
-    assert!(response.status().is_success());
+async fn assert_cors_origin(response: reqwest::Response, origin: &str) {
+    if !response.status().is_success() {
+        let status = response.status();
+        let headers = response.headers().clone();
+        let body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Failed to get response body".to_string());
+        println!("Response status: {status}");
+        println!("Response headers: {headers:?}");
+        println!("Response body: {body}");
+        panic!("Response status is not success: {status}");
+    }
     let headers = response.headers();
     assert_headers_valid(&response);
     assert!(origin_valid(headers, origin));
@@ -1723,7 +1781,7 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
     let mut response = client
         .post(&url)
         .body(query.to_string())
-        .header(ACCEPT, MULTIPART_DEFER_ACCEPT_HEADER_VALUE)
+        .header(ACCEPT, HeaderValue::from_static(MULTIPART_DEFER_ACCEPT))
         .send()
         .await
         .unwrap();
@@ -1731,7 +1789,7 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         response.headers().get(CONTENT_TYPE),
-        Some(&MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE)
+        Some(&HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE))
     );
 
     let first = response.chunk().await.unwrap().unwrap();
@@ -1783,7 +1841,7 @@ async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterErr
     let mut response = client
         .post(&url)
         .body(query.to_string())
-        .header(ACCEPT, MULTIPART_DEFER_ACCEPT_HEADER_VALUE)
+        .header(ACCEPT, HeaderValue::from_static(MULTIPART_DEFER_ACCEPT))
         .send()
         .await
         .unwrap();
@@ -1791,7 +1849,7 @@ async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterErr
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         response.headers().get(CONTENT_TYPE),
-        Some(&MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE)
+        Some(&HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE))
     );
 
     let first = response.chunk().await.unwrap().unwrap();
@@ -1832,7 +1890,7 @@ async fn it_supports_server_restart() {
             None,
             vec![],
             MultiMap::new(),
-            LicenseState::default(),
+            Arc::new(LicenseState::default()),
             all_connections_stopped_sender,
         )
         .await
@@ -1861,7 +1919,7 @@ async fn it_supports_server_restart() {
             supergraph_service_factory,
             new_configuration,
             MultiMap::new(),
-            LicenseState::default(),
+            Arc::new(LicenseState::default()),
         )
         .await
         .unwrap();
@@ -1974,7 +2032,7 @@ async fn http_deferred_service() -> impl Service<
         .map_err(Into::into)
         .map_response(|response: http::Response<axum::body::Body>| {
             let response = response.map(|body| {
-                // Convert from axum’s BoxBody to AsyncBufRead
+                // Convert from axum's BoxBody to AsyncBufRead
                 let mut body = body.into_data_stream();
                 let stream = poll_fn(move |ctx| body.poll_next_unpin(ctx))
                     .map(|result| result.map_err(io::Error::other));
@@ -2091,7 +2149,7 @@ async fn test_defer_is_not_buffered() {
     // before the first one reaches the client.
     //
     // Conversely, observing the value `1` after receiving the first part
-    // means the didn’t wait for all parts to be in the compression buffer
+    // means the didn't wait for all parts to be in the compression buffer
     // before sending any.
     assert_eq!(counts, [1, 2]);
 }
@@ -2252,7 +2310,7 @@ async fn send_to_unix_socket(addr: &ListenAddr, method: Method, body: &str) -> S
     let (mut sender, conn) = hyper::client::conn::http1::handshake(stream).await.unwrap();
     tokio::task::spawn(async move {
         if let Err(err) = conn.await {
-            println!("Connection failed: {:?}", err);
+            println!("Connection failed: {err:?}");
         }
     });
 
@@ -2370,76 +2428,4 @@ async fn test_supergraph_and_health_check_same_port_different_listener() {
         "tried to bind 0.0.0.0 and 127.0.0.1 on port 4013",
         error.to_string()
     );
-}
-
-/// This tests that the apollo.router.open_connections metric is keeps track of connections
-/// It's a replacement for the session count total metric that is more in line with otel conventions
-/// It also has pipeline information attached to it.
-#[tokio::test]
-async fn it_reports_open_connections_metric() {
-    let configuration = Configuration::fake_builder().build().unwrap();
-
-    async {
-        let (server, _client) = init_with_config(
-            router::service::empty().await,
-            Arc::new(configuration),
-            MultiMap::new(),
-        )
-        .await
-        .unwrap();
-
-        let url = format!(
-            "{}/graphql",
-            server
-                .graphql_listen_address()
-                .as_ref()
-                .expect("listen address")
-        );
-
-        let client = reqwest::Client::builder()
-            .pool_max_idle_per_host(1)
-            .build()
-            .unwrap();
-
-        let second_client = reqwest::Client::builder()
-            .pool_max_idle_per_host(1)
-            .build()
-            .unwrap();
-
-        // Create a second client that does not reuse the same connection pool.
-        let _first_response = client
-            .post(url.clone())
-            .body(r#"{ "query": "{ me }" }"#)
-            .send()
-            .await
-            .unwrap();
-
-        assert_eq!(*connection_counts().iter().next().unwrap().1, 1);
-
-        let _second_response = second_client
-            .post(url.clone())
-            .body(r#"{ "query": "{ me }" }"#)
-            .send()
-            .await
-            .unwrap();
-
-        // Both requests are in-flight
-        assert_eq!(*connection_counts().iter().next().unwrap().1, 2);
-
-        // Connection is still open in the pool even though the request is complete.
-        assert_eq!(*connection_counts().iter().next().unwrap().1, 2);
-
-        drop(client);
-        drop(second_client);
-
-        // XXX(@bryncooke): Not ideal, but we would probably have to drop down to very
-        // low-level hyper primitives to control the shutdown of connections to the required
-        // extent. 100ms is a long time so I hope it's not flaky.
-        tokio::time::sleep(Duration::from_millis(100)).await;
-
-        // All connections are closed
-        assert_eq!(connection_counts().iter().count(), 0);
-    }
-    .with_metrics()
-    .await;
 }

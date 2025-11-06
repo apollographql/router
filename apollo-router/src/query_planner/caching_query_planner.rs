@@ -1,15 +1,17 @@
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU8;
+use std::sync::atomic::Ordering;
 use std::task;
 
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use query_planner::QueryPlannerPlugin;
 use rand::seq::SliceRandom;
-use rand::thread_rng;
 use sha2::Digest;
 use sha2::Sha256;
+use tokio_util::time::FutureExt;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -27,6 +29,7 @@ use crate::compute_job::ComputeBackPressureError;
 use crate::compute_job::ComputeJobType;
 use crate::compute_job::MaybeBackPressureError;
 use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
+use crate::configuration::cooperative_cancellation::CooperativeCancellation;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::plugins::authorization::AuthorizationPlugin;
@@ -48,12 +51,37 @@ use crate::spec::Schema;
 use crate::spec::SchemaHash;
 use crate::spec::SpecError;
 
+#[repr(u8)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+enum Outcome {
+    None = 0,
+    Timeout = 1,
+    Cancelled = 2,
+    Success = 3,
+    Error = 4,
+    Backpressure = 5,
+    BatchingError = 6,
+}
+
+impl std::fmt::Display for Outcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Outcome::None => write!(f, "none"),
+            Outcome::Timeout => write!(f, "timeout"),
+            Outcome::Cancelled => write!(f, "cancelled"),
+            Outcome::Success => write!(f, "success"),
+            Outcome::Error => write!(f, "error"),
+            Outcome::Backpressure => write!(f, "backpressure"),
+            Outcome::BatchingError => write!(f, "batching_error"),
+        }
+    }
+}
+
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn QueryPlannerPlugin>>;
 pub(crate) type InMemoryCachePlanner =
     InMemoryCache<CachingQueryKey, Result<QueryPlannerContent, Arc<QueryPlannerError>>>;
 pub(crate) const APOLLO_OPERATION_ID: &str = "apollo::supergraph::operation_id";
-pub(crate) const DEPRECATED_APOLLO_OPERATION_ID: &str = "apollo_operation_id";
 
 /// Hashed value of query planner configuration for use in cache keys.
 #[derive(Clone, Hash, PartialEq, Eq)]
@@ -93,6 +121,7 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     plugins: Arc<Plugins>,
     enable_authorization_directives: bool,
     config_mode_hash: Arc<ConfigModeHash>,
+    cooperative_cancellation: CooperativeCancellation,
 }
 
 fn init_query_plan_from_redis(
@@ -100,7 +129,7 @@ fn init_query_plan_from_redis(
     cache_entry: &mut Result<QueryPlannerContent, Arc<QueryPlannerError>>,
 ) -> Result<(), String> {
     if let Ok(QueryPlannerContent::Plan { plan }) = cache_entry {
-        // Arc freshly deserialized from Redis should be unique, so this doesn’t clone:
+        // Arc freshly deserialized from Redis should be unique, so this doesn't clone:
         let plan = Arc::make_mut(plan);
         let root = Arc::make_mut(&mut plan.root);
         root.init_parsed_operations(subgraph_schemas)
@@ -140,6 +169,11 @@ where
         let mut hasher = StructHasher::new();
         configuration.rust_query_planner_config().hash(&mut hasher);
         let config_mode_hash = Arc::new(ConfigModeHash(hasher.finalize()));
+        let cooperative_cancellation = configuration
+            .supergraph
+            .query_planning
+            .experimental_cooperative_cancellation
+            .clone();
 
         Ok(Self {
             cache,
@@ -148,6 +182,7 @@ where
             subgraph_schemas,
             plugins: Arc::new(plugins),
             enable_authorization_directives,
+            cooperative_cancellation,
             config_mode_hash,
         })
     }
@@ -217,7 +252,7 @@ where
             None => Vec::new(),
         };
 
-        cache_keys.shuffle(&mut thread_rng());
+        cache_keys.shuffle(&mut rand::rng());
 
         let should_warm_with_pqs = (experimental_pql_prewarm.on_startup
             && previous_cache.is_none())
@@ -244,22 +279,20 @@ where
         // persisted queries are added first because they should get a lower priority in the LRU cache,
         // since a lot of them may be there to support old clients
         let mut all_cache_keys: Vec<WarmUpCachingQueryKey> = Vec::with_capacity(capacity);
-        if should_warm_with_pqs {
-            if let Some(queries) = persisted_queries_operations {
-                for query in queries {
-                    all_cache_keys.push(WarmUpCachingQueryKey {
-                        query,
-                        operation_name: None,
-                        hash: None,
-                        metadata: CacheKeyMetadata::default(),
-                        plan_options: PlanOptions::default(),
-                        config_mode_hash: self.config_mode_hash.clone(),
-                    });
-                }
+        if should_warm_with_pqs && let Some(queries) = persisted_queries_operations {
+            for query in queries {
+                all_cache_keys.push(WarmUpCachingQueryKey {
+                    query,
+                    operation_name: None,
+                    hash: None,
+                    metadata: CacheKeyMetadata::default(),
+                    plan_options: PlanOptions::default(),
+                    config_mode_hash: self.config_mode_hash.clone(),
+                });
             }
         }
 
-        all_cache_keys.shuffle(&mut thread_rng());
+        all_cache_keys.shuffle(&mut rand::rng());
 
         all_cache_keys.extend(cache_keys.into_iter());
 
@@ -309,16 +342,14 @@ where
                 // check if prewarming via seeing if the previous cache exists (aka a reloaded router); if reloading, try to reuse the
                 if let Some(ref previous_cache) = previous_cache {
                     // if the query hash did not change with the schema update, we can reuse the previously cached entry
-                    if let Some(hash) = hash {
-                        if hash == doc.hash {
-                            if let Some(entry) =
-                                { previous_cache.lock().await.get(&caching_key).cloned() }
-                            {
-                                self.cache.insert_in_memory(caching_key, entry).await;
-                                reused += 1;
-                                continue;
-                            }
-                        }
+                    if let Some(hash) = hash
+                        && hash == doc.hash
+                        && let Some(entry) =
+                            { previous_cache.lock().await.get(&caching_key).cloned() }
+                    {
+                        self.cache.insert_in_memory(caching_key, entry).await;
+                        reused += 1;
+                        continue;
                     }
                 }
             };
@@ -388,15 +419,14 @@ impl CachingQueryPlanner<QueryPlannerService> {
     }
 }
 
-impl<T: Clone + Send + 'static> tower::Service<query_planner::CachingRequest>
-    for CachingQueryPlanner<T>
+impl<T: Clone + Send + 'static> Service<query_planner::CachingRequest> for CachingQueryPlanner<T>
 where
-    T: tower::Service<
+    T: Service<
             QueryPlannerRequest,
             Response = QueryPlannerResponse,
             Error = MaybeBackPressureError<QueryPlannerError>,
         >,
-    <T as tower::Service<QueryPlannerRequest>>::Future: Send,
+    <T as Service<QueryPlannerRequest>>::Future: Send,
 {
     type Response = QueryPlannerResponse;
     type Error = CacheResolverError;
@@ -426,21 +456,40 @@ where
     }
 }
 
+const OUTCOME: &str = "outcome";
+
+fn record_outcome_if_none(outcome_recorded: &AtomicU8, outcome: Outcome) -> bool {
+    if outcome_recorded
+        .compare_exchange(
+            Outcome::None as u8,
+            outcome as u8,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        )
+        .is_ok()
+    {
+        tracing::Span::current().record(OUTCOME, outcome.to_string());
+        true
+    } else {
+        false
+    }
+}
+
 impl<T> CachingQueryPlanner<T>
 where
-    T: tower::Service<
+    T: Service<
             QueryPlannerRequest,
             Response = QueryPlannerResponse,
             Error = MaybeBackPressureError<QueryPlannerError>,
         > + Clone
         + Send
         + 'static,
-    <T as tower::Service<QueryPlannerRequest>>::Future: Send,
+    <T as Service<QueryPlannerRequest>>::Future: Send,
 {
     async fn plan(
         mut self,
         request: query_planner::CachingRequest,
-    ) -> Result<<T as tower::Service<QueryPlannerRequest>>::Response, CacheResolverError> {
+    ) -> Result<<T as Service<QueryPlannerRequest>>::Response, CacheResolverError> {
         if self.enable_authorization_directives {
             AuthorizationPlugin::update_cache_key(&request.context);
         }
@@ -508,96 +557,180 @@ where
                 .compute_job_type(ComputeJobType::QueryPlanning)
                 .build();
 
-            // some clients might timeout and cancel the request before query planning is finished,
-            // so we execute it in a task that can continue even after the request was canceled and
-            // the join handle was dropped. That way, the next similar query will use the cache instead
-            // of restarting the query planner until another timeout
-            tokio::task::spawn(
-                async move {
-                    let service = match self.delegate.ready().await {
-                        Ok(service) => service,
-                        Err(MaybeBackPressureError::PermanentError(error)) => {
-                            let e = Arc::new(error);
-                            let err = e.clone();
-                            tokio::spawn(async move {
-                                entry.insert(Err(err)).await;
-                            });
-                            return Err(CacheResolverError::RetrievalError(e));
-                        }
-                        Err(MaybeBackPressureError::TemporaryError(error)) => {
-                            let err = error.clone();
-                            tokio::spawn(async move {
-                                // Temporary errors are never cached
-                                entry.send(Err(err)).await;
-                            });
-                            return Err(CacheResolverError::Backpressure(error));
-                        }
-                    };
+            let planning_task = async move {
+                let service = match self.delegate.ready().await {
+                    Ok(service) => service,
+                    Err(MaybeBackPressureError::PermanentError(error)) => {
+                        let e = Arc::new(error);
+                        let err = e.clone();
+                        tokio::spawn(async move {
+                            entry.insert(Err(err)).await;
+                        });
+                        return Err(CacheResolverError::RetrievalError(e));
+                    }
+                    Err(MaybeBackPressureError::TemporaryError(error)) => {
+                        let err = error.clone();
+                        tokio::spawn(async move {
+                            // Temporary errors are never cached
+                            entry.send(Err(err)).await;
+                        });
+                        return Err(CacheResolverError::Backpressure(error));
+                    }
+                };
 
-                    let res = service.call(request).await;
+                let res = service.call(request).await;
 
-                    match res {
-                        Ok(QueryPlannerResponse { content, errors }) => {
-                            if let Some(content) = content.clone() {
-                                let can_cache = match &content {
-                                    // Already cached in an introspection-specific, small-size,
-                                    // in-memory-only cache.
-                                    QueryPlannerContent::CachedIntrospectionResponse { .. } => {
-                                        false
-                                    }
-                                    _ => true,
-                                };
+                match res {
+                    Ok(QueryPlannerResponse { content, errors }) => {
+                        if let Some(content) = content.clone() {
+                            let can_cache = match &content {
+                                // Already cached in an introspection-specific, small-size,
+                                // in-memory-only cache.
+                                QueryPlannerContent::CachedIntrospectionResponse { .. } => false,
+                                _ => true,
+                            };
 
-                                if can_cache {
-                                    tokio::spawn(async move {
-                                        entry.insert(Ok(content)).await;
-                                    });
-                                } else {
-                                    tokio::spawn(async move {
-                                        entry.send(Ok(Ok(content))).await;
-                                    });
-                                }
-                            }
-
-                            // This will be overridden by the Rust usage reporting implementation
-                            if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
-                                context.extensions().with_lock(|lock| {
-                                    lock.insert::<Arc<UsageReporting>>(plan.usage_reporting.clone())
+                            if can_cache {
+                                tokio::spawn(async move {
+                                    entry.insert(Ok(content)).await;
+                                });
+                            } else {
+                                tokio::spawn(async move {
+                                    entry.send(Ok(Ok(content))).await;
                                 });
                             }
-                            Ok(QueryPlannerResponse { content, errors })
                         }
-                        Err(MaybeBackPressureError::PermanentError(error)) => {
-                            let e = Arc::new(error);
-                            let err = e.clone();
-                            tokio::spawn(async move {
-                                entry.insert(Err(err)).await;
+
+                        // This will be overridden by the Rust usage reporting implementation
+                        if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
+                            context.extensions().with_lock(|lock| {
+                                lock.insert::<Arc<UsageReporting>>(plan.usage_reporting.clone())
                             });
-                            if let Some(usage_reporting) = e.usage_reporting() {
-                                context.extensions().with_lock(|lock| {
-                                    lock.insert::<Arc<UsageReporting>>(Arc::new(usage_reporting));
-                                });
-                            }
-                            Err(CacheResolverError::RetrievalError(e))
                         }
-                        Err(MaybeBackPressureError::TemporaryError(error)) => {
-                            let err = error.clone();
-                            tokio::spawn(async move {
-                                // Temporary errors are never cached
-                                entry.send(Err(err)).await;
+                        Ok(QueryPlannerResponse { content, errors })
+                    }
+                    Err(MaybeBackPressureError::PermanentError(error)) => {
+                        let e = Arc::new(error);
+                        let err = e.clone();
+                        tokio::spawn(async move {
+                            entry.insert(Err(err)).await;
+                        });
+                        if let Some(usage_reporting) = e.usage_reporting() {
+                            context.extensions().with_lock(|lock| {
+                                lock.insert::<Arc<UsageReporting>>(Arc::new(usage_reporting));
                             });
-                            Err(CacheResolverError::Backpressure(error))
                         }
+                        Err(CacheResolverError::RetrievalError(e))
+                    }
+                    Err(MaybeBackPressureError::TemporaryError(error)) => {
+                        let err = error.clone();
+                        tokio::spawn(async move {
+                            // Temporary errors are never cached
+                            entry.send(Err(err)).await;
+                        });
+                        Err(CacheResolverError::Backpressure(error))
                     }
                 }
-                .in_current_span(),
-            )
-            .await
-            .map_err(|e| {
+            }
+            .in_current_span();
+
+            fn convert_join_error(e: impl std::fmt::Display) -> CacheResolverError {
                 CacheResolverError::RetrievalError(Arc::new(QueryPlannerError::JoinError(
                     e.to_string(),
                 )))
-            })?
+            }
+
+            let outcome_recorded = Arc::new(AtomicU8::new(Outcome::None as u8));
+            // When cooperative cancellation is enabled, we want to cancel the query planner
+            // task if the request is canceled.
+            if self.cooperative_cancellation.is_enabled() {
+                let planning_task = tokio::task::spawn(planning_task);
+                let outcome_recorded_for_abort = outcome_recorded.clone();
+                let enforce_mode = self.cooperative_cancellation.is_enforce_mode();
+                let measure_mode = self.cooperative_cancellation.is_measure_mode();
+                let _abort_guard =
+                    scopeguard::guard(planning_task.abort_handle(), move |abort_handle| {
+                        if record_outcome_if_none(&outcome_recorded_for_abort, Outcome::Cancelled)
+                            && enforce_mode
+                        {
+                            abort_handle.abort();
+                        }
+                    });
+
+                match self.cooperative_cancellation.timeout() {
+                    Some(timeout) => {
+                        let outcome_recorded_for_timeout = outcome_recorded.clone();
+                        if enforce_mode {
+                            fn convert_timeout_error(
+                                e: impl std::fmt::Display,
+                            ) -> CacheResolverError {
+                                CacheResolverError::RetrievalError(Arc::new(
+                                    QueryPlannerError::Timeout(e.to_string()),
+                                ))
+                            }
+
+                            let planning_task_with_timeout = planning_task.timeout(timeout);
+                            let res = planning_task_with_timeout.await;
+                            // If timeout occurred, record outcome (if not already recorded)
+                            if res.is_err() {
+                                record_outcome_if_none(
+                                    &outcome_recorded_for_timeout,
+                                    Outcome::Timeout,
+                                );
+                            }
+                            res.map_err(convert_timeout_error)?
+                        } else if measure_mode {
+                            // In measure mode, spawn a timeout task that only records outcome
+                            let timeout_task = tokio::task::spawn(async move {
+                                tokio::time::sleep(timeout).await;
+                                record_outcome_if_none(
+                                    &outcome_recorded_for_timeout,
+                                    Outcome::Timeout,
+                                );
+                            });
+                            let _dropped_timeout_guard =
+                                scopeguard::guard(timeout_task.abort_handle(), |abort_handle| {
+                                    abort_handle.abort();
+                                });
+                            planning_task.await
+                        } else {
+                            unreachable!(
+                                "Can't set a timeout without enabling cooperative cancellation"
+                            );
+                        }
+                    }
+                    None => planning_task.await,
+                }
+            } else {
+                // some clients might timeout and cancel the request before query planning is finished,
+                // so we execute it in a task that can continue even after the request was canceled and
+                // the join handle was dropped. That way, the next similar query will use the cache instead
+                // of restarting the query planner until another timeout
+                tokio::task::spawn(planning_task).await
+            }
+            .inspect(|res| {
+                // We won't reach this code path if the plan was cancelled, and
+                // thus it won't overwrite the outcome.
+                match res {
+                    Ok(_) => {
+                        record_outcome_if_none(&outcome_recorded, Outcome::Success);
+                    }
+                    Err(CacheResolverError::RetrievalError(e)) => {
+                        if matches!(e.as_ref(), QueryPlannerError::Timeout(_)) {
+                            record_outcome_if_none(&outcome_recorded, Outcome::Timeout);
+                        } else {
+                            record_outcome_if_none(&outcome_recorded, Outcome::Error);
+                        };
+                    }
+                    Err(CacheResolverError::Backpressure(_)) => {
+                        record_outcome_if_none(&outcome_recorded, Outcome::Backpressure);
+                    }
+                    Err(CacheResolverError::BatchingError(_)) => {
+                        record_outcome_if_none(&outcome_recorded, Outcome::BatchingError);
+                    }
+                };
+            })
+            .map_err(convert_join_error)?
         } else {
             let res = entry.get().await.map_err(|e| match e {
                 EntryError::IsFirst | // IsFirst should be unreachable
@@ -720,21 +853,82 @@ impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::time::Duration;
 
     use mockall::mock;
+    use parking_lot::Mutex;
     use serde_json_bytes::json;
     use test_log::test;
     use tower::Service;
+    use tracing::Subscriber;
+    use tracing_core::Field;
+    use tracing_subscriber::Layer;
+    use tracing_subscriber::Registry;
+    use tracing_subscriber::layer::Context as TracingContext;
+    use tracing_subscriber::prelude::*;
 
     use super::*;
     use crate::Configuration;
     use crate::Context;
     use crate::apollo_studio_interop::UsageReporting;
+    use crate::configuration::QueryPlanning;
+    use crate::configuration::Supergraph;
     use crate::json_ext::Object;
     use crate::query_planner::QueryPlan;
     use crate::spec::Query;
     use crate::spec::Schema;
+
+    // Custom layer that records any field updates on spans.
+    #[derive(Default, Clone)]
+    struct RecordingLayer {
+        values: Arc<Mutex<HashMap<String, String>>>,
+    }
+
+    impl RecordingLayer {
+        fn get(&self, key: &str) -> Option<String> {
+            self.values.lock().get(key).cloned()
+        }
+    }
+
+    impl<S> Layer<S> for RecordingLayer
+    where
+        S: Subscriber,
+    {
+        fn on_record(
+            &self,
+            _span: &tracing::span::Id,
+            values: &tracing::span::Record<'_>,
+            _ctx: TracingContext<'_, S>,
+        ) {
+            let mut guard = self.values.lock();
+            struct Visitor<'a> {
+                map: &'a mut HashMap<String, String>,
+            }
+
+            impl<'a> tracing_core::field::Visit for Visitor<'a> {
+                fn record_str(&mut self, field: &Field, value: &str) {
+                    self.map.insert(field.name().to_string(), value.to_string());
+                }
+
+                fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+                    self.map
+                        .insert(field.name().to_string(), format!("{value:?}"));
+                }
+            }
+
+            let mut visitor = Visitor { map: &mut guard };
+            values.record(&mut visitor);
+        }
+    }
+
+    // Helper function to set up tracing for tests
+    fn setup_tracing() -> (RecordingLayer, tracing::subscriber::DefaultGuard) {
+        let layer = RecordingLayer::default();
+        let subscriber = Registry::default().with(layer.clone());
+        let guard = tracing::subscriber::set_default(subscriber);
+        (layer, guard)
+    }
 
     mock! {
         #[derive(Debug)]
@@ -848,6 +1042,328 @@ mod tests {
         );
     }
 
+    #[test(tokio::test)]
+    async fn test_cooperative_cancellation_timeout() {
+        let (layer, _guard) = setup_tracing();
+
+        #[derive(Clone)]
+        struct SlowQueryPlanner;
+
+        impl Service<QueryPlannerRequest> for SlowQueryPlanner {
+            type Response = QueryPlannerResponse;
+            type Error = MaybeBackPressureError<QueryPlannerError>;
+            type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+            fn poll_ready(
+                &mut self,
+                _cx: &mut task::Context<'_>,
+            ) -> task::Poll<Result<(), Self::Error>> {
+                task::Poll::Ready(Ok(()))
+            }
+
+            fn call(&mut self, _req: QueryPlannerRequest) -> Self::Future {
+                Box::pin(async move {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    panic!("This query planner should not be called, as it is expected to timeout");
+                })
+            }
+        }
+
+        let configuration = Configuration::builder()
+            .and_supergraph(Some(
+                Supergraph::builder()
+                    .query_planning(
+                        QueryPlanning::builder()
+                            .experimental_cooperative_cancellation(
+                                CooperativeCancellation::enabled_with_timeout(
+                                    std::time::Duration::from_secs(1),
+                                ),
+                            )
+                            .build(),
+                    )
+                    .build(),
+            ))
+            .build()
+            .expect("configuration is valid");
+        let schema = include_str!("testdata/schema.graphql");
+        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
+
+        let mut planner = CachingQueryPlanner::new(
+            SlowQueryPlanner,
+            schema.clone(),
+            Default::default(),
+            &configuration,
+            IndexMap::default(),
+        )
+        .await
+        .unwrap();
+
+        let doc = Query::parse_document(
+            "query Me { me { name { first } } }",
+            None,
+            &schema,
+            &configuration,
+        )
+        .unwrap();
+
+        let context = Context::new();
+        context
+            .extensions()
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+
+        // Create a span with the outcome field declared
+        let span = tracing::info_span!("test_span", outcome = tracing::field::Empty);
+        // Keep the span alive and ensure it's the current span during the entire operation
+        let _span_guard = span.enter();
+
+        let result = planner
+            .call(query_planner::CachingRequest::new(
+                "query Me { me { name { first } } }".to_string(),
+                Some("".into()),
+                context.clone(),
+            ))
+            .await;
+
+        match result {
+            Ok(_) => panic!("Expected an error, but got a response"),
+            Err(e) => {
+                assert!(matches!(e, CacheResolverError::RetrievalError(_)));
+                assert!(e.to_string().contains("timed out"));
+            }
+        }
+
+        // Give a small delay to ensure the span is recorded
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // Verify that the span recorded the timeout outcome
+        assert_eq!(layer.get("outcome"), Some("timeout".to_string()));
+    }
+
+    #[test(tokio::test)]
+    async fn test_cooperative_cancellation_client_drop() {
+        use std::sync::Arc;
+
+        use tokio::sync::Barrier;
+
+        let (layer, _guard) = setup_tracing();
+        let barrier = Arc::new(Barrier::new(2));
+        let barrier_clone = barrier.clone();
+
+        #[derive(Clone)]
+        struct SlowQueryPlanner {
+            barrier: Arc<Barrier>,
+        }
+
+        impl Service<QueryPlannerRequest> for SlowQueryPlanner {
+            type Response = QueryPlannerResponse;
+            type Error = MaybeBackPressureError<QueryPlannerError>;
+            type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+            fn poll_ready(
+                &mut self,
+                _cx: &mut task::Context<'_>,
+            ) -> task::Poll<Result<(), Self::Error>> {
+                task::Poll::Ready(Ok(()))
+            }
+
+            fn call(&mut self, _req: QueryPlannerRequest) -> Self::Future {
+                let barrier = self.barrier.clone();
+                Box::pin(async move {
+                    // Signal that we've started
+                    barrier.wait().await;
+
+                    // Now sleep for a long time - this should get cancelled
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                    panic!(
+                        "This query planner should not complete, as it should be cancelled by client drop"
+                    );
+                })
+            }
+        }
+
+        let configuration = Configuration::builder()
+            .and_supergraph(Some(
+                Supergraph::builder()
+                    .query_planning(
+                        QueryPlanning::builder()
+                            .experimental_cooperative_cancellation(
+                                CooperativeCancellation::enabled(),
+                            )
+                            .build(),
+                    )
+                    .build(),
+            ))
+            .build()
+            .expect("configuration is valid");
+        let schema = include_str!("testdata/schema.graphql");
+        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
+
+        let mut planner = CachingQueryPlanner::new(
+            SlowQueryPlanner {
+                barrier: barrier_clone,
+            },
+            schema.clone(),
+            Default::default(),
+            &configuration,
+            IndexMap::default(),
+        )
+        .await
+        .unwrap();
+
+        let doc = Query::parse_document(
+            "query Me { me { name { first } } }",
+            None,
+            &schema,
+            &configuration,
+        )
+        .unwrap();
+
+        let context = Context::new();
+        context
+            .extensions()
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+
+        // Create a span with the outcome field declared
+        let span = tracing::info_span!("test_span", outcome = tracing::field::Empty);
+
+        // Keep the span alive and ensure it's the current span during the entire operation
+        let _span_guard = span.enter();
+
+        // Spawn the planning task
+        let planning_task = tokio::spawn(async move {
+            planner
+                .call(query_planner::CachingRequest::new(
+                    "query Me { me { name { first } } }".to_string(),
+                    Some("".into()),
+                    context.clone(),
+                ))
+                .await
+        });
+
+        // Wait for the inner SlowQueryPlanner task to start
+        barrier.wait().await;
+
+        // Now abort the outer task - the inner task should have definitely started
+        planning_task.abort();
+
+        // Verify the task was cancelled
+        match planning_task.await {
+            Ok(_) => panic!(
+                "Expected the task to be aborted due to client drop, but it completed successfully"
+            ),
+            Err(e) => assert!(e.is_cancelled(), "Task should be cancelled, got: {e:?}"),
+        }
+
+        // Give a small delay to ensure the span is recorded
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // Verify that the span recorded the cancelled outcome
+        assert_eq!(layer.get("outcome"), Some("cancelled".to_string()));
+    }
+
+    #[test(tokio::test)]
+    async fn test_cooperative_cancellation_measurement_mode() {
+        let (layer, _guard) = setup_tracing();
+
+        #[derive(Clone)]
+        struct SlowQueryPlanner;
+
+        impl Service<QueryPlannerRequest> for SlowQueryPlanner {
+            type Response = QueryPlannerResponse;
+            type Error = MaybeBackPressureError<QueryPlannerError>;
+            type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+            fn poll_ready(
+                &mut self,
+                _cx: &mut task::Context<'_>,
+            ) -> task::Poll<Result<(), Self::Error>> {
+                task::Poll::Ready(Ok(()))
+            }
+
+            fn call(&mut self, _req: QueryPlannerRequest) -> Self::Future {
+                Box::pin(async move {
+                    // Sleep for a long time - this should trigger timeout in measurement mode
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    // In measurement mode, this should complete successfully even after timeout
+                    let plan = Arc::new(QueryPlan::fake_new(None, None));
+                    Ok(QueryPlannerResponse::builder()
+                        .content(QueryPlannerContent::Plan { plan })
+                        .build())
+                })
+            }
+        }
+
+        let configuration = Configuration::builder()
+            .and_supergraph(Some(
+                Supergraph::builder()
+                    .query_planning(
+                        QueryPlanning::builder()
+                            .experimental_cooperative_cancellation(
+                                CooperativeCancellation::measure_with_timeout(
+                                    std::time::Duration::from_millis(100),
+                                ),
+                            )
+                            .build(),
+                    )
+                    .build(),
+            ))
+            .build()
+            .expect("configuration is valid");
+        let schema = include_str!("testdata/schema.graphql");
+        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
+
+        let mut planner = CachingQueryPlanner::new(
+            SlowQueryPlanner,
+            schema.clone(),
+            Default::default(),
+            &configuration,
+            IndexMap::default(),
+        )
+        .await
+        .unwrap();
+
+        let doc = Query::parse_document(
+            "query Me { me { name { first } } }",
+            None,
+            &schema,
+            &configuration,
+        )
+        .unwrap();
+
+        let context = Context::new();
+        context
+            .extensions()
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+
+        // Create a span with the outcome field declared
+        let span = tracing::info_span!("test_span", outcome = tracing::field::Empty);
+        // Keep the span alive and ensure it's the current span during the entire operation
+        let _span_guard = span.enter();
+
+        // In measurement mode, the request should complete successfully even though it times out
+        // The timeout should be recorded as an outcome, but the request should not fail
+        let result = planner
+            .call(query_planner::CachingRequest::new(
+                "query Me { me { name { first } } }".to_string(),
+                Some("".into()),
+                context.clone(),
+            ))
+            .await;
+
+        // In measurement mode, the request should succeed even though it times out
+        assert!(
+            result.is_ok(),
+            "Expected success in measurement mode, got error"
+        );
+
+        // Give a small delay to ensure the span is recorded
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // Verify that the span recorded the timeout outcome (not success)
+        // In measurement mode, we should record timeout and not overwrite it with success
+        assert_eq!(layer.get("outcome"), Some("timeout".to_string()));
+    }
+
     macro_rules! test_query_plan {
         () => {
             include_str!("testdata/query_plan.json")
@@ -901,7 +1417,7 @@ mod tests {
         .await
         .unwrap();
 
-        let context = Context::new();
+        let context = crate::Context::new();
         context
             .extensions()
             .with_lock(|lock| lock.insert::<ParsedDocument>(doc));

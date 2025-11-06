@@ -4,16 +4,20 @@ use std::cmp::Ordering;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Write;
+use std::ops::Range;
 use std::sync::LazyLock;
 
 use apollo_compiler::InvalidNameError;
 use apollo_compiler::Name;
 use apollo_compiler::ast::OperationType;
+use apollo_compiler::parser::LineColumn;
 use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::WithErrors;
 
 use crate::subgraph::SubgraphError;
 use crate::subgraph::spec::FederationSpecError;
+use crate::subgraph::typestate::HasMetadata;
+use crate::subgraph::typestate::Subgraph;
 
 /// Create an internal error.
 ///
@@ -115,13 +119,50 @@ pub enum UnsupportedFeatureKind {
     Alias,
 }
 
+/// Modeled after `SubgraphLocation` defined in `apollo_composition`, so this struct can be
+/// converted to it.
+#[derive(Clone, Debug)]
+pub struct SubgraphLocation {
+    /// Subgraph name
+    pub subgraph: String, // TODO: Change this to `Arc<str>`, once `Merger` is updated.
+    /// Source code range in the subgraph schema document
+    pub range: Range<LineColumn>,
+}
+
+pub type Locations = Vec<SubgraphLocation>;
+
+pub(crate) trait HasLocations {
+    fn locations<T: HasMetadata>(&self, subgraph: &Subgraph<T>) -> Locations;
+}
+
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum CompositionError {
     #[error("[{subgraph}] {error}")]
     SubgraphError {
         subgraph: String,
-        error: FederationError,
+        error: SingleFederationError,
+        locations: Locations,
     },
+    #[error("{error}")]
+    MergeError { error: SingleFederationError },
+    #[error("{message}")]
+    ContextualArgumentNotContextualInAllSubgraphs {
+        message: String,
+        locations: Locations,
+    },
+    #[error("{message}")]
+    EmptyMergedEnumType {
+        message: String,
+        locations: Locations,
+    },
+    #[error("{message}")]
+    EnumValueMismatch { message: String },
+    #[error("{message}")]
+    ExternalArgumentTypeMismatch { message: String },
+    #[error("{message}")]
+    ExternalTypeMismatch { message: String },
+    #[error("{message}")]
+    ExternalArgumentDefaultMismatch { message: String },
     #[error("{message}")]
     InvalidGraphQL { message: String },
     #[error(transparent)]
@@ -138,11 +179,335 @@ pub enum CompositionError {
     TypeDefinitionInvalid { message: String },
     #[error("{message}")]
     InterfaceObjectUsageError { message: String },
+    #[error("{message}")]
+    InterfaceKeyMissingImplementationType { message: String },
+    #[error("{message}")]
+    TypeKindMismatch { message: String },
+    #[error("{message}")]
+    ShareableHasMismatchedRuntimeTypes { message: String },
+    #[error("{message}")]
+    SatisfiabilityError { message: String },
+    #[error("{message}")]
+    MaxValidationSubgraphPathsExceeded { message: String },
+    #[error("{message}")]
+    InternalError { message: String },
+    #[error("{message}")]
+    ExternalArgumentMissing { message: String },
+    #[error("{message}")]
+    ExternalMissingOnBase { message: String },
+    #[error("{message}")]
+    MergedDirectiveApplicationOnExternal { message: String },
+    #[error("{message}")]
+    LinkImportNameMismatch { message: String },
+    #[error("{message}")]
+    InvalidFieldSharing {
+        message: String,
+        locations: Locations,
+    },
+    #[error(
+        "[{subgraph}] Type \"{dest}\" is an extension type, but there is no type definition for \"{dest}\" in any subgraph."
+    )]
+    ExtensionWithNoBase {
+        subgraph: String,
+        dest: String,
+        locations: Locations,
+    },
+    #[error("{message}")]
+    DirectiveCompositionError { message: String },
+    #[error("{message}")]
+    InconsistentInputObjectField { message: String },
+    #[error("{message}")]
+    RequiredArgumentMissingInSomeSubgraph {
+        message: String,
+        locations: Locations,
+    },
+    #[error("{message}")]
+    RequiredInputFieldMissingInSomeSubgraph {
+        message: String,
+        locations: Locations,
+    },
+    #[error("{message}")]
+    EmptyMergedInputType {
+        message: String,
+        locations: Locations,
+    },
+    #[error("{message}")]
+    InputFieldMergeFailed {
+        message: String,
+        locations: Locations,
+    },
+    #[error("{message}")]
+    FieldArgumentTypeMismatch { message: String },
+    #[error("{message}")]
+    FieldTypeMismatch { message: String },
+    #[error("{message}")]
+    OverrideCollisionWithAnotherDirective { message: String },
+    #[error("{message}")]
+    OverrideFromSelfError { message: String },
+    #[error("{message}")]
+    OverrideLabelInvalid { message: String },
+    #[error("{message}")]
+    OverrideOnInterface { message: String },
+    #[error("{message}")]
+    OverrideSourceHasOverride { message: String },
+    #[error("{message}")]
+    QueryRootMissing { message: String },
+    #[error("{message}")]
+    ArgumentDefaultMismatch {
+        message: String,
+        locations: Locations,
+    },
+    #[error("{message}")]
+    InputFieldDefaultMismatch {
+        message: String,
+        locations: Locations,
+    },
+    #[error("{message}")]
+    InterfaceFieldNoImplem { message: String },
 }
 
-impl From<SubgraphError> for CompositionError {
-    fn from(SubgraphError { subgraph, error }: SubgraphError) -> Self {
-        Self::SubgraphError { subgraph, error }
+impl CompositionError {
+    pub fn code(&self) -> ErrorCode {
+        match self {
+            Self::SubgraphError { error, .. } => error.code(),
+            Self::MergeError { error, .. } => error.code(),
+            Self::ContextualArgumentNotContextualInAllSubgraphs { .. } => {
+                ErrorCode::ContextualArgumentNotContextualInAllSubgraphs
+            }
+            Self::EmptyMergedEnumType { .. } => ErrorCode::EmptyMergedEnumType,
+            Self::EnumValueMismatch { .. } => ErrorCode::EnumValueMismatch,
+            Self::ExternalTypeMismatch { .. } => ErrorCode::ExternalTypeMismatch,
+            Self::ExternalArgumentTypeMismatch { .. } => ErrorCode::ExternalArgumentTypeMismatch,
+            Self::ExternalArgumentDefaultMismatch { .. } => {
+                ErrorCode::ExternalArgumentDefaultMismatch
+            }
+            Self::InvalidGraphQL { .. } => ErrorCode::InvalidGraphQL,
+            Self::InvalidGraphQLName(..) => ErrorCode::InvalidGraphQL,
+            Self::FromContextParseError { .. } => ErrorCode::InvalidGraphQL,
+            Self::UnsupportedSpreadDirective { .. } => ErrorCode::InvalidGraphQL,
+            Self::DirectiveDefinitionInvalid { .. } => ErrorCode::DirectiveDefinitionInvalid,
+            Self::TypeDefinitionInvalid { .. } => ErrorCode::TypeDefinitionInvalid,
+            Self::InterfaceObjectUsageError { .. } => ErrorCode::InterfaceObjectUsageError,
+            Self::InterfaceKeyMissingImplementationType { .. } => {
+                ErrorCode::InterfaceKeyMissingImplementationType
+            }
+            Self::TypeKindMismatch { .. } => ErrorCode::TypeKindMismatch,
+            Self::ShareableHasMismatchedRuntimeTypes { .. } => {
+                ErrorCode::ShareableHasMismatchedRuntimeTypes
+            }
+            Self::SatisfiabilityError { .. } => ErrorCode::SatisfiabilityError,
+            Self::MaxValidationSubgraphPathsExceeded { .. } => {
+                ErrorCode::MaxValidationSubgraphPathsExceeded
+            }
+            Self::InternalError { .. } => ErrorCode::Internal,
+            Self::ExternalArgumentMissing { .. } => ErrorCode::ExternalArgumentMissing,
+            Self::ExternalMissingOnBase { .. } => ErrorCode::ExternalMissingOnBase,
+            Self::MergedDirectiveApplicationOnExternal { .. } => {
+                ErrorCode::MergedDirectiveApplicationOnExternal
+            }
+            Self::LinkImportNameMismatch { .. } => ErrorCode::LinkImportNameMismatch,
+            Self::InvalidFieldSharing { .. } => ErrorCode::InvalidFieldSharing,
+            Self::InconsistentInputObjectField { .. } => ErrorCode::Internal, // This is for hints, not errors
+            Self::RequiredArgumentMissingInSomeSubgraph { .. } => {
+                ErrorCode::RequiredArgumentMissingInSomeSubgraph
+            }
+            Self::RequiredInputFieldMissingInSomeSubgraph { .. } => {
+                ErrorCode::RequiredInputFieldMissingInSomeSubgraph
+            }
+            Self::EmptyMergedInputType { .. } => ErrorCode::EmptyMergedInputType,
+            Self::InputFieldMergeFailed { .. } => ErrorCode::InputFieldMergeFailed,
+            Self::ExtensionWithNoBase { .. } => ErrorCode::ExtensionWithNoBase,
+            Self::DirectiveCompositionError { .. } => ErrorCode::DirectiveCompositionError,
+            Self::FieldArgumentTypeMismatch { .. } => ErrorCode::FieldArgumentTypeMismatch,
+            Self::FieldTypeMismatch { .. } => ErrorCode::FieldTypeMismatch,
+            Self::OverrideCollisionWithAnotherDirective { .. } => {
+                ErrorCode::OverrideCollisionWithAnotherDirective
+            }
+            Self::OverrideFromSelfError { .. } => ErrorCode::OverrideFromSelfError,
+            Self::OverrideLabelInvalid { .. } => ErrorCode::OverrideLabelInvalid,
+            Self::OverrideOnInterface { .. } => ErrorCode::OverrideOnInterface,
+            Self::OverrideSourceHasOverride { .. } => ErrorCode::OverrideSourceHasOverride,
+            Self::QueryRootMissing { .. } => ErrorCode::QueryRootMissing,
+            Self::ArgumentDefaultMismatch { .. } => ErrorCode::FieldArgumentDefaultMismatch,
+            Self::InputFieldDefaultMismatch { .. } => ErrorCode::InputFieldDefaultMismatch,
+            Self::InterfaceFieldNoImplem { .. } => ErrorCode::InterfaceFieldNoImplem,
+        }
+    }
+
+    pub(crate) fn append_message(self, appendix: impl Display) -> Self {
+        match self {
+            Self::EmptyMergedEnumType { message, locations } => Self::EmptyMergedEnumType {
+                message: format!("{message}{appendix}"),
+                locations,
+            },
+            Self::EnumValueMismatch { message } => Self::EnumValueMismatch {
+                message: format!("{message}{appendix}"),
+            },
+            Self::ExternalTypeMismatch { message } => Self::ExternalTypeMismatch {
+                message: format!("{message}{appendix}"),
+            },
+            Self::ExternalArgumentTypeMismatch { message } => Self::ExternalArgumentTypeMismatch {
+                message: format!("{message}{appendix}"),
+            },
+            Self::ExternalArgumentDefaultMismatch { message } => {
+                Self::ExternalArgumentDefaultMismatch {
+                    message: format!("{message}{appendix}"),
+                }
+            }
+            Self::InvalidGraphQL { message } => Self::InvalidGraphQL {
+                message: format!("{message}{appendix}"),
+            },
+            Self::DirectiveDefinitionInvalid { message } => Self::DirectiveDefinitionInvalid {
+                message: format!("{message}{appendix}"),
+            },
+            Self::TypeDefinitionInvalid { message } => Self::TypeDefinitionInvalid {
+                message: format!("{message}{appendix}"),
+            },
+            Self::InterfaceObjectUsageError { message } => Self::InterfaceObjectUsageError {
+                message: format!("{message}{appendix}"),
+            },
+            Self::InterfaceKeyMissingImplementationType { message } => {
+                Self::InterfaceKeyMissingImplementationType {
+                    message: format!("{message}{appendix}"),
+                }
+            }
+            Self::TypeKindMismatch { message } => Self::TypeKindMismatch {
+                message: format!("{message}{appendix}"),
+            },
+            Self::ShareableHasMismatchedRuntimeTypes { message } => {
+                Self::ShareableHasMismatchedRuntimeTypes {
+                    message: format!("{message}{appendix}"),
+                }
+            }
+            Self::SatisfiabilityError { message } => Self::SatisfiabilityError {
+                message: format!("{message}{appendix}"),
+            },
+            Self::MaxValidationSubgraphPathsExceeded { message } => {
+                Self::MaxValidationSubgraphPathsExceeded {
+                    message: format!("{message}{appendix}"),
+                }
+            }
+            Self::InternalError { message } => Self::InternalError {
+                message: format!("{message}{appendix}"),
+            },
+            Self::ExternalArgumentMissing { message } => Self::ExternalArgumentMissing {
+                message: format!("{message}{appendix}"),
+            },
+            Self::ExternalMissingOnBase { message } => Self::ExternalMissingOnBase {
+                message: format!("{message}{appendix}"),
+            },
+            Self::MergedDirectiveApplicationOnExternal { message } => {
+                Self::MergedDirectiveApplicationOnExternal {
+                    message: format!("{message}{appendix}"),
+                }
+            }
+            Self::LinkImportNameMismatch { message } => Self::LinkImportNameMismatch {
+                message: format!("{message}{appendix}"),
+            },
+            Self::InvalidFieldSharing { message, locations } => Self::InvalidFieldSharing {
+                message: format!("{message}{appendix}"),
+                locations,
+            },
+            Self::DirectiveCompositionError { message } => Self::DirectiveCompositionError {
+                message: format!("{message}{appendix}"),
+            },
+            Self::InconsistentInputObjectField { message } => Self::InconsistentInputObjectField {
+                message: format!("{message}{appendix}"),
+            },
+            Self::RequiredArgumentMissingInSomeSubgraph { message, locations } => {
+                Self::RequiredArgumentMissingInSomeSubgraph {
+                    message: format!("{message}{appendix}"),
+                    locations,
+                }
+            }
+            Self::RequiredInputFieldMissingInSomeSubgraph { message, locations } => {
+                Self::RequiredInputFieldMissingInSomeSubgraph {
+                    message: format!("{message}{appendix}"),
+                    locations,
+                }
+            }
+            Self::EmptyMergedInputType { message, locations } => Self::EmptyMergedInputType {
+                message: format!("{message}{appendix}"),
+                locations,
+            },
+            Self::InputFieldMergeFailed { message, locations } => Self::InputFieldMergeFailed {
+                message: format!("{message}{appendix}"),
+                locations,
+            },
+            Self::FieldArgumentTypeMismatch { message } => Self::FieldArgumentTypeMismatch {
+                message: format!("{message}{appendix}"),
+            },
+            Self::FieldTypeMismatch { message } => Self::FieldTypeMismatch {
+                message: format!("{message}{appendix}"),
+            },
+            Self::ContextualArgumentNotContextualInAllSubgraphs { message, locations } => {
+                Self::ContextualArgumentNotContextualInAllSubgraphs {
+                    message: format!("{message}{appendix}"),
+                    locations,
+                }
+            }
+            Self::ArgumentDefaultMismatch { message, locations } => Self::ArgumentDefaultMismatch {
+                message: format!("{message}{appendix}"),
+                locations,
+            },
+            Self::InputFieldDefaultMismatch { message, locations } => {
+                Self::InputFieldDefaultMismatch {
+                    message: format!("{message}{appendix}"),
+                    locations,
+                }
+            }
+            Self::InterfaceFieldNoImplem { message } => Self::InterfaceFieldNoImplem {
+                message: format!("{message}{appendix}"),
+            },
+            // Remaining errors do not have an obvious way to appending a message, so we just return self.
+            Self::SubgraphError { .. }
+            | Self::MergeError { .. }
+            | Self::InvalidGraphQLName(..)
+            | Self::FromContextParseError { .. }
+            | Self::UnsupportedSpreadDirective { .. }
+            | Self::ExtensionWithNoBase { .. }
+            | Self::OverrideCollisionWithAnotherDirective { .. }
+            | Self::OverrideFromSelfError { .. }
+            | Self::OverrideLabelInvalid { .. }
+            | Self::OverrideOnInterface { .. }
+            | Self::OverrideSourceHasOverride { .. }
+            | Self::QueryRootMissing { .. } => self,
+        }
+    }
+
+    pub fn locations(&self) -> &[SubgraphLocation] {
+        match self {
+            Self::SubgraphError { locations, .. }
+            | Self::EmptyMergedEnumType { locations, .. }
+            | Self::InputFieldMergeFailed { locations, .. }
+            | Self::ExtensionWithNoBase { locations, .. }
+            | Self::RequiredArgumentMissingInSomeSubgraph { locations, .. }
+            | Self::RequiredInputFieldMissingInSomeSubgraph { locations, .. }
+            | Self::EmptyMergedInputType { locations, .. }
+            | Self::InvalidFieldSharing { locations, .. }
+            | Self::ArgumentDefaultMismatch { locations, .. }
+            | Self::InputFieldDefaultMismatch { locations, .. } => locations,
+            _ => &[],
+        }
+    }
+}
+
+impl SubgraphError {
+    pub fn to_composition_errors(&self) -> impl Iterator<Item = CompositionError> {
+        self.errors
+            .iter()
+            .map(move |error| CompositionError::SubgraphError {
+                subgraph: self.subgraph.clone(),
+                error: error.error.clone(),
+                locations: error
+                    .locations
+                    .iter()
+                    .map(|range| SubgraphLocation {
+                        subgraph: self.subgraph.clone(),
+                        range: range.clone(),
+                    })
+                    .collect(),
+            })
     }
 }
 
@@ -341,8 +706,6 @@ pub enum SingleFederationError {
     #[error("{message}")]
     InterfaceFieldNoImplem { message: String },
     #[error("{message}")]
-    TypeKindMismatch { message: String },
-    #[error("{message}")]
     ExternalTypeMismatch { message: String },
     #[error("{message}")]
     ExternalCollisionWithAnotherDirective { message: String },
@@ -376,8 +739,6 @@ pub enum SingleFederationError {
     InvalidLinkDirectiveUsage { message: String },
     #[error("{message}")]
     InvalidLinkIdentifier { message: String },
-    #[error("{message}")]
-    LinkImportNameMismatch { message: String },
     #[error("{message}")]
     ReferencedInaccessible { message: String },
     #[error("{message}")]
@@ -454,6 +815,8 @@ pub enum SingleFederationError {
     #[error("@cost cannot be applied to interface \"{interface}.{field}\"")]
     CostAppliedToInterfaceField { interface: Name, field: Name },
     #[error("{message}")]
+    ContextSelectionInvalid { message: String },
+    #[error("{message}")]
     ListSizeAppliedToNonList { message: String },
     #[error("{message}")]
     ListSizeInvalidAssumedSize { message: String },
@@ -461,6 +824,10 @@ pub enum SingleFederationError {
     ListSizeInvalidSlicingArgument { message: String },
     #[error("{message}")]
     ListSizeInvalidSizedField { message: String },
+    #[error("{message}")]
+    InvalidTagName { message: String },
+    #[error("{message}")]
+    QueryRootMissing { message: String },
 }
 
 impl SingleFederationError {
@@ -552,7 +919,6 @@ impl SingleFederationError {
             SingleFederationError::InterfaceFieldNoImplem { .. } => {
                 ErrorCode::InterfaceFieldNoImplem
             }
-            SingleFederationError::TypeKindMismatch { .. } => ErrorCode::TypeKindMismatch,
             SingleFederationError::ExternalTypeMismatch { .. } => ErrorCode::ExternalTypeMismatch,
             SingleFederationError::ExternalCollisionWithAnotherDirective { .. } => {
                 ErrorCode::ExternalCollisionWithAnotherDirective
@@ -588,9 +954,6 @@ impl SingleFederationError {
                 ErrorCode::InvalidLinkDirectiveUsage
             }
             SingleFederationError::InvalidLinkIdentifier { .. } => ErrorCode::InvalidLinkIdentifier,
-            SingleFederationError::LinkImportNameMismatch { .. } => {
-                ErrorCode::LinkImportNameMismatch
-            }
             SingleFederationError::ReferencedInaccessible { .. } => {
                 ErrorCode::ReferencedInaccessible
             }
@@ -668,6 +1031,9 @@ impl SingleFederationError {
             SingleFederationError::ContextNoResolvableKey { .. } => {
                 ErrorCode::ContextNoResolvableKey
             }
+            SingleFederationError::ContextSelectionInvalid { .. } => {
+                ErrorCode::ContextSelectionInvalid
+            }
             SingleFederationError::CostAppliedToInterfaceField { .. } => {
                 ErrorCode::CostAppliedToInterfaceField
             }
@@ -683,6 +1049,10 @@ impl SingleFederationError {
             SingleFederationError::ListSizeInvalidSizedField { .. } => {
                 ErrorCode::ListSizeInvalidSizedField
             }
+            #[allow(unused)]
+            SingleFederationError::InvalidFieldSharing { .. } => ErrorCode::InvalidFieldSharing,
+            SingleFederationError::InvalidTagName { .. } => ErrorCode::InvalidTagName,
+            SingleFederationError::QueryRootMissing { .. } => ErrorCode::QueryRootMissing,
         }
     }
 
@@ -862,6 +1232,14 @@ impl From<DiagnosticList> for FederationError {
 impl<T> From<WithErrors<T>> for FederationError {
     fn from(value: WithErrors<T>) -> Self {
         value.errors.into()
+    }
+}
+
+// Used for when we condition on a type `T: TryInto<U>`, but we have an infallible conversion of
+// `T: Into<U>`. This allows us to unwrap the `Result<U, Infallible>` with `?`.
+impl From<std::convert::Infallible> for FederationError {
+    fn from(_: std::convert::Infallible) -> Self {
+        unreachable!("Infallible should never be converted to FederationError")
     }
 }
 
@@ -1112,8 +1490,7 @@ static FIELDS_HAS_ARGS: LazyLock<ErrorCodeCategory<String>> = LazyLock::new(|| {
         "FIELDS_HAS_ARGS".to_owned(),
         Box::new(|directive| {
             format!(
-                "The `fields` argument of a `@{}` directive includes a field defined with arguments (which is not currently supported).",
-                directive
+                "The `fields` argument of a `@{directive}` directive includes a field defined with arguments (which is not currently supported)."
             )
         }),
         None,
@@ -1132,8 +1509,7 @@ static DIRECTIVE_FIELDS_MISSING_EXTERNAL: LazyLock<ErrorCodeCategory<String>> = 
             "FIELDS_MISSING_EXTERNAL".to_owned(),
             Box::new(|directive| {
                 format!(
-                    "The `fields` argument of a `@{}` directive includes a field that is not marked as `@external`.",
-                    directive
+                    "The `fields` argument of a `@{directive}` directive includes a field that is not marked as `@external`."
                 )
             }),
             Some(ErrorCodeMetadata {
@@ -1159,10 +1535,7 @@ static DIRECTIVE_UNSUPPORTED_ON_INTERFACE: LazyLock<ErrorCodeCategory<String>> =
                 } else {
                     "not (yet) supported"
                 };
-                format!(
-                    "A `@{}` directive is used on an interface, which is {}.",
-                    directive, suffix
-                )
+                format!("A `@{directive}` directive is used on an interface, which is {suffix}.")
             }),
             None,
         )
@@ -1180,8 +1553,7 @@ static DIRECTIVE_IN_FIELDS_ARG: LazyLock<ErrorCodeCategory<String>> = LazyLock::
         "DIRECTIVE_IN_FIELDS_ARG".to_owned(),
         Box::new(|directive| {
             format!(
-                "The `fields` argument of a `@{}` directive includes some directive applications. This is not supported",
-                directive
+                "The `fields` argument of a `@{directive}` directive includes some directive applications. This is not supported"
             )
         }),
         Some(ErrorCodeMetadata {
@@ -1235,8 +1607,7 @@ static DIRECTIVE_INVALID_FIELDS_TYPE: LazyLock<ErrorCodeCategory<String>> = Lazy
         "INVALID_FIELDS_TYPE".to_owned(),
         Box::new(|directive| {
             format!(
-                "The value passed to the `fields` argument of a `@{}` directive is not a string.",
-                directive
+                "The value passed to the `fields` argument of a `@{directive}` directive is not a string."
             )
         }),
         None,
@@ -1255,8 +1626,7 @@ static DIRECTIVE_INVALID_FIELDS: LazyLock<ErrorCodeCategory<String>> = LazyLock:
         "INVALID_FIELDS".to_owned(),
         Box::new(|directive| {
             format!(
-                "The `fields` argument of a `@{}` directive is invalid (it has invalid syntax, includes unknown fields, ...).",
-                directive
+                "The `fields` argument of a `@{directive}` directive is invalid (it has invalid syntax, includes unknown fields, ...)."
             )
         }),
         None,
@@ -1290,8 +1660,7 @@ static ROOT_TYPE_USED: LazyLock<ErrorCodeCategory<SchemaRootKind>> = LazyLock::n
         Box::new(|element| {
             let kind: String = element.into();
             format!(
-                "A subgraph's schema defines a type with the name `{}`, while also specifying a _different_ type name as the root query object. This is not allowed.",
-                kind
+                "A subgraph's schema defines a type with the name `{kind}`, while also specifying a _different_ type name as the root query object. This is not allowed."
             )
         }),
         Some(ErrorCodeMetadata {
@@ -1602,6 +1971,15 @@ static EMPTY_MERGED_INPUT_TYPE: LazyLock<ErrorCodeDefinition> = LazyLock::new(||
     )
 });
 
+static INPUT_FIELD_MERGE_FAILED: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "INPUT_FIELD_MERGE_FAILED".to_owned(),
+        "Failed to merge an input object field due to incompatible definitions across subgraphs."
+            .to_owned(),
+        None,
+    )
+});
+
 static ENUM_VALUE_MISMATCH: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     ErrorCodeDefinition::new(
         "ENUM_VALUE_MISMATCH".to_owned(),
@@ -1636,6 +2014,18 @@ static SATISFIABILITY_ERROR: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     )
 });
 
+static MAX_VALIDATION_SUBGRAPH_PATHS_EXCEEDED: LazyLock<ErrorCodeDefinition> =
+    LazyLock::new(|| {
+        ErrorCodeDefinition::new(
+            "MAX_VALIDATION_SUBGRAPH_PATHS_EXCEEDED".to_owned(),
+            "The maximum number of validation subgraph paths has been exceeded.".to_owned(),
+            Some(ErrorCodeMetadata {
+                added_in: "2.8.0",
+                replaces: &[],
+            }),
+        )
+    });
+
 static OVERRIDE_FROM_SELF_ERROR: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     ErrorCodeDefinition::new(
         "OVERRIDE_FROM_SELF_ERROR".to_owned(),
@@ -1669,6 +2059,17 @@ static OVERRIDE_ON_INTERFACE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
         "The @override directive cannot be used on the fields of an interface type.".to_owned(),
         Some(ErrorCodeMetadata {
             added_in: "2.3.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static OVERRIDE_LABEL_INVALID: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "OVERRIDE_LABEL_INVALID".to_owned(),
+        r#"The @override directive `label` argument must match the pattern /^[a-zA-Z][a-zA-Z0-9_\-:./]*$/ or /^percent\((\d{1,2}(\.\d{1,8})?|100)\)$/"#.to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.7.0",
             replaces: &[],
         }),
     )
@@ -1757,6 +2158,14 @@ static INTERNAL: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     ErrorCodeDefinition::new(
         "INTERNAL".to_owned(),
         "An internal federation error occured.".to_owned(),
+        None,
+    )
+});
+
+static ERROR_CODE_MISSING: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "ERROR_CODE_MISSING".to_owned(),
+        "An internal federation error occurred when translating a federation error into an error code".to_owned(),
         None,
     )
 });
@@ -1918,9 +2327,56 @@ static CONTEXT_NO_RESOLVABLE_KEY: LazyLock<ErrorCodeDefinition> = LazyLock::new(
     )
 });
 
-#[derive(Debug, strum_macros::EnumIter)]
+static CONTEXT_SELECTION_INVALID: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "CONTEXT_SELECTION_INVALID".to_owned(),
+        "The selection set is invalid".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.8.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static INVALID_TAG_NAME: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "INVALID_TAG_NAME".to_owned(),
+        "Invalid value for argument \"name\" in application of @tag.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.0.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static CONTEXTUAL_ARGUMENT_NOT_CONTEXTUAL_IN_ALL_SUBGRAPHS: LazyLock<ErrorCodeDefinition> =
+    LazyLock::new(|| {
+        ErrorCodeDefinition::new(
+            "CONTEXTUAL_ARGUMENT_NOT_CONTEXTUAL_IN_ALL_SUBGRAPHS".to_owned(),
+            "Argument on field is marked contextual in only some subgraphs".to_owned(),
+            Some(ErrorCodeMetadata {
+                added_in: "2.7.0",
+                replaces: &[],
+            }),
+        )
+    });
+
+static QUERY_ROOT_MISSING: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "QUERY_ROOT_MISSING".to_owned(),
+        "The schema has no query root type.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.0.0",
+            replaces: &[],
+        }),
+    )
+});
+
+#[derive(Debug, PartialEq, strum_macros::EnumIter)]
 pub enum ErrorCode {
+    ErrorCodeMissing,
     Internal,
+    ExtensionWithNoBase,
     InvalidGraphQL,
     DirectiveDefinitionInvalid,
     TypeDefinitionInvalid,
@@ -1965,7 +2421,6 @@ pub enum ErrorCode {
     FieldArgumentTypeMismatch,
     InputFieldDefaultMismatch,
     FieldArgumentDefaultMismatch,
-    ExtensionWithNoBase,
     ExternalMissingOnBase,
     InvalidFieldSharing,
     InvalidShareableUsage,
@@ -1982,10 +2437,12 @@ pub enum ErrorCode {
     RequiredInputFieldMissingInSomeSubgraph,
     RequiredArgumentMissingInSomeSubgraph,
     EmptyMergedInputType,
+    InputFieldMergeFailed,
     EnumValueMismatch,
     EmptyMergedEnumType,
     ShareableHasMismatchedRuntimeTypes,
     SatisfiabilityError,
+    MaxValidationSubgraphPathsExceeded,
     OverrideFromSelfError,
     OverrideSourceHasOverride,
     OverrideCollisionWithAnotherDirective,
@@ -2012,13 +2469,18 @@ pub enum ErrorCode {
     NoContextReferenced,
     NoSelectionForContext,
     ContextNoResolvableKey,
+    ContextSelectionInvalid,
+    InvalidTagName,
+    OverrideLabelInvalid,
+    ContextualArgumentNotContextualInAllSubgraphs,
+    QueryRootMissing,
 }
 
 impl ErrorCode {
     pub fn definition(&self) -> &'static ErrorCodeDefinition {
         match self {
-            // TODO: We should determine the code and doc info for internal errors.
             ErrorCode::Internal => &INTERNAL,
+            ErrorCode::ExtensionWithNoBase => &EXTENSION_WITH_NO_BASE,
             ErrorCode::InvalidGraphQL => &INVALID_GRAPHQL,
             ErrorCode::DirectiveDefinitionInvalid => &DIRECTIVE_DEFINITION_INVALID,
             ErrorCode::TypeDefinitionInvalid => &TYPE_DEFINITION_INVALID,
@@ -2067,7 +2529,6 @@ impl ErrorCode {
             ErrorCode::FieldArgumentTypeMismatch => &FIELD_ARGUMENT_TYPE_MISMATCH,
             ErrorCode::InputFieldDefaultMismatch => &INPUT_FIELD_DEFAULT_MISMATCH,
             ErrorCode::FieldArgumentDefaultMismatch => &FIELD_ARGUMENT_DEFAULT_MISMATCH,
-            ErrorCode::ExtensionWithNoBase => &EXTENSION_WITH_NO_BASE,
             ErrorCode::ExternalMissingOnBase => &EXTERNAL_MISSING_ON_BASE,
             ErrorCode::InvalidFieldSharing => &INVALID_FIELD_SHARING,
             ErrorCode::InvalidShareableUsage => &INVALID_SHAREABLE_USAGE,
@@ -2088,12 +2549,16 @@ impl ErrorCode {
                 &REQUIRED_ARGUMENT_MISSING_IN_SOME_SUBGRAPH
             }
             ErrorCode::EmptyMergedInputType => &EMPTY_MERGED_INPUT_TYPE,
+            ErrorCode::InputFieldMergeFailed => &INPUT_FIELD_MERGE_FAILED,
             ErrorCode::EnumValueMismatch => &ENUM_VALUE_MISMATCH,
             ErrorCode::EmptyMergedEnumType => &EMPTY_MERGED_ENUM_TYPE,
             ErrorCode::ShareableHasMismatchedRuntimeTypes => {
                 &SHAREABLE_HAS_MISMATCHED_RUNTIME_TYPES
             }
             ErrorCode::SatisfiabilityError => &SATISFIABILITY_ERROR,
+            ErrorCode::MaxValidationSubgraphPathsExceeded => {
+                &MAX_VALIDATION_SUBGRAPH_PATHS_EXCEEDED
+            }
             ErrorCode::OverrideFromSelfError => &OVERRIDE_FROM_SELF_ERROR,
             ErrorCode::OverrideSourceHasOverride => &OVERRIDE_SOURCE_HAS_OVERRIDE,
             ErrorCode::OverrideCollisionWithAnotherDirective => {
@@ -2124,6 +2589,14 @@ impl ErrorCode {
             ErrorCode::NoContextReferenced => &NO_CONTEXT_REFERENCED,
             ErrorCode::NoSelectionForContext => &NO_SELECTION_FOR_CONTEXT,
             ErrorCode::ContextNoResolvableKey => &CONTEXT_NO_RESOLVABLE_KEY,
+            ErrorCode::ContextSelectionInvalid => &CONTEXT_SELECTION_INVALID,
+            ErrorCode::InvalidTagName => &INVALID_TAG_NAME,
+            ErrorCode::ErrorCodeMissing => &ERROR_CODE_MISSING,
+            ErrorCode::OverrideLabelInvalid => &OVERRIDE_LABEL_INVALID,
+            ErrorCode::ContextualArgumentNotContextualInAllSubgraphs => {
+                &CONTEXTUAL_ARGUMENT_NOT_CONTEXTUAL_IN_ALL_SUBGRAPHS
+            }
+            ErrorCode::QueryRootMissing => &QUERY_ROOT_MISSING,
         }
     }
 }

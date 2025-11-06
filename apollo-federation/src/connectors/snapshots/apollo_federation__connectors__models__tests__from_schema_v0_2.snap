@@ -2,27 +2,14 @@
 source: apollo-federation/src/connectors/models.rs
 expression: "&connectors"
 ---
-{
-    ConnectId {
-        label: "connectors.json http: GET /posts",
-        subgraph_name: "connectors",
-        source_name: Some(
-            "json",
-        ),
-        directive: Field(
-            ObjectOrInterfaceFieldDirectivePosition {
-                field: Object(Query.posts),
-                directive_name: "connect",
-                directive_index: 0,
-            },
-        ),
-    }: Connector {
+[
+    Connector {
         id: ConnectId {
-            label: "connectors.json http: GET /posts",
             subgraph_name: "connectors",
             source_name: Some(
                 "json",
             ),
+            named: None,
             directive: Field(
                 ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.posts),
@@ -32,8 +19,17 @@ expression: "&connectors"
             ),
         },
         transport: HttpJsonTransport {
-            source_url: Some(
-                https://jsonplaceholder.typicode.com/,
+            source_template: Some(
+                StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "https://jsonplaceholder.typicode.com/",
+                                location: 0..37,
+                            },
+                        ),
+                    ],
+                },
             ),
             connect_template: StringTemplate {
                 parts: [
@@ -46,115 +42,153 @@ expression: "&connectors"
                 ],
             },
             method: Get,
-            headers: {
-                "authtoken": From(
-                    "x-auth-token",
-                ),
-                "user-agent": Value(
-                    HeaderValue(
-                        StringTemplate {
-                            parts: [
-                                Constant(
-                                    Constant {
-                                        value: "Firefox",
-                                        location: 0..7,
-                                    },
-                                ),
-                            ],
-                        },
+            headers: [
+                Header {
+                    name: "authtoken",
+                    source: From(
+                        "x-auth-token",
                     ),
-                ),
-            },
+                },
+                Header {
+                    name: "user-agent",
+                    source: Value(
+                        HeaderValue(
+                            StringTemplate {
+                                parts: [
+                                    Constant(
+                                        Constant {
+                                            value: "Firefox",
+                                            location: 0..7,
+                                        },
+                                    ),
+                                ],
+                            },
+                        ),
+                    ),
+                },
+            ],
             body: None,
             source_path: None,
             source_query_params: None,
             connect_path: None,
             connect_query_params: None,
         },
-        selection: Named(
-            SubSelection {
-                selections: [
-                    Field(
-                        None,
-                        WithRange {
-                            node: Field(
-                                "id",
-                            ),
-                            range: Some(
-                                0..2,
-                            ),
+        selection: JSONSelection {
+            inner: Named(
+                SubSelection {
+                    selections: [
+                        NamedSelection {
+                            prefix: None,
+                            path: PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "id",
+                                            ),
+                                            range: Some(
+                                                0..2,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                2..2,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        0..2,
+                                    ),
+                                },
+                            },
                         },
-                        None,
-                    ),
-                    Field(
-                        None,
-                        WithRange {
-                            node: Field(
-                                "title",
-                            ),
-                            range: Some(
-                                3..8,
-                            ),
+                        NamedSelection {
+                            prefix: None,
+                            path: PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "title",
+                                            ),
+                                            range: Some(
+                                                3..8,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                8..8,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        3..8,
+                                    ),
+                                },
+                            },
                         },
-                        None,
-                    ),
-                    Field(
-                        None,
-                        WithRange {
-                            node: Field(
-                                "body",
-                            ),
-                            range: Some(
-                                9..13,
-                            ),
+                        NamedSelection {
+                            prefix: None,
+                            path: PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "body",
+                                            ),
+                                            range: Some(
+                                                9..13,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                13..13,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        9..13,
+                                    ),
+                                },
+                            },
                         },
-                        None,
+                    ],
+                    range: Some(
+                        0..13,
                     ),
-                ],
-                range: Some(
-                    0..13,
-                ),
-            },
-        ),
+                },
+            ),
+            spec: V0_2,
+        },
         config: None,
         max_requests: None,
         entity_resolver: None,
         spec: V0_2,
-        request_variables: {},
-        response_variables: {},
         request_headers: {},
         response_headers: {},
-        batch_settings: Some(
-            ConnectorBatchSettings {
-                max_size: None,
-            },
-        ),
+        request_variable_keys: {},
+        response_variable_keys: {},
+        batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
+        label: Label(
+            "connectors.json http: GET /posts",
+        ),
     },
-    ConnectId {
-        label: "[BATCH] connectors.json http: POST /posts",
-        subgraph_name: "connectors",
-        source_name: Some(
-            "json",
-        ),
-        directive: Type(
-            ObjectTypeDefinitionDirectivePosition {
-                type_name: "Post",
-                directive_name: "connect",
-                directive_index: 0,
-            },
-        ),
-    }: Connector {
+    Connector {
         id: ConnectId {
-            label: "[BATCH] connectors.json http: POST /posts",
             subgraph_name: "connectors",
             source_name: Some(
                 "json",
             ),
+            named: None,
             directive: Type(
                 ObjectTypeDefinitionDirectivePosition {
                     type_name: "Post",
@@ -164,8 +198,17 @@ expression: "&connectors"
             ),
         },
         transport: HttpJsonTransport {
-            source_url: Some(
-                https://jsonplaceholder.typicode.com/,
+            source_template: Some(
+                StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "https://jsonplaceholder.typicode.com/",
+                                location: 0..37,
+                            },
+                        ),
+                    ],
+                },
             ),
             connect_template: StringTemplate {
                 parts: [
@@ -178,161 +221,216 @@ expression: "&connectors"
                 ],
             },
             method: Post,
-            headers: {
-                "authtoken": From(
-                    "x-auth-token",
-                ),
-                "user-agent": Value(
-                    HeaderValue(
-                        StringTemplate {
-                            parts: [
-                                Constant(
-                                    Constant {
-                                        value: "Firefox",
-                                        location: 0..7,
-                                    },
-                                ),
-                            ],
-                        },
+            headers: [
+                Header {
+                    name: "authtoken",
+                    source: From(
+                        "x-auth-token",
                     ),
-                ),
-            },
+                },
+                Header {
+                    name: "user-agent",
+                    source: Value(
+                        HeaderValue(
+                            StringTemplate {
+                                parts: [
+                                    Constant(
+                                        Constant {
+                                            value: "Firefox",
+                                            location: 0..7,
+                                        },
+                                    ),
+                                ],
+                            },
+                        ),
+                    ),
+                },
+            ],
             body: Some(
-                Named(
-                    SubSelection {
-                        selections: [
-                            Path {
-                                alias: Some(
-                                    Alias {
-                                        name: WithRange {
-                                            node: Field(
-                                                "ids",
-                                            ),
+                JSONSelection {
+                    inner: Named(
+                        SubSelection {
+                            selections: [
+                                NamedSelection {
+                                    prefix: Alias(
+                                        Alias {
+                                            name: WithRange {
+                                                node: Field(
+                                                    "ids",
+                                                ),
+                                                range: Some(
+                                                    0..3,
+                                                ),
+                                            },
                                             range: Some(
-                                                0..3,
+                                                0..4,
                                             ),
                                         },
-                                        range: Some(
-                                            0..4,
-                                        ),
-                                    },
-                                ),
-                                inline: false,
-                                path: PathSelection {
-                                    path: WithRange {
-                                        node: Var(
-                                            WithRange {
-                                                node: $batch,
-                                                range: Some(
-                                                    5..11,
-                                                ),
-                                            },
-                                            WithRange {
-                                                node: Key(
-                                                    WithRange {
-                                                        node: Field(
-                                                            "id",
-                                                        ),
-                                                        range: Some(
-                                                            12..14,
-                                                        ),
-                                                    },
-                                                    WithRange {
-                                                        node: Empty,
-                                                        range: Some(
-                                                            14..14,
-                                                        ),
-                                                    },
-                                                ),
-                                                range: Some(
-                                                    11..14,
-                                                ),
-                                            },
-                                        ),
-                                        range: Some(
-                                            5..14,
-                                        ),
+                                    ),
+                                    path: PathSelection {
+                                        path: WithRange {
+                                            node: Var(
+                                                WithRange {
+                                                    node: $batch,
+                                                    range: Some(
+                                                        5..11,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Key(
+                                                        WithRange {
+                                                            node: Field(
+                                                                "id",
+                                                            ),
+                                                            range: Some(
+                                                                12..14,
+                                                            ),
+                                                        },
+                                                        WithRange {
+                                                            node: Empty,
+                                                            range: Some(
+                                                                14..14,
+                                                            ),
+                                                        },
+                                                    ),
+                                                    range: Some(
+                                                        11..14,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                5..14,
+                                            ),
+                                        },
                                     },
                                 },
-                            },
-                        ],
-                        range: Some(
-                            0..14,
-                        ),
-                    },
-                ),
+                            ],
+                            range: Some(
+                                0..14,
+                            ),
+                        },
+                    ),
+                    spec: V0_2,
+                },
             ),
             source_path: None,
             source_query_params: None,
             connect_path: None,
             connect_query_params: None,
         },
-        selection: Named(
-            SubSelection {
-                selections: [
-                    Field(
-                        None,
-                        WithRange {
-                            node: Field(
-                                "id",
-                            ),
-                            range: Some(
-                                0..2,
-                            ),
+        selection: JSONSelection {
+            inner: Named(
+                SubSelection {
+                    selections: [
+                        NamedSelection {
+                            prefix: None,
+                            path: PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "id",
+                                            ),
+                                            range: Some(
+                                                0..2,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                2..2,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        0..2,
+                                    ),
+                                },
+                            },
                         },
-                        None,
-                    ),
-                    Field(
-                        None,
-                        WithRange {
-                            node: Field(
-                                "title",
-                            ),
-                            range: Some(
-                                3..8,
-                            ),
+                        NamedSelection {
+                            prefix: None,
+                            path: PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "title",
+                                            ),
+                                            range: Some(
+                                                3..8,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                8..8,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        3..8,
+                                    ),
+                                },
+                            },
                         },
-                        None,
-                    ),
-                    Field(
-                        None,
-                        WithRange {
-                            node: Field(
-                                "body",
-                            ),
-                            range: Some(
-                                9..13,
-                            ),
+                        NamedSelection {
+                            prefix: None,
+                            path: PathSelection {
+                                path: WithRange {
+                                    node: Key(
+                                        WithRange {
+                                            node: Field(
+                                                "body",
+                                            ),
+                                            range: Some(
+                                                9..13,
+                                            ),
+                                        },
+                                        WithRange {
+                                            node: Empty,
+                                            range: Some(
+                                                13..13,
+                                            ),
+                                        },
+                                    ),
+                                    range: Some(
+                                        9..13,
+                                    ),
+                                },
+                            },
                         },
-                        None,
+                    ],
+                    range: Some(
+                        0..13,
                     ),
-                ],
-                range: Some(
-                    0..13,
-                ),
-            },
-        ),
+                },
+            ),
+            spec: V0_2,
+        },
         config: None,
         max_requests: None,
         entity_resolver: Some(
             TypeBatch,
         ),
         spec: V0_2,
-        request_variables: {
-            $batch,
-        },
-        response_variables: {},
         request_headers: {},
         response_headers: {},
-        batch_settings: Some(
-            ConnectorBatchSettings {
-                max_size: None,
+        request_variable_keys: {
+            $batch: {
+                "id",
             },
-        ),
+        },
+        response_variable_keys: {},
+        batch_settings: None,
         error_settings: ConnectorErrorsSettings {
             message: None,
             source_extensions: None,
             connect_extensions: None,
+            connect_is_success: None,
         },
+        label: Label(
+            "[BATCH] connectors.json http: POST /posts",
+        ),
     },
-}
+]

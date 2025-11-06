@@ -40,6 +40,8 @@ use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
+pub(crate) const FEDERATION_ANY_TYPE_NAME_IN_SPEC: Name = name!("_Any");
+pub(crate) const FEDERATION_CACHE_TAG_DIRECTIVE_NAME_IN_SPEC: Name = name!("cacheTag");
 pub(crate) const FEDERATION_ENTITY_TYPE_NAME_IN_SPEC: Name = name!("_Entity");
 pub(crate) const FEDERATION_SERVICE_TYPE_NAME_IN_SPEC: Name = name!("_Service");
 pub(crate) const FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC: Name = name!("key");
@@ -58,12 +60,24 @@ pub(crate) const FEDERATION_COMPOSEDIRECTIVE_DIRECTIVE_NAME_IN_SPEC: Name =
 
 pub(crate) const FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC: Name = name!("FieldSet");
 pub(crate) const FEDERATION_FIELDS_ARGUMENT_NAME: Name = name!("fields");
+pub(crate) const FEDERATION_FORMAT_ARGUMENT_NAME: Name = name!("format");
 pub(crate) const FEDERATION_RESOLVABLE_ARGUMENT_NAME: Name = name!("resolvable");
 pub(crate) const FEDERATION_REASON_ARGUMENT_NAME: Name = name!("reason");
 pub(crate) const FEDERATION_FROM_ARGUMENT_NAME: Name = name!("from");
 pub(crate) const FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME: Name = name!("label");
+pub(crate) const FEDERATION_USED_OVERRIDEN_ARGUMENT_NAME: Name = name!("usedOverridden");
+pub(crate) const FEDERATION_CONTEXT_ARGUMENT_NAME: Name = name!("contextArguments");
+pub(crate) const FEDERATION_SELECTION_ARGUMENT_NAME: Name = name!("selection");
+pub(crate) const FEDERATION_TYPE_ARGUMENT_NAME: Name = name!("type");
+pub(crate) const FEDERATION_GRAPH_ARGUMENT_NAME: Name = name!("graph");
 pub(crate) const FEDERATION_NAME_ARGUMENT_NAME: Name = name!("name");
 pub(crate) const FEDERATION_FIELD_ARGUMENT_NAME: Name = name!("field");
+
+pub(crate) const FEDERATION_OPERATION_TYPES: [Name; 3] = [
+    FEDERATION_ANY_TYPE_NAME_IN_SPEC,
+    FEDERATION_ENTITY_TYPE_NAME_IN_SPEC,
+    FEDERATION_SERVICE_TYPE_NAME_IN_SPEC,
+];
 
 pub(crate) struct KeyDirectiveArguments<'doc> {
     pub(crate) fields: &'doc str,
@@ -97,6 +111,15 @@ pub(crate) struct FromContextDirectiveArguments<'doc> {
 pub(crate) struct OverrideDirectiveArguments<'doc> {
     pub(crate) from: &'doc str,
     pub(crate) label: Option<&'doc str>,
+}
+
+pub(crate) struct CacheTagDirectiveArguments<'doc> {
+    pub(crate) format: &'doc str,
+}
+
+#[derive(Clone)]
+pub(crate) struct ComposeDirectiveArguments<'doc> {
+    pub(crate) name: &'doc str,
 }
 
 #[derive(Debug)]
@@ -157,8 +180,7 @@ impl FederationSpecDefinition {
             None => Ok(None),
             _ => Err(SingleFederationError::Internal {
                 message: format!(
-                    "Unexpectedly found non-union for federation spec's \"{}\" type definition",
-                    FEDERATION_ENTITY_TYPE_NAME_IN_SPEC
+                    "Unexpectedly found non-union for federation spec's \"{FEDERATION_ENTITY_TYPE_NAME_IN_SPEC}\" type definition"
                 ),
             }
             .into()),
@@ -173,8 +195,7 @@ impl FederationSpecDefinition {
             .ok_or_else(|| {
                 SingleFederationError::Internal {
                     message: format!(
-                        "Unexpectedly could not find federation spec's \"@{}\" directive definition",
-                        FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC
+                        "Unexpectedly could not find federation spec's \"@{FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC}\" directive definition"
                     ),
                 }
                 .into()
@@ -235,8 +256,7 @@ impl FederationSpecDefinition {
             .ok_or_else(|| {
                 SingleFederationError::Internal {
                     message: format!(
-                        "Unexpectedly could not find federation spec's \"@{}\" directive definition",
-                        FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC
+                        "Unexpectedly could not find federation spec's \"@{FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC}\" directive definition"
                     ),
                 }.into()
             })
@@ -271,8 +291,7 @@ impl FederationSpecDefinition {
         self.directive_definition(schema, &FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC)?
             .ok_or_else(|| {
                 FederationError::internal(format!(
-                    "Unexpectedly could not find federation spec's \"@{}\" directive definition",
-                    FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC
+                    "Unexpectedly could not find federation spec's \"@{FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC}\" directive definition"
                 ))
             })
     }
@@ -292,8 +311,7 @@ impl FederationSpecDefinition {
             .ok_or_else(|| {
                 SingleFederationError::Internal {
                     message: format!(
-                        "Unexpectedly could not find federation spec's \"@{}\" directive definition",
-                        FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC
+                        "Unexpectedly could not find federation spec's \"@{FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC}\" directive definition"
                     ),
                 }.into()
             })
@@ -342,8 +360,7 @@ impl FederationSpecDefinition {
             .ok_or_else(|| {
                 SingleFederationError::Internal {
                     message: format!(
-                        "Unexpectedly could not find federation spec's \"@{}\" directive definition",
-                        FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC
+                        "Unexpectedly could not find federation spec's \"@{FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC}\" directive definition"
                     ),
                 }.into()
             })
@@ -378,8 +395,7 @@ impl FederationSpecDefinition {
             .ok_or_else(|| {
                 SingleFederationError::Internal {
                     message: format!(
-                        "Unexpectedly could not find federation spec's \"@{}\" directive definition",
-                        FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC
+                        "Unexpectedly could not find federation spec's \"@{FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC}\" directive definition"
                     ),
                 }.into()
             })
@@ -433,8 +449,7 @@ impl FederationSpecDefinition {
             .ok_or_else(|| {
                 SingleFederationError::Internal {
                     message: format!(
-                        "Unexpectedly could not find federation spec's \"@{}\" directive definition",
-                        FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC
+                        "Unexpectedly could not find federation spec's \"@{FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC}\" directive definition"
                     ),
                 }.into()
             })
@@ -485,8 +500,7 @@ impl FederationSpecDefinition {
         self.directive_definition(schema, &FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC)?
             .ok_or_else(|| {
                 FederationError::internal(format!(
-                    "Unexpectedly could not find federation spec's \"@{}\" directive definition",
-                    FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC
+                    "Unexpectedly could not find federation spec's \"@{FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC}\" directive definition"
                 ))
             })
     }
@@ -513,8 +527,7 @@ impl FederationSpecDefinition {
         self.directive_definition(schema, &FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC)?
             .ok_or_else(|| {
                 FederationError::internal(format!(
-                    "Unexpectedly could not find federation spec's \"@{}\" directive definition",
-                    FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC
+                    "Unexpectedly could not find federation spec's \"@{FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC}\" directive definition"
                 ))
             })
     }
@@ -568,8 +581,7 @@ impl FederationSpecDefinition {
         self.directive_definition(schema, &FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC)?
             .ok_or_else(|| {
                 FederationError::internal(format!(
-                    "Unexpectedly could not find federation spec's \"@{}\" directive definition",
-                    FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC,
+                    "Unexpectedly could not find federation spec's \"@{FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC}\" directive definition",
                 ))
             })
     }
@@ -617,8 +629,7 @@ impl FederationSpecDefinition {
         self.directive_definition(schema, &FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC)?
             .ok_or_else(|| {
                 FederationError::internal(format!(
-                    "Unexpectedly could not find federation spec's \"@{}\" directive definition",
-                    FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC,
+                    "Unexpectedly could not find federation spec's \"@{FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC}\" directive definition",
                 ))
             })
     }
@@ -664,6 +675,51 @@ impl FederationSpecDefinition {
                 application,
                 &FEDERATION_FIELD_ARGUMENT_NAME,
             )?,
+        })
+    }
+
+    pub(crate) fn cache_tag_directive_definition<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema Node<DirectiveDefinition>, FederationError> {
+        self.directive_definition(schema, &FEDERATION_CACHE_TAG_DIRECTIVE_NAME_IN_SPEC)?
+            .ok_or_else(|| {
+                FederationError::internal(format!(
+                    "Unexpectedly could not find federation spec's \"@{FEDERATION_CACHE_TAG_DIRECTIVE_NAME_IN_SPEC}\" directive definition",
+                ))
+            })
+    }
+
+    pub(crate) fn cache_tag_directive_arguments<'doc>(
+        &self,
+        application: &'doc Node<Directive>,
+    ) -> Result<CacheTagDirectiveArguments<'doc>, FederationError> {
+        Ok(CacheTagDirectiveArguments {
+            format: directive_required_string_argument(
+                application,
+                &FEDERATION_FORMAT_ARGUMENT_NAME,
+            )?,
+        })
+    }
+
+    pub(crate) fn compose_directive_definition<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema Node<DirectiveDefinition>, FederationError> {
+        self.directive_definition(schema, &FEDERATION_COMPOSEDIRECTIVE_DIRECTIVE_NAME_IN_SPEC)?
+            .ok_or_else(|| {
+                FederationError::internal(format!(
+                    "Unexpectedly could not find federation spec's \"@{FEDERATION_COMPOSEDIRECTIVE_DIRECTIVE_NAME_IN_SPEC}\" directive definition",
+                ))
+            })
+    }
+
+    pub(crate) fn compose_directive_arguments<'doc>(
+        &self,
+        application: &'doc Node<Directive>,
+    ) -> Result<ComposeDirectiveArguments<'doc>, FederationError> {
+        Ok(ComposeDirectiveArguments {
+            name: directive_required_string_argument(application, &FEDERATION_NAME_ARGUMENT_NAME)?,
         })
     }
 
@@ -811,13 +867,15 @@ impl FederationSpecDefinition {
         )
     }
 
+    // NOTE: due to the long-standing subgraph-js bug we'll continue to define name argument
+    // as nullable and rely on validations to ensure that value is set.
     fn compose_directive_directive_specification() -> DirectiveSpecification {
         DirectiveSpecification::new(
             FEDERATION_COMPOSEDIRECTIVE_DIRECTIVE_NAME_IN_SPEC,
             &[DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: FEDERATION_NAME_ARGUMENT_NAME,
-                    get_type: |_, _| Ok(ty!(String!)),
+                    get_type: |_, _| Ok(ty!(String)),
                     default_value: None,
                 },
                 composition_strategy: None,
@@ -836,6 +894,29 @@ impl FederationSpecDefinition {
             &[],
             false,
             &[DirectiveLocation::Object],
+            false,
+            None,
+            None,
+        )
+    }
+
+    fn cache_tag_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_CACHE_TAG_DIRECTIVE_NAME_IN_SPEC,
+            &[DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: FEDERATION_FORMAT_ARGUMENT_NAME,
+                    get_type: |_, _| Ok(ty!(String!)),
+                    default_value: None,
+                },
+                composition_strategy: None,
+            }],
+            true,
+            &[
+                DirectiveLocation::Object,
+                DirectiveLocation::Interface,
+                DirectiveLocation::FieldDefinition,
+            ],
             false,
             None,
             None,
@@ -882,7 +963,7 @@ impl SpecDefinition for FederationSpecDefinition {
         specs.push(Box::new(self.shareable_directive_specification()));
 
         if let Some(inaccessible_spec) =
-            INACCESSIBLE_VERSIONS.get_minimum_required_version(self.version())
+            INACCESSIBLE_VERSIONS.get_dyn_minimum_required_version(self.version())
         {
             specs.extend(inaccessible_spec.directive_specs());
         }
@@ -910,10 +991,10 @@ impl SpecDefinition for FederationSpecDefinition {
             }
         }
 
-        if self.version().satisfies(&Version { major: 2, minor: 6 }) {
-            if let Some(policy_spec) = POLICY_VERSIONS.find(&Version { major: 0, minor: 1 }) {
-                specs.extend(policy_spec.directive_specs());
-            }
+        if self.version().satisfies(&Version { major: 2, minor: 6 })
+            && let Some(policy_spec) = POLICY_VERSIONS.find(&Version { major: 0, minor: 1 })
+        {
+            specs.extend(policy_spec.directive_specs());
         }
 
         if self.version().satisfies(&Version { major: 2, minor: 8 }) {
@@ -923,10 +1004,17 @@ impl SpecDefinition for FederationSpecDefinition {
             specs.extend(context_spec_definitions);
         }
 
-        if self.version().satisfies(&Version { major: 2, minor: 9 }) {
-            if let Some(cost_spec) = COST_VERSIONS.find(&Version { major: 0, minor: 1 }) {
-                specs.extend(cost_spec.directive_specs());
-            }
+        if self.version().satisfies(&Version { major: 2, minor: 9 })
+            && let Some(cost_spec) = COST_VERSIONS.find(&Version { major: 0, minor: 1 })
+        {
+            specs.extend(cost_spec.directive_specs());
+        }
+
+        if self.version().satisfies(&Version {
+            major: 2,
+            minor: 12,
+        }) {
+            specs.push(Box::new(Self::cache_tag_directive_specification()));
         }
 
         specs
@@ -938,18 +1026,17 @@ impl SpecDefinition for FederationSpecDefinition {
                 name: FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC,
             })];
 
-        if self.version().satisfies(&Version { major: 2, minor: 5 }) {
-            if let Some(requires_scopes_spec) =
+        if self.version().satisfies(&Version { major: 2, minor: 5 })
+            && let Some(requires_scopes_spec) =
                 REQUIRES_SCOPES_VERSIONS.find(&Version { major: 0, minor: 1 })
-            {
-                type_specs.extend(requires_scopes_spec.type_specs());
-            }
+        {
+            type_specs.extend(requires_scopes_spec.type_specs());
         }
 
-        if self.version().satisfies(&Version { major: 2, minor: 6 }) {
-            if let Some(policy_spec) = POLICY_VERSIONS.find(&Version { major: 0, minor: 1 }) {
-                type_specs.extend(policy_spec.type_specs());
-            }
+        if self.version().satisfies(&Version { major: 2, minor: 6 })
+            && let Some(policy_spec) = POLICY_VERSIONS.find(&Version { major: 0, minor: 1 })
+        {
+            type_specs.extend(policy_spec.type_specs());
         }
 
         if self.version().satisfies(&Version { major: 2, minor: 8 }) {
@@ -964,6 +1051,10 @@ impl SpecDefinition for FederationSpecDefinition {
     fn minimum_federation_version(&self) -> &Version {
         &self.url.version
     }
+
+    fn purpose(&self) -> Option<link::Purpose> {
+        None
+    }
 }
 
 pub(crate) static FED_1: LazyLock<FederationSpecDefinition> =
@@ -972,6 +1063,10 @@ pub(crate) static FED_1: LazyLock<FederationSpecDefinition> =
 pub(crate) static FEDERATION_VERSIONS: LazyLock<SpecDefinitions<FederationSpecDefinition>> =
     LazyLock::new(|| {
         let mut definitions = SpecDefinitions::new(Identity::federation_identity());
+        definitions.add(FederationSpecDefinition::new(Version {
+            major: 1,
+            minor: 0,
+        }));
         definitions.add(FederationSpecDefinition::new(Version {
             major: 2,
             minor: 0,
@@ -1011,6 +1106,18 @@ pub(crate) static FEDERATION_VERSIONS: LazyLock<SpecDefinitions<FederationSpecDe
         definitions.add(FederationSpecDefinition::new(Version {
             major: 2,
             minor: 9,
+        }));
+        definitions.add(FederationSpecDefinition::new(Version {
+            major: 2,
+            minor: 10,
+        }));
+        definitions.add(FederationSpecDefinition::new(Version {
+            major: 2,
+            minor: 11,
+        }));
+        definitions.add(FederationSpecDefinition::new(Version {
+            major: 2,
+            minor: 12,
         }));
         definitions
     });

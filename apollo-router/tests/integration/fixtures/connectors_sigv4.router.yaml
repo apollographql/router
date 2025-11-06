@@ -1,0 +1,12 @@
+authentication:
+  connector:
+    sources:
+      subgraph.ec2:
+        aws_sig_v4:
+          default_chain:
+            profile_name: "default"
+            region: "eu-north-1"
+            service_name: "ec2"
+            assume_role:
+              role_arn: ${env.AWS_ROLE_ARN}
+              session_name: "connector"

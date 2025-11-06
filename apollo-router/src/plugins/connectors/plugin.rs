@@ -1,10 +1,8 @@
-pub(crate) mod debug;
-
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
-use debug::ConnectorContext;
+use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use futures::StreamExt;
 use http::HeaderValue;
 use itertools::Itertools;
@@ -112,24 +110,23 @@ impl Plugin for Connectors {
                                     limits.log();
                                 }
                             });
-                            if is_debug_enabled {
-                                if let Some(debug) = res.context.extensions().with_lock(|lock| {
+                            if is_debug_enabled
+                                && let Some(debug) = res.context.extensions().with_lock(|lock| {
                                     lock.get::<Arc<Mutex<ConnectorContext>>>().cloned()
-                                }) {
-                                    let (parts, stream) = res.response.into_parts();
+                                })
+                            {
+                                let (parts, stream) = res.response.into_parts();
 
-                                    let stream = stream.map(move |mut chunk| {
-                                        let serialized = { &debug.lock().clone().serialize() };
-                                        chunk.extensions.insert(
-                                            CONNECTORS_DEBUG_KEY,
-                                            json!({"version": "1", "data": serialized }),
-                                        );
-                                        chunk
-                                    });
+                                let stream = stream.map(move |mut chunk| {
+                                    let serialized = { &debug.lock().clone().serialize() };
+                                    chunk.extensions.insert(
+                                        CONNECTORS_DEBUG_KEY,
+                                        json!({"version": "2", "data": serialized }),
+                                    );
+                                    chunk
+                                });
 
-                                    res.response =
-                                        http::Response::from_parts(parts, Box::pin(stream));
-                                }
+                                res.response = http::Response::from_parts(parts, Box::pin(stream));
                             }
 
                             Ok(res)

@@ -1,0 +1,153 @@
+---
+source: apollo-router/tests/integration/query_planner/error_paths.rs
+expression: response
+---
+{
+  "data": {
+    "topProducts": [
+      {
+        "name": "Table",
+        "inStock": true,
+        "reviews": [
+          {
+            "id": "1",
+            "author": {
+              "username": "@ada",
+              "name": null
+            }
+          },
+          {
+            "id": "2",
+            "author": {
+              "username": "@alan",
+              "name": null
+            }
+          }
+        ]
+      },
+      {
+        "name": "Chair",
+        "inStock": false,
+        "reviews": [
+          {
+            "id": "3",
+            "author": {
+              "username": "@alan",
+              "name": null
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "errors": [
+    {
+      "message": "HTTP fetch failed from 'accounts': 404: Not Found",
+      "path": [
+        "topProducts",
+        0,
+        "reviews",
+        0,
+        "author"
+      ],
+      "extensions": {
+        "code": "SUBREQUEST_HTTP_ERROR",
+        "service": "accounts",
+        "reason": "404: Not Found",
+        "http": {
+          "status": 404
+        }
+      }
+    },
+    {
+      "message": "HTTP fetch failed from 'accounts': 404: Not Found",
+      "path": [
+        "topProducts",
+        0,
+        "reviews",
+        1,
+        "author"
+      ],
+      "extensions": {
+        "code": "SUBREQUEST_HTTP_ERROR",
+        "service": "accounts",
+        "reason": "404: Not Found",
+        "http": {
+          "status": 404
+        }
+      }
+    },
+    {
+      "message": "HTTP fetch failed from 'accounts': 404: Not Found",
+      "path": [
+        "topProducts",
+        1,
+        "reviews",
+        0,
+        "author"
+      ],
+      "extensions": {
+        "code": "SUBREQUEST_HTTP_ERROR",
+        "service": "accounts",
+        "reason": "404: Not Found",
+        "http": {
+          "status": 404
+        }
+      }
+    },
+    {
+      "message": "HTTP fetch failed from 'accounts': subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json",
+      "path": [
+        "topProducts",
+        0,
+        "reviews",
+        0,
+        "author"
+      ],
+      "extensions": {
+        "code": "SUBREQUEST_HTTP_ERROR",
+        "service": "accounts",
+        "reason": "subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json",
+        "http": {
+          "status": 404
+        }
+      }
+    },
+    {
+      "message": "HTTP fetch failed from 'accounts': subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json",
+      "path": [
+        "topProducts",
+        0,
+        "reviews",
+        1,
+        "author"
+      ],
+      "extensions": {
+        "code": "SUBREQUEST_HTTP_ERROR",
+        "service": "accounts",
+        "reason": "subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json",
+        "http": {
+          "status": 404
+        }
+      }
+    },
+    {
+      "message": "HTTP fetch failed from 'accounts': subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json",
+      "path": [
+        "topProducts",
+        1,
+        "reviews",
+        0,
+        "author"
+      ],
+      "extensions": {
+        "code": "SUBREQUEST_HTTP_ERROR",
+        "service": "accounts",
+        "reason": "subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json",
+        "http": {
+          "status": 404
+        }
+      }
+    }
+  ]
+}

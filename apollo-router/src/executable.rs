@@ -31,34 +31,14 @@ use crate::configuration::schema::Mode;
 use crate::configuration::validate_yaml_configuration;
 use crate::metrics::meter_provider_internal;
 use crate::plugin::plugins;
-use crate::plugins::telemetry::reload::init_telemetry;
+use crate::plugins::telemetry::reload::otel::init_telemetry;
+use crate::registry::OciConfig;
 use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
 use crate::router::SchemaSource;
 use crate::router::ShutdownSource;
 use crate::uplink::Endpoints;
 use crate::uplink::UplinkConfig;
-
-#[cfg(all(
-    feature = "global-allocator",
-    not(feature = "dhat-heap"),
-    target_os = "linux"
-))]
-#[global_allocator]
-static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
-
-// Note: the dhat-heap and dhat-ad-hoc features should not be both enabled. We name our functions
-// and variables identically to prevent this from happening.
-
-#[cfg(feature = "dhat-heap")]
-#[global_allocator]
-pub(crate) static ALLOC: dhat::Alloc = dhat::Alloc;
-
-#[cfg(feature = "dhat-heap")]
-pub(crate) static DHAT_HEAP_PROFILER: Mutex<Option<dhat::Profiler>> = Mutex::new(None);
-
-#[cfg(feature = "dhat-ad-hoc")]
-pub(crate) static DHAT_AD_HOC_PROFILER: Mutex<Option<dhat::Profiler>> = Mutex::new(None);
 
 pub(crate) static APOLLO_ROUTER_DEV_MODE: AtomicBool = AtomicBool::new(false);
 pub(crate) static APOLLO_ROUTER_SUPERGRAPH_PATH_IS_SET: AtomicBool = AtomicBool::new(false);
@@ -69,38 +49,6 @@ pub(crate) static APOLLO_TELEMETRY_DISABLED: AtomicBool = AtomicBool::new(false)
 pub(crate) static APOLLO_ROUTER_LISTEN_ADDRESS: Mutex<Option<SocketAddr>> = Mutex::new(None);
 
 const INITIAL_UPLINK_POLL_INTERVAL: Duration = Duration::from_secs(10);
-
-// Note: Constructor/Destructor functions may not play nicely with tracing, since they run after
-// main completes, so don't use tracing, use println!() and eprintln!()..
-#[cfg(feature = "dhat-heap")]
-fn create_heap_profiler() {
-    *DHAT_HEAP_PROFILER.lock() = Some(dhat::Profiler::new_heap());
-    println!("heap profiler installed");
-    unsafe { libc::atexit(drop_heap_profiler) };
-}
-
-#[cfg(feature = "dhat-heap")]
-#[unsafe(no_mangle)]
-extern "C" fn drop_heap_profiler() {
-    if let Some(p) = DHAT_HEAP_PROFILER.lock().take() {
-        drop(p);
-    }
-}
-
-#[cfg(feature = "dhat-ad-hoc")]
-fn create_ad_hoc_profiler() {
-    *DHAT_AD_HOC_PROFILER.lock() = Some(dhat::Profiler::new_heap());
-    println!("ad-hoc profiler installed");
-    unsafe { libc::atexit(drop_ad_hoc_profiler) };
-}
-
-#[cfg(feature = "dhat-ad-hoc")]
-#[unsafe(no_mangle)]
-extern "C" fn drop_ad_hoc_profiler() {
-    if let Some(p) = DHAT_AD_HOC_PROFILER.lock().take() {
-        drop(p);
-    }
-}
 
 /// Subcommands
 #[derive(Subcommand, Debug)]
@@ -224,6 +172,10 @@ pub struct Opt {
     // Should be a Vec<Url> when https://github.com/clap-rs/clap/discussions/3796 is solved
     apollo_uplink_endpoints: Option<String>,
 
+    /// An OCI reference to a graph artifact that contains the supergraph schema for the router to run.
+    #[clap(long, env = "APOLLO_GRAPH_ARTIFACT_REFERENCE", action = ArgAction::Append)]
+    graph_artifact_reference: Option<String>,
+
     /// Disable sending anonymous usage information to Apollo.
     #[clap(long, env = "APOLLO_TELEMETRY_DISABLED", value_parser = FalseyValueParser::new())]
     anonymous_telemetry_disabled: bool,
@@ -284,6 +236,33 @@ impl Opt {
         })
     }
 
+    pub(crate) fn oci_config(&self) -> Result<OciConfig, anyhow::Error> {
+        Ok(OciConfig {
+            apollo_key: self
+                .apollo_key
+                .clone()
+                .ok_or(Self::err_require_opt("APOLLO_KEY"))?,
+            reference: Self::validate_oci_reference(
+                &self
+                    .graph_artifact_reference
+                    .clone()
+                    .ok_or(Self::err_require_opt("APOLLO_GRAPH_ARTIFACT_REFERENCE"))?,
+            )?,
+        })
+    }
+
+    pub fn validate_oci_reference(reference: &str) -> std::result::Result<String, anyhow::Error> {
+        // Currently only shas are allowed to be passed as graph artifact references
+        // TODO Update when tag reloading is implemented
+        let valid_regex = Regex::new(r"@sha256:[0-9a-fA-F]{64}$").unwrap();
+        if valid_regex.is_match(reference) {
+            tracing::debug!("validated OCI configuration");
+            Ok(reference.to_string())
+        } else {
+            Err(anyhow!("invalid graph artifact reference: {reference}"))
+        }
+    }
+
     fn parse_endpoints(endpoints: &str) -> std::result::Result<Endpoints, anyhow::Error> {
         Ok(Endpoints::fallback(
             endpoints
@@ -307,10 +286,10 @@ impl Opt {
 /// Refer to the examples if you would like to see how to run your own router with plugins.
 pub fn main() -> Result<()> {
     #[cfg(feature = "dhat-heap")]
-    create_heap_profiler();
+    crate::allocator::create_heap_profiler();
 
     #[cfg(feature = "dhat-ad-hoc")]
-    create_ad_hoc_profiler();
+    crate::allocator::create_ad_hoc_profiler();
 
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     builder.enable_all();
@@ -432,7 +411,7 @@ impl Executable {
                 )?
                 .validate()?;
 
-                println!("Configuration at path {:?} is valid!", config_path);
+                println!("Configuration at path {config_path:?} is valid!");
 
                 Ok(())
             }
@@ -522,7 +501,8 @@ impl Executable {
         // 1. Cli --supergraph
         // 2. Env APOLLO_ROUTER_SUPERGRAPH_PATH
         // 3. Env APOLLO_ROUTER_SUPERGRAPH_URLS
-        // 4. Env APOLLO_KEY and APOLLO_GRAPH_REF
+        // 4. Env APOLLO_KEY and APOLLO_GRAPH_ARTIFACT_REFERENCE
+        // 5. Env APOLLO_KEY and APOLLO_GRAPH_REF
         #[cfg(unix)]
         let akp = &opt.apollo_key_path;
         #[cfg(not(unix))]
@@ -619,13 +599,19 @@ impl Executable {
                             return Err(anyhow!("Failed to read Apollo key file: {}", err));
                         }
                     };
-                    SchemaSource::Registry(opt.uplink_config()?)
+                    match opt.graph_artifact_reference {
+                        None => SchemaSource::Registry(opt.uplink_config()?),
+                        Some(_) => SchemaSource::OCI(opt.oci_config()?),
+                    }
                 }
             }
             (_, None, None, Some(_apollo_key), None) => {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
-                SchemaSource::Registry(opt.uplink_config()?)
+                match opt.graph_artifact_reference {
+                    None => SchemaSource::Registry(opt.uplink_config()?),
+                    Some(_) => SchemaSource::OCI(opt.oci_config()?),
+                }
             }
             _ => {
                 return Err(anyhow!(
@@ -834,5 +820,79 @@ mod tests {
             add_log_filter("apollo_router::plugins=debug").unwrap(),
             "info,apollo_router::plugins=debug"
         );
+    }
+
+    #[test]
+    fn test_validate_oci_reference_valid_cases() {
+        // Test valid OCI references with different hash values
+        let valid_hashes = vec![
+            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            "@sha256:ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890",
+            "@sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+            "@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            "@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        ];
+
+        for hash in valid_hashes {
+            let result = super::Opt::validate_oci_reference(hash);
+            assert!(result.is_ok(), "Hash '{}' should be valid", hash);
+            assert_eq!(result.unwrap(), hash);
+        }
+    }
+
+    #[test]
+    fn test_validate_oci_reference_invalid_cases() {
+        let invalid_references = vec![
+            // Missing @sha256: prefix
+            "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            // Wrong prefix
+            "@sha1:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            "@sha512:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            // Too short
+            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcde",
+            // Too long
+            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1",
+            // Invalid characters
+            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdeg",
+            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcde!",
+            // Empty string
+            "",
+            // Just the prefix
+            "@sha256:",
+            // Hash with spaces
+            "@sha256: 1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef ",
+            // Hash with dashes
+            "@sha256:12345678-90abcdef-12345678-90abcdef-12345678-90abcdef-12345678-90abcdef",
+            // Hash with colons
+            "@sha256:12345678:90abcdef:12345678:90abcdef:12345678:90abcdef:12345678:90abcdef",
+            // Missing hash entirely
+            "@sha256",
+            // Wrong format entirely
+            "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            // Extra characters at the end
+            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef:latest",
+            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef@tag",
+        ];
+
+        for reference in invalid_references {
+            let result = super::Opt::validate_oci_reference(reference);
+            assert!(
+                result.is_err(),
+                "Reference '{}' should be invalid",
+                reference
+            );
+            let error_msg = result.unwrap_err().to_string();
+            assert!(
+                error_msg.contains("invalid graph artifact reference"),
+                "Error message should contain 'invalid graph artifact reference' for '{}'",
+                reference
+            );
+            assert!(
+                error_msg.contains(reference),
+                "Error message should contain the invalid reference '{}'",
+                reference
+            );
+        }
     }
 }

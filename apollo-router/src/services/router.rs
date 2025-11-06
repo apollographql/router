@@ -3,6 +3,7 @@
 use std::any::Any;
 use std::mem;
 
+use ahash::HashMap;
 use bytes::Bytes;
 use displaydoc::Display;
 use futures::Stream;
@@ -18,19 +19,22 @@ use multer::Multipart;
 use multimap::MultiMap;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
+use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use thiserror::Error;
 use tower::BoxError;
+use uuid::Uuid;
 
 use self::body::RouterBody;
+use self::service::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
+use self::service::MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE;
 use super::supergraph;
 use crate::Context;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
+use crate::context::ROUTER_RESPONSE_ERRORS;
 use crate::graphql;
 use crate::http_ext::header_map;
 use crate::json_ext::Path;
-use crate::plugins::content_negotiation::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
-use crate::plugins::content_negotiation::MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE;
 use crate::plugins::telemetry::config_new::router::events::RouterResponseBodyExtensionType;
 use crate::services::TryIntoHeaderName;
 use crate::services::TryIntoHeaderValue;
@@ -235,8 +239,9 @@ impl Response {
         context: Context,
     ) -> Result<Self, BoxError> {
         if !errors.is_empty() {
-            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
+            Self::add_errors_to_context(&errors, &context);
         }
+
         // Build a response
         let b = graphql::Response::builder()
             .and_label(label)
@@ -267,6 +272,28 @@ impl Response {
         response.stash_the_body_in_extensions(body_string);
 
         Ok(response)
+    }
+
+    #[builder(visibility = "pub")]
+    fn http_response_new(
+        response: http::Response<Body>,
+        context: Context,
+        body_to_stash: Option<String>,
+        errors_for_context: Option<Vec<graphql::Error>>,
+    ) -> Result<Self, BoxError> {
+        // There are instances where we have errors that need to be counted for telemetry in this
+        // layer, but we don't want to deserialize the body. In these cases we can pass in the
+        // list of errors to add to context for counting later in the telemetry plugin.
+        if let Some(errors) = errors_for_context
+            && !errors.is_empty()
+        {
+            Self::add_errors_to_context(&errors, &context);
+        }
+        let mut res = Self { response, context };
+        if let Some(body_to_stash) = body_to_stash {
+            res.stash_the_body_in_extensions(body_to_stash)
+        }
+        Ok(res)
     }
 
     /// This is the constructor (or builder) to use when constructing a Response that represents a global error.
@@ -306,6 +333,10 @@ impl Response {
         headers: MultiMap<HeaderName, HeaderValue>,
         context: Context,
     ) -> Self {
+        if !errors.is_empty() {
+            Self::add_errors_to_context(&errors, &context);
+        }
+
         // Build a response
         let b = graphql::Response::builder()
             .and_label(label)
@@ -333,6 +364,27 @@ impl Response {
         Self { response, context }
     }
 
+    fn add_errors_to_context(errors: &[graphql::Error], context: &Context) {
+        context.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+        // This is ONLY guaranteed to capture errors if any were added during router service
+        // processing. We will sometimes avoid this path if no router service errors exist, even
+        // if errors were passed from the supergraph service, because that path builds the
+        // router::Response using parts_new(). This is ok because we only need this context to
+        // count errors introduced in the router service; however, it means that we handle error
+        // counting differently in this layer than others.
+        context
+            .insert(
+                ROUTER_RESPONSE_ERRORS,
+                // We can't serialize the apollo_id, so make a map with id as the key
+                errors
+                    .iter()
+                    .cloned()
+                    .map(|err| (err.apollo_id(), err))
+                    .collect::<HashMap<Uuid, graphql::Error>>(),
+            )
+            .expect("Unable to serialize router response errors list for context");
+    }
+
     /// EXPERIMENTAL: THIS FUNCTION IS EXPERIMENTAL AND SUBJECT TO POTENTIAL CHANGE.
     pub async fn into_graphql_response_stream(
         self,
@@ -354,10 +406,10 @@ impl Response {
                 );
 
                 Either::Left(futures::stream::unfold(multipart, |mut m| async {
-                    if let Ok(Some(response)) = m.next_field().await {
-                        if let Ok(bytes) = response.bytes().await {
-                            return Some((serde_json::from_slice::<graphql::Response>(&bytes), m));
-                        }
+                    if let Ok(Some(response)) = m.next_field().await
+                        && let Ok(bytes) = response.bytes().await
+                    {
+                        return Some((serde_json::from_slice::<graphql::Response>(&bytes), m));
                     }
                     None
                 }))
@@ -400,6 +452,14 @@ impl Response {
             context.unwrap_or_default(),
         )
     }
+}
+
+#[derive(Clone, Default, Debug)]
+pub(crate) struct ClientRequestAccepts {
+    pub(crate) multipart_defer: bool,
+    pub(crate) multipart_subscription: bool,
+    pub(crate) json: bool,
+    pub(crate) wildcard: bool,
 }
 
 impl<T> From<http::Response<T>> for Response

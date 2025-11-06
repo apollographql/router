@@ -1,7 +1,6 @@
 use std::cell::Cell;
 use std::num::NonZeroU32;
 use std::ops::ControlFlow;
-use std::ops::Deref;
 use std::sync::Arc;
 
 use apollo_compiler::ExecutableDocument;
@@ -10,6 +9,7 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::validation::Valid;
 use itertools::Itertools;
+use petgraph::visit::EdgeRef;
 use serde::Deserialize;
 use serde::Serialize;
 use tracing::trace;
@@ -27,6 +27,7 @@ use crate::operation::NormalizedDefer;
 use crate::operation::Operation;
 use crate::operation::SelectionSet;
 use crate::operation::normalize_operation;
+use crate::query_graph::OverrideConditions;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::build_federated_query_graph;
@@ -76,7 +77,7 @@ pub struct QueryPlannerConfig {
     // Side-note: implemented as an object instead of single boolean because we expect to add more
     // to this soon enough. In particular, once defer-passthrough to subgraphs is implemented, the
     // idea would be to add a new `passthrough_subgraphs` option that is the list of subgraphs to
-    // which we can pass-through some @defer (and it would be empty by default). Similarly, once we
+    // which we can pass through some @defer (and it would be empty by default). Similarly, once we
     // support @stream, grouping the options here will make sense too.
     pub incremental_delivery: QueryPlanIncrementalDeliveryConfig,
 
@@ -185,7 +186,14 @@ pub struct QueryPlanOptions<'a> {
     /// progressive @override feature.
     // PORT_NOTE: In JS implementation this was a Map
     pub override_conditions: Vec<String>,
-
+    /// An optional function that will be called to check if the query plan should be cancelled.
+    ///
+    /// Cooperative cancellation occurs when the original client has abandoned the query.
+    /// When this happens, the query plan should be cancelled to free up resources.
+    ///
+    /// This function should return `ControlFlow::Break` if the query plan should be cancelled.
+    ///
+    /// Defaults to `None`.
     pub check_for_cooperative_cancellation: Option<&'a dyn Fn() -> ControlFlow<()>>,
     /// Impose a limit on the number of non-local selections, which can be a
     /// performance hazard. On by default.
@@ -225,17 +233,6 @@ impl std::fmt::Debug for QueryPlanOptions<'_> {
                 &self.non_local_selections_limit_enabled,
             )
             .finish()
-    }
-}
-
-#[derive(Debug, Default, Clone)]
-pub(crate) struct EnabledOverrideConditions(IndexSet<String>);
-
-impl Deref for EnabledOverrideConditions {
-    type Target = IndexSet<String>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
     }
 }
 
@@ -464,9 +461,10 @@ impl QueryPlanner {
                 .clone()
                 .into(),
             config: self.config.clone(),
-            override_conditions: EnabledOverrideConditions(IndexSet::from_iter(
-                options.override_conditions,
-            )),
+            override_conditions: OverrideConditions::new(
+                &self.federated_query_graph,
+                &IndexSet::from_iter(options.override_conditions),
+            ),
             check_for_cooperative_cancellation: options.check_for_cooperative_cancellation,
             fetch_id_generator: Arc::new(FetchIdGenerator::new()),
             disabled_subgraphs: self
@@ -573,9 +571,13 @@ impl QueryPlanner {
     pub fn supergraph_schema(&self) -> &ValidFederationSchema {
         &self.supergraph_schema
     }
+
+    pub fn override_condition_labels(&self) -> &IndexSet<Arc<str>> {
+        self.federated_query_graph.override_condition_labels()
+    }
 }
 
-fn compute_root_serial_dependency_graph(
+fn compute_root_serial_dependency_graph_for_mutation(
     parameters: &QueryPlanningParameters,
     has_defers: bool,
     non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
@@ -605,7 +607,7 @@ fn compute_root_serial_dependency_graph(
         mut fetch_dependency_graph,
         path_tree: mut prev_path,
         ..
-    } = compute_root_parallel_best_plan(
+    } = compute_root_parallel_best_plan_for_mutation(
         parameters,
         selection_set,
         has_defers,
@@ -617,7 +619,7 @@ fn compute_root_serial_dependency_graph(
             fetch_dependency_graph: new_dep_graph,
             path_tree: new_path,
             ..
-        } = compute_root_parallel_best_plan(
+        } = compute_root_parallel_best_plan_for_mutation(
             parameters,
             selection_set,
             has_defers,
@@ -776,6 +778,7 @@ fn compute_root_parallel_best_plan(
         parameters.operation.root_kind,
         FetchDependencyGraphToCostProcessor,
         non_local_selection_state.as_mut(),
+        None,
     )?;
 
     // Getting no plan means the query is essentially unsatisfiable (it's a valid query, but we can prove it will never return a result),
@@ -783,6 +786,43 @@ fn compute_root_parallel_best_plan(
     Ok(planning_traversal
         .find_best_plan()?
         .unwrap_or_else(|| BestQueryPlanInfo::empty(parameters)))
+}
+
+fn compute_root_parallel_best_plan_for_mutation(
+    parameters: &QueryPlanningParameters,
+    selection: SelectionSet,
+    has_defers: bool,
+    non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
+) -> Result<BestQueryPlanInfo, FederationError> {
+    parameters.federated_query_graph.out_edges(parameters.head).into_iter().map(|edge_ref| {
+        let mutation_subgraph = parameters.federated_query_graph.node_weight(edge_ref.target())?.source.clone();
+        let planning_traversal = QueryPlanningTraversal::new(
+            parameters,
+            selection.clone(),
+            has_defers,
+            parameters.operation.root_kind,
+            FetchDependencyGraphToCostProcessor,
+            non_local_selection_state.as_mut(),
+            Some(mutation_subgraph),
+        )?;
+        planning_traversal.find_best_plan()
+    }).process_results(|iter| iter
+        .flatten()
+        .min_by(|a, b| a.cost.total_cmp(&b.cost))
+        .map(Ok)
+        .unwrap_or_else(|| {
+            if parameters.disabled_subgraphs.is_empty() {
+                Err(FederationError::internal(format!(
+                    "Was not able to plan {} starting from a single subgraph: This shouldn't have happened.",
+                    parameters.operation,
+                )))
+            } else {
+                // If subgraphs were disabled, this could be expected, and we indicate this in
+                // the error accordingly.
+                Err(SingleFederationError::NoPlanFoundWithDisabledSubgraphs.into())
+            }
+        })
+    )?
 }
 
 fn compute_plan_internal(
@@ -796,7 +836,7 @@ fn compute_plan_internal(
     let (main, deferred, primary_selection, cost) = if root_kind
         == SchemaRootDefinitionKind::Mutation
     {
-        let dependency_graphs = compute_root_serial_dependency_graph(
+        let dependency_graphs = compute_root_serial_dependency_graph_for_mutation(
             parameters,
             has_defers,
             non_local_selection_state,

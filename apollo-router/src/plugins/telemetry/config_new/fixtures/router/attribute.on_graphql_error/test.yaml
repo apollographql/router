@@ -13,3 +13,15 @@ events:
         body: |
           hello
         status: 200
+  - - router_request:
+        uri: "/hello"
+        method: GET
+        body: |
+          hello
+    - context:
+        map:
+          "apollo::telemetry::contains_graphql_error": false
+    - router_response:
+        body: |
+          hello
+        status: 200

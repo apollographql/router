@@ -10,7 +10,7 @@ fn valid_large_body() {
     const SCHEMA: &str = "src/connectors/validation/test_data/valid_large_body.graphql";
 
     const MAX_BYTES: usize = 204_800; // 200 KiB
-    const MAX_ALLOCATIONS: u64 = 22_300;
+    const MAX_ALLOCATIONS: u64 = 22_500;
 
     let schema = std::fs::read_to_string(SCHEMA).unwrap();
 

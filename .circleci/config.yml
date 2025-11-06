@@ -5,13 +5,13 @@ version: 2.1
 # These "CircleCI Orbs" are reusable bits of configuration that can be shared
 # across projects.  See https://circleci.com/orbs/ for more information.
 orbs:
-  slack: circleci/slack@5.1.1
+  slack: circleci/slack@6.0.0
   secops: apollo/circleci-secops-orb@2.0.7
 
 executors:
   amd_linux_build: &amd_linux_build_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.11.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.19.0
     resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
@@ -19,30 +19,45 @@ executors:
       MISE_ENV: ci
   amd_linux_helm: &amd_linux_helm_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.11.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.19.0
     resource_class: small
     environment:
       MISE_ENV: ci
   amd_linux_test: &amd_linux_test_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.11.0
-      - image: cimg/redis:7.4.3
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.19.0
+      - image: cimg/redis:7.4.6
       - image: openzipkin/zipkin:3.5.1
-      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.23.1
+      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.37.0
+      # redis cluster - 3 primaries, 3 replicas
+      - image: cimg/redis:7.4.6
+        command: [ "redis-server", "--protected-mode", "no", "--port", "7000", "--cluster-enabled", "yes" ]
+      - image: cimg/redis:7.4.6
+        command: [ "redis-server", "--protected-mode", "no", "--port", "7001", "--cluster-enabled", "yes" ]
+      - image: cimg/redis:7.4.6
+        command: [ "redis-server", "--protected-mode", "no", "--port", "7002", "--cluster-enabled", "yes" ]
+      - image: cimg/redis:7.4.6
+        command: [ "redis-server", "--protected-mode", "no", "--port", "7003", "--cluster-enabled", "yes" ]
+      - image: cimg/redis:7.4.6
+        command: [ "redis-server", "--protected-mode", "no", "--port", "7004", "--cluster-enabled", "yes" ]
+      - image: cimg/redis:7.4.6
+        command: [ "redis-server", "--protected-mode", "no", "--port", "7005", "--cluster-enabled", "yes" ]
+      - image: cimg/redis:7.4.6
+        command: [ "sh", "-c", "sleep 30; echo yes | redis-cli --cluster create --cluster-replicas 1 localhost:7000 localhost:7001 localhost:7002 localhost:7003 localhost:7004 localhost:7005" ]
     resource_class: 2xlarge
     environment:
       MISE_ENV: ci
       CARGO_BUILD_JOBS: 4
   arm_linux_build: &arm_linux_build_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.11.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.19.0
     resource_class: arm.xlarge
     environment:
       MISE_ENV: ci
       CARGO_BUILD_JOBS: 8
   arm_linux_test: &arm_linux_test_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.11.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.19.0
     resource_class: arm.xlarge
     environment:
       MISE_ENV: ci
@@ -68,14 +83,14 @@ executors:
   windows_build: &windows_build_executor
     machine:
       image: "windows-server-2019-vs2019:2024.02.21"
-    resource_class: windows.xlarge
+    resource_class: windows.2xlarge
     shell: bash.exe --login -eo pipefail
     environment:
       MISE_ENV: ci,windows
   windows_test: &windows_test_executor
     machine:
       image: "windows-server-2019-vs2019:2024.02.21"
-    resource_class: windows.xlarge
+    resource_class: windows.2xlarge
     shell: bash.exe --login -eo pipefail
     environment:
       MISE_ENV: ci,windows
@@ -85,12 +100,9 @@ parameters:
   toolchain_version:
     type: string
     default: '{{ checksum ".circleci/config.yml" }}-v3-{{ checksum "~/.arch" }}-{{ checksum ".config/mise/config.toml" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.daily_version" }}'
-  xtask_version:
-    type: string
-    default: '{{ checksum ".circleci/config.yml" }}-v3-{{ checksum "~/.arch" }}-{{ checksum ".config/mise/config.toml" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.xtask_version" }}'
   merge_version:
     type: string
-    default: '{{ checksum ".circleci/config.yml" }}-v3-{{ checksum "~/.arch" }}-{{ checksum ".config/mise/config.toml" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.xtask_version" }}-{{ checksum "~/.merge_version" }}'
+    default: '{{ checksum ".circleci/config.yml" }}-v3-{{ checksum "~/.arch" }}-{{ checksum ".config/mise/config.toml" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.merge_version" }}'
   nightly:
     type: boolean
     default: false
@@ -116,9 +128,8 @@ common_job_environment: &common_job_environment
   RUST_BACKTRACE: full
   CARGO_INCREMENTAL: 0
   JEMALLOC_SYS_WITH_LG_PAGE: 16
-  MISE_VERSION: v2025.5.8
+  MISE_VERSION: v2025.7.26
 commands:
-
   setup_environment:
     parameters:
       platform:
@@ -139,7 +150,6 @@ commands:
             - ~/.cargo
             - ~/.rustup
             - ~/.local
-      - install_xtask
 
   # Even though all executors use bash there are a number of differences that can be taken care of up front.
   # Windows shell commands are found on the path before the linux subsystem commands, so use aliases to override.
@@ -155,9 +165,9 @@ commands:
       - when:
           condition:
             or:
-              - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
-              - equal: [ *amd_linux_test_executor, << parameters.platform >> ]
-              - equal: [ *amd_linux_helm_executor, << parameters.platform >> ]
+              - equal: [*amd_linux_build_executor, << parameters.platform >>]
+              - equal: [*amd_linux_test_executor, << parameters.platform >>]
+              - equal: [*amd_linux_helm_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Write arch
@@ -166,8 +176,8 @@ commands:
       - when:
           condition:
             or:
-              - equal: [ *arm_linux_build_executor, << parameters.platform >> ]
-              - equal: [ *arm_linux_test_executor, << parameters.platform >> ]
+              - equal: [*arm_linux_build_executor, << parameters.platform >>]
+              - equal: [*arm_linux_test_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Write arch
@@ -176,8 +186,8 @@ commands:
       - when:
           condition:
             or:
-              - equal: [ *macos_build_executor, << parameters.platform >> ]
-              - equal: [ *macos_test_executor, << parameters.platform >> ]
+              - equal: [*macos_build_executor, << parameters.platform >>]
+              - equal: [*macos_test_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Make link to md5
@@ -191,8 +201,8 @@ commands:
       - when:
           condition:
             or:
-              - equal: [ *windows_build_executor, << parameters.platform >> ]
-              - equal: [ *windows_test_executor, << parameters.platform >> ]
+              - equal: [*windows_build_executor, << parameters.platform >>]
+              - equal: [*windows_test_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Extend Bash profile for Windows
@@ -214,8 +224,6 @@ commands:
           command: |
             # The Rust index takes time to download. Update this daily.
             date +%j > ~/.daily_version
-            # The checksum of the xtask/src directory, so that when we make changes to xtask we cause a full rebuild
-            find xtask/src -type f | while read name; do md5sum $name; done | sort -k 2 | md5sum > ~/.xtask_version
             # The closest common ancestor to the default branch, so that test jobs can take advantage previous compiles
             git remote set-head origin -a
             TARGET_BRANCH=$(git rev-parse --abbrev-ref origin/HEAD)
@@ -233,13 +241,13 @@ commands:
       - when:
           condition:
             or:
-              - equal: [ *amd_linux_helm_executor, << parameters.platform >> ]
-              - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
-              - equal: [ *amd_linux_test_executor, << parameters.platform >> ]
-              - equal: [ *arm_linux_build_executor, << parameters.platform >> ]
-              - equal: [ *arm_linux_test_executor, << parameters.platform >> ]
-              - equal: [ *macos_build_executor, << parameters.platform >> ]
-              - equal: [ *macos_test_executor, << parameters.platform >> ]
+              - equal: [*amd_linux_helm_executor, << parameters.platform >>]
+              - equal: [*amd_linux_build_executor, << parameters.platform >>]
+              - equal: [*amd_linux_test_executor, << parameters.platform >>]
+              - equal: [*arm_linux_build_executor, << parameters.platform >>]
+              - equal: [*arm_linux_test_executor, << parameters.platform >>]
+              - equal: [*macos_build_executor, << parameters.platform >>]
+              - equal: [*macos_test_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Install mise
@@ -252,8 +260,8 @@ commands:
       - when:
           condition:
             or:
-              - equal: [ *windows_build_executor, << parameters.platform >> ]
-              - equal: [ *windows_test_executor, << parameters.platform >> ]
+              - equal: [*windows_build_executor, << parameters.platform >>]
+              - equal: [*windows_test_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Install scoop
@@ -273,32 +281,15 @@ commands:
           name: Fetch dependencies
           command: cargo fetch --locked
 
-  install_xtask:
-    steps:
-      - restore_cache:
-          keys:
-            - "<< pipeline.parameters.xtask_version >>"
-      - run:
-          name: Install xtask
-          command: |
-            if [[ ! -f "$HOME/.cargo/bin/xtask$EXECUTABLE_SUFFIX" ]]; then
-              cargo install --locked --path xtask
-            fi
-      - save_cache:
-          key: "<< pipeline.parameters.xtask_version >>"
-          paths:
-            - ~/.cargo/bin/xtask
-            - ~/.cargo/bin/xtask.exe
-
   xtask_lint:
     steps:
       - restore_cache:
           keys:
             - "<< pipeline.parameters.merge_version >>-lint"
-      - run: $HOME/.cargo/bin/xtask$EXECUTABLE_SUFFIX lint
+      - run: cargo xtask lint
       - when:
           condition:
-            equal: [ "dev", "<< pipeline.git.branch >>" ]
+            equal: ["dev", "<< pipeline.git.branch >>"]
           steps:
             - save_cache:
                 key: "<< pipeline.parameters.merge_version >>-lint"
@@ -306,7 +297,7 @@ commands:
                   - target
   xtask_release_preverify:
     steps:
-      - run: xtask release pre-verify
+      - run: cargo xtask release pre-verify
 
   xtask_check_helm:
     steps:
@@ -363,10 +354,10 @@ commands:
             - "<< pipeline.parameters.merge_version >>-compliance"
       # cargo-deny fetches a rustsec advisory DB, which has to happen on github.com over https
       - run: git config --global --unset-all url.ssh://git@github.com.insteadof
-      - run: $HOME/.cargo/bin/xtask$EXECUTABLE_SUFFIX check-compliance
+      - run: cargo xtask check-compliance
       - when:
           condition:
-            equal: [ "dev", "<< pipeline.git.branch >>" ]
+            equal: ["dev", "<< pipeline.git.branch >>"]
           steps:
             - save_cache:
                 key: "<< pipeline.parameters.merge_version >>-compliance"
@@ -386,11 +377,9 @@ commands:
           environment:
             # Use the settings from the "ci" profile in nextest configuration.
             NEXTEST_PROFILE: ci
-            # Temporary disable lib backtrace since it crashing on MacOS
-            # TODO: remove this workaround once we update to Xcode >= 15.1.0
-            # See: https://github.com/apollographql/router/pull/5462
-            RUST_LIB_BACKTRACE: 0
-          command: $HOME/.cargo/bin/xtask$EXECUTABLE_SUFFIX test --workspace --locked --features ci,snapshot
+          command: |
+            cargo xtask test --no-fail-fast --workspace --locked --features ci,snapshot
+
       - run:
           name: Delete large files from cache
           command: |
@@ -398,7 +387,7 @@ commands:
             rm target/debug/router*
       - when:
           condition:
-            equal: [ "dev", "<< pipeline.git.branch >>" ]
+            equal: ["dev", "<< pipeline.git.branch >>"]
           steps:
             - save_cache:
                 key: "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
@@ -455,7 +444,7 @@ jobs:
     steps:
       - when:
           condition:
-            equal: [ *amd_linux_helm_executor, << parameters.platform >> ]
+            equal: [*amd_linux_helm_executor, << parameters.platform >>]
           steps:
             - checkout
             - setup_environment:
@@ -539,7 +528,8 @@ jobs:
 
       - when:
           condition:
-            equal: [ true, << parameters.from_test_updated_cargo_deps_workflow >> ]
+            equal:
+              [true, << parameters.from_test_updated_cargo_deps_workflow >>]
           steps:
             - slack/notify:
                 event: fail
@@ -631,12 +621,12 @@ jobs:
       - when:
           condition:
             or:
-              - equal: [ *macos_build_executor, << parameters.platform >> ]
+              - equal: [*macos_build_executor, << parameters.platform >>]
 
           steps:
             - when:
                 condition:
-                  equal: [ true, << parameters.nightly >> ]
+                  equal: [true, << parameters.nightly >>]
                 steps:
                   - run: cargo xtask release prepare nightly
             - run:
@@ -673,14 +663,14 @@ jobs:
       - when:
           condition:
             or:
-              - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
-              - equal: [ *arm_linux_build_executor, << parameters.platform >> ]
-              - equal: [ *windows_build_executor, << parameters.platform >> ]
+              - equal: [*amd_linux_build_executor, << parameters.platform >>]
+              - equal: [*arm_linux_build_executor, << parameters.platform >>]
+              - equal: [*windows_build_executor, << parameters.platform >>]
           steps:
             # This will set the version to include current date and commit hash
             - when:
                 condition:
-                  equal: [ true, << parameters.nightly >> ]
+                  equal: [true, << parameters.nightly >>]
                 steps:
                   - run: cargo xtask release prepare nightly
             - run:
@@ -701,8 +691,8 @@ jobs:
       - when:
           condition:
             and:
-              - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
-              - equal: [ true, << parameters.nightly >> ]
+              - equal: [*amd_linux_build_executor, << parameters.platform >>]
+              - equal: [true, << parameters.nightly >>]
               - matches:
                   pattern: "^https:\\/\\/github\\.com\\/apollographql\\/router.*$"
                   value: << pipeline.project.git_url >>
@@ -721,13 +711,42 @@ jobs:
                   # See: https://docs.github.com/en/packages/learn-github-packages/connecting-a-repository-to-a-package#connecting-a-repository-to-a-container-image-using-the-command-line
 
                   BASE_VERSION=$(cargo metadata --format-version=1 --no-deps | jq --raw-output '.packages[0].version')
-                  ARTIFACT_URL="https://output.circle-artifacts.com/output/job/${CIRCLE_WORKFLOW_JOB_ID}/artifacts/0/artifacts/router-v${BASE_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+                  ARTIFACT_FILENAME="router-v${BASE_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+                  ARTIFACT_URL="https://output.circle-artifacts.com/output/job/${CIRCLE_WORKFLOW_JOB_ID}/artifacts/0/artifacts/${ARTIFACT_FILENAME}"
                   VERSION="v$(echo "${BASE_VERSION}" | tr "+" "-")"
                   ROUTER_TAG=ghcr.io/apollographql/nightly/router
 
+                  # Validate local artifact exists and calculate its checksum as a safety net
+                  if [ ! -f "artifacts/${ARTIFACT_FILENAME}" ]; then
+                    echo "Error: Local artifact not found: artifacts/${ARTIFACT_FILENAME}"
+                    exit 1
+                  fi
+                  LOCAL_ARTIFACT_SHA256SUM=$(sha256sum "artifacts/${ARTIFACT_FILENAME}" | cut -d' ' -f1)
+                  echo "Local artifact checksum: ${LOCAL_ARTIFACT_SHA256SUM}"
+
+                  # Download the artifact and calculate its checksum
+                  echo "Downloading artifact to calculate checksum..."
+                  curl -sSL -H "Circle-Token: ${CIRCLE_TOKEN}" -o "router-artifact.tar.gz" "${ARTIFACT_URL}"
+
+                  # Calculate checksum of the tarball (not the binary inside)
+                  ARTIFACT_URL_SHA256SUM=$(sha256sum "router-artifact.tar.gz" | cut -d' ' -f1)
+                  rm -f router-artifact.tar.gz
+
+                  # Compare local vs remote artifact checksums
+                  if [ "${LOCAL_ARTIFACT_SHA256SUM}" != "${ARTIFACT_URL_SHA256SUM}" ]; then
+                    echo "Error: Local and remote artifact checksums don't match!"
+                    echo "Local:      ${LOCAL_ARTIFACT_SHA256SUM}"
+                    echo "Remote: ${ARTIFACT_URL_SHA256SUM}"
+                    exit 1
+                  fi
+                  echo "Local and remote artifact checksums match: ${LOCAL_ARTIFACT_SHA256SUM}"
+
                   echo "REPO_URL: ${REPO_URL}"
                   echo "BASE_VERSION: ${BASE_VERSION}"
+                  echo "ARTIFACT_FILENAME: ${ARTIFACT_FILENAME}"
                   echo "ARTIFACT_URL: ${ARTIFACT_URL}"
+                  echo "ARTIFACT_URL_SHA256SUM: ${ARTIFACT_URL_SHA256SUM}"
+                  echo "LOCAL_ARTIFACT_SHA256SUM: ${LOCAL_ARTIFACT_SHA256SUM}"
                   echo "VERSION: ${VERSION}"
                   echo "ROUTER_TAG: ${ROUTER_TAG}"
 
@@ -740,10 +759,10 @@ jobs:
                   echo ${GITHUB_OCI_TOKEN} | docker login ghcr.io -u apollo-bot2 --password-stdin
                   # TODO: Can't figure out how to build multi-arch image from ARTIFACT_URL right now. Figure out later...
                   # Build and push debug image
-                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
+                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ARTIFACT_URL_SHA256SUM="${ARTIFACT_URL_SHA256SUM}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug dockerfiles/.
                   docker push ${ROUTER_TAG}:${VERSION}-debug
                   # Build and push release image
-                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
+                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ARTIFACT_URL_SHA256SUM="${ARTIFACT_URL_SHA256SUM}" --build-arg ROUTER_RELEASE=${VERSION} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} dockerfiles/.
                   docker push ${ROUTER_TAG}:${VERSION}
                   # save containers for analysis
                   mkdir built-containers
@@ -767,7 +786,7 @@ jobs:
                   helm push ${CHART} oci://ghcr.io/apollographql/helm-charts-nightly
       - when:
           condition:
-            equal: [ true, << parameters.nightly >> ]
+            equal: [true, << parameters.nightly >>]
           steps:
             - slack/notify:
                 event: fail
@@ -828,7 +847,7 @@ jobs:
 
   publish_github_release:
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.11.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.19.0
     resource_class: small
     environment:
       <<: *common_job_environment
@@ -837,14 +856,22 @@ jobs:
       - when:
           condition:
             not:
-              equal: [ "https://github.com/apollographql/router", << pipeline.project.git_url >> ]
+              equal:
+                [
+                  "https://github.com/apollographql/router",
+                  << pipeline.project.git_url >>,
+                ]
           steps:
             - run:
                 command: >
                   echo "Not publishing any github release."
       - when:
           condition:
-            equal: [ "https://github.com/apollographql/router", << pipeline.project.git_url >> ]
+            equal:
+              [
+                "https://github.com/apollographql/router",
+                << pipeline.project.git_url >>,
+              ]
           steps:
             - checkout
             - setup_environment:
@@ -865,6 +892,19 @@ jobs:
             - run:
                 command: >
                   cd artifacts && sha1sum *.tar.gz > sha1sums.txt
+
+            - run:
+                name: Publish to Crates.io
+                command: |
+                  # Remove leading 'v' which is present on the Git tag; Cargo doesn't want that leading 'v'
+                  VERSION_WITHOUT_LEADING_V="${VERSION#v}"
+                  echo "Publishing apollo-federation@${VERSION_WITHOUT_LEADING_V} and apollo-router@${VERSION_WITHOUT_LEADING_V}"
+                  # Just do a dry-run for now on apollo-federation, since that's a leading
+                  # indicator that the publish is going to work.  We don't do the attempt for
+                  # router because it's dependent on apollo-federation, so it'll definitely fail.
+                  cargo publish -p apollo-federation@${VERSION_WITHOUT_LEADING_V}
+                  cargo publish -p apollo-router@${VERSION_WITHOUT_LEADING_V}
+
             - run:
                 name: Create GitHub Release
                 command: >
@@ -894,9 +934,9 @@ jobs:
                   docker manifest inspect ${ROUTER_TAG}:${VERSION}  > /dev/null && exit 1
                   docker manifest inspect ${ROUTER_TAG}:${VERSION}-debug  > /dev/null && exit 1
                   # Build and push debug image
-                  docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
+                  docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug dockerfiles/.
                   # Build and push release image
-                  docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
+                  docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} dockerfiles/.
             - run:
                 name: Helm build
                 command: |
@@ -931,15 +971,15 @@ workflows:
       - lint:
           matrix:
             parameters:
-              platform: [ amd_linux_build ]
+              platform: [amd_linux_build]
       - check_helm:
           matrix:
             parameters:
-              platform: [ amd_linux_helm ]
+              platform: [amd_linux_helm]
       - check_compliance:
           matrix:
             parameters:
-              platform: [ amd_linux_build ]
+              platform: [amd_linux_build]
 
       - test:
           # this should be changed back to true on dev after release
@@ -951,7 +991,7 @@ workflows:
           matrix:
             parameters:
               platform:
-                [ macos_test, windows_test, amd_linux_test, arm_linux_test ]
+                [macos_test, windows_test, amd_linux_test, arm_linux_test]
   quick-nightly:
     when: << pipeline.parameters.quick_nightly >>
     jobs:
@@ -963,46 +1003,43 @@ workflows:
           matrix:
             parameters:
               platform:
-                [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
+                [macos_build, windows_build, amd_linux_build, arm_linux_build]
   coverage_only:
     when: << pipeline.parameters.coverage >>
     jobs:
       - coverage:
           matrix:
             parameters:
-              platform:
-                [ macos_test ]
+              platform: [macos_test]
   nightly:
     when: << pipeline.parameters.nightly >>
     jobs:
       - lint:
           matrix:
             parameters:
-              platform: [ amd_linux_build ]
+              platform: [amd_linux_build]
       - check_helm:
           matrix:
             parameters:
-              platform: [ amd_linux_helm ]
+              platform: [amd_linux_helm]
       - check_compliance:
           matrix:
             parameters:
-              platform: [ amd_linux_build ]
+              platform: [amd_linux_build]
       - test:
           requires:
             - lint
           matrix:
             parameters:
               platform:
-                [ macos_test, windows_test, amd_linux_test, arm_linux_test ]
+                [macos_test, windows_test, amd_linux_test, arm_linux_test]
       - coverage:
           matrix:
             parameters:
-              platform:
-                [ macos_test ]
+              platform: [macos_test]
       - build_release:
           requires:
             - test
-            - coverage
             - check_helm
             - check_compliance
           nightly: true
@@ -1012,7 +1049,7 @@ workflows:
           matrix:
             parameters:
               platform:
-                [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
+                [macos_build, windows_build, amd_linux_build, arm_linux_build]
       - secops/wiz-docker:
           context:
             - platform-docker-ro
@@ -1032,7 +1069,6 @@ workflows:
           # This allows us to tailor the policy applied during the scans to router.
           wiz-policies: Apollo-Router-Vulnerabilities-Policy
 
-
   release:
     when:
       not:
@@ -1044,7 +1080,7 @@ workflows:
       - pre_verify_release:
           matrix:
             parameters:
-              platform: [ amd_linux_build ]
+              platform: [amd_linux_build]
           filters:
             branches:
               ignore: /.*/
@@ -1053,7 +1089,7 @@ workflows:
       - lint:
           matrix:
             parameters:
-              platform: [ amd_linux_build ]
+              platform: [amd_linux_build]
           filters:
             branches:
               ignore: /.*/
@@ -1062,7 +1098,7 @@ workflows:
       - check_helm:
           matrix:
             parameters:
-              platform: [ amd_linux_helm ]
+              platform: [amd_linux_helm]
           filters:
             branches:
               ignore: /.*/
@@ -1071,7 +1107,7 @@ workflows:
       - check_compliance:
           matrix:
             parameters:
-              platform: [ amd_linux_build ]
+              platform: [amd_linux_build]
           filters:
             branches:
               ignore: /.*/
@@ -1081,7 +1117,7 @@ workflows:
           matrix:
             parameters:
               platform:
-                [ macos_test, windows_test, amd_linux_test, arm_linux_test ]
+                [macos_test, windows_test, amd_linux_test, arm_linux_test]
           filters:
             branches:
               ignore: /.*/
@@ -1091,7 +1127,7 @@ workflows:
           matrix:
             parameters:
               platform:
-                [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
+                [macos_build, windows_build, amd_linux_build, arm_linux_build]
           filters:
             branches:
               ignore: /.*/

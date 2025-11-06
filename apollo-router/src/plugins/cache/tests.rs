@@ -52,11 +52,11 @@ impl Mocks for MockStore {
 
         match &*command.cmd {
             "GET" => {
-                if let Some(RedisValue::Bytes(b)) = command.args.first() {
-                    if let Some(bytes) = self.map.lock().get(b) {
-                        println!("-> returning {:?}", std::str::from_utf8(bytes));
-                        return Ok(RedisValue::Bytes(bytes.clone()));
-                    }
+                if let Some(RedisValue::Bytes(b)) = command.args.first()
+                    && let Some(bytes) = self.map.lock().get(b)
+                {
+                    println!("-> returning {:?}", std::str::from_utf8(bytes));
+                    return Ok(RedisValue::Bytes(bytes.clone()));
                 }
             }
             "MGET" => {
@@ -247,7 +247,7 @@ async fn insert() {
     );
     let hashed_entity_key = hash_representation(&entity_key);
     let prefix_key =
-        format!("version:1.0:subgraph:orga:type:Organization:entity:{hashed_entity_key}");
+        format!("version:1.1:subgraph:orga:type:Organization:entity:{hashed_entity_key}");
     assert!(
         cache_keys
             .iter()
@@ -316,8 +316,8 @@ async fn insert_with_requires() {
                     "representations": [
                         {
                             "weight": 5,
-                            "price": 150,
                             "upc": "1",
+                            "price": 150,
                             "__typename": "Product"
                         }
                     ]
@@ -387,7 +387,7 @@ async fn insert_with_requires() {
     );
     let hashed_entity_key = hash_representation(&entity_key);
     let prefix_key =
-        format!("version:1.0:subgraph:inventory:type:Product:entity:{hashed_entity_key}");
+        format!("version:1.1:subgraph:inventory:type:Product:entity:{hashed_entity_key}");
     assert!(
         cache_keys
             .iter()
@@ -522,7 +522,7 @@ async fn insert_with_nested_field_set() {
     );
 
     let hashed_entity_key = hash_representation(&entity_key);
-    let prefix_key = format!("version:1.0:subgraph:users:type:User:entity:{hashed_entity_key}");
+    let prefix_key = format!("version:1.1:subgraph:users:type:User:entity:{hashed_entity_key}");
     assert!(
         cache_keys
             .iter()

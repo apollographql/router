@@ -54,10 +54,11 @@ async fn basic_batch() {
                 .headers_mut()
                 .append("Apollo-Expose-Query-Plan", "true".parse().unwrap());
         },
+        None,
     )
     .await;
 
-    insta::assert_json_snapshot!(response, @r#"
+    insta::assert_json_snapshot!(response, @r###"
     {
       "data": {
         "users": [
@@ -96,7 +97,7 @@ async fn basic_batch() {
                   "inputRewrites": null,
                   "outputRewrites": null,
                   "contextRewrites": null,
-                  "schemaAwareHash": "a6d44123ba4b1ffc978ce420274ee5ddcf270a45808f693b3215c26a6be8ef77",
+                  "schemaAwareHash": "5c1e1c8a20e92d662884d3af7337bf739d4c1ea700a43dd2eb09c361051d9acb",
                   "authorization": {
                     "is_authenticated": false,
                     "scopes": [],
@@ -136,7 +137,7 @@ async fn basic_batch() {
                     "inputRewrites": null,
                     "outputRewrites": null,
                     "contextRewrites": null,
-                    "schemaAwareHash": "396d1e3e27938fc0e73c7b88af27da118c89e09484ad26a7f0d45d2da2c153be",
+                    "schemaAwareHash": "c2135feb344973e4498126b00bedf66c1924d4ededee5ecae7e13edf08a52dc6",
                     "authorization": {
                       "is_authenticated": false,
                       "scopes": [],
@@ -151,7 +152,7 @@ async fn basic_batch() {
         }
       }
     }
-    "#);
+    "###);
 
     super::req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
@@ -214,6 +215,7 @@ async fn connect_on_type() {
         Default::default(),
         None,
         |_| {},
+        None,
     )
     .await;
 

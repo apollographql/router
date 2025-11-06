@@ -258,34 +258,41 @@ impl From<ExecutionResponse> for Response {
 mod tests {
     use serde_json::json;
     use serde_json_bytes::json as bjson;
+    use uuid::Uuid;
 
     use super::*;
+    use crate::assert_response_eq_ignoring_error_id;
+    use crate::graphql;
+    use crate::graphql::Error;
     use crate::graphql::Location;
+    use crate::graphql::Response;
 
     #[test]
     fn test_append_errors_path_fallback_and_override() {
+        let uuid1 = Uuid::new_v4();
+        let uuid2 = Uuid::new_v4();
         let expected_errors = vec![
-            Error {
-                message: "Something terrible happened!".to_string(),
-                path: Some(Path::from("here")),
-                ..Default::default()
-            },
-            Error {
-                message: "I mean for real".to_string(),
-                ..Default::default()
-            },
+            Error::builder()
+                .message("Something terrible happened!")
+                .path(Path::from("here"))
+                .apollo_id(uuid1)
+                .build(),
+            Error::builder()
+                .message("I mean for real")
+                .apollo_id(uuid2)
+                .build(),
         ];
 
         let mut errors_to_append = vec![
-            Error {
-                message: "Something terrible happened!".to_string(),
-                path: Some(Path::from("here")),
-                ..Default::default()
-            },
-            Error {
-                message: "I mean for real".to_string(),
-                ..Default::default()
-            },
+            Error::builder()
+                .message("Something terrible happened!")
+                .path(Path::from("here"))
+                .apollo_id(uuid1)
+                .build(),
+            Error::builder()
+                .message("I mean for real")
+                .apollo_id(uuid2)
+                .build(),
         ];
 
         let mut response = Response::builder().build();
@@ -334,8 +341,9 @@ mod tests {
             .to_string()
             .as_str(),
         );
-        assert_eq!(
-            result.unwrap(),
+        let response = result.unwrap();
+        assert_response_eq_ignoring_error_id!(
+            response,
             Response::builder()
                 .data(json!({
                   "hero": {
@@ -356,17 +364,19 @@ mod tests {
                     ]
                   }
                 }))
-                .errors(vec![Error {
-                    message: "Name for character with ID 1002 could not be fetched.".into(),
-                    locations: vec!(Location { line: 6, column: 7 }),
-                    path: Some(Path::from("hero/heroFriends/1/name")),
-                    extensions: bjson!({
-                        "error-extension": 5,
-                    })
-                    .as_object()
-                    .cloned()
-                    .unwrap()
-                }])
+                .errors(vec![
+                    Error::builder()
+                        .message("Name for character with ID 1002 could not be fetched.")
+                        .locations(vec!(Location { line: 6, column: 7 }))
+                        .path(Path::from("hero/heroFriends/1/name"))
+                        .extensions(
+                            bjson!({ "error-extension": 5, })
+                                .as_object()
+                                .cloned()
+                                .unwrap()
+                        )
+                        .build()
+                ])
                 .extensions(
                     bjson!({
                         "response-extension": 3,
@@ -423,8 +433,9 @@ mod tests {
             .to_string()
             .as_str(),
         );
-        assert_eq!(
-            result.unwrap(),
+        let response = result.unwrap();
+        assert_response_eq_ignoring_error_id!(
+            response,
             Response::builder()
                 .label("part".to_owned())
                 .data(json!({
@@ -447,17 +458,19 @@ mod tests {
                   }
                 }))
                 .path(Path::from("hero/heroFriends/1/name"))
-                .errors(vec![Error {
-                    message: "Name for character with ID 1002 could not be fetched.".into(),
-                    locations: vec!(Location { line: 6, column: 7 }),
-                    path: Some(Path::from("hero/heroFriends/1/name")),
-                    extensions: bjson!({
-                        "error-extension": 5,
-                    })
-                    .as_object()
-                    .cloned()
-                    .unwrap()
-                }])
+                .errors(vec![
+                    Error::builder()
+                        .message("Name for character with ID 1002 could not be fetched.")
+                        .locations(vec!(Location { line: 6, column: 7 }))
+                        .path(Path::from("hero/heroFriends/1/name"))
+                        .extensions(
+                            bjson!({ "error-extension": 5, })
+                                .as_object()
+                                .cloned()
+                                .unwrap()
+                        )
+                        .build()
+                ])
                 .extensions(
                     bjson!({
                         "response-extension": 3,

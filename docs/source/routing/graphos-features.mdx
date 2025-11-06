@@ -1,8 +1,8 @@
 ---
 title: Licensed GraphOS Router Features
-subtitle: Features that requiring a licensed GraphOS plan 
+subtitle: Features that require a licensed GraphOS plan
 description: Unlock Enterprise features for the GraphOS Router by connecting it to Apollo GraphOS.
-redirectFrom: 
+redirectFrom:
   - /router/enterprise-features
 ---
 
@@ -16,22 +16,20 @@ This page lists the additional features of GraphOS Router that are enabled via i
 - Improved performance with [query batching](/graphos/routing/performance/query-batching)
 - Authentication of inbound requests via [JSON Web Token (JWT)](/graphos/routing/security/jwt)
 - [Authorization of specific fields and types](/graphos/routing/security/authorization) through the [`@requiresScopes`](/graphos/routing/security/authorization#requiresscopes), [`@authenticated`](/graphos/routing/security/authorization#authenticated), and [`@policy`](/graphos/routing/security/authorization#policy) directives
-- Incremental migration between subgraphs through [the progressive `@override` directive](/graphos/schema-design/federated-schemas/entities/migrate-fields#incremental-migration-with-progressive-override).
-- Redis-backed [distributed caching of query plans and persisted queries](/graphos/routing/performance/caching/distributed)
-- Redis-backed [entity caching of subgraph responses](/graphos/routing/performance/caching/entity)
+- Redis-backed [distributed caching of query plans](/graphos/routing/query-planning/caching#distributed-caching-with-redis) and [automatic persisted queries](/graphos/routing/operations/apq#distributed-caching-with-redis)
+- Redis-backed [response caching](/graphos/routing/performance/caching/response-caching) (preview)
 - Custom request handling in any language via [external coprocessing](/graphos/routing/customization/coprocessor)
-- Mitigation of potentially malicious requests via [request limits](/graphos/routing/security/request-limits), [demand control](/graphos/routing/security/request-limits), and [safelisting](/graphos/routing/security/persisted-queries)
+- Mitigation of potentially malicious requests via [request limits](/graphos/routing/security/request-limits), [demand control](/graphos/routing/security/demand-control), and [safelisting](/graphos/routing/security/persisted-queries)
 - Custom instrumentation and telemetry, including [custom attributes for spans](/graphos/reference/router/telemetry/instrumentation/spans#attributes).
-- An [offline license](/graphos/reference/router/graphos-features#the-enterprise-license) that enables running the router with GraphOS features when disconnected from the internet.
-- [Using contexts to share data](/graphos/schema-design/federated-schemas/entities/use-contexts) with the `@context` and `@fromContext` directives
+- An [offline license](/graphos/routing/license/#offline-license) that enables running the router with GraphOS features when disconnected from the internet.
 
 ## Enabling licensed plan features
 
 To enable licensed plan features in a router:
 
 - You must run GraphOS Router v1.12 or later. [Download the latest version.](/graphos/reference/router/self-hosted-install#1-download-and-extract-the-router-binary)
-    - Certain features might require a later router version. See a particular feature's documentation for details.
+  - Certain features might require a later router version. See a particular feature's documentation for details.
 - Your router instances must connect to GraphOS with a **graph API key** and **graph ref** associated with your organization.
-    - You connect your router to GraphOS by setting [these environment variables](/graphos/reference/router/configuration#environment-variables) when starting the router.
+  - You connect your router to GraphOS by setting [these environment variables](/graphos/reference/router/configuration#environment-variables) when starting the router.
 
 > Learn more about the [GraphOS plan license](/graphos/routing/license).

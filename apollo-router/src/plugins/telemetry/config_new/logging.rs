@@ -4,14 +4,8 @@ use std::io::IsTerminal;
 use std::time::Duration;
 
 use schemars::JsonSchema;
-use schemars::r#gen::SchemaGenerator;
-use schemars::schema::InstanceType;
-use schemars::schema::Metadata;
-use schemars::schema::ObjectValidation;
-use schemars::schema::Schema;
-use schemars::schema::SchemaObject;
-use schemars::schema::SingleOrVec;
-use schemars::schema::SubschemaValidation;
+use schemars::Schema;
+use schemars::SchemaGenerator;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::de::MapAccess;
@@ -22,7 +16,7 @@ use crate::plugins::telemetry::config::TraceIdFormat;
 use crate::plugins::telemetry::resource::ConfigResource;
 
 /// Logging configuration.
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
+#[derive(Deserialize, JsonSchema, Clone, Default, Debug, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Logging {
     /// Common configuration
@@ -34,7 +28,7 @@ pub(crate) struct Logging {
     pub(crate) file: File,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, Default, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct LoggingCommon {
     /// Set a service.name resource in your metrics
@@ -59,7 +53,7 @@ impl ConfigResource for LoggingCommon {
     }
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct StdOut {
     /// Set to true to log to stdout.
@@ -83,7 +77,7 @@ impl Default for StdOut {
     }
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct RateLimit {
     /// Set to true to limit the rate of log messages
@@ -108,7 +102,7 @@ impl Default for RateLimit {
 
 /// Log to a file
 #[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
+#[derive(Deserialize, JsonSchema, Clone, Default, Debug, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct File {
     /// Set to true to log to a file.
@@ -149,12 +143,11 @@ pub(crate) enum Format {
 
 // This custom implementation JsonSchema allows the user to supply an enum or a struct in the same way that the custom deserializer does.
 impl JsonSchema for Format {
-    fn schema_name() -> String {
-        "logging_format".to_string()
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "logging_format".into()
     }
 
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        // Does nothing, but will compile error if the
         let types = vec![
             (
                 "json",
@@ -168,57 +161,30 @@ impl JsonSchema for Format {
             ),
         ];
 
-        Schema::Object(SchemaObject {
-            subschemas: Some(Box::new(SubschemaValidation {
-                one_of: Some(
-                    types
-                        .into_iter()
-                        .map(|(name, schema, description)| {
-                            (
-                                name,
-                                ObjectValidation {
-                                    required: [name.to_string()].into(),
-                                    properties: [(name.to_string(), schema)].into(),
-                                    additional_properties: Some(Box::new(Schema::Bool(false))),
-                                    ..Default::default()
-                                },
-                                description,
-                            )
-                        })
-                        .flat_map(|(name, o, dec)| {
-                            vec![
-                                SchemaObject {
-                                    metadata: Some(Box::new(Metadata {
-                                        description: Some(dec.to_string()),
-                                        ..Default::default()
-                                    })),
-                                    instance_type: Some(SingleOrVec::Single(Box::new(
-                                        InstanceType::Object,
-                                    ))),
-                                    object: Some(Box::new(o)),
-                                    ..Default::default()
-                                },
-                                SchemaObject {
-                                    metadata: Some(Box::new(Metadata {
-                                        description: Some(dec.to_string()),
-                                        ..Default::default()
-                                    })),
-                                    instance_type: Some(SingleOrVec::Single(Box::new(
-                                        InstanceType::String,
-                                    ))),
-                                    enum_values: Some(vec![serde_json::Value::String(
-                                        name.to_string(),
-                                    )]),
-                                    ..Default::default()
-                                },
-                            ]
-                        })
-                        .map(Schema::Object)
-                        .collect::<Vec<_>>(),
-                ),
-                ..Default::default()
-            })),
-            ..Default::default()
+        let schemas = types
+            .into_iter()
+            .flat_map(|(name, schema, description)| {
+                [
+                    schemars::json_schema!({
+                        "type": "object",
+                        "description": description,
+                        "properties": {
+                            name.to_string(): schema,
+                        },
+                        "required": [name],
+                        "additionalProperties": false,
+                    }),
+                    schemars::json_schema!({
+                        "type": "string",
+                        "description": description,
+                        "enum": [name], // TODO(@goto-bus-stop): why not "const"?
+                    }),
+                ]
+            })
+            .collect::<Vec<_>>();
+
+        schemars::json_schema!({
+            "oneOf": schemas,
         })
     }
 }
@@ -244,7 +210,7 @@ impl<'de> Deserialize<'de> for Format {
                 match value {
                     "json" => Ok(Format::Json(JsonFormat::default())),
                     "text" => Ok(Format::Text(TextFormat::default())),
-                    _ => Err(E::custom(format!("unknown log format: {}", value))),
+                    _ => Err(E::custom(format!("unknown log format: {value}"))),
                 }
             }
 
@@ -258,8 +224,7 @@ impl<'de> Deserialize<'de> for Format {
                     Some("json") => Ok(Format::Json(map.next_value::<JsonFormat>()?)),
                     Some("text") => Ok(Format::Text(map.next_value::<TextFormat>()?)),
                     Some(value) => Err(serde::de::Error::custom(format!(
-                        "unknown log format: {}",
-                        value
+                        "unknown log format: {value}"
                     ))),
                     _ => Err(serde::de::Error::custom("unknown log format")),
                 }
@@ -423,7 +388,7 @@ impl Default for TextFormat {
 
 /// The period to rollover the log file.
 #[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
+#[derive(Deserialize, JsonSchema, Clone, Default, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Rollover {
     /// Roll over every hour.

@@ -32,7 +32,7 @@ impl Plugin for DoNotExecute {
             .map_request(|mut req: supergraph::Request| {
                 let body = req.supergraph_request.body_mut();
                 body.query = body.query.as_ref().map(|query| {
-                    let query_name = format!("query Query{} ", rand::random::<usize>());
+                    let query_name = format!("query Query{} ", rand::random::<u32>());
                     query.replacen("query ", query_name.as_str(), 1)
                 });
                 req

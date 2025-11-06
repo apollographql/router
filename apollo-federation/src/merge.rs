@@ -54,6 +54,7 @@ use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::inaccessible_spec_definition::INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::inaccessible_spec_definition::InaccessibleSpecDefinition;
+use crate::link::join_spec_definition::EnumValue;
 use crate::link::join_spec_definition::JOIN_OVERRIDE_LABEL_ARGUMENT_NAME;
 use crate::link::spec::Identity;
 use crate::link::spec::Version;
@@ -153,13 +154,13 @@ impl Merger {
             };
 
             // Ensure that enum values are unique after normalizing them
-            let enum_value = if enum_values.contains(&enum_value.0.to_string()) {
+            let enum_value = if enum_values.contains(&enum_value.to_string()) {
                 EnumValue::new(&format!("{}_{}", subgraph.name, enum_values.len()))
                     .expect("adding a suffix always works")
             } else {
                 enum_value
             };
-            enum_values.insert(enum_value.0.to_string());
+            enum_values.insert(enum_value.to_string());
             subgraphs_and_enum_values.push((subgraph, enum_value))
         }
         if !self.errors.is_empty() {
@@ -1869,87 +1870,6 @@ fn join_graph_enum_type(
             .insert(graph.value.clone(), Component::new(graph));
     }
     (join_graph_enum_name, join_graph_enum_type)
-}
-
-/// Represents a valid enum value in GraphQL, used for building `join__Graph`.
-///
-/// TODO: Put this in `join_spec_definition.rs` when we convert to using that module.
-#[derive(Clone, Debug)]
-struct EnumValue(Name);
-
-impl EnumValue {
-    fn new(raw: &str) -> Result<Self, String> {
-        let prefix = if raw.starts_with(char::is_numeric) {
-            Some('_')
-        } else {
-            None
-        };
-        let name = prefix
-            .into_iter()
-            .chain(raw.chars())
-            .map(|c| match c {
-                'a'..='z' => c.to_ascii_uppercase(),
-                'A'..='Z' | '0'..='9' => c,
-                _ => '_',
-            })
-            .collect::<String>();
-        Name::new(&name)
-            .map(Self)
-            .map_err(|_| format!("Failed to transform {raw} into a valid GraphQL name. Got {name}"))
-    }
-    fn to_name(&self) -> Name {
-        self.0.clone()
-    }
-
-    #[cfg(test)]
-    fn as_str(&self) -> &str {
-        self.0.as_str()
-    }
-}
-
-impl From<EnumValue> for Name {
-    fn from(ev: EnumValue) -> Self {
-        ev.0
-    }
-}
-
-#[cfg(test)]
-mod test_enum_value {
-    #[test]
-    fn basic() {
-        let ev = super::EnumValue::new("subgraph").unwrap();
-        assert_eq!(ev.as_str(), "SUBGRAPH");
-    }
-
-    #[test]
-    fn with_underscores() {
-        let ev = super::EnumValue::new("a_subgraph").unwrap();
-        assert_eq!(ev.as_str(), "A_SUBGRAPH");
-    }
-
-    #[test]
-    fn with_hyphens() {
-        let ev = super::EnumValue::new("a-subgraph").unwrap();
-        assert_eq!(ev.as_str(), "A_SUBGRAPH");
-    }
-
-    #[test]
-    fn special_symbols() {
-        let ev = super::EnumValue::new("a$ubgraph").unwrap();
-        assert_eq!(ev.as_str(), "A_UBGRAPH");
-    }
-
-    #[test]
-    fn digit_first_char() {
-        let ev = super::EnumValue::new("1subgraph").unwrap();
-        assert_eq!(ev.as_str(), "_1SUBGRAPH");
-    }
-
-    #[test]
-    fn digit_last_char() {
-        let ev = super::EnumValue::new("subgraph_1").unwrap();
-        assert_eq!(ev.as_str(), "SUBGRAPH_1");
-    }
 }
 
 fn add_core_feature_inaccessible(supergraph: &mut Schema) {

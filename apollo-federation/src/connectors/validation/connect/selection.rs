@@ -6,6 +6,8 @@ use std::ops::Range;
 
 use apollo_compiler::Node;
 use apollo_compiler::ast::FieldDefinition;
+use apollo_compiler::ast::Value;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
@@ -22,16 +24,16 @@ use crate::connectors::SubSelection;
 use crate::connectors::expand::visitors::FieldVisitor;
 use crate::connectors::expand::visitors::GroupVisitor;
 use crate::connectors::id::ConnectedElement;
-use crate::connectors::json_selection::ExternalVarPaths;
 use crate::connectors::json_selection::NamedSelection;
 use crate::connectors::json_selection::Ranged;
-use crate::connectors::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
+use crate::connectors::json_selection::VarPaths;
+use crate::connectors::spec::connect::CONNECT_SELECTION_ARGUMENT_NAME;
 use crate::connectors::validation::coordinates::ConnectDirectiveCoordinate;
 use crate::connectors::validation::coordinates::SelectionCoordinate;
 use crate::connectors::validation::expression::MappingArgument;
 use crate::connectors::validation::expression::parse_mapping_argument;
-use crate::connectors::validation::graphql::GraphQLString;
 use crate::connectors::validation::graphql::SchemaInfo;
+use crate::connectors::validation::graphql::subslice_location;
 use crate::connectors::variable::Phase;
 use crate::connectors::variable::Target;
 use crate::connectors::variable::VariableContext;
@@ -41,7 +43,7 @@ mod variables;
 /// The `@connect(selection:)` argument
 pub(super) struct Selection<'schema> {
     parsed: JSONSelection,
-    string: GraphQLString<'schema>,
+    node: Node<Value>,
     coordinate: SelectionCoordinate<'schema>,
 }
 
@@ -66,7 +68,7 @@ impl<'schema> Selection<'schema> {
                     .collect(),
             })?;
 
-        let MappingArgument { expression, string } = parse_mapping_argument(
+        let MappingArgument { expression, node } = parse_mapping_argument(
             &selection_arg.value,
             coordinate,
             Code::InvalidSelection,
@@ -74,9 +76,9 @@ impl<'schema> Selection<'schema> {
         )?;
 
         Ok(Self {
-            string,
-            coordinate,
             parsed: expression.expression,
+            node,
+            coordinate,
         })
     }
 
@@ -88,10 +90,11 @@ impl<'schema> Selection<'schema> {
         validate_selection_variables(
             &VariableResolver::new(context.clone(), schema),
             self.coordinate,
-            self.string,
+            &self.node,
             schema,
             context,
             self.parsed.external_var_paths(),
+            &self.parsed.local_var_names(),
         )?;
 
         match coordinate.element {
@@ -118,7 +121,7 @@ impl<'schema> Selection<'schema> {
                 SelectionValidator::new(
                     schema,
                     PathPart::Root(parent_type),
-                    self.string,
+                    &self.node,
                     self.coordinate,
                 )
                 .walk(group)
@@ -139,7 +142,7 @@ impl<'schema> Selection<'schema> {
                 SelectionValidator::new(
                     schema,
                     PathPart::Root(type_def),
-                    self.string,
+                    &self.node,
                     self.coordinate,
                 )
                 .walk(group)
@@ -159,12 +162,13 @@ impl<'schema> Selection<'schema> {
 pub(super) fn validate_selection_variables<'a>(
     variable_resolver: &VariableResolver,
     coordinate: impl Display,
-    selection_str: GraphQLString,
+    selection_str: &Node<Value>,
     schema: &SchemaInfo,
     context: VariableContext,
-    variable_paths: impl IntoIterator<Item = &'a PathSelection>,
+    external_var_paths: impl IntoIterator<Item = &'a PathSelection>,
+    local_var_names: &IndexSet<String>,
 ) -> Result<(), Message> {
-    for path in variable_paths {
+    for path in external_var_paths {
         if let Some(reference) = path.variable_reference() {
             variable_resolver
                 .resolve(&reference, selection_str)
@@ -173,10 +177,19 @@ pub(super) fn validate_selection_variables<'a>(
                     err
                 })?;
         } else if let Some(reference) = path.variable_reference::<String>() {
+            let locals_suffix = {
+                let local_var_vec = local_var_names.iter().cloned().collect::<Vec<_>>();
+                if local_var_vec.is_empty() {
+                    "".to_string()
+                } else {
+                    format!(", {}", local_var_vec.join(", "))
+                }
+            };
+
             return Err(Message {
                 code: context.error_code(),
                 message: format!(
-                    "In {coordinate}: unknown variable `{namespace}`, must be one of {available}",
+                    "In {coordinate}: unknown variable `{namespace}`, must be one of {available}{locals_suffix}",
                     namespace = reference.namespace.namespace.as_str(),
                     available = context.namespaces_joined(),
                 ),
@@ -184,7 +197,7 @@ pub(super) fn validate_selection_variables<'a>(
                     .namespace
                     .location
                     .iter()
-                    .flat_map(|range| selection_str.line_col_for_subslice(range.clone(), schema))
+                    .flat_map(|range| subslice_location(selection_str, range.clone(), schema))
                     .collect(),
             });
         }
@@ -196,7 +209,7 @@ struct SelectionValidator<'schema> {
     schema: &'schema SchemaInfo<'schema>,
     root: PathPart<'schema>,
     path: Vec<PathPart<'schema>>,
-    string: GraphQLString<'schema>,
+    node: &'schema Node<Value>,
     coordinate: SelectionCoordinate<'schema>,
     seen_fields: Vec<(Name, Name)>,
 }
@@ -205,14 +218,14 @@ impl<'schema> SelectionValidator<'schema> {
     const fn new(
         schema: &'schema SchemaInfo<'schema>,
         root: PathPart<'schema>,
-        string: GraphQLString<'schema>,
+        node: &'schema Node<Value>,
         coordinate: SelectionCoordinate<'schema>,
     ) -> Self {
         Self {
             schema,
             root,
             path: Vec::new(),
-            string,
+            node,
             coordinate,
             seen_fields: Vec::new(),
         }
@@ -264,7 +277,7 @@ impl SelectionValidator<'_> {
     ) -> impl Iterator<Item = Range<LineColumn>> {
         selection
             .range()
-            .and_then(|range| self.string.line_col_for_subslice(range, self.schema))
+            .and_then(|range| subslice_location(self.node, range, self.schema))
             .into_iter()
     }
 
@@ -274,14 +287,11 @@ impl SelectionValidator<'_> {
     ) -> impl Iterator<Item = Range<LineColumn>> {
         selection
             .as_ref()
-            .and_then(|range| {
-                self.string
-                    .line_col_for_subslice(range.clone(), self.schema)
-            })
+            .and_then(|range| subslice_location(self.node, range.clone(), self.schema))
             .into_iter()
     }
 
-    fn path_with_root(&self) -> impl Iterator<Item = PathPart> {
+    fn path_with_root(&self) -> impl Iterator<Item = PathPart<'_>> {
         once(self.root).chain(self.path.iter().copied())
     }
 
@@ -295,7 +305,7 @@ impl SelectionValidator<'_> {
             .join(".")
     }
 
-    fn last_field(&self) -> &PathPart {
+    fn last_field(&self) -> &PathPart<'_> {
         self.path.last().unwrap_or(&self.root)
     }
 }

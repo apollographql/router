@@ -12,6 +12,8 @@ use std::collections::HashMap;
 use std::num::NonZeroU64;
 use std::time::Duration;
 
+use apollo_federation::connectors::runtime::errors::Error;
+use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
 use http::HeaderValue;
 use http::StatusCode;
 use http::header::CONTENT_ENCODING;
@@ -27,7 +29,6 @@ use tower::load_shed::error::Overloaded;
 use tower::timeout::TimeoutLayer;
 use tower::timeout::error::Elapsed;
 
-use self::connector::request_service::TransportRequest;
 use self::deduplication::QueryDeduplicationLayer;
 use crate::configuration::shared::DnsResolutionStrategy;
 use crate::graphql;
@@ -38,7 +39,6 @@ use crate::services::RouterResponse;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::connector;
-use crate::services::connector::request_service::Error;
 use crate::services::connector::request_service::Request;
 use crate::services::connector::request_service::Response;
 use crate::services::http::service::Compression;
@@ -200,9 +200,10 @@ struct RouterShaping {
 
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
+#[schemars(rename = "TrafficShapingConfig")]
 // FIXME: This struct is pub(crate) because we need its configuration in the query planner service.
 // Remove this once the configuration yml changes.
-/// Configuration for the experimental traffic shaping plugin
+/// Configuration for the traffic shaping plugin
 pub(crate) struct Config {
     /// Applied at the router level
     router: Option<RouterShaping>,
@@ -478,30 +479,26 @@ impl PluginPrivate for TrafficShaping {
 
             ServiceBuilder::new()
                 .map_future_with_request_data(
-                    |req: &Request| (req.context.clone(), req.connector.clone(), req.key.clone()),
-                    move |(ctx, connector, response_key), future| {
+                    |req: &Request| req.key.clone(),
+                    move |response_key, future| {
                         async {
                             let response: Result<Response, BoxError> = future.await;
                             match response {
                                 Ok(ok) => Ok(ok),
                                 Err(err) if err.is::<Elapsed>() => {
-                                    let response = Response::error_builder()
-                                        .context(ctx)
-                                        .connector(connector)
-                                        .error(Error::GatewayTimeout)
-                                        .message("Your request has been timed out")
-                                        .response_key(response_key)
-                                        .build();
+                                    let response = Response::error_new(
+                                        Error::GatewayTimeout,
+                                        "Your request has been timed out",
+                                        response_key,
+                                    );
                                     Ok(response)
                                 }
                                Err(err) if err.is::<Overloaded>() => {
-                                    let response = Response::error_builder()
-                                        .context(ctx)
-                                        .connector(connector)
-                                        .error(Error::RateLimited)
-                                        .message("Your request has been rate limited")
-                                        .response_key(response_key)
-                                        .build();
+                                    let response = Response::error_new(
+                                        Error::RateLimited,
+                                        "Your request has been rate limited",
+                                        response_key,
+                                    );
                                     Ok(response)
                                 }
                                 Err(err) => Err(err),
@@ -573,7 +570,6 @@ register_private_plugin!("apollo", "traffic_shaping", TrafficShaping);
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
     use std::sync::Arc;
 
     use apollo_compiler::name;
@@ -582,9 +578,11 @@ mod test {
     use apollo_federation::connectors::Connector;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::SourceName;
+    use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
+    use apollo_federation::connectors::runtime::key::ResponseKey;
     use bytes::Bytes;
     use http::HeaderMap;
-    use http::Uri;
     use maplit::hashmap;
     use once_cell::sync::Lazy;
     use serde_json_bytes::ByteString;
@@ -600,7 +598,6 @@ mod test {
     use crate::plugin::test::MockConnector;
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraph;
-    use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::query_planner::QueryPlannerService;
     use crate::router_factory::create_plugins;
     use crate::services::HasSchema;
@@ -609,7 +606,6 @@ mod test {
     use crate::services::RouterResponse;
     use crate::services::SupergraphRequest;
     use crate::services::connector::request_service::Request as ConnectorRequest;
-    use crate::services::connector::request_service::transport::http::HttpRequest;
     use crate::services::layers::persisted_queries::PersistedQueryLayer;
     use crate::services::layers::query_analysis::QueryAnalysisLayer;
     use crate::services::router;
@@ -724,6 +720,7 @@ mod test {
                 None,
                 Some(vec![(APOLLO_TRAFFIC_SHAPING.to_string(), plugin)]),
                 Default::default(),
+                None,
             )
             .await
             .expect("create plugins should work"),
@@ -760,7 +757,6 @@ mod test {
     }
 
     fn get_fake_connector_request(
-        service_name: String,
         headers: Option<HeaderMap<HeaderValue>>,
         data: String,
     ) -> ConnectorRequest {
@@ -769,14 +765,14 @@ mod test {
             spec: ConnectSpec::V0_1,
             id: ConnectId::new(
                 "test_subgraph".into(),
-                Some("test_sourcename".into()),
+                Some(SourceName::cast("test_sourcename")),
                 name!(Query),
                 name!(hello),
+                None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Uri::from_str("http://localhost/api").ok(),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -784,12 +780,13 @@ mod test {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         });
         let key = ResponseKey::RootField {
             name: "hello".to_string(),
@@ -808,13 +805,12 @@ mod test {
 
         let http_request = HttpRequest {
             inner: request,
-            debug: None,
+            debug: Default::default(),
         };
 
         ConnectorRequest {
             context,
             connector,
-            service_name,
             transport_request: http_request.into(),
             key,
             mapping_problems,
@@ -882,11 +878,7 @@ mod test {
         .unwrap();
 
         let plugin = get_traffic_shaping_plugin(&config).await;
-        let request = get_fake_connector_request(
-            "test_subgraph.test_sourcename".into(),
-            None,
-            "testing".to_string(),
-        );
+        let request = get_fake_connector_request(None, "testing".to_string());
 
         let test_service =
             MockConnector::new(HashMap::new()).map_request(|req: ConnectorRequest| {
@@ -1106,11 +1098,7 @@ mod test {
         .unwrap();
 
         let plugin = get_traffic_shaping_plugin(&config).await;
-        let request = get_fake_connector_request(
-            "test_subgraph.test_sourcename".into(),
-            None,
-            "testing".to_string(),
-        );
+        let request = get_fake_connector_request(None, "testing".to_string());
 
         let test_service = MockConnector::new(hashmap! {
             "test_request".into() => "test_request".into()
@@ -1132,11 +1120,7 @@ mod test {
                 .is_ok()
         );
 
-        let request = get_fake_connector_request(
-            "test_subgraph.test_sourcename".into(),
-            None,
-            "testing".to_string(),
-        );
+        let request = get_fake_connector_request(None, "testing".to_string());
         let response = svc
             .ready()
             .await
@@ -1153,11 +1137,7 @@ mod test {
 
         tokio::time::sleep(Duration::from_millis(300)).await;
 
-        let request = get_fake_connector_request(
-            "test_subgraph.test_sourcename".into(),
-            None,
-            "testing".to_string(),
-        );
+        let request = get_fake_connector_request(None, "testing".to_string());
         assert!(
             svc.ready()
                 .await
@@ -1217,7 +1197,7 @@ mod test {
             .unwrap();
         assert_eq!(StatusCode::SERVICE_UNAVAILABLE, response.response.status());
         let j: serde_json::Value = serde_json::from_slice(
-            &crate::services::router::body::into_bytes(response.response)
+            &router::body::into_bytes(response.response)
                 .await
                 .expect("we have a body"),
         )

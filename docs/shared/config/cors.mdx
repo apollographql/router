@@ -6,12 +6,36 @@ cors:
   allow_credentials: false
   allow_headers: []
   expose_headers: null
-  match_origins: null
   max_age: null
   methods:
   - GET
   - POST
   - OPTIONS
-  origins:
-  - https://studio.apollographql.com
+  policies:
+  - origins:
+    - https://studio.apollographql.com
+    - https://myapp.com
+    allow_credentials: false
+    allow_headers: []
+    expose_headers: []
+    private_network_access:
+      access_id:
+    # methods not specified - uses global defaults [GET, POST, OPTIONS]
+  - origins:
+    - https://restricted.com
+    methods: []  # Explicitly no methods allowed
+  - origins:
+    - https://api.example.com
+    match_origins:
+    - "^https://.*\\.example\\.com$"
+    allow_headers:
+    - content-type
+    - authorization
+    methods:
+    - GET
+    - POST
+    private_network_access:
+      access_id: "01:23:45:67:89:0A"
+      access_name: "mega-corp device"
+    # Specific methods override global defaults
 ```

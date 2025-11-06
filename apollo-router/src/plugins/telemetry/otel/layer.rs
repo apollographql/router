@@ -38,8 +38,8 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_MESSAGE;
 use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
-use crate::plugins::telemetry::reload::IsSampled;
-use crate::plugins::telemetry::reload::SampledSpan;
+use crate::plugins::telemetry::reload::otel::IsSampled;
+use crate::plugins::telemetry::reload::otel::SampledSpan;
 use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::router_factory::STARTING_SPAN_NAME;
 
@@ -216,14 +216,14 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
     /// [`Span`]: opentelemetry::trace::Span
     fn record_debug(&mut self, field: &field::Field, value: &dyn fmt::Debug) {
         match field.name() {
-            "message" => self.event_builder.name = format!("{:?}", value).into(),
+            "message" => self.event_builder.name = format!("{value:?}").into(),
             name => {
                 if name == "kind" {
                     self.custom_event = true;
                 }
                 self.event_builder
                     .attributes
-                    .push(KeyValue::new(name, format!("{:?}", value)));
+                    .push(KeyValue::new(name, format!("{value:?}")));
             }
         }
     }
@@ -263,23 +263,22 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
                 .push(Key::new(FIELD_EXCEPTION_STACKTRACE).array(chain.clone()));
         }
 
-        if self.exception_config.propagate {
-            if let Some(span) = &mut self.span_builder {
-                if let Some(attrs) = span.attributes.as_mut() {
-                    attrs.push(KeyValue::new(FIELD_EXCEPTION_MESSAGE, error_msg.clone()));
+        if self.exception_config.propagate
+            && let Some(span) = &mut self.span_builder
+            && let Some(attrs) = span.attributes.as_mut()
+        {
+            attrs.push(KeyValue::new(FIELD_EXCEPTION_MESSAGE, error_msg.clone()));
 
-                    // NOTE: This is actually not the stacktrace of the exception. This is
-                    // the "source chain". It represents the hierarchy of errors from the
-                    // app level to the lowest level such as IO. It does not represent all
-                    // of the callsites in the code that led to the error happening.
-                    // `std::error::Error::backtrace` is a nightly-only API and cannot be
-                    // used here until the feature is stabilized.
-                    attrs.push(KeyValue::new(
-                        FIELD_EXCEPTION_STACKTRACE,
-                        Value::Array(chain.clone().into()),
-                    ));
-                }
-            }
+            // NOTE: This is actually not the stacktrace of the exception. This is
+            // the "source chain". It represents the hierarchy of errors from the
+            // app level to the lowest level such as IO. It does not represent all
+            // of the callsites in the code that led to the error happening.
+            // `std::error::Error::backtrace` is a nightly-only API and cannot be
+            // used here until the feature is stabilized.
+            attrs.push(KeyValue::new(
+                FIELD_EXCEPTION_STACKTRACE,
+                Value::Array(chain.clone().into()),
+            ));
         }
 
         self.event_builder
@@ -362,13 +361,13 @@ impl field::Visit for SpanAttributeVisitor<'_> {
     /// [`Span`]: opentelemetry::trace::Span
     fn record_debug(&mut self, field: &field::Field, value: &dyn fmt::Debug) {
         match field.name() {
-            OTEL_NAME => self.span_builder.name = format!("{:?}", value).into(),
-            OTEL_KIND => self.span_builder.span_kind = str_to_span_kind(&format!("{:?}", value)),
-            OTEL_STATUS_CODE => self.span_builder.status = str_to_status(&format!("{:?}", value)),
+            OTEL_NAME => self.span_builder.name = format!("{value:?}").into(),
+            OTEL_KIND => self.span_builder.span_kind = str_to_span_kind(&format!("{value:?}")),
+            OTEL_STATUS_CODE => self.span_builder.status = str_to_status(&format!("{value:?}")),
             OTEL_STATUS_MESSAGE => {
-                self.span_builder.status = otel::Status::error(format!("{:?}", value))
+                self.span_builder.status = otel::Status::error(format!("{value:?}"))
             }
-            _ => self.record(Key::new(field.name()).string(format!("{:?}", value))),
+            _ => self.record(Key::new(field.name()).string(format!("{value:?}"))),
         }
     }
 
@@ -1096,7 +1095,7 @@ impl Timings {
 }
 
 fn thread_id_integer(id: thread::ThreadId) -> u64 {
-    let thread_id = format!("{:?}", id);
+    let thread_id = format!("{id:?}");
     thread_id
         .trim_start_matches("ThreadId(")
         .trim_end_matches(')')

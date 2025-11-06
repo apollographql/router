@@ -1,24 +1,33 @@
 use std::fs;
 use std::io;
 use std::num::NonZeroU32;
+use std::ops::Range;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use anyhow::Error as AnyError;
+use anyhow::anyhow;
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::parser::LineColumn;
 use apollo_federation::ApiSchemaOptions;
 use apollo_federation::Supergraph;
+use apollo_federation::bail;
+use apollo_federation::composition;
+use apollo_federation::composition::validate_satisfiability;
 use apollo_federation::connectors::expand::ExpansionResult;
 use apollo_federation::connectors::expand::expand_connectors;
-use apollo_federation::correctness::CorrectnessError;
+use apollo_federation::error::CompositionError;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
-use apollo_federation::internal_error;
+use apollo_federation::error::SubgraphLocation;
+use apollo_federation::internal_composition_api;
 use apollo_federation::query_graph;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
-use apollo_federation::subgraph;
+use apollo_federation::subgraph::SubgraphError;
 use apollo_federation::subgraph::typestate;
+use apollo_federation::supergraph as new_supergraph;
 use clap::Parser;
 use tracing_subscriber::prelude::*;
 
@@ -99,6 +108,11 @@ enum Command {
     Subgraph {
         /// The path to the subgraph schema file, or `-` for stdin
         subgraph_schema: PathBuf,
+    },
+    /// Validate the satisfiability of a supergraph schema
+    Satisfiability {
+        /// The path to the supergraph schema file, or `-` for stdin
+        supergraph_schema: PathBuf,
     },
     /// Extract subgraph schemas from a supergraph schema to stdout (or in a directory if specified)
     Extract {
@@ -181,6 +195,7 @@ fn main() -> ExitCode {
         } => cmd_plan(json, &query, &schemas, planner),
         Command::Validate { schemas } => cmd_validate(&schemas),
         Command::Subgraph { subgraph_schema } => cmd_subgraph(&subgraph_schema),
+        Command::Satisfiability { supergraph_schema } => cmd_satisfiability(&supergraph_schema),
         Command::Compose { schemas } => cmd_compose(&schemas),
         Command::Extract {
             supergraph_schema,
@@ -219,7 +234,7 @@ fn read_input(input_path: &Path) -> String {
     }
 }
 
-fn cmd_api_schema(file_paths: &[PathBuf], enable_defer: bool) -> Result<(), FederationError> {
+fn cmd_api_schema(file_paths: &[PathBuf], enable_defer: bool) -> Result<(), AnyError> {
     let supergraph = load_supergraph(file_paths)?;
     let api_schema = supergraph.to_api_schema(apollo_federation::ApiSchemaOptions {
         include_defer: enable_defer,
@@ -229,19 +244,80 @@ fn cmd_api_schema(file_paths: &[PathBuf], enable_defer: bool) -> Result<(), Fede
     Ok(())
 }
 
+fn compose_files_inner(
+    file_paths: &[PathBuf],
+) -> Result<composition::Supergraph<composition::Satisfiable>, Vec<CompositionError>> {
+    let mut subgraphs = Vec::new();
+    let mut errors = Vec::new();
+    for path in file_paths {
+        let doc_str = std::fs::read_to_string(path).unwrap();
+        let url = format!("file://{}", path.to_str().unwrap());
+        let basename = path.file_stem().unwrap().to_str().unwrap();
+        let result = typestate::Subgraph::parse(basename, &url, &doc_str);
+        match result {
+            Ok(subgraph) => {
+                subgraphs.push(subgraph);
+            }
+            Err(err) => {
+                errors.push(err);
+            }
+        }
+    }
+    if !errors.is_empty() {
+        // Subgraph errors
+        let mut composition_errors = Vec::new();
+        for error in errors {
+            composition_errors.extend(error.to_composition_errors());
+        }
+        return Err(composition_errors);
+    }
+
+    composition::compose(subgraphs)
+}
+
 /// Compose a supergraph from multiple subgraph files.
-fn compose_files(file_paths: &[PathBuf]) -> Result<apollo_federation::Supergraph, FederationError> {
-    let schemas: Vec<_> = file_paths
-        .iter()
-        .map(|pathname| {
-            let doc_str = std::fs::read_to_string(pathname).unwrap();
-            let url = format!("file://{}", pathname.to_str().unwrap());
-            let basename = pathname.file_stem().unwrap().to_str().unwrap();
-            subgraph::Subgraph::parse_and_expand(basename, &url, &doc_str).unwrap()
-        })
-        .collect();
-    let supergraph = apollo_federation::Supergraph::compose(schemas.iter().collect()).unwrap();
-    Ok(supergraph)
+fn compose_files(
+    file_paths: &[PathBuf],
+) -> Result<composition::Supergraph<composition::Satisfiable>, AnyError> {
+    match compose_files_inner(file_paths) {
+        Ok(supergraph) => Ok(supergraph),
+        Err(errors) => {
+            // Print composition errors
+            print_composition_errors(&errors);
+            let num_errors = errors.len();
+            Err(anyhow!("Error: found {num_errors} composition error(s)."))
+        }
+    }
+}
+
+fn print_composition_errors(errors: &[CompositionError]) {
+    for error in errors {
+        eprintln!(
+            "{code}: {message}",
+            code = error.code().definition().code(),
+            message = error
+        );
+        print_subgraph_locations(error.locations());
+        eprintln!(); // line break
+    }
+}
+
+fn print_subgraph_locations(locations: &[SubgraphLocation]) {
+    if locations.is_empty() {
+        eprintln!("locations: <unknown>");
+    } else {
+        eprintln!("locations:");
+        for loc in locations {
+            eprintln!(
+                "  [{subgraph}] {start_line}:{start_column} - {end_line}:{end_column}",
+                subgraph = loc.subgraph,
+                start_line = loc.range.start.line,
+                start_column = loc.range.start.column,
+                end_line = loc.range.end.line,
+                end_column = loc.range.end.column,
+            );
+        }
+    }
 }
 
 fn load_supergraph_file(
@@ -253,32 +329,29 @@ fn load_supergraph_file(
 
 /// Load either single supergraph schema file or compose one from multiple subgraph files.
 /// If the single file is "-", read from stdin.
-fn load_supergraph(
-    file_paths: &[PathBuf],
-) -> Result<apollo_federation::Supergraph, FederationError> {
-    if file_paths.is_empty() {
-        panic!("Error: missing command arguments");
+fn load_supergraph(file_paths: &[PathBuf]) -> Result<apollo_federation::Supergraph, AnyError> {
+    let supergraph = if file_paths.is_empty() {
+        bail!("Error: missing command arguments");
     } else if file_paths.len() == 1 {
-        load_supergraph_file(&file_paths[0])
+        load_supergraph_file(&file_paths[0])?
     } else {
-        compose_files(file_paths)
-    }
+        let supergraph = compose_files(file_paths)?;
+        // Convert the new Supergraph struct into the old one.
+        let schema_doc = supergraph.schema().schema().to_string();
+        apollo_federation::Supergraph::new_with_router_specs(&schema_doc)?
+    };
+    Ok(supergraph)
 }
 
-fn cmd_query_graph(file_paths: &[PathBuf]) -> Result<(), FederationError> {
+fn cmd_query_graph(file_paths: &[PathBuf]) -> Result<(), AnyError> {
     let supergraph = load_supergraph(file_paths)?;
-    let name: &str = if file_paths.len() == 1 {
-        file_paths[0].file_stem().unwrap().to_str().unwrap()
-    } else {
-        "supergraph"
-    };
-    let query_graph =
-        query_graph::build_query_graph::build_query_graph(name.into(), supergraph.schema)?;
+    let api_schema = supergraph.to_api_schema(Default::default())?;
+    let query_graph = query_graph::build_supergraph_api_query_graph(supergraph.schema, api_schema)?;
     println!("{}", query_graph::output::to_dot(&query_graph));
     Ok(())
 }
 
-fn cmd_federated_graph(file_paths: &[PathBuf]) -> Result<(), FederationError> {
+fn cmd_federated_graph(file_paths: &[PathBuf]) -> Result<(), AnyError> {
     let supergraph = load_supergraph(file_paths)?;
     let api_schema = supergraph.to_api_schema(Default::default())?;
     let query_graph =
@@ -292,7 +365,7 @@ fn cmd_plan(
     query_path: &Path,
     schema_paths: &[PathBuf],
     planner: QueryPlannerArgs,
-) -> Result<(), FederationError> {
+) -> Result<(), AnyError> {
     let query = read_input(query_path);
     let supergraph = load_supergraph(schema_paths)?;
 
@@ -300,7 +373,8 @@ fn cmd_plan(
     let planner = QueryPlanner::new(&supergraph, config)?;
 
     let query_doc =
-        ExecutableDocument::parse_and_validate(planner.api_schema().schema(), query, query_path)?;
+        ExecutableDocument::parse_and_validate(planner.api_schema().schema(), query, query_path)
+            .map_err(FederationError::from)?;
     let query_plan = planner.build_query_plan(&query_doc, None, Default::default())?;
     if use_json {
         println!("{}", serde_json::to_string_pretty(&query_plan).unwrap());
@@ -324,41 +398,109 @@ fn cmd_plan(
     );
     match result {
         Ok(_) => Ok(()),
-        Err(CorrectnessError::FederationError(e)) => Err(e),
-        Err(CorrectnessError::ComparisonError(e)) => Err(internal_error!("{}", e.description())),
+        Err(err) => Err(anyhow!("{err}")),
     }
 }
 
-fn cmd_validate(file_paths: &[PathBuf]) -> Result<(), FederationError> {
+fn cmd_validate(file_paths: &[PathBuf]) -> Result<(), AnyError> {
     load_supergraph(file_paths)?;
     println!("[SUCCESS]");
     Ok(())
 }
 
-fn cmd_subgraph(file_path: &Path) -> Result<(), FederationError> {
+fn subgraph_parse_and_expand(
+    name: &str,
+    url: &str,
+    doc_str: &str,
+) -> Result<typestate::Subgraph<typestate::Expanded>, SubgraphError> {
+    typestate::Subgraph::parse(name, url, doc_str)?.expand_links()
+}
+
+fn cmd_subgraph(file_path: &Path) -> Result<(), AnyError> {
     let doc_str = read_input(file_path);
     let name = file_path
-        .file_name()
-        .and_then(|name| name.to_str().map(|x| x.to_string()));
-    let name = name.unwrap_or("subgraph".to_string());
-    let subgraph = typestate::Subgraph::parse(&name, &format!("http://{name}"), &doc_str)
-        .map_err(|e| e.into_inner())?
-        .expand_links()
-        .map_err(|e| e.into_inner())?
-        .assume_upgraded()
-        .validate()
-        .map_err(|e| e.into_inner())?;
+        .file_stem()
+        .and_then(|name| name.to_str().map(|x| x.to_string()))
+        .unwrap_or_else(|| "subgraph".to_string());
+    let url = format!("http://{name}");
+    let subgraph = match subgraph_parse_and_expand(&name, &url, &doc_str) {
+        Ok(subgraph) => subgraph,
+        Err(err) => {
+            let composition_errors: Vec<_> = err.to_composition_errors().collect();
+            print_composition_errors(&composition_errors);
+            let num_errors = composition_errors.len();
+            return Err(anyhow!(
+                "Error: found {num_errors} error(s) in subgraph schema"
+            ));
+        }
+    };
+
+    // Extra subgraph validation for @cacheTag directive
+    let result = internal_composition_api::validate_cache_tag_directives(&name, &url, &doc_str)?;
+    if !result.errors.is_empty() {
+        for err in &result.errors {
+            eprintln!(
+                "{code}: {message}",
+                code = err.code(),
+                message = err.message()
+            );
+            print_locations(&err.locations);
+            eprintln!(); // line break
+        }
+        let num_errors = result.errors.len();
+        return Err(anyhow!(
+            "Error: found {num_errors} error(s) in subgraph schema"
+        ));
+    }
+
     println!("{}", subgraph.schema_string());
     Ok(())
 }
 
-fn cmd_compose(file_paths: &[PathBuf]) -> Result<(), FederationError> {
-    let supergraph = compose_files(file_paths)?;
-    println!("{}", supergraph.schema.schema());
+fn print_locations(locations: &[Range<LineColumn>]) {
+    if locations.is_empty() {
+        eprintln!("locations: <unknown>");
+    } else {
+        eprintln!("locations:");
+        for loc in locations {
+            eprintln!(
+                "  {start_line}:{start_column} - {end_line}:{end_column}",
+                start_line = loc.start.line,
+                start_column = loc.start.column,
+                end_line = loc.end.line,
+                end_column = loc.end.column,
+            );
+        }
+    }
+}
+
+fn cmd_satisfiability(file_path: &Path) -> Result<(), AnyError> {
+    let doc_str = read_input(file_path);
+    let supergraph = new_supergraph::Supergraph::parse(&doc_str).unwrap();
+    _ = validate_satisfiability(supergraph).expect("Supergraph should be satisfiable");
     Ok(())
 }
 
-fn cmd_extract(file_path: &Path, dest: Option<&PathBuf>) -> Result<(), FederationError> {
+fn cmd_compose(file_paths: &[PathBuf]) -> Result<(), AnyError> {
+    let supergraph = compose_files(file_paths)?;
+    println!("{}", supergraph.schema().schema());
+    let hints = supergraph.hints();
+    if !hints.is_empty() {
+        eprintln!("{num_hints} HINTS generated:", num_hints = hints.len());
+        for hint in hints {
+            eprintln!(); // line break
+            eprintln!(
+                "{code}: {message}",
+                code = hint.code(),
+                message = hint.message()
+            );
+            print_subgraph_locations(&hint.locations);
+        }
+    }
+    Ok(())
+}
+
+fn cmd_extract(file_path: &Path, dest: Option<&PathBuf>) -> Result<(), AnyError> {
     let supergraph = load_supergraph_file(file_path)?;
     let subgraphs = supergraph.extract_subgraphs()?;
     if let Some(dest) = dest {
@@ -387,16 +529,14 @@ fn cmd_expand(
     file_path: &Path,
     dest: Option<&PathBuf>,
     filter_prefix: Option<&str>,
-) -> Result<(), FederationError> {
+) -> Result<(), AnyError> {
     let original_supergraph = load_supergraph_file(file_path)?;
     let ExpansionResult::Expanded { raw_sdl, .. } = expand_connectors(
         &original_supergraph.schema.schema().serialize().to_string(),
         &ApiSchemaOptions::default(),
     )?
     else {
-        return Err(FederationError::internal(
-            "supplied supergraph has no connectors to expand",
-        ));
+        bail!("supplied supergraph has no connectors to expand",);
     };
 
     // Validate the schema
@@ -413,10 +553,10 @@ fn cmd_expand(
         })?;
         for (name, subgraph) in subgraphs {
             // Skip any files not matching the prefix, if specified
-            if let Some(prefix) = filter_prefix {
-                if !name.starts_with(prefix) {
-                    continue;
-                }
+            if let Some(prefix) = filter_prefix
+                && !name.starts_with(prefix)
+            {
+                continue;
             }
 
             let subgraph_path = dest.join(format!("{}.graphql", name));
@@ -433,10 +573,10 @@ fn cmd_expand(
         println!("subgraphs:");
         for (name, subgraph) in subgraphs {
             // Skip any files not matching the prefix, if specified
-            if let Some(prefix) = filter_prefix {
-                if !name.starts_with(prefix) {
-                    continue;
-                }
+            if let Some(prefix) = filter_prefix
+                && !name.starts_with(prefix)
+            {
+                continue;
             }
 
             let schema_str = subgraph.schema.schema().serialize().initial_indent_level(4);
@@ -465,7 +605,7 @@ fn cmd_bench(
     file_path: &Path,
     operations_dir: &PathBuf,
     planner: QueryPlannerArgs,
-) -> Result<(), FederationError> {
+) -> Result<(), AnyError> {
     let results = _cmd_bench(file_path, operations_dir, planner.into())?;
     println!("| operation_name | time (ms) | evaluated_plans (max 10000) | error |");
     println!("|----------------|----------------|-----------|-----------------------------|");

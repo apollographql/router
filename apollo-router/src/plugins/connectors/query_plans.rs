@@ -25,13 +25,10 @@ pub(crate) fn get_connectors(context: &Context) -> Option<ConnectorsByServiceNam
 
 type ConnectorLabels = Arc<IndexMap<Arc<str>, String>>;
 
-pub(crate) fn store_connectors_labels(
-    context: &Context,
-    labels_by_service_name: Arc<IndexMap<Arc<str>, String>>,
-) {
+pub(crate) fn store_connectors_labels(context: &Context, labels_by_service_name: ConnectorLabels) {
     context
         .extensions()
-        .with_lock(|lock| lock.insert::<ConnectorLabels>(labels_by_service_name));
+        .with_lock(|lock| lock.insert(labels_by_service_name));
 }
 
 pub(crate) fn replace_connector_service_names_text(
@@ -45,7 +42,7 @@ pub(crate) fn replace_connector_service_names_text(
         text.as_ref().map(|text| {
             let mut text = text.to_string();
             for (service_name, label) in replacements.iter() {
-                text = text.replace(&**service_name, label);
+                text = text.replace(&**service_name, label.as_ref());
             }
             Arc::new(text)
         })

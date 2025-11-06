@@ -157,12 +157,12 @@ impl FetchError {
             }
         }
 
-        Error {
-            message: self.to_string(),
-            locations: Default::default(),
-            path,
-            extensions: value.as_object().unwrap().to_owned(),
-        }
+        Error::builder()
+            .message(self.to_string())
+            .locations(Vec::default())
+            .and_path(path)
+            .extensions(value.as_object().unwrap().to_owned())
+            .build()
     }
 
     /// Convert the error to an appropriate response.
@@ -292,6 +292,9 @@ pub(crate) enum QueryPlannerError {
 
     /// Federation error: {0}
     FederationError(FederationErrorBridge),
+
+    /// Query planning timed out: {0}
+    Timeout(String),
 }
 
 impl From<FederationErrorBridge> for QueryPlannerError {
@@ -314,6 +317,8 @@ pub(crate) enum FederationErrorBridge {
     OperationNameNotProvided(String),
     /// {0}
     Other(String),
+    /// {0}
+    Cancellation(String),
 }
 
 impl From<FederationError> for FederationErrorBridge {
@@ -325,6 +330,9 @@ impl From<FederationError> for FederationErrorBridge {
             err @ FederationError::SingleFederationError(
                 apollo_federation::error::SingleFederationError::OperationNameNotProvided,
             ) => Self::OperationNameNotProvided(err.to_string()),
+            err @ FederationError::SingleFederationError(
+                apollo_federation::error::SingleFederationError::PlanningCancelled,
+            ) => Self::Cancellation(err.to_string()),
             err => Self::Other(err.to_string()),
         }
     }
@@ -515,7 +523,7 @@ impl std::fmt::Display for ParseErrors {
             if i > 0 {
                 f.write_str("\n")?;
             }
-            write!(f, "{}", error)?;
+            write!(f, "{error}")?;
         }
         let remaining = errors.count();
         if remaining > 0 {
@@ -640,6 +648,7 @@ pub(crate) enum SubgraphBatchingError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::assert_error_eq_ignoring_id;
     use crate::graphql;
 
     #[test]
@@ -660,6 +669,6 @@ mod tests {
             )
             .build();
 
-        assert_eq!(expected_gql_error, error.to_graphql_error(None));
+        assert_error_eq_ignoring_id!(expected_gql_error, error.to_graphql_error(None));
     }
 }

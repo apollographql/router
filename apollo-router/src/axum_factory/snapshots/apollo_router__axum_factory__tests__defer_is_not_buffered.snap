@@ -1,6 +1,7 @@
 ---
 source: apollo-router/src/axum_factory/tests.rs
 expression: parts
+snapshot_kind: text
 ---
 [
   {
@@ -9,31 +10,82 @@ expression: parts
         {
           "upc": "1",
           "name": "Table",
-          "reviews": null
+          "reviews": [
+            {
+              "id": "1",
+              "product": {
+                "name": "Table"
+              }
+            },
+            {
+              "id": "4",
+              "product": {
+                "name": "Table"
+              }
+            }
+          ]
         },
         {
           "upc": "2",
           "name": "Couch",
-          "reviews": null
+          "reviews": [
+            {
+              "id": "2",
+              "product": {
+                "name": "Couch"
+              }
+            }
+          ]
         }
       ]
     },
-    "errors": [
-      {
-        "message": "couldn't find mock for query {\"query\":\"query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { reviews { __typename id product { __typename upc } } } } }\",\"variables\":{\"representations\":[{\"__typename\":\"Product\",\"upc\":\"1\"},{\"__typename\":\"Product\",\"upc\":\"2\"}]}}",
-        "path": [
-          "topProducts",
-          "@"
-        ],
-        "extensions": {
-          "code": "FETCH_ERROR",
-          "service": "reviews"
-        }
-      }
-    ],
     "hasNext": true
   },
   {
-    "hasNext": false
+    "hasNext": false,
+    "incremental": [
+      {
+        "data": {
+          "author": {
+            "id": "1",
+            "name": "Ada Lovelace"
+          }
+        },
+        "path": [
+          "topProducts",
+          0,
+          "reviews",
+          0
+        ]
+      },
+      {
+        "data": {
+          "author": {
+            "id": "2",
+            "name": "Alan Turing"
+          }
+        },
+        "path": [
+          "topProducts",
+          0,
+          "reviews",
+          1
+        ]
+      },
+      {
+        "data": {
+          "author": {
+            "id": "1",
+            "name": "Ada Lovelace"
+          }
+        },
+        "path": [
+          "topProducts",
+          1,
+          "reviews",
+          0
+        ]
+      }
+    ]
   }
 ]

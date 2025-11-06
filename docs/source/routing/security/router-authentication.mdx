@@ -31,12 +31,12 @@ In fact, we recommend you [combine all three strategies](#combining-authenticati
 In addition to the approaches outlined below, you can use [authorization directives](/graphos/routing/security/authorization/) to enforce authorization at the router layer.
 This allows you to authorize requests prior to them hitting your subgraphs saving on bandwidth and processing time.
 
-<EnterpriseFeature>
+<PlanRequired plans={["Free", "Developer", "Standard", "Enterprise"]}>
 
-This is an [Enterprise feature](/router/enterprise-features) of the GraphOS Router.
-It requires an organization with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
+Rate limits apply on the Free plan.
+Developer and Standard plans require Router v2.6.0 or later.
 
-</EnterpriseFeature>
+</PlanRequired>
 
 ```mermaid
 sequenceDiagram
@@ -107,8 +107,6 @@ headers:
 
 As of router v1.13, you can use the [JWT Authentication plugin](/router/configuration/authn-jwt) to validate JWT-based authentication tokens in your supergraph.
 
-<PremiumFeature />
-
 ```mermaid
 sequenceDiagram
   Client->>Router: Request with JWT
@@ -146,8 +144,6 @@ You can use the Apollo Solutions [router JWKS generator](https://github.com/apol
 ## Use a coprocessor
 
 If you have a custom authentication strategy, you can use a [coprocessor](/graphos/routing/customization/coprocessor) to implement it.
-
-<PremiumFeature />
 
 ```mermaid
 sequenceDiagram

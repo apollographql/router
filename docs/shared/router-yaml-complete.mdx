@@ -185,8 +185,8 @@ cors:
     - GET
     - POST
     - OPTIONS
-  origins:
-    - https://studio.apollographql.com
+  policies:
+    - origins: [https://studio.apollographql.com]
 csrf:
   required_headers:
     - x-apollo-operation-name

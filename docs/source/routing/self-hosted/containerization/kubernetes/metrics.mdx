@@ -1,0 +1,47 @@
+---
+title: Enabling Metrics Endpoints
+subtitle: Learn how to use a self-hosted router in Kubernetes with metrics endpoints
+description: Use the Apollo GraphOS Router or Apollo Router Core in Kubernetes with metrics endpoints and considerations when doing so.
+---
+
+<ElasticNotice />
+
+The router supports [metrics endpoints for Prometheus and OpenTelemetry protocol (OTLP)](/router/configuration/telemetry/exporters/metrics/overview). The default deployment doesn't enable metrics endpoints because the router chart disables both Prometheus (explicitly) and OTLP (by omission).
+
+This guide shows how to deploy a router with metric endpoints in Kubernetes.
+
+## Deploy with metrics endpoints
+To enable metrics endpoints in your deployed router through a YAML configuration file:
+
+1. Create a YAML file, `my_values.yaml`, to contain additional values that override default values.
+1. Edit `my_values.yaml` to enable metrics endpoints:
+
+    ```yaml title="my_values.yaml"
+    router:
+      configuration:
+        telemetry:
+          metrics:
+            prometheus:
+              enabled: true
+              listen: 0.0.0.0:9090
+              path: "/metrics"
+            otlp:
+              temporality: cumulative # default; if using DataDog, use temporality: delta
+              endpoint: <otlp-endpoint-addr>
+    ```
+
+    <Note>
+
+    Although this example enables both Prometheus and OTLP, in practice it's common to enable only one endpoint.
+
+    </Note>
+
+    * `router.configuration.telemetry.metrics.prometheus` was already configured but disabled (`enabled: false`) by default. This configuration sets `enabled: true`.
+    * `router.configuration.telemetry.metrics.otlp` is enabled by inclusion.
+    * `router.configuration.telemetry.temporality` by default is `temporality: cumulative` and is a good choice for most metrics consumers. For DataDog, use `temporality: delta`.
+
+1. Deploy the router with the additional YAML configuration file. For example, starting with the `helm install` command from the basic deployment step, append `--values my_values.yaml`:
+
+    ```bash
+    helm install --namespace <router-namespace> --set managedFederation.apiKey="<graph-api-key>" --set managedFederation.graphRef="<graph-ref>"  oci://ghcr.io/apollographql/helm-charts/router --version <router-version> --values router/values.yaml --values my_values.yaml
+    ```

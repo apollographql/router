@@ -6,8 +6,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use apollo_compiler::Schema;
-use apollo_compiler::ast::NamedType;
-use apollo_compiler::parser::Parser;
 use apollo_compiler::validation::Valid;
 use http::header;
 use http::header::CACHE_CONTROL;
@@ -57,6 +55,7 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::response_cache::plugin::find_matching_key_field_set;
 use crate::query_planner::OperationKind;
 use crate::services::subgraph;
 use crate::services::subgraph::SubgraphRequestId;
@@ -65,7 +64,7 @@ use crate::spec::QueryHash;
 use crate::spec::TYPENAME;
 
 /// Change this key if you introduce a breaking change in entity caching algorithm to make sure it won't take the previous entries
-pub(crate) const ENTITY_CACHE_VERSION: &str = "1.0";
+pub(crate) const ENTITY_CACHE_VERSION: &str = "1.1";
 pub(crate) const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
 pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_entity_cache::key";
@@ -675,9 +674,7 @@ impl CacheService {
                             if response.response.headers().contains_key(CACHE_CONTROL) {
                                 CacheControl::new(response.response.headers(), self.storage.ttl)?
                             } else {
-                                let mut c = CacheControl::default();
-                                c.no_store = true;
-                                c
+                                CacheControl::no_store()
                             };
 
                         if cache_control.private() {
@@ -899,12 +896,12 @@ impl CacheService {
         origin: InvalidationOrigin,
         invalidation_extensions: Value,
     ) {
-        if let Ok(requests) = from_value(invalidation_extensions) {
-            if let Err(e) = self.invalidation.invalidate(origin, requests).await {
-                tracing::error!(error = %e,
-                   message = "could not invalidate entity cache entries",
-                );
-            }
+        if let Ok(requests) = from_value(invalidation_extensions)
+            && let Err(e) = self.invalidation.invalidate(origin, requests).await
+        {
+            tracing::error!(error = %e,
+               message = "could not invalidate entity cache entries",
+            );
         }
     }
 }
@@ -931,16 +928,13 @@ async fn cache_lookup_root(
         private_id,
     );
 
-    let cache_result: Option<RedisValue<CacheEntry>> = cache.get(RedisKey(key.clone())).await;
+    let cache_result: Result<RedisValue<CacheEntry>, _> = cache.get(RedisKey(key.clone())).await;
 
     match cache_result {
-        Some(value) => {
+        Ok(value) => {
             if value.0.control.can_use() {
                 let control = value.0.control.clone();
-                request
-                    .context
-                    .extensions()
-                    .with_lock(|lock| lock.insert(control));
+                update_cache_control(&request.context, &control);
                 if expose_keys_in_context {
                     let request_id = request.id.clone();
                     let cache_control_header = value.0.control.to_cache_control_header()?;
@@ -988,7 +982,7 @@ async fn cache_lookup_root(
                 Ok(ControlFlow::Continue((request, key)))
             }
         }
-        None => Ok(ControlFlow::Continue((request, key))),
+        Err(_) => Ok(ControlFlow::Continue((request, key))),
     }
 }
 
@@ -1021,22 +1015,19 @@ async fn cache_lookup_entities(
     let cache_result: Vec<Option<CacheEntry>> = cache
         .get_multiple(keys.iter().map(|k| RedisKey(k.clone())).collect::<Vec<_>>())
         .await
-        .map(|res| {
-            res.into_iter()
-                .map(|r| r.map(|v: RedisValue<CacheEntry>| v.0))
-                .map(|v| match v {
-                    None => None,
-                    Some(v) => {
-                        if v.control.can_use() {
-                            Some(v)
-                        } else {
-                            None
-                        }
-                    }
-                })
-                .collect()
+        .into_iter()
+        .map(|r| r.map(|v: RedisValue<CacheEntry>| v.0))
+        .map(|v| match v {
+            None => None,
+            Some(v) => {
+                if v.control.can_use() {
+                    Some(v)
+                } else {
+                    None
+                }
+            }
         })
-        .unwrap_or_else(|| vec![None; keys.len()]);
+        .collect();
 
     let representations = body
         .variables
@@ -1124,8 +1115,10 @@ fn update_cache_control(context: &Context, cache_control: &CacheControl) {
         if let Some(c) = lock.get_mut::<CacheControl>() {
             *c = c.merge(cache_control);
         } else {
-            //FIXME: race condition. We need an Entry API for private entries
-            lock.insert(cache_control.clone());
+            // Go through the "merge" algorithm even with a single value
+            // in order to keep single-fetch queries consistent between cache hit and miss,
+            // and with multi-fetch queries.
+            lock.insert(cache_control.merge(cache_control));
         }
     })
 }
@@ -1153,7 +1146,7 @@ async fn cache_store_root_from_response(
     if let Some(data) = response.response.body().data.as_ref() {
         let ttl: Option<Duration> = cache_control
             .ttl()
-            .map(|secs| Duration::from_secs(secs as u64))
+            .map(Duration::from_secs)
             .or(subgraph_ttl);
 
         if response.response.body().errors.is_empty() && cache_control.should_store() {
@@ -1369,10 +1362,8 @@ fn extract_cache_key_root(
         "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}:hash:{query_hash}:data:{additional_data_hash}"
     );
 
-    if is_known_private {
-        if let Some(id) = private_id {
-            let _ = write!(&mut key, ":{id}");
-        }
+    if is_known_private && let Some(id) = private_id {
+        let _ = write!(&mut key, ":{id}");
     }
     key
 }
@@ -1424,8 +1415,7 @@ fn extract_cache_keys(
                 reason: "__typename in representation is not a string".to_string(),
             })?;
 
-        // Split `representation` into two parts: the entity key part and the rest.
-        let representation_entity_key = take_matching_key_field_set(
+        let key_field_set = find_matching_key_field_set(
             representation,
             typename,
             subgraph_name,
@@ -1436,9 +1426,9 @@ fn extract_cache_keys(
         let hashed_representation = if representation.is_empty() {
             String::new()
         } else {
-            hash_other_representation(representation)
+            hash_representation(representation)
         };
-        let hashed_entity_key = hash_entity_key(&representation_entity_key);
+        let hashed_entity_key = hash_entity_key(representation, &key_field_set);
 
         // the cache key is written to easily find keys matching a prefix for deletion:
         // - entity cache version: current version of the hash
@@ -1450,216 +1440,109 @@ fn extract_cache_keys(
         let mut key = format!(
             "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}:entity:{hashed_entity_key}:representation:{hashed_representation}:hash:{query_hash}:data:{additional_data_hash}"
         );
-        if is_known_private {
-            if let Some(id) = private_id {
-                let _ = write!(&mut key, ":{id}");
-            }
+        if is_known_private && let Some(id) = private_id {
+            let _ = write!(&mut key, ":{id}");
         }
 
         // Restore the `representation` back whole again
         representation.insert(TYPENAME, typename_value);
-        merge_representation(representation, representation_entity_key);
 
         res.push(key);
     }
     Ok(res)
 }
 
-fn take_matching_key_field_set(
-    representation: &mut serde_json_bytes::Map<ByteString, Value>,
-    typename: &str,
-    subgraph_name: &str,
-    supergraph_schema: &Valid<Schema>,
-    subgraph_enums: &HashMap<String, String>,
-) -> Result<serde_json_bytes::Map<ByteString, Value>, FetchError> {
-    // find an entry in the `key_field_sets` that matches the `representation`.
-    let matched_key_field_set =
-        collect_key_field_sets(typename, subgraph_name, supergraph_schema, subgraph_enums)?
-        .find(|field_set| {
-            matches_selection_set(representation, &field_set.selection_set)
-        })
-        .ok_or_else(|| {
-            tracing::trace!("representation does not match any key field set for typename {typename} in subgraph {subgraph_name}");
-            FetchError::MalformedRequest {
-                reason: format!("unexpected critical internal error for typename {typename} in subgraph {subgraph_name}"),
-            }
-        })?;
-    take_selection_set(representation, &matched_key_field_set.selection_set).ok_or_else(|| {
-        FetchError::MalformedRequest {
-            reason: format!("representation does not match the field set {matched_key_field_set}"),
-        }
-    })
-}
-
-// Collect `@key` field sets on a `typename` in a `subgraph_name`.
-// - Returns a Vec of FieldSet, since there may be more than one @key directives in the subgraph.
-fn collect_key_field_sets(
-    typename: &str,
-    subgraph_name: &str,
-    supergraph_schema: &Valid<Schema>,
-    subgraph_enums: &HashMap<String, String>,
-) -> Result<impl Iterator<Item = apollo_compiler::executable::FieldSet>, FetchError> {
-    Ok(supergraph_schema
-        .types
-        .get(typename)
-        .ok_or_else(|| FetchError::MalformedRequest {
-            reason: format!("unknown typename {typename:?} in representations"),
-        })?
-        .directives()
-        .get_all("join__type")
-        .filter_map(move |directive| {
-            let schema_subgraph_name = directive
-                .specified_argument_by_name("graph")
-                .and_then(|arg| arg.as_enum())
-                .and_then(|arg| subgraph_enums.get(arg.as_str()))?;
-
-            if schema_subgraph_name == subgraph_name {
-                let mut parser = Parser::new();
-                directive
-                    .specified_argument_by_name("key")
-                    .and_then(|arg| arg.as_str())
-                    .and_then(|arg| {
-                        parser
-                            .parse_field_set(
-                                supergraph_schema,
-                                NamedType::new(typename).ok()?,
-                                arg,
-                                "entity_caching.graphql",
-                            )
-                            .ok()
-                    })
-            } else {
-                None
-            }
-        }))
-}
-
-// Does the shape of `representation`  match the `selection_set`?
-fn matches_selection_set(
-    representation: &serde_json_bytes::Map<ByteString, Value>,
-    selection_set: &apollo_compiler::executable::SelectionSet,
-) -> bool {
-    for field in selection_set.root_fields(&Default::default()) {
-        // Note: field sets can't have aliases.
-        let Some(value) = representation.get(field.name.as_str()) else {
-            return false;
-        };
-
-        if field.selection_set.is_empty() {
-            // `value` must be a scalar.
-            if matches!(value, Value::Object(_)) {
-                return false;
-            }
-            continue;
-        }
-
-        // Check the sub-selection set.
-        let Value::Object(sub_value) = value else {
-            return false;
-        };
-        if !matches_selection_set(sub_value, &field.selection_set) {
-            return false;
-        }
-    }
-    true
-}
-
-// Removes the selection set from `representation` and returns the value corresponding to it.
-// - Returns None if the representation doesn't match the selection set.
-fn take_selection_set(
-    representation: &mut serde_json_bytes::Map<ByteString, Value>,
-    selection_set: &apollo_compiler::executable::SelectionSet,
-) -> Option<serde_json_bytes::Map<ByteString, Value>> {
-    let mut result = serde_json_bytes::Map::new();
-    for field in selection_set.root_fields(&Default::default()) {
-        // Note: field sets can't have aliases.
-        if field.selection_set.is_empty() {
-            let value = representation.remove(field.name.as_str())?;
-            // `value` must be a scalar.
-            if matches!(value, Value::Object(_)) {
-                return None;
-            }
-            // Move the scalar field to the `result`.
-            result.insert(ByteString::from(field.name.as_str()), value);
-            continue;
-        } else {
-            let value = representation.get_mut(field.name.as_str())?;
-            // Update the sub-selection set.
-            let Value::Object(sub_value) = value else {
-                return None;
-            };
-            let removed = take_selection_set(sub_value, &field.selection_set)?;
-            result.insert(
-                ByteString::from(field.name.as_str()),
-                Value::Object(removed),
-            );
-        }
-    }
-    Some(result)
-}
-
-// The inverse of `take_selection_set`.
-fn merge_representation(
-    dest: &mut serde_json_bytes::Map<ByteString, Value>,
-    source: serde_json_bytes::Map<ByteString, Value>,
-) {
-    source.into_iter().for_each(|(key, src_value)| {
-        // Note: field sets can't have aliases.
-        let Some(dest_value) = dest.get_mut(&key) else {
-            dest.insert(key, src_value);
-            return;
-        };
-
-        // Overlapping fields must be objects.
-        if let (Value::Object(dest_sub_value), Value::Object(src_sub_value)) =
-            (dest_value, src_value)
-        {
-            // Merge sub-values
-            merge_representation(dest_sub_value, src_sub_value);
-        }
-    });
-}
-
 // Order-insensitive structural hash of the representation value
-pub(crate) fn hash_representation(
+// * representation: key fields & other required fields
+// * selection_set: key fields selection set (if any)
+// * if selection_set is provided, only fields present in the selection set are hashed.
+// Note: This function mirrors `get_entity_key_from_selection_set` in response_cache/plugin.rs.
+fn hash_representation_inner(
     representation: &serde_json_bytes::Map<ByteString, Value>,
+    selection_set: Option<&apollo_compiler::executable::SelectionSet>,
 ) -> String {
-    let mut digest = Sha256::new();
-    fn hash(state: &mut Sha256, fields: &serde_json_bytes::Map<ByteString, Value>) {
-        fields
-            .iter()
-            .sorted_by(|a, b| a.0.cmp(b.0))
-            .for_each(|(k, v)| {
-                state.update(serde_json::to_string(k).unwrap().as_bytes());
-                state.update(":".as_bytes());
-                match v {
-                    serde_json_bytes::Value::Object(obj) => {
-                        state.update("{".as_bytes());
-                        hash(state, obj);
-                        state.update("}".as_bytes());
-                    }
-                    _ => state.update(serde_json::to_string(v).unwrap().as_bytes()),
+    fn hash_object(
+        state: &mut Sha256,
+        fields: &serde_json_bytes::Map<ByteString, Value>,
+        selection_set: Option<&apollo_compiler::executable::SelectionSet>,
+    ) {
+        state.update("{".as_bytes());
+        let default_document = Default::default();
+        let sorted_selections = if let Some(selection_set) = selection_set {
+            // Select only fields present in the selection set
+            selection_set
+                .root_fields(&default_document)
+                .filter_map(|f| {
+                    let key = f.name.as_str();
+                    let val = fields.get(key)?;
+                    Some((key, val, Some(&f.selection_set)))
+                })
+                .sorted_by(|a, b| a.0.cmp(b.0))
+        } else {
+            // Select all fields
+            fields
+                .iter()
+                .map(|(k, v)| (k.as_str(), v, None))
+                .sorted_by(|a, b| a.0.cmp(b.0))
+        };
+        for (key, val, selection_set) in sorted_selections {
+            state.update(serde_json::to_string(key).unwrap().as_bytes());
+            state.update(":".as_bytes());
+            match val {
+                serde_json_bytes::Value::Object(obj) => {
+                    hash_object(state, obj, selection_set);
                 }
-            });
+                Value::Array(arr) => {
+                    hash_array(state, arr, selection_set);
+                }
+                // scalar value
+                _ => state.update(serde_json::to_string(val).unwrap().as_bytes()),
+            }
+            state.update(",".as_bytes());
+        }
+        state.update("}".as_bytes());
     }
-    hash(&mut digest, representation);
+
+    fn hash_array(
+        state: &mut Sha256,
+        items: &[Value],
+        selection_set: Option<&apollo_compiler::executable::SelectionSet>,
+    ) {
+        state.update("[".as_bytes());
+        items.iter().for_each(|v| {
+            match v {
+                serde_json_bytes::Value::Object(obj) => {
+                    hash_object(state, obj, selection_set);
+                }
+                Value::Array(arr) => {
+                    hash_array(state, arr, selection_set);
+                }
+                // scalar value
+                _ => state.update(serde_json::to_string(v).unwrap().as_bytes()),
+            }
+            state.update(",".as_bytes());
+        });
+        state.update("]".as_bytes());
+    }
+
+    let mut digest = Sha256::new();
+    hash_object(&mut digest, representation, selection_set);
     hex::encode(digest.finalize().as_slice())
 }
 
-// Only hash the list of entity keys
-pub(crate) fn hash_entity_key(
-    entity_keys: &serde_json_bytes::Map<ByteString, serde_json_bytes::Value>,
+// Hash the whole representation
+pub(crate) fn hash_representation(
+    representation: &serde_json_bytes::Map<ByteString, Value>,
 ) -> String {
-    tracing::trace!("entity keys: {entity_keys:?}");
-    // We have to hash the representation because it can contains PII
-    hash_representation(entity_keys)
+    hash_representation_inner(representation, None)
 }
 
-// Hash other representation variables except __typename and entity keys
-fn hash_other_representation(
-    representation: &mut serde_json_bytes::Map<ByteString, Value>,
+// Hash only the entity key part of representation
+fn hash_entity_key(
+    representation: &serde_json_bytes::Map<ByteString, Value>,
+    key_field_set: &apollo_compiler::executable::SelectionSet,
 ) -> String {
-    hash_representation(representation)
+    hash_representation_inner(representation, Some(key_field_set))
 }
 
 /// represents the result of a cache lookup for an entity type and key
@@ -1748,7 +1631,7 @@ async fn insert_entities_in_result(
 ) -> Result<(Vec<Value>, Vec<Error>), BoxError> {
     let ttl: Option<Duration> = cache_control
         .ttl()
-        .map(|secs| Duration::from_secs(secs as u64))
+        .map(Duration::from_secs)
         .or(subgraph_ttl);
 
     let mut new_entities = Vec::new();
@@ -1911,9 +1794,13 @@ impl Ord for CacheKeyStatus {
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::parser::Parser;
+    use serde_json_bytes::json;
+
     use super::*;
     use crate::plugins::cache::tests::MockStore;
     use crate::plugins::cache::tests::SCHEMA;
+    use crate::plugins::response_cache::plugin::matches_selection_set;
 
     #[tokio::test]
     async fn test_subgraph_enabled() {
@@ -2028,6 +1915,149 @@ mod tests {
         assert_eq!(
             entity_cache.subgraph_ttl("archive", &redis_cache),
             Some(Duration::from_millis(5000))
+        );
+    }
+
+    #[test]
+    fn test_matches_selection_set_handles_arrays() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                locale: String!
+                lists: [List!]!
+                list: [List!]!
+            }
+            type List {
+                id: ID!
+                date: Int!
+                quantity: Int!
+                location: String!
+            }
+        "#;
+        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity location } list { id date quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        // Test with complex nested array structure
+        let representation = json!({
+            "id": "TEST123",
+            "locale": "en_US",
+            "lists": [
+                {
+                    "id": "LIST1",
+                    "date": 20240101,
+                    "quantity": 50,
+                    "location": "WAREHOUSE_A"
+                }
+            ],
+            "list": [
+                {
+                    "id": "LIST2",
+                    "date": 20240101,
+                    "quantity": 100,
+                    "location": "WAREHOUSE_A"
+                },
+                {
+                    "id": "LIST3",
+                    "date": 20240102,
+                    "quantity": 75,
+                    "location": "WAREHOUSE_B"
+                }
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        assert!(
+            matches_selection_set(&representation, &field_set.selection_set),
+            "complex nested arrays should match"
+        );
+    }
+
+    #[test]
+    fn test_take_selection_set_handles_arrays() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                locale: String!
+                lists: [List!]!
+                list: [List!]!
+            }
+            type List {
+                id: ID!
+                date: Int!
+                quantity: Int!
+                location: String!
+            }
+        "#;
+        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity location } list { id date quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        // Test with complex nested array structure
+        let representation = json!({
+            "id": "TEST123",
+            "locale": "en_US",
+            "lists": [
+                {
+                    "id": "LIST1",
+                    "date": 20240101,
+                    "quantity": 50,
+                    "location": "WAREHOUSE_A"
+                }
+            ],
+            "list": [
+                {
+                    "id": "LIST2",
+                    "date": 20240101,
+                    "quantity": 100,
+                    "location": "WAREHOUSE_A"
+                },
+                {
+                    "id": "LIST3",
+                    "date": 20240102,
+                    "quantity": 75,
+                    "location": "WAREHOUSE_B"
+                }
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        assert!(matches_selection_set(
+            &representation,
+            &field_set.selection_set
+        ));
+        let hash = hash_entity_key(&representation, &field_set.selection_set);
+        assert_eq!(
+            hash,
+            "e5faa4c491214ed07f53acc65189e6efacc8b7eedc0d88055d86a5307671f0e3"
         );
     }
 }

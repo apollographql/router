@@ -8,15 +8,15 @@ use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 
 use super::DirectiveName;
-use super::source::SourceName;
 use crate::connectors::HTTPMethod;
+use crate::connectors::SourceName;
 use crate::connectors::id::ConnectedElement;
-use crate::connectors::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
-use crate::connectors::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
-use crate::connectors::spec::schema::HEADERS_ARGUMENT_NAME;
-use crate::connectors::spec::schema::HTTP_ARGUMENT_NAME;
-use crate::connectors::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
-use crate::connectors::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
+use crate::connectors::spec::connect::CONNECT_SELECTION_ARGUMENT_NAME;
+use crate::connectors::spec::connect::IS_SUCCESS_ARGUMENT_NAME;
+use crate::connectors::spec::http::HEADERS_ARGUMENT_NAME;
+use crate::connectors::spec::http::HTTP_ARGUMENT_NAME;
+use crate::connectors::spec::source::BaseUrl;
+use crate::connectors::validation::errors::ErrorsCoordinate;
 
 /// The location of a `@connect` directive.
 #[derive(Clone, Copy)]
@@ -37,9 +37,9 @@ impl Display for ConnectDirectiveCoordinate<'_> {
 }
 
 /// The location of a `@source` directive.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) struct SourceDirectiveCoordinate<'a> {
-    pub(crate) name: SourceName<'a>,
+    pub(crate) name: SourceName,
     pub(super) directive: &'a Node<Directive>,
 }
 
@@ -80,7 +80,7 @@ impl<'a> From<ConnectDirectiveCoordinate<'a>> for SelectionCoordinate<'a> {
 
 /// The coordinate of an `HTTP` arg within a connect directive.
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub(super) struct ConnectHTTPCoordinate<'a> {
     pub(crate) connect_directive_coordinate: ConnectDirectiveCoordinate<'a>,
 }
@@ -138,37 +138,12 @@ impl Display for BaseUrlCoordinate<'_> {
         let Self {
             source_directive_name,
         } = self;
-        write!(
-            f,
-            "`@{source_directive_name}({SOURCE_BASE_URL_ARGUMENT_NAME}:)`",
-        )
+        write!(f, "`@{source_directive_name}({}:)`", BaseUrl::ARGUMENT)
     }
 }
 
 pub(super) fn source_http_argument_coordinate(source_directive_name: &DirectiveName) -> String {
     format!("`@{source_directive_name}({HTTP_ARGUMENT_NAME}:)`")
-}
-
-pub(super) fn source_name_argument_coordinate(source_directive_name: &DirectiveName) -> String {
-    format!("`@{source_directive_name}({SOURCE_NAME_ARGUMENT_NAME}:)`")
-}
-
-pub(super) fn source_name_value_coordinate(
-    source_directive_name: &DirectiveName,
-    value: &Node<Value>,
-) -> String {
-    format!("`@{source_directive_name}({SOURCE_NAME_ARGUMENT_NAME}: {value})`")
-}
-
-pub(super) fn connect_directive_name_coordinate(
-    connect_directive_name: &Name,
-    source: &Node<Value>,
-    coordinate: &ConnectDirectiveCoordinate,
-) -> String {
-    format!(
-        "`@{connect_directive_name}({CONNECT_SOURCE_ARGUMENT_NAME}: {source})` on `{element}`",
-        element = coordinate.element
-    )
 }
 
 /// Coordinate for an `HTTP.headers` argument in `@source` or `@connect`.
@@ -198,6 +173,35 @@ impl Display for HttpHeadersCoordinate<'_> {
                 write!(
                     f,
                     "`@{directive_name}({HTTP_ARGUMENT_NAME}.{HEADERS_ARGUMENT_NAME}:)`",
+                )
+            }
+        }
+    }
+}
+
+/// The `isSuccess` argument for the `@source` directive
+#[derive(Clone)]
+pub(crate) struct IsSuccessCoordinate<'schema> {
+    pub(crate) coordinate: ErrorsCoordinate<'schema>,
+}
+
+impl Display for IsSuccessCoordinate<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match &self.coordinate {
+            ErrorsCoordinate::Source { source } => {
+                write!(
+                    f,
+                    "`@{directive_name}(name: \"{source_name}\" {IS_SUCCESS_ARGUMENT_NAME}:)`",
+                    directive_name = source.directive.name,
+                    source_name = source.name
+                )
+            }
+            ErrorsCoordinate::Connect { connect } => {
+                write!(
+                    f,
+                    "`@{directive_name}({IS_SUCCESS_ARGUMENT_NAME}:)` on `{element}`",
+                    directive_name = connect.directive.name,
+                    element = connect.element
                 )
             }
         }

@@ -1,7 +1,7 @@
 ---
 source: apollo-router/tests/set_context.rs
+assertion_line: 280
 expression: response
-snapshot_kind: text
 ---
 {
   "data": null,
@@ -14,6 +14,25 @@ snapshot_kind: text
       ],
       "extensions": {
         "service": "Subgraph2"
+      }
+    },
+    {
+      "message": "Null value found for non-nullable type U",
+      "path": [
+        "t",
+        "u"
+      ],
+      "extensions": {
+        "code": "RESPONSE_VALIDATION_FAILED"
+      }
+    },
+    {
+      "message": "Null value found for non-nullable type T",
+      "path": [
+        "t"
+      ],
+      "extensions": {
+        "code": "RESPONSE_VALIDATION_FAILED"
       }
     }
   ],
@@ -38,7 +57,7 @@ snapshot_kind: text
               "operationKind": "query",
               "operationName": "Query_fetch_failure__Subgraph1__0",
               "outputRewrites": null,
-              "schemaAwareHash": "69aefb1c00e6c759f7238b7f4388bf0b5b8351cecf236e59a385165ccd4de986",
+              "schemaAwareHash": "5580d1aad73ae6a685200b5ed6c3bb917f6d6e8da215e0ad9f7f491fc3b776e7",
               "serviceName": "Subgraph1",
               "variableUsages": []
             },
@@ -87,7 +106,7 @@ snapshot_kind: text
                         "typeCondition": "U"
                       }
                     ],
-                    "schemaAwareHash": "a2d9d5ae511effd9280bdf0cde021c36206e6e578e1d6722a74584cdec287f8b",
+                    "schemaAwareHash": "d33d8040456aa4c2c67fba60c0621d8bc656baf994541c453c479492a0627f3c",
                     "serviceName": "Subgraph1",
                     "variableUsages": [
                       "contextualArgument_1_0"
@@ -130,7 +149,7 @@ snapshot_kind: text
                         "typeCondition": "U"
                       }
                     ],
-                    "schemaAwareHash": "eda16e56540e88943000a1936786574f5da632ea4d4ab73b49cea306db8f9b25",
+                    "schemaAwareHash": "496c2e23024bad910adfe1c7327571e9e87685ea51f61c4f37ea05a489a26a22",
                     "serviceName": "Subgraph2",
                     "variableUsages": []
                   },
@@ -148,21 +167,21 @@ snapshot_kind: text
     },
     "valueCompletion": [
       {
-        "message": "Cannot return null for non-nullable field U.field",
+        "message": "Null value found for non-nullable type Int",
         "path": [
           "t",
           "u"
         ]
       },
       {
-        "message": "Cannot return null for non-nullable field T.u",
+        "message": "Null value found for non-nullable type U",
         "path": [
           "t",
           "u"
         ]
       },
       {
-        "message": "Cannot return null for non-nullable field T!.t",
+        "message": "Null value found for non-nullable type T",
         "path": [
           "t"
         ]

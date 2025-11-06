@@ -214,20 +214,13 @@ async fn fetch_chunk(http_client: Client, chunk_url: &String) -> Result<SignedUr
         .await
         .and_then(|r| r.error_for_status())
         .map_err(|e| -> BoxError {
-            format!(
-                "error fetching persisted queries manifest chunk from {}: {}",
-                chunk_url, e
-            )
-            .into()
+            format!("error fetching persisted queries manifest chunk from {chunk_url}: {e}").into()
         })?
         .json::<SignedUrlChunk>()
         .await
         .map_err(|e| -> BoxError {
-            format!(
-                "error reading body of persisted queries manifest chunk from {}: {}",
-                chunk_url, e
-            )
-            .into()
+            format!("error reading body of persisted queries manifest chunk from {chunk_url}: {e}")
+                .into()
         })?;
 
     chunk.validate()
@@ -338,11 +331,7 @@ async fn load_local_manifests(paths: Vec<String>) -> Result<PersistedQueryManife
 
     for path in paths.iter() {
         let raw_file_contents = read_to_string(path).await.map_err(|e| -> BoxError {
-            format!(
-                "Failed to read persisted query list file at path: {}, {}",
-                path, e
-            )
-            .into()
+            format!("Failed to read persisted query list file at path: {path}, {e}").into()
         })?;
 
         let chunk = SignedUrlChunk::parse_and_validate(&raw_file_contents)?;
@@ -380,7 +369,7 @@ fn create_uplink_stream(
     .filter_map(|result| async move {
         match result {
             Ok(Some(manifest)) => Some(Ok(manifest)),
-            Ok(None) => None,
+            Ok(None) => Some(Ok(PersistedQueryManifest::default())),
             Err(e) => Some(Err(e.into())),
         }
     })
@@ -556,6 +545,22 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(manifest_manager.get_operation_body(&id, None), Some(body));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handles_empty_pq_manifest_from_uplink() {
+        let (_mock_guard, uplink_config) = mock_empty_pq_uplink().await;
+        let manifest_manager = PersistedQueryManifestPoller::new(
+            Configuration::fake_builder()
+                .uplink(uplink_config)
+                .build()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        // Should successfully start up with empty manifest
+        assert_eq!(manifest_manager.get_all_operations().len(), 0);
     }
 
     #[tokio::test(flavor = "multi_thread")]

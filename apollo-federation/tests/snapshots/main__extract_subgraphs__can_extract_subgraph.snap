@@ -8,7 +8,7 @@ schema {
   query: Query
 }
 
-extend schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.9")
+extend schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.12")
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
@@ -45,6 +45,8 @@ directive @federation__listSize(assumedSize: Int, slicingArguments: [String!], s
 directive @federation__fromContext(field: federation__ContextFieldValue) on ARGUMENT_DEFINITION
 
 directive @federation__context(name: String!) repeatable on INTERFACE | OBJECT | UNION
+
+directive @federation__cacheTag(format: String!) repeatable on INTERFACE | OBJECT | FIELD_DEFINITION
 
 scalar link__Import
 
@@ -95,7 +97,7 @@ schema {
   query: Query
 }
 
-extend schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.9")
+extend schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.12")
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
@@ -132,6 +134,8 @@ directive @federation__listSize(assumedSize: Int, slicingArguments: [String!], s
 directive @federation__fromContext(field: federation__ContextFieldValue) on ARGUMENT_DEFINITION
 
 directive @federation__context(name: String!) repeatable on INTERFACE | OBJECT | UNION
+
+directive @federation__cacheTag(format: String!) repeatable on INTERFACE | OBJECT | FIELD_DEFINITION
 
 scalar link__Import
 

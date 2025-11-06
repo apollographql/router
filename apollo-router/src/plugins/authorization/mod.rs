@@ -6,6 +6,7 @@ use std::ops::ControlFlow;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::ast;
+use apollo_federation::link::spec::Identity;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -15,15 +16,12 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
-use self::authenticated::AUTHENTICATED_SPEC_BASE_URL;
 use self::authenticated::AUTHENTICATED_SPEC_VERSION_RANGE;
 use self::authenticated::AuthenticatedCheckVisitor;
 use self::authenticated::AuthenticatedVisitor;
-use self::policy::POLICY_SPEC_BASE_URL;
 use self::policy::POLICY_SPEC_VERSION_RANGE;
 use self::policy::PolicyExtractionVisitor;
 use self::policy::PolicyFilteringVisitor;
-use self::scopes::REQUIRES_SCOPES_SPEC_BASE_URL;
 use self::scopes::REQUIRES_SCOPES_SPEC_VERSION_RANGE;
 use self::scopes::ScopeExtractionVisitor;
 use self::scopes::ScopeFilteringVisitor;
@@ -52,15 +50,10 @@ pub(crate) mod authenticated;
 pub(crate) mod policy;
 pub(crate) mod scopes;
 
-pub(crate) const DEPRECATED_AUTHENTICATION_REQUIRED_KEY: &str =
-    "apollo_authorization::authenticated::required";
 pub(crate) const AUTHENTICATION_REQUIRED_KEY: &str =
     "apollo::authorization::authentication_required";
 pub(crate) const REQUIRED_SCOPES_KEY: &str = "apollo::authorization::required_scopes";
-pub(crate) const DEPRECATED_REQUIRED_SCOPES_KEY: &str = "apollo_authorization::scopes::required";
 pub(crate) const REQUIRED_POLICIES_KEY: &str = "apollo::authorization::required_policies";
-pub(crate) const DEPRECATED_REQUIRED_POLICIES_KEY: &str =
-    "apollo_authorization::policies::required";
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct CacheKeyMetadata {
@@ -72,6 +65,7 @@ pub(crate) struct CacheKeyMetadata {
 /// Authorization plugin
 #[derive(Clone, Debug, serde_derive_default::Default, Deserialize, JsonSchema)]
 #[allow(dead_code)]
+#[schemars(rename = "AuthorizationConfig")]
 pub(crate) struct Conf {
     /// Reject unauthenticated requests
     #[serde(default)]
@@ -83,6 +77,7 @@ pub(crate) struct Conf {
 
 #[derive(Clone, Debug, serde_derive_default::Default, Deserialize, JsonSchema)]
 #[allow(dead_code)]
+#[schemars(rename = "AuthorizationDirectivesConfig")]
 pub(crate) struct Directives {
     /// enables the `@authenticated` and `@requiresScopes` directives
     #[serde(default = "default_enable_directives")]
@@ -102,6 +97,7 @@ pub(crate) struct Directives {
     Clone, Debug, serde_derive_default::Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
 )]
 #[allow(dead_code)]
+#[schemars(rename = "AuthorizationErrorConfig")]
 pub(crate) struct ErrorConfig {
     /// log authorization errors
     #[serde(default = "enable_log_errors")]
@@ -155,13 +151,13 @@ impl AuthorizationPlugin {
             .and_then(|v| v.get("enabled").and_then(|v| v.as_bool()));
 
         let has_authorization_directives = schema.has_spec(
-            AUTHENTICATED_SPEC_BASE_URL,
+            &Identity::authenticated_identity(),
             AUTHENTICATED_SPEC_VERSION_RANGE,
         ) || schema.has_spec(
-            REQUIRES_SCOPES_SPEC_BASE_URL,
+            &Identity::requires_scopes_identity(),
             REQUIRES_SCOPES_SPEC_VERSION_RANGE,
         ) || schema
-            .has_spec(POLICY_SPEC_BASE_URL, POLICY_SPEC_VERSION_RANGE);
+            .has_spec(&Identity::policy_identity(), POLICY_SPEC_VERSION_RANGE);
 
         Ok(has_config.unwrap_or(true) && has_authorization_directives)
     }

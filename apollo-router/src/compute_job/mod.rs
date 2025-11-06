@@ -14,7 +14,6 @@ use tracing::info_span;
 use tracing_core::Dispatch;
 use tracing_subscriber::util::SubscriberInitExt;
 
-use self::metrics::ActiveComputeMetric;
 use self::metrics::JobWatcher;
 use self::metrics::Outcome;
 use self::metrics::observe_compute_duration;
@@ -175,7 +174,13 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
                         span.in_scope(|| {
                             observe_queue_wait_duration(job.ty, job.queue_start.elapsed());
 
-                            let _active_metric = ActiveComputeMetric::register(job.ty);
+                            let _active_metric = i64_up_down_counter_with_unit!(
+                                "apollo.router.compute_jobs.active_jobs",
+                                "Number of computation jobs in progress",
+                                "{job}",
+                                1,
+                                job.type = job.ty
+                            );
                             let job_start = Instant::now();
                             (job.job_fn)();
                             observe_compute_duration(job.ty, job_start.elapsed());
@@ -411,48 +416,5 @@ mod tests {
             Ok(Ok(())) => {}
             e => panic!("job did not cancel as expected: {e:?}"),
         };
-    }
-
-    #[tokio::test]
-    async fn test_relative_priorities() {
-        let pool_size = thread_pool_size();
-        ensure_queue_is_initialized().await;
-
-        let start = Instant::now();
-
-        // Send in `pool_size * 2 - 1` low priority requests and 1 high priority request after the
-        // low priority requests.
-        // If the queue were isolated, we'd expect `pool_size` low priority requests to complete
-        // before the high priority requests, since the workers would start on the low priority
-        // requests immediately.
-        // But, the queue is not isolated. This loosens our guarantees - we expect _up to_ `pool_size`
-        // low priority requests to complete before the high priority request.
-        let low_priority_handles: Vec<_> = (0..pool_size * 2 - 1)
-            .map(|_| {
-                execute(ComputeJobType::QueryPlanningWarmup, move |_| {
-                    let inner_start = start;
-                    std::thread::sleep(Duration::from_millis(10));
-                    inner_start.elapsed()
-                })
-                .unwrap()
-            })
-            .collect();
-        let high_priority_handle = execute(ComputeJobType::QueryPlanning, move |_| {
-            let inner_start = start;
-            std::thread::sleep(Duration::from_millis(5));
-            inner_start.elapsed()
-        })
-        .unwrap();
-
-        let low_priority_durations =
-            futures::future::join_all(low_priority_handles.into_iter()).await;
-        let high_priority_duration = high_priority_handle.await;
-
-        let low_before_high_count = low_priority_durations
-            .iter()
-            .filter(|d| d < &&high_priority_duration)
-            .count();
-
-        assert!(low_before_high_count <= pool_size);
     }
 }

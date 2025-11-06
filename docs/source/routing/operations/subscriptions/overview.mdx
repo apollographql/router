@@ -2,10 +2,16 @@
 title: Overview of GraphQL Subscription Support
 subtitle: Enable clients to receive real-time updates
 description: Configure your router to support GraphQL subscriptions, enabling clients to receive real-time updates via WebSocket or HTTP callbacks.
-minVersion: 1.22.0
+minVersion: Router v1.22.0
 ---
 
-<PremiumFeature />
+<PlanRequired plans={["Free", "Developer", "Standard", "Enterprise"]}>
+
+Rate limits apply on the Free plan.
+Subscription pricing applies on Developer and Standard plans.
+Developer and Standard plans require Router v2.6.0 or later.
+
+</PlanRequired>
 
 GraphQL subscriptions enable clients to manage real-time data updates effectively, without the need for constant polling.  This is particularly crucial in applications that need live updates, such as notifications, stock tickers, or chat applications. Using subscriptions improves performance and user experience by ensuring that clients receive the latest information as soon as changes occur on the backend. 
 
@@ -33,6 +39,12 @@ type Subscription {
 ## How subscriptions work
 
 <HowSubscriptionsWork />
+
+<Note>
+
+Apollo Router does not support direct WebSocket connections from clients. Client subscriptions are handled over HTTP using the multipart protocol, while WebSocket is used internally between the router and subgraphs when applicable.
+
+</Note>
 
 ## Next steps
 

@@ -8,28 +8,28 @@ input_file: apollo-federation/src/connectors/validation/test_data/url_properties
         code: InvalidUrlProperty,
         message: "In `@source(name: \"v1\")`, the `path` argument is not valid: nom::error::ErrorKind::Eof: .",
         locations: [
-            6:38..6:39,
+            8:52..8:53,
         ],
     },
     Message {
         code: InvalidUrlProperty,
         message: "In `@source(name: \"v1\")`, the `queryParams` argument is not valid: nom::error::ErrorKind::Eof: .",
         locations: [
-            6:56..6:57,
+            8:70..8:71,
         ],
     },
     Message {
         code: InvalidUrlProperty,
         message: "In `@connect` on `Query.resources`, the `path` argument is not valid: nom::error::ErrorKind::Eof: .",
         locations: [
-            12:32..12:33,
+            15:32..15:33,
         ],
     },
     Message {
         code: InvalidUrlProperty,
         message: "In `@connect` on `Query.resources`, the `queryParams` argument is not valid: nom::error::ErrorKind::Eof: .",
         locations: [
-            12:50..12:51,
+            15:50..15:51,
         ],
     },
 ]

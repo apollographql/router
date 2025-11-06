@@ -7,15 +7,14 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::task::Poll;
 
 use bytes::Bytes;
-use futures::StreamExt;
 use futures::TryFutureExt;
 use futures::future::BoxFuture;
 use http::HeaderValue;
 use http::Request;
 use http::StatusCode;
+use http::header;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
-use http::header::{self};
 use http::response::Parts;
 use hyper_rustls::ConfigBuilderExt;
 use itertools::Itertools;
@@ -26,23 +25,21 @@ use mime::APPLICATION_JSON;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use rustls::RootCertStore;
-use serde::Serialize;
-use tokio::select;
+use serde_json_bytes::Entry;
+use serde_json_bytes::json;
 use tokio::sync::oneshot;
-use tokio_tungstenite::connect_async;
-use tokio_tungstenite::connect_async_tls_with_config;
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tower::BoxError;
 use tower::Service;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower::buffer::Buffer;
 use tracing::Instrument;
 use tracing::instrument;
-use uuid::Uuid;
 
 use super::Plugins;
 use super::http::HttpClientServiceFactory;
 use super::http::HttpRequest;
+use super::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::router::body::RouterBody;
 use super::subgraph::SubgraphRequestId;
 use crate::Configuration;
@@ -59,22 +56,13 @@ use crate::error::SubgraphBatchingError;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::layers::DEFAULT_BUFFER_SIZE;
-use crate::plugins::authentication::subgraph::SigningParamsConfig;
-use crate::plugins::content_negotiation::APPLICATION_GRAPHQL_JSON;
 use crate::plugins::file_uploads;
-use crate::plugins::subscription::CallbackMode;
-use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
 use crate::plugins::subscription::SubscriptionConfig;
-use crate::plugins::subscription::SubscriptionMode;
-use crate::plugins::subscription::WebSocketConfiguration;
-use crate::plugins::subscription::create_verifier;
+use crate::plugins::subscription::subgraph::SubscriptionSubgraphLayer;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::subgraph::events::SubgraphEventRequest;
 use crate::plugins::telemetry::config_new::subgraph::events::SubgraphEventResponse;
 use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
-use crate::protocols::websocket::GraphqlWebSocket;
-use crate::protocols::websocket::convert_websocket_stream;
-use crate::query_planner::OperationKind;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::layers::apq;
@@ -93,8 +81,6 @@ const HASH_KEY: &str = "sha256Hash";
 const GRAPHQL_RESPONSE: mediatype::Name = mediatype::Name::new_unchecked("graphql-response");
 
 #[allow(clippy::declare_interior_mutable_const)]
-static CALLBACK_PROTOCOL_ACCEPT: HeaderValue =
-    HeaderValue::from_static("application/json;callbackSpec=1.0");
 pub(crate) static APPLICATION_JSON_HEADER_VALUE: HeaderValue =
     HeaderValue::from_static("application/json");
 static ACCEPT_GRAPHQL_JSON: HeaderValue =
@@ -104,16 +90,6 @@ enum APQError {
     PersistedQueryNotSupported,
     PersistedQueryNotFound,
     Other,
-}
-
-#[cfg_attr(test, derive(serde::Deserialize))]
-#[derive(Serialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-struct SubscriptionExtension {
-    subscription_id: String,
-    callback_url: url::Url,
-    verifier: String,
-    heartbeat_interval_ms: u64,
 }
 
 /// Client for interacting with subgraphs.
@@ -131,16 +107,12 @@ pub(crate) struct SubgraphService {
     /// If a subgraph sends the error message PERSISTED_QUERY_NOT_SUPPORTED,
     /// apq is set to false
     apq: Arc<AtomicBool>,
-    /// Subscription config if enabled
-    subscription_config: Option<SubscriptionConfig>,
-    notify: Notify<String, graphql::Response>,
 }
 
 impl SubgraphService {
     pub(crate) fn from_config(
         service: impl Into<String>,
         configuration: &Configuration,
-        subscription_config: Option<SubscriptionConfig>,
         client_factory: HttpClientServiceFactory,
     ) -> Result<Self, BoxError> {
         let name: String = service.into();
@@ -153,28 +125,18 @@ impl SubgraphService {
             .map(|apq| apq.enabled)
             .unwrap_or(configuration.apq.subgraph.all.enabled);
 
-        SubgraphService::new(
-            name,
-            enable_apq,
-            subscription_config,
-            configuration.notify.clone(),
-            client_factory,
-        )
+        SubgraphService::new(name, enable_apq, client_factory)
     }
 
     pub(crate) fn new(
         service: impl Into<String>,
         enable_apq: bool,
-        subscription_config: Option<SubscriptionConfig>,
-        notify: Notify<String, graphql::Response>,
         client_factory: crate::services::http::HttpClientServiceFactory,
     ) -> Result<Self, BoxError> {
         Ok(Self {
             client_factory,
             service: Arc::new(service.into()),
             apq: Arc::new(<AtomicBool>::new(enable_apq)),
-            subscription_config,
-            notify,
         })
     }
 }
@@ -213,168 +175,24 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, mut request: SubgraphRequest) -> Self::Future {
-        let subscription_config = (request.operation_kind == OperationKind::Subscription)
-            .then(|| self.subscription_config.clone())
-            .flatten();
+    fn call(&mut self, request: SubgraphRequest) -> Self::Future {
         let service_name = (*self.service).to_owned();
-
-        // Do it only for subscription to dedup them
-        let hashed_request = if request.operation_kind == OperationKind::Subscription {
-            let subscription_config = match &subscription_config {
-                Some(sub_cfg) => sub_cfg,
-                None => {
-                    return Box::pin(async move {
-                        Err(BoxError::from(FetchError::SubrequestWsError {
-                            service: service_name,
-                            reason: "subscription is not enabled".to_string(),
-                        }))
-                    });
-                }
-            };
-            if subscription_config.deduplication.enabled {
-                request.to_sha256(&subscription_config.deduplication.ignored_headers)
-            } else {
-                Uuid::new_v4().to_string()
-            }
-        } else {
-            String::new()
-        };
-
-        let SubgraphRequest {
-            subgraph_request,
-            context,
-            ..
-        } = request.clone();
-
-        let (_, mut body) = subgraph_request.into_parts();
 
         let client_factory = self.client_factory.clone();
 
         let arc_apq_enabled = self.apq.clone();
 
-        let mut notify = self.notify.clone();
-
         let make_calls = async move {
-            // Subscription handling
-            if request.operation_kind == OperationKind::Subscription
-                && request.subscription_stream.is_some()
-            {
-                let subscription_config =
-                    subscription_config.ok_or_else(|| FetchError::SubrequestHttpError {
-                        service: service_name.clone(),
-                        reason: "subscription is not enabled".to_string(),
-                        status_code: None,
-                    })?;
-                let mode = subscription_config.mode.get_subgraph_config(&service_name);
+            // XXX(@goto-bus-stop): We are cloning the subgraph request potentially 3 times below.
+            // It will normally not be super expensive? but it still does not seem great or
+            // necessary.
 
-                match &mode {
-                    Some(SubscriptionMode::Passthrough(ws_conf)) => {
-                        // call_websocket for passthrough mode
-                        return call_websocket(
-                            notify,
-                            request,
-                            context,
-                            service_name,
-                            ws_conf,
-                            hashed_request,
-                        )
-                        .await;
-                    }
-                    Some(SubscriptionMode::Callback(CallbackMode {
-                        public_url,
-                        heartbeat_interval,
-                        ..
-                    })) => {
-                        // Hash the subgraph_request
-                        let subscription_id = hashed_request;
-
-                        // Call create_or_subscribe on notify
-                        let (handle, created) = notify
-                            .create_or_subscribe(subscription_id.clone(), true)
-                            .await?;
-
-                        // If it existed before just send the right stream (handle) and early return
-                        let stream_tx = request.subscription_stream.clone().ok_or_else(|| {
-                            FetchError::SubrequestWsError {
-                                service: service_name.clone(),
-                                reason: "cannot get the callback stream".to_string(),
-                            }
-                        })?;
-                        stream_tx.send(Box::pin(handle.into_stream())).await?;
-
-                        u64_counter!(
-                            "apollo.router.operations.subscriptions",
-                            "Total requests with subscription operations",
-                            1,
-                            subscriptions.mode = "callback",
-                            subscriptions.deduplicated = !created,
-                            subgraph.service.name = service_name.clone()
-                        );
-                        if !created {
-                            // Dedup happens here
-                            return Ok(SubgraphResponse::builder()
-                                .subgraph_name(service_name.clone())
-                                .context(context)
-                                .extensions(Object::default())
-                                .build());
-                        }
-
-                        // If not then put the subscription_id in the extensions for callback mode and continue
-                        // Do this if the topic doesn't already exist
-                        let mut callback_url = public_url.clone();
-                        if callback_url.path_segments_mut().is_err() {
-                            callback_url = callback_url.join(&subscription_id)?;
-                        } else {
-                            callback_url
-                                .path_segments_mut()
-                                .expect("can't happen because we checked before")
-                                .push(&subscription_id);
-                        }
-
-                        // Generate verifier
-                        let verifier = create_verifier(&subscription_id).map_err(|err| {
-                            FetchError::SubrequestHttpError {
-                                service: service_name.clone(),
-                                reason: format!("{err:?}"),
-                                status_code: None,
-                            }
-                        })?;
-                        request
-                            .subgraph_request
-                            .headers_mut()
-                            .append(ACCEPT, CALLBACK_PROTOCOL_ACCEPT.clone());
-
-                        let subscription_extension = SubscriptionExtension {
-                            subscription_id,
-                            callback_url,
-                            verifier,
-                            heartbeat_interval_ms: heartbeat_interval
-                                .into_option()
-                                .map(|duration| duration.as_millis() as u64)
-                                .unwrap_or(0),
-                        };
-                        body.extensions.insert(
-                            "subscription",
-                            serde_json_bytes::to_value(subscription_extension).map_err(|err| {
-                                FetchError::SubrequestHttpError {
-                                    service: service_name.clone(),
-                                    reason: format!(
-                                        "cannot serialize the subscription extension: {err:?}",
-                                    ),
-                                    status_code: None,
-                                }
-                            })?,
-                        );
-                    }
-                    _ => {
-                        return Err(Box::new(FetchError::SubrequestWsError {
-                            service: service_name.clone(),
-                            reason: "subscription mode is not enabled".to_string(),
-                        }));
-                    }
-                }
-            }
+            let SubgraphRequest {
+                subgraph_request,
+                context,
+                ..
+            } = request.clone();
+            let body = subgraph_request.into_body();
 
             // If APQ is not enabled, simply make the graphql call
             // with the same request body.
@@ -462,262 +280,6 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
     }
 }
 
-/// call websocket makes websocket calls with modified graphql::Request (body)
-async fn call_websocket(
-    mut notify: Notify<String, graphql::Response>,
-    request: SubgraphRequest,
-    context: Context,
-    service_name: String,
-    subgraph_cfg: &WebSocketConfiguration,
-    subscription_hash: String,
-) -> Result<SubgraphResponse, BoxError> {
-    let operation_name = request
-        .subgraph_request
-        .body()
-        .operation_name
-        .clone()
-        .unwrap_or_default();
-
-    let subgraph_request_event = context
-        .extensions()
-        .with_lock(|lock| lock.get::<SubgraphEventRequest>().cloned());
-    let log_request_level = subgraph_request_event.and_then(|s| {
-        if s.condition.lock().evaluate_request(&request) == Some(true) {
-            Some(s.level)
-        } else {
-            None
-        }
-    });
-
-    let SubgraphRequest {
-        subgraph_request,
-        subscription_stream,
-        connection_closed_signal,
-        id: subgraph_request_id,
-        ..
-    } = request;
-    let subscription_stream_tx =
-        subscription_stream.ok_or_else(|| FetchError::SubrequestWsError {
-            service: service_name.clone(),
-            reason: "cannot get the websocket stream".to_string(),
-        })?;
-
-    let (handle, created) = notify
-        .create_or_subscribe(subscription_hash.clone(), false)
-        .await?;
-    u64_counter!(
-        "apollo.router.operations.subscriptions",
-        "Total requests with subscription operations",
-        1,
-        subscriptions.mode = "passthrough",
-        subscriptions.deduplicated = !created,
-        subgraph.service.name = service_name.clone()
-    );
-    if !created {
-        subscription_stream_tx
-            .send(Box::pin(handle.into_stream()))
-            .await?;
-
-        // Dedup happens here
-        return Ok(SubgraphResponse::builder()
-            .context(context)
-            .subgraph_name(service_name.clone())
-            .extensions(Object::default())
-            .build());
-    }
-
-    let (parts, body) = subgraph_request.into_parts();
-
-    // Check context key and Authorization header (context key takes precedence) to set connection params if needed
-    let connection_params = match (
-        context.get_json_value(SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS),
-        parts
-            .headers
-            .get(http::header::AUTHORIZATION)
-            .and_then(|auth| auth.to_str().ok()),
-    ) {
-        (Some(connection_params), _) => Some(connection_params),
-        (None, Some(authorization)) => Some(serde_json_bytes::json!({ "token": authorization })),
-        _ => None,
-    };
-
-    let request = get_websocket_request(service_name.clone(), parts, subgraph_cfg)?;
-
-    let signing_params = context
-        .extensions()
-        .with_lock(|lock| lock.get::<Arc<SigningParamsConfig>>().cloned());
-
-    let request = if let Some(signing_params) = signing_params {
-        signing_params
-            .sign_empty(request, service_name.as_str())
-            .await?
-    } else {
-        request
-    };
-
-    if let Some(level) = log_request_level {
-        let mut attrs = Vec::with_capacity(5);
-        attrs.push(KeyValue::new(
-            Key::from_static_str("http.request.headers"),
-            opentelemetry::Value::String(format!("{:?}", request.headers()).into()),
-        ));
-        attrs.push(KeyValue::new(
-            Key::from_static_str("http.request.method"),
-            opentelemetry::Value::String(format!("{}", request.method()).into()),
-        ));
-        attrs.push(KeyValue::new(
-            Key::from_static_str("http.request.version"),
-            opentelemetry::Value::String(format!("{:?}", request.version()).into()),
-        ));
-        attrs.push(KeyValue::new(
-            Key::from_static_str("http.request.body"),
-            opentelemetry::Value::String(
-                serde_json::to_string(request.body())
-                    .unwrap_or_default()
-                    .into(),
-            ),
-        ));
-        attrs.push(KeyValue::new(
-            Key::from_static_str("subgraph.name"),
-            opentelemetry::Value::String(service_name.clone().into()),
-        ));
-        log_event(
-            level,
-            "subgraph.request",
-            attrs,
-            &format!("Websocket request body to subgraph {service_name:?}"),
-        );
-    }
-
-    let uri = request.uri();
-    let path = uri.path();
-    let host = uri.host().unwrap_or_default();
-    let port = uri.port_u16().unwrap_or_else(|| {
-        let scheme = uri.scheme_str();
-        if scheme == Some("wss") {
-            443
-        } else if scheme == Some("ws") {
-            80
-        } else {
-            0
-        }
-    });
-
-    let subgraph_req_span = tracing::info_span!(SUBGRAPH_REQUEST_SPAN_NAME,
-        "otel.kind" = "CLIENT",
-        "net.peer.name" = %host,
-        "net.peer.port" = %port,
-        "http.route" = %path,
-        "http.url" = %uri,
-        "net.transport" = "ip_tcp",
-        "apollo.subgraph.name" = %service_name,
-        "graphql.operation.name" = %operation_name,
-    );
-
-    let (ws_stream, resp) = match request.uri().scheme_str() {
-        Some("wss") => {
-            connect_async_tls_with_config(request, None, false, None)
-                .instrument(subgraph_req_span)
-                .await
-        }
-        _ => connect_async(request).instrument(subgraph_req_span).await,
-    }
-    .map_err(|err| {
-        let error_details = match &err {
-            tokio_tungstenite::tungstenite::Error::Utf8 => {
-                "invalid UTF-8 in WebSocket handshake; no additional details available".to_string()
-            }
-
-            tokio_tungstenite::tungstenite::Error::Http(response) => {
-                let status = response.status();
-                let headers = response
-                    .headers()
-                    .iter()
-                    .map(|(k, v)| {
-                        let header_value = v.to_str().unwrap_or("HTTP Error");
-                        format!("{k:?}: {header_value:?}")
-                    })
-                    .collect::<Vec<String>>()
-                    .join("; ");
-
-                format!("WebSocket upgrade failed. Status: {status}; Headers: [{headers}]")
-            }
-
-            tokio_tungstenite::tungstenite::Error::Protocol(proto_err) => {
-                format!("WebSocket protocol error: {proto_err}")
-            }
-
-            other_error => other_error.to_string(),
-        };
-
-        tracing::debug!(
-            error.type   = "websocket_connection_failed",
-            error.details= %error_details,
-            error.source = %std::any::type_name_of_val(&err),
-            "WebSocket connection failed"
-        );
-
-        FetchError::SubrequestWsError {
-            service: service_name.clone(),
-            reason: format!("cannot connect websocket to subgraph: {error_details}"),
-        }
-    })?;
-
-    let gql_socket = GraphqlWebSocket::new(
-        convert_websocket_stream(ws_stream, subscription_hash.clone()),
-        subscription_hash,
-        subgraph_cfg.protocol,
-        connection_params,
-    )
-    .await
-    .map_err(|err| FetchError::SubrequestWsError {
-        service: service_name.clone(),
-        reason: format!("cannot get the GraphQL websocket stream: {}", err.message),
-    })?;
-
-    let gql_stream = gql_socket
-        .into_subscription(body, subgraph_cfg.heartbeat_interval.into_option())
-        .await
-        .map_err(|err| FetchError::SubrequestWsError {
-            service: service_name.clone(),
-            reason: format!("cannot send the subgraph request to websocket stream: {err:?}"),
-        })?;
-
-    let (handle_sink, handle_stream) = handle.split();
-
-    tokio::task::spawn(async move {
-        match connection_closed_signal {
-            Some(mut connection_closed_signal) => select! {
-                // We prefer to specify the order of checks within the select
-                biased;
-                _ = gql_stream
-                    .map(Ok::<_, graphql::Error>)
-                    .forward(handle_sink) => {
-                    tracing::debug!("gql_stream empty");
-                },
-                _ = connection_closed_signal.recv() => {
-                    tracing::debug!("connection_closed_signal triggered");
-                }
-            },
-            None => {
-                let _ = gql_stream
-                    .map(Ok::<_, graphql::Error>)
-                    .forward(handle_sink)
-                    .await;
-            }
-        }
-    });
-
-    subscription_stream_tx.send(Box::pin(handle_stream)).await?;
-
-    Ok(SubgraphResponse::new_from_response(
-        resp.map(|_| graphql::Response::default()),
-        context,
-        service_name,
-        subgraph_request_id,
-    ))
-}
-
 // Utility function to extract uri details.
 fn get_uri_details(uri: &hyper::Uri) -> (&str, u16, &str) {
     let port = uri.port_u16().unwrap_or_else(|| {
@@ -793,6 +355,14 @@ fn http_response_to_graphql_response(
             graphql_response
         }
     };
+
+    // Any errors directly parsed from the response likely won't yet have the service name set,
+    // but we need it for telemetry error counting
+    for err in &mut graphql_response.errors {
+        if let Entry::Vacant(v) = err.extensions.entry("service") {
+            v.insert(json!(service_name));
+        }
+    }
 
     // Add an error for response codes that are not 2xx
     if !parts.status.is_success() {
@@ -1436,12 +1006,10 @@ fn get_graphql_content_type(service_name: &str, parts: &Parts) -> Result<Content
                 Ok(ContentType::ApplicationGraphqlResponseJson)
             }
             Some(mime) => Err(format!(
-                "subgraph response contains unsupported content-type: {}",
-                mime,
+                "subgraph response contains unsupported content-type: {mime}",
             )),
             None => Err(format!(
-                "subgraph response contains invalid 'content-type' header value {:?}",
-                raw_content_type,
+                "subgraph response contains invalid 'content-type' header value {raw_content_type:?}",
             )),
         }
     } else {
@@ -1454,7 +1022,7 @@ fn get_graphql_content_type(service_name: &str, parts: &Parts) -> Result<Content
             "{}; expected content-type: {} or content-type: {}",
             reason,
             APPLICATION_JSON.essence_str(),
-            APPLICATION_GRAPHQL_JSON
+            GRAPHQL_JSON_RESPONSE_HEADER_VALUE
         ),
     })
 }
@@ -1510,64 +1078,6 @@ async fn do_fetch(
     Ok((parts, content_type, body))
 }
 
-fn get_websocket_request(
-    service_name: String,
-    mut parts: http::request::Parts,
-    subgraph_ws_cfg: &WebSocketConfiguration,
-) -> Result<http::Request<()>, FetchError> {
-    let mut subgraph_url = url::Url::parse(&parts.uri.to_string()).map_err(|err| {
-        tracing::error!("cannot parse subgraph url {}: {err:?}", parts.uri);
-        FetchError::SubrequestWsError {
-            service: service_name.clone(),
-            reason: "cannot parse subgraph url".to_string(),
-        }
-    })?;
-    let new_scheme = match subgraph_url.scheme() {
-        "http" => "ws",
-        "https" => "wss",
-        _ => "ws",
-    };
-    subgraph_url.set_scheme(new_scheme).map_err(|err| {
-        tracing::error!("cannot set a scheme '{new_scheme}' on subgraph url: {err:?}");
-
-        FetchError::SubrequestWsError {
-            service: service_name.clone(),
-            reason: "cannot set a scheme on websocket url".to_string(),
-        }
-    })?;
-
-    let subgraph_url = match &subgraph_ws_cfg.path {
-        Some(path) => subgraph_url
-            .join(path)
-            .map_err(|_| FetchError::SubrequestWsError {
-                service: service_name.clone(),
-                reason: "cannot parse subgraph url with the specific websocket path".to_string(),
-            })?,
-        None => subgraph_url,
-    };
-    // XXX During hyper upgrade, observed that we had lost the implementation for Url
-    // so I made the expedient decision to get a string representation (as_str())
-    // for the creation of the client request. This works fine, but I'm not sure
-    // why we need to do it, because into_client_request **should** be implemented
-    // for Url...
-    let mut request = subgraph_url.as_str().into_client_request().map_err(|err| {
-        tracing::error!("cannot create websocket client request: {err:?}");
-
-        FetchError::SubrequestWsError {
-            service: service_name.clone(),
-            reason: "cannot create websocket client request".to_string(),
-        }
-    })?;
-    request.headers_mut().insert(
-        http::header::SEC_WEBSOCKET_PROTOCOL,
-        subgraph_ws_cfg.protocol.into(),
-    );
-    parts.headers.extend(request.headers_mut().drain());
-    *request.headers_mut() = parts.headers;
-
-    Ok(request)
-}
-
 fn get_apq_error(gql_response: &graphql::Response) -> APQError {
     for error in &gql_response.errors {
         // Check if error message is an APQ error
@@ -1603,16 +1113,26 @@ impl SubgraphServiceFactory {
     pub(crate) fn new(
         services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
         plugins: Arc<Plugins>,
+        notify: Notify<String, graphql::Response>,
+        subscription_config: Option<Arc<SubscriptionConfig>>,
     ) -> Self {
         let mut map = HashMap::with_capacity(services.len());
         for (name, maker) in services.into_iter() {
-            let service = Buffer::new(
+            // We have to do a little dance here to insert the subscription layer at the right
+            // place: *after* all user plugins, but *before* the subgraph service proper.
+            let inner_service = ServiceBuilder::new()
+                .layer(SubscriptionSubgraphLayer::new(
+                    notify.clone(),
+                    subscription_config.clone(),
+                    Arc::from(name.clone()),
+                ))
+                .service(maker.make())
+                .boxed();
+            let service = ServiceBuilder::new().buffer(DEFAULT_BUFFER_SIZE).service(
                 plugins
                     .iter()
                     .rev()
-                    .fold(maker.make(), |acc, (_, e)| e.subgraph_service(&name, acc))
-                    .boxed(),
-                DEFAULT_BUFFER_SIZE,
+                    .fold(inner_service, |acc, (_, e)| e.subgraph_service(&name, acc)),
             );
             map.insert(name, service);
         }
@@ -1632,7 +1152,7 @@ impl SubgraphServiceFactory {
 ///
 /// there can be multiple instances of that service executing at any given time
 pub(crate) trait MakeSubgraphService: Send + Sync + 'static {
-    fn make(&self) -> subgraph::BoxService;
+    fn make(&self) -> subgraph::BoxCloneService;
 }
 
 impl<S> MakeSubgraphService for S
@@ -1644,8 +1164,8 @@ where
         + 'static,
     <S as Service<SubgraphRequest>>::Future: Send,
 {
-    fn make(&self) -> subgraph::BoxService {
-        self.clone().boxed()
+    fn make(&self) -> subgraph::BoxCloneService {
+        self.clone().boxed_clone()
     }
 }
 
@@ -1673,20 +1193,25 @@ mod tests {
     use tokio::net::TcpListener;
     use tokio::sync::mpsc;
     use tokio_stream::wrappers::ReceiverStream;
+    use tower::Layer as _;
     use tower::ServiceExt;
     use url::Url;
 
     use super::*;
     use crate::Context;
+    use crate::assert_response_eq_ignoring_error_id;
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
-    use crate::plugins::content_negotiation::APPLICATION_GRAPHQL_JSON;
+    use crate::plugins::subscription::CallbackMode;
     use crate::plugins::subscription::DeduplicationConfig;
     use crate::plugins::subscription::HeartbeatInterval;
     use crate::plugins::subscription::SUBSCRIPTION_CALLBACK_HMAC_KEY;
     use crate::plugins::subscription::SubgraphPassthroughMode;
     use crate::plugins::subscription::SubscriptionModeConfig;
+    use crate::plugins::subscription::WebSocketConfiguration;
+    use crate::plugins::subscription::subgraph::SubscriptionSubgraphLayer;
+    use crate::plugins::subscription::subgraph::SubscriptionSubgraphService;
     use crate::protocols::websocket::ClientMessage;
     use crate::protocols::websocket::ServerMessage;
     use crate::protocols::websocket::WebSocketProtocol;
@@ -1719,7 +1244,7 @@ mod tests {
                     .serve_connection_with_upgrades(io, svc)
                     .await
                 {
-                    eprintln!("server error: {}", err);
+                    eprintln!("server error: {err}");
                 }
             });
         }
@@ -1811,10 +1336,7 @@ mod tests {
     ) {
         async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             Ok(http::Response::builder()
-                .header(
-                    CONTENT_TYPE,
-                    HeaderValue::from_static(APPLICATION_GRAPHQL_JSON),
-                )
+                .header(CONTENT_TYPE, GRAPHQL_JSON_RESPONSE_HEADER_VALUE)
                 .status(StatusCode::UNAUTHORIZED)
                 .body(r#"invalid"#.into())
                 .unwrap())
@@ -1840,10 +1362,7 @@ mod tests {
     async fn emulate_subgraph_application_graphql_response(listener: TcpListener) {
         async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             Ok(http::Response::builder()
-                .header(
-                    CONTENT_TYPE,
-                    HeaderValue::from_static(APPLICATION_GRAPHQL_JSON),
-                )
+                .header(CONTENT_TYPE, GRAPHQL_JSON_RESPONSE_HEADER_VALUE)
                 .status(StatusCode::OK)
                 .body(r#"{"data": null}"#.into())
                 .unwrap())
@@ -2277,6 +1796,9 @@ mod tests {
         server.await.unwrap();
     }
 
+    static CALLBACK_PROTOCOL_ACCEPT: HeaderValue =
+        HeaderValue::from_static("application/json;callbackSpec=1.0");
+
     async fn emulate_subgraph_with_callback_data(listener: TcpListener) {
         async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             let (parts, body) = request.into_parts();
@@ -2294,7 +1816,7 @@ mod tests {
                 .map_err(|_| "failed to parse the request body as JSON");
             let graphql_request = graphql_request.unwrap();
             assert!(graphql_request.extensions.contains_key("subscription"));
-            let subscription_extension: SubscriptionExtension = serde_json_bytes::from_value(
+            let subscription_extension: crate::plugins::subscription::subgraph::SubscriptionExtension = serde_json_bytes::from_value(
                 graphql_request
                     .extensions
                     .get("subscription")
@@ -2355,6 +1877,18 @@ mod tests {
         }
     }
 
+    /// Manually add the subgraph subscription layer for subscriptions tests.
+    /// This would otherwise be done by the SubgraphServiceFactory, but many unit tests do not use
+    /// it.
+    fn with_subscription_layer(s: SubgraphService) -> SubscriptionSubgraphService<SubgraphService> {
+        SubscriptionSubgraphLayer::new(
+            Notify::builder().build(),
+            Some(Arc::new(subscription_config())),
+            Arc::from(s.service.to_string()),
+        )
+        .layer(s)
+    }
+
     fn supergraph_request(query: &str) -> Arc<http::Request<Request>> {
         Arc::new(
             http::Request::builder()
@@ -2380,18 +1914,18 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         let spawned_task = tokio::task::spawn(emulate_subgraph_with_callback_data(listener));
-        let subgraph_service = SubgraphService::new(
-            "testbis",
-            true,
-            subscription_config().into(),
-            Notify::builder().build(),
-            HttpClientServiceFactory::from_config(
+        let subgraph_service = with_subscription_layer(
+            SubgraphService::new(
                 "testbis",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            ),
-        )
-        .expect("can create a SubgraphService");
+                true,
+                HttpClientServiceFactory::from_config(
+                    "testbis",
+                    &Configuration::default(),
+                    crate::configuration::shared::Client::default(),
+                ),
+            )
+            .expect("can create a SubgraphService"),
+        );
         let (tx, _rx) = mpsc::channel(2);
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -2427,8 +1961,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -2461,8 +1993,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -2496,8 +2026,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -2534,8 +2062,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -2573,8 +2099,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -2616,8 +2140,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -2654,18 +2176,18 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         let spawned_task = tokio::task::spawn(emulate_correct_websocket_server(listener));
-        let subgraph_service = SubgraphService::new(
-            "test",
-            true,
-            subscription_config().into(),
-            Notify::builder().build(),
-            HttpClientServiceFactory::from_config(
+        let subgraph_service = with_subscription_layer(
+            SubgraphService::new(
                 "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            ),
-        )
-        .expect("can create a SubgraphService");
+                true,
+                HttpClientServiceFactory::from_config(
+                    "test",
+                    &Configuration::default(),
+                    crate::configuration::shared::Client::default(),
+                ),
+            )
+            .expect("can create a SubgraphService"),
+        );
         let (tx, rx) = mpsc::channel(2);
         let mut rx_stream = ReceiverStream::new(rx);
 
@@ -2707,18 +2229,18 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_incorrect_websocket_server(listener));
-        let subgraph_service = SubgraphService::new(
-            "test",
-            true,
-            subscription_config().into(),
-            Notify::builder().build(),
-            HttpClientServiceFactory::from_config(
+        let subgraph_service = with_subscription_layer(
+            SubgraphService::new(
                 "test",
-                &Configuration::default(),
-                crate::configuration::shared::Client::default(),
-            ),
-        )
-        .expect("can create a SubgraphService");
+                true,
+                HttpClientServiceFactory::from_config(
+                    "test",
+                    &Configuration::default(),
+                    crate::configuration::shared::Client::default(),
+                ),
+            )
+            .expect("can create a SubgraphService"),
+        );
         let (tx, _rx) = mpsc::channel(2);
 
         let url = Uri::from_str(&format!("ws://{socket_addr}")).unwrap();
@@ -2753,8 +2275,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -2795,8 +2315,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -2833,8 +2351,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -2871,8 +2387,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -2908,8 +2422,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -2945,8 +2457,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -2991,8 +2501,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -3035,8 +2543,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -3076,8 +2582,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -3117,8 +2621,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -3158,8 +2660,6 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             false,
-            None,
-            Notify::default(),
             HttpClientServiceFactory::from_config(
                 "test",
                 &Configuration::default(),
@@ -3243,7 +2743,7 @@ mod tests {
                 .to_graphql_error(None),
             )
             .build();
-        assert_eq!(actual, expected);
+        assert_response_eq_ignoring_error_id!(actual, expected);
     }
 
     #[test]
@@ -3278,6 +2778,7 @@ mod tests {
         let error = graphql::Error::builder()
             .message("error was encountered for test")
             .extension_code("SOME_EXTENSION")
+            .extension("service", "test_service")
             .build();
         let mut json = serde_json::json!({
             "data": {
@@ -3304,7 +2805,7 @@ mod tests {
             .data(json["data"].take())
             .error(error)
             .build();
-        assert_eq!(actual, expected);
+        assert_response_eq_ignoring_error_id!(actual, expected);
     }
 
     #[test]
@@ -3312,6 +2813,7 @@ mod tests {
         let error = graphql::Error::builder()
             .message("error was encountered for test")
             .extension_code("SOME_EXTENSION")
+            .extension("service", "test_service")
             .build();
         let mut json = serde_json::json!({
             "data": {
@@ -3346,6 +2848,6 @@ mod tests {
             )
             .error(error)
             .build();
-        assert_eq!(actual, expected);
+        assert_response_eq_ignoring_error_id!(expected, actual);
     }
 }

@@ -47,13 +47,9 @@ pub(crate) mod cost_calculator;
 pub(crate) mod strategy;
 
 pub(crate) const COST_ESTIMATED_KEY: &str = "apollo::demand_control::estimated_cost";
-pub(crate) const DEPRECATED_COST_ESTIMATED_KEY: &str = "cost.estimated";
 pub(crate) const COST_ACTUAL_KEY: &str = "apollo::demand_control::actual_cost";
-pub(crate) const DEPRECATED_COST_ACTUAL_KEY: &str = "cost.actual";
 pub(crate) const COST_RESULT_KEY: &str = "apollo::demand_control::result";
-pub(crate) const DEPRECATED_COST_RESULT_KEY: &str = "cost.result";
 pub(crate) const COST_STRATEGY_KEY: &str = "apollo::demand_control::strategy";
-pub(crate) const DEPRECATED_COST_STRATEGY_KEY: &str = "cost.strategy";
 
 /// Algorithm for calculating the cost of an incoming query.
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -212,7 +208,7 @@ impl DemandControlError {
 
 impl<T> From<WithErrors<T>> for DemandControlError {
     fn from(value: WithErrors<T>) -> Self {
-        DemandControlError::QueryParseFailure(format!("{}", value))
+        DemandControlError::QueryParseFailure(format!("{value}"))
     }
 }
 
@@ -224,8 +220,7 @@ impl From<FieldLookupError<'_>> for DemandControlError {
             ),
             FieldLookupError::NoSuchField(type_name, _) => {
                 DemandControlError::QueryParseFailure(format!(
-                    "Attempted to look up a field on type {}, but the field does not exist",
-                    type_name
+                    "Attempted to look up a field on type {type_name}, but the field does not exist"
                 ))
             }
         }
@@ -485,6 +480,7 @@ impl Plugin for DemandControl {
                                     err.into_graphql_errors()
                                         .expect("must be able to convert to graphql error"),
                                 )
+                                .id(req.id)
                                 .context(req.context.clone())
                                 .extensions(crate::json_ext::Object::new())
                                 .subgraph_name(subgraph_name.clone())
@@ -512,6 +508,7 @@ impl Plugin for DemandControl {
                                     err.into_graphql_errors()
                                         .expect("must be able to convert to graphql error"),
                                 )
+                                .id(resp.id)
                                 .subgraph_name(subgraph_name)
                                 .context(resp.context.clone())
                                 .extensions(Object::new())

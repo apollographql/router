@@ -1,0 +1,16 @@
+cors:
+  origins:
+    - "https://studio.apollographql.com"
+    - "https://myapp.com"
+    - "https://api.example.com"
+  allow_credentials: true
+  methods:
+    - "GET"
+    - "POST" 
+    - "OPTIONS"
+  allow_headers:
+    - "content-type"
+    - "authorization"
+  expose_headers:
+    - "x-custom-header"
+  max_age: "3600s"

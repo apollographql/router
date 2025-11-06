@@ -16,7 +16,9 @@ use aws_smithy_async::rt::sleep::TokioSleep;
 use aws_smithy_async::time::SystemTimeSource;
 use aws_smithy_http_client::tls::Provider;
 use aws_smithy_http_client::tls::rustls_provider::CryptoMode;
+use aws_smithy_runtime_api::client::behavior_version::BehaviorVersion;
 use aws_smithy_runtime_api::client::identity::Identity;
+use aws_types::SdkConfig;
 use aws_types::region::Region;
 use aws_types::sdk_config::SharedCredentialsProvider;
 use http::HeaderMap;
@@ -111,6 +113,18 @@ impl AWSSigV4Config {
         let role_provider_builder = self.assume_role().map(|assume_role_provider| {
             let rp =
                 aws_config::sts::AssumeRoleProvider::builder(assume_role_provider.role_arn.clone())
+                    .configure(
+                        &SdkConfig::builder()
+                            .http_client(
+                                aws_smithy_http_client::Builder::new()
+                                    .tls_provider(Provider::Rustls(CryptoMode::Ring))
+                                    .build_https(),
+                            )
+                            .sleep_impl(TokioSleep::new())
+                            .time_source(SystemTimeSource::new())
+                            .behavior_version(BehaviorVersion::latest())
+                            .build(),
+                    )
                     .session_name(assume_role_provider.session_name.clone())
                     .region(region.clone());
             if let Some(external_id) = &assume_role_provider.external_id {
@@ -194,6 +208,7 @@ pub(crate) enum AuthConfig {
 /// Configure subgraph authentication
 #[derive(Clone, Debug, Default, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[schemars(rename = "AuthenticationSubgraphConfig")]
 pub(crate) struct Config {
     /// Configuration that will apply to all subgraphs.
     #[serde(default)]
@@ -341,7 +356,7 @@ impl SigningParamsConfig {
         let (signing_instructions, _signature) = sign(signable_request, &signing_params.into())
             .map_err(|err| {
                 increment_failure_counter(subgraph_name);
-                let error = format!("failed to sign GraphQL body for AWS SigV4: {}", err);
+                let error = format!("failed to sign GraphQL body for AWS SigV4: {err}");
                 tracing::error!("{}", error);
                 error
             })?
@@ -380,7 +395,7 @@ impl SigningParamsConfig {
         let (signing_instructions, _signature) = sign(signable_request, &signing_params.into())
             .map_err(|err| {
                 increment_failure_counter(subgraph_name);
-                let error = format!("failed to sign GraphQL body for AWS SigV4: {}", err);
+                let error = format!("failed to sign GraphQL body for AWS SigV4: {err}");
                 tracing::error!("{}", error);
                 error
             })?
@@ -411,7 +426,7 @@ impl SigningParamsConfig {
             .await
             .map_err(|err| {
                 increment_failure_counter(self.subgraph_name.as_str());
-                let error = format!("failed to get credentials for AWS SigV4 signing: {}", err);
+                let error = format!("failed to get credentials for AWS SigV4 signing: {err}");
                 tracing::error!("{}", error);
                 error.into()
             })

@@ -24,8 +24,6 @@ use http::header::CONTENT_ENCODING;
 use itertools::Itertools;
 use multimap::MultiMap;
 use once_cell::sync::Lazy;
-use opentelemetry::metrics::MeterProvider as _;
-use opentelemetry::metrics::ObservableGauge;
 use regex::Regex;
 use serde_json::json;
 #[cfg(unix)]
@@ -33,7 +31,6 @@ use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
 use tower::ServiceExt;
-use tower::layer::layer_fn;
 use tower_http::trace::TraceLayer;
 use tracing::Instrument;
 use tracing::instrument::WithSubscriber;
@@ -55,7 +52,6 @@ use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
-use crate::metrics::meter_provider;
 use crate::plugins::telemetry::SpanMode;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
@@ -65,35 +61,28 @@ use crate::uplink::license_enforcement::APOLLO_ROUTER_LICENSE_EXPIRED;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 use crate::uplink::license_enforcement::LicenseState;
 
-static ACTIVE_SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
 static BARE_WILDCARD_PATH_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^/\{\*[^/]+\}$").expect("this regex to check wildcard paths is valid")
 });
 
-fn session_count_instrument() -> ObservableGauge<u64> {
-    let meter = meter_provider().meter("apollo/router");
-    meter
-        .u64_observable_gauge("apollo.router.session.count.active")
-        .with_description("Amount of in-flight sessions")
-        .with_callback(|gauge| {
-            gauge.observe(ACTIVE_SESSION_COUNT.load(Ordering::Relaxed), &[]);
-        })
-        .init()
-}
+#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
+fn jemalloc_metrics_instruments() -> (
+    tokio::task::JoinHandle<()>,
+    Vec<opentelemetry::metrics::ObservableGauge<u64>>,
+) {
+    use crate::axum_factory::metrics::jemalloc;
 
-struct ActiveSessionCountGuard;
-
-impl ActiveSessionCountGuard {
-    fn start() -> Self {
-        ACTIVE_SESSION_COUNT.fetch_add(1, Ordering::Acquire);
-        Self
-    }
-}
-
-impl Drop for ActiveSessionCountGuard {
-    fn drop(&mut self) {
-        ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Acquire);
-    }
+    (
+        jemalloc::start_epoch_advance_loop(),
+        vec![
+            jemalloc::create_active_gauge(),
+            jemalloc::create_allocated_gauge(),
+            jemalloc::create_metadata_gauge(),
+            jemalloc::create_mapped_gauge(),
+            jemalloc::create_resident_gauge(),
+            jemalloc::create_retained_gauge(),
+        ],
+    )
 }
 
 /// A basic http server using Axum.
@@ -111,7 +100,7 @@ pub(crate) fn make_axum_router<RF>(
     service_factory: RF,
     configuration: &Configuration,
     mut endpoints: MultiMap<ListenAddr, Endpoint>,
-    license: LicenseState,
+    license: Arc<LicenseState>,
 ) -> Result<ListenersAndRouters, ApolloRouterError>
 where
     RF: RouterFactory,
@@ -153,7 +142,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
         mut main_listener: Option<Listener>,
         previous_listeners: Vec<(ListenAddr, Listener)>,
         extra_endpoints: MultiMap<ListenAddr, Endpoint>,
-        license: LicenseState,
+        license: Arc<LicenseState>,
         all_connections_stopped_sender: mpsc::Sender<()>,
     ) -> Self::Future
     where
@@ -352,7 +341,7 @@ fn main_endpoint<RF>(
     service_factory: RF,
     configuration: &Configuration,
     endpoints_on_main_listener: Vec<Endpoint>,
-    license: LicenseState,
+    license: Arc<LicenseState>,
 ) -> Result<ListenAddrAndRouter, ApolloRouterError>
 where
     RF: RouterFactory,
@@ -374,7 +363,7 @@ where
     let mut main_route = main_router::<RF>(configuration)
         .layer(decompression)
         .layer(middleware::from_fn_with_state(
-            (license, Instant::now(), Arc::new(AtomicU64::new(0))),
+            (license.clone(), Instant::now(), Arc::new(AtomicU64::new(0))),
             license_handler,
         ))
         .layer(Extension(service_factory))
@@ -417,12 +406,12 @@ async fn metrics_handler(request: Request<axum::body::Body>, next: Next) -> Resp
 }
 
 async fn license_handler(
-    State((license, start, delta)): State<(LicenseState, Instant, Arc<AtomicU64>)>,
+    State((license, start, delta)): State<(Arc<LicenseState>, Instant, Arc<AtomicU64>)>,
     request: Request<axum::body::Body>,
     next: Next,
 ) -> Response {
     if matches!(
-        license,
+        &*license,
         LicenseState::LicensedHalt { limits: _ } | LicenseState::LicensedWarn { limits: _ }
     ) {
         // This will rate limit logs about license to 1 a second.
@@ -448,7 +437,7 @@ async fn license_handler(
         }
     }
 
-    if matches!(license, LicenseState::LicensedHalt { limits: _ }) {
+    if matches!(&*license, LicenseState::LicensedHalt { limits: _ }) {
         http::Response::builder()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .body(axum::body::Body::default())
@@ -481,13 +470,17 @@ where
         early_cancel: configuration.supergraph.early_cancel,
         experimental_log_on_broken_pipe: configuration.supergraph.experimental_log_on_broken_pipe,
     }));
-    // Tie the lifetime of the session count instrument to the lifetime of the router
-    // by moving it into a no-op layer.
-    let instrument = session_count_instrument();
-    router = router.layer(layer_fn(move |service| {
-        let _ = &instrument;
-        service
-    }));
+    #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
+    {
+        use tower::layer::layer_fn;
+        let (_epoch_advance_loop, jemalloc_instrument) = jemalloc_metrics_instruments();
+        // Tie the lifetime of the jemalloc instruments to the lifetime of the router
+        // by referencing them in a no-op layer.
+        router = router.layer(layer_fn(move |service| {
+            let _jemalloc_instrument = &jemalloc_instrument;
+            service
+        }));
+    }
 
     router
 }
@@ -497,7 +490,12 @@ async fn handle_graphql<RF: RouterFactory>(
     Extension(service_factory): Extension<RF>,
     http_request: Request<axum::body::Body>,
 ) -> impl IntoResponse {
-    let _guard = ActiveSessionCountGuard::start();
+    let _guard = i64_up_down_counter_with_unit!(
+        "apollo.router.session.count.active",
+        "Amount of in-flight sessions",
+        "{session}",
+        1
+    );
 
     let HandlerOptions {
         early_cancel,

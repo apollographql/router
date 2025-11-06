@@ -28,7 +28,7 @@ impl<'schema> UrlProperties<'schema> {
         schema: &'schema SchemaInfo<'schema>,
         http_arg: &'schema [(Name, Node<Value>)],
     ) -> Result<Self, Vec<Message>> {
-        Self::parse(ConnectOrSource::Connect(connector), schema, http_arg)
+        Self::parse(&ConnectOrSource::Connect(connector), schema, http_arg)
     }
 
     pub(in crate::connectors::validation) fn parse_for_source(
@@ -36,11 +36,15 @@ impl<'schema> UrlProperties<'schema> {
         schema: &'schema SchemaInfo<'schema>,
         http_arg: &'schema [(Name, Node<Value>)],
     ) -> Result<Self, Vec<Message>> {
-        Self::parse(ConnectOrSource::Source(source_coordinate), schema, http_arg)
+        Self::parse(
+            &ConnectOrSource::Source(source_coordinate),
+            schema,
+            http_arg,
+        )
     }
 
     fn parse(
-        directive: ConnectOrSource<'schema>,
+        directive: &ConnectOrSource<'schema>,
         schema: &'schema SchemaInfo<'schema>,
         http_arg: &'schema [(Name, Node<Value>)],
     ) -> Result<Self, Vec<Message>> {
@@ -53,11 +57,11 @@ impl<'schema> UrlProperties<'schema> {
             })
             .map(|(property, value)| {
                 let coordinate = Coordinate {
-                    directive,
+                    directive: directive.clone(),
                     property,
                 };
                 let mapping =
-                    parse_mapping_argument(value, coordinate, Code::InvalidUrlProperty, schema)?;
+                    parse_mapping_argument(value, &coordinate, Code::InvalidUrlProperty, schema)?;
                 Ok(Property {
                     coordinate,
                     mapping,
@@ -93,13 +97,13 @@ impl<'schema> UrlProperties<'schema> {
         let context = match property.coordinate.directive {
             ConnectOrSource::Source(_) => expression::Context::for_source(
                 schema,
-                &property.mapping.string,
+                &property.mapping.node,
                 Code::InvalidUrlProperty,
             ),
             ConnectOrSource::Connect(coord) => expression::Context::for_connect_request(
                 schema,
                 coord,
-                &property.mapping.string,
+                &property.mapping.node,
                 Code::InvalidUrlProperty,
             ),
         };
@@ -118,7 +122,7 @@ impl<'schema> UrlProperties<'schema> {
 
 struct Property<'schema> {
     coordinate: Coordinate<'schema>,
-    mapping: MappingArgument<'schema>,
+    mapping: MappingArgument,
 }
 
 impl Property<'_> {
@@ -130,7 +134,7 @@ impl Property<'_> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct Coordinate<'schema> {
     directive: ConnectOrSource<'schema>,
     property: PropertyName,
@@ -149,7 +153,7 @@ impl fmt::Display for Coordinate<'_> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum ConnectOrSource<'schema> {
     Source(SourceDirectiveCoordinate<'schema>),
     Connect(ConnectDirectiveCoordinate<'schema>),

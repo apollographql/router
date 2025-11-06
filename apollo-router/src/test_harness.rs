@@ -1,6 +1,7 @@
 //! Test harness and mocks for the Apollo Router.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::default::Default;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -13,6 +14,7 @@ use tower::ServiceExt;
 use tower_http::trace::MakeSpan;
 use tracing_futures::Instrument;
 
+use crate::AllowedFeature;
 use crate::axum_factory::span_mode;
 use crate::axum_factory::utils::PropagatingMakeSpan;
 use crate::configuration::Configuration;
@@ -25,7 +27,7 @@ use crate::plugin::PluginPrivate;
 use crate::plugin::PluginUnstable;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::canned;
-use crate::plugins::telemetry::reload::init_telemetry;
+use crate::plugins::telemetry::reload::otel::init_telemetry;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::HasSchema;
 use crate::services::SupergraphCreator;
@@ -37,6 +39,7 @@ use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::Schema;
+use crate::uplink::license_enforcement::LicenseLimits;
 use crate::uplink::license_enforcement::LicenseState;
 
 /// Mocks for services the Apollo Router must integrate with.
@@ -94,6 +97,7 @@ pub struct TestHarness<'a> {
     configuration: Option<Arc<Configuration>>,
     extra_plugins: Vec<(String, Box<dyn DynPlugin>)>,
     subgraph_network_requests: bool,
+    license: Option<Arc<LicenseState>>,
 }
 
 // Not using buildstructor because `extra_plugin` has non-trivial signature and behavior
@@ -105,6 +109,7 @@ impl<'a> TestHarness<'a> {
             configuration: None,
             extra_plugins: Vec::new(),
             subgraph_network_requests: false,
+            license: None,
         }
     }
 
@@ -167,6 +172,25 @@ impl<'a> TestHarness<'a> {
     pub fn configuration_yaml(self, configuration: &'a str) -> Result<Self, ConfigurationError> {
         let configuration: Configuration = Configuration::from_str(configuration)?;
         Ok(self.configuration(Arc::new(configuration)))
+    }
+
+    /// Specifies the (static) license.
+    ///
+    /// Panics if called more than once.
+    ///
+    /// If this isn't called, the default license is used.
+    pub fn license_from_allowed_features(mut self, allowed_features: Vec<AllowedFeature>) -> Self {
+        assert!(self.license.is_none(), "license was specified twice");
+        self.license = Some(Arc::new(LicenseState::Licensed {
+            limits: {
+                Some(
+                    LicenseLimits::builder()
+                        .allowed_features(HashSet::from_iter(allowed_features))
+                        .build(),
+                )
+            },
+        }));
+        self
     }
 
     /// Adds an extra, already instantiated plugin.
@@ -272,19 +296,19 @@ impl<'a> TestHarness<'a> {
 
     pub(crate) async fn build_common(
         self,
-    ) -> Result<(Arc<Configuration>, SupergraphCreator), BoxError> {
-        let builder = if self.schema.is_none() {
-            self.subgraph_hook(|subgraph_name, default| match subgraph_name {
-                "products" => canned::products_subgraph().boxed(),
-                "accounts" => canned::accounts_subgraph().boxed(),
-                "reviews" => canned::reviews_subgraph().boxed(),
-                _ => default,
-            })
-        } else {
-            self
-        };
-        let mut config = builder.configuration.unwrap_or_default();
-        if !builder.subgraph_network_requests {
+    ) -> Result<(Arc<Configuration>, Arc<Schema>, SupergraphCreator), BoxError> {
+        let mut config = self.configuration.unwrap_or_default();
+        let has_legacy_mock_subgraphs_plugin = self.extra_plugins.iter().any(|(_, dyn_plugin)| {
+            dyn_plugin.name() == *crate::plugins::mock_subgraphs::PLUGIN_NAME
+        });
+        if self.schema.is_none() && !has_legacy_mock_subgraphs_plugin {
+            Arc::make_mut(&mut config)
+                .apollo_plugins
+                .plugins
+                .entry("experimental_mock_subgraphs")
+                .or_insert_with(canned::mock_subgraphs);
+        }
+        if !self.subgraph_network_requests {
             Arc::make_mut(&mut config)
                 .apollo_plugins
                 .plugins
@@ -292,28 +316,57 @@ impl<'a> TestHarness<'a> {
                 .or_insert(serde_json::json!({}));
         }
         let canned_schema = include_str!("../testing_schema.graphql");
-        let schema = builder.schema.unwrap_or(canned_schema);
+        let schema = self.schema.unwrap_or(canned_schema);
         let schema = Arc::new(Schema::parse(schema, &config)?);
+        // Default to using an unrestricted license
+        let license = self.license.unwrap_or(Arc::new(LicenseState::Licensed {
+            limits: Default::default(),
+        }));
         let supergraph_creator = YamlRouterFactory
             .inner_create_supergraph(
                 config.clone(),
-                schema,
+                schema.clone(),
                 None,
+                Some(self.extra_plugins),
+                license,
                 None,
-                Some(builder.extra_plugins),
-                Default::default(),
             )
             .await?;
 
-        Ok((config, supergraph_creator))
+        Ok((config, schema, supergraph_creator))
     }
 
     /// Builds the supergraph service
     pub async fn build_supergraph(self) -> Result<supergraph::BoxCloneService, BoxError> {
-        let (_config, supergraph_creator) = self.build_common().await?;
+        let (config, schema, supergraph_creator) = self.build_common().await?;
 
-        Ok(tower::service_fn(move |request| {
+        Ok(tower::service_fn(move |request: supergraph::Request| {
             let router = supergraph_creator.make();
+
+            // The supergraph service expects a ParsedDocument in the context. In the real world,
+            // that is always populated by the router service. For the testing harness, however,
+            // tests normally craft a supergraph request manually, and it's inconvenient to
+            // manually populate the ParsedDocument. Instead of doing it many different ways
+            // over and over in different tests, we simulate that part of the router service here.
+            let body = request.supergraph_request.body();
+            // If we don't have a query we definitely won't have a parsed document.
+            if let Some(query_str) = body.query.as_deref() {
+                let operation_name = body.operation_name.as_deref();
+                if !request.context.extensions().with_lock(|lock| {
+                    lock.contains_key::<crate::services::layers::query_analysis::ParsedDocument>()
+                }) {
+                    let doc = crate::spec::Query::parse_document(
+                        query_str,
+                        operation_name,
+                        &schema,
+                        &config,
+                    )
+                    .expect("parse error in test");
+                    request.context.extensions().with_lock(|lock| {
+                        lock.insert::<crate::services::layers::query_analysis::ParsedDocument>(doc)
+                    });
+                }
+            }
 
             async move { router.oneshot(request).await }
         })
@@ -322,7 +375,7 @@ impl<'a> TestHarness<'a> {
 
     /// Builds the router service
     pub async fn build_router(self) -> Result<router::BoxCloneService, BoxError> {
-        let (config, supergraph_creator) = self.build_common().await?;
+        let (config, _schema, supergraph_creator) = self.build_common().await?;
         let router_creator = RouterCreator::new(
             QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&config)).await,
             Arc::new(PersistedQueryLayer::new(&config).await.unwrap()),
@@ -350,7 +403,7 @@ impl<'a> TestHarness<'a> {
         use crate::axum_factory::axum_http_server_factory::make_axum_router;
         use crate::router_factory::RouterFactory;
 
-        let (config, supergraph_creator) = self.build_common().await?;
+        let (config, _schema, supergraph_creator) = self.build_common().await?;
         let router_creator = RouterCreator::new(
             QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&config)).await,
             Arc::new(PersistedQueryLayer::new(&config).await.unwrap()),
@@ -365,7 +418,9 @@ impl<'a> TestHarness<'a> {
             router_creator,
             &config,
             web_endpoints,
-            LicenseState::Unlicensed,
+            Arc::new(LicenseState::Licensed {
+                limits: Default::default(),
+            }),
         )?;
         let ListenAddrAndRouter(_listener, router) = routers.main;
         Ok(router.boxed())
@@ -521,13 +576,12 @@ pub fn make_fake_batch(
         // name from -> to.
         // If our request doesn't have an operation name or we weren't given an op_from_to,
         // just duplicate the request as is.
-        if let Some((from, to)) = op_from_to {
-            if let Some(operation_name) = &req.operation_name {
-                if operation_name == from {
-                    new_req.query = req.query.clone().map(|q| q.replace(from, to));
-                    new_req.operation_name = Some(to.to_string());
-                }
-            }
+        if let Some((from, to)) = op_from_to
+            && let Some(operation_name) = &req.operation_name
+            && operation_name == from
+        {
+            new_req.query = req.query.clone().map(|q| q.replace(from, to));
+            new_req.operation_name = Some(to.to_string());
         }
 
         let mut json_bytes_req = serde_json::to_vec(&req).unwrap();
@@ -585,4 +639,45 @@ async fn test_intercept_subgraph_network_requests() {
       ]
     }
     "###);
+}
+
+/// This module should be used in place of the `::tracing_test::traced_test` macro,
+/// which instantiates a global subscriber via a `OnceLock`, causing test failures.
+///
+/// # Examples
+///
+/// ```rust
+/// use crate::test_harness:tracing_test;
+/// fn test_logs_are_captured() {
+///     let _guard = tracing_test::dispatcher_guard();
+///
+///     // explicit call, but this could also be a router call etc
+///     tracing::info!("hello world");
+///
+///     assert!(tracing_test::logs_contain("hello world"));
+/// }
+/// ```
+///
+/// # Notes
+/// This relies on the internal implementation details of the `tracing_test` crate.
+#[cfg(test)]
+pub(crate) mod tracing_test {
+    use tracing_core::dispatcher::DefaultGuard;
+
+    /// Create and return a `tracing` subscriber to be used in tests.
+    pub(crate) fn dispatcher_guard() -> DefaultGuard {
+        let mock_writer =
+            ::tracing_test::internal::MockWriter::new(::tracing_test::internal::global_buf());
+        let subscriber =
+            ::tracing_test::internal::get_subscriber(mock_writer, "apollo_router=trace");
+        tracing::dispatcher::set_default(&subscriber)
+    }
+
+    pub(crate) fn logs_with_scope_contain(scope: &str, value: &str) -> bool {
+        ::tracing_test::internal::logs_with_scope_contain(scope, value)
+    }
+
+    pub(crate) fn logs_contain(value: &str) -> bool {
+        logs_with_scope_contain("apollo_router", value)
+    }
 }

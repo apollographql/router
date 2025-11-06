@@ -18,6 +18,7 @@ use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequireme
 pub(crate) mod attributes;
 pub(crate) mod conditions;
 
+pub(crate) mod apollo;
 pub(crate) mod cache;
 mod conditional;
 pub(crate) mod connector;
@@ -25,11 +26,13 @@ pub(crate) mod cost;
 pub(crate) mod events;
 pub(crate) mod extendable;
 pub(crate) mod graphql;
+pub(crate) mod http_client;
 pub(crate) mod http_common;
 pub(crate) mod http_server;
 pub(crate) mod instruments;
 pub(crate) mod logging;
 pub(crate) mod router;
+pub(crate) mod router_overhead;
 pub(crate) mod selectors;
 pub(crate) mod spans;
 pub(crate) mod subgraph;

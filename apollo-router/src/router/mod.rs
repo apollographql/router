@@ -11,7 +11,6 @@ pub use error::ApolloRouterError;
 pub use event::ConfigurationSource;
 pub(crate) use event::Event;
 pub use event::LicenseSource;
-pub(crate) use event::ReloadSource;
 pub use event::SchemaSource;
 pub use event::ShutdownSource;
 use futures::FutureExt;
@@ -30,6 +29,8 @@ use tracing_futures::WithSubscriber;
 use crate::axum_factory::AxumHttpServerFactory;
 use crate::configuration::ListenAddr;
 use crate::orbiter::OrbiterRouterSuperServiceFactory;
+use crate::plugins::chaos::ChaosEventStream;
+use crate::router::event::reload::ReloadableEventStream;
 use crate::router_factory::YamlRouterFactory;
 use crate::state_machine::ListenAddresses;
 use crate::state_machine::StateMachine;
@@ -231,29 +232,19 @@ fn generate_event_stream(
     license: LicenseSource,
     shutdown_receiver: oneshot::Receiver<()>,
 ) -> impl Stream<Item = Event> {
-    let reload_source = ReloadSource::default();
-
     stream::select_all(vec![
         shutdown.into_stream().boxed(),
         schema.into_stream().boxed(),
         license.into_stream().boxed(),
-        reload_source.clone().into_stream().boxed(),
-        configuration
-            .into_stream(uplink_config)
-            .map(move |config_event| {
-                if let Event::UpdateConfiguration(config) = &config_event {
-                    reload_source.set_period(&config.experimental_chaos.force_reload)
-                }
-                config_event
-            })
-            .boxed(),
+        configuration.into_stream(uplink_config).boxed(),
         shutdown_receiver
             .into_stream()
             .map(|_| Event::Shutdown)
             .boxed(),
     ])
+    .with_sighup_reload()
+    .with_chaos_reload()
     .take_while(|msg| future::ready(!matches!(msg, Event::Shutdown)))
-    // Chain is required so that the final shutdown message is sent.
     .chain(stream::iter(vec![Event::Shutdown]))
     .boxed()
 }
@@ -422,7 +413,7 @@ mod tests {
             .await
             .unwrap();
         router_handle
-            .send_event(UpdateLicense(LicenseState::Unlicensed))
+            .send_event(UpdateLicense(Arc::new(LicenseState::Unlicensed)))
             .await
             .unwrap();
 
@@ -468,7 +459,7 @@ mod tests {
             .await
             .unwrap();
         router_handle
-            .send_event(UpdateLicense(LicenseState::Unlicensed))
+            .send_event(UpdateLicense(Arc::new(LicenseState::Unlicensed)))
             .await
             .unwrap();
 

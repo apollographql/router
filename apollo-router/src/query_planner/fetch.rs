@@ -313,21 +313,21 @@ impl FetchNode {
         value: &Value,
         errors: &[Error],
     ) {
-        if let Some(id) = id {
-            if let Some(sender) = deferred_fetches.get(id.as_str()) {
-                u64_counter!(
-                    "apollo.router.operations.defer.fetch",
-                    "Number of deferred responses fetched from subgraphs",
-                    1
+        if let Some(id) = id
+            && let Some(sender) = deferred_fetches.get(id.as_str())
+        {
+            u64_counter!(
+                "apollo.router.operations.defer.fetch",
+                "Number of deferred responses fetched from subgraphs",
+                1
+            );
+            if let Err(e) = sender.clone().send((value.clone(), Vec::from(errors))) {
+                tracing::error!(
+                    "error sending fetch result at path {} and id {:?} for deferred response building: {}",
+                    current_dir,
+                    id,
+                    e
                 );
-                if let Err(e) = sender.clone().send((value.clone(), Vec::from(errors))) {
-                    tracing::error!(
-                        "error sending fetch result at path {} and id {:?} for deferred response building: {}",
-                        current_dir,
-                        id,
-                        e
-                    );
-                }
             }
         }
     }
@@ -362,16 +362,21 @@ impl FetchNode {
                                 for values_path in
                                     inverted_paths.get(*i).iter().flat_map(|v| v.iter())
                                 {
-                                    errors.push(Error {
-                                        locations: error.locations.clone(),
-                                        // append to the entitiy's path the error's path without
-                                        //`_entities` and the index
-                                        path: Some(Path::from_iter(
-                                            values_path.0.iter().chain(&path.0[2..]).cloned(),
-                                        )),
-                                        message: error.message.clone(),
-                                        extensions: error.extensions.clone(),
-                                    })
+                                    errors.push(
+                                        Error::builder()
+                                            .locations(error.locations.clone())
+                                            // append to the entity's path the error's path without
+                                            //`_entities` and the index
+                                            .path(Path::from_iter(
+                                                values_path.0.iter().chain(&path.0[2..]).cloned(),
+                                            ))
+                                            .message(error.message.clone())
+                                            .and_extension_code(error.extension_code())
+                                            .extensions(error.extensions.clone())
+                                            // re-use the original ID so we don't double count this error
+                                            .apollo_id(error.apollo_id())
+                                            .build(),
+                                    )
                                 }
                             }
                             _ => {
@@ -391,30 +396,30 @@ impl FetchNode {
 
             // we have to nest conditions and do early returns here
             // because we need to take ownership of the inner value
-            if let Some(Value::Object(mut map)) = response.data {
-                if let Some(entities) = map.remove("_entities") {
-                    tracing::trace!("received entities: {:?}", &entities);
+            if let Some(Value::Object(mut map)) = response.data
+                && let Some(entities) = map.remove("_entities")
+            {
+                tracing::trace!("received entities: {:?}", &entities);
 
-                    if let Value::Array(array) = entities {
-                        let mut value = Value::default();
+                if let Value::Array(array) = entities {
+                    let mut value = Value::default();
 
-                        for (index, mut entity) in array.into_iter().enumerate() {
-                            rewrites::apply_rewrites(schema, &mut entity, &self.output_rewrites);
+                    for (index, mut entity) in array.into_iter().enumerate() {
+                        rewrites::apply_rewrites(schema, &mut entity, &self.output_rewrites);
 
-                            if let Some(paths) = inverted_paths.get(index) {
-                                if paths.len() > 1 {
-                                    for path in &paths[1..] {
-                                        let _ = value.insert(path, entity.clone());
-                                    }
-                                }
-
-                                if let Some(path) = paths.first() {
-                                    let _ = value.insert(path, entity);
+                        if let Some(paths) = inverted_paths.get(index) {
+                            if paths.len() > 1 {
+                                for path in &paths[1..] {
+                                    let _ = value.insert(path, entity.clone());
                                 }
                             }
+
+                            if let Some(path) = paths.first() {
+                                let _ = value.insert(path, entity);
+                            }
                         }
-                        return (value, errors);
                     }
+                    return (value, errors);
                 }
             }
 
@@ -450,12 +455,14 @@ impl FetchNode {
                         })
                         .unwrap_or_else(|| current_dir.clone());
 
-                    Error {
-                        locations: error.locations,
-                        path: Some(path),
-                        message: error.message,
-                        extensions: error.extensions,
-                    }
+                    Error::builder()
+                        .locations(error.locations.clone())
+                        .path(path)
+                        .message(error.message.clone())
+                        .and_extension_code(error.extension_code())
+                        .extensions(error.extensions.clone())
+                        .apollo_id(error.apollo_id())
+                        .build()
                 })
                 .collect();
             let mut data = response.data.unwrap_or_default();

@@ -7,10 +7,6 @@ events:
         url_template: "/users"
         uri: "/users"
     - connector_response:
-        subgraph_name: users
-        source_name: user_api
-        http_method: GET
-        url_template: "/users"
         status: 200
         headers:
           x-ratelimit-remaining: 999
@@ -23,10 +19,6 @@ events:
         url_template: "/users"
         uri: "/users"
     - connector_response:
-        subgraph_name: users
-        source_name: user_api
-        http_method: GET
-        url_template: "/users"
         status: 200
         headers:
           x-ratelimit-remaining: 500

@@ -6,7 +6,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/uri_templates/
 [
     Message {
         code: InvalidUrl,
-        message: "In `GET` in `@connect(http:)` on `Query.resources`: unknown variable `$blah`, must be one of $args, $config, $context, $request",
+        message: "In `GET` in `@connect(http:)` on `Query.resources`: unknown variable `$blah`, must be one of $args, $config, $context, $request, $env",
         locations: [
             12:23..12:28,
         ],

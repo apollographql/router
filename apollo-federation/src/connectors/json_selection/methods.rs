@@ -1,13 +1,15 @@
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
-use shape::location::SourceId;
 
 use super::ApplyToError;
 use super::MethodArgs;
 use super::VarsWithPathsMap;
 use super::immutable::InputPath;
 use super::location::WithRange;
+use crate::connectors::json_selection::ShapeContext;
+use crate::connectors::spec::ConnectSpec;
+
+mod common;
 
 // Two kinds of methods: public ones and not-yet-public ones. The future ones
 // have proposed implementations and tests, and some are even used within the
@@ -26,6 +28,7 @@ mod tests;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ArrowMethod {
     // Public methods:
+    As,
     Echo,
     Map,
     Match,
@@ -36,23 +39,34 @@ pub(super) enum ArrowMethod {
     Entries,
     JsonStringify,
     JoinNotNull,
-
-    // Future methods:
-    TypeOf,
+    Filter,
+    Find,
+    Gte,
+    Lte,
     Eq,
-    MatchIf,
+    Ne,
+    Or,
+    And,
+    Gt,
+    Lt,
+    Not,
+    In,
+    Contains,
+    Get,
+    ToString,
+    ParseInt,
     Add,
     Sub,
     Mul,
     Div,
     Mod,
+
+    // Future methods:
+    TypeOf,
+    MatchIf,
     Has,
-    Get,
     Keys,
     Values,
-    Not,
-    Or,
-    And,
 }
 
 #[macro_export]
@@ -68,27 +82,20 @@ macro_rules! impl_arrow_method {
                 data: &JSON,
                 vars: &VarsWithPathsMap,
                 input_path: &InputPath<JSON>,
+                spec: $crate::connectors::spec::ConnectSpec,
             ) -> (Option<JSON>, Vec<ApplyToError>) {
-                $impl_fn_name(method_name, method_args, data, vars, input_path)
+                $impl_fn_name(method_name, method_args, data, vars, input_path, spec)
             }
 
             fn shape(
                 &self,
+                context: &$crate::connectors::json_selection::apply_to::ShapeContext,
                 method_name: &WithRange<String>,
                 method_args: Option<&MethodArgs>,
                 input_shape: Shape,
                 dollar_shape: Shape,
-                named_var_shapes: &IndexMap<&str, Shape>,
-                source_id: &SourceId,
             ) -> Shape {
-                $shape_fn_name(
-                    method_name,
-                    method_args,
-                    input_shape,
-                    dollar_shape,
-                    named_var_shapes,
-                    source_id,
-                )
+                $shape_fn_name(context, method_name, method_args, input_shape, dollar_shape)
             }
         }
     };
@@ -103,10 +110,12 @@ pub(super) trait ArrowMethodImpl {
         data: &JSON,
         vars: &VarsWithPathsMap,
         input_path: &InputPath<JSON>,
+        spec: ConnectSpec,
     ) -> (Option<JSON>, Vec<ApplyToError>);
 
     fn shape(
         &self,
+        context: &ShapeContext,
         // Shape processing errors for methods can benefit from knowing the name
         // of the method and its source range. Note that ArrowMethodImpl::shape
         // is invoked for every invocation of a method, with appropriately
@@ -122,12 +131,6 @@ pub(super) trait ArrowMethodImpl {
         // The dollar_shape is the shape of the $ variable, or the input object
         // associated with the closest enclosing subselection.
         dollar_shape: Shape,
-        // Other variable shapes may also be provided here, though in general
-        // variables and their subproperties can be represented abstractly using
-        // $var.nested.property ShapeCase::Name shapes.
-        named_var_shapes: &IndexMap<&str, Shape>,
-        // The shared source name which can be used to produce Shape locations
-        source_id: &SourceId,
     ) -> Shape;
 }
 
@@ -139,6 +142,7 @@ impl std::ops::Deref for ArrowMethod {
     fn deref(&self) -> &Self::Target {
         match self {
             // Public methods:
+            Self::As => &public::AsMethod,
             Self::Echo => &public::EchoMethod,
             Self::Map => &public::MapMethod,
             Self::Match => &public::MatchMethod,
@@ -149,23 +153,34 @@ impl std::ops::Deref for ArrowMethod {
             Self::Entries => &public::EntriesMethod,
             Self::JsonStringify => &public::JsonStringifyMethod,
             Self::JoinNotNull => &public::JoinNotNullMethod,
+            Self::Filter => &public::FilterMethod,
+            Self::Find => &public::FindMethod,
+            Self::Gte => &public::GteMethod,
+            Self::Lte => &public::LteMethod,
+            Self::Eq => &public::EqMethod,
+            Self::Ne => &public::NeMethod,
+            Self::Or => &public::OrMethod,
+            Self::And => &public::AndMethod,
+            Self::Gt => &public::GtMethod,
+            Self::Lt => &public::LtMethod,
+            Self::Not => &public::NotMethod,
+            Self::In => &public::InMethod,
+            Self::Contains => &public::ContainsMethod,
+            Self::Get => &public::GetMethod,
+            Self::ToString => &public::ToStringMethod,
+            Self::ParseInt => &public::ParseIntMethod,
+            Self::Add => &public::AddMethod,
+            Self::Sub => &public::SubMethod,
+            Self::Mul => &public::MulMethod,
+            Self::Div => &public::DivMethod,
+            Self::Mod => &public::ModMethod,
 
             // Future methods:
             Self::TypeOf => &future::TypeOfMethod,
-            Self::Eq => &future::EqMethod,
             Self::MatchIf => &future::MatchIfMethod,
-            Self::Add => &future::AddMethod,
-            Self::Sub => &future::SubMethod,
-            Self::Mul => &future::MulMethod,
-            Self::Div => &future::DivMethod,
-            Self::Mod => &future::ModMethod,
             Self::Has => &future::HasMethod,
-            Self::Get => &future::GetMethod,
             Self::Keys => &future::KeysMethod,
             Self::Values => &future::ValuesMethod,
-            Self::Not => &future::NotMethod,
-            Self::Or => &future::OrMethod,
-            Self::And => &future::AndMethod,
         }
     }
 }
@@ -176,6 +191,7 @@ impl ArrowMethod {
     // instead of a String for the method name in the AST.
     pub(super) fn lookup(name: &str) -> Option<Self> {
         let method_opt = match name {
+            "as" => Some(Self::As),
             "echo" => Some(Self::Echo),
             "map" => Some(Self::Map),
             "eq" => Some(Self::Eq),
@@ -204,6 +220,17 @@ impl ArrowMethod {
             "and" => Some(Self::And),
             "jsonStringify" => Some(Self::JsonStringify),
             "joinNotNull" => Some(Self::JoinNotNull),
+            "filter" => Some(Self::Filter),
+            "find" => Some(Self::Find),
+            "gte" => Some(Self::Gte),
+            "lte" => Some(Self::Lte),
+            "ne" => Some(Self::Ne),
+            "gt" => Some(Self::Gt),
+            "lt" => Some(Self::Lt),
+            "in" => Some(Self::In),
+            "contains" => Some(Self::Contains),
+            "toString" => Some(Self::ToString),
+            "parseInt" => Some(Self::ParseInt),
             _ => None,
         };
 
@@ -219,7 +246,8 @@ impl ArrowMethod {
         // will not be returned from lookup_arrow_method outside of tests.
         matches!(
             self,
-            Self::Echo
+            Self::As
+                | Self::Echo
                 | Self::Map
                 | Self::Match
                 | Self::First
@@ -229,6 +257,27 @@ impl ArrowMethod {
                 | Self::Entries
                 | Self::JsonStringify
                 | Self::JoinNotNull
+                | Self::Filter
+                | Self::Find
+                | Self::Gte
+                | Self::Lte
+                | Self::Eq
+                | Self::Ne
+                | Self::Or
+                | Self::And
+                | Self::Gt
+                | Self::Lt
+                | Self::Not
+                | Self::In
+                | Self::Contains
+                | Self::Get
+                | Self::ToString
+                | Self::ParseInt
+                | Self::Add
+                | Self::Sub
+                | Self::Mul
+                | Self::Div
+                | Self::Mod
         )
     }
 }

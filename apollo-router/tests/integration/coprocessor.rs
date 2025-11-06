@@ -192,8 +192,7 @@ async fn test_full_pipeline(
     assert_eq!(
         response.status(),
         response_status,
-        "Failed at stage {}",
-        stage
+        "Failed at stage {stage}"
     );
 
     router.graceful_shutdown().await;
@@ -313,4 +312,180 @@ async fn test_coprocessor_proxying_error_response() -> Result<(), BoxError> {
     router.graceful_shutdown().await;
 
     Ok(())
+}
+
+mod on_graphql_error_selector {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use std::sync::RwLock;
+
+    use serde_json::json;
+    use serde_json::value::Value;
+    use tower::BoxError;
+    use wiremock::Mock;
+    use wiremock::ResponseTemplate;
+    use wiremock::matchers::method;
+    use wiremock::matchers::path;
+
+    use crate::integration::IntegrationTest;
+    use crate::integration::common::Query;
+    use crate::integration::common::graph_os_enabled;
+
+    fn query() -> Query {
+        Query::builder()
+            .traced(true)
+            .body(json!({"query": "query Q { topProducts { name inStock } }"}))
+            .build()
+    }
+
+    fn products_response(errors: bool) -> Value {
+        if errors {
+            json!({"errors": [{ "message": "products error", "path": [] }]})
+        } else {
+            json!({
+                "data": {
+                    "topProducts": [
+                        { "__typename": "Product", "name": "Table", "upc": "1" },
+                        { "__typename": "Product", "name": "Chair", "upc": "2" },
+                    ]
+                },
+            })
+        }
+    }
+
+    fn inventory_response(errors: bool) -> Value {
+        if errors {
+            json!({"errors": [{ "message": "inventory error", "path": [] }]})
+        } else {
+            json!({"data": {"_entities": [{"inStock": true}, {"inStock": false}]}})
+        }
+    }
+
+    fn response_template(response_json: Value) -> ResponseTemplate {
+        ResponseTemplate::new(200).set_body_json(response_json)
+    }
+
+    async fn send_query_to_coprocessor_enabled_router(
+        query: Query,
+        subgraph_response_products: ResponseTemplate,
+        subgraph_response_inventory: ResponseTemplate,
+    ) -> Result<(Value, HashMap<String, usize>), BoxError> {
+        let coprocessor_hits: Arc<RwLock<HashMap<String, usize>>> =
+            Arc::new(RwLock::new(HashMap::default()));
+        let coprocessor_hits_clone = coprocessor_hits.clone();
+        let coprocessor_response = move |req: &wiremock::Request| {
+            let req_body = req.body_json::<serde_json::Value>().expect("body");
+            let stage = req_body.as_object()?.get("stage")?.as_str()?.to_string();
+
+            let mut binding = coprocessor_hits_clone.write().ok()?;
+            let entry = binding.entry(stage).or_default();
+            *entry += 1;
+            Some(response_template(req_body))
+        };
+
+        let mock_coprocessor = wiremock::MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(move |r: &wiremock::Request| coprocessor_response(r).unwrap())
+            .mount(&mock_coprocessor)
+            .await;
+
+        let mock_products = wiremock::MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(subgraph_response_products)
+            .mount(&mock_products)
+            .await;
+
+        let mock_inventory = wiremock::MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(subgraph_response_inventory)
+            .mount(&mock_inventory)
+            .await;
+
+        let mut router = IntegrationTest::builder()
+            .config(
+                include_str!("fixtures/coprocessor_conditional.router.yaml")
+                    .replace("<replace>", &mock_coprocessor.uri()),
+            )
+            .subgraph_override("products", mock_products.uri())
+            .subgraph_override("inventory", mock_inventory.uri())
+            .build()
+            .await;
+        router.start().await;
+        router.assert_started().await;
+
+        let (_, response) = router.execute_query(query).await;
+        assert_eq!(response.status(), 200);
+
+        let response = serde_json::from_str(&response.text().await?).unwrap();
+
+        // NB: should be ok to read and clone bc response should have finished
+        Ok((response, coprocessor_hits.read().unwrap().clone()))
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_all_successful() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        let (response, coprocessor_hits) = send_query_to_coprocessor_enabled_router(
+            query(),
+            response_template(products_response(false)),
+            response_template(inventory_response(false)),
+        )
+        .await?;
+
+        let errors = response.as_object().unwrap().get("errors");
+        assert!(errors.is_none());
+        assert!(coprocessor_hits.is_empty());
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_first_response_failure() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        let (response, coprocessor_hits) = send_query_to_coprocessor_enabled_router(
+            query(),
+            response_template(products_response(true)),
+            response_template(inventory_response(false)),
+        )
+        .await?;
+
+        let errors = response.as_object().unwrap().get("errors").unwrap();
+        insta::assert_json_snapshot!(errors);
+
+        assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 1);
+        assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 1);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_nested_response_failure() -> Result<(), BoxError> {
+        if !graph_os_enabled() {
+            return Ok(());
+        }
+
+        let (response, coprocessor_hits) = send_query_to_coprocessor_enabled_router(
+            query(),
+            response_template(products_response(false)),
+            response_template(inventory_response(true)),
+        )
+        .await?;
+
+        let errors = response.as_object().unwrap().get("errors").unwrap();
+        insta::assert_json_snapshot!(errors);
+
+        assert_eq!(*coprocessor_hits.get("RouterResponse").unwrap(), 1);
+        assert_eq!(*coprocessor_hits.get("SupergraphResponse").unwrap(), 1);
+
+        Ok(())
+    }
 }

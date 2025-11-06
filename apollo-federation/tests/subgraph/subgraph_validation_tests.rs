@@ -101,7 +101,7 @@ mod fieldset_based_directives {
             let schema_str = format!(
                 r#"
                 extend schema
-                @link(url: "https://specs.apollo.dev/federation/v{}", import: ["@key"])
+                @link(url: "https://specs.apollo.dev/federation/v{version}", import: ["@key"])
 
                 type Query {{
                 t: T
@@ -110,8 +110,7 @@ mod fieldset_based_directives {
                 interface T @key(fields: "f") {{
                 f: Int
                 }}
-            "#,
-                version
+            "#
             );
             let err = build_for_errors_with_option(&schema_str, BuildOption::AsIs);
 
@@ -719,6 +718,29 @@ mod fieldset_based_directives {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn handles_requires_with_sub_selection() {
+        let schema_str = r#"
+            extend schema @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@external", "@key", "@requires"])
+
+            type Query {
+                t: T
+            }
+
+            type T @key(fields: "id") {
+                id: ID!
+                u: U
+                required: Int @requires(fields: "u { inner }")
+            }
+
+            type U @key(fields: "id") {
+              id: ID!
+              inner: String @external
+            }
+        "#;
+        build_and_validate(schema_str);
     }
 }
 
@@ -1814,9 +1836,6 @@ mod cost_tests {
     #[test]
     fn rejects_cost_applications_on_interfaces() {
         let doc = r#"
-            extend schema
-                @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@cost"])
-
             type Query {
                 a: A
             }
@@ -1842,9 +1861,6 @@ mod list_size_tests {
     #[test]
     fn rejects_applications_on_non_lists_unless_it_uses_sized_fields() {
         let doc = r#"
-            extend schema
-                @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
-
             type Query {
                 a1: A @listSize(assumedSize: 5)
                 a2: A @listSize(assumedSize: 10, sizedFields: ["ints"])
@@ -1867,9 +1883,6 @@ mod list_size_tests {
     #[test]
     fn rejects_negative_assumed_size() {
         let doc = r#"
-            extend schema
-                @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
-
             type Query {
                 a: [Int] @listSize(assumedSize: -5)
                 b: [Int] @listSize(assumedSize: 0)
@@ -1888,9 +1901,6 @@ mod list_size_tests {
     #[test]
     fn rejects_slicing_arguments_not_in_field_arguments() {
         let doc = r#"
-            extend schema
-                @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
-
             type Query {
                 myField(something: Int): [String]
                     @listSize(slicingArguments: ["missing1", "missing2"])
@@ -1921,9 +1931,6 @@ mod list_size_tests {
     #[test]
     fn rejects_slicing_arguments_not_int_or_int_non_null() {
         let doc = r#"
-            extend schema
-                @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
-
             type Query {
                 sliced(
                     first: String
@@ -1960,9 +1967,6 @@ mod list_size_tests {
     #[test]
     fn rejects_sized_fields_when_output_type_is_not_object() {
         let doc = r#"
-            extend schema
-                @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
-
             type Query {
                 notObject: Int @listSize(assumedSize: 1, sizedFields: ["anything"])
                 a: A @listSize(assumedSize: 5, sizedFields: ["ints"])
@@ -1990,9 +1994,6 @@ mod list_size_tests {
     #[test]
     fn rejects_sized_fields_not_in_output_type() {
         let doc = r#"
-            extend schema
-                @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
-
             type Query {
                 a: A @listSize(assumedSize: 5, sizedFields: ["notOnA"])
             }
@@ -2014,9 +2015,6 @@ mod list_size_tests {
     #[test]
     fn rejects_sized_fields_not_lists() {
         let doc = r#"
-            extend schema
-                @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
-
             type Query {
                 a: A
                     @listSize(
@@ -2057,7 +2055,7 @@ mod tag_tests {
             build_for_errors_with_option(doc, BuildOption::AsIs),
             [(
                 "DIRECTIVE_DEFINITION_INVALID",
-                r#"[S] Invalid definition for directive "@tag": Missing required argument "name""#
+                r#"[S] Invalid definition for directive "@tag": missing required argument "name""#
             )]
         );
     }
@@ -2124,5 +2122,209 @@ mod tag_tests {
             directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE
         "#;
         let _ = build_and_validate(doc);
+    }
+
+    #[test]
+    fn errors_on_invalid_symbols_in_tag_name() {
+        let disallowed_symbols = [
+            ' ', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '{', '}', '[', ']', '|', ';',
+            ':', '+', '=', '.', ',', '?', '`', '~',
+        ];
+        for symbol in disallowed_symbols {
+            let doc = include_str!("fixtures/tag_validation_template.graphqls")
+                .replace("{symbol}", &symbol.to_string());
+            let err = build_for_errors_with_option(&doc, BuildOption::AsIs);
+
+            assert_errors!(
+                err,
+                [
+                    (
+                        "INVALID_TAG_NAME",
+                        &format!(
+                            "[S] Schema root has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
+                        )
+                    ),
+                    (
+                        "INVALID_TAG_NAME",
+                        &format!(
+                            "[S] Schema element Foo has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
+                        )
+                    ),
+                    (
+                        "INVALID_TAG_NAME",
+                        &format!(
+                            "[S] Schema element Foo.foo1 has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
+                        )
+                    ),
+                    (
+                        "INVALID_TAG_NAME",
+                        &format!(
+                            "[S] Schema element Foo.foo2(arg:) has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
+                        )
+                    ),
+                    (
+                        "INVALID_TAG_NAME",
+                        &format!(
+                            "[S] Schema element Bar has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
+                        )
+                    ),
+                    (
+                        "INVALID_TAG_NAME",
+                        &format!(
+                            "[S] Schema element Query.foo has invalid @tag directive value '{symbol}test' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
+                        )
+                    ),
+                    (
+                        "INVALID_TAG_NAME",
+                        &format!(
+                            "[S] Schema element Query.bar has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
+                        )
+                    ),
+                    (
+                        "INVALID_TAG_NAME",
+                        &format!(
+                            "[S] Schema element Query.baz has invalid @tag directive value 'test{symbol}test' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
+                        )
+                    ),
+                    (
+                        "INVALID_TAG_NAME",
+                        &format!(
+                            "[S] Schema element Bar.bar1 has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
+                        )
+                    ),
+                    (
+                        "INVALID_TAG_NAME",
+                        &format!(
+                            "[S] Schema element Bar.bar2(arg:) has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
+                        )
+                    ),
+                    (
+                        "INVALID_TAG_NAME",
+                        &format!(
+                            "[S] Schema element Baz has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
+                        )
+                    ),
+                    (
+                        "INVALID_TAG_NAME",
+                        &format!(
+                            "[S] Schema element CustomScalar has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
+                        )
+                    ),
+                    (
+                        "INVALID_TAG_NAME",
+                        &format!(
+                            "[S] Schema element TestEnum has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
+                        )
+                    ),
+                    (
+                        "INVALID_TAG_NAME",
+                        &format!(
+                            "[S] Schema element TestEnum.VALUE1 has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
+                        )
+                    ),
+                    (
+                        "INVALID_TAG_NAME",
+                        &format!(
+                            "[S] Schema element TestInput has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
+                        )
+                    ),
+                    (
+                        "INVALID_TAG_NAME",
+                        &format!(
+                            "[S] Schema element TestInput.inputField1 has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
+                        )
+                    ),
+                    (
+                        "INVALID_TAG_NAME",
+                        &format!(
+                            "[S] Schema element TestInput.inputField3 has invalid @tag directive value '{symbol}test' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
+                        )
+                    ),
+                    (
+                        "INVALID_TAG_NAME",
+                        &format!(
+                            "[S] Schema element @custom(arg:) has invalid @tag directive value 'test{symbol}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
+                        )
+                    ),
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn errors_on_invalid_symbols_at_start_of_tag_name() {
+        let disallowed_symbols = ['-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+        for symbol in disallowed_symbols {
+            let doc = include_str!("fixtures/tag_validation_template.graphqls")
+                .replace("{symbol}", &symbol.to_string());
+            let err = build_for_errors_with_option(&doc, BuildOption::AsIs);
+
+            assert_errors!(
+                err,
+                [
+                    (
+                        "INVALID_TAG_NAME",
+                        &format!(
+                            "[S] Schema element Query.foo has invalid @tag directive value '{symbol}test' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
+                        )
+                    ),
+                    (
+                        "INVALID_TAG_NAME",
+                        &format!(
+                            "[S] Schema element TestInput.inputField3 has invalid @tag directive value '{symbol}test' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
+                        )
+                    ),
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn allows_valid_symbols_in_tag_name() {
+        let allowed_symbols = [
+            '_', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p',
+            'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+        ];
+        for symbol in allowed_symbols {
+            let doc = include_str!("fixtures/tag_validation_template.graphqls")
+                .replace("{symbol}", &symbol.to_string());
+            // Build should succeed without errors
+            let _ = build_and_validate(&doc);
+        }
+    }
+
+    #[test]
+    fn errors_when_tag_name_exceeds_length_limit() {
+        // 128 chars is valid
+        let valid = "a".repeat(128);
+        let doc_valid = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@tag"])
+
+            type T @tag(name: "VALID_TAG") { x: Int }
+            "#
+        .replace("VALID_TAG", &valid);
+        // Build should succeed without errors
+        let _ = build_and_validate(&doc_valid);
+
+        // 129 chars is invalid
+        let invalid = "a".repeat(129);
+        let doc_invalid = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@tag"])
+
+            type T @tag(name: "INVALID_TAG") { x: Int }
+            "#
+        .replace("INVALID_TAG", &invalid);
+        let err = build_for_errors_with_option(&doc_invalid, BuildOption::AsIs);
+        assert_errors!(
+            err,
+            [(
+                "INVALID_TAG_NAME",
+                &format!(
+                    "[S] Schema element T has invalid @tag directive value '{invalid}' for argument \"name\". Values must start with an alphanumeric character or underscore and contain only slashes, hyphens, or underscores."
+                )
+            )]
+        );
     }
 }

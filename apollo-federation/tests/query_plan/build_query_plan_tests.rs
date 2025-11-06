@@ -478,6 +478,152 @@ fn it_executes_mutation_operations_in_sequence() {
     );
 }
 
+#[test]
+fn it_executes_a_single_mutation_operation_on_a_shareable_field() {
+    let planner = planner!(
+        Subgraph1: r#"
+          type Query {
+            dummy: Int
+          }
+
+          type Mutation {
+            f: F @shareable
+          }
+
+          type F @key(fields: "id") {
+            id: ID!
+            x: Int
+          }
+        "#,
+        Subgraph2: r#"
+          type Mutation {
+            f: F @shareable
+          }
+
+          type F @key(fields: "id", resolvable: false) {
+            id: ID!
+            y: Int
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          mutation {
+            f {
+              x
+              y
+            }
+          }
+        "#,
+        @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "Subgraph2") {
+              {
+                f {
+                  __typename
+                  id
+                  y
+                }
+              }
+            },
+            Flatten(path: "f") {
+              Fetch(service: "Subgraph1") {
+                {
+                  ... on F {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on F {
+                    x
+                  }
+                }
+              },
+            },
+          },
+        }
+      "###
+    );
+}
+
+#[test]
+fn it_ignores_mutation_key_at_top_level_for_mutations() {
+    let planner = planner!(
+        Subgraph1: r#"
+          type Query {
+            dummy: Int
+          }
+
+          type Mutation @key(fields: "__typename") {
+            f: F @shareable
+          }
+
+          type F @key(fields: "id") {
+            id: ID!
+            x: Int
+          }
+        "#,
+        Subgraph2: r#"
+          type Mutation @key(fields: "__typename") {
+            f: F @shareable
+          }
+
+          type F @key(fields: "id", resolvable: false) {
+            id: ID!
+            y: Int
+          }
+        "#,
+    );
+    // Note that a plan that uses a mutation @key will typically be more costly than a plan that
+    // doesn't, so the query planner's plan won't show that we properly ignored the @key. We instead
+    // check both the number of evaluated plans and the plan itself.
+    let plan = assert_plan!(
+        &planner,
+        r#"
+          mutation {
+            f {
+              x
+              y
+            }
+          }
+        "#,
+        @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "Subgraph2") {
+              {
+                f {
+                  __typename
+                  id
+                  y
+                }
+              }
+            },
+            Flatten(path: "f") {
+              Fetch(service: "Subgraph1") {
+                {
+                  ... on F {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on F {
+                    x
+                  }
+                }
+              },
+            },
+          },
+        }
+      "###
+    );
+    assert_eq!(plan.statistics.evaluated_plan_count.get(), 1);
+}
+
 /// @requires references external field indirectly
 #[test]
 fn key_where_at_external_is_not_at_top_level_of_selection_of_requires() {
@@ -1213,13 +1359,15 @@ fn condition_order_router799() {
             }
           }
         "#,
+        // Note: `on Mutation` is suppressed in the query plan. But, the operation is still a
+        //       mutation.
         @r###"
     QueryPlan {
       Include(if: $var1) {
         Skip(if: $var0) {
           Fetch(service: "books") {
             {
-              ... on Mutation {
+              ... {
                 field0: __typename
               }
             }
@@ -1240,13 +1388,15 @@ fn condition_order_router799() {
             }
           }
         "#,
+        // Note: `on Mutation` is suppressed in the query plan. But, the operation is still a
+        //       mutation.
         @r###"
     QueryPlan {
       Include(if: $var1) {
         Skip(if: $var0) {
           Fetch(service: "books") {
             {
-              ... on Mutation {
+              ... {
                 field0: __typename
               }
             }

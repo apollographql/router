@@ -6,6 +6,8 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use apollo_federation::connectors::Connector;
+use apollo_federation::connectors::SourceName;
+use apollo_federation::connectors::runtime::debug::ConnectorContext;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use opentelemetry::Key;
@@ -21,7 +23,6 @@ use super::connect::BoxService;
 use super::new_service::ServiceFactory;
 use crate::plugins::connectors::handle_responses::aggregate_responses;
 use crate::plugins::connectors::make_requests::make_requests;
-use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::connectors::tracing::connect_spec_version_instrument;
 use crate::plugins::subscription::SubscriptionConfig;
@@ -61,11 +62,11 @@ pub(crate) struct ConnectorService {
 #[derive(Hash, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub(crate) struct ConnectorSourceRef {
     pub(crate) subgraph_name: String,
-    pub(crate) source_name: String,
+    pub(crate) source_name: SourceName,
 }
 
 impl ConnectorSourceRef {
-    pub(crate) fn new(subgraph_name: String, source_name: String) -> Self {
+    pub(crate) fn new(subgraph_name: String, source_name: SourceName) -> Self {
         Self {
             subgraph_name,
             source_name,
@@ -80,13 +81,12 @@ impl FromStr for ConnectorSourceRef {
         let mut parts = s.split('.');
         let subgraph_name = parts
             .next()
-            .ok_or(format!("Invalid connector source reference '{}'", s))?
+            .ok_or(format!("Invalid connector source reference '{s}'"))?
             .to_string();
         let source_name = parts
             .next()
-            .ok_or(format!("Invalid connector source reference '{}'", s))?
-            .to_string();
-        Ok(Self::new(subgraph_name, source_name))
+            .ok_or(format!("Invalid connector source reference '{s}'"))?;
+        Ok(Self::new(subgraph_name, SourceName::cast(source_name)))
     }
 }
 
@@ -166,24 +166,17 @@ impl tower::Service<ConnectRequest> for ConnectorService {
                 span.record("apollo.connector.detail", detail);
             }
             if let Some(source_name) = connector.id.source_name.as_ref() {
-                span.record("apollo.connector.source.name", source_name);
+                span.record("apollo.connector.source.name", source_name.as_str());
                 if let Ok(detail) = serde_json::to_string(
-                    &serde_json::json!({ "baseURL": transport.source_url.as_ref().map(|uri| uri.to_string()) }),
+                    &serde_json::json!({ "baseURL": transport.source_template.as_ref().map(|uri| uri.to_string()) }),
                 ) {
                     span.record("apollo.connector.source.detail", detail);
                 }
             }
 
-            let service_name = request.service_name.to_string();
-
-            execute(
-                &connector_request_service_factory,
-                request,
-                connector,
-                &service_name,
-            )
-            .instrument(span)
-            .await
+            execute(&connector_request_service_factory, request, connector)
+                .instrument(span)
+                .await
         })
     }
 }
@@ -192,7 +185,6 @@ async fn execute(
     connector_request_service_factory: &ConnectorRequestServiceFactory,
     request: ConnectRequest,
     connector: Connector,
-    service_name: &str,
 ) -> Result<ConnectResponse, BoxError> {
     let context = request.context.clone();
     let connector = Arc::new(connector);
@@ -201,7 +193,7 @@ async fn execute(
         .extensions()
         .with_lock(|lock| lock.get::<Arc<Mutex<ConnectorContext>>>().cloned());
 
-    let tasks = make_requests(request, &context, connector, service_name, debug)
+    let tasks = make_requests(request, &context, connector, debug)
         .map_err(BoxError::from)?
         .into_iter()
         .map(move |request| {

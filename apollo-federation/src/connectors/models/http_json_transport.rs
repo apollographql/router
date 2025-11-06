@@ -1,18 +1,12 @@
-use std::error::Error;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Write;
 use std::iter::once;
 use std::str::FromStr;
 
-use apollo_compiler::Node;
-use apollo_compiler::ast;
 use apollo_compiler::collections::IndexMap;
-use apollo_compiler::parser::SourceSpan;
 use either::Either;
-use http::HeaderName;
 use http::Uri;
-use http::header;
 use http::uri::InvalidUri;
 use http::uri::InvalidUriParts;
 use http::uri::Parts;
@@ -21,19 +15,17 @@ use serde_json_bytes::Value;
 use serde_json_bytes::json;
 use thiserror::Error;
 
+use super::ProblemLocation;
 use crate::connectors::ApplyToError;
+use crate::connectors::ConnectSpec;
 use crate::connectors::JSONSelection;
 use crate::connectors::Namespace;
 use crate::connectors::PathSelection;
 use crate::connectors::StringTemplate;
-use crate::connectors::header::HeaderValue;
-use crate::connectors::json_selection::ExternalVarPaths;
+use crate::connectors::json_selection::VarPaths;
+use crate::connectors::models::Header;
 use crate::connectors::spec::ConnectHTTPArguments;
 use crate::connectors::spec::SourceHTTPArguments;
-use crate::connectors::spec::schema::HEADERS_ARGUMENT_NAME;
-use crate::connectors::spec::schema::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME;
-use crate::connectors::spec::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME;
-use crate::connectors::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
 use crate::connectors::string_template;
 use crate::connectors::string_template::UriString;
 use crate::connectors::string_template::write_value;
@@ -42,10 +34,10 @@ use crate::error::FederationError;
 
 #[derive(Clone, Debug, Default)]
 pub struct HttpJsonTransport {
-    pub source_url: Option<Uri>,
+    pub source_template: Option<StringTemplate>,
     pub connect_template: StringTemplate,
     pub method: HTTPMethod,
-    pub headers: IndexMap<HeaderName, HeaderSource>,
+    pub headers: Vec<Header>,
     pub body: Option<JSONSelection>,
     pub source_path: Option<JSONSelection>,
     pub source_query_params: Option<JSONSelection>,
@@ -55,8 +47,9 @@ pub struct HttpJsonTransport {
 
 impl HttpJsonTransport {
     pub fn from_directive(
-        http: &ConnectHTTPArguments,
+        http: ConnectHTTPArguments,
         source: Option<&SourceHTTPArguments>,
+        spec: ConnectSpec,
     ) -> Result<Self, FederationError> {
         let (method, connect_url) = if let Some(url) = &http.get {
             (HTTPMethod::Get, url)
@@ -72,32 +65,33 @@ impl HttpJsonTransport {
             return Err(FederationError::internal("missing http method"));
         };
 
-        #[allow(clippy::mutable_key_type)]
-        // HeaderName is internally mutable, but we don't mutate it
-        let mut headers = http.headers.clone();
-        for (header_name, header_source) in
-            source.map(|source| &source.headers).into_iter().flatten()
-        {
-            if !headers.contains_key(header_name) {
-                headers.insert(header_name.clone(), header_source.clone());
+        let mut headers = http.headers;
+        for header in source.map(|source| &source.headers).into_iter().flatten() {
+            if !headers
+                .iter()
+                .any(|connect_header| connect_header.name == header.name)
+            {
+                headers.push(header.clone());
             }
         }
 
         Ok(Self {
-            source_url: source.map(|s| s.base_url.clone()),
-            connect_template: connect_url.parse().map_err(|e: string_template::Error| {
-                FederationError::internal(format!(
-                    "could not parse URL template: {message}",
-                    message = e.message
-                ))
-            })?,
+            source_template: source.map(|source| source.base_url.template.clone()),
+            connect_template: StringTemplate::parse_with_spec(connect_url, spec).map_err(
+                |e: string_template::Error| {
+                    FederationError::internal(format!(
+                        "could not parse URL template: {message}",
+                        message = e.message
+                    ))
+                },
+            )?,
             method,
             headers,
-            body: http.body.clone(),
+            body: http.body,
             source_path: source.and_then(|s| s.path.clone()),
             source_query_params: source.and_then(|s| s.query_params.clone()),
-            connect_path: http.path.clone(),
-            connect_query_params: http.query_params.clone(),
+            connect_path: http.path,
+            connect_query_params: http.query_params,
         })
     }
 
@@ -110,9 +104,16 @@ impl HttpJsonTransport {
         let header_selections = self
             .headers
             .iter()
-            .flat_map(|(_, source)| source.expressions());
+            .flat_map(|header| header.source.expressions());
+
+        let source_selections = self
+            .source_template
+            .iter()
+            .flat_map(|template| template.expressions().map(|e| &e.expression));
+
         url_selections
             .chain(header_selections)
+            .chain(source_selections)
             .chain(self.body.iter())
             .chain(self.source_path.iter())
             .chain(self.source_query_params.iter())
@@ -125,14 +126,34 @@ impl HttpJsonTransport {
             })
     }
 
-    pub fn make_uri(&self, inputs: &IndexMap<String, Value>) -> Result<Uri, MakeUriError> {
+    pub fn make_uri(
+        &self,
+        inputs: &IndexMap<String, Value>,
+    ) -> Result<(Uri, Vec<(ProblemLocation, ApplyToError)>), MakeUriError> {
         let mut uri_parts = Parts::default();
-        // TODO: Return these warnings for both Sandbox debugging and mapping playground
         let mut warnings = Vec::new();
 
-        let connect_uri = self.connect_template.interpolate_uri(inputs)?;
+        let (connect_uri, connect_template_warnings) =
+            self.connect_template.interpolate_uri(inputs)?;
+        warnings.extend(
+            connect_template_warnings
+                .into_iter()
+                .map(|warning| (ProblemLocation::ConnectUrl, warning)),
+        );
+        let resolved_source_uri = match &self.source_template {
+            Some(template) => {
+                let (uri, source_template_warnings) = template.interpolate_uri(inputs)?;
+                warnings.extend(
+                    source_template_warnings
+                        .into_iter()
+                        .map(|warning| (ProblemLocation::SourceUrl, warning)),
+                );
+                Some(uri)
+            }
+            None => None,
+        };
 
-        if let Some(source_uri) = &self.source_url {
+        if let Some(source_uri) = &resolved_source_uri {
             uri_parts.scheme = source_uri.scheme().cloned();
             uri_parts.authority = source_uri.authority().cloned();
         } else {
@@ -141,12 +162,15 @@ impl HttpJsonTransport {
         }
 
         let mut path = UriString::new();
-        if let Some(source_uri_path) = self.source_url.as_ref().map(|source_uri| source_uri.path())
-        {
-            path.write_without_encoding(source_uri_path)?;
+        if let Some(source_uri) = &resolved_source_uri {
+            path.write_without_encoding(source_uri.path())?;
         }
         if let Some(source_path) = self.source_path.as_ref() {
-            warnings.extend(extend_path_from_expression(&mut path, source_path, inputs)?);
+            warnings.extend(
+                extend_path_from_expression(&mut path, source_path, inputs)?
+                    .into_iter()
+                    .map(|error| (ProblemLocation::SourcePath, error)),
+            );
         }
         let connect_path = connect_uri.path();
         if !connect_path.is_empty() && connect_path != "/" {
@@ -160,28 +184,26 @@ impl HttpJsonTransport {
             };
         }
         if let Some(connect_path) = self.connect_path.as_ref() {
-            warnings.extend(extend_path_from_expression(
-                &mut path,
-                connect_path,
-                inputs,
-            )?);
+            warnings.extend(
+                extend_path_from_expression(&mut path, connect_path, inputs)?
+                    .into_iter()
+                    .map(|error| (ProblemLocation::ConnectPath, error)),
+            );
         }
 
         let mut query = UriString::new();
-
-        if let Some(source_uri_query) = self
-            .source_url
+        if let Some(source_uri_query) = resolved_source_uri
             .as_ref()
             .and_then(|source_uri| source_uri.query())
         {
             query.write_without_encoding(source_uri_query)?;
         }
         if let Some(source_query) = self.source_query_params.as_ref() {
-            warnings.extend(extend_query_from_expression(
-                &mut query,
-                source_query,
-                inputs,
-            )?);
+            warnings.extend(
+                extend_query_from_expression(&mut query, source_query, inputs)?
+                    .into_iter()
+                    .map(|error| (ProblemLocation::SourceQueryParams, error)),
+            );
         }
         let connect_query = connect_uri.query().unwrap_or_default();
         if !connect_query.is_empty() {
@@ -191,11 +213,11 @@ impl HttpJsonTransport {
             query.write_without_encoding(connect_query)?;
         }
         if let Some(connect_query) = self.connect_query_params.as_ref() {
-            warnings.extend(extend_query_from_expression(
-                &mut query,
-                connect_query,
-                inputs,
-            )?);
+            warnings.extend(
+                extend_query_from_expression(&mut query, connect_query, inputs)?
+                    .into_iter()
+                    .map(|error| (ProblemLocation::ConnectQueryParams, error)),
+            );
         }
 
         let path = path.into_string();
@@ -208,7 +230,9 @@ impl HttpJsonTransport {
             (false, false) => PathAndQuery::try_from(format!("{path}?{query}"))?,
         });
 
-        Uri::from_parts(uri_parts).map_err(MakeUriError::BuildMergedUri)
+        let uri = Uri::from_parts(uri_parts).map_err(MakeUriError::BuildMergedUri)?;
+
+        Ok((uri, warnings))
     }
 }
 
@@ -338,193 +362,11 @@ impl Display for HTTPMethod {
     }
 }
 
-#[derive(Clone, Debug)]
-pub enum HeaderSource {
-    From(HeaderName),
-    Value(HeaderValue),
-}
-
-impl HeaderSource {
-    pub(crate) fn expressions(&self) -> impl Iterator<Item = &JSONSelection> {
-        match self {
-            HeaderSource::From(_) => Either::Left(std::iter::empty()),
-            HeaderSource::Value(value) => Either::Right(value.expressions().map(|e| &e.expression)),
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct Header<'a> {
-    pub(crate) name: HeaderName,
-    pub(crate) name_node: &'a Node<ast::Value>,
-    pub(crate) source: HeaderSource,
-    pub(crate) source_node: &'a Node<ast::Value>,
-}
-
-impl<'a> Header<'a> {
-    /// Get a list of headers from the `headers` argument in a `@connect` or `@source` directive.
-    pub(crate) fn from_headers_arg(
-        node: &'a Node<ast::Value>,
-    ) -> Vec<Result<Self, HeaderParseError<'a>>> {
-        match (node.as_list(), node.as_object()) {
-            (Some(values), _) => values.iter().map(Self::from_single).collect(),
-            (None, Some(_)) => vec![Self::from_single(node)],
-            _ => vec![Err(HeaderParseError::Other {
-                message: format!("`{HEADERS_ARGUMENT_NAME}` must be an object or list of objects"),
-                node,
-            })],
-        }
-    }
-
-    /// Build a single [`Self`] from a single entry in the `headers` arg.
-    fn from_single(node: &'a Node<ast::Value>) -> Result<Self, HeaderParseError<'a>> {
-        let mappings = node.as_object().ok_or_else(|| HeaderParseError::Other {
-            message: "the HTTP header mapping is not an object".to_string(),
-            node,
-        })?;
-        let name_node = mappings
-            .iter()
-            .find_map(|(name, value)| {
-                (*name == HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME).then_some(value)
-            })
-            .ok_or_else(|| HeaderParseError::Other {
-                message: format!("missing `{HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME}` field"),
-                node,
-            })?;
-        let name = name_node
-            .as_str()
-            .ok_or_else(|| format!("`{HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME}` is not a string"))
-            .and_then(|name_str| {
-                HeaderName::try_from(name_str)
-                    .map_err(|_| format!("the value `{name_str}` is an invalid HTTP header name"))
-            })
-            .map_err(|message| HeaderParseError::Other {
-                message,
-                node: name_node,
-            })?;
-
-        if RESERVED_HEADERS.contains(&name) {
-            return Err(HeaderParseError::Other {
-                message: format!("header '{name}' is reserved and cannot be set by a connector"),
-                node: name_node,
-            });
-        }
-
-        let from = mappings
-            .iter()
-            .find(|(name, _value)| *name == HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME);
-        let value = mappings
-            .iter()
-            .find(|(name, _value)| *name == HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME);
-
-        match (from, value) {
-            (Some(_), None) if STATIC_HEADERS.contains(&name) => {
-                Err(HeaderParseError::Other{ message: format!(
-                    "header '{name}' can't be set with `{HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME}`, only with `{HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}`"
-                ), node: name_node})
-            }
-            (Some((_, from_node)), None) => {
-                from_node.as_str()
-                    .ok_or_else(|| format!("`{HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME}` is not a string"))
-                    .and_then(|from_str| {
-                        HeaderName::try_from(from_str).map_err(|_| {
-                            format!("the value `{from_str}` is an invalid HTTP header name")
-                        })
-                    })
-                    .map(|from| Self {
-                        name,
-                        name_node,
-                        source: HeaderSource::From(from),
-                        source_node: from_node,
-                    })
-                    .map_err(|message| HeaderParseError::Other{ message, node: from_node})
-            }
-            (None, Some((_, value_node))) => {
-                value_node
-                    .as_str()
-                    .ok_or_else(|| HeaderParseError::Other{ message: format!("`{HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}` field in HTTP header mapping must be a string"), node: value_node})
-                    .and_then(|value_str| {
-                        value_str
-                            .parse::<HeaderValue>()
-                            .map_err(|err| HeaderParseError::ValueError {err, node: value_node})
-                    })
-                    .map(|value| Self {
-                        name,
-                        name_node,
-                        source: HeaderSource::Value(value),
-                        source_node: value_node,
-                    })
-            }
-            (None, None) => {
-                Err(HeaderParseError::Other {
-                    message: format!("either `{HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME}` or `{HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}` must be set"),
-                    node,
-                })
-            },
-            (Some((from_name, _)), Some((value_name, _))) => {
-                Err(HeaderParseError::ConflictingArguments {
-                    message: format!("`{HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME}` and `{HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}` can't be set at the same time"),
-                    from_location: from_name.location(),
-                    value_location: value_name.location(),
-                })
-            }
-        }
-    }
-}
-
-#[derive(Debug)]
-pub(crate) enum HeaderParseError<'a> {
-    ValueError {
-        err: string_template::Error,
-        node: &'a Node<ast::Value>,
-    },
-    /// Both `value` and `from` are set
-    ConflictingArguments {
-        message: String,
-        from_location: Option<SourceSpan>,
-        value_location: Option<SourceSpan>,
-    },
-    Other {
-        message: String,
-        node: &'a Node<ast::Value>,
-    },
-}
-
-impl Display for HeaderParseError<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::ConflictingArguments { message, .. } | Self::Other { message, .. } => {
-                write!(f, "{}", message)
-            }
-            Self::ValueError { err, .. } => write!(f, "{err}"),
-        }
-    }
-}
-
-impl Error for HeaderParseError<'_> {}
-
-const RESERVED_HEADERS: [HeaderName; 11] = [
-    header::CONNECTION,
-    header::PROXY_AUTHENTICATE,
-    header::PROXY_AUTHORIZATION,
-    header::TE,
-    header::TRAILER,
-    header::TRANSFER_ENCODING,
-    header::UPGRADE,
-    header::CONTENT_LENGTH,
-    header::CONTENT_ENCODING,
-    header::ACCEPT_ENCODING,
-    HeaderName::from_static("keep-alive"),
-];
-
-const STATIC_HEADERS: [HeaderName; 3] = [header::CONTENT_TYPE, header::ACCEPT, header::HOST];
-
 #[cfg(test)]
 mod test_make_uri {
     use std::str::FromStr;
 
     use apollo_compiler::collections::IndexMap;
-    use http::Uri;
     use pretty_assertions::assert_eq;
     use serde_json_bytes::json;
 
@@ -535,11 +377,15 @@ mod test_make_uri {
     #[test]
     fn merge_all_sources() {
         let transport = HttpJsonTransport {
-            source_url: Uri::from_str(
+            source_template: StringTemplate::from_str(
                 "http://example.com/sourceUri?shared=sourceUri&sourceUri=sourceUri",
             )
             .ok(),
-            connect_template: "/{$args.connectUri}?shared={$args.connectUri}&{$args.connectUri}={$args.connectUri}".parse().unwrap(),
+            connect_template: StringTemplate::parse_with_spec(
+                "/{$args.connectUri}?shared={$args.connectUri}&{$args.connectUri}={$args.connectUri}",
+                ConnectSpec::latest(),
+            )
+            .unwrap(),
             source_path: JSONSelection::parse("$args.sourcePath").ok(),
             connect_path: JSONSelection::parse("$args.connectPath").ok(),
             source_query_params: JSONSelection::parse("$args.sourceQuery").ok(),
@@ -556,7 +402,7 @@ mod test_make_uri {
                 "connectQuery": {"shared": "connectQuery", "connectQuery": "connectQuery"},
             }),
         )]);
-        let url = transport.make_uri(&inputs).unwrap();
+        let (url, _) = transport.make_uri(&inputs).unwrap();
         assert_eq!(
             url.to_string(),
             "http://example.com/sourceUri/sourcePath1/sourcePath2/connectUri/connectPath1/connectPath2\
@@ -591,12 +437,16 @@ mod test_make_uri {
             #[case] connect_path: &str,
         ) {
             let transport = HttpJsonTransport {
-                source_url: Uri::from_str(source_uri).ok(),
+                source_template: StringTemplate::from_str(source_uri).ok(),
                 connect_template: connect_path.parse().unwrap(),
                 ..Default::default()
             };
             assert_eq!(
-                transport.make_uri(&Default::default()).unwrap().to_string(),
+                transport
+                    .make_uri(&Default::default())
+                    .unwrap()
+                    .0
+                    .to_string(),
                 "https://localhost:8080/v1/hello"
             );
         }
@@ -606,12 +456,16 @@ mod test_make_uri {
         #[case::when_base_does_not_have_trailing("http://localhost")]
         fn handle_slashes_when_adding_path_expression(#[case] base: &str) {
             let transport = HttpJsonTransport {
-                source_url: Uri::from_str(base).ok(),
+                source_template: StringTemplate::from_str(base).ok(),
                 source_path: JSONSelection::parse("$([1, 2])").ok(),
                 ..Default::default()
             };
             assert_eq!(
-                transport.make_uri(&Default::default()).unwrap().to_string(),
+                transport
+                    .make_uri(&Default::default())
+                    .unwrap()
+                    .0
+                    .to_string(),
                 "http://localhost/1/2"
             );
         }
@@ -619,12 +473,16 @@ mod test_make_uri {
         #[test]
         fn preserve_trailing_slash_from_connect() {
             let transport = HttpJsonTransport {
-                source_url: Uri::from_str("https://localhost:8080/v1").ok(),
+                source_template: StringTemplate::from_str("https://localhost:8080/v1").ok(),
                 connect_template: "/hello/".parse().unwrap(),
                 ..Default::default()
             };
             assert_eq!(
-                transport.make_uri(&Default::default()).unwrap().to_string(),
+                transport
+                    .make_uri(&Default::default())
+                    .unwrap()
+                    .0
+                    .to_string(),
                 "https://localhost:8080/v1/hello/"
             );
         }
@@ -632,12 +490,16 @@ mod test_make_uri {
         #[test]
         fn preserve_trailing_slash_from_source() {
             let transport = HttpJsonTransport {
-                source_url: Uri::from_str("https://localhost:8080/v1/").ok(),
+                source_template: StringTemplate::from_str("https://localhost:8080/v1/").ok(),
                 connect_template: "/".parse().unwrap(),
                 ..Default::default()
             };
             assert_eq!(
-                transport.make_uri(&Default::default()).unwrap().to_string(),
+                transport
+                    .make_uri(&Default::default())
+                    .unwrap()
+                    .0
+                    .to_string(),
                 "https://localhost:8080/v1/"
             );
         }
@@ -645,12 +507,16 @@ mod test_make_uri {
         #[test]
         fn preserve_no_trailing_slash_from_source() {
             let transport = HttpJsonTransport {
-                source_url: Uri::from_str("https://localhost:8080/v1").ok(),
+                source_template: StringTemplate::from_str("https://localhost:8080/v1").ok(),
                 connect_template: "/".parse().unwrap(),
                 ..Default::default()
             };
             assert_eq!(
-                transport.make_uri(&Default::default()).unwrap().to_string(),
+                transport
+                    .make_uri(&Default::default())
+                    .unwrap()
+                    .0
+                    .to_string(),
                 "https://localhost:8080/v1"
             );
         }
@@ -658,12 +524,17 @@ mod test_make_uri {
         #[test]
         fn add_path_before_query_params() {
             let transport = HttpJsonTransport {
-                source_url: Uri::from_str("https://localhost:8080/v1?something").ok(),
+                source_template: StringTemplate::from_str("https://localhost:8080/v1?something")
+                    .ok(),
                 connect_template: "/hello".parse().unwrap(),
                 ..Default::default()
             };
             assert_eq!(
-                transport.make_uri(&this! { "id": 42 }).unwrap().to_string(),
+                transport
+                    .make_uri(&this! { "id": 42 })
+                    .unwrap()
+                    .0
+                    .to_string(),
                 "https://localhost:8080/v1/hello?something"
             );
         }
@@ -671,12 +542,17 @@ mod test_make_uri {
         #[test]
         fn trailing_slash_plus_query_params() {
             let transport = HttpJsonTransport {
-                source_url: Uri::from_str("https://localhost:8080/v1/?something").ok(),
+                source_template: StringTemplate::from_str("https://localhost:8080/v1/?something")
+                    .ok(),
                 connect_template: "/hello/".parse().unwrap(),
                 ..Default::default()
             };
             assert_eq!(
-                transport.make_uri(&this! { "id": 42 }).unwrap().to_string(),
+                transport
+                    .make_uri(&this! { "id": 42 })
+                    .unwrap()
+                    .0
+                    .to_string(),
                 "https://localhost:8080/v1/hello/?something"
             );
         }
@@ -684,12 +560,21 @@ mod test_make_uri {
         #[test]
         fn with_trailing_slash_in_base_plus_query_params() {
             let transport = HttpJsonTransport {
-                source_url: Uri::from_str("https://localhost:8080/v1/?foo=bar").ok(),
-                connect_template: "/hello/{$this.id}?id={$this.id}".parse().unwrap(),
+                source_template: StringTemplate::from_str("https://localhost:8080/v1/?foo=bar")
+                    .ok(),
+                connect_template: StringTemplate::parse_with_spec(
+                    "/hello/{$this.id}?id={$this.id}",
+                    ConnectSpec::latest(),
+                )
+                .unwrap(),
                 ..Default::default()
             };
             assert_eq!(
-                transport.make_uri(&this! {"id": 42 }).unwrap().to_string(),
+                transport
+                    .make_uri(&this! {"id": 42 })
+                    .unwrap()
+                    .0
+                    .to_string(),
                 "https://localhost:8080/v1/hello/42?foo=bar&id=42"
             );
         }
@@ -702,12 +587,12 @@ mod test_make_uri {
         #[test]
         fn source_only() {
             let transport = HttpJsonTransport {
-                source_url: Uri::from_str("http://localhost/users?a=b").ok(),
+                source_template: StringTemplate::from_str("http://localhost/users?a=b").ok(),
                 connect_template: "/123".parse().unwrap(),
                 ..Default::default()
             };
             assert_eq!(
-                transport.make_uri(&Default::default()).unwrap(),
+                transport.make_uri(&Default::default()).unwrap().0,
                 "http://localhost/users/123?a=b"
             );
         }
@@ -715,12 +600,12 @@ mod test_make_uri {
         #[test]
         fn connect_only() {
             let transport = HttpJsonTransport {
-                source_url: Uri::from_str("http://localhost/users").ok(),
+                source_template: StringTemplate::from_str("http://localhost/users").ok(),
                 connect_template: "?a=b&c=d".parse().unwrap(),
                 ..Default::default()
             };
             assert_eq!(
-                transport.make_uri(&Default::default()).unwrap(),
+                transport.make_uri(&Default::default()).unwrap().0,
                 "http://localhost/users?a=b&c=d"
             )
         }
@@ -728,12 +613,12 @@ mod test_make_uri {
         #[test]
         fn combine_from_both_uris() {
             let transport = HttpJsonTransport {
-                source_url: Uri::from_str("http://localhost/users?a=b").ok(),
+                source_template: StringTemplate::from_str("http://localhost/users?a=b").ok(),
                 connect_template: "?c=d".parse().unwrap(),
                 ..Default::default()
             };
             assert_eq!(
-                transport.make_uri(&Default::default()).unwrap(),
+                transport.make_uri(&Default::default()).unwrap().0,
                 "http://localhost/users?a=b&c=d"
             )
         }
@@ -741,12 +626,12 @@ mod test_make_uri {
         #[test]
         fn source_and_connect_have_same_param() {
             let transport = HttpJsonTransport {
-                source_url: Uri::from_str("http://localhost/users?a=b").ok(),
+                source_template: StringTemplate::from_str("http://localhost/users?a=b").ok(),
                 connect_template: "?a=d".parse().unwrap(),
                 ..Default::default()
             };
             assert_eq!(
-                transport.make_uri(&Default::default()).unwrap(),
+                transport.make_uri(&Default::default()).unwrap().0,
                 "http://localhost/users?a=b&a=d"
             )
         }
@@ -765,7 +650,7 @@ mod test_make_uri {
                 }),
             )]);
             assert_eq!(
-                transport.make_uri(&inputs).unwrap(),
+                transport.make_uri(&inputs).unwrap().0,
                 "http://localhost?multi=first&multi=second"
             )
         }
@@ -774,12 +659,13 @@ mod test_make_uri {
     #[test]
     fn fragments_are_dropped() {
         let transport = HttpJsonTransport {
-            source_url: Uri::from_str("http://localhost/source?a=b#SourceFragment").ok(),
+            source_template: StringTemplate::from_str("http://localhost/source?a=b#SourceFragment")
+                .ok(),
             connect_template: "/connect?c=d#connectFragment".parse().unwrap(),
             ..Default::default()
         };
         assert_eq!(
-            transport.make_uri(&Default::default()).unwrap(),
+            transport.make_uri(&Default::default()).unwrap().0,
             "http://localhost/source/connect?a=b&c=d"
         )
     }
@@ -789,12 +675,15 @@ mod test_make_uri {
     #[test]
     fn pieces_are_not_double_encoded() {
         let transport = HttpJsonTransport {
-            source_url: Uri::from_str("http://localhost/source%20path?param=source%20param").ok(),
+            source_template: StringTemplate::from_str(
+                "http://localhost/source%20path?param=source%20param",
+            )
+            .ok(),
             connect_template: "/connect%20path?param=connect%20param".parse().unwrap(),
             ..Default::default()
         };
         assert_eq!(
-            transport.make_uri(&Default::default()).unwrap(),
+            transport.make_uri(&Default::default()).unwrap().0,
             "http://localhost/source%20path/connect%20path?param=source%20param&param=connect%20param"
         )
     }
@@ -804,12 +693,12 @@ mod test_make_uri {
     #[test]
     fn empty_path_and_query() {
         let transport = HttpJsonTransport {
-            source_url: None,
+            source_template: None,
             connect_template: "http://localhost/".parse().unwrap(),
             ..Default::default()
         };
         assert_eq!(
-            transport.make_uri(&Default::default()).unwrap(),
+            transport.make_uri(&Default::default()).unwrap().0,
             "http://localhost/"
         )
     }
@@ -817,14 +706,14 @@ mod test_make_uri {
     #[test]
     fn skip_null_query_params() {
         let transport = HttpJsonTransport {
-            source_url: None,
+            source_template: None,
             connect_template: "http://localhost/".parse().unwrap(),
             connect_query_params: JSONSelection::parse("something: $(null)").ok(),
             ..Default::default()
         };
 
         assert_eq!(
-            transport.make_uri(&Default::default()).unwrap(),
+            transport.make_uri(&Default::default()).unwrap().0,
             "http://localhost/"
         )
     }
@@ -832,15 +721,56 @@ mod test_make_uri {
     #[test]
     fn skip_null_path_params() {
         let transport = HttpJsonTransport {
-            source_url: None,
+            source_template: None,
             connect_template: "http://localhost/".parse().unwrap(),
             connect_path: JSONSelection::parse("$([1, null, 2])").ok(),
             ..Default::default()
         };
 
         assert_eq!(
-            transport.make_uri(&Default::default()).unwrap(),
+            transport.make_uri(&Default::default()).unwrap().0,
             "http://localhost/1/2"
         )
+    }
+
+    #[test]
+    fn source_template_variables_retained() {
+        let transport = HttpJsonTransport {
+            source_template: StringTemplate::parse_with_spec(
+                "http://${$config.subdomain}.localhost",
+                ConnectSpec::latest(),
+            )
+            .ok(),
+            connect_template: "/connect?c=d".parse().unwrap(),
+            ..Default::default()
+        };
+
+        // Transport variables contain the config reference
+        transport
+            .variable_references()
+            .find(|var_ref| var_ref.namespace.namespace == Namespace::Config)
+            .unwrap();
+    }
+
+    #[test]
+    fn source_template_interpolated_correctly() {
+        let transport = HttpJsonTransport {
+            source_template: StringTemplate::parse_with_spec(
+                "http://{$config.subdomain}.localhost:{$config.port}",
+                ConnectSpec::latest(),
+            )
+            .ok(),
+            connect_template: "/connect?c=d".parse().unwrap(),
+            ..Default::default()
+        };
+        let mut vars: IndexMap<String, Value> = Default::default();
+        vars.insert(
+            "$config".to_string(),
+            json!({ "subdomain": "api", "port": 5000 }),
+        );
+        assert_eq!(
+            transport.make_uri(&vars).unwrap().0,
+            "http://api.localhost:5000/connect?c=d"
+        );
     }
 }

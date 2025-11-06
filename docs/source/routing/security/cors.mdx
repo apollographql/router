@@ -4,7 +4,7 @@ subtitle: Control browser access to your router
 description: Manage browser access to your Apollo GraphOS Router or Apollo Router Core with CORS configuration options, including origin whitelisting, wildcard origins, and credential passing.
 ---
 
-<Note> 
+<Note>
 
 **This article describes CORS configuration that's specific to the GraphOS Router and Apollo Router Core**. For a more general introduction to CORS and common considerations, see the following sections:
 
@@ -15,9 +15,9 @@ description: Manage browser access to your Apollo GraphOS Router or Apollo Route
 
 By default, the router enables _only_ GraphOS Studio to initiate browser connections to it. If your supergraph serves data to other browser-based applications, you need to do one of the following in the `cors` section of your router's [YAML config file](/router/configuration/overview/#yaml-config-file):
 
-* Add the origins of those web applications to the router's list of allowed `origins`.
+* Add the origins of those web applications to the router's list of allowed `policies`.
     * Use this option if there is a known, finite list of web applications that consume your supergraph.
-* Add a regex that matches the origins of those web applications to the router's list of allowed `origins`.
+* Add a regex that matches the origins of those web applications to the router's list of allowed `policies`.
     * This option comes in handy if you want to match origins against a pattern, see the example below that matches subdomains of a specific namespace.
 * Enable the `allow_any_origin` option.
     * Use this option if your supergraph is a public API with arbitrarily many web app consumers.
@@ -40,18 +40,19 @@ cors:
   #
   # An origin is a combination of scheme, hostname and port.
   # It does not have any path section, so no trailing slash.
-  origins:
-    - https://www.your-app.example.com
-    - https://studio.apollographql.com # Keep this so GraphOS Studio can run queries against your router
-  match_origins:
-    - "^https://([a-z0-9]+[.])*api[.]example[.]com$" # any host that uses https and ends with .api.example.com
+  policies:
+    - origins:
+        - https://www.your-app.example.com
+        - https://studio.apollographql.com # Keep this so GraphOS Studio can run queries against your router
+      match_origins:
+        - "^https://([a-z0-9]+[.])*api[.]example[.]com$" # any host that uses https and ends with .api.example.com
 ```
 
-You can also disable CORS entirely by setting `origins` to an empty list:
+You can also disable CORS entirely by setting `policies` to an empty list:
 
 ```yml title="router.yaml"
 cors:
-  origins: []
+  policies: []
 ```
 
 If your router serves exclusively _non_-browser-based clients, you probably don't need to modify the default CORS configuration.
@@ -66,13 +67,14 @@ To allow browsers to pass credentials to the router, set `allow_credentials` to 
 
 ```yaml {6} title="router.yaml"
 cors:
-  origins:
-    - https://www.your-app.example.com
-    - https://studio.apollographql.com
+  policies:
+    - origins:
+        - https://www.your-app.example.com
+        - https://studio.apollographql.com
   allow_credentials: true
 ```
 
-<Tip> 
+<Tip>
 
 **To support credentialed requests, your router's config file must specify individual `origins`**. If your router enables `allow_any_origin`, your browser will refuse to send credentials.
 
@@ -90,6 +92,47 @@ headers:
 
 For examples of sending cookies and authorization headers from Apollo Client, see [Authentication](/react/networking/authentication/).
 
+## CORS private network access
+
+By default, browsers block any requests sent to [a device or service on a private network](https://wicg.github.io/private-network-access/). If your router requires requests to a device or service on a private network, you need to enable this behavior in your CORS configuration.
+
+To enable private network access with CORS, your router must return the [`Access-Control-Allow-Private-Network`](http://wicg.github.io/private-network-access/#http-headerdef-access-control-allow-private-network) HTTP header with a value of `true`. To do so, add the `private_network_access` with an empty `access_id` value in the `policies` of your `cors` config.
+
+```yaml {7} title="router.yaml"
+cors:
+  policies:
+    - origins:
+        - https://www.your-app.example.com
+        - https://studio.apollographql.com
+      private_network_access:
+        access_id:
+```
+
+Optionally, you can specify the `access_id` and `access_name` subfields to identify what is being accessed in the private network when the browser prompts the user for permission. These fields return the `Private-Network-Access-ID` and `Private-Network-Access-Name` HTTP headers, respectively, along with the specified strings.
+
+```yaml {8} title="router.yaml"
+cors:
+  policies:
+    - origins:
+        - https://www.your-app.example.com
+        - https://studio.apollographql.com
+      private_network_access:
+        access_id: "01:23:45:67:89:0A"
+        access_name: "mega-corp device"
+```
+
+## Policy inheritance
+
+Individual policies within the `policies` array inherit global CORS settings unless explicitly overridden:
+
+- **Allow credentials**: Policies inherit the global `allow_credentials` setting unless they specify their own value
+- **Allow headers**: Policies inherit global headers if their `allow_headers` is empty, otherwise use policy-specific headers
+- **Expose headers**: Policies inherit global headers if their `expose_headers` is empty, otherwise use policy-specific headers
+- **Methods**: Policies have three inheritance states:
+  - Not specified (`null`): Inherits global `methods`
+  - Empty array (`[]`): No methods allowed for this policy
+  - Specific values: Uses those exact methods
+- **Max age**: Policies inherit the global `max_age` unless they specify their own value
 
 ## All `cors` options
 
@@ -109,8 +152,12 @@ cors:
   #
   # An origin is a combination of scheme, hostname and port.
   # It does not have any path section, so no trailing slash.
-  origins:
-    - https://studio.apollographql.com # Keep this so GraphOS Studio can still run queries against your router
+  policies:
+    - origins:
+        - https://studio.apollographql.com # Keep this so GraphOS Studio can still run queries against your router
+      # Enable private network access for the router
+      private_network_access:
+        access_id:
 
   # Set to true to add the `Access-Control-Allow-Credentials` header
   allow_credentials: false
@@ -132,7 +179,7 @@ cors:
   expose_headers: []
 
   # Adds the Access-Control-Max-Age header
-  # Can be set to a duration in time units 
+  # Can be set to a duration in time units
   # If not set, the header is not included
   max_age: 2h
 ```

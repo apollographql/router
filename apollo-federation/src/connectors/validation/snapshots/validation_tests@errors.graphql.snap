@@ -9,33 +9,32 @@ input_file: apollo-federation/src/connectors/validation/test_data/errors.graphql
         message: "In `@source(name: \"invalid_source_message_not_string\" errors.message:)`: object values aren't valid here",
         locations: [
             13:25..13:47,
-            13:25..13:47,
         ],
     },
     Message {
         code: InvalidErrorsMessage,
-        message: "In `@source(name: \"invalid_source_args_variable\" errors.extensions:)`: $args is not valid here, must be one of $config, $context, $status, $request, $response",
+        message: "In `@source(name: \"invalid_source_args_variable\" errors.extensions:)`: $args is not valid here, must be one of $config, $context, $status, $request, $response, $env",
         locations: [
             23:63..23:76,
         ],
     },
     Message {
         code: InvalidErrorsMessage,
-        message: "In `@source(name: \"invalid_source_this_variable\" errors.extensions:)`: $this is not valid here, must be one of $config, $context, $status, $request, $response",
+        message: "In `@source(name: \"invalid_source_this_variable\" errors.extensions:)`: $this is not valid here, must be one of $config, $context, $status, $request, $response, $env",
         locations: [
             28:63..28:76,
         ],
     },
     Message {
-        code: GraphQLError,
-        message: "`@connect(errors.message:)` on `Query.invalid_sourceless_empty_message` must be a string.",
+        code: InvalidErrorsMessage,
+        message: "`@connect(errors.message:)` on `Query.invalid_sourceless_empty_message` is empty",
         locations: [
             114:26..114:28,
         ],
     },
     Message {
-        code: GraphQLError,
-        message: "`@connect(errors.extensions:)` on `Query.invalid_sourceless_empty_extensions` must be a string.",
+        code: InvalidErrorsMessage,
+        message: "`@connect(errors.extensions:)` on `Query.invalid_sourceless_empty_extensions` is empty",
         locations: [
             119:97..119:99,
         ],
@@ -44,7 +43,6 @@ input_file: apollo-federation/src/connectors/validation/test_data/errors.graphql
         code: InvalidErrorsMessage,
         message: "In `@connect(errors.message:)` on `Query.invalid_sourceless_message_not_string`: object values aren't valid here",
         locations: [
-            86:27..86:49,
             86:27..86:49,
         ],
     },

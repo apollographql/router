@@ -2,11 +2,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_federation::connectors::CustomConfiguration;
+use apollo_federation::connectors::SourceName;
 use apollo_federation::connectors::expand::Connectors;
 use http::Uri;
 use schemars::JsonSchema;
-use schemars::schema::InstanceType;
-use schemars::schema::SchemaObject;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -15,6 +14,9 @@ use crate::Configuration;
 use crate::plugins::connectors::plugin::PLUGIN_NAME;
 use crate::services::connector_service::ConnectorSourceRef;
 
+/// Configuration for Apollo Connectors.
+///
+/// https://www.apollographql.com/docs/graphos/routing/configuration/yaml#connectors
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ConnectorsConfig {
@@ -36,6 +38,7 @@ pub(crate) struct ConnectorsConfig {
     pub(crate) max_requests_per_operation_per_source: Option<usize>,
 
     /// When enabled, adds an entry to the context for use in coprocessors
+    ///
     /// ```json
     /// {
     ///   "context": {
@@ -58,7 +61,13 @@ pub(crate) struct ConnectorsConfig {
     /// Feature gate for Connect spec v0.3. Set to `true` to enable the using
     /// the v0.3 spec during the preview phase.
     #[serde(default)]
+    #[deprecated(note = "Connect spec v0.3 is now available.")]
     pub(crate) preview_connect_v0_3: Option<bool>,
+
+    /// Feature gate for Connect spec v0.3. Set to `true` to enable the using
+    /// the v0.3 spec during the preview phase.
+    #[serde(default)]
+    pub(crate) preview_connect_v0_4: Option<bool>,
 }
 
 // TODO: remove this after deprecation period
@@ -67,11 +76,20 @@ pub(crate) struct ConnectorsConfig {
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SubgraphConnectorConfiguration {
     /// A map of `@source(name:)` to configuration for that source
-    pub(crate) sources: HashMap<String, SourceConfiguration>,
+    #[schemars(schema_with = "sources_configuration_schema")]
+    pub(crate) sources: HashMap<SourceName, SourceConfiguration>,
 
     /// Other values that can be used by connectors via `{$config.<key>}`
     #[serde(rename = "$config")]
     pub(crate) custom: CustomConfiguration,
+}
+
+// Custom schema implementation to not restrict key type
+fn sources_configuration_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "object",
+        "additionalProperties": generator.subschema_for::<SourceConfiguration>(),
+    })
 }
 
 /// Configuration for a `@source` directive
@@ -91,18 +109,11 @@ pub(crate) struct SourceConfiguration {
     pub(crate) custom: CustomConfiguration,
 }
 
-fn uri_schema(_generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
-    SchemaObject {
-        instance_type: Some(InstanceType::String.into()),
-        format: Some("uri".to_owned()),
-        extensions: {
-            let mut map = schemars::Map::new();
-            map.insert("nullable".to_owned(), serde_json::json!(true));
-            map
-        },
-        ..Default::default()
-    }
-    .into()
+fn uri_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": ["string", "null"],
+        "format": "uri",
+    })
 }
 
 /// Modifies connectors with values from the configuration
@@ -122,16 +133,18 @@ pub(crate) fn apply_config(
     };
 
     for connector in Arc::make_mut(&mut connectors.by_service_name).values_mut() {
-        if let Ok(source_ref) = ConnectorSourceRef::try_from(&mut *connector) {
-            if let Some(source_config) = config.sources.get(&source_ref.to_string()) {
-                if let Some(uri) = source_config.override_url.as_ref() {
-                    connector.transport.source_url = Some(uri.clone());
-                }
-                if let Some(max_requests) = source_config.max_requests_per_operation {
-                    connector.max_requests = Some(max_requests);
-                }
-                connector.config = Some(source_config.custom.clone());
+        if let Ok(source_ref) = ConnectorSourceRef::try_from(&mut *connector)
+            && let Some(source_config) = config.sources.get(&source_ref.to_string())
+        {
+            if let Some(uri) = source_config.override_url.as_ref() {
+                // Discards potential StringTemplate parsing error as URI should
+                // always be a valid template string.
+                connector.transport.source_template = uri.to_string().parse().ok();
             }
+            if let Some(max_requests) = source_config.max_requests_per_operation {
+                connector.max_requests = Some(max_requests);
+            }
+            connector.config = Some(source_config.custom.clone());
         }
 
         // TODO: remove this after deprecation period
@@ -146,7 +159,9 @@ pub(crate) fn apply_config(
             .and_then(|source_name| subgraph_config.sources.get(source_name))
         {
             if let Some(uri) = source_config.override_url.as_ref() {
-                connector.transport.source_url = Some(uri.clone());
+                // Discards potential StringTemplate parsing error as
+                // URI should always be a valid template string.
+                connector.transport.source_template = uri.to_string().parse().ok();
             }
             if let Some(max_requests) = source_config.max_requests_per_operation {
                 connector.max_requests = Some(max_requests);

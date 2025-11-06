@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
 
+use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::header::ACCEPT;
@@ -42,7 +43,6 @@ use crate::plugin::serde::deserialize_option_header_value;
 use crate::plugin::serde::deserialize_regex;
 use crate::services::SubgraphRequest;
 use crate::services::connector;
-use crate::services::connector::request_service::TransportRequest;
 use crate::services::subgraph;
 
 register_private_plugin!("apollo", "headers", Headers);
@@ -198,6 +198,7 @@ struct ConnectorHeadersConfiguration {
 /// Configuration for header propagation
 #[derive(Clone, JsonSchema, Default, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+#[schemars(rename = "HeadersConfig")]
 struct Config {
     /// Rules to apply to all subgraphs
     all: Option<HeadersLocation>,
@@ -617,8 +618,9 @@ mod test {
     use apollo_federation::connectors::Connector;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
-    use http::Uri;
-    use serde_json::json;
+    use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
+    use apollo_federation::connectors::runtime::key::ResponseKey;
+    use serde_json_bytes::json;
     use subgraph::SubgraphRequestId;
     use tower::BoxError;
 
@@ -628,12 +630,10 @@ mod test {
     use crate::graphql::Request;
     use crate::plugin::test::MockConnectorService;
     use crate::plugin::test::MockSubgraphService;
-    use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::plugins::test::PluginTestHarness;
     use crate::query_planner::fetch::OperationKind;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
-    use crate::services::connector::request_service::transport::http::HttpRequest;
 
     #[test]
     fn test_subgraph_config() {
@@ -1582,45 +1582,17 @@ mod test {
     fn example_connector_response(
         _req: connector::request_service::Request,
     ) -> Result<connector::request_service::Response, BoxError> {
-        let connector = Connector {
-            spec: ConnectSpec::V0_1,
-            id: ConnectId::new(
-                "subgraph_name".into(),
-                None,
-                name!(Query),
-                name!(a),
-                0,
-                "test label",
-            ),
-            transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
-                connect_template: "/path".parse().unwrap(),
-                ..Default::default()
-            },
-            selection: JSONSelection::parse("f").unwrap(),
-            entity_resolver: None,
-            config: Default::default(),
-            max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
-            batch_settings: None,
-            request_headers: Default::default(),
-            response_headers: Default::default(),
-            error_settings: Default::default(),
-        };
         let key = ResponseKey::RootField {
             name: "hello".to_string(),
             inputs: Default::default(),
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
-
-        Ok(connector::request_service::Response::test_builder()
-            .context(Context::new())
-            .connector(Arc::new(connector))
-            .response_key(key)
-            .problems(Default::default())
-            .data(json!(""))
-            .build())
+        Ok(connector::request_service::Response::test_new(
+            key,
+            Vec::new(),
+            json!(""),
+            None,
+        ))
     }
 
     fn example_request() -> SubgraphRequest {
@@ -1677,11 +1649,11 @@ mod test {
                 None,
                 name!(Query),
                 name!(a),
+                None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1689,12 +1661,13 @@ mod test {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
         let key = ResponseKey::RootField {
             name: "hello".to_string(),
@@ -1719,13 +1692,12 @@ mod test {
 
         let http_request = HttpRequest {
             inner: request,
-            debug: None,
+            debug: Default::default(),
         };
 
         connector::request_service::Request {
             context: ctx,
             connector: Arc::new(connector),
-            service_name: String::from("test"),
             transport_request: http_request.into(),
             key,
             mapping_problems: Default::default(),
@@ -1805,7 +1777,7 @@ mod test {
                     if let Some(header) = headers.get(*name) {
                         assert_eq!(header.to_str().unwrap(), *value);
                     } else {
-                        panic!("missing header {}", name);
+                        panic!("missing header {name}");
                     }
                 }
                 Ok(subgraph::Response::fake_builder().build())

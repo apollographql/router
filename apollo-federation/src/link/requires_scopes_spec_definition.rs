@@ -5,6 +5,7 @@ use apollo_compiler::ast::Type;
 use apollo_compiler::name;
 use apollo_compiler::schema::DirectiveLocation;
 
+use crate::link::Purpose;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
@@ -68,7 +69,7 @@ impl RequiresScopesSpecDefinition {
                 DirectiveLocation::Enum,
             ],
             true, // composes
-            Some(&|v| REQUIRES_SCOPES_VERSIONS.get_minimum_required_version(v)),
+            Some(&|v| REQUIRES_SCOPES_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
     }
@@ -96,6 +97,10 @@ impl SpecDefinition for RequiresScopesSpecDefinition {
     fn minimum_federation_version(&self) -> &Version {
         &self.minimum_federation_version
     }
+
+    fn purpose(&self) -> Option<Purpose> {
+        Some(Purpose::SECURITY)
+    }
 }
 
 pub(crate) static REQUIRES_SCOPES_VERSIONS: LazyLock<
@@ -111,19 +116,9 @@ pub(crate) static REQUIRES_SCOPES_VERSIONS: LazyLock<
 
 #[cfg(test)]
 mod test {
-    use apollo_compiler::Node;
-    use apollo_compiler::ast::Argument;
-    use apollo_compiler::ast::Directive;
-    use apollo_compiler::ast::Value;
-    use apollo_compiler::name;
     use itertools::Itertools;
 
-    use super::*;
-    use crate::link::DEFAULT_LINK_NAME;
-    use crate::link::link_spec_definition::LINK_DIRECTIVE_FOR_ARGUMENT_NAME;
-    use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
     use crate::schema::FederationSchema;
-    use crate::schema::position::SchemaDefinitionPosition;
     use crate::subgraph::test_utils::BuildOption;
     use crate::subgraph::test_utils::build_inner_expanded;
 
@@ -132,29 +127,6 @@ mod test {
             .unwrap()
             .schema()
             .to_owned()
-    }
-
-    fn get_schema_with_requires_scopes(version: Version) -> FederationSchema {
-        let mut schema = trivial_schema();
-        let spec = REQUIRES_SCOPES_VERSIONS.find(&version).unwrap();
-        let link = Directive {
-            name: DEFAULT_LINK_NAME,
-            arguments: vec![
-                Node::new(Argument {
-                    name: LINK_DIRECTIVE_URL_ARGUMENT_NAME,
-                    value: spec.url().to_string().into(),
-                }),
-                Node::new(Argument {
-                    name: LINK_DIRECTIVE_FOR_ARGUMENT_NAME,
-                    value: Node::new(Value::Enum(name!("SECURITY"))),
-                }),
-            ],
-        };
-        SchemaDefinitionPosition
-            .insert_directive(&mut schema, link.into())
-            .unwrap();
-        spec.add_elements_to_schema(&mut schema).unwrap();
-        schema
     }
 
     fn requires_scopes_spec_directives_snapshot(schema: &FederationSchema) -> String {
@@ -178,7 +150,7 @@ mod test {
             .types
             .iter()
             .filter_map(|(name, ty)| {
-                if name.as_str().starts_with("requiresScopes__") {
+                if name.as_str().ends_with("__Scope") {
                     Some(ty.to_string())
                 } else {
                     None
@@ -189,13 +161,13 @@ mod test {
 
     #[test]
     fn requires_scopes_spec_v0_1_definitions() {
-        let schema = get_schema_with_requires_scopes(Version { major: 0, minor: 1 });
+        let schema = trivial_schema();
         let types_snapshot = requires_scopes_spec_types_snapshot(&schema);
-        let expected_types = r#"scalar requiresScopes__Scope"#;
+        let expected_types = r#"scalar federation__Scope"#;
         assert_eq!(types_snapshot.trim(), expected_types.trim());
 
         let directives_snapshot: String = requires_scopes_spec_directives_snapshot(&schema);
-        let expected_directives = r#"directive @requiresScopes(scopes: [[requiresScopes__Scope!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM"#;
+        let expected_directives = r#"directive @requiresScopes(scopes: [[federation__Scope!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM"#;
         assert_eq!(directives_snapshot.trim(), expected_directives.trim());
     }
 }

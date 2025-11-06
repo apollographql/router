@@ -45,7 +45,6 @@ fn connect_spec_counts(connectors: &Connectors) -> HashMap<String, u64> {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
     use std::sync::Arc;
 
     use apollo_compiler::name;
@@ -55,7 +54,6 @@ mod tests {
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
     use apollo_federation::connectors::expand::Connectors;
-    use http::Uri;
 
     use crate::metrics::FutureMetricsExt as _;
     use crate::plugins::connectors::tracing::connect_spec_counts;
@@ -71,11 +69,11 @@ mod tests {
                 None,
                 name!(Query),
                 name!(users),
+                None,
                 0,
-                "label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/").unwrap()),
+                source_template: "http://localhost/".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -83,12 +81,13 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "label".into(),
         };
 
         let connectors = Connectors {

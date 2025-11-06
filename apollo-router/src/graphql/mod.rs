@@ -6,6 +6,7 @@ mod visitor;
 
 use std::fmt;
 use std::pin::Pin;
+use std::str::FromStr;
 
 use apollo_compiler::response::GraphQLError as CompilerExecutionError;
 use apollo_compiler::response::ResponseDataPathSegment;
@@ -20,6 +21,7 @@ use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value;
+use uuid::Uuid;
 pub(crate) use visitor::ResponseVisitor;
 
 use crate::json_ext::Object;
@@ -52,15 +54,15 @@ pub struct Location {
 /// as may be found in the `errors` field of a GraphQL [`Response`].
 ///
 /// Converted to (or from) JSON with serde.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 #[non_exhaustive]
 pub struct Error {
     /// The error message.
     pub message: String,
 
     /// The locations of the error in the GraphQL document of the originating request.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub locations: Vec<Location>,
 
     /// If this is a field error, the JSON path to that field in [`Response::data`]
@@ -68,9 +70,26 @@ pub struct Error {
     pub path: Option<Path>,
 
     /// The optional GraphQL extensions for this error.
-    #[serde(default, skip_serializing_if = "Object::is_empty")]
+    #[serde(skip_serializing_if = "Object::is_empty")]
     pub extensions: Object,
+
+    /// A unique identifier for this error
+    #[serde(skip_serializing)]
+    apollo_id: Uuid,
 }
+
+impl Default for Error {
+    fn default() -> Self {
+        Self {
+            message: String::new(),
+            locations: Vec::new(),
+            path: None,
+            extensions: Object::new(),
+            apollo_id: generate_uuid(),
+        }
+    }
+}
+
 // Implement getter and getter_mut to not use pub field directly
 
 #[buildstructor::buildstructor]
@@ -103,37 +122,51 @@ impl Error {
     ///   Optional, may be called multiple times.
     ///   Adds one item to the [`Error::extensions`] map.
     ///
+    /// * `.extension_code(impl Into<`[`String`]`>)`
+    ///   Optional.
+    ///   Sets the "code" in the extension map. Will be ignored if extension already has this key
+    ///   set.
+    ///
+    /// * `.apollo_id(impl Into<`[`Uuid`]`>)`
+    ///   Optional.
+    ///   Sets the unique identifier for this Error. This should only be used in cases of
+    ///   deserialization or testing. If not given, the ID will be auto-generated.
+    ///
     /// * `.build()`
     ///   Finishes the builder and returns a GraphQL [`Error`].
     #[builder(visibility = "pub")]
-    fn new<T: Into<String>>(
+    fn new(
         message: String,
         locations: Vec<Location>,
         path: Option<Path>,
-        extension_code: T,
-        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
+        extension_code: Option<String>,
+        // Skip the `Object` type alias in order to use buildstructor's map special-casing
         mut extensions: JsonMap<ByteString, Value>,
+        apollo_id: Option<Uuid>,
     ) -> Self {
-        extensions
-            .entry("code")
-            .or_insert_with(|| extension_code.into().into());
+        if let Some(code) = extension_code {
+            extensions
+                .entry("code")
+                .or_insert(Value::String(ByteString::from(code)));
+        }
         Self {
             message,
             locations,
             path,
             extensions,
+            apollo_id: apollo_id.unwrap_or_else(Uuid::new_v4),
         }
     }
 
     pub(crate) fn from_value(value: Value) -> Result<Error, MalformedResponseError> {
         let mut object = ensure_object!(value).map_err(|error| MalformedResponseError {
-            reason: format!("invalid error within `errors`: {}", error),
+            reason: format!("invalid error within `errors`: {error}"),
         })?;
 
         let extensions =
             extract_key_value_from_object!(object, "extensions", Value::Object(o) => o)
                 .map_err(|err| MalformedResponseError {
-                    reason: format!("invalid `extensions` within error: {}", err),
+                    reason: format!("invalid `extensions` within error: {err}"),
                 })?
                 .unwrap_or_default();
         let message = match extract_key_value_from_object!(object, "message", Value::String(s) => s)
@@ -143,7 +176,7 @@ impl Error {
                 reason: "missing required `message` property within error".to_owned(),
             }),
             Err(err) => Err(MalformedResponseError {
-                reason: format!("invalid `message` within error: {}", err),
+                reason: format!("invalid `message` within error: {err}"),
             }),
         }?;
         let locations = extract_key_value_from_object!(object, "locations")
@@ -151,22 +184,33 @@ impl Error {
             .map(serde_json_bytes::from_value)
             .transpose()
             .map_err(|err| MalformedResponseError {
-                reason: format!("invalid `locations` within error: {}", err),
+                reason: format!("invalid `locations` within error: {err}"),
             })?
             .unwrap_or_default();
         let path = extract_key_value_from_object!(object, "path")
             .map(serde_json_bytes::from_value)
             .transpose()
             .map_err(|err| MalformedResponseError {
-                reason: format!("invalid `path` within error: {}", err),
+                reason: format!("invalid `path` within error: {err}"),
             })?;
-
-        Ok(Error {
-            message,
-            locations,
-            path,
-            extensions,
+        let apollo_id: Option<Uuid> = extract_key_value_from_object!(
+            object,
+            "apolloId",
+            Value::String(s) => s
+        )
+        .map_err(|err| MalformedResponseError {
+            reason: format!("invalid `apolloId` within error: {err}"),
+        })?
+        .map(|s| {
+            Uuid::from_str(s.as_str()).map_err(|err| MalformedResponseError {
+                reason: format!("invalid `apolloId` within error: {err}"),
+            })
         })
+        .transpose()?;
+
+        Ok(Self::new(
+            message, locations, path, None, extensions, apollo_id,
+        ))
     }
 
     pub(crate) fn from_value_completion_value(value: &Value) -> Option<Error> {
@@ -196,13 +240,46 @@ impl Error {
                 .and_then(|p: &serde_json_bytes::Value| -> Option<Path> {
                     serde_json_bytes::from_value(p.clone()).ok()
                 });
-        Some(Error {
-            message,
-            locations,
-            path,
-            extensions,
+
+        Some(Self::new(
+            message, locations, path, None, extensions,
+            None, // apollo_id is not serialized, so it will never exist in a serialized vc error
+        ))
+    }
+
+    /// Extract the error code from [`Error::extensions`] as a String if it is set.
+    pub fn extension_code(&self) -> Option<String> {
+        self.extensions.get("code").and_then(|c| match c {
+            Value::String(s) => Some(s.as_str().to_owned()),
+            Value::Number(n) => Some(n.to_string()),
+            Value::Null | Value::Array(_) | Value::Object(_) | Value::Bool(_) => None,
         })
     }
+
+    /// Retrieve the internal Apollo unique ID for this error
+    pub fn apollo_id(&self) -> Uuid {
+        self.apollo_id
+    }
+
+    /// Returns a duplicate of the error where [`self.apollo_id`] is now the given ID
+    pub fn with_apollo_id(&self, id: Uuid) -> Self {
+        let mut new_err = self.clone();
+        new_err.apollo_id = id;
+        new_err
+    }
+
+    #[cfg(test)]
+    /// Returns a duplicate of the error where [`self.apollo_id`] is `Uuid::nil()`. Used for
+    /// comparing errors in tests where you cannot control the randomly generated Uuid
+    pub fn with_null_id(&self) -> Self {
+        self.with_apollo_id(Uuid::nil())
+    }
+}
+
+/// Generate a random Uuid. For use in generating a default [`Error::apollo_id`] when not supplied
+/// during deserialization.
+fn generate_uuid() -> Uuid {
+    Uuid::new_v4()
 }
 
 /// GraphQL spec require that both "line" and "column" are positive numbers.
@@ -282,6 +359,44 @@ impl From<CompilerExecutionError> for Error {
             locations,
             path,
             extensions,
+            apollo_id: Uuid::new_v4(),
         }
     }
+}
+
+/// Assert that the expected and actual [`Error`] are equal when ignoring their
+/// [`Error::apollo_id`].
+#[macro_export]
+macro_rules! assert_error_eq_ignoring_id {
+    ($expected:expr, $actual:expr) => {
+        assert_eq!($expected.with_null_id(), $actual.with_null_id());
+    };
+}
+
+/// Assert that the expected and actual lists of [`Error`] are equal when ignoring their
+/// [`Error::apollo_id`].
+#[macro_export]
+macro_rules! assert_errors_eq_ignoring_id {
+    ($expected:expr, $actual:expr) => {{
+        let normalize =
+            |v: &[graphql::Error]| v.iter().map(|e| e.with_null_id()).collect::<Vec<_>>();
+
+        assert_eq!(normalize(&$expected), normalize(&$actual));
+    }};
+}
+
+/// Assert that the expected and actual [`Response`] are equal when ignoring the
+/// [`Error::apollo_id`] on any [`Error`] in their [`Response::errors`].
+#[macro_export]
+macro_rules! assert_response_eq_ignoring_error_id {
+    ($expected:expr, $actual:expr) => {{
+        let normalize =
+            |v: &[graphql::Error]| v.iter().map(|e| e.with_null_id()).collect::<Vec<_>>();
+        let mut expected_response: graphql::Response = $expected.clone();
+        let mut actual_response: graphql::Response = $actual.clone();
+        expected_response.errors = normalize(&expected_response.errors);
+        actual_response.errors = normalize(&actual_response.errors);
+
+        assert_eq!(expected_response, actual_response);
+    }};
 }

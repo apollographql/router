@@ -8,7 +8,7 @@ use http::Uri;
 use insta::assert_json_snapshot;
 use regex::Regex;
 use rust_embed::RustEmbed;
-use schemars::r#gen::SchemaSettings;
+use schemars::generate::SchemaSettings;
 use serde_json::json;
 use walkdir::DirEntry;
 use walkdir::WalkDir;
@@ -17,6 +17,7 @@ use super::schema::Mode;
 use super::schema::validate_yaml_configuration;
 use super::subgraph::SubgraphConfiguration;
 use super::*;
+use crate::configuration::cors::Policy;
 use crate::error::SchemaError;
 
 #[cfg(unix)]
@@ -32,6 +33,12 @@ fn schema_generation() {
         json_schema.len() < 500 * 1024,
         "schema must be less than 500kb"
     );
+}
+
+#[test]
+fn schema_is_valid() {
+    let schema = generate_config_schema();
+    jsonschema::draft7::meta::validate(schema.as_value()).expect("generated schema must be valid");
 }
 
 #[test]
@@ -82,21 +89,48 @@ fn missing_subgraph_url() {
 #[test]
 fn cors_defaults() {
     let cors = Cors::builder().build();
-
+    let policies = cors.policies.unwrap();
+    assert_eq!(policies.len(), 1);
     assert_eq!(
-        ["https://studio.apollographql.com"],
-        cors.origins.as_slice()
+        policies[0].origins,
+        Arc::from(["https://studio.apollographql.com".into()])
     );
     assert!(
         !cors.allow_any_origin,
         "Allow any origin should be disabled by default"
     );
-    assert!(cors.allow_headers.is_empty());
-
-    assert!(
-        cors.match_origins.is_none(),
-        "No origin regex list should be present by default"
+    assert_eq!(
+        cors.methods,
+        Arc::from(["GET".into(), "POST".into(), "OPTIONS".into()])
     );
+    assert!(cors.max_age.is_none());
+}
+
+#[test]
+fn cors_single_origin_config() {
+    let cors = Cors::builder()
+        .max_age(std::time::Duration::from_secs(3600))
+        .policies(vec![
+            Policy::builder()
+                .origins(vec!["https://trusted.com".into()])
+                .allow_credentials(true)
+                .allow_headers(vec!["content-type".into(), "authorization".into()])
+                .expose_headers(vec!["x-custom-header".into()])
+                .methods(vec!["GET".into(), "POST".into()])
+                .build(),
+        ])
+        .build();
+    let policies = cors.policies.unwrap();
+    assert_eq!(policies.len(), 1);
+    let oc = &policies[0];
+    assert_eq!(oc.origins, Arc::from(["https://trusted.com".into()]));
+    assert!(oc.allow_credentials.unwrap());
+    assert_eq!(
+        oc.allow_headers,
+        Arc::from(["content-type".into(), "authorization".into()])
+    );
+    assert_eq!(oc.expose_headers, Arc::from(["x-custom-header".into()]));
+    assert_eq!(oc.methods, Some(Arc::from(["GET".into(), "POST".into()])));
 }
 
 #[test]
@@ -305,7 +339,7 @@ cors:
         .expect_err("should have resulted in an error");
     assert_eq!(
         error,
-        "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Headers: *`"
+        "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Headers: *` in policy"
     );
 }
 
@@ -327,12 +361,12 @@ cors:
         .expect_err("should have resulted in an error");
     assert_eq!(
         error,
-        "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Methods: *`"
+        "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Methods: *` in policy"
     );
 }
 
 #[test]
-fn it_does_not_allow_invalid_cors_origins() {
+fn cors_does_not_allow_invalid_cors_origins() {
     let cfg = validate_yaml_configuration(
         r#"
 cors:
@@ -354,12 +388,12 @@ cors:
 }
 
 #[test]
-fn it_doesnt_allow_origins_wildcard() {
+fn cors_doesnt_allow_origins_wildcard() {
     let cfg = validate_yaml_configuration(
         r#"
 cors:
-  origins:
-    - "*"
+  policies:
+    - origins: ["*"]
         "#,
         Expansion::default().unwrap(),
         Mode::NoUpgrade,
@@ -432,10 +466,17 @@ fn validate_project_config_files() {
                     .mocked_env_var("JAEGER_HOST", "http://example.com")
                     .mocked_env_var("JAEGER_USERNAME", "username")
                     .mocked_env_var("JAEGER_PASSWORD", "pass")
+                    .mocked_env_var("REDIS_PASSWORD", "pass")
                     .mocked_env_var("ZIPKIN_HOST", "http://example.com")
                     .mocked_env_var("TEST_CONFIG_ENDPOINT", "http://example.com")
                     .mocked_env_var("TEST_CONFIG_COLLECTOR_ENDPOINT", "http://example.com")
                     .mocked_env_var("PARSER_MAX_RECURSION", "500")
+                    .mocked_env_var("AWS_ROLE_ARN", "arn:aws:iam::12345678:role/SomeRole")
+                    .mocked_env_var("INVALIDATION_SHARED_KEY", "invalidation")
+                    .mocked_env_var(
+                        "INVALIDATION_SHARED_KEY_PRODUCTS",
+                        "invalidation-for-products",
+                    )
                     .build()
                     .unwrap();
 
@@ -685,8 +726,16 @@ fn upgrade_old_minor_configuration() {
 
 #[test]
 fn all_properties_are_documented() {
-    let schema = serde_json::to_value(generate_config_schema())
-        .expect("must be able to convert the schema to json");
+    // Not using `generate_config_schema` here because of custom configuration.
+    // By inlining all sub-schemas we don't have to resolve references.
+    let generator = SchemaSettings::draft07()
+        .with(|s| {
+            s.inline_subschemas = true;
+        })
+        .into_generator();
+
+    let schema = generator.into_root_schema_for::<Configuration>();
+    let schema = serde_json::to_value(schema).expect("must be able to convert the schema to json");
 
     let mut errors = Vec::new();
     visit_schema("", &schema, &mut errors);
@@ -701,6 +750,14 @@ fn all_properties_are_documented() {
 #[test]
 fn default_config_has_defaults() {
     insta::assert_yaml_snapshot!(Configuration::default().validated_yaml);
+}
+
+#[rstest::rstest]
+#[case("")]
+#[case("plugins:")]
+fn unusual_configs_validate(#[case] input: &str) {
+    validate_yaml_configuration(input, Expansion::builder().build(), Mode::NoUpgrade)
+        .expect("should be valid configuration");
 }
 
 fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
@@ -838,8 +895,6 @@ impl Default for PluginConfig {
 #[test]
 fn test_subgraph_override() {
     let settings = SchemaSettings::draft2019_09().with(|s| {
-        s.option_nullable = true;
-        s.option_add_null_type = false;
         s.inline_subschemas = true;
     });
     let generator = settings.into_generator();
@@ -940,7 +995,7 @@ fn test_deserialize_derive_default() {
             if deserialize_regex.is_match(line) {
                 // Get the struct name
                 if let Some(struct_name) = find_struct_name(&lines, line_number) {
-                    let manual_implementation = format!("impl Default for {} ", struct_name);
+                    let manual_implementation = format!("impl Default for {struct_name} ");
 
                     let has_field_level_defaults =
                         has_field_level_serde_defaults(&lines, line_number);
@@ -1226,4 +1281,43 @@ fn find_struct_name(lines: &[&str], line_number: usize) -> Option<String> {
             })
         })
         .next()
+}
+
+#[test]
+fn it_prevents_enablement_of_both_subgraph_caching_plugins() {
+    let make_config = |response_cache_enabled, entity_cache_enabled| {
+        let mut config = json!({});
+        if let Some(enabled) = response_cache_enabled {
+            config.as_object_mut().unwrap().insert(
+                "preview_response_cache".to_string(),
+                json!({"enabled": enabled}),
+            );
+        }
+        if let Some(enabled) = entity_cache_enabled {
+            config.as_object_mut().unwrap().insert(
+                "preview_entity_cache".to_string(),
+                json!({"enabled": enabled}),
+            );
+        }
+        config
+    };
+
+    let _: Configuration =
+        serde_json::from_value(make_config(None, None)).expect("neither plugin configured");
+
+    let _: Configuration = serde_json::from_value(make_config(Some(true), None))
+        .expect("response cache plugin configured");
+
+    let _: Configuration = serde_json::from_value(make_config(Some(true), Some(false)))
+        .expect("response cache plugin configured");
+
+    let _: Configuration = serde_json::from_value(make_config(None, Some(true)))
+        .expect("entity cache plugin configured");
+
+    let _: Configuration = serde_json::from_value(make_config(Some(false), Some(true)))
+        .expect("entity cache plugin configured");
+
+    let config_result: Result<Configuration, _> =
+        serde_json::from_value(make_config(Some(true), Some(true)));
+    config_result.expect_err("both plugins configured");
 }

@@ -4,6 +4,7 @@
 /apollo-federation/src/connectors @apollographql/graph-dev
 /apollo-router/ @apollographql/router-core
 /apollo-router/src/plugins/connectors @apollographql/graph-dev
+/apollo-router/src/plugins/fleet_detector.rs @apollographql/cloud-fleet
 /apollo-router-benchmarks/ @apollographql/router-core @apollographql/fed-core
 /examples/ @apollographql/router-core @apollographql/fed-core
 /.github/CODEOWNERS @apollographql/router-core @apollographql/fed-core

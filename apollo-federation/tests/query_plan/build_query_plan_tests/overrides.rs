@@ -25,7 +25,6 @@ fn it_handles_progressive_override_on_root_fields() {
         "#,
         QueryPlanOptions {
             override_conditions: vec!["test".to_string()],
-            check_for_cooperative_cancellation: None,
             ..Default::default()
         },
         @r###"
@@ -120,7 +119,6 @@ fn it_handles_progressive_override_on_entity_fields() {
         "#,
         QueryPlanOptions {
             override_conditions: vec!["test".to_string()],
-            check_for_cooperative_cancellation: None,
             ..Default::default()
         },
         @r###"
@@ -281,7 +279,6 @@ fn it_handles_progressive_override_on_nested_entity_fields() {
         "#,
         QueryPlanOptions {
             override_conditions: vec!["test".to_string()],
-            check_for_cooperative_cancellation: None,
             ..Default::default()
         },
         @r###"
@@ -377,5 +374,90 @@ fn it_does_not_override_unset_labels_on_nested_entity_fields() {
             },
           }
       "###
+    );
+}
+
+#[test]
+fn override_a_field_from_an_interface() {
+    let planner = planner!(
+        subgraphA: r#"
+          interface IImage {
+            id: ID!
+            absoluteUri: String!
+          }
+          type Image implements IImage @key(fields: "id") {
+            id: ID!
+            absoluteUri: String!
+          }
+          extend type AssetMetadata @key(fields: "id") {
+            id: ID!
+            image: Image
+          }
+        "#,
+        subgraphB: r#"
+          type Image @key(fields: "id") {
+            id: ID!
+            absoluteUri: String! @override(from: "subgraphA", label: "percent(1)")
+          }
+          type AssetMetadata @key(fields: "id") {
+            id: ID!
+            image: Image @override(from: "subgraphA", label: "percent(1)")
+          }
+        "#,
+        subgraphC: r#"
+          type Query {
+            assetMetadata(id: ID!): AssetMetadata
+          }
+          type AssetMetadata @key(fields: "id") {
+            id: ID!
+            name: String!
+          }
+        "#,
+    );
+
+    assert_plan!(
+        &planner,
+        r#"
+          query TestQuery($id: ID!) {
+            assetMetadata(id: $id) {
+              __typename
+              image {
+                absoluteUri
+              }
+            }
+          }
+        "#,
+        @r###"
+          QueryPlan {
+            Sequence {
+              Fetch(service: "subgraphC") {
+                {
+                  assetMetadata(id: $id) {
+                    __typename
+                    id
+                  }
+                }
+              },
+              Flatten(path: "assetMetadata") {
+                Fetch(service: "subgraphA") {
+                  {
+                    ... on AssetMetadata {
+                      __typename
+                      id
+                    }
+                  } =>
+                  {
+                    ... on AssetMetadata {
+                      __typename
+                      image {
+                        absoluteUri
+                      }
+                    }
+                  }
+                },
+              },
+            },
+          }
+        "###
     );
 }

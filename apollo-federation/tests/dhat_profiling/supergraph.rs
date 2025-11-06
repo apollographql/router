@@ -15,8 +15,8 @@ fn valid_supergraph_schema() {
     const MAX_BYTES_SUPERGRAPH: usize = 135_050; // ~135 KiB. actual number: 128605
 
     // Total number of allocations with a 5% buffer.
-    // Actual number: 4889.
-    const MAX_ALLOCATIONS_SUPERGRAPH: u64 = 5_150; // number of allocations. actual number: 4889
+    // Actual number: 4929.
+    const MAX_ALLOCATIONS_SUPERGRAPH: u64 = 5_150; // number of allocations.
 
     // Number of bytes when the heap size reached its global maximum with a 5% buffer.
     // Actual number: 188_420.
@@ -25,10 +25,10 @@ fn valid_supergraph_schema() {
     const MAX_BYTES_API_SCHEMA: usize = 197_900; // ~200 KiB
 
     // Total number of allocations with a 5% buffer.
-    // Actual number: 5_535.
+    // Actual number: 5584.
     //
-    // API schema has an additional 646 allocations (5_535-4_889=646).
-    const MAX_ALLOCATIONS_API_SCHEMA: u64 = 5_800;
+    // API schema has an additional 655 allocations (= 5584 - 4929).
+    const MAX_ALLOCATIONS_API_SCHEMA: u64 = 5863;
 
     // Number of bytes when the heap size reached its global maximum with a 5% buffer.
     // Actual number: 552_781.
@@ -37,10 +37,10 @@ fn valid_supergraph_schema() {
     const MAX_BYTES_SUBGRAPHS: usize = 580_420; // ~600 KiB
 
     // Total number of allocations with a 5% buffer.
-    // Actual number: 12_185.
+    // Actual number: 13205.
     //
-    // Extract subgraphs from supergraph has an additional 6_650 allocations (12_185-5_535=6_650).
-    const MAX_ALLOCATIONS_SUBGRAPHS: u64 = 12_800;
+    // Extract subgraphs from supergraph has an additional 7621 allocations (= 13205 - 5584).
+    const MAX_ALLOCATIONS_SUBGRAPHS: u64 = 13865;
 
     let schema = std::fs::read_to_string(SCHEMA).unwrap();
 
@@ -49,12 +49,14 @@ fn valid_supergraph_schema() {
     let supergraph =
         apollo_federation::Supergraph::new(&schema).expect("supergraph should be valid");
     let stats = dhat::HeapStats::get();
+    println!("Supergraph::new: {stats:?}");
     dhat::assert!(stats.max_bytes < MAX_BYTES_SUPERGRAPH);
     dhat::assert!(stats.total_blocks < MAX_ALLOCATIONS_SUPERGRAPH);
 
     let api_options = apollo_federation::ApiSchemaOptions::default();
     let _api_schema = supergraph.to_api_schema(api_options);
     let stats = dhat::HeapStats::get();
+    println!("supergraph.to_api_schema: {stats:?}");
     dhat::assert!(stats.max_bytes < MAX_BYTES_API_SCHEMA);
     dhat::assert!(stats.total_blocks < MAX_ALLOCATIONS_API_SCHEMA);
 
@@ -62,6 +64,7 @@ fn valid_supergraph_schema() {
         .extract_subgraphs()
         .expect("subgraphs should be extracted");
     let stats = dhat::HeapStats::get();
+    println!("supergraph.extract_subgraphs: {stats:?}");
     dhat::assert!(stats.max_bytes < MAX_BYTES_SUBGRAPHS);
     dhat::assert!(stats.total_blocks < MAX_ALLOCATIONS_SUBGRAPHS);
 }

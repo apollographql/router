@@ -2,9 +2,11 @@
 
 use std::collections::HashMap;
 
+use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::Type;
+use apollo_compiler::ast::Value;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
@@ -14,8 +16,8 @@ use crate::connectors::id::ConnectedElement;
 use crate::connectors::json_selection::SelectionTrie;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
-use crate::connectors::validation::graphql::GraphQLString;
 use crate::connectors::validation::graphql::SchemaInfo;
+use crate::connectors::validation::graphql::subslice_location;
 use crate::connectors::variable::Namespace;
 use crate::connectors::variable::VariableContext;
 use crate::connectors::variable::VariableReference;
@@ -55,7 +57,7 @@ impl<'a> VariableResolver<'a> {
     pub(super) fn resolve(
         &self,
         reference: &VariableReference<Namespace>,
-        expression: GraphQLString,
+        node: &Node<Value>,
     ) -> Result<(), Message> {
         if !self
             .context
@@ -73,12 +75,12 @@ impl<'a> VariableResolver<'a> {
                     .namespace
                     .location
                     .iter()
-                    .flat_map(|range| expression.line_col_for_subslice(range.clone(), self.schema))
+                    .flat_map(|range| subslice_location(node, range.clone(), self.schema))
                     .collect(),
             });
         }
         if let Some(resolver) = self.resolvers.get(&reference.namespace.namespace) {
-            resolver.check(reference, expression, self.schema)?;
+            resolver.check(reference, node, self.schema)?;
         }
         Ok(())
     }
@@ -89,7 +91,7 @@ pub(crate) trait NamespaceResolver {
     fn check(
         &self,
         reference: &VariableReference<Namespace>,
-        expression: GraphQLString,
+        node: &Node<Value>,
         schema: &SchemaInfo,
     ) -> Result<(), Message>;
 }
@@ -117,7 +119,7 @@ pub(super) fn resolve_type<'schema>(
 fn resolve_path(
     schema: &SchemaInfo,
     path_selection: &SelectionTrie,
-    expression: GraphQLString,
+    node: &Node<Value>,
     field_type: &Type,
     field: &Component<FieldDefinition>,
 ) -> Result<(), Message> {
@@ -152,7 +154,7 @@ fn resolve_path(
                         ),
                         locations: path_selection
                             .key_ranges(nested_field_name)
-                            .flat_map(|range| expression.line_col_for_subslice(range, schema))
+                            .flat_map(|range| subslice_location(node, range, schema))
                             .collect(),
                     })
             })
@@ -166,7 +168,7 @@ fn resolve_path(
                 }
             })?;
 
-        resolve_path(schema, sub_trie, expression, &nested_field_type, field)?;
+        resolve_path(schema, sub_trie, node, &nested_field_type, field)?;
     }
 
     Ok(())
@@ -188,7 +190,7 @@ impl NamespaceResolver for ThisResolver<'_> {
     fn check(
         &self,
         reference: &VariableReference<Namespace>,
-        expression: GraphQLString,
+        node: &Node<Value>,
         schema: &SchemaInfo,
     ) -> Result<(), Message> {
         for (root, sub_trie) in reference.selection.iter() {
@@ -205,12 +207,12 @@ impl NamespaceResolver for ThisResolver<'_> {
                     locations: reference
                         .selection
                         .key_ranges(root)
-                        .flat_map(|range| expression.line_col_for_subslice(range, schema))
+                        .flat_map(|range| subslice_location(node, range, schema))
                         .collect(),
                 })
                 .map(|field| field.ty.clone())?;
 
-            resolve_path(schema, sub_trie, expression, &field_type, self.field)?;
+            resolve_path(schema, sub_trie, node, &field_type, self.field)?;
         }
 
         Ok(())
@@ -232,7 +234,7 @@ impl NamespaceResolver for ArgsResolver<'_> {
     fn check(
         &self,
         reference: &VariableReference<Namespace>,
-        expression: GraphQLString,
+        node: &Node<Value>,
         schema: &SchemaInfo,
     ) -> Result<(), Message> {
         for (root, sub_trie) in reference.selection.iter() {
@@ -251,11 +253,11 @@ impl NamespaceResolver for ArgsResolver<'_> {
                     locations: reference
                         .selection
                         .key_ranges(root)
-                        .flat_map(|range| expression.line_col_for_subslice(range, schema))
+                        .flat_map(|range| subslice_location(node, range, schema))
                         .collect(),
                 })?;
 
-            resolve_path(schema, sub_trie, expression, &field_type, self.field)?;
+            resolve_path(schema, sub_trie, node, &field_type, self.field)?;
         }
 
         Ok(())

@@ -1,208 +1,27 @@
 use std::sync::Arc;
 
-use apollo_compiler::Name;
-use apollo_compiler::collections::HashSet;
-use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
-use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::EntityResolver;
-use apollo_federation::connectors::JSONSelection;
-use apollo_federation::connectors::Namespace;
+use apollo_federation::connectors::runtime::debug::ConnectorContext;
+use apollo_federation::connectors::runtime::http_json_transport::HttpJsonTransportError;
+use apollo_federation::connectors::runtime::http_json_transport::make_request;
+use apollo_federation::connectors::runtime::inputs::RequestInputs;
+use apollo_federation::connectors::runtime::key::ResponseKey;
 use parking_lot::Mutex;
-use request_merger::MappingContextMerger;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Map;
-use serde_json_bytes::Value;
 
-use super::http_json_transport::HttpJsonTransportError;
-use super::http_json_transport::make_request;
 use crate::Context;
-use crate::json_ext::Path;
-use crate::json_ext::PathElement;
-use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::services::connect;
 use crate::services::connector::request_service::Request;
-
-pub(crate) mod request_merger;
 
 const REPRESENTATIONS_VAR: &str = "representations";
 const ENTITIES: &str = "_entities";
 const TYPENAME: &str = "__typename";
 
-#[derive(Clone, Default)]
-pub(crate) struct RequestInputs {
-    args: Map<ByteString, Value>,
-    this: Map<ByteString, Value>,
-    pub(crate) batch: Vec<Map<ByteString, Value>>,
-}
-
-impl RequestInputs {
-    /// Creates a map for use in JSONSelection::apply_with_vars. It only clones
-    /// values into the map if the variable namespaces (`$args`, `$this`, etc.)
-    /// are actually referenced in the expressions for URLs, headers, body, or selection.
-    pub(crate) fn merger(self, variables_used: &HashSet<Namespace>) -> MappingContextMerger {
-        MappingContextMerger {
-            inputs: self,
-            variables_used,
-            config: None,
-            context: None,
-            status: None,
-            request: None,
-            response: None,
-        }
-    }
-}
-
-impl std::fmt::Debug for RequestInputs {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "RequestInputs {{\n    args: {},\n    this: {},\n    batch: {}\n}}",
-            serde_json::to_string(&self.args).unwrap_or("<invalid JSON>".to_string()),
-            serde_json::to_string(&self.this).unwrap_or("<invalid JSON>".to_string()),
-            serde_json::to_string(&self.batch).unwrap_or("<invalid JSON>".to_string()),
-        )
-    }
-}
-
-#[derive(Clone)]
-pub(crate) enum ResponseKey {
-    RootField {
-        name: String,
-        selection: Arc<JSONSelection>,
-        inputs: RequestInputs,
-    },
-    Entity {
-        index: usize,
-        selection: Arc<JSONSelection>,
-        inputs: RequestInputs,
-    },
-    EntityField {
-        index: usize,
-        field_name: String,
-        /// Is Some only if the output type is a concrete object type. If it's
-        /// an interface, it's treated as an interface object and we can't emit
-        /// a __typename in the response.
-        typename: Option<Name>,
-        selection: Arc<JSONSelection>,
-        inputs: RequestInputs,
-    },
-    BatchEntity {
-        selection: Arc<JSONSelection>,
-        keys: Valid<FieldSet>,
-        inputs: RequestInputs,
-    },
-}
-
-impl ResponseKey {
-    pub(crate) fn selection(&self) -> &JSONSelection {
-        match self {
-            ResponseKey::RootField { selection, .. } => selection,
-            ResponseKey::Entity { selection, .. } => selection,
-            ResponseKey::EntityField { selection, .. } => selection,
-            ResponseKey::BatchEntity { selection, .. } => selection,
-        }
-    }
-
-    pub(crate) fn inputs(&self) -> &RequestInputs {
-        match self {
-            ResponseKey::RootField { inputs, .. } => inputs,
-            ResponseKey::Entity { inputs, .. } => inputs,
-            ResponseKey::EntityField { inputs, .. } => inputs,
-            ResponseKey::BatchEntity { inputs, .. } => inputs,
-        }
-    }
-}
-
-/// Convert a ResponseKey into a Path for use in GraphQL errors. This mimics
-/// the behavior of a GraphQL subgraph, including the `_entities` field. When
-/// the path gets to [`FetchNode::response_at_path`], it will be amended and
-/// appended to a parent path to create the full path to the field. For ex:
-///
-/// - parent path: `["posts", @, "user"]
-/// - path from key: `["_entities", 0, "user", "profile"]`
-/// - result: `["posts", 1, "user", "profile"]`
-impl From<&ResponseKey> for Path {
-    fn from(key: &ResponseKey) -> Self {
-        match key {
-            ResponseKey::RootField { name, .. } => {
-                Path::from_iter(vec![PathElement::Key(name.to_string(), None)])
-            }
-            ResponseKey::Entity { index, .. } => Path::from_iter(vec![
-                PathElement::Key("_entities".to_string(), None),
-                PathElement::Index(*index),
-            ]),
-            ResponseKey::EntityField {
-                index, field_name, ..
-            } => Path::from_iter(vec![
-                PathElement::Key("_entities".to_string(), None),
-                PathElement::Index(*index),
-                PathElement::Key(field_name.clone(), None),
-            ]),
-            ResponseKey::BatchEntity { .. } => {
-                Path::from_iter(vec![PathElement::Key("_entities".to_string(), None)])
-            }
-        }
-    }
-}
-
-impl std::fmt::Debug for ResponseKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::RootField {
-                name,
-                selection,
-                inputs,
-            } => f
-                .debug_struct("RootField")
-                .field("name", name)
-                .field("selection", &selection.to_string())
-                .field("inputs", inputs)
-                .finish(),
-            Self::Entity {
-                index,
-                selection,
-                inputs,
-            } => f
-                .debug_struct("Entity")
-                .field("index", index)
-                .field("selection", &selection.to_string())
-                .field("inputs", inputs)
-                .finish(),
-            Self::EntityField {
-                index,
-                field_name,
-                typename,
-                selection,
-                inputs,
-            } => f
-                .debug_struct("EntityField")
-                .field("index", index)
-                .field("field_name", field_name)
-                .field("typename", typename)
-                .field("selection", &selection.to_string())
-                .field("inputs", inputs)
-                .finish(),
-            Self::BatchEntity {
-                selection,
-                keys,
-                inputs,
-            } => f
-                .debug_struct("BatchEntity")
-                .field("selection", &selection.to_string())
-                .field("key_selection", &keys.serialize().no_indent().to_string())
-                .field("inputs", inputs)
-                .finish(),
-        }
-    }
-}
-
 pub(crate) fn make_requests(
     request: connect::Request,
     context: &Context,
     connector: Arc<Connector>,
-    service_name: &str,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<Vec<Request>, MakeRequestError> {
     let request_params = match connector.entity_resolver {
@@ -216,20 +35,12 @@ pub(crate) fn make_requests(
         None => root_fields(connector.clone(), &request),
     }?;
 
-    request_params_to_requests(
-        context,
-        connector,
-        service_name,
-        request_params,
-        request,
-        debug,
-    )
+    request_params_to_requests(context, connector, request_params, request, debug)
 }
 
 fn request_params_to_requests(
     context: &Context,
     connector: Arc<Connector>,
-    service_name: &str,
     request_params: Vec<ResponseKey>,
     original_request: connect::Request,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
@@ -242,22 +53,21 @@ fn request_params_to_requests(
             response_key
                 .inputs()
                 .clone()
-                .merger(&connector.request_variables)
+                .merger(&connector.request_variable_keys)
                 .config(connector.config.as_ref())
                 .context(&original_request.context)
                 .request(
                     &connector.request_headers,
-                    &original_request.supergraph_request,
+                    original_request.supergraph_request.headers(),
                 )
                 .merge(),
-            &original_request,
+            original_request.supergraph_request.headers(),
             debug,
         )?;
 
         results.push(Request {
             context: context.clone(),
             connector,
-            service_name: service_name.to_string(),
             transport_request,
             key: response_key,
             mapping_problems,
@@ -701,26 +511,27 @@ fn batch_entities_from_request(
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
     use std::sync::Arc;
 
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
     use apollo_compiler::executable::FieldSet;
     use apollo_compiler::name;
+    use apollo_federation::connectors::ConnectBatchArguments;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
     use apollo_federation::connectors::Connector;
-    use apollo_federation::connectors::ConnectorBatchSettings;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
-    use http::Uri;
+    use apollo_federation::connectors::StringTemplate;
+    use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
     use insta::assert_debug_snapshot;
 
     use crate::Context;
     use crate::graphql;
     use crate::query_planner::fetch::Variables;
-    use crate::services::connector::request_service::TransportRequest;
+
+    const DEFAULT_CONNECT_SPEC: ConnectSpec = ConnectSpec::V0_2;
 
     #[test]
     fn test_root_fields_simple() {
@@ -758,11 +569,11 @@ mod tests {
                 None,
                 name!(Query),
                 name!(a),
+                None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -770,12 +581,13 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
 
         assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r#"
@@ -843,11 +655,11 @@ mod tests {
                 None,
                 name!(Query),
                 name!(b),
+                None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -855,12 +667,13 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
 
         assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r#"
@@ -954,11 +767,11 @@ mod tests {
                 None,
                 name!(Query),
                 name!(c),
+                None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -966,12 +779,13 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
 
         assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r#"
@@ -1077,11 +891,11 @@ mod tests {
                 None,
                 name!(Query),
                 name!(entity),
+                None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1089,12 +903,13 @@ mod tests {
             entity_resolver: Some(super::EntityResolver::Explicit),
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1199,11 +1014,11 @@ mod tests {
                 None,
                 name!(Query),
                 name!(entity),
+                None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1211,12 +1026,13 @@ mod tests {
             entity_resolver: Some(super::EntityResolver::Explicit),
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1302,11 +1118,11 @@ mod tests {
                 None,
                 name!(Query),
                 name!(entity),
+                None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1314,12 +1130,13 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1427,11 +1244,11 @@ mod tests {
                 None,
                 name!(Entity),
                 name!(field),
+                None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1439,12 +1256,13 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1587,11 +1405,11 @@ mod tests {
                 None,
                 name!(Entity),
                 name!(field),
+                None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1599,12 +1417,13 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1744,11 +1563,11 @@ mod tests {
                 None,
                 name!(Entity),
                 name!(field),
+                None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1756,12 +1575,13 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1868,15 +1688,9 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
-            id: ConnectId::new_on_object(
-                "subgraph_name".into(),
-                None,
-                name!(Entity),
-                0,
-                "test label",
-            ),
+            id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1884,19 +1698,20 @@ mod tests {
             entity_resolver: Some(super::EntityResolver::TypeBatch),
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
+        assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
         [
             BatchEntity {
                 selection: "id\nfield\nalias: field",
-                key_selection: "id",
+                key: "id",
                 inputs: RequestInputs {
                     args: {},
                     this: {},
@@ -1904,7 +1719,7 @@ mod tests {
                 },
             },
         ]
-        "#);
+        "###);
     }
 
     #[test]
@@ -1983,15 +1798,9 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
-            id: ConnectId::new_on_object(
-                "subgraph_name".into(),
-                None,
-                name!(Entity),
-                0,
-                "test label",
-            ),
+            id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1999,19 +1808,20 @@ mod tests {
             entity_resolver: Some(super::EntityResolver::TypeBatch),
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
-            batch_settings: Some(ConnectorBatchSettings { max_size: Some(10) }),
+            batch_settings: Some(ConnectBatchArguments { max_size: Some(10) }),
             request_headers: Default::default(),
             response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
+        assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
         [
             BatchEntity {
                 selection: "id\nfield\nalias: field",
-                key_selection: "id",
+                key: "id",
                 inputs: RequestInputs {
                     args: {},
                     this: {},
@@ -2019,7 +1829,7 @@ mod tests {
                 },
             },
         ]
-        "#);
+        "###);
     }
 
     #[test]
@@ -2103,15 +1913,9 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
-            id: ConnectId::new_on_object(
-                "subgraph_name".into(),
-                None,
-                name!(Entity),
-                0,
-                "test label",
-            ),
+            id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -2119,19 +1923,20 @@ mod tests {
             entity_resolver: Some(super::EntityResolver::TypeBatch),
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
-            batch_settings: Some(ConnectorBatchSettings { max_size: Some(5) }),
+            batch_settings: Some(ConnectBatchArguments { max_size: Some(5) }),
             request_headers: Default::default(),
             response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
 
-        assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
+        assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
         [
             BatchEntity {
                 selection: "id\nfield\nalias: field",
-                key_selection: "id",
+                key: "id",
                 inputs: RequestInputs {
                     args: {},
                     this: {},
@@ -2140,7 +1945,7 @@ mod tests {
             },
             BatchEntity {
                 selection: "id\nfield\nalias: field",
-                key_selection: "id",
+                key: "id",
                 inputs: RequestInputs {
                     args: {},
                     this: {},
@@ -2148,7 +1953,7 @@ mod tests {
                 },
             },
         ]
-        "#);
+        "###);
     }
 
     #[test]
@@ -2226,29 +2031,28 @@ mod tests {
             .build();
 
         let connector = Connector {
-            spec: ConnectSpec::V0_1,
-            id: ConnectId::new_on_object(
-                "subgraph_name".into(),
-                None,
-                name!(Entity),
-                0,
-                "test label",
-            ),
+            spec: DEFAULT_CONNECT_SPEC,
+            id: ConnectId::new_on_object("subgraph_name".into(), None, name!(Entity), None, 0),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
-                connect_template: "/path?id={$this.id}".parse().unwrap(),
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: StringTemplate::parse_with_spec(
+                    "/path?id={$this.id}",
+                    DEFAULT_CONNECT_SPEC,
+                )
+                .unwrap(),
                 ..Default::default()
             },
-            selection: JSONSelection::parse("id field").unwrap(),
+            selection: JSONSelection::parse_with_spec("id field", DEFAULT_CONNECT_SPEC).unwrap(),
             entity_resolver: Some(super::EntityResolver::TypeSingle),
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -2309,11 +2113,11 @@ mod tests {
                 None,
                 name!(Query),
                 name!(users),
+                None,
                 0,
-                "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_template: "http://localhost/api".parse().ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -2321,31 +2125,29 @@ mod tests {
             entity_resolver: None,
             config: Default::default(),
             max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            label: "test label".into(),
         };
 
-        let requests: Vec<_> = super::make_requests(
-            req,
-            &Context::default(),
-            Arc::new(connector),
-            &service_name,
-            &None,
-        )
-        .unwrap()
-        .into_iter()
-        .map(|req| {
-            let TransportRequest::Http(http_request) = req.transport_request;
-            let (parts, _body) = http_request.inner.into_parts();
-            let new_req =
-                http::Request::from_parts(parts, http_body_util::Empty::<bytes::Bytes>::new());
-            (new_req, req.key, http_request.debug)
-        })
-        .collect();
+        let requests: Vec<_> =
+            super::make_requests(req, &Context::default(), Arc::new(connector), &None)
+                .unwrap()
+                .into_iter()
+                .map(|req| {
+                    let TransportRequest::Http(http_request) = req.transport_request;
+                    let (parts, _body) = http_request.inner.into_parts();
+                    let new_req = http::Request::from_parts(
+                        parts,
+                        http_body_util::Empty::<bytes::Bytes>::new(),
+                    );
+                    (new_req, req.key, http_request.debug)
+                })
+                .collect();
 
         assert_debug_snapshot!(requests, @r#"
         [
@@ -2366,7 +2168,10 @@ mod tests {
                         batch: []
                     },
                 },
-                None,
+                (
+                    None,
+                    [],
+                ),
             ),
         ]
         "#);

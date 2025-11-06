@@ -86,15 +86,15 @@ impl<'a> SubgraphContext<'a> {
         schema: &'a Schema,
         context_rewrites: &'a Option<Vec<DataRewrite>>,
     ) -> Option<SubgraphContext<'a>> {
-        if let Some(rewrites) = context_rewrites {
-            if !rewrites.is_empty() {
-                return Some(SubgraphContext {
-                    data,
-                    schema,
-                    context_rewrites: rewrites,
-                    named_args: Vec::new(),
-                });
-            }
+        if let Some(rewrites) = context_rewrites
+            && !rewrites.is_empty()
+        {
+            return Some(SubgraphContext {
+                data,
+                schema,
+                context_rewrites: rewrites,
+                named_args: Vec::new(),
+            });
         }
         None
     }
@@ -175,7 +175,7 @@ impl<'a> SubgraphContext<'a> {
                     // append _<index> to each of the arguments and push all the values into hash_map
                     hash_map.extend(item.iter().map(|(k, v)| {
                         let mut new_named_param = k.clone();
-                        new_named_param.push_str(&format!("_{}", index));
+                        new_named_param.push_str(&format!("_{index}"));
                         (new_named_param, v.clone())
                     }));
                 }
@@ -284,7 +284,7 @@ fn transform_operation(
         // it is a field selection for _entities, so it's ok to reach in and give it an alias
         let mut cloned = field_selection.clone();
         let cfs = cloned.make_mut();
-        cfs.alias = Some(Name::new_unchecked(&format!("_{}", i)));
+        cfs.alias = Some(Name::new_unchecked(&format!("_{i}")));
 
         transform_field_arguments(&mut cfs.arguments, arguments, i);
         transform_selection_set(&mut cfs.selection_set, arguments, i);
@@ -332,14 +332,14 @@ fn transform_field_arguments(
 ) {
     arguments_in_selection.iter_mut().for_each(|arg| {
         let arg = arg.make_mut();
-        if let Some(v) = arg.value.as_variable() {
-            if arguments.contains(v.as_str()) {
-                arg.value = Node::new(ast::Value::Variable(Name::new_unchecked(&format!(
-                    "{}_{}",
-                    v.as_str(),
-                    index
-                ))));
-            }
+        if let Some(v) = arg.value.as_variable()
+            && arguments.contains(v.as_str())
+        {
+            arg.value = Node::new(ast::Value::Variable(Name::new_unchecked(&format!(
+                "{}_{}",
+                v.as_str(),
+                index
+            ))));
         }
     });
 }

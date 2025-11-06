@@ -184,7 +184,16 @@ impl QueryPlannerService {
             let result = result.map_err(FederationErrorBridge::from);
 
             let elapsed = start.elapsed().as_secs_f64();
-            metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
+            match &result {
+                Ok(_) => metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, "success"),
+                Err(FederationErrorBridge::Cancellation(e)) if e.contains("timeout") => {
+                    metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, "timeout")
+                }
+                Err(FederationErrorBridge::Cancellation(_)) => {
+                    metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, "cancelled")
+                }
+                Err(_) => metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, "error"),
+            }
 
             let plan = result?;
             let root_node = convert_root_query_plan_node(&plan);
@@ -603,12 +612,17 @@ pub(crate) struct QueryPlanResult {
     pub(super) evaluated_plan_paths: u64,
 }
 
-pub(crate) fn metric_query_planning_plan_duration(planner: &'static str, elapsed: f64) {
+pub(crate) fn metric_query_planning_plan_duration(
+    planner: &'static str,
+    elapsed: f64,
+    outcome: &'static str,
+) {
     f64_histogram!(
         "apollo.router.query_planning.plan.duration",
         "Duration of the query planning, in seconds.",
         elapsed,
-        "planner" = planner
+        "planner" = planner,
+        "outcome" = outcome
     );
 }
 
@@ -1175,6 +1189,7 @@ mod tests {
                         queries.push('\n');
                         Ok(subgraph::Response::builder()
                             .extensions(crate::json_ext::Object::new())
+                            .id(request.id)
                             .context(request.context)
                             .subgraph_name(String::default())
                             .build())
@@ -1205,11 +1220,12 @@ mod tests {
     fn test_metric_query_planning_plan_duration() {
         let start = Instant::now();
         let elapsed = start.elapsed().as_secs_f64();
-        metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
+        metric_query_planning_plan_duration(RUST_QP_MODE, elapsed, "success");
         assert_histogram_exists!(
             "apollo.router.query_planning.plan.duration",
             f64,
-            "planner" = "rust"
+            "planner" = "rust",
+            "outcome" = "success"
         );
     }
 

@@ -8,6 +8,8 @@ use derive_more::From;
 use futures::prelude::*;
 use url::Url;
 
+use crate::registry::OciConfig;
+use crate::registry::fetch_oci;
 use crate::router::Event;
 use crate::router::Event::NoMoreSchema;
 use crate::router::Event::UpdateSchema;
@@ -51,6 +53,9 @@ pub enum SchemaSource {
         /// The URLs to fetch the schema from.
         urls: Vec<Url>,
     },
+
+    #[display("Registry")]
+    OCI(OciConfig),
 }
 
 impl From<&'_ str> for SchemaSource {
@@ -154,16 +159,30 @@ impl SchemaSource {
                 .filter_map(|s| async move { s.map(Event::UpdateSchema) })
                 .boxed()
             }
+            SchemaSource::OCI(oci_config) => {
+                tracing::debug!("using oci as schema source");
+                futures::stream::once(async move {
+                    match fetch_oci(oci_config).await {
+                        Ok(oci_result) => {
+                            tracing::debug!("fetched schema from oci registry");
+                            Some(SchemaState {
+                                sdl: oci_result.schema,
+                                launch_id: None,
+                            })
+                        }
+                        Err(err) => {
+                            tracing::error!("error fetching schema from oci registry {}", err);
+                            None
+                        }
+                    }
+                })
+                    .filter_map(|s| async move { s.map(Event::UpdateSchema) })
+                    .boxed()
+            }
         }
         .chain(stream::iter(vec![NoMoreSchema]))
         .boxed()
     }
-}
-
-#[derive(thiserror::Error, Debug)]
-enum FetcherError {
-    #[error("failed to build http client")]
-    InitializationError(#[from] reqwest::Error),
 }
 
 // Encapsulates fetching the schema from the first viable url.

@@ -25,13 +25,9 @@ use crate::services::supergraph;
 const EXPOSE_QUERY_PLAN_HEADER_NAME: &str = "Apollo-Expose-Query-Plan";
 const ENABLE_EXPOSE_QUERY_PLAN_ENV: &str = "APOLLO_EXPOSE_QUERY_PLAN";
 pub(crate) const QUERY_PLAN_CONTEXT_KEY: &str = "apollo::expose_query_plan::plan";
-pub(crate) const DEPRECATED_QUERY_PLAN_CONTEXT_KEY: &str = "experimental::expose_query_plan.plan";
 pub(crate) const FORMATTED_QUERY_PLAN_CONTEXT_KEY: &str =
     "apollo::expose_query_plan::formatted_plan";
-pub(crate) const DEPRECATED_FORMATTED_QUERY_PLAN_CONTEXT_KEY: &str =
-    "experimental::expose_query_plan.formatted_plan";
 pub(crate) const ENABLED_CONTEXT_KEY: &str = "apollo::expose_query_plan::enabled";
-pub(crate) const DEPRECATED_ENABLED_CONTEXT_KEY: &str = "experimental::expose_query_plan.enabled";
 
 #[derive(Debug, Clone)]
 struct ExposeQueryPlan {
@@ -133,15 +129,14 @@ impl Plugin for ExposeQueryPlan {
                             let (parts, stream) = res.response.into_parts();
                             let (mut first, rest) = StreamExt::into_future(stream).await;
 
-                            if let Some(first) = &mut first {
-                                if let Some(plan) =
+                            if let Some(first) = &mut first
+                                && let Some(plan) =
                                     res.context.get_json_value(QUERY_PLAN_CONTEXT_KEY)
                                 {
                                     first
                                         .extensions
                                         .insert("apolloQueryPlan", json!({ "object": { "kind": "QueryPlan", "node": plan }, "text": res.context.get_json_value(FORMATTED_QUERY_PLAN_CONTEXT_KEY) }));
                                 }
-                            }
                             res.response = http::Response::from_parts(
                                 parts,
                                 once(ready(first.unwrap_or_default())).chain(rest).boxed(),

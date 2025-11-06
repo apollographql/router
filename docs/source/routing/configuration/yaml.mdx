@@ -29,8 +29,8 @@ import OverrideSubUrl from '../../../shared/config/override_subgraph_url.mdx';
 import PersistedQueries from '../../../shared/config/persisted_queries.mdx';
 import Plugins from '../../../shared/config/plugins.mdx';
 import PreviewEntityCache from '../../../shared/config/preview_entity_cache.mdx';
+import PreviewResponseCache from '../../../shared/config/preview_response_cache.mdx';
 import PreviewFileUploads from '../../../shared/config/preview_file_uploads.mdx';
-import ProgOverride from '../../../shared/config/progressive_override.mdx';
 import Rhai from '../../../shared/config/rhai.mdx';
 import Sandbox from '../../../shared/config/sandbox.mdx';
 import Subscription from '../../../shared/config/subscription.mdx';
@@ -73,7 +73,7 @@ Expand the code block to view an example YAML config file containing all propert
 
 <Apq />
 
-Learn more in [Caching Automatic Persisted Queries](/graphos/routing/performance/caching/in-memory#caching-automatic-persisted-queries-apq).
+Learn more in [Automatic Persisted Queries](/graphos/routing/operations/apq).
 
 ---
 
@@ -252,19 +252,25 @@ Learn more in [Native Plugins for router](/graphos/routing/customization/native-
 
 <PreviewEntityCache /> 
 
-Learn more in [Entity Caching](/graphos/routing/performance/caching/entity).
+<Note>
+
+For new projects, Apollo recommends using [Response Caching](/graphos/routing/performance/caching/response-caching) instead.
+
+</Note>
+
+Learn more in [Entity Caching](/graphos/routing/v1/performance/caching/entity).
+
+---
+
+<PreviewResponseCache />
+
+Learn more in [Response Caching](/graphos/routing/performance/caching/response-caching).
 
 ---
 
 <PreviewFileUploads /> 
 
 Learn more in [File Uploads](/graphos/routing/operations/file-upload).
-
----
-
-<ProgOverride />
-
-Learn more in [Progressive Override](/graphos/schema-design/federated-schemas/reference/directives#progressive-override).
 
 ---
 
@@ -464,11 +470,9 @@ supergraph:
 
 <Telemetry /> 
 
-<MinVersion version="1.49.0">
-
 #### Enhanced operation signature normalization
 
-</MinVersion>
+<MinVersionBadge version="Router v1.49.0" />
 
 <Note>
 
@@ -633,11 +637,9 @@ query AliasedQuery {
 }
 ```
 
-<MinVersion version="1.50.0">
-
 #### Extended reference reporting
 
-</MinVersion>
+<MinVersionBadge version="Router v1.50.0" />
 
 <Note>
 
@@ -647,8 +649,6 @@ The router supports extended reference reporting in the following versions:
 - [Experimental](/resources/product-launch-stages/#experimental-features) in v1.50.0 to v1.53.0
 
 </Note>
-
-<EnterpriseFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
 
 You can configure the router to report enum and input object references for enhanced insights and operation checks.
 Apollo's legacy reference reporting doesn't include data about enum values and input object fields, meaning you can't view enum and input object field usage in GraphOS Studio.
@@ -662,11 +662,9 @@ telemetry:
     metrics_reference_mode: extended # Default is legacy
 ```
 
-<MinVersion version="2.1.2">
-
 #### Extended error reporting
 
-</MinVersion>
+<MinVersionBadge version="Router v2.1.2" />
 
 <PreviewFeature />
 

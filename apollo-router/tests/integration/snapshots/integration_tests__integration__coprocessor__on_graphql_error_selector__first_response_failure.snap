@@ -1,0 +1,13 @@
+---
+source: apollo-router/tests/integration/coprocessor.rs
+expression: errors
+---
+[
+  {
+    "message": "products error",
+    "path": [],
+    "extensions": {
+      "service": "products"
+    }
+  }
+]

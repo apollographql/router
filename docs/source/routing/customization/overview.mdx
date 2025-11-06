@@ -14,8 +14,8 @@ The GraphOS Router supports the following customization types:
 
 - [**Rhai scripts**](/graphos/routing/customization/rhai/)
   - The [Rhai scripting language](https://rhai.rs/book/) lets you add functionality directly to your stock router binary by hooking into different phases of the router's request lifecycle.
-- [**External co-processing**](/router/customizations/coprocessor/) ([Enterprise feature](/router/enterprise-features/))
-  - If your organization has a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/), you can write custom request-handling code in any language. This code can run in the same container as your router or separately.
+- [**External co-processing**](/router/customizations/coprocessor/) ([Licensed feature](/router/enterprise-features/))
+  - If your organization has a [GraphOS plan](https://www.apollographql.com/pricing/), you can write custom request-handling code in any language. This code can run in the same container as your router or separately.
   - The router calls your custom code via HTTP, passing it the details of each incoming client request.
 
 The Apollo Router Core supports customization only through [Rhai scripts](/graphos/routing/customization/rhai/).
@@ -94,31 +94,7 @@ In general, it's best to avoid buffering where possible. If necessary, it is ok 
 
 The router makes several values available in the request context, which is shared across stages of the processing pipeline.
 
-- `apollo::apq::cache_hit`: present if the request used APQ, true if we got a cache hit for the query id, false otherwise
-- `apollo::apq::registered`: true if the request registered a query in APQ
-- `apollo::authentication::jwt_claims`: claims extracted from a JWT if present in the request
-- `apollo::authorization::authenticated_required`: true if the query covers type of fields marked with `@authenticated`
-- `apollo::authorization::required_policies`: if the query covers type of fields marked with `@policy`, it contains a map of `policy name -> Option<bool>`. A coprocessor or rhai script can edit this map to mark `true` on authorization policies that succeed or `false` on ones that fail
-- `apollo::authorization::required_scopes`: if the query covers type of fields marked with `@requiresScopes`, it contains the list of scopes used by those directive applications
-- `apollo::demand_control::actual_cost`: calculated cost of the responses returned by the subgraphs; populated by the demand control plugin
-- `apollo::demand_control::estimated_cost`: estimated cost of the requests to be sent to the subgraphs; populated by the demand control plugin
-- `apollo::demand_control::result`: `COST_OK` if allowed, and `COST_TOO_EXPENSIVE` if rejected due to cost limits; populated by the demand control plugin
-- `apollo::demand_control::strategy`: the name of the cost calculation strategy used by the demand control plugin
-- `apollo::entity_cache::cached_keys_status`: a map of cache control statuses for cached entities, keyed by subgraph request id; populated by the entity caching plugin when `expose_keys_in_context` is turned on in the router configuration
-- `apollo::expose_query_plan::enabled`: true if experimental query plan exposure is enabled
-- `apollo::expose_query_plan::formatted_plan`: query plan formatted as text
-- `apollo::expose_query_plan::plan`: contains the query plan serialized as JSON (editing it has no effect on execution)
-- `apollo::progressive_override::labels_to_override`: used in progressive override, list of labels for which we need an override
-- `apollo::progressive_override::unresolved_labels`: used in progressive override, contains the list of unresolved labels
-- `apollo::supergraph::first_event`: false if the current response chunk is not the first response in the stream, nonexistent otherwise
-- `apollo::supergraph::operation_id`: contains the usage reporting stats report key
-- `apollo::supergraph::operation_kind`: can be `query`, `mutation` or `subscription`
-- `apollo::supergraph::operation_name`: name of the operation being executed (according to the query and the `operation_name` field in the request)
-- `apollo::telemetry::client_name`: client name extracted from the client name header
-- `apollo::telemetry::client_version`: client version extracted from the client version header
-- `apollo::telemetry::contains_graphql_error`: true if the response contains at least one error
-- `apollo::telemetry::studio_exclude`: true if the current request's trace details should be excluded from Studio
-- `apollo::telemetry::subgraph_ftv1`: JSON-serialized trace data returned by the subgraph when FTV1 is enabled
+See the [Coprocessor Reference documentation](/graphos/routing/customization/coprocessor/reference#context-key-reference) for a complete list of available context keys.
 
 ## Creating customizations
 

@@ -9,15 +9,15 @@ use shape::Shape;
 
 mod strings;
 
-pub(super) use strings::GraphQLString;
+pub(super) use strings::subslice_location;
 
-use crate::connectors::validation::link::ConnectLink;
+use crate::connectors::spec::ConnectLink;
 
 pub(crate) struct SchemaInfo<'schema> {
     pub(crate) schema: &'schema Schema,
     len: usize,
     lookup: LineColLookup<'schema>,
-    pub(crate) connect_link: ConnectLink<'schema>,
+    pub(crate) connect_link: ConnectLink,
     /// A lookup map for the Shapes computed from GraphQL types.
     pub(crate) shape_lookup: IndexMap<&'schema str, Shape>,
 }
@@ -26,7 +26,7 @@ impl<'schema> SchemaInfo<'schema> {
     pub(crate) fn new(
         schema: &'schema Schema,
         src: &'schema str,
-        connect_link: ConnectLink<'schema>,
+        connect_link: ConnectLink,
     ) -> Self {
         Self {
             schema,
@@ -51,12 +51,12 @@ impl<'schema> SchemaInfo<'schema> {
 
     #[inline]
     pub(crate) fn source_directive_name(&self) -> &Name {
-        self.connect_link.source_directive_name()
+        &self.connect_link.source_directive_name
     }
 
     #[inline]
     pub(crate) fn connect_directive_name(&self) -> &Name {
-        self.connect_link.connect_directive_name()
+        &self.connect_link.connect_directive_name
     }
 }
 

@@ -103,6 +103,8 @@ async fn test_connector_timeout() -> Result<(), BoxError> {
                     sources:
                         connectors.jsonPlaceholder:
                             timeout: 1ns
+            include_subgraph_errors:
+                all: true
             "#,
         )
         .supergraph(PathBuf::from_iter([

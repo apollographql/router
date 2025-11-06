@@ -20,6 +20,7 @@ use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
 
+pub(crate) mod cache_tag;
 pub(crate) mod context;
 pub(crate) mod cost;
 pub(crate) mod external;
@@ -30,7 +31,9 @@ pub(crate) mod list_size;
 pub(crate) mod merged;
 pub(crate) mod provides;
 pub(crate) mod requires;
+pub(crate) mod root_fields;
 pub(crate) mod shareable;
+pub(crate) mod tag;
 
 /// A trait for validating FieldSets used in schema directives. Do not use this
 /// to validate FieldSets used in operations. This will skip named fragments
@@ -271,7 +274,12 @@ impl<D: DeniesNonExternalLeafFields> SchemaFieldSetValidator<D> for DenyNonExter
                 errors.errors.push(directive.error(parent_ty, field));
             }
         } else {
-            self.visit_selection_set(parent_ty, &field.selection_set, directive, errors);
+            self.visit_selection_set(
+                field.ty().inner_named_type(),
+                &field.selection_set,
+                directive,
+                errors,
+            );
         }
     }
 }

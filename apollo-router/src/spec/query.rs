@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Name;
 use apollo_compiler::executable;
 use apollo_compiler::schema::ExtendedType;
 use derivative::Derivative;
@@ -127,6 +128,7 @@ impl Query {
         variables: Object,
         schema: &ApiSchema,
         defer_conditions: BooleanValues,
+        include_coercion_errors: bool,
     ) -> Vec<Path> {
         let data = std::mem::take(&mut response.data);
 
@@ -145,6 +147,7 @@ impl Query {
                                 variables: &variables,
                                 schema,
                                 errors: Vec::new(),
+                                coercion_errors: include_coercion_errors.then(Vec::new),
                                 nullified: Vec::new(),
                             };
 
@@ -162,12 +165,12 @@ impl Query {
                                 },
                             );
 
-                            if !parameters.errors.is_empty() {
-                                if let Ok(value) = serde_json_bytes::to_value(&parameters.errors) {
-                                    response
-                                        .extensions
-                                        .insert(EXTENSIONS_VALUE_COMPLETION_KEY, value);
-                                }
+                            if !parameters.errors.is_empty()
+                                && let Ok(value) = serde_json_bytes::to_value(&parameters.errors)
+                            {
+                                response
+                                    .extensions
+                                    .insert(EXTENSIONS_VALUE_COMPLETION_KEY, value);
                             }
 
                             return parameters.nullified;
@@ -202,6 +205,7 @@ impl Query {
                         variables: &all_variables,
                         schema,
                         errors: Vec::new(),
+                        coercion_errors: include_coercion_errors.then(Vec::new),
                         nullified: Vec::new(),
                     };
 
@@ -218,12 +222,18 @@ impl Query {
                             Err(InvalidValue) => Value::Null,
                         },
                     );
-                    if !parameters.errors.is_empty() {
-                        if let Ok(value) = serde_json_bytes::to_value(&parameters.errors) {
-                            response
-                                .extensions
-                                .insert(EXTENSIONS_VALUE_COMPLETION_KEY, value);
-                        }
+                    if !parameters.errors.is_empty()
+                        && let Ok(value) = serde_json_bytes::to_value(&parameters.errors)
+                    {
+                        response
+                            .extensions
+                            .insert(EXTENSIONS_VALUE_COMPLETION_KEY, value);
+                    }
+
+                    if let Some(errors) = parameters.coercion_errors.as_mut()
+                        && !errors.is_empty()
+                    {
+                        response.errors.append(errors);
                     }
 
                     return parameters.nullified;
@@ -326,7 +336,6 @@ impl Query {
         Ok((fragments, operation, defer_stats, hash))
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn format_value<'a: 'b, 'b>(
         &'a self,
         parameters: &mut FormatParameters,
@@ -334,232 +343,358 @@ impl Query {
         input: &mut Value,
         output: &mut Value,
         path: &mut Vec<ResponsePathElement<'b>>,
-        parent_type: &executable::Type,
         selection_set: &'a [Selection],
     ) -> Result<(), InvalidValue> {
         // for every type, if we have an invalid value, we will replace it with null
         // and return Ok(()), because values are optional by default
         match field_type {
-            // for non null types, we validate with the inner type, then if we get an InvalidValue
-            // we set it to null and immediately return an error instead of Ok(()), because we
-            // want the error to go up until the next nullable parent
-            executable::Type::NonNullNamed(_) | executable::Type::NonNullList(_) => {
-                let inner_type = match field_type {
-                    executable::Type::NonNullList(ty) => ty.clone().list(),
-                    executable::Type::NonNullNamed(name) => executable::Type::Named(name.clone()),
-                    _ => unreachable!(),
-                };
-                match self.format_value(
+            executable::Type::Named(name) => match name.as_str() {
+                "Int" => self.format_integer(parameters, path, input, output),
+                "Float" => self.format_float(parameters, path, input, output),
+                "Boolean" => self.format_boolean(parameters, path, input, output),
+                "String" => self.format_string(parameters, path, input, output),
+                "Id" => self.format_id(parameters, path, input, output),
+                _ => self.format_named_type(
                     parameters,
-                    &inner_type,
+                    field_type,
                     input,
+                    name,
                     output,
                     path,
-                    field_type,
                     selection_set,
-                ) {
-                    Err(_) => Err(InvalidValue),
-                    Ok(_) => {
-                        if output.is_null() {
-                            let message = match path.last() {
-                                Some(ResponsePathElement::Key(k)) => format!(
-                                    "Cannot return null for non-nullable field {parent_type}.{k}"
-                                ),
-                                Some(ResponsePathElement::Index(i)) => format!(
-                                    "Cannot return null for non-nullable array element of type {inner_type} at index {i}"
-                                ),
-                                _ => todo!(),
-                            };
-                            parameters.errors.push(Error {
-                                message,
-                                path: Some(Path::from_response_slice(path)),
-                                ..Error::default()
-                            });
-
-                            Err(InvalidValue)
-                        } else {
-                            Ok(())
-                        }
-                    }
-                }
-            }
-
+                )?,
+            },
             // if the list contains nonnullable types, we will receive a Err(InvalidValue)
             // and should replace the entire list with null
             // if the types are nullable, the inner call to filter_errors will take care
             // of setting the current entry to null
-            executable::Type::List(inner_type) => match input {
-                Value::Array(input_array) => {
-                    if output.is_null() {
-                        *output = Value::Array(vec![Value::Null; input_array.len()]);
-                    }
-                    let output_array = output.as_array_mut().ok_or(InvalidValue)?;
-                    match input_array
-                        .iter_mut()
-                        .enumerate()
-                        .try_for_each(|(i, element)| {
-                            path.push(ResponsePathElement::Index(i));
-                            let res = self.format_value(
-                                parameters,
-                                inner_type,
-                                element,
-                                &mut output_array[i],
-                                path,
-                                field_type,
-                                selection_set,
-                            );
-                            path.pop();
-                            res
-                        }) {
-                        Err(InvalidValue) => {
-                            parameters.nullified.push(Path::from_response_slice(path));
-                            *output = Value::Null;
-                            Ok(())
-                        }
-                        Ok(()) => Ok(()),
-                    }
-                }
-                _ => Ok(()),
-            },
-            executable::Type::Named(name) if name == "Int" => {
-                let opt = if input.is_i64() {
-                    input.as_i64().and_then(|i| i32::try_from(i).ok())
-                } else if input.is_u64() {
-                    input.as_i64().and_then(|i| i32::try_from(i).ok())
-                } else {
-                    None
+            executable::Type::List(inner_type) => {
+                self.format_list(parameters, input, inner_type, output, path, selection_set)?
+            }
+            // for non null types, we validate with the inner type, then if we get an InvalidValue
+            // we set it to null and immediately return an error instead of Ok(()), because we
+            // want the error to go up until the next nullable parent
+            executable::Type::NonNullNamed(_) | executable::Type::NonNullList(_) => self
+                .format_non_nullable_value(
+                    parameters,
+                    field_type,
+                    input,
+                    output,
+                    path,
+                    selection_set,
+                )?,
+        }
+        Ok(())
+    }
+
+    #[inline]
+    fn format_non_nullable_value<'a: 'b, 'b>(
+        &'a self,
+        parameters: &mut FormatParameters,
+        field_type: &executable::Type,
+        input: &mut Value,
+        output: &mut Value,
+        path: &mut Vec<ResponsePathElement<'b>>,
+        selection_set: &'a [Selection],
+    ) -> Result<(), InvalidValue> {
+        let inner_type = match field_type {
+            executable::Type::NonNullList(ty) => ty.clone().list(),
+            executable::Type::NonNullNamed(name) => executable::Type::Named(name.clone()),
+            // This function should never be called for non-nullable types
+            _ => {
+                tracing::error!("`format_non_nullable_value` was called with a nullable type!!");
+                debug_assert!(field_type.is_non_null());
+                return Err(InvalidValue);
+            }
+        };
+
+        self.format_value(parameters, &inner_type, input, output, path, selection_set)?;
+
+        if output.is_null() {
+            let message = format!("Null value found for non-nullable type {inner_type}");
+            parameters.errors.push(
+                Error::builder()
+                    .message(&message)
+                    .path(Path::from_response_slice(path))
+                    .build(),
+            );
+            parameters.insert_coercion_error(
+                Error::builder()
+                    .message(message)
+                    .path(Path::from_response_slice(path))
+                    .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
+                    .build(),
+            );
+
+            Err(InvalidValue)
+        } else {
+            Ok(())
+        }
+    }
+
+    #[inline]
+    fn format_list<'a: 'b, 'b>(
+        &'a self,
+        parameters: &mut FormatParameters,
+        input: &mut Value,
+        inner_type: &executable::Type,
+        output: &mut Value,
+        path: &mut Vec<ResponsePathElement<'b>>,
+        selection_set: &'a [Selection],
+    ) -> Result<(), InvalidValue> {
+        let Value::Array(input_array) = input else {
+            return Ok(());
+        };
+        if output.is_null() {
+            *output = Value::Array(vec![Value::Null; input_array.len()]);
+        }
+        let output_array = output.as_array_mut().ok_or(InvalidValue)?;
+        if let Err(InvalidValue) =
+            input_array
+                .iter_mut()
+                .enumerate()
+                .try_for_each(|(i, element)| {
+                    path.push(ResponsePathElement::Index(i));
+                    self.format_value(
+                        parameters,
+                        inner_type,
+                        element,
+                        &mut output_array[i],
+                        path,
+                        selection_set,
+                    )?;
+                    path.pop();
+                    Ok(())
+                })
+        {
+            // We pop here because, if an error is found, the path still contains the index of the
+            // invalid value.
+            path.pop();
+            parameters.nullified.push(Path::from_response_slice(path));
+            parameters.insert_coercion_error(
+                Error::builder()
+                    .message(format!(
+                        "Invalid value found inside the array of type [{inner_type}]"
+                    ))
+                    .path(Path::from_response_slice(path))
+                    .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
+                    .build(),
+            );
+            *output = Value::Null;
+        }
+        Ok(())
+    }
+
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    fn format_named_type<'a: 'b, 'b>(
+        &'a self,
+        parameters: &mut FormatParameters,
+        field_type: &executable::Type,
+        input: &mut Value,
+        type_name: &Name,
+        output: &mut Value,
+        path: &mut Vec<ResponsePathElement<'b>>,
+        selection_set: &'a [Selection],
+    ) -> Result<(), InvalidValue> {
+        // we cannot know about the expected format of custom scalars
+        // so we must pass them directly to the client
+        match parameters.schema.types.get(type_name) {
+            Some(ExtendedType::Scalar(_)) => {
+                *output = input.clone();
+                return Ok(());
+            }
+            Some(ExtendedType::Enum(enum_type)) => {
+                *output = input
+                    .as_str()
+                    .filter(|s| enum_type.values.contains_key(*s))
+                    .map(|_| input.clone())
+                    .unwrap_or_default();
+                return Ok(());
+            }
+            _ => {}
+        }
+
+        if let Value::Object(input_object) = input {
+            if let Some(input_type) = input_object.get(TYPENAME).and_then(|val| val.as_str()) {
+                // If there is a __typename, make sure the pointed type is a valid type of the
+                // schema. Otherwise, something is wrong, and in case we might be inadvertently
+                // leaking some data for an @inacessible type or something, nullify the whole
+                // object. However, do note that due to `@interfaceObject`, some subgraph can have
+                // returned a __typename that is the name of an interface in the supergraph, and
+                // this is fine (that is, we should not return such a __typename to the user, but
+                // as long as it's not returned, having it in the internal data is ok and sometimes
+                // expected).
+                let Some(ExtendedType::Object(_) | ExtendedType::Interface(_)) =
+                    parameters.schema.types.get(input_type)
+                else {
+                    parameters.nullified.push(Path::from_response_slice(path));
+                    *output = Value::Null;
+                    return Ok(());
                 };
-
-                // if the value is invalid, we do not insert it in the output object
-                // which is equivalent to inserting null
-                if opt.is_some() {
-                    *output = input.clone();
-                } else {
-                    *output = Value::Null;
-                }
-                Ok(())
             }
-            executable::Type::Named(name) if name == "Float" => {
-                if input.as_f64().is_some() {
-                    *output = input.clone();
-                } else {
-                    *output = Value::Null;
-                }
-                Ok(())
+
+            if output.is_null() {
+                *output = Value::Object(Object::with_capacity(selection_set.len()));
             }
-            executable::Type::Named(name) if name == "Boolean" => {
-                if input.as_bool().is_some() {
-                    *output = input.clone();
-                } else {
-                    *output = Value::Null;
+            let output_object = output.as_object_mut().ok_or(InvalidValue)?;
+
+            let typename = input_object
+                .get(TYPENAME)
+                .and_then(|val| val.as_str())
+                .and_then(|s| apollo_compiler::ast::NamedType::new(s).ok())
+                .map(apollo_compiler::ast::Type::Named);
+
+            let current_type = match parameters.schema.types.get(field_type.inner_named_type()) {
+                Some(ExtendedType::Interface(..) | ExtendedType::Union(..)) => {
+                    typename.as_ref().unwrap_or(field_type)
                 }
-                Ok(())
+                _ => field_type,
+            };
+
+            if self
+                .apply_selection_set(
+                    selection_set,
+                    parameters,
+                    input_object,
+                    output_object,
+                    path,
+                    current_type,
+                )
+                .is_err()
+            {
+                parameters.nullified.push(Path::from_response_slice(path));
+                *output = Value::Null;
             }
-            executable::Type::Named(name) if name == "String" => {
-                if input.as_str().is_some() {
-                    *output = input.clone();
-                } else {
-                    *output = Value::Null;
-                }
-                Ok(())
+        } else {
+            parameters.nullified.push(Path::from_response_slice(path));
+            *output = Value::Null;
+        }
+
+        Ok(())
+    }
+
+    #[inline]
+    fn format_integer(
+        &self,
+        parameters: &mut FormatParameters,
+        path: &[ResponsePathElement<'_>],
+        input: &mut Value,
+        output: &mut Value,
+    ) {
+        // if the value is invalid, we do not insert it in the output object
+        // which is equivalent to inserting null
+        if input.as_i64().is_some_and(|i| i32::try_from(i).is_ok())
+            || input.as_i64().is_some_and(|i| i32::try_from(i).is_ok())
+        {
+            *output = input.clone();
+        } else {
+            if !input.is_null() {
+                parameters.insert_coercion_error(
+                    Error::builder()
+                        .message("Invalid value found for the type Int")
+                        .path(Path::from_response_slice(path))
+                        .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
+                        .build(),
+                );
             }
-            executable::Type::Named(name) if name == "Id" => {
-                if input.is_string() || input.is_i64() || input.is_u64() || input.is_f64() {
-                    *output = input.clone();
-                } else {
-                    *output = Value::Null;
-                }
-                Ok(())
+            *output = Value::Null;
+        }
+    }
+
+    #[inline]
+    fn format_float(
+        &self,
+        parameters: &mut FormatParameters,
+        path: &[ResponsePathElement<'_>],
+        input: &mut Value,
+        output: &mut Value,
+    ) {
+        if input.as_f64().is_some() {
+            *output = input.clone();
+        } else {
+            if !input.is_null() {
+                parameters.insert_coercion_error(
+                    Error::builder()
+                        .message("Invalid value found for the type Float")
+                        .path(Path::from_response_slice(path))
+                        .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
+                        .build(),
+                );
             }
-            executable::Type::Named(type_name) => {
-                // we cannot know about the expected format of custom scalars
-                // so we must pass them directly to the client
-                match parameters.schema.types.get(type_name) {
-                    Some(ExtendedType::Scalar(_)) => {
-                        *output = input.clone();
-                        return Ok(());
-                    }
-                    Some(ExtendedType::Enum(enum_type)) => {
-                        return match input.as_str() {
-                            Some(s) => {
-                                if enum_type.values.contains_key(s) {
-                                    *output = input.clone();
-                                    Ok(())
-                                } else {
-                                    *output = Value::Null;
-                                    Ok(())
-                                }
-                            }
-                            None => {
-                                *output = Value::Null;
-                                Ok(())
-                            }
-                        };
-                    }
-                    _ => {}
-                }
+            *output = Value::Null;
+        }
+    }
 
-                match input {
-                    Value::Object(input_object) => {
-                        if let Some(input_type) =
-                            input_object.get(TYPENAME).and_then(|val| val.as_str())
-                        {
-                            // If there is a __typename, make sure the pointed type is a valid type of the schema. Otherwise, something is wrong, and in case we might
-                            // be inadvertently leaking some data for an @inacessible type or something, nullify the whole object. However, do note that due to `@interfaceObject`,
-                            // some subgraph can have returned a __typename that is the name of an interface in the supergraph, and this is fine (that is, we should not
-                            // return such a __typename to the user, but as long as it's not returned, having it in the internal data is ok and sometimes expected).
-                            let Some(ExtendedType::Object(_) | ExtendedType::Interface(_)) =
-                                parameters.schema.types.get(input_type)
-                            else {
-                                parameters.nullified.push(Path::from_response_slice(path));
-                                *output = Value::Null;
-                                return Ok(());
-                            };
-                        }
-
-                        if output.is_null() {
-                            *output = Value::Object(Object::with_capacity(selection_set.len()));
-                        }
-                        let output_object = output.as_object_mut().ok_or(InvalidValue)?;
-
-                        let typename = input_object
-                            .get(TYPENAME)
-                            .and_then(|val| val.as_str())
-                            .and_then(|s| apollo_compiler::ast::NamedType::new(s).ok())
-                            .map(apollo_compiler::ast::Type::Named);
-
-                        let current_type =
-                            match parameters.schema.types.get(field_type.inner_named_type()) {
-                                Some(ExtendedType::Interface(..) | ExtendedType::Union(..)) => {
-                                    typename.as_ref().unwrap_or(field_type)
-                                }
-                                _ => field_type,
-                            };
-
-                        if self
-                            .apply_selection_set(
-                                selection_set,
-                                parameters,
-                                input_object,
-                                output_object,
-                                path,
-                                current_type,
-                            )
-                            .is_err()
-                        {
-                            parameters.nullified.push(Path::from_response_slice(path));
-                            *output = Value::Null;
-                        }
-
-                        Ok(())
-                    }
-                    _ => {
-                        parameters.nullified.push(Path::from_response_slice(path));
-                        *output = Value::Null;
-                        Ok(())
-                    }
-                }
+    #[inline]
+    fn format_boolean(
+        &self,
+        parameters: &mut FormatParameters,
+        path: &[ResponsePathElement<'_>],
+        input: &mut Value,
+        output: &mut Value,
+    ) {
+        if input.as_bool().is_some() {
+            *output = input.clone();
+        } else {
+            if !input.is_null() {
+                parameters.insert_coercion_error(
+                    Error::builder()
+                        .message("Invalid value found for the type Boolean")
+                        .path(Path::from_response_slice(path))
+                        .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
+                        .build(),
+                );
             }
+            *output = Value::Null;
+        }
+    }
+
+    #[inline]
+    fn format_string(
+        &self,
+        parameters: &mut FormatParameters,
+        path: &[ResponsePathElement<'_>],
+        input: &mut Value,
+        output: &mut Value,
+    ) {
+        if input.as_str().is_some() {
+            *output = input.clone();
+        } else {
+            if !input.is_null() {
+                parameters.insert_coercion_error(
+                    Error::builder()
+                        .message("Invalid value found for the type String")
+                        .path(Path::from_response_slice(path))
+                        .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
+                        .build(),
+                );
+            }
+            *output = Value::Null;
+        }
+    }
+
+    #[inline]
+    fn format_id(
+        &self,
+        parameters: &mut FormatParameters,
+        path: &[ResponsePathElement<'_>],
+        input: &mut Value,
+        output: &mut Value,
+    ) {
+        if input.is_string() || input.is_i64() || input.is_u64() || input.is_f64() {
+            *output = input.clone();
+        } else {
+            if !input.is_null() {
+                parameters.insert_coercion_error(
+                    Error::builder()
+                        .message("Invalid value found for the type ID")
+                        .path(Path::from_response_slice(path))
+                        .extension("code", ERROR_CODE_RESPONSE_VALIDATION)
+                        .build(),
+                );
+            }
+            *output = Value::Null;
         }
     }
 
@@ -629,7 +764,6 @@ impl Query {
                             input_value,
                             output_value,
                             path,
-                            current_type,
                             selection_set,
                         );
                         path.pop();
@@ -639,14 +773,15 @@ impl Query {
                             output.insert((*field_name).clone(), Value::Null);
                         }
                         if field_type.is_non_null() {
-                            parameters.errors.push(Error {
-                                message: format!(
-                                    "Cannot return null for non-nullable field {current_type}.{}",
-                                    field_name.as_str()
-                                ),
-                                path: Some(Path::from_response_slice(path)),
-                                ..Error::default()
-                            });
+                            parameters.errors.push(
+                                Error::builder()
+                                    .message(format!(
+                                        "Null value found for non-nullable type {}",
+                                        field_type.0.inner_named_type()
+                                    ))
+                                    .path(Path::from_response_slice(path))
+                                    .build(),
+                            );
 
                             return Err(InvalidValue);
                         }
@@ -664,6 +799,21 @@ impl Query {
                         continue;
                     }
 
+                    // NOTE: The subtype logic is strange. We are trying to determine if a fragment
+                    // should be applied, but we don't have the __typename of the selection set
+                    // (otherwise, we would be on a different branch). Consider the following query
+                    // for a union Thing = Foo | Bar:
+                    // { thing { ... on Foo { foo }, ... on Bar { bar } } }
+                    //
+                    // As we process the `... on Foo` fragment, `Foo` is `type_condition` and
+                    // `Thing` is `current_type`, we *could* reverse the order in calling
+                    // `is_subtype` and apply the fragment; however, the same is true for the `Bar`
+                    // fragment. Without the type info of the data we have in our response, we
+                    // can't know which to apply (or if both should apply in the case of
+                    // interfaces).
+                    //
+                    // Without that information, this is the best we can do without construction a
+                    // much more complicated reformatting heuristic.
                     let is_apply = current_type.inner_named_type().as_str()
                         == type_condition.as_str()
                         || parameters
@@ -672,10 +822,10 @@ impl Query {
 
                     if is_apply {
                         // if this is the filtered query, we must keep the __typename field because the original query must know the type
-                        if !self.is_original {
-                            if let Some(input_type) = input.get(TYPENAME) {
-                                output.insert(TYPENAME, input_type.clone());
-                            }
+                        if !self.is_original
+                            && let Some(input_type) = input.get(TYPENAME)
+                        {
+                            output.insert(TYPENAME, input_type.clone());
                         }
 
                         self.apply_selection_set(
@@ -704,6 +854,8 @@ impl Query {
                         selection_set,
                     }) = self.fragments.get(name)
                     {
+                        // NOTE: This subtype logic is a bit strange. See the InlineFragment
+                        // branch for why its done this way.
                         let is_apply = current_type.inner_named_type().as_str()
                             == type_condition.as_str()
                             || parameters.schema.is_subtype(
@@ -713,10 +865,10 @@ impl Query {
 
                         if is_apply {
                             // if this is the filtered query, we must keep the __typename field because the original query must know the type
-                            if !self.is_original {
-                                if let Some(input_type) = input.get(TYPENAME) {
-                                    output.insert(TYPENAME, input_type.clone());
-                                }
+                            if !self.is_original
+                                && let Some(input_type) = input.get(TYPENAME)
+                            {
+                                output.insert(TYPENAME, input_type.clone());
                             }
 
                             self.apply_selection_set(
@@ -789,20 +941,19 @@ impl Query {
                             input_value,
                             output_value,
                             path,
-                            &field_type.0,
                             selection_set,
                         );
                         path.pop();
                         res?
                     } else if field_type.is_non_null() {
-                        parameters.errors.push(Error {
-                            message: format!(
-                                "Cannot return null for non-nullable field {}.{field_name_str}",
-                                root_type_name
-                            ),
-                            path: Some(Path::from_response_slice(path)),
-                            ..Error::default()
-                        });
+                        parameters.errors.push(
+                            Error::builder()
+                                .message(format!(
+                                    "Cannot return null for non-nullable field {root_type_name}.{field_name_str}"
+                                ))
+                                .path(Path::from_response_slice(path))
+                                .build(),
+                        );
                         return Err(InvalidValue);
                     } else {
                         output.insert(field_name.clone(), Value::Null);
@@ -878,6 +1029,8 @@ impl Query {
 
     /// Validate a [`Request`]'s variables against this [`Query`] using a provided [`Schema`].
     #[tracing::instrument(skip_all, level = "trace")]
+    // `Response` is large, but this is not a frequently used function
+    #[allow(clippy::result_large_err)]
     pub(crate) fn validate_variables(
         &self,
         request: &Request,
@@ -1021,8 +1174,17 @@ impl Query {
 struct FormatParameters<'a> {
     variables: &'a Object,
     errors: Vec<Error>,
+    coercion_errors: Option<Vec<Error>>,
     nullified: Vec<Path>,
     schema: &'a ApiSchema,
+}
+
+impl FormatParameters<'_> {
+    fn insert_coercion_error(&mut self, error: Error) {
+        if let Some(errors) = self.coercion_errors.as_mut() {
+            errors.push(error)
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

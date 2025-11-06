@@ -1,7 +1,6 @@
 ---
 source: apollo-router/tests/type_conditions.rs
 expression: response
-snapshot_kind: text
 ---
 {
   "data": {
@@ -80,7 +79,7 @@ snapshot_kind: text
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-              "schemaAwareHash": "c508776fb95baa51ab0f2073f588c5b65f8d0c2b0e77993f746acb3306e262ce",
+              "schemaAwareHash": "051a0faa33813724fa3bba65b83e23a2297611e368296fa571256f746fb21e31",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -138,7 +137,7 @@ snapshot_kind: text
                 "inputRewrites": null,
                 "outputRewrites": null,
                 "contextRewrites": null,
-                "schemaAwareHash": "6da6794e8b4382ebbc03f009762212fe42c0a7ea531c621877483fac81f2799a",
+                "schemaAwareHash": "149c061870d11ccaa57bca965bf7ab4fbcfae01d5405032de5fed8b5564fe3dd",
                 "authorization": {
                   "is_authenticated": false,
                   "scopes": [],

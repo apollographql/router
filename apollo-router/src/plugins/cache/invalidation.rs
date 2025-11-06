@@ -18,7 +18,7 @@ use tracing::Instrument;
 use super::entity::Storage as EntityStorage;
 use crate::cache::redis::RedisCacheStorage;
 use crate::plugins::cache::entity::ENTITY_CACHE_VERSION;
-use crate::plugins::cache::entity::hash_entity_key;
+use crate::plugins::cache::entity::hash_representation;
 
 #[derive(Clone)]
 pub(crate) struct Invalidation {
@@ -124,14 +124,14 @@ impl Invalidation {
                     break;
                 }
                 Ok(mut scan_res) => {
-                    if let Some(keys) = scan_res.take_results() {
-                        if !keys.is_empty() {
-                            let deleted = redis_storage
-                                .delete_from_scan_result(keys)
-                                .await
-                                .unwrap_or(0) as u64;
-                            count += deleted;
-                        }
+                    if let Some(keys) = scan_res.take_results()
+                        && !keys.is_empty()
+                    {
+                        let deleted = redis_storage
+                            .delete_from_scan_result(keys.into_iter())
+                            .await
+                            .unwrap_or(0) as u64;
+                        count += deleted;
                     }
                     scan_res.next();
                 }
@@ -243,7 +243,7 @@ impl InvalidationRequest {
                 r#type,
                 key,
             } => {
-                let entity_key = hash_entity_key(key);
+                let entity_key = hash_representation(key);
                 format!(
                     "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph}:type:{type}:entity:{entity_key}:*"
                 )

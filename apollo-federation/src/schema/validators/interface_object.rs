@@ -29,7 +29,7 @@ fn validate_keys_on_interfaces_are_also_on_all_implementations(
         .key_directive_definition(schema)?
         .name;
     for type_pos in schema.get_types() {
-        let Ok(type_pos): Result<InterfaceTypeDefinitionPosition, _> = type_pos.try_into() else {
+        let Ok(type_pos) = InterfaceTypeDefinitionPosition::try_from(type_pos) else {
             continue;
         };
         let implementation_types = schema.possible_runtime_types(type_pos.clone().into())?;
@@ -80,7 +80,7 @@ fn validate_keys_on_interfaces_are_also_on_all_implementations(
                 let types_list = human_readable_list(
                     implementations_with_missing_keys
                         .iter()
-                        .map(|pos| format!("\"{}\"", pos)),
+                        .map(|pos| format!("\"{pos}\"")),
                     HumanReadableListOptions {
                         prefix: Some(HumanReadableListPrefix {
                             singular: "type",
@@ -103,7 +103,7 @@ fn validate_keys_on_interfaces_are_also_on_all_implementations(
                 let types_list = human_readable_list(
                     implementations_with_non_resolvable_keys
                         .iter()
-                        .map(|pos| format!("\"{}\"", pos)),
+                        .map(|pos| format!("\"{pos}\"")),
                     HumanReadableListOptions {
                         prefix: Some(HumanReadableListPrefix {
                             singular: "type",
@@ -156,8 +156,7 @@ fn validate_interface_objects_are_on_entities(
             error_collector.errors.push(
                 SingleFederationError::InterfaceObjectUsageError {
                     message: format!(
-                        "The @interfaceObject directive can only be applied to entity types but type \"{}\" has no @key in this subgraph.",
-                        type_pos
+                        "The @interfaceObject directive can only be applied to entity types but type \"{type_pos}\" has no @key in this subgraph."
                     )
                 }
             )

@@ -103,27 +103,27 @@ impl FeatureGateEnforcementReport {
     }
 
     fn schema_restrictions() -> Vec<FeatureRestriction> {
-        // @link(url: "https://specs.apollo.dev/connect/v0.3") requires `connectors.preview_connect_v0_3: true`
+        // @link(url: "https://specs.apollo.dev/connect/v0.4") requires `connectors.preview_connect_v0_4: true`
         // This uses join__directives to find specs because the we're looking
         // at links within individual subgraphs.
         vec![FeatureRestriction::SpecInJoinDirective {
-            name: "Connect v0.3".to_string(),
+            name: "Connect v0.4".to_string(),
             spec_url: "https://specs.apollo.dev/connect".to_string(),
             version_req: semver::VersionReq {
                 comparators: vec![semver::Comparator {
                     op: semver::Op::Exact,
                     major: 0,
-                    minor: 3.into(),
+                    minor: 4.into(),
                     patch: 0.into(),
                     pre: semver::Prerelease::EMPTY,
                 }],
             },
-            feature_gate_configuration_path: "$.connectors.preview_connect_v0_3".to_string(),
+            feature_gate_configuration_path: "$.connectors.preview_connect_v0_4".to_string(),
             expected_value: Value::Bool(true),
             to_enable: "  connectors:
-    preview_connect_v0_3: true"
+    preview_connect_v0_4: true"
                 .to_string(),
-            warning: Some("Support for @link(url: \"https://specs.apollo.dev/connect/v0.3\") is in preview. See https://go.apollo.dev/connectors/preview-v0.3 for more information.".to_string())
+            warning: Some("Support for @link(url: \"https://specs.apollo.dev/connect/v0.4\") is in preview. See https://go.apollo.dev/connectors/preview for more information.".to_string())
         }]
     }
 }
@@ -177,8 +177,7 @@ impl Display for FeatureGateViolation {
             } => {
                 write!(
                     f,
-                    "* {} @link(url: \"{}\")\n  To enable:\n\n{}",
-                    name, url, to_enable
+                    "* {name} @link(url: \"{url}\")\n  To enable:\n\n{to_enable}"
                 )
             }
         }
@@ -205,7 +204,7 @@ mod test {
     fn feature_gate_connectors_v0_3() {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
-            include_str!("testdata/feature_enforcement_connect_v0_3.graphql"),
+            include_str!("testdata/feature_enforcement_connect_v0_4.graphql"),
         );
 
         assert_eq!(
@@ -215,15 +214,15 @@ mod test {
         );
         let FeatureGateViolation::Spec { url, name, .. } = &report.gated_features_in_use[0];
 
-        assert_eq!("https://specs.apollo.dev/connect/v0.3", url);
-        assert_eq!("Connect v0.3", name);
+        assert_eq!("https://specs.apollo.dev/connect/v0.4", url);
+        assert_eq!("Connect v0.4", name);
     }
 
     #[test]
     fn feature_gate_connectors_v0_3_enabled() {
         let report = check(
-            include_str!("testdata/connectv0_3.router.yaml"),
-            include_str!("testdata/feature_enforcement_connect_v0_3.graphql"),
+            include_str!("testdata/connectv0_4.router.yaml"),
+            include_str!("testdata/feature_enforcement_connect_v0_4.graphql"),
         );
 
         assert_eq!(

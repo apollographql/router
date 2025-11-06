@@ -4,7 +4,12 @@ subtitle: Enforce authorization with schema directives
 description: Enforce authorization in the GraphOS Router with the @requireScopes, @authenticated, and @policy directives.
 ---
 
-<PremiumFeature />
+<PlanRequired plans={["Free", "Developer", "Standard", "Enterprise"]}>
+
+Rate limits apply on the Free plan.
+Developer and Standard plans require Router v2.6.0 or later.
+
+</PlanRequired>
 
 Learn how to secure access to your graph via the router by using authorization directives in your GraphQL schemas.
 
@@ -41,11 +46,9 @@ authorization:
     enabled: false
 ```
 
-<MinVersion version="1.29.1">
-
 ### `@requiresScopes`
 
-</MinVersion>
+<MinVersionBadge version="Router v1.29.1" />
 
 The `@requiresScopes` directive marks fields and types as restricted based on required scopes.
 The directive includes a `scopes` argument with an array of the required scopes to declare which scopes are required:
@@ -108,6 +111,12 @@ fn router_service(service) {
 </ExpansionPanel>
 
 #### Usage
+
+<Caution>
+
+    Federation v2.9 and above doesn't allow `@requiresScopes` on interfaces. Applying `@requiresScopes` to an interface or interface field results in a composition error.
+
+</Caution>
 
 To use the `@requiresScopes` directive in a subgraph, you can [import it from the `@link` directive](/federation/federated-types/federated-directives/#importing-directives) like so:
 
@@ -239,11 +248,9 @@ The router returns `null` for unauthorized fields and applies the [standard Grap
 }
 ```
 
-<MinVersion version="1.29.1">
-
 ### `@authenticated`
 
-</MinVersion>
+<MinVersionBadge version="Router v1.29.1" />
 
 The `@authenticated` directive marks specific fields and types as requiring authentication.
 It works by checking for the `apollo::authentication::jwt_claims` key in a request's context, that is added either by the JWT authentication plugin, when the request contains a valid JWT, or by an authentication coprocessor.
@@ -251,6 +258,12 @@ If the key exists, it means the request is authenticated, and the router execute
 If the request is unauthenticated, the router removes `@authenticated` fields before planning the query and only executes the parts of the query that don't require authentication.
 
 #### Usage
+
+<Caution>
+
+    Federation v2.9 and above doesn't allow `@authenticated` on interfaces. Applying `@authenticated` to an interface or interface field results in a composition error.
+
+</Caution>
 
 To use the `@authenticated` directive in a subgraph, you can [import it from the `@link` directive](/federation/federated-types/federated-directives/#importing-directives) like so:
 
@@ -370,11 +383,9 @@ The response retains the initial request's shape but returns `null` for unauthor
 
 If _every_ requested field requires authentication and a request is unauthenticated, the router generates an error indicating that the query is unauthorized.
 
-<MinVersion version="1.35.0">
-
 ### `@policy`
 
-</MinVersion>
+<MinVersionBadge version="Router v1.35.0" />
 
 The `@policy` directive marks fields and types as restricted based on authorization policies evaluated in a [Rhai script](/graphos/routing/customization/rhai/) or [coprocessor](/router/customizations/coprocessor). This enables custom authorization validation beyond authentication and scopes. It is useful when we need more complex policy evaluation than verifying the presence of a claim value in a list (example: checking specific values in headers).
 
@@ -402,6 +413,12 @@ An overview of how `@policy` is processed through the router's request lifecycle
 - If no field of a subgraph query passes its authorization policies, the router stops further processing of the query and precludes unauthorized subgraph requests. This efficiency gain is a key benefit of the `@policy` and other authorization directives.
 
 #### Usage
+
+<Caution>
+
+    Federation v2.9 and above doesn't allow `@policy` on interfaces. Applying `@policy` to an interface or interface field results in a composition error.
+
+</Caution>
 
 To use the `@policy` directive in a subgraph, you can [import it from the `@link` directive](/federation/federated-types/federated-directives/#importing-directives) like so:
 
@@ -627,13 +644,13 @@ Recall that the `@authenticated` directive only checks for the existence of the 
 
 ### Composed fields with the same authorization directives
 
-If a shared field uses the same authorization directives across subgraphs, composition merges them using `OR` logic.
+If a shared field uses the same authorization directives across subgraphs, composition merges them using `AND` logic.
 For example, suppose two subgraphs use the `@requiresScopes` directive on the `users` query.
-One subgraph requires the `read:others` scope, and another subgraph requires the `read:profiles` scope:
+One subgraph requires the `read:users` scope, and another subgraph requires the `read:profiles` scope:
 
 ```graphql title="Subgraph A"
 type Query {
-  users: [User!]! @requiresScopes(scopes: [["read:others"]])
+  users: [User!]! @requiresScopes(scopes: [["read:users"]])
 }
 ```
 
@@ -643,49 +660,44 @@ type Query {
 }
 ```
 
-A request would need either the `read:others` **OR** the `read:profiles` scope to be authorized.
+A request would need both the `read:users` **AND** the `read:profiles` scope to be authorized.
 
 ```graphql title="Supergraph"
 type Query {
-  users: [User!]! @requiresScopes(scopes: [["read:others"], ["read:profiles"]])
+  users: [User!]! @requiresScopes(scopes: [["read:users", "read:profiles"]])
 }
 ```
 
 <Tip>
 
-Refer to the section on [Combining policies with AND/OR logic](#combining-policies-with-andor-logic) for a refresher of `@requiresScopes` boolean syntax.
+Refer to the section on [Combining scopes with AND/OR logic](#combining-required-scopes-with-andor-logic) for a refresher of `@requiresScopes` boolean syntax.
 
 </Tip>
 
-Using **OR** logic for shared directives simplifies schema updates.
-If requirements change suddenly, you don't need to update the directive in all subgraphs simultaneously.
-
 #### Combining `AND`/`OR` logic with `@requiresScopes`
 
-As with [combining scopes for a single use of [`@requiresScopes`](#combining-required-scopes-with-andor-logic), you can use nested arrays to introduce **AND** logic in a single subgraph:
+As with combining scopes for a single use of [`@requiresScopes`](#combining-required-scopes-with-andor-logic), you can use nested arrays to introduce **AND** and **OR** logic in a single subgraph:
 
 ```graphql title="Subgraph A"
 type Query {
-  users: [User!]! @requiresScopes(scopes: [["read:others", "read:users"]])
+  users: [User!]! @requiresScopes(scopes: [["read:profile", "read:users"], ["read:admin"]])
 }
 ```
 
 ```graphql title="Subgraph B"
 type Query {
-  users: [User!]! @requiresScopes(scopes: [["read:profiles"]])
+  users: [User!]! @requiresScopes(scopes: [["read:admin"]])
 }
 ```
 
-Since both subgraphs use the same authorization directive, composition [merges them using **OR** logic](#a-shared-field-with-the-same-authorization-directives-use-or-logic):
+Since both subgraphs use the same authorization directive, composition [merges them using **AND** logic](#composed-fields-with-the-same-authorization-directives). This results in a scope requirement of either (`read:profile` AND `read:users` AND `read:admin`) OR `read:admin`. Since the `read:admin` scope by itself subsumes the other requirement, we drop the redundant requirements to arrive at the final scope:
 
 ```graphql title="Supergraph"
 type Query {
   users: [User!]!
-    @requiresScopes(scopes: [["read:others", "read:users"], ["read:profiles"]])
+    @requiresScopes(scopes: [["read:admin"]])
 }
 ```
-
-This syntax means a request needs either (`read:others` **AND** `read:users`) scopes **OR** just the `read:profiles` scope to be authorized.
 
 ### Authorization and `@key` fields
 
@@ -745,11 +757,11 @@ This behavior resembles what you can create with [contracts](/graphos/delivery/c
 
 ### Authorization and interfaces
 
-If a type [implementing an interface](/apollo-server/schema/unions-interfaces/#interface-type) requires authorization, unauthorized requests can query the interface, but not any parts of the type that require authorization.
+If a type [implementing an interface](/apollo-server/schema/unions-interfaces/#interface-type) requires authorization, unauthorized requests cannot query fields on the interface.
 
 For example, consider this schema where the `Post` interface doesn't require authentication, but the `PrivateBlog` type, which implements `Post`, does:
-
-```graphql
+ 
+```graphql {11, 18}
 type Query {
   posts: [Post!]!
 }
@@ -772,12 +784,10 @@ type PrivateBlog implements Post @authenticated {
   author: User!
   title: String!
   content: String!
-  publishAt: String
-  allowedViewers: [User!]!
 }
 ```
 
-If an unauthenticated request were to make this query:
+If an unauthenticated request sends a query for fields on the `Post` interface:
 
 ```graphql
 query {
@@ -785,26 +795,101 @@ query {
     id
     author
     title
+  }
+}
+```
+
+The router would filter out the whole query.
+
+The response would include an `"UNAUTHORIZED_FIELD_OR_TYPE"` error at the `/posts` path.
+
+#### Polymorphic types with different requirements
+
+Interface implementations can each specify different authorization requirements. To successfully query the interface's fields, the request must meet all of those authorization requirements, which are combined with `AND` logic.
+
+For example, consider this schema where the `PublicBlog` type doesn't require authentication, but the `PrivateBlog` type does:
+
+```graphql {11, 18, 25}
+type Query {
+  posts: [Post!]!
+}
+
+type User {
+  id: ID!
+  username: String
+  posts: [Post!]!
+}
+
+interface Post {
+  id: ID!
+  author: User!
+  title: String!
+  content: String!
+}
+
+type PrivateBlog implements Post @authenticated {
+  id: ID!
+  author: User!
+  title: String!
+  content: String!
+}
+
+type PublicBlog implements Post {
+  id: ID!
+  author: User!
+  title: String!
+  content: String!
+}
+```
+
+If an unauthenticated request sends a query for fields on the `Post` interface:
+
+```graphql
+query {
+  posts {
+    id
+    author
+    title
+  }
+}
+```
+
+The router would filter out the whole query. The response would include an `"UNAUTHORIZED_FIELD_OR_TYPE"` error at the `/posts` path. This is because the data returned could contain an instance of `PrivateBlog`, which requires authentication.
+
+If an unauthenticated request specifically asks for `PublicBlog` and `PrivateBlog` entries:
+
+```graphql
+query {
+  posts {
+    ... on PublicBlog {
+        id
+        author
+        title
+    }
     ... on PrivateBlog {
-      allowedViewers
+        id
+        author
+        title
     }
   }
 }
 ```
 
-The router would filter the query as follows:
+The router would filter out the authenticated parts of the query, leaving only the fields that don't require authentication:
 
 ```graphql
 query {
   posts {
-    id
-    author
-    title
+    ... on PublicBlog {
+        id
+        author
+        title
+    }
   }
 }
 ```
 
-The response would include an `"UNAUTHORIZED_FIELD_OR_TYPE"` error at the `/posts/@/allowedViewers` path.
+The response would include an `"UNAUTHORIZED_FIELD_OR_TYPE"` error at the `/posts/... on PrivateBlog` path.
 
 ## Query deduplication
 

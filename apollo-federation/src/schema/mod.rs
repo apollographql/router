@@ -1,6 +1,7 @@
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::ops::Deref;
+use std::ops::Range;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
@@ -9,14 +10,17 @@ use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::Value;
-use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FieldSet;
+use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::ComponentOrigin;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::ExtensionId;
 use apollo_compiler::schema::SchemaDefinition;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
+use itertools::Itertools;
+use position::DirectiveTargetPosition;
 use position::FieldArgumentDefinitionPosition;
 use position::ObjectOrInterfaceTypeDefinitionPosition;
 use position::TagDirectiveTargetPosition;
@@ -28,8 +32,11 @@ use crate::error::SingleFederationError;
 use crate::internal_error;
 use crate::link::Link;
 use crate::link::LinksMetadata;
+use crate::link::context_spec_definition::ContextSpecDefinition;
 use crate::link::cost_spec_definition;
 use crate::link::cost_spec_definition::CostSpecDefinition;
+use crate::link::federation_spec_definition::CacheTagDirectiveArguments;
+use crate::link::federation_spec_definition::ComposeDirectiveArguments;
 use crate::link::federation_spec_definition::ContextDirectiveArguments;
 use crate::link::federation_spec_definition::FEDERATION_ENTITY_TYPE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
@@ -43,6 +50,7 @@ use crate::link::federation_spec_definition::RequiresDirectiveArguments;
 use crate::link::federation_spec_definition::TagDirectiveArguments;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::spec::Version;
+use crate::link::spec_definition::SPEC_REGISTRY;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
@@ -59,7 +67,9 @@ use crate::schema::subgraph_metadata::SubgraphMetadata;
 pub(crate) mod argument_composition_strategies;
 pub(crate) mod blueprint;
 pub(crate) mod definitions;
+pub(crate) mod directive_location;
 pub(crate) mod field_set;
+pub(crate) mod locations;
 pub(crate) mod position;
 pub(crate) mod referencer;
 pub(crate) mod schema_upgrader;
@@ -152,7 +162,7 @@ impl FederationSchema {
                 .types
                 .get(&type_name)
                 .ok_or_else(|| SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{}\"", type_name),
+                    message: format!("Schema has no type \"{type_name}\""),
                 })?;
         Ok(match type_ {
             ExtendedType::Scalar(_) => ScalarTypeDefinitionPosition { type_name }.into(),
@@ -166,6 +176,18 @@ impl FederationSchema {
 
     pub(crate) fn try_get_type(&self, type_name: Name) -> Option<TypeDefinitionPosition> {
         self.get_type(type_name).ok()
+    }
+
+    pub(crate) fn is_root_type(&self, type_name: &Name) -> bool {
+        self.schema()
+            .schema_definition
+            .iter_root_operations()
+            .any(|op| *op.1 == *type_name)
+    }
+
+    pub(crate) fn is_subscription_root_type(&self, type_name: &Name) -> bool {
+        let subscription = &self.schema().schema_definition.subscription;
+        subscription.as_ref().is_some_and(|name| name == type_name)
     }
 
     /// Return the possible runtime types for a definition.
@@ -194,6 +216,31 @@ impl FederationSchema {
                 })
                 .collect::<IndexSet<_>>(),
         })
+    }
+
+    /// Return all implementing types (i.e. both object and interface) for an interface definition.
+    ///
+    /// Note this always allocates a set for the result. Avoid calling it frequently.
+    pub(crate) fn all_implementation_types(
+        &self,
+        interface_type_definition_position: &InterfaceTypeDefinitionPosition,
+    ) -> Result<IndexSet<ObjectOrInterfaceTypeDefinitionPosition>, FederationError> {
+        let referencers = self
+            .referencers()
+            .get_interface_type(&interface_type_definition_position.type_name)?;
+        Ok(referencers
+            .object_types
+            .iter()
+            .cloned()
+            .map(ObjectOrInterfaceTypeDefinitionPosition::from)
+            .chain(
+                referencers
+                    .interface_types
+                    .iter()
+                    .cloned()
+                    .map(ObjectOrInterfaceTypeDefinitionPosition::from),
+            )
+            .collect())
     }
 
     /// Similar to `Self::validate` but returns `self` as part of the error should it be needed by
@@ -242,8 +289,7 @@ impl FederationSchema {
                 type_name: FEDERATION_ENTITY_TYPE_NAME_IN_SPEC,
             })),
             Some(_) => Err(FederationError::internal(format!(
-                "Unexpectedly found non-union for federation spec's `{}` type definition",
-                FEDERATION_ENTITY_TYPE_NAME_IN_SPEC
+                "Unexpectedly found non-union for federation spec's `{FEDERATION_ENTITY_TYPE_NAME_IN_SPEC}` type definition"
             ))),
             None => Ok(None),
         }
@@ -337,9 +383,28 @@ impl FederationSchema {
         }
     }
 
+    pub(crate) fn compose_directive_applications(
+        &self,
+    ) -> FallibleDirectiveIterator<ComposeDirectiveDirective<'_>> {
+        let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
+        let compose_directive_definition = federation_spec.compose_directive_definition(self)?;
+        let directives = self
+            .schema()
+            .schema_definition
+            .directives
+            .get_all(&compose_directive_definition.name)
+            .map(|d| {
+                let arguments = federation_spec.compose_directive_arguments(d);
+                arguments.map(|args| ComposeDirectiveDirective { arguments: args })
+            })
+            .collect();
+        Ok(directives)
+    }
+
+    /// For subgraph schemas where the `@context` directive is a federation spec directive.
     pub(crate) fn context_directive_applications(
         &self,
-    ) -> FallibleDirectiveIterator<ContextDirective> {
+    ) -> FallibleDirectiveIterator<ContextDirective<'_>> {
         let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
         let context_directive_definition = federation_spec.context_directive_definition(self)?;
         let context_directive_referencers = self
@@ -395,10 +460,36 @@ impl FederationSchema {
         Ok(applications)
     }
 
+    /// For supergraph schemas where the `@context` directive is a "context" spec directive.
+    pub(crate) fn context_directive_applications_in_supergraph(
+        &self,
+        context_spec: &ContextSpecDefinition,
+    ) -> FallibleDirectiveIterator<ContextDirective<'_>> {
+        let context_directive_definition = context_spec.context_directive_definition(self)?;
+        let context_directive_referencers = self
+            .referencers()
+            .get_directive(&context_directive_definition.name)?;
+        let mut applications = Vec::new();
+        for type_pos in context_directive_referencers.composite_type_positions() {
+            let directive_apps =
+                type_pos.get_applied_directives(self, &context_directive_definition.name);
+            for app in directive_apps {
+                let arguments = context_spec.context_directive_arguments(app);
+                applications.push(arguments.map(|args| ContextDirective {
+                    // Note: `ContextDirectiveArguments` is also defined in `context_spec_definition` module.
+                    //       So, it is converted to the one defined in this module.
+                    arguments: ContextDirectiveArguments { name: args.name },
+                    target: type_pos.clone(),
+                }));
+            }
+        }
+        Ok(applications)
+    }
+
     #[allow(clippy::wrong_self_convention)]
     pub(crate) fn from_context_directive_applications(
         &self,
-    ) -> FallibleDirectiveIterator<FromContextDirective> {
+    ) -> FallibleDirectiveIterator<FromContextDirective<'_>> {
         let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
         let from_context_directive_definition =
             federation_spec.from_context_directive_definition(self)?;
@@ -444,7 +535,7 @@ impl FederationSchema {
         Ok(applications)
     }
 
-    pub(crate) fn key_directive_applications(&self) -> FallibleDirectiveIterator<KeyDirective> {
+    pub(crate) fn key_directive_applications(&self) -> FallibleDirectiveIterator<KeyDirective<'_>> {
         let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
         let key_directive_definition = federation_spec.key_directive_definition(self)?;
         let key_directive_referencers = self
@@ -506,7 +597,7 @@ impl FederationSchema {
 
     pub(crate) fn provides_directive_applications(
         &self,
-    ) -> FallibleDirectiveIterator<ProvidesDirective> {
+    ) -> FallibleDirectiveIterator<ProvidesDirective<'_>> {
         let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
         let provides_directive_definition = federation_spec.provides_directive_definition(self)?;
         let provides_directive_referencers = self
@@ -557,7 +648,7 @@ impl FederationSchema {
 
     pub(crate) fn requires_directive_applications(
         &self,
-    ) -> FallibleDirectiveIterator<RequiresDirective> {
+    ) -> FallibleDirectiveIterator<RequiresDirective<'_>> {
         let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
         let requires_directive_definition = federation_spec.requires_directive_definition(self)?;
         let requires_directive_referencers = self
@@ -605,8 +696,7 @@ impl FederationSchema {
         Ok(applications)
     }
 
-    // TODO: This currently only returns targets for object_fields and interface_fields
-    pub(crate) fn tag_directive_applications(&self) -> FallibleDirectiveIterator<TagDirective> {
+    pub(crate) fn tag_directive_applications(&self) -> FallibleDirectiveIterator<TagDirective<'_>> {
         let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
         let tag_directive_definition = federation_spec.tag_directive_definition(self)?;
         let tag_directive_referencers = self
@@ -614,10 +704,24 @@ impl FederationSchema {
             .get_directive(&tag_directive_definition.name)?;
 
         let mut applications = Vec::new();
-        for field_definition_position in &tag_directive_referencers.object_fields {
-            match field_definition_position.get(self.schema()) {
-                Ok(field_definition) => {
-                    let directives = &field_definition.directives;
+        // Schema
+        if let Some(schema_position) = &tag_directive_referencers.schema {
+            let schema_def = schema_position.get(self.schema());
+            let directives = &schema_def.directives;
+            for tag_directive_application in directives.get_all(&tag_directive_definition.name) {
+                let arguments = federation_spec.tag_directive_arguments(tag_directive_application);
+                applications.push(arguments.map(|args| TagDirective {
+                    arguments: args,
+                    target: TagDirectiveTargetPosition::Schema(schema_position.clone()),
+                    directive: tag_directive_application,
+                }));
+            }
+        }
+        // Interface types
+        for interface_type_position in &tag_directive_referencers.interface_types {
+            match interface_type_position.get(self.schema()) {
+                Ok(interface_type) => {
+                    let directives = &interface_type.directives;
                     for tag_directive_application in
                         directives.get_all(&tag_directive_definition.name)
                     {
@@ -625,8 +729,8 @@ impl FederationSchema {
                             federation_spec.tag_directive_arguments(tag_directive_application);
                         applications.push(arguments.map(|args| TagDirective {
                             arguments: args,
-                            target: TagDirectiveTargetPosition::ObjectField(
-                                field_definition_position.clone(),
+                            target: TagDirectiveTargetPosition::Interface(
+                                interface_type_position.clone(),
                             ),
                             directive: tag_directive_application,
                         }));
@@ -635,6 +739,7 @@ impl FederationSchema {
                 Err(error) => applications.push(Err(error.into())),
             }
         }
+        // Interface fields
         for field_definition_position in &tag_directive_referencers.interface_fields {
             match field_definition_position.get(self.schema()) {
                 Ok(field_definition) => {
@@ -656,12 +761,252 @@ impl FederationSchema {
                 Err(error) => applications.push(Err(error.into())),
             }
         }
+        // Interface field arguments
+        for argument_definition_position in &tag_directive_referencers.interface_field_arguments {
+            match argument_definition_position.get(self.schema()) {
+                Ok(argument_definition) => {
+                    let directives = &argument_definition.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::ArgumentDefinition(
+                                argument_definition_position.clone().into(),
+                            ),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        // Object types
+        for object_type_position in &tag_directive_referencers.object_types {
+            match object_type_position.get(self.schema()) {
+                Ok(object_type) => {
+                    let directives = &object_type.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::Object(
+                                object_type_position.clone(),
+                            ),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        // Object fields
+        for field_definition_position in &tag_directive_referencers.object_fields {
+            match field_definition_position.get(self.schema()) {
+                Ok(field_definition) => {
+                    let directives = &field_definition.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::ObjectField(
+                                field_definition_position.clone(),
+                            ),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        // Object field arguments
+        for argument_definition_position in &tag_directive_referencers.object_field_arguments {
+            match argument_definition_position.get(self.schema()) {
+                Ok(argument_definition) => {
+                    let directives = &argument_definition.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::ArgumentDefinition(
+                                argument_definition_position.clone().into(),
+                            ),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        // Union types
+        for union_type_position in &tag_directive_referencers.union_types {
+            match union_type_position.get(self.schema()) {
+                Ok(union_type) => {
+                    let directives = &union_type.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::Union(union_type_position.clone()),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+
+        // Scalar types
+        for scalar_type_position in &tag_directive_referencers.scalar_types {
+            match scalar_type_position.get(self.schema()) {
+                Ok(scalar_type) => {
+                    let directives = &scalar_type.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::Scalar(
+                                scalar_type_position.clone(),
+                            ),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        // Enum types
+        for enum_type_position in &tag_directive_referencers.enum_types {
+            match enum_type_position.get(self.schema()) {
+                Ok(enum_type) => {
+                    let directives = &enum_type.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::Enum(enum_type_position.clone()),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        // Enum values
+        for enum_value_position in &tag_directive_referencers.enum_values {
+            match enum_value_position.get(self.schema()) {
+                Ok(enum_value) => {
+                    let directives = &enum_value.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::EnumValue(
+                                enum_value_position.clone(),
+                            ),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        // Input object types
+        for input_object_type_position in &tag_directive_referencers.input_object_types {
+            match input_object_type_position.get(self.schema()) {
+                Ok(input_object_type) => {
+                    let directives = &input_object_type.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::InputObject(
+                                input_object_type_position.clone(),
+                            ),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        // Input field definitions
+        for input_field_definition_position in &tag_directive_referencers.input_object_fields {
+            match input_field_definition_position.get(self.schema()) {
+                Ok(input_field_definition) => {
+                    let directives = &input_field_definition.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::InputObjectFieldDefinition(
+                                input_field_definition_position.clone(),
+                            ),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        // Directive definition arguments
+        for directive_definition_position in &tag_directive_referencers.directive_arguments {
+            match directive_definition_position.get(self.schema()) {
+                Ok(directive_definition) => {
+                    let directives = &directive_definition.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::DirectiveArgumentDefinition(
+                                directive_definition_position.clone(),
+                            ),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+
         Ok(applications)
     }
 
     pub(crate) fn list_size_directive_applications(
         &self,
-    ) -> FallibleDirectiveIterator<ListSizeDirective> {
+    ) -> FallibleDirectiveIterator<ListSizeDirective<'_>> {
         let Some(list_size_directive_name) = CostSpecDefinition::list_size_directive_name(self)?
         else {
             return Ok(Vec::new());
@@ -697,21 +1042,97 @@ impl FederationSchema {
                 }
             }
         }
+
         Ok(applications)
+    }
+
+    pub(crate) fn cache_tag_directive_applications(
+        &self,
+    ) -> FallibleDirectiveIterator<CacheTagDirective<'_>> {
+        let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
+        let Ok(cache_tag_directive_definition) =
+            federation_spec.cache_tag_directive_definition(self)
+        else {
+            return Ok(Vec::new());
+        };
+
+        let result = self
+            .referencers()
+            .get_directive_applications(self, &cache_tag_directive_definition.name)?
+            .map(|(pos, application)| {
+                let arguments = federation_spec.cache_tag_directive_arguments(application);
+                arguments.map(|args| CacheTagDirective {
+                    arguments: args,
+                    target: pos,
+                })
+            })
+            .collect();
+        Ok(result)
     }
 
     pub(crate) fn is_interface(&self, type_name: &Name) -> bool {
         self.referencers().interface_types.contains_key(type_name)
     }
+
+    pub(crate) fn all_features(&self) -> Result<Vec<&'static dyn SpecDefinition>, FederationError> {
+        let Some(links) = self.metadata() else {
+            return Ok(Vec::new());
+        };
+
+        let mut features: Vec<&'static dyn SpecDefinition> =
+            Vec::with_capacity(links.all_links().len());
+
+        for link in links.all_links() {
+            if let Some(spec) = SPEC_REGISTRY.get_definition(&link.url) {
+                features.push(*spec);
+            } else if let Some(supported_versions) = SPEC_REGISTRY.get_versions(&link.url.identity)
+            {
+                return Err(
+        SingleFederationError::UnknownLinkVersion {
+            message: format!(
+                "Detected unsupported {} specification version {}. Please upgrade to a composition version which supports that version, or select one of the following supported versions: {}.",
+                link.url.identity.name,
+                link.url.version,
+                supported_versions.iter().join(", ")
+            ),
+        }.into());
+            }
+        }
+
+        Ok(features)
+    }
+
+    pub(crate) fn node_locations<T>(
+        &self,
+        node: &Node<T>,
+    ) -> impl Iterator<Item = Range<LineColumn>> {
+        node.line_column_range(&self.schema().sources).into_iter()
+    }
 }
 
 type FallibleDirectiveIterator<D> = Result<Vec<Result<D, FederationError>>, FederationError>;
+
+#[derive(Clone)]
+pub(crate) struct ComposeDirectiveDirective<'schema> {
+    /// The parsed arguments of this `@composeDirective` application
+    pub(crate) arguments: ComposeDirectiveArguments<'schema>,
+}
 
 pub(crate) struct ContextDirective<'schema> {
     /// The parsed arguments of this `@context` application
     arguments: ContextDirectiveArguments<'schema>,
     /// The schema position to which this directive is applied
     target: CompositeTypeDefinitionPosition,
+}
+
+impl ContextDirective<'_> {
+    pub(crate) fn arguments(&self) -> &ContextDirectiveArguments<'_> {
+        &self.arguments
+    }
+
+    pub(crate) fn target(&self) -> &CompositeTypeDefinitionPosition {
+        &self.target
+    }
 }
 
 pub(crate) struct FromContextDirective<'schema> {
@@ -810,6 +1231,13 @@ pub(crate) struct TagDirective<'schema> {
     target: TagDirectiveTargetPosition, // TODO: Make this a reference
     /// Reference to the directive in the schema
     directive: &'schema Node<Directive>,
+}
+
+pub(crate) struct CacheTagDirective<'schema> {
+    /// The parsed arguments of this `@cacheTag` application
+    arguments: CacheTagDirectiveArguments<'schema>,
+    /// The schema position to which this directive is applied
+    target: DirectiveTargetPosition,
 }
 
 pub(crate) trait HasFields {
@@ -946,52 +1374,68 @@ impl std::fmt::Debug for ValidFederationSchema {
     }
 }
 
-pub(crate) trait SchemaElement {
-    fn origins(&self) -> HashSet<&ComponentOrigin>;
+impl From<ValidFederationSchema> for FederationSchema {
+    fn from(value: ValidFederationSchema) -> Self {
+        Arc::unwrap_or_clone(value.schema).into_inner()
+    }
+}
 
-    #[allow(unused)]
-    fn has_non_extension_elements(&self) -> bool {
-        self.origins()
-            .iter()
-            .any(|origin| matches!(origin, ComponentOrigin::Definition))
+pub(crate) trait SchemaElement {
+    /// Iterates over the origins of the schema element.
+    /// - Expected to use the apollo_compiler's `iter_origins` implementation.
+    fn iter_origins(&self) -> impl Iterator<Item = &ComponentOrigin>;
+
+    /// Returns true in the first tuple element if `self` has a definition.
+    /// Returns a set of extension IDs in the second tuple element, if any.
+    fn definition_and_extensions(&self) -> (bool, IndexSet<&ExtensionId>) {
+        let mut extensions = IndexSet::default();
+        let mut has_definition = false;
+        for origin in self.iter_origins() {
+            if let Some(extension_id) = origin.extension_id() {
+                extensions.insert(extension_id);
+            } else {
+                has_definition = true;
+            }
+        }
+        (has_definition, extensions)
     }
 
-    #[allow(unused)]
+    fn extensions(&self) -> IndexSet<&ExtensionId> {
+        self.definition_and_extensions().1
+    }
+
+    fn has_non_extension_elements(&self) -> bool {
+        self.definition_and_extensions().0
+    }
+
     fn has_extension_elements(&self) -> bool {
-        self.origins()
-            .iter()
-            .any(|origin| matches!(origin, ComponentOrigin::Extension(_)))
+        !self.extensions().is_empty()
     }
 
     fn origin_to_use(&self) -> ComponentOrigin {
-        let origins = self.origins();
-        let has_definition = origins.contains(&ComponentOrigin::Definition);
+        let extensions = self.extensions();
         // Find an arbitrary extension origin if the schema definition has any extension elements.
-        // TODO: No ordering between origins.
-        let first_extension = origins
-            .into_iter()
-            .find(|origin| matches!(origin, ComponentOrigin::Extension(_)));
-        if has_definition {
-            // Use the existing definition if exists
-            ComponentOrigin::Definition
-        } else if let Some(first_extension) = first_extension {
+        // Note: No defined ordering between origins.
+        let first_extension = extensions.first();
+        if let Some(first_extension) = first_extension {
             // If there is an extension, use the first extension.
-            first_extension.clone()
+            ComponentOrigin::Extension((*first_extension).clone())
         } else {
-            // Otherwise, use a new definition
+            // Use the existing definition if exists, or maybe a new definition if no definition
+            // nor extensions exist.
             ComponentOrigin::Definition
         }
     }
 }
 
 impl SchemaElement for SchemaDefinition {
-    fn origins(&self) -> HashSet<&ComponentOrigin> {
-        self.directives
-            .iter()
-            .map(|component| &component.origin)
-            .chain(self.query.iter().map(|name| &name.origin))
-            .chain(self.mutation.iter().map(|name| &name.origin))
-            .chain(self.subscription.iter().map(|name| &name.origin))
-            .collect()
+    fn iter_origins(&self) -> impl Iterator<Item = &ComponentOrigin> {
+        self.iter_origins()
+    }
+}
+
+impl SchemaElement for ExtendedType {
+    fn iter_origins(&self) -> impl Iterator<Item = &ComponentOrigin> {
+        self.iter_origins()
     }
 }

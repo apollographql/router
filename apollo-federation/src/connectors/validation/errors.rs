@@ -11,20 +11,21 @@ use multi_try::MultiTry;
 use shape::Shape;
 
 use super::coordinates::ConnectDirectiveCoordinate;
+use super::coordinates::IsSuccessCoordinate;
 use super::coordinates::SourceDirectiveCoordinate;
 use super::expression::MappingArgument;
 use super::expression::parse_mapping_argument;
 use crate::connectors::JSONSelection;
 use crate::connectors::Namespace;
-use crate::connectors::spec::schema::ERRORS_ARGUMENT_NAME;
-use crate::connectors::spec::schema::ERRORS_EXTENSIONS_ARGUMENT_NAME;
-use crate::connectors::spec::schema::ERRORS_MESSAGE_ARGUMENT_NAME;
+use crate::connectors::spec::connect::IS_SUCCESS_ARGUMENT_NAME;
+use crate::connectors::spec::errors::ERRORS_ARGUMENT_NAME;
+use crate::connectors::spec::errors::ERRORS_EXTENSIONS_ARGUMENT_NAME;
+use crate::connectors::spec::errors::ERRORS_MESSAGE_ARGUMENT_NAME;
 use crate::connectors::string_template::Expression;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
 use crate::connectors::validation::expression;
 use crate::connectors::validation::expression::Context;
-use crate::connectors::validation::graphql::GraphQLString;
 use crate::connectors::validation::graphql::SchemaInfo;
 
 /// A valid, parsed (but not type-checked) `@connect(errors:)` or `@source(errors:)`.
@@ -47,7 +48,7 @@ impl<'schema> Errors<'schema> {
         coordinate: ErrorsCoordinate<'schema>,
         schema: &'schema SchemaInfo,
     ) -> Result<Self, Vec<Message>> {
-        let directive = match coordinate {
+        let directive = match &coordinate {
             ErrorsCoordinate::Source { source } => source.directive,
             ErrorsCoordinate::Connect { connect } => connect.directive,
         };
@@ -59,7 +60,7 @@ impl<'schema> Errors<'schema> {
         };
 
         if let Some(errors_arg) = arg.as_object() {
-            ErrorsMessage::parse(errors_arg, coordinate, schema)
+            ErrorsMessage::parse(errors_arg, coordinate.clone(), schema)
                 .and_try(ErrorsExtensions::parse(errors_arg, coordinate, schema))
                 .map(|(message, extensions)| Self {
                     message,
@@ -121,7 +122,7 @@ impl<'schema> Errors<'schema> {
 }
 
 struct ErrorsMessage<'schema> {
-    mapping: MappingArgument<'schema>,
+    mapping: MappingArgument,
     coordinate: ErrorsMessageCoordinate<'schema>,
 }
 
@@ -139,8 +140,12 @@ impl<'schema> ErrorsMessage<'schema> {
         };
         let coordinate = ErrorsMessageCoordinate { coordinate };
 
-        let mapping =
-            parse_mapping_argument(value, coordinate, Code::InvalidErrorsMessage, schema)?;
+        let mapping = parse_mapping_argument(
+            value,
+            coordinate.clone(),
+            Code::InvalidErrorsMessage,
+            schema,
+        )?;
 
         Ok(Some(Self {
             mapping,
@@ -156,12 +161,12 @@ impl<'schema> ErrorsMessage<'schema> {
         } = self;
         let context = match coordinate.coordinate {
             ErrorsCoordinate::Source { .. } => {
-                &Context::for_source_response(schema, &mapping.string, Code::InvalidErrorsMessage)
+                &Context::for_source_response(schema, &mapping.node, Code::InvalidErrorsMessage)
             }
             ErrorsCoordinate::Connect { connect } => &Context::for_connect_response(
                 schema,
                 connect,
-                &mapping.string,
+                &mapping.node,
                 Code::InvalidErrorsMessage,
             ),
         };
@@ -176,7 +181,7 @@ impl<'schema> ErrorsMessage<'schema> {
 }
 
 /// Coordinate for an `errors` argument in `@source` or `@connect`.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) enum ErrorsCoordinate<'a> {
     Source {
         source: SourceDirectiveCoordinate<'a>,
@@ -199,14 +204,14 @@ impl Display for ErrorsCoordinate<'_> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct ErrorsMessageCoordinate<'schema> {
     coordinate: ErrorsCoordinate<'schema>,
 }
 
 impl Display for ErrorsMessageCoordinate<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self.coordinate {
+        match &self.coordinate {
             ErrorsCoordinate::Source { source } => {
                 write!(
                     f,
@@ -229,7 +234,7 @@ impl Display for ErrorsMessageCoordinate<'_> {
 
 struct ErrorsExtensions<'schema> {
     selection: JSONSelection,
-    string: GraphQLString<'schema>,
+    node: Node<Value>,
     coordinate: ErrorsExtensionsCoordinate<'schema>,
 }
 
@@ -247,12 +252,16 @@ impl<'schema> ErrorsExtensions<'schema> {
         };
         let coordinate = ErrorsExtensionsCoordinate { coordinate };
 
-        let MappingArgument { expression, string } =
-            parse_mapping_argument(value, coordinate, Code::InvalidErrorsMessage, schema)?;
+        let MappingArgument { expression, node } = parse_mapping_argument(
+            value,
+            coordinate.clone(),
+            Code::InvalidErrorsMessage,
+            schema,
+        )?;
 
         Ok(Some(Self {
             selection: expression.expression,
-            string,
+            node,
             coordinate,
         }))
     }
@@ -261,22 +270,25 @@ impl<'schema> ErrorsExtensions<'schema> {
     pub(super) fn type_check(self, schema: &SchemaInfo) -> Result<(), Message> {
         let Self {
             selection,
-            string,
+            node,
             coordinate,
         } = self;
         let context = match coordinate.coordinate {
             ErrorsCoordinate::Source { .. } => {
-                &Context::for_source_response(schema, &string, Code::InvalidErrorsMessage)
+                &Context::for_source_response(schema, &node, Code::InvalidErrorsMessage)
             }
             ErrorsCoordinate::Connect { connect } => {
-                &Context::for_connect_response(schema, connect, &string, Code::InvalidErrorsMessage)
+                &Context::for_connect_response(schema, connect, &node, Code::InvalidErrorsMessage)
             }
         };
 
         expression::validate(
             &Expression {
                 expression: selection,
-                location: 0..string.as_str().len(),
+                location: 0..node
+                    .location()
+                    .map(|location| location.node_len())
+                    .unwrap_or_default(),
             },
             context,
             &Shape::dict(Shape::unknown([]), []),
@@ -288,14 +300,14 @@ impl<'schema> ErrorsExtensions<'schema> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct ErrorsExtensionsCoordinate<'schema> {
     coordinate: ErrorsCoordinate<'schema>,
 }
 
 impl Display for ErrorsExtensionsCoordinate<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self.coordinate {
+        match &self.coordinate {
             ErrorsCoordinate::Source { source } => {
                 write!(
                     f,
@@ -313,5 +325,81 @@ impl Display for ErrorsExtensionsCoordinate<'_> {
                 )
             }
         }
+    }
+}
+
+/// The `@connect(isSuccess:)` or `@source(isSuccess:)` argument
+pub(crate) struct IsSuccessArgument<'schema> {
+    expression: Expression,
+    node: Node<Value>,
+    coordinate: IsSuccessCoordinate<'schema>,
+}
+
+impl<'schema> IsSuccessArgument<'schema> {
+    pub(crate) fn parse_for_connector(
+        connect: ConnectDirectiveCoordinate<'schema>,
+        schema: &'schema SchemaInfo,
+    ) -> Result<Option<Self>, Message> {
+        Self::parse(
+            IsSuccessCoordinate {
+                coordinate: ErrorsCoordinate::Connect { connect },
+            },
+            schema,
+        )
+    }
+
+    pub(crate) fn parse_for_source(
+        source: SourceDirectiveCoordinate<'schema>,
+        schema: &'schema SchemaInfo,
+    ) -> Result<Option<Self>, Message> {
+        Self::parse(
+            IsSuccessCoordinate {
+                coordinate: ErrorsCoordinate::Source { source },
+            },
+            schema,
+        )
+    }
+
+    fn parse(
+        coordinate: IsSuccessCoordinate<'schema>,
+        schema: &'schema SchemaInfo,
+    ) -> Result<Option<Self>, Message> {
+        let directive = match &coordinate.coordinate {
+            ErrorsCoordinate::Source { source } => source.directive,
+            ErrorsCoordinate::Connect { connect } => connect.directive,
+        };
+        // If the `isSuccess` argument cannot be found in provided args, Error
+        let Some(value) = directive.specified_argument_by_name(&IS_SUCCESS_ARGUMENT_NAME) else {
+            return Ok(None);
+        };
+
+        let MappingArgument { expression, node } =
+            parse_mapping_argument(value, coordinate.clone(), Code::InvalidIsSuccess, schema)?;
+
+        Ok(Some(Self {
+            expression,
+            coordinate,
+            node,
+        }))
+    }
+
+    /// Check that only available variables are used, and the expression results in a boolean
+    pub(crate) fn type_check(self, schema: &SchemaInfo<'_>) -> Result<(), Message> {
+        let context = match self.coordinate.coordinate {
+            ErrorsCoordinate::Source { .. } => {
+                &Context::for_source_response(schema, &self.node, Code::InvalidIsSuccess)
+            }
+            ErrorsCoordinate::Connect { connect } => {
+                &Context::for_connect_response(schema, connect, &self.node, Code::InvalidIsSuccess)
+            }
+        };
+        expression::validate(&self.expression, context, &Shape::bool([])).map_err(|mut message| {
+            message.message = format!(
+                "In {coordinate}: {message}",
+                coordinate = self.coordinate,
+                message = message.message
+            );
+            message
+        })
     }
 }

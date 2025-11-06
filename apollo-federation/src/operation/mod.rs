@@ -29,6 +29,7 @@ use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
+use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Fragment;
 use apollo_compiler::name;
 use apollo_compiler::schema::Directive;
@@ -281,14 +282,6 @@ pub(crate) enum Selection {
     InlineFragment(Arc<InlineFragmentSelection>),
 }
 
-/// Element enum that is more general than OpPathElement.
-/// - Used for operation optimization.
-#[derive(Debug, Clone, derive_more::From)]
-pub(crate) enum OperationElement {
-    Field(Field),
-    InlineFragment(InlineFragment),
-}
-
 impl Selection {
     pub(crate) fn from_field(field: Field, sub_selections: Option<SelectionSet>) -> Self {
         Self::Field(Arc::new(field.with_subselection(sub_selections)))
@@ -304,25 +297,6 @@ impl Selection {
         match element {
             OpPathElement::Field(field) => Ok(Self::from_field(field, sub_selections)),
             OpPathElement::InlineFragment(inline_fragment) => {
-                let Some(sub_selections) = sub_selections else {
-                    return Err(FederationError::internal(
-                        "unexpected inline fragment without sub-selections",
-                    ));
-                };
-                Ok(InlineFragmentSelection::new(inline_fragment, sub_selections).into())
-            }
-        }
-    }
-
-    /// Build a selection from an OperationElement and a sub-selection set.
-    /// - `named_fragments`: Named fragment definitions that are rebased for the element's schema.
-    pub(crate) fn from_operation_element(
-        element: OperationElement,
-        sub_selections: Option<SelectionSet>,
-    ) -> Result<Selection, FederationError> {
-        match element {
-            OperationElement::Field(field) => Ok(Self::from_field(field, sub_selections)),
-            OperationElement::InlineFragment(inline_fragment) => {
                 let Some(sub_selections) = sub_selections else {
                     return Err(FederationError::internal(
                         "unexpected inline fragment without sub-selections",
@@ -358,17 +332,6 @@ impl Selection {
             }
             Selection::InlineFragment(inline_fragment_selection) => {
                 OpPathElement::InlineFragment(inline_fragment_selection.inline_fragment.clone())
-            }
-        }
-    }
-
-    pub(crate) fn operation_element(&self) -> OperationElement {
-        match self {
-            Selection::Field(field_selection) => {
-                OperationElement::Field(field_selection.field.clone())
-            }
-            Selection::InlineFragment(inline_fragment_selection) => {
-                OperationElement::InlineFragment(inline_fragment_selection.inline_fragment.clone())
             }
         }
     }
@@ -764,33 +727,33 @@ mod field_selection {
             self,
             selection_set: Option<SelectionSet>,
         ) -> FieldSelection {
-            if cfg!(debug_assertions) {
-                if let Some(ref selection_set) = selection_set {
-                    if let Ok(field_type) = self.output_base_type() {
-                        if let Ok(field_type_position) =
-                            CompositeTypeDefinitionPosition::try_from(field_type)
-                        {
-                            debug_assert_eq!(
-                                field_type_position, selection_set.type_position,
-                                "Field and its selection set should point to the same type position [field position: {}, selection position: {}]",
-                                field_type_position, selection_set.type_position,
-                            );
-                            debug_assert_eq!(
-                                self.schema, selection_set.schema,
-                                "Field and its selection set should point to the same schema",
-                            );
-                        } else {
-                            debug_assert!(
-                                false,
-                                "Field with subselection does not reference CompositeTypePosition"
-                            );
-                        }
+            if cfg!(debug_assertions)
+                && let Some(ref selection_set) = selection_set
+            {
+                if let Ok(field_type) = self.output_base_type() {
+                    if let Ok(field_type_position) =
+                        CompositeTypeDefinitionPosition::try_from(field_type)
+                    {
+                        debug_assert_eq!(
+                            field_type_position, selection_set.type_position,
+                            "Field and its selection set should point to the same type position [field position: {}, selection position: {}]",
+                            field_type_position, selection_set.type_position,
+                        );
+                        debug_assert_eq!(
+                            self.schema, selection_set.schema,
+                            "Field and its selection set should point to the same schema",
+                        );
                     } else {
                         debug_assert!(
                             false,
                             "Field with subselection does not reference CompositeTypePosition"
                         );
                     }
+                } else {
+                    debug_assert!(
+                        false,
+                        "Field with subselection does not reference CompositeTypePosition"
+                    );
                 }
             }
 
@@ -1119,7 +1082,9 @@ impl SelectionSet {
             schema.schema(),
             type_position.type_name().clone(),
             source_text,
-        )?;
+            false,
+        )?
+        .0;
         let fragments = Default::default();
         SelectionSet::from_selection_set(&selection_set, &fragments, &schema, &never_cancel)
     }
@@ -1456,13 +1421,13 @@ impl SelectionSet {
             return first.rebase_on(parent_type, schema);
         };
 
-        let element = first.operation_element().rebase_on(parent_type, schema)?;
+        let element = first.element().rebase_on(parent_type, schema)?;
         let sub_selection_parent_type: Option<CompositeTypeDefinitionPosition> =
             element.sub_selection_type_position()?;
 
         let Some(ref sub_selection_parent_type) = sub_selection_parent_type else {
             // This is a leaf, so all updates should correspond ot the same field and we just use the first.
-            return Selection::from_operation_element(element, /*sub_selection*/ None);
+            return Selection::from_element(element, /*sub_selection*/ None);
         };
 
         // This case has a sub-selection. Merge all sub-selection updates.
@@ -1483,7 +1448,7 @@ impl SelectionSet {
             sub_selection_parent_type,
             sub_selection_updates.values().map(|v| v.iter()),
         )?);
-        Selection::from_operation_element(element, updated_sub_selection)
+        Selection::from_element(element, updated_sub_selection)
     }
 
     /// Build a selection set by aggregating all items from the `selection_key_groups` iterator.
@@ -1699,8 +1664,9 @@ impl SelectionSet {
                 let Some(sub_selection_type) = element.sub_selection_type_position()? else {
                     return Err(FederationError::internal("unexpected error: add_at_path encountered a field that is not of a composite type".to_string()));
                 };
+                let element_key = element.key().to_owned_key();
                 let mut selection = Arc::make_mut(&mut self.selections)
-                    .entry(ele.key())
+                    .entry(element_key.as_borrowed_key())
                     .or_insert(|| {
                         Selection::from_element(
                             element,
@@ -2192,10 +2158,10 @@ fn compute_aliases_for_non_merging_fields(
 fn gen_alias_name(base_name: &Name, unavailable_names: &IndexMap<Name, SeenResponseName>) -> Name {
     let mut counter = 0usize;
     loop {
-        if let Ok(name) = Name::try_from(format!("{base_name}__alias_{counter}")) {
-            if !unavailable_names.contains_key(&name) {
-                return name;
-            }
+        if let Ok(name) = Name::try_from(format!("{base_name}__alias_{counter}"))
+            && !unavailable_names.contains_key(&name)
+        {
+            return name;
         }
         counter += 1;
     }
@@ -2279,10 +2245,10 @@ impl FieldSelection {
         if predicate(self.field.clone().into()) {
             return true;
         }
-        if let Some(selection_set) = &self.selection_set {
-            if selection_set.any_element(predicate) {
-                return true;
-            }
+        if let Some(selection_set) = &self.selection_set
+            && selection_set.any_element(predicate)
+        {
+            return true;
         }
         false
     }
@@ -2471,12 +2437,12 @@ impl DeferNormalizer {
         };
         let mut stack = selection_set.into_iter().collect::<Vec<_>>();
         while let Some(selection) = stack.pop() {
-            if let Selection::InlineFragment(inline) = selection {
-                if let Some(args) = inline.inline_fragment.defer_directive_arguments()? {
-                    let DeferDirectiveArguments { label, if_: _ } = args;
-                    if let Some(label) = label {
-                        digest.used_labels.insert(label);
-                    }
+            if let Selection::InlineFragment(inline) = selection
+                && let Some(args) = inline.inline_fragment.defer_directive_arguments()?
+            {
+                let DeferDirectiveArguments { label, if_: _ } = args;
+                if let Some(label) = label {
+                    digest.used_labels.insert(label);
                 }
             }
             stack.extend(selection.selection_set().into_iter().flatten());
@@ -2540,7 +2506,6 @@ impl InlineFragmentSelection {
         };
 
         let mut remove_defer = false;
-        #[expect(clippy::redundant_clone)]
         let mut args_copy = args.clone();
         if let Some(BooleanOrVariable::Boolean(b)) = &args.if_ {
             if *b {
@@ -2861,18 +2826,17 @@ impl TryFrom<&SelectionSet> for executable::SelectionSet {
         let mut flattened = vec![];
         for normalized_selection in val.selections.values() {
             let selection: executable::Selection = normalized_selection.try_into()?;
-            if let executable::Selection::Field(field) = &selection {
-                if field.name == *INTROSPECTION_TYPENAME_FIELD_NAME
-                    && field.directives.is_empty()
-                    && field.alias.is_none()
-                {
-                    // Move the plain __typename to the start of the selection set.
-                    // This looks nicer, and matches existing tests.
-                    // Note: The plain-ness is also defined in `Field::is_plain_typename_field`.
-                    // PORT_NOTE: JS does this in `selectionsInPrintOrder`
-                    flattened.insert(0, selection);
-                    continue;
-                }
+            if let executable::Selection::Field(field) = &selection
+                && field.name == *INTROSPECTION_TYPENAME_FIELD_NAME
+                && field.directives.is_empty()
+                && field.alias.is_none()
+            {
+                // Move the plain __typename to the start of the selection set.
+                // This looks nicer, and matches existing tests.
+                // Note: The plain-ness is also defined in `Field::is_plain_typename_field`.
+                // PORT_NOTE: JS does this in `selectionsInPrintOrder`
+                flattened.insert(0, selection);
+                continue;
             }
             flattened.push(selection);
         }
@@ -3042,6 +3006,24 @@ impl Display for SelectionSet {
     }
 }
 
+pub(crate) struct FieldSetDisplay<T: AsRef<SelectionSet>>(pub(crate) T);
+
+impl<T: AsRef<SelectionSet>> Display for FieldSetDisplay<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let selection_set: executable::SelectionSet = match self.0.as_ref().try_into() {
+            Ok(selection_set) => selection_set,
+            Err(_) => return Err(std::fmt::Error),
+        };
+        FieldSet {
+            sources: Default::default(),
+            selection_set,
+        }
+        .serialize()
+        .no_indent()
+        .fmt(f)
+    }
+}
+
 impl Display for Selection {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let selection: executable::Selection = match self.try_into() {
@@ -3094,15 +3076,6 @@ impl Display for InlineFragment {
             f.write_str("...")?;
         }
         data.directives.serialize().no_indent().fmt(f)
-    }
-}
-
-impl Display for OperationElement {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            OperationElement::Field(field) => field.fmt(f),
-            OperationElement::InlineFragment(inline_fragment) => inline_fragment.fmt(f),
-        }
     }
 }
 

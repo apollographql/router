@@ -20,6 +20,7 @@ use super::invalidation::Invalidation;
 use super::invalidation::InvalidationOrigin;
 use crate::ListenAddr;
 use crate::configuration::subgraph::SubgraphConfiguration;
+use crate::graphql;
 use crate::plugins::cache::invalidation::InvalidationRequest;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
@@ -60,19 +61,6 @@ fn concurrent_requests_count() -> u32 {
     10
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub(crate) enum InvalidationType {
-    EntityType,
-}
-
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct InvalidationKey {
-    pub(crate) id: String,
-    pub(crate) field: String,
-}
-
 #[derive(Clone)]
 pub(crate) struct InvalidationService {
     config: Arc<SubgraphConfiguration<Subgraph>>,
@@ -108,13 +96,16 @@ impl Service<router::Request> for InvalidationService {
                 let (parts, body) = req.router_request.into_parts();
                 if !parts.headers.contains_key(AUTHORIZATION) {
                     Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                    return Ok(router::Response {
-                        response: http::Response::builder()
-                            .status(StatusCode::UNAUTHORIZED)
-                            .body(router::body::from_bytes("Missing authorization header"))
-                            .map_err(BoxError::from)?,
-                        context: req.context,
-                    });
+                    return router::Response::error_builder()
+                        .status_code(StatusCode::UNAUTHORIZED)
+                        .error(
+                            graphql::Error::builder()
+                                .message(String::from("Missing authorization header"))
+                                .extension_code(StatusCode::UNAUTHORIZED.to_string())
+                                .build(),
+                        )
+                        .context(req.context)
+                        .build();
                 }
                 match parts.method {
                     Method::POST => {
@@ -156,66 +147,82 @@ impl Service<router::Request> for InvalidationService {
                                 if !valid_shared_key {
                                     Span::current()
                                         .record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                                    return Ok(router::Response {
-                                        response: http::Response::builder()
-                                            .status(StatusCode::UNAUTHORIZED)
-                                            .body(router::body::from_bytes(
-                                                "Invalid authorization header",
-                                            ))
-                                            .map_err(BoxError::from)?,
-                                        context: req.context,
-                                    });
+                                    return router::Response::error_builder()
+                                        .status_code(StatusCode::UNAUTHORIZED)
+                                        .error(
+                                            graphql::Error::builder()
+                                                .message("Invalid authorization header")
+                                                .extension_code(
+                                                    StatusCode::UNAUTHORIZED.to_string(),
+                                                )
+                                                .build(),
+                                        )
+                                        .context(req.context)
+                                        .build();
                                 }
                                 match invalidation
                                     .invalidate(InvalidationOrigin::Endpoint, body)
                                     .instrument(tracing::info_span!("invalidate"))
                                     .await
                                 {
-                                    Ok(count) => Ok(router::Response {
-                                        response: http::Response::builder()
-                                            .status(StatusCode::ACCEPTED)
-                                            .body(router::body::from_bytes(serde_json::to_string(
-                                                &json!({
-                                                    "count": count
-                                                }),
-                                            )?))
-                                            .map_err(BoxError::from)?,
-                                        context: req.context,
-                                    }),
+                                    Ok(count) => router::Response::http_response_builder()
+                                        .response(
+                                            http::Response::builder()
+                                                .status(StatusCode::ACCEPTED)
+                                                .body(router::body::from_bytes(
+                                                    serde_json::to_string(&json!({
+                                                        "count": count
+                                                    }))?,
+                                                ))
+                                                .map_err(BoxError::from)?,
+                                        )
+                                        .context(req.context)
+                                        .build(),
                                     Err(err) => {
                                         Span::current()
                                             .record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                                        Ok(router::Response {
-                                            response: http::Response::builder()
-                                                .status(StatusCode::BAD_REQUEST)
-                                                .body(router::body::from_bytes(err.to_string()))
-                                                .map_err(BoxError::from)?,
-                                            context: req.context,
-                                        })
+                                        router::Response::error_builder()
+                                            .status_code(StatusCode::BAD_REQUEST)
+                                            .error(
+                                                graphql::Error::builder()
+                                                    .message(err.to_string())
+                                                    .extension_code(
+                                                        StatusCode::BAD_REQUEST.to_string(),
+                                                    )
+                                                    .build(),
+                                            )
+                                            .context(req.context)
+                                            .build()
                                     }
                                 }
                             }
                             Err(err) => {
                                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                                Ok(router::Response {
-                                    response: http::Response::builder()
-                                        .status(StatusCode::BAD_REQUEST)
-                                        .body(router::body::from_bytes(err))
-                                        .map_err(BoxError::from)?,
-                                    context: req.context,
-                                })
+                                router::Response::error_builder()
+                                    .status_code(StatusCode::BAD_REQUEST)
+                                    .error(
+                                        graphql::Error::builder()
+                                            .message(err)
+                                            .extension_code(StatusCode::BAD_REQUEST.to_string())
+                                            .build(),
+                                    )
+                                    .context(req.context)
+                                    .build()
                             }
                         }
                     }
                     _ => {
                         Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                        Ok(router::Response {
-                            response: http::Response::builder()
-                                .status(StatusCode::METHOD_NOT_ALLOWED)
-                                .body(router::body::from_bytes("".to_string()))
-                                .map_err(BoxError::from)?,
-                            context: req.context,
-                        })
+                        router::Response::error_builder()
+                            .status_code(StatusCode::METHOD_NOT_ALLOWED)
+                            .error(
+                                graphql::Error::builder()
+                                    .message("".to_string())
+                                    .extension_code(StatusCode::METHOD_NOT_ALLOWED.to_string())
+                                    .build(),
+                            )
+                            .context(req.context)
+                            .build()
                     }
                 }
             }

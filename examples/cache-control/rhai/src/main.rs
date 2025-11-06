@@ -120,7 +120,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_subgraph_cache_control() {
+    async fn test_cache_control_mixed() {
         assert_eq!(
             cache_control_header(
                 Some("max-age=100, private".to_string()),
@@ -132,7 +132,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_subgraph_cache_control_public() {
+    async fn test_cache_control_public() {
         assert_eq!(
             cache_control_header(
                 Some("max-age=100, public".to_string()),
@@ -144,10 +144,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_subgraph_cache_control_missing() {
+    async fn test_cache_control_missing() {
         assert_eq!(
             cache_control_header(Some("max-age=100, private".to_string()), None).await,
             None
+        );
+    }
+
+    #[tokio::test]
+    async fn test_subgraph_cache_no_cache() {
+        assert_eq!(
+            cache_control_header(
+                Some("max-age=100, private".to_string()),
+                Some("no-cache".to_string())
+            )
+            .await,
+            Some("no-cache".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_subgraph_cache_no_store() {
+        assert_eq!(
+            cache_control_header(
+                Some("max-age=100, private".to_string()),
+                Some("no-store".to_string())
+            )
+            .await,
+            Some("no-store".to_string())
         );
     }
 }

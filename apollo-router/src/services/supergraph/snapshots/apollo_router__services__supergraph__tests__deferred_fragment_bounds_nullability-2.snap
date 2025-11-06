@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/services/supergraph/tests.rs
+assertion_line: 800
 expression: stream.next_response().await.unwrap()
 ---
 {
@@ -13,10 +14,25 @@ expression: stream.next_response().await.unwrap()
         "suborga",
         0
       ],
+      "errors": [
+        {
+          "message": "couldn't find mock for query {\"query\":\"query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Organization { nonNullId } } }\",\"variables\":{\"representations\":[{\"__typename\":\"Organization\",\"id\":\"1\"},{\"__typename\":\"Organization\",\"id\":\"2\"},{\"__typename\":\"Organization\",\"id\":\"3\"}]}}",
+          "path": [
+            "currentUser",
+            "activeOrganization",
+            "suborga",
+            0
+          ],
+          "extensions": {
+            "code": "FETCH_ERROR",
+            "service": "orga"
+          }
+        }
+      ],
       "extensions": {
         "valueCompletion": [
           {
-            "message": "Cannot return null for non-nullable field Organization.nonNullId",
+            "message": "Null value found for non-nullable type ID",
             "path": [
               "currentUser",
               "activeOrganization",
@@ -35,10 +51,25 @@ expression: stream.next_response().await.unwrap()
         "suborga",
         1
       ],
+      "errors": [
+        {
+          "message": "couldn't find mock for query {\"query\":\"query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Organization { nonNullId } } }\",\"variables\":{\"representations\":[{\"__typename\":\"Organization\",\"id\":\"1\"},{\"__typename\":\"Organization\",\"id\":\"2\"},{\"__typename\":\"Organization\",\"id\":\"3\"}]}}",
+          "path": [
+            "currentUser",
+            "activeOrganization",
+            "suborga",
+            1
+          ],
+          "extensions": {
+            "code": "FETCH_ERROR",
+            "service": "orga"
+          }
+        }
+      ],
       "extensions": {
         "valueCompletion": [
           {
-            "message": "Cannot return null for non-nullable field Organization.nonNullId",
+            "message": "Null value found for non-nullable type ID",
             "path": [
               "currentUser",
               "activeOrganization",
@@ -57,10 +88,25 @@ expression: stream.next_response().await.unwrap()
         "suborga",
         2
       ],
+      "errors": [
+        {
+          "message": "couldn't find mock for query {\"query\":\"query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Organization { nonNullId } } }\",\"variables\":{\"representations\":[{\"__typename\":\"Organization\",\"id\":\"1\"},{\"__typename\":\"Organization\",\"id\":\"2\"},{\"__typename\":\"Organization\",\"id\":\"3\"}]}}",
+          "path": [
+            "currentUser",
+            "activeOrganization",
+            "suborga",
+            2
+          ],
+          "extensions": {
+            "code": "FETCH_ERROR",
+            "service": "orga"
+          }
+        }
+      ],
       "extensions": {
         "valueCompletion": [
           {
-            "message": "Cannot return null for non-nullable field Organization.nonNullId",
+            "message": "Null value found for non-nullable type ID",
             "path": [
               "currentUser",
               "activeOrganization",

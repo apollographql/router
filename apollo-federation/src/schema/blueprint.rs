@@ -5,7 +5,6 @@ use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ty;
 
-use crate::CONTEXT_VERSIONS;
 use crate::bail;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
@@ -14,21 +13,16 @@ use crate::error::suggestion::did_you_mean;
 use crate::error::suggestion::suggestion_list;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Link;
-use crate::link::authenticated_spec_definition::AUTHENTICATED_VERSIONS;
-use crate::link::cost_spec_definition::COST_VERSIONS;
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
+use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
-use crate::link::inaccessible_spec_definition::INACCESSIBLE_VERSIONS;
 use crate::link::link_spec_definition::LinkSpecDefinition;
-use crate::link::policy_spec_definition::POLICY_VERSIONS;
-use crate::link::requires_scopes_spec_definition::REQUIRES_SCOPES_VERSIONS;
 use crate::link::spec::Identity;
 use crate::link::spec_definition::SpecDefinition;
-use crate::link::tag_spec_definition::TAG_VERSIONS;
 use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;
 use crate::schema::compute_subgraph_metadata;
@@ -44,7 +38,7 @@ use crate::schema::validators::list_size::validate_list_size_directives;
 use crate::schema::validators::provides::validate_provides_directives;
 use crate::schema::validators::requires::validate_requires_directives;
 use crate::schema::validators::shareable::validate_shareable_directives;
-use crate::subgraph;
+use crate::schema::validators::tag::validate_tag_directives;
 use crate::supergraph::FEDERATION_ENTITIES_FIELD_NAME;
 use crate::supergraph::FEDERATION_SERVICE_FIELD_NAME;
 
@@ -135,7 +129,7 @@ impl FederationBlueprint {
         }
 
         let context_map = validate_context_directives(schema, &mut error_collector)?;
-        validate_from_context_directives(schema, &context_map, &mut error_collector)?;
+        validate_from_context_directives(schema, meta, &context_map, &mut error_collector)?;
         validate_key_directives(schema, meta, &mut error_collector)?;
         validate_provides_directives(schema, meta, &mut error_collector)?;
         validate_requires_directives(schema, meta, &mut error_collector)?;
@@ -144,6 +138,7 @@ impl FederationBlueprint {
         validate_shareable_directives(schema, meta, &mut error_collector)?;
         validate_cost_directives(schema, &mut error_collector)?;
         validate_list_size_directives(schema, &mut error_collector)?;
+        validate_tag_directives(schema, &mut error_collector)?;
 
         error_collector.into_result()
     }
@@ -189,7 +184,7 @@ impl FederationBlueprint {
             return Self::on_unknown_directive_validation_error(schema, directive_name, &message);
         }
 
-        let did_you_mean = did_you_mean(suggestions.iter().map(|s| format!("@{}", s)));
+        let did_you_mean = did_you_mean(suggestions.iter().map(|s| format!("@{s}")));
         SingleFederationError::InvalidGraphQL {
             message: format!("{message}{did_you_mean}\n"),
         }
@@ -259,7 +254,7 @@ impl FederationBlueprint {
                 all_directive_names.iter().map(|name| name.to_string()),
             );
             if !suggestions.is_empty() {
-                let did_you_mean = did_you_mean(suggestions.iter().map(|s| format!("@{}", s)));
+                let did_you_mean = did_you_mean(suggestions.iter().map(|s| format!("@{s}")));
                 let note = if suggestions.len() == 1 {
                     "it is a federation 2 directive"
                 } else {
@@ -344,104 +339,10 @@ impl FederationBlueprint {
     }
 
     fn expand_known_features(schema: &mut FederationSchema) -> Result<(), FederationError> {
-        fn unknown_version_error(
-            spec_name: &str,
-            version: &impl std::fmt::Display,
-            supported_versions: impl Iterator<Item = impl std::fmt::Display>,
-        ) -> SingleFederationError {
-            SingleFederationError::UnknownLinkVersion {
-                message: format!(
-                    "Detected unsupported {spec_name} specification version {version}. Please upgrade to a composition version which supports that version, or select one of the following supported versions: {}.",
-                    supported_versions
-                        .map(|v| v.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-            }
+        for feature in schema.all_features()? {
+            feature.add_elements_to_schema(schema)?;
         }
 
-        let Some(links_metadata) = schema.metadata() else {
-            return Ok(());
-        };
-
-        for link in links_metadata.links.clone() {
-            if link.url.identity == Identity::authenticated_identity() {
-                let spec = AUTHENTICATED_VERSIONS
-                    .find(&link.url.version)
-                    .ok_or_else(|| {
-                        unknown_version_error(
-                            &link.url.identity.name,
-                            &link.url.version,
-                            AUTHENTICATED_VERSIONS.versions(),
-                        )
-                    })?;
-                spec.add_elements_to_schema(schema)?;
-            }
-            if link.url.identity == Identity::context_identity() {
-                let spec = CONTEXT_VERSIONS.find(&link.url.version).ok_or_else(|| {
-                    unknown_version_error(
-                        &link.url.identity.name,
-                        &link.url.version,
-                        CONTEXT_VERSIONS.versions(),
-                    )
-                })?;
-                spec.add_elements_to_schema(schema)?;
-            }
-            if link.url.identity == Identity::cost_identity() {
-                let spec = COST_VERSIONS.find(&link.url.version).ok_or_else(|| {
-                    unknown_version_error(
-                        &link.url.identity.name,
-                        &link.url.version,
-                        COST_VERSIONS.versions(),
-                    )
-                })?;
-                spec.add_elements_to_schema(schema)?;
-            }
-            if link.url.identity == Identity::inaccessible_identity() {
-                let spec = INACCESSIBLE_VERSIONS
-                    .find(&link.url.version)
-                    .ok_or_else(|| {
-                        unknown_version_error(
-                            &link.url.identity.name,
-                            &link.url.version,
-                            INACCESSIBLE_VERSIONS.versions(),
-                        )
-                    })?;
-                spec.add_elements_to_schema(schema)?;
-            }
-            if link.url.identity == Identity::policy_identity() {
-                let spec = POLICY_VERSIONS.find(&link.url.version).ok_or_else(|| {
-                    unknown_version_error(
-                        &link.url.identity.name,
-                        &link.url.version,
-                        POLICY_VERSIONS.versions(),
-                    )
-                })?;
-                spec.add_elements_to_schema(schema)?;
-            }
-            if link.url.identity == Identity::requires_scopes_identity() {
-                let spec = REQUIRES_SCOPES_VERSIONS
-                    .find(&link.url.version)
-                    .ok_or_else(|| {
-                        unknown_version_error(
-                            &link.url.identity.name,
-                            &link.url.version,
-                            REQUIRES_SCOPES_VERSIONS.versions(),
-                        )
-                    })?;
-                spec.add_elements_to_schema(schema)?;
-            }
-            if link.url.identity == Identity::tag_identity() {
-                let spec = TAG_VERSIONS.find(&link.url.version).ok_or_else(|| {
-                    unknown_version_error(
-                        &link.url.identity.name,
-                        &link.url.version,
-                        TAG_VERSIONS.versions(),
-                    )
-                })?;
-                spec.add_elements_to_schema(schema)?;
-            }
-        }
         Ok(())
     }
 }
@@ -452,9 +353,9 @@ pub(crate) const FEDERATION_OPERATION_FIELDS: [Name; 2] = [
 ];
 
 fn all_default_federation_directive_names() -> HashSet<Name> {
-    subgraph::spec::FEDERATION_V1_DIRECTIVE_NAMES
+    FederationSpecDefinition::latest()
+        .directive_specs()
         .iter()
-        .chain(subgraph::spec::FEDERATION_V2_DIRECTIVE_NAMES.iter())
-        .cloned()
+        .map(|spec| spec.name().clone())
         .collect()
 }

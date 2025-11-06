@@ -3,6 +3,7 @@ use std::sync::LazyLock;
 use apollo_compiler::name;
 use apollo_compiler::schema::DirectiveLocation;
 
+use crate::link::Purpose;
 use crate::link::federation_spec_definition::FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
@@ -70,7 +71,7 @@ impl TagSpecDefinition {
             true, // repeatable
             &self.directive_locations(),
             true, // composes
-            Some(&|v| TAG_VERSIONS.get_minimum_required_version(v)),
+            Some(&|v| TAG_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         ))
     }
@@ -91,6 +92,10 @@ impl SpecDefinition for TagSpecDefinition {
 
     fn minimum_federation_version(&self) -> &Version {
         &self.minimum_federation_version
+    }
+
+    fn purpose(&self) -> Option<Purpose> {
+        None
     }
 }
 

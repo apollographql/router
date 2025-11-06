@@ -17,7 +17,7 @@ use super::ObjectCategory;
 use crate::connectors::expand::visitors::FieldVisitor;
 use crate::connectors::expand::visitors::GroupVisitor;
 use crate::connectors::id::ConnectedElement;
-use crate::connectors::spec::schema::CONNECT_ENTITY_ARGUMENT_NAME;
+use crate::connectors::spec::connect::CONNECT_ENTITY_ARGUMENT_NAME;
 use crate::connectors::validation::coordinates::ConnectDirectiveCoordinate;
 use crate::connectors::validation::graphql::SchemaInfo;
 

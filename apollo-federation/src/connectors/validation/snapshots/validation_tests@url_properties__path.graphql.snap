@@ -6,53 +6,53 @@ input_file: apollo-federation/src/connectors/validation/test_data/url_properties
 [
     Message {
         code: InvalidUrlProperty,
-        message: "In `@source(name: \"v2\")`, the `path` argument is invalid: `*.bad` must start with one of $config, $context, $request",
+        message: "In `@source(name: \"v2\")`, the `path` argument is invalid: `bad` must start with one of $config, $context, $request, $env",
         locations: [
-            7:38..7:41,
+            13:70..13:73,
         ],
     },
     Message {
         code: InvalidUrlProperty,
         message: "In `@source(name: \"v3\")`, the `path` argument is invalid: string values aren't valid here",
         locations: [
-            8:40..8:45,
+            16:54..16:59,
         ],
     },
     Message {
         code: InvalidUrlProperty,
         message: "In `@source(name: \"v4\")`, the `path` argument is invalid: object values aren't valid here",
         locations: [
-            9:40..9:52,
+            20:54..20:66,
         ],
     },
     Message {
         code: InvalidUrlProperty,
-        message: "In `@connect` on `Query.resources`, the `path` argument is invalid: `*.bad` must start with one of $args, $config, $context, $request",
+        message: "In `@connect` on `Query.resources`, the `path` argument is invalid: `bad` must start with one of $args, $config, $context, $request, $env",
         locations: [
-            23:53..23:56,
+            35:53..35:56,
         ],
     },
     Message {
         code: InvalidUrlProperty,
         message: "In `@connect` on `Query.resources`, the `path` argument is invalid: string values aren't valid here",
         locations: [
-            24:55..24:60,
+            36:55..36:60,
         ],
     },
     Message {
         code: InvalidUrlProperty,
         message: "In `@connect` on `Query.resources`, the `path` argument is invalid: object values aren't valid here",
         locations: [
-            27:34..27:46,
+            39:34..39:46,
         ],
     },
     Message {
         code: InvalidUrlProperty,
         message: "In `@connect` on `Query.resources`, the `path` argument is invalid: string values aren't valid here",
         locations: [
-            12:16..12:22,
-            12:13..12:22,
-            35:59..35:60,
+            24:16..24:22,
+            24:13..24:22,
+            47:59..47:60,
         ],
     },
 ]

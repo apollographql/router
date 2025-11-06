@@ -90,8 +90,12 @@ impl IncompatiblePlugin for AuthIncompatPlugin {
                     connector
                         .id
                         .source_name
-                        .clone()
-                        .unwrap_or(format!("<anonymous source for {}>", connector.id)),
+                        .as_ref()
+                        .map(|name| name.to_string())
+                        .unwrap_or(format!(
+                            "<anonymous source for {}>",
+                            connector.label.as_ref()
+                        )),
                 )
             })
             .into_grouping_map()

@@ -271,6 +271,7 @@ where
             service,
             self.configuration.url.clone(),
             self.sdl.clone(),
+            self.configuration.response_validation,
         )
     }
 
@@ -283,6 +284,7 @@ where
             service,
             self.configuration.url.clone(),
             self.sdl.clone(),
+            self.configuration.response_validation,
         )
     }
 
@@ -295,6 +297,7 @@ where
             service,
             self.configuration.url.clone(),
             self.sdl.clone(),
+            self.configuration.response_validation,
         )
     }
 
@@ -304,6 +307,7 @@ where
             service,
             self.configuration.url.clone(),
             name.to_string(),
+            self.configuration.response_validation,
         )
     }
 }
@@ -325,6 +329,8 @@ pub(super) struct RouterRequestConf {
     pub(super) path: bool,
     /// Send the method
     pub(super) method: bool,
+    /// The coprocessor URL for this stage (overrides the global URL if specified)
+    pub(super) url: Option<String>,
 }
 
 /// What information is passed to a router request/response stage
@@ -343,6 +349,8 @@ pub(super) struct RouterResponseConf {
     pub(super) sdl: bool,
     /// Send the HTTP status
     pub(super) status_code: bool,
+    /// The coprocessor URL for this stage (overrides the global URL if specified)
+    pub(super) url: Option<String>,
 }
 /// What information is passed to a subgraph request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
@@ -364,6 +372,8 @@ pub(super) struct SubgraphRequestConf {
     pub(super) service_name: bool,
     /// Send the subgraph request id
     pub(super) subgraph_request_id: bool,
+    /// The coprocessor URL for this stage (overrides the global URL if specified)
+    pub(super) url: Option<String>,
 }
 
 /// What information is passed to a subgraph request/response stage
@@ -384,13 +394,16 @@ pub(super) struct SubgraphResponseConf {
     pub(super) status_code: bool,
     /// Send the subgraph request id
     pub(super) subgraph_request_id: bool,
+    /// The coprocessor URL for this stage (overrides the global URL if specified)
+    pub(super) url: Option<String>,
 }
 
 /// Configures the externalization plugin
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(rename = "CoprocessorConfig")]
 struct Conf {
-    /// The url you'd like to offload processing to
+    /// The url you'd like to offload processing to (can be overridden per-stage)
     url: String,
     client: Option<Client>,
     /// The timeout for external requests
@@ -398,6 +411,9 @@ struct Conf {
     #[schemars(with = "String", default = "default_timeout")]
     #[serde(default = "default_timeout")]
     timeout: Duration,
+    /// Response validation defaults to true
+    #[serde(default = "default_response_validation")]
+    response_validation: bool,
     /// The router stage request/response configuration
     #[serde(default)]
     router: RouterStage,
@@ -475,6 +491,10 @@ fn default_timeout() -> Duration {
     DEFAULT_EXTERNALIZATION_TIMEOUT
 }
 
+fn default_response_validation() -> bool {
+    true
+}
+
 fn record_coprocessor_duration(stage: PipelineStep, duration: Duration) {
     f64_histogram!(
         "apollo.router.operations.coprocessor.duration",
@@ -498,8 +518,9 @@ impl RouterStage {
         &self,
         http_client: C,
         service: router::BoxService,
-        coprocessor_url: String,
+        default_url: String,
         sdl: Arc<String>,
+        response_validation: bool,
     ) -> router::BoxService
     where
         C: Service<
@@ -514,7 +535,7 @@ impl RouterStage {
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
-            let coprocessor_url = coprocessor_url.clone();
+            let coprocessor_url = request_config.url.clone().unwrap_or(default_url.clone());
             let http_client = http_client.clone();
             let sdl = sdl.clone();
 
@@ -532,6 +553,7 @@ impl RouterStage {
                         sdl,
                         request,
                         request_config,
+                        response_validation,
                     )
                     .await
                     .map_err(|error| {
@@ -553,6 +575,7 @@ impl RouterStage {
 
         let response_layer = (self.response != Default::default()).then_some({
             let response_config = self.response.clone();
+            let coprocessor_url = response_config.url.clone().unwrap_or(default_url);
             MapFutureLayer::new(move |fut| {
                 let sdl = sdl.clone();
                 let coprocessor_url = coprocessor_url.clone();
@@ -569,6 +592,7 @@ impl RouterStage {
                         sdl,
                         response,
                         response_config,
+                        response_validation,
                     )
                     .await
                     .map_err(|error| {
@@ -633,8 +657,9 @@ impl SubgraphStage {
         &self,
         http_client: C,
         service: subgraph::BoxService,
-        coprocessor_url: String,
+        default_url: String,
         service_name: String,
+        response_validation: bool,
     ) -> subgraph::BoxService
     where
         C: Service<
@@ -650,7 +675,7 @@ impl SubgraphStage {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
             let http_client = http_client.clone();
-            let coprocessor_url = coprocessor_url.clone();
+            let coprocessor_url = request_config.url.clone().unwrap_or(default_url.clone());
             let service_name = service_name.clone();
             AsyncCheckpointLayer::new(move |request: subgraph::Request| {
                 let http_client = http_client.clone();
@@ -666,6 +691,7 @@ impl SubgraphStage {
                         service_name,
                         request,
                         request_config,
+                        response_validation,
                     )
                     .await
                     .map_err(|error| {
@@ -687,6 +713,7 @@ impl SubgraphStage {
 
         let response_layer = (self.response != Default::default()).then_some({
             let response_config = self.response.clone();
+            let coprocessor_url = response_config.url.clone().unwrap_or(default_url);
 
             MapFutureLayer::new(move |fut| {
                 let http_client = http_client.clone();
@@ -704,6 +731,7 @@ impl SubgraphStage {
                         service_name,
                         response,
                         response_config,
+                        response_validation,
                     )
                     .await
                     .map_err(|error| {
@@ -750,6 +778,7 @@ async fn process_router_request_stage<C>(
     sdl: Arc<String>,
     mut request: router::Request,
     mut request_config: RouterRequestConf,
+    response_validation: bool,
 ) -> Result<ControlFlow<router::Response, router::Request>, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -839,18 +868,7 @@ where
                         .build(),
                 ])
                 .build(),
-            _ => graphql::Response::from_value(body_as_value).unwrap_or_else(|error| {
-                graphql::Response::builder()
-                    .errors(vec![
-                        Error::builder()
-                            .message(format!(
-                                "couldn't deserialize coprocessor output body: {error}"
-                            ))
-                            .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
-                            .build(),
-                    ])
-                    .build()
-            }),
+            _ => deserialize_coprocessor_response(body_as_value, response_validation),
         };
 
         let res = router::Response::builder()
@@ -919,6 +937,7 @@ async fn process_router_response_stage<C>(
     sdl: Arc<String>,
     mut response: router::Response,
     response_config: RouterResponseConf,
+    _response_validation: bool, // Router responses don't implement GraphQL validation - streaming responses bypass handle_graphql_response
 ) -> Result<router::Response, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -1104,11 +1123,11 @@ where
             .map(|b| b.map(http_body::Frame::data).map_err(axum::Error::new)),
     ));
 
-    // Finally, return a response which has a Body that wraps our stream of response chunks.
-    Ok(router::Response {
-        context,
-        response: http::Response::from_parts(parts, final_stream),
-    })
+    // Finally, return a response which has a Body that wraps our stream of response chunks
+    router::Response::http_response_builder()
+        .context(context)
+        .response(http::Response::from_parts(parts, final_stream))
+        .build()
 }
 // -----------------------------------------------------------------------------------------------------
 
@@ -1118,6 +1137,7 @@ async fn process_subgraph_request_stage<C>(
     service_name: String,
     mut request: subgraph::Request,
     mut request_config: SubgraphRequestConf,
+    response_validation: bool,
 ) -> Result<ControlFlow<subgraph::Response, subgraph::Request>, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -1194,18 +1214,7 @@ where
                             .build(),
                     ])
                     .build(),
-                value => graphql::Response::from_value(value).unwrap_or_else(|error| {
-                    graphql::Response::builder()
-                        .errors(vec![
-                            Error::builder()
-                                .message(format!(
-                                    "couldn't deserialize coprocessor output body: {error}"
-                                ))
-                                .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
-                                .build(),
-                        ])
-                        .build()
-                }),
+                value => deserialize_coprocessor_response(value, response_validation),
             };
 
             let mut http_response = http::Response::builder()
@@ -1279,6 +1288,7 @@ async fn process_subgraph_response_stage<C>(
     service_name: String,
     mut response: subgraph::Response,
     response_config: SubgraphResponseConf,
+    response_validation: bool,
 ) -> Result<subgraph::Response, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -1336,12 +1346,20 @@ where
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::SubgraphResponse)?;
 
+    // Check if the incoming GraphQL response was valid according to GraphQL spec
+    let incoming_payload_was_valid = was_incoming_payload_valid(&body, response_config.body);
+
     // Third, process our reply and act on the contents. Our processing logic is
     // that we replace "bits" of our incoming response with the updated bits if they
     // are present in our co_processor_output. If they aren't present, just use the
     // bits that we sent to the co_processor.
 
-    let new_body = handle_graphql_response(body, co_processor_output.body)?;
+    let new_body = handle_graphql_response(
+        body,
+        co_processor_output.body,
+        response_validation,
+        incoming_payload_was_valid,
+    )?;
 
     response.response = http::Response::from_parts(parts, new_body);
 
@@ -1415,26 +1433,113 @@ pub(super) fn internalize_header_map(
     Ok(output)
 }
 
+// Helper function to apply common post-processing to deserialized GraphQL responses
+fn apply_response_post_processing(
+    mut new_body: graphql::Response,
+    original_response_body: &graphql::Response,
+) -> graphql::Response {
+    // Needs to take back these 2 fields because it's skipped by serde
+    new_body.subscribed = original_response_body.subscribed;
+    new_body.created_at = original_response_body.created_at;
+    // Required because for subscription if data is Some(Null) it won't cut the subscription
+    // And in some languages they don't have any differences between Some(Null) and Null
+    if original_response_body.data == Some(Value::Null)
+        && new_body.data.is_none()
+        && new_body.subscribed == Some(true)
+    {
+        new_body.data = Some(Value::Null);
+    }
+    new_body
+}
+
+/// Check if a GraphQL response is minimally valid according to the GraphQL spec.
+/// A response is invalid if it has no data AND no errors.
+pub(super) fn is_graphql_response_minimally_valid(response: &graphql::Response) -> bool {
+    // According to GraphQL spec, a response without data must contain at least one error
+    response.data.is_some() || !response.errors.is_empty()
+}
+
+/// Check if the incoming payload was valid for conditional validation purposes.
+/// Returns true if body was not sent to coprocessor OR if the response is minimally valid.
+pub(super) fn was_incoming_payload_valid(response: &graphql::Response, body_sent: bool) -> bool {
+    if body_sent {
+        // If we sent the body to the coprocessor, check if it was minimally valid
+        is_graphql_response_minimally_valid(response)
+    } else {
+        // If we didn't send the body, assume it was valid
+        true
+    }
+}
+
+/// Deserializes a GraphQL response from a Value with optional validation
+pub(super) fn deserialize_coprocessor_response(
+    body_as_value: Value,
+    response_validation: bool,
+) -> graphql::Response {
+    if response_validation {
+        graphql::Response::from_value(body_as_value).unwrap_or_else(|error| {
+            graphql::Response::builder()
+                .errors(vec![
+                    Error::builder()
+                        .message(format!(
+                            "couldn't deserialize coprocessor output body: {error}"
+                        ))
+                        .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
+                        .build(),
+                ])
+                .build()
+        })
+    } else {
+        // When validation is disabled, use the old behavior - just deserialize without GraphQL validation
+        serde_json_bytes::from_value(body_as_value).unwrap_or_else(|error| {
+            graphql::Response::builder()
+                .errors(vec![
+                    Error::builder()
+                        .message(format!(
+                            "couldn't deserialize coprocessor output body: {error}"
+                        ))
+                        .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
+                        .build(),
+                ])
+                .build()
+        })
+    }
+}
+
 pub(super) fn handle_graphql_response(
     original_response_body: graphql::Response,
     copro_response_body: Option<Value>,
+    response_validation: bool,
+    incoming_payload_was_valid: bool,
 ) -> Result<graphql::Response, BoxError> {
+    // Enable conditional validation: only validate coprocessor responses when the incoming payload was valid.
+    // This prevents validation failures for responses that were already invalid before being sent to the coprocessor.
+    // Set to false to restore the previous behavior of always validating coprocessor responses when response_validation is true.
+    const ENABLE_CONDITIONAL_VALIDATION: bool = true;
+
+    // Only apply validation if response_validation is enabled AND either:
+    // 1. Conditional validation is disabled, OR
+    // 2. The incoming payload to the coprocessor was valid
+    let should_validate =
+        response_validation && (!ENABLE_CONDITIONAL_VALIDATION || incoming_payload_was_valid);
+
     Ok(match copro_response_body {
         Some(value) => {
-            let mut new_body = graphql::Response::from_value(value)?;
-            // Needs to take back these 2 fields because it's skipped by serde
-            new_body.subscribed = original_response_body.subscribed;
-            new_body.created_at = original_response_body.created_at;
-            // Required because for subscription if data is Some(Null) it won't cut the subscription
-            // And in some languages they don't have any differences between Some(Null) and Null
-            if original_response_body.data == Some(Value::Null)
-                && new_body.data.is_none()
-                && new_body.subscribed == Some(true)
-            {
-                new_body.data = Some(Value::Null);
+            if should_validate {
+                let new_body = graphql::Response::from_value(value)?;
+                apply_response_post_processing(new_body, &original_response_body)
+            } else {
+                // When validation is disabled, use the old behavior - just deserialize without GraphQL validation
+                match serde_json_bytes::from_value::<graphql::Response>(value) {
+                    Ok(new_body) => {
+                        apply_response_post_processing(new_body, &original_response_body)
+                    }
+                    Err(_) => {
+                        // If deserialization fails completely, return original response
+                        original_response_body
+                    }
+                }
             }
-
-            new_body
         }
         None => original_response_body,
     })

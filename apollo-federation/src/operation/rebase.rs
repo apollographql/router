@@ -3,13 +3,10 @@
 //! Often, the change is between equivalent types from different schemas, but selections can also
 //! be rebased from one type to another in the same schema.
 
-use itertools::Itertools;
-
 use super::Field;
 use super::FieldSelection;
 use super::InlineFragment;
 use super::InlineFragmentSelection;
-use super::OperationElement;
 use super::Selection;
 use super::SelectionSet;
 use super::TYPENAME_FIELD;
@@ -81,13 +78,6 @@ pub(crate) enum RebaseError {
         field_position: crate::schema::position::FieldDefinitionPosition,
         parent_type: CompositeTypeDefinitionPosition,
     },
-    #[error(
-        "Cannot add selection of field `{field_position}` to selection set of parent type `{parent_type}` that is potentially an interface object type at runtime"
-    )]
-    InterfaceObjectTypename {
-        field_position: crate::schema::position::FieldDefinitionPosition,
-        parent_type: CompositeTypeDefinitionPosition,
-    },
     #[error("Cannot rebase composite field selection because its subselection is empty")]
     EmptySelectionSet,
     #[error(
@@ -126,24 +116,10 @@ impl Field {
         }
 
         if self.name() == &TYPENAME_FIELD {
-            // TODO interface object info should be precomputed in QP constructor
-            return if schema
-                .possible_runtime_types(parent_type.clone())?
-                .iter()
-                .map(|t| schema.is_interface_object_type(t.clone().into()))
-                .process_results(|mut iter| iter.any(|b| b))?
-            {
-                Err(RebaseError::InterfaceObjectTypename {
-                    field_position: self.field_position.clone(),
-                    parent_type: parent_type.clone(),
-                }
-                .into())
-            } else {
-                let mut updated_field = self.clone();
-                updated_field.schema = schema.clone();
-                updated_field.field_position = parent_type.introspection_typename_field();
-                Ok(updated_field)
-            };
+            let mut updated_field = self.clone();
+            updated_field.schema = schema.clone();
+            updated_field.field_position = parent_type.introspection_typename_field();
+            return Ok(updated_field);
         }
 
         let field_from_parent = parent_type.field(self.name().clone())?;
@@ -398,6 +374,17 @@ impl InlineFragment {
                 CompositeTypeDefinitionPosition::try_from(rebased_condition_position)
             })
         {
+            // Root types can always be rebased and the type condition is unnecessary.
+            // Moreover, the actual subgraph might have renamed the root types, but the
+            // supergraph schema does not contain that information.
+            // Note: We only handle when the rebased condition is the same as the parent type. They
+            //       could be different in rare cases, but that will be fixed after the
+            //       source-awareness initiative is complete.
+            if rebased_condition == *parent_type
+                && parent_schema.is_root_type(rebased_condition.type_name())
+            {
+                return (true, None);
+            }
             // chained if let chains are not yet supported
             // see https://github.com/rust-lang/rust/issues/53667
             if runtime_types_intersect(parent_type, &rebased_condition, parent_schema) {
@@ -466,30 +453,6 @@ impl InlineFragmentSelection {
             self.selection_set.can_rebase_on(&ty, schema)
         } else {
             Ok(true)
-        }
-    }
-}
-
-impl OperationElement {
-    pub(crate) fn rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        schema: &ValidFederationSchema,
-    ) -> Result<OperationElement, FederationError> {
-        match self {
-            OperationElement::Field(field) => Ok(field.rebase_on(parent_type, schema)?.into()),
-            OperationElement::InlineFragment(inline) => {
-                Ok(inline.rebase_on(parent_type, schema)?.into())
-            }
-        }
-    }
-
-    pub(crate) fn sub_selection_type_position(
-        &self,
-    ) -> Result<Option<CompositeTypeDefinitionPosition>, FederationError> {
-        match self {
-            OperationElement::Field(field) => Ok(field.output_base_type()?.try_into().ok()),
-            OperationElement::InlineFragment(inline) => Ok(Some(inline.casted_type())),
         }
     }
 }

@@ -18,7 +18,6 @@ use tower::load_shed::error::Overloaded;
 
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
-use crate::metrics::count_graphql_error;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::services::RouterResponse;
@@ -44,6 +43,7 @@ pub(crate) struct TpsLimitConf {
     pub(crate) interval: Duration,
 }
 
+/// The license enforcement plugin has no configuration.
 #[derive(Debug, Default, Deserialize, JsonSchema, Serialize)]
 pub(crate) struct LicenseEnforcementConfig {}
 
@@ -73,12 +73,9 @@ impl PluginPrivate for LicenseEnforcement {
                     match response {
                         Ok(ok) => Ok(ok),
                         Err(err) if err.is::<Overloaded>() => {
-                            let extension_code = "ROUTER_FREE_PLAN_RATE_LIMIT_REACHED";
-                            count_graphql_error(1u64, Some(extension_code));
-
                             let error = graphql::Error::builder()
                                 .message("Your request has been rate limited. You've reached the limits for the Free plan. Consider upgrading to a higher plan for increased limits.")
-                                .extension_code(extension_code)
+                                .extension_code("ROUTER_FREE_PLAN_RATE_LIMIT_REACHED")
                                 .build();
                             Ok(RouterResponse::error_builder()
                                 .status_code(StatusCode::SERVICE_UNAVAILABLE)
@@ -106,8 +103,12 @@ register_private_plugin!("apollo", "license_enforcement", LicenseEnforcement);
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+    use std::sync::Mutex;
+
     use super::*;
     use crate::metrics::FutureMetricsExt;
+    use crate::plugins::telemetry::Telemetry;
     use crate::plugins::test::PluginTestHarness;
     use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::license_enforcement::LicenseState;
@@ -124,6 +125,7 @@ mod test {
                     capacity: 1,
                     interval: Duration::from_millis(150),
                 }),
+                allowed_features: Default::default(),
             }),
         };
 
@@ -168,7 +170,7 @@ mod test {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn it_emits_metrics_when_tps_enforced() {
         async {
             // GIVEN
@@ -180,31 +182,73 @@ mod test {
                         capacity: 1,
                         interval: Duration::from_millis(150),
                     }),
+                    allowed_features: Default::default(),
                 }),
             };
 
-            let test_harness: PluginTestHarness<LicenseEnforcement> = PluginTestHarness::builder()
+            let license_service = PluginTestHarness::<LicenseEnforcement>::builder()
                 .license(license)
                 .build()
                 .await
-                .expect("test harness");
-
-            let service = test_harness.router_service(|_req| async {
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                Ok(router::Response::fake_builder()
-                    .data(serde_json::json!({"data": {"field": "value"}}))
-                    .header("x-custom-header", "test-value")
-                    .build()
-                    .unwrap())
-            });
+                .unwrap()
+                .router_service(|req| async {
+                    Ok(router::Response::fake_builder()
+                        .data(serde_json::json!({"data": {"field": "value"}}))
+                        .header("x-custom-header", "test-value")
+                        .context(req.context)
+                        .build()
+                        .unwrap())
+                });
 
             // WHEN
             // * two reqs happen
-            let _ = service.call_default().await;
-            let _ = service.call_default().await;
+            // * and the telemetry plugin receives the second response with errors to count
+
+            let _first_response = license_service.call_default().await;
+            let license_plugin_error_response = license_service.call_default().await.unwrap();
+
+            // Put the error response in an arc and mutex so we can share it with telemetry threads
+            let slot = Arc::new(Mutex::new(Some(license_plugin_error_response)));
+            // We have to do a weird thing where we take the response from the license plugin and feed
+            // it as the mock response of the telemetry plugin so that telemetry plugin will count
+            // the errors. Ideally this would be done using a TestHarness, but using a "full"
+            // router with the Telemetry plugin will hit reload_metrics() on activation thus
+            // breaking async(){}.with_metrics() by shutting down its metrics provider.
+            // Ultimately this is the best way anyone could think of to simulate this scenario.
+            let _telemetry_service = PluginTestHarness::<Telemetry>::builder()
+                .config(
+                    r#"
+                    telemetry:
+                      apollo:
+                        endpoint: "http://example.com"
+                        client_name_header: "name_header"
+                        client_version_header: "version_header"
+                        buffer_size: 10000
+                    "#,
+                )
+                .build()
+                .await
+                .unwrap()
+                .router_service(move |_req| {
+                    let slot = Arc::clone(&slot);
+                    async move {
+                        // pull out our one error‐response
+                        let mut guard = slot.lock().unwrap();
+                        let resp = guard.take().unwrap();
+                        Ok(resp)
+                    }
+                })
+                .call(
+                    router::Request::fake_builder()
+                        .header("content-type", "application/json")
+                        .build()
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
 
             // THEN
-            // * we get a metric saying the tps limit was enforced
+            // * we get a metric from the telemetry plugin saying the tps limit was enforced
             assert_counter!(
                 "apollo.router.graphql_error",
                 1,

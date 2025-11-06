@@ -71,3 +71,16 @@ pub(crate) fn apollo_key() -> Option<String> {
 pub(crate) fn apollo_graph_reference() -> Option<String> {
     APOLLO_GRAPH_REF.lock().clone()
 }
+
+// set the supported `@defer` specification version to https://github.com/graphql/graphql-spec/pull/742/commits/01d7b98f04810c9a9db4c0e53d3c4d54dbf10b82
+pub(crate) const MULTIPART_DEFER_SPEC_PARAMETER: &str = "deferSpec";
+pub(crate) const MULTIPART_DEFER_SPEC_VALUE: &str = "20220824";
+pub(crate) const MULTIPART_DEFER_ACCEPT: &str = "multipart/mixed;deferSpec=20220824";
+pub(crate) const MULTIPART_DEFER_CONTENT_TYPE: &str =
+    "multipart/mixed;boundary=\"graphql\";deferSpec=20220824";
+
+pub(crate) const MULTIPART_SUBSCRIPTION_ACCEPT: &str = "multipart/mixed;subscriptionSpec=1.0";
+pub(crate) const MULTIPART_SUBSCRIPTION_CONTENT_TYPE: &str =
+    "multipart/mixed;boundary=\"graphql\";subscriptionSpec=1.0";
+pub(crate) const MULTIPART_SUBSCRIPTION_SPEC_PARAMETER: &str = "subscriptionSpec";
+pub(crate) const MULTIPART_SUBSCRIPTION_SPEC_VALUE: &str = "1.0";

@@ -2,10 +2,16 @@
 title: Configure GraphQL Subscription Support
 subtitle: Enable clients to receive real-time updates
 description: Configure your router to support GraphQL subscriptions, enabling clients to receive real-time updates via WebSocket or HTTP callbacks.
-minVersion: 1.22.0
+minVersion: Router v1.22.0
 ---
 
-<PremiumFeature />
+<PlanRequired plans={["Free", "Developer", "Standard", "Enterprise"]}>
+
+Rate limits apply on the Free plan.
+Subscription pricing applies on Developer and Standard plans.
+Developer and Standard plans require Router v2.6.0 or later.
+
+</PlanRequired>
 
 Learn how to configure the router to enable GraphQL subscriptions.
 
@@ -356,14 +362,14 @@ Disabling deduplication is useful if you need to create a separate connection to
 
 ### Termination on schema update
 
-Whenever your router's supergraph schema is updated, **the router terminates all active subscriptions.** Clients can detect this special-case termination via an error code and execute a new subscription.
+Whenever your router's supergraph schema or configuration is updated, **the router terminates all active subscriptions.** Clients can detect this special-case termination via an error code and establish a new subscription.
 
-Your router's supergraph schema is updated in the following cases:
+Subscriptions are terminated in the following cases:
 
 - Your router regularly polls GraphOS for its supergraph schema, and an updated schema becomes available.
-- Your router obtains its supergraph schema from a local file, which it watches for updates if the [`--hot-reload` option](/router/configuration/overview#--hr----hot-reload) is set.
+- Your router obtains its supergraph schema or configuration from a local file, which it watches for updates if the [`--hot-reload` option](/router/configuration/overview#--hr----hot-reload) is set.
 
-When the router terminates subscriptions this way, it sends the following as a final response payload to all active subscribing clients:
+The router then sends the following as a final response payload to all active subscribing clients:
 
 ```json
 {
@@ -378,7 +384,7 @@ When the router terminates subscriptions this way, it sends the following as a f
 }
 ```
 
-A client that receives this `SUBSCRIPTION_SCHEMA_RELOAD` error code can reconnect by executing a new subscription operation.
+A client that receives this `SUBSCRIPTION_SCHEMA_RELOAD` or `SUBSCRIPTION_CONFIG_RELOAD` error code can reconnect by executing a new subscription operation.
 
 ### WebSocket auth support
 

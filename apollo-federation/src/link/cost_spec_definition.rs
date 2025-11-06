@@ -17,6 +17,7 @@ use indexmap::IndexSet;
 
 use crate::error::FederationError;
 use crate::internal_error;
+use crate::link::Purpose;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
@@ -268,7 +269,7 @@ impl CostSpecDefinition {
                 DirectiveLocation::Scalar,
             ],
             true,
-            Some(&|v| COST_VERSIONS.get_minimum_required_version(v)),
+            Some(&|v| COST_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         )
     }
@@ -283,7 +284,7 @@ impl CostSpecDefinition {
                         get_type: |_, _| Ok(ty!(Int)),
                         default_value: None,
                     },
-                    composition_strategy: Some(ArgumentCompositionStrategy::Max),
+                    composition_strategy: Some(ArgumentCompositionStrategy::NullableMax),
                 },
                 DirectiveArgumentSpecification {
                     base_spec: ArgumentSpecification {
@@ -291,7 +292,7 @@ impl CostSpecDefinition {
                         get_type: |_, _| Ok(ty!([String!])),
                         default_value: None,
                     },
-                    composition_strategy: Some(ArgumentCompositionStrategy::Union),
+                    composition_strategy: Some(ArgumentCompositionStrategy::NullableUnion),
                 },
                 DirectiveArgumentSpecification {
                     base_spec: ArgumentSpecification {
@@ -299,7 +300,7 @@ impl CostSpecDefinition {
                         get_type: |_, _| Ok(ty!([String!])),
                         default_value: None,
                     },
-                    composition_strategy: Some(ArgumentCompositionStrategy::Union),
+                    composition_strategy: Some(ArgumentCompositionStrategy::NullableUnion),
                 },
                 DirectiveArgumentSpecification {
                     base_spec: ArgumentSpecification {
@@ -307,13 +308,13 @@ impl CostSpecDefinition {
                         get_type: |_, _| Ok(ty!(Boolean)),
                         default_value: Some(Value::Boolean(true)),
                     },
-                    composition_strategy: Some(ArgumentCompositionStrategy::Max),
+                    composition_strategy: Some(ArgumentCompositionStrategy::NullableAnd),
                 },
             ],
             false,
             &[DirectiveLocation::FieldDefinition],
             true,
-            Some(&|v| COST_VERSIONS.get_minimum_required_version(v)),
+            Some(&|v| COST_VERSIONS.get_dyn_minimum_required_version(v)),
             None,
         )
     }
@@ -337,6 +338,10 @@ impl SpecDefinition for CostSpecDefinition {
 
     fn minimum_federation_version(&self) -> &Version {
         &self.minimum_federation_version
+    }
+
+    fn purpose(&self) -> Option<Purpose> {
+        None
     }
 }
 

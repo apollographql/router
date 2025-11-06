@@ -1,7 +1,6 @@
 use std::env::consts::ARCH;
 use std::env::consts::OS;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -20,7 +19,6 @@ use tower::ServiceExt as _;
 use tower::util::BoxService;
 use tracing::debug;
 
-use crate::executable::APOLLO_TELEMETRY_DISABLED;
 use crate::metrics::meter_provider;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
@@ -31,7 +29,14 @@ use crate::services::router;
 const REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 const COMPUTE_DETECTOR_THRESHOLD: u16 = 24576;
 const OFFICIAL_HELM_CHART_VAR: &str = "APOLLO_ROUTER_OFFICIAL_HELM_CHART";
+const DEPLOYMENT_TYPE_VAR: &str = "APOLLO_ROUTER_DEPLOYMENT_TYPE";
 
+// Valid deployment type values
+const UNKNOWN: &str = "unknown";
+const OFFICIAL_HELM_CHART: &str = "official_helm_chart";
+const OPERATOR: &str = "operator";
+
+/// The fleet detector plugin has no configuration.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 struct Conf {}
 
@@ -98,7 +103,10 @@ impl GaugeStore {
                 }
             }
             // Deployment type
-            attributes.push(KeyValue::new("deployment.type", get_deployment_type()));
+            attributes.push(KeyValue::new(
+                "deployment.type",
+                opts.deployment_type.clone(),
+            ));
             gauges.push(
                 meter
                     .u64_observable_gauge("apollo.router.instance")
@@ -207,11 +215,11 @@ impl GaugeStore {
 struct GaugeOptions {
     supergraph_schema_hash: String,
     launch_id: Option<String>,
+    deployment_type: String,
 }
 
 #[derive(Default)]
 struct FleetDetector {
-    enabled: bool,
     gauge_store: Mutex<GaugeStore>,
 
     // Options passed to the gauge_store during activation.
@@ -224,18 +232,21 @@ impl PluginPrivate for FleetDetector {
 
     async fn new(plugin: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         debug!("initialising fleet detection plugin");
-        if APOLLO_TELEMETRY_DISABLED.load(Ordering::Relaxed) {
-            debug!("fleet detection disabled, no telemetry will be sent");
-            return Ok(FleetDetector::default());
-        }
+
+        let deployment_type = get_deployment_type(
+            std::env::var_os(OFFICIAL_HELM_CHART_VAR)
+                .is_some()
+                .then_some("true"),
+            std::env::var(DEPLOYMENT_TYPE_VAR).ok().as_deref(),
+        );
 
         let gauge_options = GaugeOptions {
             supergraph_schema_hash: plugin.supergraph_schema_id.to_string(),
             launch_id: plugin.launch_id.map(|s| s.to_string()),
+            deployment_type,
         };
 
         Ok(FleetDetector {
-            enabled: true,
             gauge_store: Mutex::new(GaugeStore::Pending),
             gauge_options,
         })
@@ -249,10 +260,6 @@ impl PluginPrivate for FleetDetector {
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        if !self.enabled {
-            return service;
-        }
-
         service
             // Count the number of request bytes from clients to the router
             .map_request(move |req: router::Request| router::Request {
@@ -270,19 +277,22 @@ impl PluginPrivate for FleetDetector {
                 context: req.context,
             })
             // Count the number of response bytes from the router to clients
-            .map_response(move |res: router::Response| router::Response {
-                response: res.response.map(move |body| {
-                    router::body::from_result_stream(body.into_data_stream().inspect(|res| {
-                        if let Ok(bytes) = res {
-                            u64_counter!(
-                                "apollo.router.operations.response_size",
-                                "Total number of response bytes to clients",
-                                bytes.len() as u64
-                            );
-                        }
+            .map_response(move |res: router::Response| {
+                router::Response::http_response_builder()
+                    .response(res.response.map(move |body| {
+                        router::body::from_result_stream(body.into_data_stream().inspect(|res| {
+                            if let Ok(bytes) = res {
+                                u64_counter!(
+                                    "apollo.router.operations.response_size",
+                                    "Total number of response bytes to clients",
+                                    bytes.len() as u64
+                                );
+                            }
+                        }))
                     }))
-                }),
-                context: res.context,
+                    .context(res.context)
+                    .build()
+                    .unwrap()
             })
             .boxed()
     }
@@ -292,9 +302,6 @@ impl PluginPrivate for FleetDetector {
         subgraph_name: &str,
         service: BoxService<HttpRequest, HttpResponse, BoxError>,
     ) -> BoxService<HttpRequest, HttpResponse, BoxError> {
-        if !self.enabled {
-            return service;
-        }
         let sn_req = Arc::new(subgraph_name.to_string());
         let sn_res = sn_req.clone();
         service
@@ -514,12 +521,28 @@ fn get_otel_os() -> &'static str {
     }
 }
 
-fn get_deployment_type() -> &'static str {
-    // Official Apollo helm chart
-    if std::env::var_os(OFFICIAL_HELM_CHART_VAR).is_some() {
-        return "official_helm_chart";
+fn get_deployment_type(official_helm_chart: Option<&str>, deployment_type: Option<&str>) -> String {
+    if official_helm_chart.is_some() {
+        OFFICIAL_HELM_CHART.to_string()
+    } else if let Some(val) = deployment_type
+        && !val.is_empty()
+    {
+        // Only allow specific deployment types
+        match val {
+            UNKNOWN | OFFICIAL_HELM_CHART | OPERATOR => val.to_string(),
+            _ => {
+                // Invalid deployment type, fall back to unknown
+                tracing::warn!(
+                    "Invalid deployment type '{}', falling back to '{}'",
+                    val,
+                    UNKNOWN
+                );
+                UNKNOWN.to_string()
+            }
+        }
+    } else {
+        UNKNOWN.to_string()
     }
-    "unknown"
 }
 
 register_private_plugin!("apollo", "fleet_detector", FleetDetector);
@@ -533,16 +556,13 @@ mod tests {
 
     use super::*;
     use crate::metrics::FutureMetricsExt as _;
-    use crate::metrics::collect_metrics;
-    use crate::metrics::test_utils::MetricType;
     use crate::plugin::test::MockHttpClientService;
     use crate::plugin::test::MockRouterService;
     use crate::services::router::Body;
 
     #[tokio::test]
-    async fn test_disabled_router_service() {
+    async fn test_enabled_router_service() {
         async {
-            // WHEN the plugin is disabled
             let plugin = FleetDetector::default();
 
             // GIVEN a router service request
@@ -551,73 +571,17 @@ mod tests {
                 .expect_call()
                 .times(1)
                 .returning(|req: router::Request| {
-                    Ok(router::Response {
-                        context: req.context,
-                        response: http::Response::builder()
-                            .status(StatusCode::BAD_REQUEST)
-                            .header("content-type", "application/json")
-                            // making sure the request body is consumed
-                            .body(req.router_request.into_body())
-                            .unwrap(),
-                    })
-                });
-            let mut bad_request_router_service =
-                plugin.router_service(mock_bad_request_service.boxed());
-            let router_req = router::Request::fake_builder()
-                .body(router::body::from_bytes("request"))
-                .build()
-                .unwrap();
-            let _router_response = bad_request_router_service
-                .ready()
-                .await
-                .unwrap()
-                .call(router_req)
-                .await
-                .unwrap()
-                .next_response()
-                .await
-                .unwrap();
-
-            // THEN operation size metrics shouldn't exist
-            assert!(!collect_metrics().metric_exists::<u64>(
-                "apollo.router.operations.request_size",
-                MetricType::Counter,
-                &[],
-            ));
-            assert!(!collect_metrics().metric_exists::<u64>(
-                "apollo.router.operations.response_size",
-                MetricType::Counter,
-                &[],
-            ));
-        }
-        .with_metrics()
-        .await;
-    }
-
-    #[tokio::test]
-    async fn test_enabled_router_service() {
-        async {
-            // WHEN the plugin is enabled
-            let plugin = FleetDetector {
-                enabled: true,
-                ..Default::default()
-            };
-
-            // GIVEN a router service request
-            let mut mock_bad_request_service = MockRouterService::new();
-            mock_bad_request_service
-                .expect_call()
-                .times(1)
-                .returning(|req: router::Request| {
-                    Ok(router::Response {
-                        context: req.context,
-                        response: http::Response::builder()
-                            .status(StatusCode::BAD_REQUEST)
-                            .header("content-type", "application/json")
-                            // making sure the request body is consumed
-                            .body(req.router_request.into_body())
-                            .unwrap(),
-                    })
+                    router::Response::http_response_builder()
+                        .context(req.context)
+                        .response(
+                            http::Response::builder()
+                                .status(StatusCode::BAD_REQUEST)
+                                .header("content-type", "application/json")
+                                // making sure the request body is consumed
+                                .body(req.router_request.into_body())
+                                .unwrap(),
+                        )
+                        .build()
                 });
             let mut bad_request_router_service =
                 plugin.router_service(mock_bad_request_service.boxed());
@@ -645,86 +609,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_disabled_http_client_service() {
-        async {
-            // WHEN the plugin is disabled
-            let plugin = FleetDetector::default();
-
-            // GIVEN an http client service request
-            let mut mock_bad_request_service = MockHttpClientService::new();
-            mock_bad_request_service
-                .expect_call()
-                .times(1)
-                .returning(|req| {
-                    Box::pin(async {
-                        Ok(http::Response::builder()
-                            .status(StatusCode::BAD_REQUEST)
-                            .header("content-type", "application/json")
-                            // making sure the request body is consumed
-                            .body(req.into_body())
-                            .unwrap())
-                    })
-                });
-            let mut bad_request_http_client_service = plugin.http_client_service(
-                "subgraph",
-                mock_bad_request_service
-                    .map_request(|req: HttpRequest| req.http_request)
-                    .map_response(|res| HttpResponse {
-                        http_response: res,
-                        context: Default::default(),
-                    })
-                    .boxed(),
-            );
-            let http_client_req = HttpRequest {
-                http_request: http::Request::builder()
-                    .body(router::body::from_bytes("request"))
-                    .unwrap(),
-                context: Default::default(),
-            };
-            let http_client_response = bad_request_http_client_service
-                .ready()
-                .await
-                .unwrap()
-                .call(http_client_req)
-                .await
-                .unwrap();
-            // making sure the response body is consumed
-            let _data = http_client_response
-                .http_response
-                .into_body()
-                .collect()
-                .await
-                .unwrap();
-
-            // THEN fetch metrics shouldn't exist
-            assert!(!collect_metrics().metric_exists::<u64>(
-                "apollo.router.operations.fetch",
-                MetricType::Counter,
-                &[KeyValue::new("subgraph.name", "subgraph"),],
-            ));
-            assert!(!collect_metrics().metric_exists::<u64>(
-                "apollo.router.operations.fetch.request_size",
-                MetricType::Counter,
-                &[KeyValue::new("subgraph.name", "subgraph"),],
-            ));
-            assert!(!collect_metrics().metric_exists::<u64>(
-                "apollo.router.operations.fetch.response_size",
-                MetricType::Counter,
-                &[KeyValue::new("subgraph.name", "subgraph"),],
-            ));
-        }
-        .with_metrics()
-        .await;
-    }
-
-    #[tokio::test]
     async fn test_enabled_http_client_service_full() {
         async {
-            // WHEN the plugin is enabled
-            let plugin = FleetDetector {
-                enabled: true,
-                ..Default::default()
-            };
+            let plugin = FleetDetector::default();
 
             // GIVEN an http client service request with a complete body
             let mut mock_bad_request_service = MockHttpClientService::new();
@@ -801,11 +688,7 @@ mod tests {
     #[tokio::test]
     async fn test_enabled_http_client_service_stream() {
         async {
-            // WHEN the plugin is enabled
-            let plugin = FleetDetector {
-                enabled: true,
-                ..Default::default()
-            };
+            let plugin = FleetDetector::default();
 
             // GIVEN an http client service request with a streaming body
             let mut mock_bad_request_service = MockHttpClientService::new();
@@ -912,5 +795,48 @@ nodev   cgroup
 
         let res = detect_cgroup_version(PROC_FILESYSTEMS_CGROUP2);
         assert_eq!(res, CGroupVersion::None)
+    }
+
+    #[test]
+    fn test_get_deployment_type_official_helm_chart() {
+        assert_eq!(get_deployment_type(Some("true"), None), OFFICIAL_HELM_CHART);
+    }
+
+    #[test]
+    fn test_get_deployment_type_custom() {
+        assert_eq!(
+            get_deployment_type(None, Some("custom_deployment")),
+            UNKNOWN
+        );
+    }
+
+    #[test]
+    fn test_get_deployment_type_custom_empty() {
+        assert_eq!(get_deployment_type(None, Some("")), UNKNOWN);
+    }
+
+    #[test]
+    fn test_get_deployment_type_default() {
+        assert_eq!(get_deployment_type(None, None), UNKNOWN);
+    }
+
+    #[test]
+    fn test_get_deployment_type_priority() {
+        // Set both environment variables - official helm chart should take priority
+        assert_eq!(
+            get_deployment_type(Some("true"), Some("custom_deployment")),
+            OFFICIAL_HELM_CHART
+        );
+    }
+
+    #[test]
+    fn test_get_deployment_type_valid_values() {
+        // Test that valid deployment types are accepted
+        assert_eq!(get_deployment_type(None, Some(UNKNOWN)), UNKNOWN);
+        assert_eq!(
+            get_deployment_type(None, Some(OFFICIAL_HELM_CHART)),
+            OFFICIAL_HELM_CHART
+        );
+        assert_eq!(get_deployment_type(None, Some(OPERATOR)), OPERATOR);
     }
 }

@@ -19,7 +19,6 @@ use super::config_new::ToOtelValue;
 use super::dynamic_attribute::LogAttributes;
 use super::formatters::EXCLUDED_ATTRIBUTES;
 use super::formatters::EventFormatter;
-use super::reload::IsSampled;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::config_new::logging::Format;
 use crate::plugins::telemetry::config_new::logging::StdOut;
@@ -27,7 +26,8 @@ use crate::plugins::telemetry::consts::EVENT_ATTRIBUTE_OMIT_LOG;
 use crate::plugins::telemetry::formatters::RateLimitFormatter;
 use crate::plugins::telemetry::formatters::json::Json;
 use crate::plugins::telemetry::formatters::text::Text;
-use crate::plugins::telemetry::reload::LayeredTracer;
+use crate::plugins::telemetry::reload::otel::IsSampled;
+use crate::plugins::telemetry::reload::otel::LayeredTracer;
 use crate::plugins::telemetry::resource::ConfigResource;
 
 pub(crate) fn create_fmt_layer(
@@ -247,11 +247,11 @@ impl field::Visit for FieldsVisitor<'_, '_> {
         match field_name {
             name if name.starts_with("r#") => {
                 self.values
-                    .insert(&name[2..], serde_json::Value::from(format!("{:?}", value)));
+                    .insert(&name[2..], serde_json::Value::from(format!("{value:?}")));
             }
             name => {
                 self.values
-                    .insert(name, serde_json::Value::from(format!("{:?}", value)));
+                    .insert(name, serde_json::Value::from(format!("{value:?}")));
             }
         };
     }
@@ -268,7 +268,16 @@ mod tests {
     use apollo_federation::connectors::Connector;
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::ProblemLocation;
+    use apollo_federation::connectors::SourceName;
     use apollo_federation::connectors::StringTemplate;
+    use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
+    use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
+    use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
+    use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
+    use apollo_federation::connectors::runtime::key::ResponseKey;
+    use apollo_federation::connectors::runtime::mapping::Problem;
+    use apollo_federation::connectors::runtime::responses::MappedResponse;
     use http::HeaderValue;
     use http::header::CONTENT_LENGTH;
     use parking_lot::Mutex;
@@ -282,9 +291,6 @@ mod tests {
 
     use super::*;
     use crate::graphql;
-    use crate::plugins::connectors::handle_responses::MappedResponse;
-    use crate::plugins::connectors::make_requests::ResponseKey;
-    use crate::plugins::connectors::mapping::Problem;
     use crate::plugins::telemetry::config_new::events;
     use crate::plugins::telemetry::config_new::events::log_event;
     use crate::plugins::telemetry::config_new::logging::JsonFormat;
@@ -295,9 +301,6 @@ mod tests {
     use crate::plugins::telemetry::otel;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
-    use crate::services::connector::request_service::TransportRequest;
-    use crate::services::connector::request_service::TransportResponse;
-    use crate::services::connector::request_service::transport;
     use crate::services::router;
     use crate::services::router::body;
     use crate::services::subgraph;
@@ -814,18 +817,18 @@ connector:
                 http_request
                     .headers_mut()
                     .insert("x-log-request", HeaderValue::from_static("log"));
-                let transport_request = TransportRequest::Http(transport::http::HttpRequest {
+                let transport_request = TransportRequest::Http(HttpRequest {
                     inner: http_request,
-                    debug: None,
+                    debug: Default::default(),
                 });
                 let connector = Arc::new(Connector {
                     id: ConnectId::new(
                         "connector_subgraph".into(),
-                        Some("source".into()),
+                        Some(SourceName::cast("source")),
                         name!(Query),
                         name!(users),
+                        None,
                         0,
-                        "label",
                     ),
                     transport: HttpJsonTransport {
                         connect_template: StringTemplate::from_str("/test").unwrap(),
@@ -836,12 +839,13 @@ connector:
                     max_requests: None,
                     entity_resolver: None,
                     spec: ConnectSpec::V0_1,
-                    request_variables: Default::default(),
-                    response_variables: Default::default(),
                     batch_settings: None,
                     request_headers: Default::default(),
                     response_headers: Default::default(),
+                    request_variable_keys: Default::default(),
+                    response_variable_keys: Default::default(),
                     error_settings: Default::default(),
+                    label: "label".into(),
                 });
                 let response_key = ResponseKey::RootField {
                     name: "hello".to_string(),
@@ -851,7 +855,6 @@ connector:
                 let connector_request = Request {
                     context: context.clone(),
                     connector: connector.clone(),
-                    service_name: Default::default(),
                     transport_request,
                     key: response_key.clone(),
                     mapping_problems: vec![
@@ -859,16 +862,19 @@ connector:
                             count: 1,
                             message: "error message".to_string(),
                             path: "@.id".to_string(),
+                            location: ProblemLocation::Selection,
                         },
                         Problem {
                             count: 2,
                             message: "warn message".to_string(),
                             path: "@.id".to_string(),
+                            location: ProblemLocation::Selection,
                         },
                         Problem {
                             count: 3,
                             message: "info message".to_string(),
                             path: "@.id".to_string(),
+                            location: ProblemLocation::Selection,
                         },
                     ],
                     supergraph_request: Default::default(),
@@ -877,9 +883,7 @@ connector:
                 connector_events.on_request(&connector_request);
 
                 let connector_response = Response {
-                    context,
-                    connector: connector.clone(),
-                    transport_result: Ok(TransportResponse::Http(transport::http::HttpResponse {
+                    transport_result: Ok(TransportResponse::Http(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)
                             .header("x-log-response", HeaderValue::from_static("log"))
@@ -898,16 +902,19 @@ connector:
                                 count: 1,
                                 message: "error message".to_string(),
                                 path: "@.id".to_string(),
+                                location: ProblemLocation::Selection,
                             },
                             Problem {
                                 count: 2,
                                 message: "warn message".to_string(),
                                 path: "@.id".to_string(),
+                                location: ProblemLocation::Selection,
                             },
                             Problem {
                                 count: 3,
                                 message: "info message".to_string(),
                                 path: "@.id".to_string(),
+                                location: ProblemLocation::Selection,
                             },
                         ],
                     },
@@ -1167,18 +1174,18 @@ subgraph:
                 http_request
                     .headers_mut()
                     .insert("x-log-request", HeaderValue::from_static("log"));
-                let transport_request = TransportRequest::Http(transport::http::HttpRequest {
+                let transport_request = TransportRequest::Http(HttpRequest {
                     inner: http_request,
-                    debug: None,
+                    debug: Default::default(),
                 });
                 let connector = Arc::new(Connector {
                     id: ConnectId::new(
                         "connector_subgraph".into(),
-                        Some("source".into()),
+                        Some(SourceName::cast("source")),
                         name!(Query),
                         name!(users),
+                        None,
                         0,
-                        "label",
                     ),
                     transport: HttpJsonTransport {
                         connect_template: StringTemplate::from_str("/test").unwrap(),
@@ -1189,12 +1196,13 @@ subgraph:
                     max_requests: None,
                     entity_resolver: None,
                     spec: ConnectSpec::V0_1,
-                    request_variables: Default::default(),
-                    response_variables: Default::default(),
                     batch_settings: None,
                     request_headers: Default::default(),
                     response_headers: Default::default(),
+                    request_variable_keys: Default::default(),
+                    response_variable_keys: Default::default(),
                     error_settings: Default::default(),
+                    label: "label".into(),
                 });
                 let response_key = ResponseKey::RootField {
                     name: "hello".to_string(),
@@ -1204,7 +1212,6 @@ subgraph:
                 let connector_request = Request {
                     context: context.clone(),
                     connector: connector.clone(),
-                    service_name: Default::default(),
                     transport_request,
                     key: response_key.clone(),
                     mapping_problems: vec![
@@ -1212,16 +1219,19 @@ subgraph:
                             count: 1,
                             message: "error message".to_string(),
                             path: "@.id".to_string(),
+                            location: ProblemLocation::Selection,
                         },
                         Problem {
                             count: 2,
                             message: "warn message".to_string(),
                             path: "@.id".to_string(),
+                            location: ProblemLocation::Selection,
                         },
                         Problem {
                             count: 3,
                             message: "info message".to_string(),
                             path: "@.id".to_string(),
+                            location: ProblemLocation::Selection,
                         },
                     ],
                     supergraph_request: Default::default(),
@@ -1230,9 +1240,7 @@ subgraph:
                 connector_events.on_request(&connector_request);
 
                 let connector_response = Response {
-                    context,
-                    connector: connector.clone(),
-                    transport_result: Ok(TransportResponse::Http(transport::http::HttpResponse {
+                    transport_result: Ok(TransportResponse::Http(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)
                             .header("x-log-response", HeaderValue::from_static("log"))
@@ -1251,16 +1259,19 @@ subgraph:
                                 count: 1,
                                 message: "error message".to_string(),
                                 path: "@.id".to_string(),
+                                location: ProblemLocation::Selection,
                             },
                             Problem {
                                 count: 2,
                                 message: "warn message".to_string(),
                                 path: "@.id".to_string(),
+                                location: ProblemLocation::Selection,
                             },
                             Problem {
                                 count: 3,
                                 message: "info message".to_string(),
                                 path: "@.id".to_string(),
+                                location: ProblemLocation::Selection,
                             },
                         ],
                     },

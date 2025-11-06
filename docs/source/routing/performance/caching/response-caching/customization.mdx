@@ -1,0 +1,355 @@
+---
+title: Response Cache Customization
+subtitle: Cache private data and customize cache keys
+description: Configure per-user caching with private data, create custom cache keys with Rhai scripts, and tune advanced Redis settings.
+minVersion: Router v2.8.0
+releaseStage: preview
+---
+
+Beyond basic response caching, the router supports customization for caching private data, modifying cache keys, and advanced Redis configuration.
+
+## When to customize
+
+Consider these advanced customization options when:
+
+- You need to cache user-specific data (`PRIVATE` cache scope)
+- Cache entries should vary based on request headers (locale, tenant ID, feature flags)
+- You require multiple Redis instances for different subgraphs
+- You need fine-tuned Redis performance (connection pools, timeouts, namespacing)
+
+For basic response caching setup, see the [Quickstart](/router/performance/caching/response-caching/quickstart) page.
+
+## Private data caching
+
+A subgraph can return a response with the header `Cache-Control: private`, indicating that it contains user-personalized data. Although this usually forbids intermediate servers from storing data, the router can recognize different users and store their data in different parts of the cache.
+
+
+Use private data caching when:
+
+- Your subgraph returns user-specific data that can be cached (shopping cart, user preferences, personalized recommendations)
+- You can reliably identify users through authentication tokens or session data
+- The performance gain from caching user-specific data outweighs the complexity of managing separate cache entries per user
+
+Don't use private data caching if:
+
+- Your data contains highly sensitive information that should never be cached
+- You can't reliably identify users across requests
+- User-specific data changes too frequently to benefit from caching
+
+### Configure `private_id`
+
+To set up private information caching, configure the `private_id` option. This option is a string pointing at a field in the request context that contains data used to recognize users (for example, a user ID, or `sub` claim in JWT).
+
+As an example, if you are using the router's JWT authentication plugin, first configure the `private_id` option in the `accounts` subgraph to point to the `user_id` key in the context. Then, use a Rhai script to set that key from the JWT's `sub` claim:
+
+```yaml title="router.yaml"
+preview_response_cache:
+  enabled: true
+  subgraph:
+    all:
+      enabled: true
+      redis:
+        urls: ["redis://..."]
+    subgraphs:
+      accounts:
+        private_id: "user_id"
+authentication:
+  router:
+    jwt:
+      jwks:
+        - url: https://auth-server/jwks.json
+```
+
+```rhai title="main.rhai"
+fn supergraph_service(service) {
+  let request_callback = |request| {
+    let claims = request.context[Router.APOLLO_AUTHENTICATION_JWT_CLAIMS];
+
+    if claims != () {
+      let private_id = claims["sub"];
+      request.context["user_id"] = private_id;
+    }
+  };
+
+  service.map_request(request_callback);
+}
+```
+
+### How private data caching works
+
+The router performs the following sequence to determine whether a particular query returns private data:
+
+1. Upon seeing a query for the first time, the router requests the cache as if it were a public-only query.
+2. When the subgraph returns the response with private data, the router recognizes it and stores the data in a user-specific part of the cache.
+3. The router stores the query in a list of known queries with private data.
+4. When the router subsequently sees a known query:
+  - If the private ID isn't provided, the router doesn't check the cache and instead transmits the subgraph response directly.
+  - If the private ID is provided, the router queries the part of the cache for the current user and checks the subgraph if nothing is available.
+
+## Custom cache keys
+
+To store data for a particular request in different cache entries, configure the cache key through the `apollo::response_cache::key` context entry.
+
+
+Use custom cache keys when you need to:
+
+- Cache different versions of the same query based on request headers (locale, currency, feature flags)
+- Segment cache entries by tenant, region, or API version
+- Include request-specific context that affects the response but isn't part of the GraphQL query
+
+### Configure cache keys
+
+You can customize the response cache key with the `apollo::response_cache::key` context entry. Data in this entry modifies the data used to generate the cache key, and it can be any valid JSON.
+
+You can apply customizations at multiple scales using different fields in `apollo::response_cache::key`:
+- An `all` field, which affects all subgraph requests
+- A `subgraphs` field, which contains an object with per-subgraph customization
+- A field for each operation name, which affects only a specific operation
+
+Data within these customizations are _not_ merged. The router chooses data in order of precedence: operation name, subgraph, then `all`. To set common data, you must also add it to the more specific sections.
+
+Example:
+
+```json
+{
+    "all": 1,
+    "subgraph_operation1": "key1",
+    "subgraph_operation2": {
+      "data": "key2"
+    },
+    "subgraphs": {
+      "my_subgraph": {
+        "locale": "be"
+      }
+    }
+}
+```
+
+Example in Rhai:
+
+```rhai title="main.rhai"
+fn supergraph_service(service) {
+  let request_callback = |request| {
+    // Include the request header value of "x-my-new-header" in the primary cache key hash to create a unique cache entry for every value of this header
+    request.context[Router.APOLLO_RESPONSE_CACHE_KEY]["all"] = request.headers["x-my-new-header"]; // Applied on all subgraphs
+  };
+
+  service.map_request(request_callback);
+}
+```
+
+### Example: Multi-tenant caching
+
+Cache different responses for each tenant based on a request header:
+
+```rhai title="main.rhai"
+fn supergraph_service(service) {
+  let request_callback = |request| {
+    // Create separate cache entries for each tenant
+    let tenant_id = request.headers["x-tenant-id"];
+    if tenant_id != () {
+      request.context[Router.APOLLO_RESPONSE_CACHE_KEY]["all"] = tenant_id;
+    }
+  };
+
+  service.map_request(request_callback);
+}
+```
+
+### Example: Locale-specific caching
+
+Cache different responses for each locale:
+
+```rhai title="main.rhai"
+fn supergraph_service(service) {
+  let request_callback = |request| {
+    // Create separate cache entries for each locale
+    let locale = request.headers["accept-language"];
+    if locale != () {
+      request.context[Router.APOLLO_RESPONSE_CACHE_KEY]["all"] = locale;
+    }
+  };
+
+  service.map_request(request_callback);
+}
+```
+
+## Advanced Redis configuration
+
+The router provides multiple Redis options to ensure you can scale properly and achieve the best performance.
+
+For basic Redis setup, see the [Quickstart](/router/performance/caching/response-caching/quickstart) page.
+
+### Per-subgraph Redis instances
+
+Configure a global Redis instance (used by default) and override it with specific instances and their own configuration for individual subgraphs:
+
+```yaml title="router.yaml"
+# Enable response caching globally
+preview_response_cache:
+  enabled: true
+  subgraph:
+    all:
+      enabled: true
+      # Configure Redis globally
+      redis:
+        urls: ["redis://..."]
+        fetch_timeout: 300ms # Optional, by default: 150ms
+        insert_timeout: 750ms # Optional, by default: 500ms
+        invalidate_timeout: 750ms # Optional, by default: 1s
+    # Configure response caching per subgraph, overrides options from the "all" section
+    subgraphs:
+      products:
+        redis:
+          urls: ["redis://..."] # Override global Redis instance for this specific subgraph
+          pool_size: 15 # Optional. Default: 5
+          namespace: products_response_cache # Optional. Prefix all the cached entries in Redis with this prefix in Redis key
+      inventory:
+        enabled: false # Disable for a specific subgraph
+```
+
+### Redis URL formats
+
+<Tip>
+
+For comprehensive Redis URL configuration details, including authentication and TLS setup, see the [distributed caching Redis configuration guide](/router/configuration/distributed-caching#redis-url-configuration).
+
+</Tip>
+
+The response caching configuration must contain one or more URLs using different schemes depending on the expected deployment:
+
+- `redis` - TCP connected to a centralized server
+- `rediss` - TLS connected to a centralized server
+- `redis-cluster` - TCP connected to a cluster
+- `rediss-cluster` - TLS connected to a cluster
+
+The URLs must have the following format:
+
+#### One node
+
+```
+redis|rediss :// [[username:]password@] host [:port][/database]
+```
+
+Example: `redis://localhost:6379`
+
+#### Clustered
+
+```
+redis|rediss[-cluster] :// [[username:]password@] host [:port][?[node=host1:port1][&node=host2:port2][&node=hostN:portN]]
+```
+
+or, if configured with multiple URLs:
+
+```yaml
+[
+  "redis|rediss[-cluster] :// [[username:]password@] host [:port]",
+  "redis|rediss[-cluster] :// [[username:]password@] host1 [:port1]",
+  "redis|rediss[-cluster] :// [[username:]password@] host2 [:port2]"
+]
+```
+
+### TLS and authentication
+
+For Redis TLS connections, you can set up a client certificate or override the root certificate authority by configuring `tls` in your router's [YAML config file](https://www.apollographql.com/docs/router/overview/#yaml-config-file). For example:
+
+```yaml title="router.yaml"
+# Enable response caching globally
+preview_response_cache:
+  enabled: true
+  subgraph:
+    all:
+      enabled: true
+      # Configure Redis globally
+      redis:
+        urls: [ "rediss://redis.example.com:6379" ]
+        #highlight-start
+        username: root
+        password: ${env.REDIS_PASSWORD}
+        tls:
+          certificate_authorities: ${file./path/to/ca.crt}
+          client_authentication:
+            certificate_chain: ${file./path/to/certificate_chain.pem}
+            key: ${file./path/to/key.pem}
+        #highlight-end
+```
+
+### Timeout configuration
+
+Redis connections and commands have default timeouts that you can override. The timeouts are tailored to specific caching operations: fetch, insert, invalidate, and maintenance. Set a lower fetch timeout and a higher insert timeout for a good balance of reliability and client responsiveness:
+
+```yaml title="router.yaml"
+preview_response_cache:
+  enabled: true
+  subgraph:
+    all:
+      enabled: true
+      redis:
+        urls: ["redis://..."]
+        fetch_timeout: 250ms
+        insert_timeout: 750ms
+        invalidate_timeout: 750ms
+```
+
+### TTL for cache entries
+
+The `ttl` option defines the default global expiration for cache entries. You must set a TTL for all enabled subgraphs.
+
+To prevent potential cache overflow, consider setting the TTL to 24 hours or twice the median publish interval (whichever is less), and monitor cache utilization in your environment, especially if you cache a lot of different data:
+
+```yaml title="router.yaml"
+preview_response_cache:
+  enabled: true
+  subgraph:
+    all:
+      enabled: true
+      ttl: 24h
+    products:
+      enabled: true
+      ttl: 6h
+```
+
+### Namespace prefix
+
+When using the same Redis instance for multiple purposes, the `namespace` option defines a prefix for all the keys defined by the router:
+
+```yaml title="router.yaml"
+preview_response_cache:
+  enabled: true
+  subgraph:
+    all:
+      enabled: true
+      redis:
+        urls: ["redis://..."]
+        namespace: response_cache
+```
+
+### Required to start
+
+When active, the `required_to_start` option prevents the router from starting if it can't connect to Redis. By default, the router starts without a connection to Redis, which means it sends requests to subgraphs directly, bypassing the cache:
+
+```yaml title="router.yaml"
+preview_response_cache:
+  enabled: true
+  subgraph:
+    all:
+      enabled: true
+      redis:
+        urls: ["redis://..."]
+        required_to_start: true
+```
+
+### Connection pool size
+
+The `pool_size` option defines the number of Redis connections the router opens. By default, the router opens five connections. If you have high traffic between the router and Redis, or if you observe latency in those requests, increase the pool size to reduce that latency. You can measure whether you need to increase this number by monitoring the `apollo.router.operations.response_cache.insert` and `apollo.router.operations.response_cache.fetch` [response cache metrics](/router/performance/caching/response-caching/observability#fetchinsert). If the time to insert and fetch data from the cache is long, it might be because of delays in acquiring a connection from the pool:
+
+```yaml title="router.yaml"
+preview_response_cache:
+  enabled: true
+  subgraph:
+    all:
+      enabled: true
+      redis:
+        urls: ["redis://..."]
+        pool_size: 15
+```

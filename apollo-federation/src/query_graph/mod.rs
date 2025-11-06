@@ -1,6 +1,8 @@
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::hash::Hash;
+use std::ops::Deref;
+use std::ops::DerefMut;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
@@ -16,7 +18,7 @@ use petgraph::graph::EdgeReference;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
 
-use crate::bail;
+use crate::ensure;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::internal_error;
@@ -41,6 +43,7 @@ pub mod output;
 pub(crate) mod path_tree;
 
 pub use build_query_graph::build_federated_query_graph;
+pub use build_query_graph::build_supergraph_api_query_graph;
 use graph_path::operation::OpGraphPathContext;
 use graph_path::operation::OpGraphPathTrigger;
 use graph_path::operation::OpPathElement;
@@ -50,7 +53,6 @@ use crate::query_graph::condition_resolver::ConditionResolver;
 use crate::query_graph::graph_path::ExcludedConditions;
 use crate::query_graph::graph_path::ExcludedDestinations;
 use crate::query_plan::QueryPlanCost;
-use crate::query_plan::query_planner::EnabledOverrideConditions;
 use crate::query_plan::query_planning_traversal::non_local_selections_estimation;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -84,7 +86,7 @@ impl Display for QueryGraphNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}({})", self.type_, self.source)?;
         if let Some(provide_id) = self.provide_id {
-            write!(f, "-{}", provide_id)?;
+            write!(f, "-{provide_id}")?;
         }
         if self.is_root_node() {
             write!(f, "*")?;
@@ -189,19 +191,17 @@ impl QueryGraphEdge {
     pub(crate) fn new(
         transition: QueryGraphEdgeTransition,
         conditions: Option<Arc<SelectionSet>>,
+        override_condition: Option<OverrideCondition>,
     ) -> Self {
         Self {
             transition,
             conditions,
-            override_condition: None,
+            override_condition,
             required_contexts: Vec::new(),
         }
     }
 
-    fn satisfies_override_conditions(
-        &self,
-        conditions_to_check: &EnabledOverrideConditions,
-    ) -> bool {
+    fn satisfies_override_conditions(&self, conditions_to_check: &OverrideConditions) -> bool {
         if let Some(override_condition) = &self.override_condition {
             override_condition.check(conditions_to_check)
         } else {
@@ -234,15 +234,50 @@ impl Display for QueryGraphEdge {
         }
     }
 }
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct OverrideCondition {
-    pub(crate) label: String,
+    pub(crate) label: Arc<str>,
     pub(crate) condition: bool,
 }
 
 impl OverrideCondition {
-    pub(crate) fn check(&self, enabled_conditions: &EnabledOverrideConditions) -> bool {
-        self.condition == enabled_conditions.contains(&self.label)
+    pub(crate) fn check(&self, override_conditions: &OverrideConditions) -> bool {
+        override_conditions.get(&self.label) == Some(&self.condition)
+    }
+}
+
+/// For query planning, this is a map of all override condition labels to whether that label is set.
+/// For composition satisfiability, this is the same thing, but it's only some of the override
+/// conditions. Specifically, for top-level queries in satisfiability, this will only contain those
+/// override conditions encountered in the path. For conditions queries in satisfiability, this will
+/// be an empty map.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct OverrideConditions(IndexMap<Arc<str>, bool>);
+
+impl Deref for OverrideConditions {
+    type Target = IndexMap<Arc<str>, bool>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for OverrideConditions {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl OverrideConditions {
+    pub(crate) fn new(graph: &QueryGraph, enabled_conditions: &IndexSet<String>) -> Self {
+        Self(
+            graph
+                .override_condition_labels
+                .iter()
+                .map(|label| (label.clone(), enabled_conditions.contains(label.as_ref())))
+                .collect(),
+        )
     }
 }
 
@@ -328,6 +363,11 @@ impl QueryGraphEdgeTransition {
         &self,
         other: &Self,
     ) -> Result<bool, FederationError> {
+        ensure!(
+            other.collect_operation_elements(),
+            "Supergraphs shouldn't have a transition that doesn't collect elements; got {}",
+            other,
+        );
         Ok(match self {
             QueryGraphEdgeTransition::FieldCollection {
                 field_definition_position,
@@ -365,12 +405,7 @@ impl QueryGraphEdgeTransition {
                 };
                 to_type_name == other_to_type_name
             }
-            _ => {
-                bail!(
-                    "Supergraphs shouldn't have a transition that doesn't collect elements; got {}",
-                    other,
-                );
-            }
+            _ => false,
         })
     }
 }
@@ -393,13 +428,13 @@ impl Display for QueryGraphEdgeTransition {
                 write!(f, "key()")
             }
             QueryGraphEdgeTransition::RootTypeResolution { root_kind } => {
-                write!(f, "{}()", root_kind)
+                write!(f, "{root_kind}()")
             }
             QueryGraphEdgeTransition::SubgraphEnteringTransition => {
                 write!(f, "∅")
             }
             QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { to_type_name, .. } => {
-                write!(f, "... on {}", to_type_name)
+                write!(f, "... on {to_type_name}")
             }
         }
     }
@@ -463,6 +498,7 @@ pub struct QueryGraph {
     /// argument coordinates). This identifier is called the "context ID".
     arguments_to_context_ids_by_source:
         IndexMap<Arc<str>, IndexMap<ObjectFieldArgumentDefinitionPosition, Name>>,
+    override_condition_labels: IndexSet<Arc<str>>,
     /// To speed up the estimation of counting non-local selections, we precompute specific metadata
     /// about the query graph and store that here.
     non_local_selection_metadata: non_local_selections_estimation::QueryGraphMetadata,
@@ -475,6 +511,10 @@ impl QueryGraph {
 
     pub(crate) fn graph(&self) -> &DiGraph<QueryGraphNode, QueryGraphEdge> {
         &self.graph
+    }
+
+    pub(crate) fn override_condition_labels(&self) -> &IndexSet<Arc<str>> {
+        &self.override_condition_labels
     }
 
     pub(crate) fn supergraph_schema(&self) -> Result<ValidFederationSchema, FederationError> {
@@ -524,7 +564,7 @@ impl QueryGraph {
             .ok_or_else(|| internal_error!("Edge unexpectedly missing"))
     }
 
-    fn schema(&self) -> Result<&ValidFederationSchema, FederationError> {
+    pub(crate) fn schema(&self) -> Result<&ValidFederationSchema, FederationError> {
         self.schema_by_source(&self.current_source)
     }
 
@@ -655,13 +695,13 @@ impl QueryGraph {
     pub(crate) fn out_edges_with_federation_self_edges(
         &self,
         node: NodeIndex,
-    ) -> Vec<EdgeReference<QueryGraphEdge>> {
+    ) -> Vec<EdgeReference<'_, QueryGraphEdge>> {
         Self::sorted_edges(self.graph.edges_directed(node, Direction::Outgoing))
     }
 
     /// The outward edges from the given node, minus self-key and self-root-type-resolution edges,
     /// as they're rarely useful (currently only used by `@defer`).
-    pub(crate) fn out_edges(&self, node: NodeIndex) -> Vec<EdgeReference<QueryGraphEdge>> {
+    pub(crate) fn out_edges(&self, node: NodeIndex) -> Vec<EdgeReference<'_, QueryGraphEdge>> {
         Self::sorted_edges(self.graph.edges_directed(node, Direction::Outgoing).filter(
             |edge_ref| {
                 !(edge_ref.source() == edge_ref.target()
@@ -691,6 +731,10 @@ impl QueryGraph {
         let mut edges: Vec<_> = edges.collect();
         edges.sort_by_key(|e| -> EdgeIndex { e.id() });
         edges
+    }
+
+    pub(crate) fn is_terminal(&self, node: NodeIndex) -> bool {
+        self.graph.edges_directed(node, Direction::Outgoing).count() == 0
     }
 
     pub(crate) fn is_self_key_or_root_edge(
@@ -803,7 +847,7 @@ impl QueryGraph {
         &self,
         node: NodeIndex,
         field: &Field,
-        override_conditions: &EnabledOverrideConditions,
+        override_conditions: &OverrideConditions,
     ) -> Option<EdgeIndex> {
         let mut candidates = self.out_edges(node).into_iter().filter_map(|edge_ref| {
             let edge_weight = edge_ref.weight();
@@ -885,7 +929,7 @@ impl QueryGraph {
         &self,
         node: NodeIndex,
         op_graph_path_trigger: &OpGraphPathTrigger,
-        override_conditions: &EnabledOverrideConditions,
+        override_conditions: &OverrideConditions,
     ) -> Option<Option<EdgeIndex>> {
         let OpGraphPathTrigger::OpPathElement(op_path_element) = op_graph_path_trigger else {
             return None;
@@ -903,6 +947,25 @@ impl QueryGraph {
                 }
             }
         }
+    }
+
+    pub(crate) fn edge_for_transition_graph_path_trigger(
+        &self,
+        node: NodeIndex,
+        transition_graph_path_trigger: &QueryGraphEdgeTransition,
+        override_conditions: &OverrideConditions,
+    ) -> Result<Option<EdgeIndex>, FederationError> {
+        for edge_ref in self.out_edges(node) {
+            let edge_weight = edge_ref.weight();
+            if edge_weight
+                .transition
+                .matches_supergraph_transition(transition_graph_path_trigger)?
+                && edge_weight.satisfies_override_conditions(override_conditions)
+            {
+                return Ok(Some(edge_ref.id()));
+            }
+        }
+        Ok(None)
     }
 
     /// Given the possible runtime types at the head of the given edge, returns the possible runtime
@@ -931,11 +994,9 @@ impl QueryGraph {
                 field_definition_position,
                 ..
             } => {
-                let Ok(_): Result<CompositeTypeDefinitionPosition, _> =
-                    tail_type_pos.clone().try_into()
-                else {
+                if CompositeTypeDefinitionPosition::try_from(tail_type_pos.clone()).is_err() {
                     return Ok(IndexSet::default());
-                };
+                }
                 let schema = self.schema_by_source(source)?;
                 let mut new_possible_runtime_types = IndexSet::default();
                 for possible_runtime_type in possible_runtime_types {
@@ -1066,8 +1127,7 @@ impl QueryGraph {
         let schema = self.schema_by_source(source)?;
         let Some(metadata) = schema.subgraph_metadata() else {
             return Err(FederationError::internal(format!(
-                "Interface should have come from a federation subgraph {}",
-                source
+                "Interface should have come from a federation subgraph {source}"
             )));
         };
 

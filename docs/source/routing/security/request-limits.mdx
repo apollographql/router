@@ -22,7 +22,7 @@ limits:
   parser_max_tokens: 15000 # Default value
   parser_max_recursion: 500 # Default value
 
-  # Operation-based limits (Enterprise only)
+  # Operation-based limits (License only)
   max_depth: 100
   max_height: 200
   max_aliases: 30
@@ -31,7 +31,12 @@ limits:
 
 ## Operation-based limits
 
-<EnterpriseFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
+<PlanRequired plans={["Free", "Developer", "Standard", "Enterprise"]}>
+
+Rate limits apply on the Free plan.
+Developer and Standard plans require Router v2.6.0 or later.
+
+</PlanRequired>
 
 You can define **operation limits** in your router's configuration to reject potentially malicious requests. An operation that exceeds _any_ specified limit is rejected (unless you run your router in [`warn_only` mode](#warn_only-mode)).
 

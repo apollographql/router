@@ -31,7 +31,7 @@ snapshot_kind: text
               "errors_count": 0,
               "requests_with_errors_count": 0
             },
-            "has_errors": true,
+            "has_errors": false,
             "public_cache_ttl_latency": null,
             "private_cache_ttl_latency": null,
             "registered_operation": false,

@@ -1,50 +1,30 @@
 //! Validation of the `@source` and `@connect` directives.
 
-// No panics allowed in this module
-#![cfg_attr(
-    not(test),
-    deny(
-        clippy::exit,
-        clippy::panic,
-        clippy::unwrap_used,
-        clippy::expect_used,
-        clippy::indexing_slicing,
-        clippy::unimplemented,
-        clippy::todo
-    )
-)]
-
 mod connect;
 mod coordinates;
 mod errors;
 mod expression;
 mod graphql;
 mod http;
-mod link;
 mod schema;
 mod source;
 
-use std::fmt::Display;
 use std::ops::Range;
-use std::str::FromStr;
 
-use ::http::Uri;
 use apollo_compiler::Name;
-use apollo_compiler::Node;
 use apollo_compiler::Schema;
-use apollo_compiler::ast::Value;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::SchemaBuilder;
 use itertools::Itertools;
+pub(crate) use schema::field_set_is_subset;
 use strum_macros::Display;
 use strum_macros::IntoStaticStr;
 
 use crate::connectors::ConnectSpec;
-use crate::connectors::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
+use crate::connectors::spec::ConnectLink;
+use crate::connectors::spec::source::SOURCE_DIRECTIVE_NAME_IN_SPEC;
 use crate::connectors::validation::connect::fields_seen_by_all_connects;
-use crate::connectors::validation::graphql::GraphQLString;
 use crate::connectors::validation::graphql::SchemaInfo;
-use crate::connectors::validation::link::ConnectLink;
 use crate::connectors::validation::source::SourceDirective;
 
 /// The result of a validation pass on a subgraph
@@ -68,8 +48,6 @@ pub struct ValidationResult {
 /// This function attempts to collect as many validation errors as possible, so it does not bail
 /// out as soon as it encounters one.
 pub fn validate(mut source_text: String, file_name: &str) -> ValidationResult {
-    // TODO: Use parse_and_validate (adding in directives as needed)
-    // TODO: Handle schema errors rather than relying on JavaScript to catch it later
     let schema = SchemaBuilder::new()
         .adopt_orphan_extensions()
         .parse(&source_text, file_name)
@@ -98,9 +76,13 @@ pub fn validate(mut source_text: String, file_name: &str) -> ValidationResult {
 
     let (source_directives, mut messages) = SourceDirective::find(&schema_info);
     let all_source_names = source_directives
-        .into_iter()
-        .map(|directive| directive.name)
+        .iter()
+        .map(|directive| directive.name.clone())
         .collect_vec();
+
+    for source in source_directives {
+        messages.extend(source.type_check());
+    }
 
     match fields_seen_by_all_connects(&schema_info, &all_source_names) {
         Ok(fields_seen_by_connectors) => {
@@ -116,7 +98,7 @@ pub fn validate(mut source_text: String, file_name: &str) -> ValidationResult {
         }
     }
 
-    if schema_info.connect_link.source_directive_name() == DEFAULT_SOURCE_DIRECTIVE_NAME
+    if schema_info.source_directive_name() == DEFAULT_SOURCE_DIRECTIVE_NAME
         && messages
             .iter()
             .any(|error| error.code == Code::NoSourcesDefined)
@@ -124,7 +106,7 @@ pub fn validate(mut source_text: String, file_name: &str) -> ValidationResult {
         messages.push(Message {
             code: Code::NoSourceImport,
             message: format!("The `@{SOURCE_DIRECTIVE_NAME_IN_SPEC}` directive is not imported. Try adding `@{SOURCE_DIRECTIVE_NAME_IN_SPEC}` to `import` for `{link}`", link=schema_info.connect_link),
-            locations: schema_info.connect_link.directive().line_column_range(&schema.sources)
+            locations: schema_info.connect_link.directive.line_column_range(&schema.sources)
                 .into_iter()
                 .collect(),
         });
@@ -132,11 +114,11 @@ pub fn validate(mut source_text: String, file_name: &str) -> ValidationResult {
 
     // Auto-upgrade the schema as the _last_ step, so that error messages from earlier don't have
     // incorrect line/col info if we mess this up
-    if schema_info.connect_link.spec() == ConnectSpec::V0_1 {
+    if schema_info.connect_link.spec == ConnectSpec::V0_1 {
         if let Some(version_range) =
             schema_info
                 .connect_link
-                .directive()
+                .directive
                 .location()
                 .and_then(|link_range| {
                     let version_offset = source_text
@@ -152,7 +134,7 @@ pub fn validate(mut source_text: String, file_name: &str) -> ValidationResult {
             messages.push(Message {
                 code: Code::UnknownConnectorsVersion,
                 message: "Failed to auto-upgrade 0.1 to 0.2, you must manually update the version in `@link`".to_string(),
-                locations: schema_info.connect_link.directive().line_column_range(&schema.sources)
+                locations: schema_info.connect_link.directive.line_column_range(&schema.sources)
                     .into_iter()
                     .collect(),
             });
@@ -174,30 +156,6 @@ pub fn validate(mut source_text: String, file_name: &str) -> ValidationResult {
 }
 
 const DEFAULT_SOURCE_DIRECTIVE_NAME: &str = "connect__source";
-
-fn parse_url<Coordinate: Display + Copy>(
-    value: &Node<Value>,
-    coordinate: Coordinate,
-    schema: &SchemaInfo,
-) -> Result<(), Message> {
-    let str_value = GraphQLString::new(value, &schema.sources).map_err(|_| Message {
-        code: Code::GraphQLError,
-        message: format!("The value for {coordinate} must be a string."),
-        locations: value
-            .line_column_range(&schema.sources)
-            .into_iter()
-            .collect(),
-    })?;
-    let url = Uri::from_str(str_value.as_str()).map_err(|inner| Message {
-        code: Code::InvalidUrl,
-        message: format!("The value {value} for {coordinate} is not a valid URL: {inner}."),
-        locations: value
-            .line_column_range(&schema.sources)
-            .into_iter()
-            .collect(),
-    })?;
-    http::url::validate_url_scheme(&url, coordinate, value, str_value, schema)
-}
 
 type DirectiveName = Name;
 
@@ -233,10 +191,14 @@ pub enum Code {
     GraphQLError,
     /// Indicates two connector sources with the same name were created.
     DuplicateSourceName,
+    /// Indicates two connector IDs with the same name were created.
+    DuplicateIdName,
     /// The `name` provided for a `@source` was invalid.
     InvalidSourceName,
     /// No `name` was provided when creating a connector source with `@source`.
     EmptySourceName,
+    /// Connector ID name must be `alphanumeric_`.
+    InvalidConnectorIdName,
     /// A URL provided to `@source` or `@connect` was not valid.
     InvalidUrl,
     /// A URL scheme provided to `@source` or `@connect` was not `http` or `https`.
@@ -276,6 +238,8 @@ pub enum Code {
     InvalidBody,
     /// The `errors.message` provided in `@connect` or `@source` was not valid.
     InvalidErrorsMessage,
+    /// The `isSuccess` mapping provided in `@connect` or `@source` was not valid.
+    InvalidIsSuccess,
     /// A circular reference was detected in a `@connect` directive's `selection` argument.
     CircularReference,
     /// A field included in a `@connect` directive's `selection` argument is not defined on the corresponding type.
