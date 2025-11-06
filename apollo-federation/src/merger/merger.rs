@@ -1478,52 +1478,10 @@ impl Merger {
         from_idx: usize,
         field: &ObjectOrInterfaceFieldDefinitionPosition,
     ) -> Result<Option<(String, String)>, FederationError> {
-        // Check the overriding field for @external, @requires or @provides
-        let overriding_subgraph = &self.subgraphs[overriding_idx];
-        let overriding_subgraph_name = &self.names[overriding_idx];
-        let field_pos: FieldDefinitionPosition = field.clone().into();
-
-        // Check if the overriding field itself is marked @external
-        if overriding_subgraph.metadata().is_field_external(&field_pos)
-            && let Ok(Some(external_name)) = overriding_subgraph.external_directive_name()
-        {
-            return Ok(Some((
-                external_name.to_string(),
-                overriding_subgraph_name.clone(),
-            )));
-        }
-
-        if let Ok(Some(requires_name)) = overriding_subgraph.requires_directive_name()
-            && field.has_applied_directive(overriding_subgraph.schema(), &requires_name)
-        {
-            return Ok(Some((
-                requires_name.to_string(),
-                overriding_subgraph_name.clone(),
-            )));
-        }
-
-        if let Ok(Some(provides_name)) = overriding_subgraph.provides_directive_name()
-            && field.has_applied_directive(overriding_subgraph.schema(), &provides_name)
-        {
-            return Ok(Some((
-                provides_name.to_string(),
-                overriding_subgraph_name.clone(),
-            )));
-        }
-
-        // Check the from field for @external, @requires, or @provides
         let from_subgraph = &self.subgraphs[from_idx];
         let from_subgraph_name = &self.names[from_idx];
 
-        if from_subgraph.metadata().is_field_external(&field_pos)
-            && let Ok(Some(external_name)) = from_subgraph.external_directive_name()
-        {
-            return Ok(Some((
-                external_name.to_string(),
-                from_subgraph_name.clone(),
-            )));
-        }
-
+        // Check for conflict with @requires
         if let Ok(Some(requires_name)) = from_subgraph.requires_directive_name()
             && field.has_applied_directive(from_subgraph.schema(), &requires_name)
         {
@@ -1533,12 +1491,25 @@ impl Merger {
             )));
         }
 
+        // Check for conflict with @provides
         if let Ok(Some(provides_name)) = from_subgraph.provides_directive_name()
             && field.has_applied_directive(from_subgraph.schema(), &provides_name)
         {
             return Ok(Some((
                 provides_name.to_string(),
                 from_subgraph_name.clone(),
+            )));
+        }
+
+        // Check for conflict with @external
+        let overriding_subgraph_name = &self.names[overriding_idx];
+        let field_pos: FieldDefinitionPosition = field.clone().into();
+        if let Ok(Some(external_name)) = from_subgraph.external_directive_name()
+            && self.is_field_external(overriding_idx, &field_pos)
+        {
+            return Ok(Some((
+                external_name.to_string(),
+                overriding_subgraph_name.clone(),
             )));
         }
 
