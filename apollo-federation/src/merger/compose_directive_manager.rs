@@ -5,7 +5,6 @@ use std::sync::Arc;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::DirectiveDefinition;
-use multimap::MultiMap;
 
 use crate::error::CompositionError;
 use crate::error::FederationError;
@@ -30,6 +29,7 @@ use crate::merger::merge::Sources;
 use crate::subgraph::typestate::HasMetadata;
 use crate::subgraph::typestate::Subgraph;
 use crate::supergraph::CompositionHint;
+use crate::utils::MultiIndexMap as MultiMap;
 
 const DEFAULT_COMPOSED_DIRECTIVES: [Name; 6] = [
     FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC,
@@ -266,7 +266,7 @@ impl ComposeDirectiveManager {
                         // Ensure the directive does not conflict with a federation directive. For
                         // directives like `@tag` which are composed by default, we raise a hint
                         // to say that applying `@composeDirective(name: "@tag")` is redundant.
-                        // Note that check for conflicts across subgraphs to make sure that we
+                        // Note that we check for conflicts across subgraphs to make sure that we
                         // don't compose a custom `@tag` directive with the federation one, if it
                         // hasn't been properly renamed in another subgraph.
                         let original_directive_name = feature

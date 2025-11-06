@@ -584,6 +584,11 @@ mod inconsistent_imports {
 
         let result = compose(vec![subgraph_a, subgraph_b]).expect("Composition should succeed");
         assert_eq!(result.hints().len(), 0);
+
+        // We're primarily looking for the combined link for the custom spec to combine both
+        // directives with the latest version. It should look like:
+        // @link(url: "https://specs.custom.dev/foo/v1.1", import: ["@foo", "@bar"])
+        insta::assert_snapshot!(result.schema().schema());
     }
 
     #[test]

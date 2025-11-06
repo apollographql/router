@@ -1744,7 +1744,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
         // We should skip the supergraph specific directives, that is the @core and @join directives.
 
         // Collect all directive names from both the merged schema and the compose directive manager
-        let mut directive_names: HashSet<Name> = self
+        let mut directive_names: IndexSet<Name> = self
             .merged
             .schema()
             .directive_definitions
