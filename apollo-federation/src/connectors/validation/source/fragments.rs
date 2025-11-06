@@ -1,17 +1,26 @@
-use crate::connectors::{spec::source::FRAGMENTS_NAME_ARGUMENT, string_template::Expression, validation::{Code, coordinates::{FragmentsCoordinate, SourceDirectiveCoordinate}, errors::ErrorsCoordinate, expression::{self, Context, MappingArgument, parse_mapping_argument}, graphql::SchemaInfo}};
+use crate::connectors::{
+    spec::source::FRAGMENTS_NAME_ARGUMENT,
+    string_template::Expression,
+    validation::{
+        Code,
+        coordinates::{FragmentsCoordinate, SourceDirectiveCoordinate},
+        errors::ErrorsCoordinate,
+        expression::{self, Context, MappingArgument, parse_mapping_argument},
+        graphql::SchemaInfo,
+    },
+};
 
-use apollo_compiler::{Name, Node};
+use crate::connectors::validation::Message;
 use apollo_compiler::ast::Value;
+use apollo_compiler::{Name, Node};
 use indexmap::IndexMap;
 use shape::Shape;
-use crate::connectors::validation::Message;
-
 
 /// The`@source(fragments:)` argument
 pub(crate) struct FragmentsArgument<'schema> {
     coordinate: FragmentsCoordinate<'schema>,
     node: Node<Value>,
-    object: IndexMap<Name, (Expression, Node<Value>)>
+    object: IndexMap<Name, (Expression, Node<Value>)>,
 }
 
 impl<'schema> FragmentsArgument<'schema> {
@@ -39,30 +48,32 @@ impl<'schema> FragmentsArgument<'schema> {
         let Some(value) = directive.specified_argument_by_name(&FRAGMENTS_NAME_ARGUMENT) else {
             return Ok(None);
         };
-        
+
         let Some(obj) = value.as_object() else {
-            return Err(Message{
+            return Err(Message {
                 code: Code::InvalidFragments,
                 message: "fragments are required to be objects".to_string(),
                 locations: Vec::new(),
-            })
+            });
         };
 
         let object = obj
             .iter()
             .map(|(key, node)| {
-                let MappingArgument { expression, node } =
-                    parse_mapping_argument(node, coordinate.clone(), Code::InvalidFragments, schema)?;
-                Ok((
-                    key.clone(),
-                    (expression, node)
-            ))})
+                let MappingArgument { expression, node } = parse_mapping_argument(
+                    node,
+                    coordinate.clone(),
+                    Code::InvalidFragments,
+                    schema,
+                )?;
+                Ok((key.clone(), (expression, node)))
+            })
             .collect::<Result<IndexMap<_, _>, Message>>()?;
 
         Ok(Some(Self {
-            object,            
+            object,
             coordinate,
-            node: value.to_owned()
+            node: value.to_owned(),
         }))
     }
 

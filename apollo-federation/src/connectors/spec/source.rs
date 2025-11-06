@@ -66,7 +66,7 @@ pub(crate) struct SourceDirectiveArguments {
     pub(crate) is_success: Option<JSONSelection>,
 
     /// Possible json selections fragments
-    pub(crate) fragments: BTreeMap<Name, JSONSelection>
+    pub(crate) fragments: BTreeMap<Name, JSONSelection>,
 }
 
 impl SourceDirectiveArguments {
@@ -134,7 +134,7 @@ impl SourceDirectiveArguments {
                         ))
                     })?;
                     let value = JSONSelection::parse_with_spec(selection_value, spec)
-                            .map_err(|e| FederationError::internal(e.message))?;
+                        .map_err(|e| FederationError::internal(e.message))?;
                     fragments.insert(fragment.clone(), value);
                 }
             }
@@ -433,8 +433,7 @@ mod tests {
         assert_eq!(source.name, SourceName::cast("json"));
         assert_eq!(source.fragments.len(), 1);
         let expected =
-            JSONSelection::parse_with_spec("id name", spec_from_success_source_subgraph)
-                .unwrap();
+            JSONSelection::parse_with_spec("id name", spec_from_success_source_subgraph).unwrap();
         assert_eq!(source.fragments["hello"], expected);
     }
 

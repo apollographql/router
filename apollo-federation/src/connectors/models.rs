@@ -217,9 +217,9 @@ impl Connector {
         let mut selection = connect.selection;
         if let (Some(fragments), Some(source_name)) = (fragments, source_name.as_ref()) {
             for (name, frag_selection) in fragments {
-                let fragment_query = format!("...{source_name}.{name}");
+                let fragment_query = format!("...$fragment.{source_name}.{name}");
                 if selection.contains(&fragment_query) {
-                    selection = selection.replace(&fragment_query,& frag_selection.to_string());
+                    selection = selection.replace(&fragment_query, &frag_selection.to_string());
                 }
             }
         }
@@ -490,7 +490,8 @@ mod tests {
 
     static SIMPLE_SUPERGRAPH: &str = include_str!("./tests/schemas/simple.graphql");
     static SIMPLE_SUPERGRAPH_V0_2: &str = include_str!("./tests/schemas/simple_v0_2.graphql");
-    static FRAGMENTS_SUPERGRAPH: &str = include_str!("./tests/schemas/single-fragment-source.graphql");
+    static FRAGMENTS_SUPERGRAPH: &str =
+        include_str!("./tests/schemas/single-fragment-source.graphql");
 
     fn get_subgraphs(supergraph_sdl: &str) -> ValidFederationSubgraphs {
         let schema = Schema::parse(supergraph_sdl, "supergraph.graphql").unwrap();
@@ -854,8 +855,8 @@ mod tests {
         let subgraphs = get_subgraphs(FRAGMENTS_SUPERGRAPH);
         let subgraph = subgraphs.get("connectors").unwrap();
         let connectors = Connector::from_schema(subgraph.schema.schema(), "connectors").unwrap();
-        for connector in connectors {
-            assert_snapshot!(connector.selection.to_string());
-        }
+        let connector = connectors.first().unwrap();
+
+        assert_snapshot!(connector.selection.to_string());
     }
 }

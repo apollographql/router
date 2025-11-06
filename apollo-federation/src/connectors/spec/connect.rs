@@ -242,7 +242,7 @@ impl ConnectDirectiveArguments {
                     ))
                 })?;
                 JSONSelection::parse_with_spec(selection_value, connect_spec)
-                        .map_err(|e| FederationError::internal(e.message))?;
+                    .map_err(|e| FederationError::internal(e.message))?;
 
                 selection = Some(selection_value.to_string());
             } else if arg_name == CONNECT_ID_ARGUMENT_NAME.as_str() {

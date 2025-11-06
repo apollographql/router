@@ -208,7 +208,6 @@ impl Display for IsSuccessCoordinate<'_> {
     }
 }
 
-
 /// The `fragments` argument for the `@source` directive
 #[derive(Clone)]
 pub(crate) struct FragmentsCoordinate<'schema> {
