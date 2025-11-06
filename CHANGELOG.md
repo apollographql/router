@@ -11,25 +11,25 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ### Fix authorization plugin handling of polymorphic types
 
-Updates the authorization plugin to correctly handle authorization requirements when processing polymorphic types.
+Updates the auth plugin to correctly handle access control requirements when processing polymorphic types.
 
-When querying interface fields, the authorization plugin was verifying only whether all implementations shared the same authorization requirements. In cases where interface did not specify any authorization requirements, this could result in unauthorized access to protected data.
+When querying interface types/fields, the auth plugin was verifying only whether all implementations shared the same access control requirements. In cases where interface types/fields did not specify the same access control requirements as the implementations, this could result in unauthorized access to protected data.
 
-The authorization plugin was updated to correctly verify that all polymorphic authorization requirements are satisfied by the current context.
+The auth plugin was updated to correctly verify that all polymorphic access control requirements are satisfied by the current context.
 
 See [GHSA-x33c-7c2v-mrj9](https://github.com/apollographql/router/security/advisories/GHSA-x33c-7c2v-mrj9) for additional details and the associated CVE number.
 
-By [@dariuszkuc](https://github.com/dariuszkuc)
+By @dariuszkuc
 
 ### Fixed authorization plugin handling of directive renames
 
-The router authorization plugin did not properly handle authorization requirements when subgraphs renamed their authentication directives through imports. When such renames occurred, the plugin’s `@link`-processing code ignored the imported directives entirely, causing authentication constraints defined by the renamed directives to be ignored.
+The router auth plugin did not properly handle access control requirements when subgraphs renamed their access control directives through imports. When such renames occurred, the plugin’s `@link`-processing code ignored the imported directives entirely, causing access control constraints defined by the renamed directives to be ignored.
 
 The plugin code was updated to call the appropriate functionality in the `apollo-federation` crate, which correctly handles both because spec and imports directive renames.
 
-See [GHSA-g8jh-vg5j-4h3f](https://github.com/apollographql/router/security/advisories/GHSA-g8jh-vg5j-4h3f) for additional details.  A CVE number assignment is still pending at the time of this writing.
+See [GHSA-g8jh-vg5j-4h3f](https://github.com/apollographql/router/security/advisories/GHSA-g8jh-vg5j-4h3f) for additional details and the associated CVE number.
 
-By [@sachindshinde](https://github.com/sachindshinde)
+By @sachindshinde
 
 # [2.8.0] - 2025-10-27
 
