@@ -69,7 +69,7 @@ async-compression = { version = "0.4.6", features = [
 ] }
 async-trait.workspace = true
 axum = { version = "0.8.1", features = ["http2"] }
-axum-extra = { version = "0.10.0", features = ["typed-header"] }
+axum-extra = { version = "0.12.0", features = ["typed-header"] }
 axum-server = { version = "0.7.1", optional = true }
 base64 = "0.22.0"
 bloomfilter = "3.0.0"
