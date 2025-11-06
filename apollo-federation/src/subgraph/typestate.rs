@@ -275,7 +275,7 @@ impl Subgraph<Initial> {
         })?;
 
         let schema = if validate {
-            validate_subgraph_schema(schema, &metadata)?
+            validate_subgraph_schema(schema, &metadata, &self.name)?
         } else {
             schema.assume_valid()?
         };
@@ -405,6 +405,7 @@ impl Subgraph<Expanded> {
 fn validate_subgraph_schema(
     schema: FederationSchema,
     metadata: &SubgraphMetadata,
+    subgraph_name: &str,
 ) -> Result<ValidFederationSchema, FederationError> {
     let schema = schema.validate_or_return_self().map_err(|(schema, err)| {
         // Specialize GraphQL validation errors.
@@ -417,7 +418,7 @@ fn validate_subgraph_schema(
         MultipleFederationErrors::from_iter(iter)
     })?;
 
-    FederationBlueprint::on_validation(&schema, metadata)?;
+    FederationBlueprint::on_validation(&schema, metadata, subgraph_name)?;
 
     Ok(schema)
 }
@@ -454,7 +455,7 @@ impl Subgraph<Upgraded> {
             "Subgraph<Upgraded>: validate_subgraph_schema for `{}`",
             self.name
         );
-        let schema = validate_subgraph_schema(self.state.schema, &self.state.metadata)
+        let schema = validate_subgraph_schema(self.state.schema, &self.state.metadata, &self.name)
             .map_err(|err| SubgraphError::new_without_locations(self.name.clone(), err))?;
 
         Ok(Subgraph {

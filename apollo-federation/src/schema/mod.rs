@@ -498,6 +498,17 @@ impl FederationSchema {
             .get_directive(&from_context_directive_definition.name)?;
 
         let mut applications = Vec::new();
+
+        // Check for @fromContext on directive definition arguments (not allowed)
+        for directive_argument_position in &from_context_directive_referencers.directive_arguments {
+            applications.push(Err(SingleFederationError::ContextNotSet {
+                message: format!(
+                    "@fromContext argument cannot be used on a directive definition argument \"{}\".",
+                    directive_argument_position
+                ),
+            }
+            .into()));
+        }
         for interface_field_argument_position in
             &from_context_directive_referencers.interface_field_arguments
         {

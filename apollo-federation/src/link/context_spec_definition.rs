@@ -64,7 +64,7 @@ impl ContextSpecDefinition {
         let subgraph_name = &subgraph.name;
         args.into_iter()
             .map(|(key, value)| {
-                if key.as_str() == "name" {
+                if *key.as_str() == *FEDERATION_NAME_ARGUMENT_NAME.as_str() {
                     (
                         key,
                         Value::String(format!("{}__{}", subgraph_name, value.as_str().unwrap())),

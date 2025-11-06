@@ -118,6 +118,7 @@ impl FederationBlueprint {
     pub(crate) fn on_validation(
         schema: &ValidFederationSchema,
         meta: &SubgraphMetadata,
+        subgraph_name: &str,
     ) -> Result<(), FederationError> {
         let mut error_collector = MultipleFederationErrors { errors: Vec::new() };
 
@@ -129,7 +130,13 @@ impl FederationBlueprint {
         }
 
         let context_map = validate_context_directives(schema, &mut error_collector)?;
-        validate_from_context_directives(schema, meta, &context_map, &mut error_collector)?;
+        validate_from_context_directives(
+            schema,
+            meta,
+            &context_map,
+            &mut error_collector,
+            subgraph_name,
+        )?;
         validate_key_directives(schema, meta, &mut error_collector)?;
         validate_provides_directives(schema, meta, &mut error_collector)?;
         validate_requires_directives(schema, meta, &mut error_collector)?;

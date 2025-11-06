@@ -38,6 +38,7 @@ pub(crate) fn validate_from_context_directives(
     meta: &SubgraphMetadata,
     context_map: &HashMap<String, Vec<Name>>,
     errors: &mut MultipleFederationErrors,
+    subgraph_name: &str,
 ) -> Result<(), FederationError> {
     let from_context_rules: Vec<Box<dyn FromContextValidator>> = vec![
         Box::new(DenyOnAbstractType::new()),
@@ -73,7 +74,11 @@ pub(crate) fn validate_from_context_directives(
 
                 // after RequireContextExists, we will have errored if either the context or selection is not present
                 let (Some(context), Some(selection)) = (&context, &selection) else {
-                    bail!("Context and selection must be present");
+                    bail!(
+                        "[{}] @fromContext argument does not reference a context \"{}\"",
+                        subgraph_name,
+                        field
+                    );
                 };
 
                 // We need the context locations from the context map for this target
@@ -435,7 +440,7 @@ fn validate_field_value(
                                 errors.push(
                                     SingleFederationError::ContextSelectionInvalid {
                                         message: format!(
-                                            "Context \"{context}\" is used in \"{target}\" but the selection is invalid: the type of the selection \"{resolved_type}\" does not match the expected type \"{expected_type}\""
+                                            "Context \"{context}\" is used in \"{target}\" but the selection is invalid: thxe type of the selection \"{resolved_type}\" does not match the expected type \"{expected_type}\""
                                         ),
                                     }
                                     .into(),
@@ -652,7 +657,9 @@ impl FromContextValidator for DenyOnInterfaceImplementation {
                     errors.push(
                         SingleFederationError::ContextNotSet {
                             message: format!(
-                                "@fromContext argument cannot be used on a field implementing an interface field \"{target}\"."
+                                "@fromContext argument cannot be used on a field implementing an interface field \"{}.{}\".",
+                                itf.type_name,
+                                field.unwrap().field_name,
                             ),
                         }
                         .into(),
@@ -970,6 +977,7 @@ mod tests {
             subgraph.metadata(),
             &context_map,
             &mut errors,
+            &subgraph.name,
         )
         .expect("validates fromContext directives");
 
@@ -1025,6 +1033,7 @@ mod tests {
             subgraph.metadata(),
             &context_map,
             &mut errors,
+            &subgraph.name,
         )
         .expect("validates fromContext directives");
 
@@ -1074,6 +1083,7 @@ mod tests {
             subgraph.metadata(),
             &context_map,
             &mut errors,
+            &subgraph.name,
         )
         .expect_err("validates fromContext directives");
     }
@@ -1112,6 +1122,7 @@ mod tests {
             subgraph.metadata(),
             &context_map,
             &mut errors,
+            &subgraph.name,
         )
         .expect("validates fromContext directives");
 
@@ -2167,6 +2178,7 @@ mod tests {
             subgraph.metadata(),
             &context_map,
             &mut errors,
+            &subgraph.name,
         )
         .expect_err("unparseable fromContext directive");
     }
@@ -2464,6 +2476,7 @@ mod tests {
             subgraph.metadata(),
             &context_map,
             &mut errors,
+            &subgraph.name,
         )
         .expect("validates fromContext directives");
 
@@ -2616,6 +2629,7 @@ mod tests {
             subgraph.metadata(),
             &context_map,
             &mut errors,
+            &subgraph.name,
         )
         .expect("validates fromContext directives");
 
@@ -2665,6 +2679,7 @@ mod tests {
             subgraph.metadata(),
             &context_map,
             &mut errors,
+            &subgraph.name,
         )
         .expect("validates fromContext directives");
 
@@ -2715,6 +2730,7 @@ mod tests {
             subgraph.metadata(),
             &context_map,
             &mut errors,
+            &subgraph.name,
         )
         .expect("validates fromContext directives");
 
@@ -2764,6 +2780,7 @@ mod tests {
             subgraph.metadata(),
             &context_map,
             &mut errors,
+            &subgraph.name,
         )
         .expect("validates fromContext directives");
 
@@ -2820,6 +2837,7 @@ mod tests {
             subgraph.metadata(),
             &context_map,
             &mut errors,
+            &subgraph.name,
         )
         .expect("validates fromContext directives");
 
@@ -2876,6 +2894,7 @@ mod tests {
             subgraph.metadata(),
             &context_map,
             &mut errors,
+            &subgraph.name,
         )
         .expect("validates fromContext directives");
 
@@ -2928,6 +2947,7 @@ mod tests {
             subgraph.metadata(),
             &context_map,
             &mut errors,
+            &subgraph.name,
         )
         .expect("validates fromContext directives");
 
@@ -2981,6 +3001,7 @@ mod tests {
             subgraph.metadata(),
             &context_map,
             &mut errors,
+            &subgraph.name,
         )
         .expect("validates fromContext directives");
         assert!(
@@ -3028,6 +3049,7 @@ mod tests {
             subgraph.metadata(),
             &context_map,
             &mut errors,
+            &subgraph.name,
         )
         .expect("validates fromContext directives");
         // This should succeed - nullability mismatch is ok if contextual value is non-nullable
@@ -3080,6 +3102,7 @@ mod tests {
             subgraph.metadata(),
             &context_map,
             &mut errors,
+            &subgraph.name,
         )
         .expect("validates fromContext directives");
 
