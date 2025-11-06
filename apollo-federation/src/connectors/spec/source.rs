@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
@@ -30,6 +32,7 @@ use crate::error::FederationError;
 pub(crate) const SOURCE_DIRECTIVE_NAME_IN_SPEC: Name = name!("source");
 pub(crate) const SOURCE_NAME_ARGUMENT_NAME: Name = name!("name");
 pub(crate) const SOURCE_HTTP_NAME_IN_SPEC: Name = name!("SourceHTTP");
+pub(crate) const FRAGMENTS_NAME_ARGUMENT: Name = name!("fragments");
 
 pub(crate) fn extract_source_directive_arguments(
     schema: &Schema,
@@ -61,6 +64,9 @@ pub(crate) struct SourceDirectiveArguments {
 
     /// Conditional statement to override the default success criteria for responses
     pub(crate) is_success: Option<JSONSelection>,
+
+    /// Possible json selections fragments
+    pub(crate) fragments: BTreeMap<Name, JSONSelection>
 }
 
 impl SourceDirectiveArguments {
@@ -81,6 +87,7 @@ impl SourceDirectiveArguments {
         let mut http = None;
         let mut errors = None;
         let mut is_success = None;
+        let mut fragments = BTreeMap::new();
         for arg in args {
             let arg_name = arg.name.as_str();
 
@@ -113,11 +120,29 @@ impl SourceDirectiveArguments {
                     JSONSelection::parse_with_spec(selection_value, spec)
                         .map_err(|e| FederationError::internal(e.message))?,
                 );
+            } else if arg_name == FRAGMENTS_NAME_ARGUMENT.as_str() {
+                let frag = arg.value.as_object().ok_or_else(|| {
+                    FederationError::internal(format!(
+                        "`fragments` field in `@{directive_name}` directive is not an object"
+                    ))
+                })?;
+
+                for (fragment, node) in frag {
+                    let selection_value = node.as_str().ok_or_else(|| {
+                        FederationError::internal(format!(
+                            "`fragment` subfield in `@{directive_name}` directive is not a string"
+                        ))
+                    })?;
+                    let value = JSONSelection::parse_with_spec(selection_value, spec)
+                            .map_err(|e| FederationError::internal(e.message))?;
+                    fragments.insert(fragment.clone(), value);
+                }
             }
         }
 
         Ok(Self {
             name,
+            fragments,
             http: http.ok_or_else(|| {
                 FederationError::internal(format!(
                     "missing `http` field in `@{directive_name}` directive"
@@ -261,6 +286,8 @@ mod tests {
         include_str!("../tests/schemas/source-template.graphql");
     static IS_SUCCESS_SOURCE_SUPERGRAPH: &str =
         include_str!("../tests/schemas/is-success-source.graphql");
+    static SINGLE_FRAGMENT_SOURCE_SUPERGRAPH: &str =
+        include_str!("../tests/schemas/single-fragment-source.graphql");
 
     fn get_subgraphs(supergraph_sdl: &str) -> ValidFederationSubgraphs {
         let schema = Schema::parse(supergraph_sdl, "supergraph.graphql").unwrap();
@@ -396,6 +423,19 @@ mod tests {
             JSONSelection::parse_with_spec("$status->eq(202)", spec_from_success_source_subgraph)
                 .unwrap();
         assert_eq!(source.is_success.as_ref().unwrap(), &expected);
+    }
+
+    #[test]
+    fn it_supports_single_fragment_in_source() {
+        let spec_from_success_source_subgraph = ConnectSpec::V0_4;
+        let sources = extract_source_directive_args(SINGLE_FRAGMENT_SOURCE_SUPERGRAPH);
+        let source = sources.first().unwrap();
+        assert_eq!(source.name, SourceName::cast("json"));
+        assert_eq!(source.fragments.len(), 1);
+        let expected =
+            JSONSelection::parse_with_spec("id name", spec_from_success_source_subgraph)
+                .unwrap();
+        assert_eq!(source.fragments["hello"], expected);
     }
 
     fn extract_source_directive_args(graph: &str) -> Vec<SourceDirectiveArguments> {

@@ -207,3 +207,33 @@ impl Display for IsSuccessCoordinate<'_> {
         }
     }
 }
+
+
+/// The `fragments` argument for the `@source` directive
+#[derive(Clone)]
+pub(crate) struct FragmentsCoordinate<'schema> {
+    pub(crate) coordinate: ErrorsCoordinate<'schema>,
+}
+
+impl Display for FragmentsCoordinate<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match &self.coordinate {
+            ErrorsCoordinate::Source { source } => {
+                write!(
+                    f,
+                    "`@{directive_name}(name: \"{source_name}\" {IS_SUCCESS_ARGUMENT_NAME}:)`",
+                    directive_name = source.directive.name,
+                    source_name = source.name
+                )
+            }
+            ErrorsCoordinate::Connect { connect } => {
+                write!(
+                    f,
+                    "`@{directive_name}({IS_SUCCESS_ARGUMENT_NAME}:)` on `{element}`",
+                    directive_name = connect.directive.name,
+                    element = connect.element
+                )
+            }
+        }
+    }
+}

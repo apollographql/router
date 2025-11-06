@@ -36,6 +36,7 @@ use super::source::SOURCE_DIRECTIVE_NAME_IN_SPEC;
 use super::source::SOURCE_HTTP_NAME_IN_SPEC;
 use super::source::SOURCE_NAME_ARGUMENT_NAME;
 use crate::connectors::spec::ConnectSpec;
+use crate::connectors::spec::source::FRAGMENTS_NAME_ARGUMENT;
 use crate::error::SingleFederationError;
 use crate::link::Link;
 use crate::schema::FederationSchema;
@@ -418,6 +419,7 @@ fn connect_directive_spec() -> DirectiveSpecification {
 //   name: String!
 //   http: SourceHTTP
 //   errors: ConnectorErrors
+//   fragments: BTreeMap<Name, JsonSelection>
 // ) repeatable on SCHEMA
 fn source_directive_spec() -> DirectiveSpecification {
     DirectiveSpecification::new(
@@ -447,6 +449,17 @@ fn source_directive_spec() -> DirectiveSpecification {
                     name: ERRORS_ARGUMENT_NAME,
                     get_type: |s, _| {
                         let name = link(s)?.type_name_in_schema(&ERRORS_NAME_IN_SPEC);
+                        Ok(Type::Named(name))
+                    },
+                    default_value: None,
+                },
+                composition_strategy: None,
+            },
+            DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: FRAGMENTS_NAME_ARGUMENT,
+                    get_type: |s, _| {
+                        let name = link(s)?.type_name_in_schema(&JSON_SELECTION_SCALAR_NAME);
                         Ok(Type::Named(name))
                     },
                     default_value: None,

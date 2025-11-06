@@ -282,6 +282,8 @@ pub enum Code {
     ConnectBatchAndThis,
     /// Invalid URL property
     InvalidUrlProperty,
+    /// The `fragments` mapping provided in `@source` was not valid.
+    InvalidFragments,
 }
 
 impl Code {

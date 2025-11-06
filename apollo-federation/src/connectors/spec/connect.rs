@@ -152,7 +152,10 @@ pub(crate) struct ConnectDirectiveArguments {
     ///
     /// Uses the JSONSelection syntax to define a mapping of connector response to
     /// GraphQL schema.
-    pub(crate) selection: JSONSelection,
+    pub(crate) selection: String,
+
+    /// The connector spec used to create this connectors
+    pub(crate) connect_spec: ConnectSpec,
 
     /// Custom connector ID name
     pub(crate) connector_id: Option<Name>,
@@ -238,10 +241,10 @@ impl ConnectDirectiveArguments {
                         "`selection` field in `@{directive_name}` directive is not a string"
                     ))
                 })?;
-                selection = Some(
-                    JSONSelection::parse_with_spec(selection_value, connect_spec)
-                        .map_err(|e| FederationError::internal(e.message))?,
-                );
+                JSONSelection::parse_with_spec(selection_value, connect_spec)
+                        .map_err(|e| FederationError::internal(e.message))?;
+
+                selection = Some(selection_value.to_string());
             } else if arg_name == CONNECT_ID_ARGUMENT_NAME.as_str() {
                 let id = arg.value.as_str().ok_or_else(|| {
                     FederationError::internal(format!(
@@ -276,6 +279,7 @@ impl ConnectDirectiveArguments {
             source,
             http,
             connector_id,
+            connect_spec,
             selection: selection.ok_or_else(|| {
                 FederationError::internal(format!(
                     "`@{directive_name}` directive is missing a selection"

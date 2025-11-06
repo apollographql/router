@@ -210,6 +210,22 @@ impl Connector {
             .is_success
             .as_ref()
             .or_else(|| source.and_then(|s| s.is_success.as_ref()));
+        let fragments = source.map(|s| s.fragments.clone());
+
+        // I know this is pretty dumb and incorrect
+        // Just needed to get something quickly to test the general idea
+        let mut selection = connect.selection;
+        if let (Some(fragments), Some(source_name)) = (fragments, source_name.as_ref()) {
+            for (name, frag_selection) in fragments {
+                let fragment_query = format!("...{source_name}.{name}");
+                if selection.contains(&fragment_query) {
+                    selection = selection.replace(&fragment_query,& frag_selection.to_string());
+                }
+            }
+        }
+
+        let connect_selection = JSONSelection::parse_with_spec(&selection, connect.connect_spec)
+            .map_err(|e| FederationError::internal(e.message))?;
 
         let error_settings =
             ConnectorErrorsSettings::from_directive(connect_errors, source_errors, is_success);
@@ -219,8 +235,7 @@ impl Connector {
             transport.variable_references().collect();
 
         // Collect all variables and subselections used in response mappings (including errors.message and errors.extensions)
-        let response_references: IndexSet<VariableReference<Namespace>> = connect
-            .selection
+        let response_references: IndexSet<VariableReference<Namespace>> = connect_selection
             .variable_references()
             .chain(error_settings.variable_references())
             .collect();
@@ -257,7 +272,7 @@ impl Connector {
         Ok(Connector {
             id,
             transport,
-            selection: connect.selection,
+            selection: connect_selection,
             entity_resolver,
             config: None,
             max_requests: None,
@@ -466,7 +481,7 @@ fn extract_variable_key_references<'a>(
 #[cfg(test)]
 mod tests {
     use apollo_compiler::Schema;
-    use insta::assert_debug_snapshot;
+    use insta::{assert_debug_snapshot, assert_snapshot};
 
     use super::*;
     use crate::ValidFederationSubgraphs;
@@ -475,6 +490,7 @@ mod tests {
 
     static SIMPLE_SUPERGRAPH: &str = include_str!("./tests/schemas/simple.graphql");
     static SIMPLE_SUPERGRAPH_V0_2: &str = include_str!("./tests/schemas/simple_v0_2.graphql");
+    static FRAGMENTS_SUPERGRAPH: &str = include_str!("./tests/schemas/single-fragment-source.graphql");
 
     fn get_subgraphs(supergraph_sdl: &str) -> ValidFederationSubgraphs {
         let schema = Schema::parse(supergraph_sdl, "supergraph.graphql").unwrap();
@@ -831,5 +847,15 @@ mod tests {
         let subgraph = subgraphs.get("connectors").unwrap();
         let connectors = Connector::from_schema(subgraph.schema.schema(), "connectors").unwrap();
         assert_debug_snapshot!(&connectors);
+    }
+
+    #[test]
+    fn test_from_schema_fragments() {
+        let subgraphs = get_subgraphs(FRAGMENTS_SUPERGRAPH);
+        let subgraph = subgraphs.get("connectors").unwrap();
+        let connectors = Connector::from_schema(subgraph.schema.schema(), "connectors").unwrap();
+        for connector in connectors {
+            assert_snapshot!(connector.selection.to_string());
+        }
     }
 }

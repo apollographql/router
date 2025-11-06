@@ -25,6 +25,9 @@ use crate::connectors::validation::expression::scalars;
 use crate::connectors::validation::graphql::SchemaInfo;
 use crate::connectors::validation::http::headers::Headers;
 use crate::connectors::validation::http::url::validate_url_scheme;
+use crate::connectors::validation::source::fragments::FragmentsArgument;
+
+pub(crate) mod fragments;
 
 /// A `@source` directive along with any errors related to it.
 pub(super) struct SourceDirective<'schema> {
@@ -34,6 +37,7 @@ pub(super) struct SourceDirective<'schema> {
     url_properties: Option<UrlProperties<'schema>>,
     headers: Option<Headers<'schema>>,
     is_success: Option<IsSuccessArgument<'schema>>,
+    fragments: Option<FragmentsArgument<'schema>>,
     errors: Option<Errors<'schema>>,
     schema: &'schema SchemaInfo<'schema>,
 }
@@ -107,6 +111,14 @@ impl<'schema> SourceDirective<'schema> {
             }
         };
 
+        let fragments = match FragmentsArgument::parse_for_source(coordinate.clone(), schema) {
+            Ok(frags) => frags,
+            Err(err) => {
+                messages.push(err);
+                None
+            }
+        };
+
         let Some(http_arg) = directive
             .specified_argument_by_name(&HTTP_ARGUMENT_NAME)
             .and_then(|arg| arg.as_object())
@@ -128,6 +140,7 @@ impl<'schema> SourceDirective<'schema> {
                     schema,
                     directive,
                     is_success,
+                    fragments,
                     base_url: None,
                     url_properties: None,
                     headers: None,
@@ -203,6 +216,7 @@ impl<'schema> SourceDirective<'schema> {
                 base_url,
                 url_properties,
                 is_success,
+                fragments,
                 headers,
                 errors,
                 schema,
@@ -243,6 +257,9 @@ impl<'schema> SourceDirective<'schema> {
         }
         if let Some(headers) = self.headers {
             messages.extend(headers.type_check(self.schema).err().into_iter().flatten());
+        }
+        if let Some(fragments_argument) = self.fragments {
+            messages.extend(fragments_argument.type_check(self.schema).err());
         }
         messages
     }

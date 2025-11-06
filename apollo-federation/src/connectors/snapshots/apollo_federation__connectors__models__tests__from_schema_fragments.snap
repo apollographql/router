@@ -1,0 +1,6 @@
+---
+source: apollo-federation/src/connectors/models.rs
+expression: connector.selection.to_string()
+---
+id
+name
