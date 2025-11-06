@@ -321,24 +321,24 @@ fn field_sharing_include_hint_in_error_for_targetless_override() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",
         type_defs: r#"
-        type Query {
-          me: User
-        }
+          type Query {
+            e: E
+          }
 
-        type User @key(fields: "id") {
-          id: ID!
-          name: String! @override(from: "subgraphB")
-        }
+          type E @key(fields: "id") {
+            id: ID!
+            a: Int @override(from: "badName")
+          }
         "#,
     };
 
     let subgraph_b = ServiceDefinition {
         name: "subgraphB",
         type_defs: r#"
-        type User @key(fields: "id") {
-          id: ID!
-          name: String!
-        }
+          type E @key(fields: "id") {
+            id: ID!
+            a: Int
+          }
         "#,
     };
 
@@ -347,7 +347,7 @@ fn field_sharing_include_hint_in_error_for_targetless_override() {
         &result,
         &[(
             "INVALID_FIELD_SHARING",
-            r#"Non-shareable field "User.name" is resolved from multiple subgraphs"#,
+            r#"Non-shareable field "E.a" is resolved from multiple subgraphs: it is resolved from subgraphs "subgraphA" and "subgraphB" and defined as non-shareable in all of them (please note that "E.a" has an @override directive in "subgraphA" that targets an unknown subgraph so this could be due to misspelling the @override(from:) argument)"#,
         )],
     );
 }
