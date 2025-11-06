@@ -1,10 +1,10 @@
-use std::collections::HashMap;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::DirectiveDefinition;
+use indexmap::IndexMap;
+use indexmap::IndexSet;
 
 use crate::error::CompositionError;
 use crate::error::FederationError;
@@ -42,14 +42,14 @@ const DEFAULT_COMPOSED_DIRECTIVES: [Name; 6] = [
 
 pub(crate) struct ComposeDirectiveManager {
     /// Map of subgraphs to directives being composed
-    merge_directive_map: HashMap<String, HashSet<Name>>,
+    merge_directive_map: IndexMap<String, IndexSet<Name>>,
     /// Map of (original) directive name to the latest definition found across subgraphs
-    latest_directive_definition_map: HashMap<Name, DirectiveDefinition>,
+    latest_directive_definition_map: IndexMap<Name, DirectiveDefinition>,
     /// Map of identities to the `Link` with latest version and the subgraph where it is applied
-    latest_feature_map: HashMap<Identity, (Arc<Link>, String)>,
+    latest_feature_map: IndexMap<Identity, (Arc<Link>, String)>,
     /// Map of identities to the list of directives imported from that identity across all
     /// subgraphs. The directive names are recorded in a map of original name to aliased name.
-    directives_for_feature_map: HashMap<Identity, HashMap<Name, Name>>,
+    directives_for_feature_map: IndexMap<Identity, IndexMap<Name, Name>>,
 }
 
 #[derive(Clone)]
@@ -115,14 +115,14 @@ impl std::fmt::Display for MergeDirectiveItem {
 impl ComposeDirectiveManager {
     pub(crate) fn new() -> Self {
         Self {
-            merge_directive_map: HashMap::new(),
-            latest_directive_definition_map: HashMap::new(),
-            latest_feature_map: HashMap::new(),
-            directives_for_feature_map: HashMap::new(),
+            merge_directive_map: Default::default(),
+            latest_directive_definition_map: Default::default(),
+            latest_feature_map: Default::default(),
+            directives_for_feature_map: Default::default(),
         }
     }
 
-    pub(crate) fn all_composed_core_features(&self) -> Vec<(Arc<Link>, HashMap<Name, Name>)> {
+    pub(crate) fn all_composed_core_features(&self) -> Vec<(Arc<Link>, IndexMap<Name, Name>)> {
         self.latest_feature_map
             .iter()
             .filter_map(|(identity, (link, _))| {
@@ -182,8 +182,8 @@ impl ComposeDirectiveManager {
         subgraphs: &[Subgraph<T>],
         error_reporter: &mut ErrorReporter,
     ) -> Result<(), FederationError> {
-        let mut wont_merge_features = HashSet::new();
-        let mut wont_merge_directive_names = HashSet::new();
+        let mut wont_merge_features: IndexSet<_> = Default::default();
+        let mut wont_merge_directive_names: IndexSet<_> = Default::default();
         let mut items_by_subgraph: MultiMap<String, MergeDirectiveItem> = MultiMap::new();
         let mut items_by_identity: MultiMap<Identity, MergeDirectiveItem> = MultiMap::new();
         let mut items_by_directive_name: MultiMap<Name, MergeDirectiveItem> = MultiMap::new();
@@ -354,7 +354,7 @@ impl ComposeDirectiveManager {
                 continue;
             }
 
-            let mut major_versions = HashSet::new();
+            let mut major_versions: IndexSet<_> = Default::default();
             for (link, _) in features {
                 major_versions.insert(link.url.version.major);
             }
@@ -449,7 +449,7 @@ impl ComposeDirectiveManager {
                 let subgraphs_exporting_this_directive = items
                     .iter()
                     .map(|i| i.subgraph_name.clone())
-                    .collect::<HashSet<_>>();
+                    .collect::<IndexSet<_>>();
                 for subgraph in subgraphs {
                     if subgraphs_exporting_this_directive.contains(&subgraph.name) {
                         continue;
@@ -477,7 +477,7 @@ impl ComposeDirectiveManager {
 
         // For anything which hasn't been ruled out, add it to the map of directives to be merged
         for (subgraph, items) in items_by_subgraph.iter_all() {
-            let mut directives_for_subgraph = HashSet::with_capacity(items.len());
+            let mut directives_for_subgraph = IndexSet::with_capacity(items.len());
             for item in items {
                 if !wont_merge_features.contains(item.identity())
                     && !wont_merge_directive_names.contains(item.aliased_directive_name())
