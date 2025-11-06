@@ -271,11 +271,9 @@ mod tests {
         // Check merging using NULLABLE_AND succeeded
         let schema = result_sg.schema().schema();
         let sdl = print_sdl(schema);
-        assert!(
-            sdl.contains(
-                r#"@link(url: "https://specs.apollo.dev/cost/v0.1", import: ["listSize"])"#
-            )
-        );
+        assert!(sdl.contains(
+            r#"@link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])"#
+        ));
 
         let t = coord!(Query.t)
             .lookup_field(schema)
@@ -387,11 +385,9 @@ mod tests {
         // Check merging using NULLABLE_MAX succeeded
         let schema = result_sg.schema().schema();
         let sdl = print_sdl(schema);
-        assert!(
-            sdl.contains(
-                r#"@link(url: "https://specs.apollo.dev/cost/v0.1", import: ["listSize"])"#
-            )
-        );
+        assert!(sdl.contains(
+            r#"@link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])"#
+        ));
 
         let t = coord!(Query.t)
             .lookup_field(schema)
@@ -521,11 +517,9 @@ mod tests {
         // Check merging using NULLABLE_UNION succeeded
         let schema = result_sg.schema().schema();
         let sdl = print_sdl(schema);
-        assert!(
-            sdl.contains(
-                r#"@link(url: "https://specs.apollo.dev/cost/v0.1", import: ["listSize"])"#
-            )
-        );
+        assert!(sdl.contains(
+            r#"@link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])"#
+        ));
 
         coord!(Query.t)
             .lookup_field(schema)

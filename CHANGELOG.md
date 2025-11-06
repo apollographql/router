@@ -2,6 +2,35 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.8.1] - 2025-11-04
+
+## 🔒 Security
+
+> [!NOTE]
+> For more information on the impact of the fixes in this release and how your deployment might be affected or remediated, see the corresponding GitHub Security Advisory (GHSA) linked on the entries below.  In both listed cases, updating to a patched Router version will resolve any vulnerabilities.
+
+### Fix authorization plugin handling of polymorphic types
+
+Updates the auth plugin to correctly handle access control requirements when processing polymorphic types.
+
+When querying interface types/fields, the auth plugin was verifying only whether all implementations shared the same access control requirements. In cases where interface types/fields did not specify the same access control requirements as the implementations, this could result in unauthorized access to protected data.
+
+The auth plugin was updated to correctly verify that all polymorphic access control requirements are satisfied by the current context.
+
+See [GHSA-x33c-7c2v-mrj9](https://github.com/apollographql/router/security/advisories/GHSA-x33c-7c2v-mrj9) for additional details and the associated CVE number.
+
+By @dariuszkuc
+
+### Fixed authorization plugin handling of directive renames
+
+The router auth plugin did not properly handle access control requirements when subgraphs renamed their access control directives through imports. When such renames occurred, the plugin’s `@link`-processing code ignored the imported directives entirely, causing access control constraints defined by the renamed directives to be ignored.
+
+The plugin code was updated to call the appropriate functionality in the `apollo-federation` crate, which correctly handles both because spec and imports directive renames.
+
+See [GHSA-g8jh-vg5j-4h3f](https://github.com/apollographql/router/security/advisories/GHSA-g8jh-vg5j-4h3f) for additional details and the associated CVE number.
+
+By @sachindshinde
+
 # [2.8.0] - 2025-10-27
 
 ## 🚀 Features

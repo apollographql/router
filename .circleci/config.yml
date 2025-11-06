@@ -28,7 +28,7 @@ executors:
       - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.19.0
       - image: cimg/redis:7.4.6
       - image: openzipkin/zipkin:3.5.1
-      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.36.0
+      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.37.0
       # redis cluster - 3 primaries, 3 replicas
       - image: cimg/redis:7.4.6
         command: [ "redis-server", "--protected-mode", "no", "--port", "7000", "--cluster-enabled", "yes" ]
