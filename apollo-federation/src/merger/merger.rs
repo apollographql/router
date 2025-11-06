@@ -29,6 +29,8 @@ use crate::bail;
 use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::error::SubgraphLocation;
+use crate::error::suggestion::did_you_mean;
+use crate::error::suggestion::suggestion_list;
 use crate::internal_error;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Import;
@@ -36,6 +38,7 @@ use crate::link::Link;
 use crate::link::federation_spec_definition::FEDERATION_OPERATION_TYPES;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::join_spec_definition::JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::join_spec_definition::JOIN_GRAPH_ARGUMENT_NAME;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME;
@@ -78,6 +81,7 @@ use crate::schema::validators::merged::validate_merged_schema;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
+use crate::utils::MultiIndexMap;
 use crate::utils::first_max_by_key;
 use crate::utils::human_readable::human_readable_subgraph_names;
 use crate::utils::iter_into_single_item;
@@ -101,6 +105,12 @@ static BUILT_IN_DIRECTIVES: [&str; 6] = [
     "defer",
     "stream",
 ];
+
+// Patterns for parsing @override labels
+static LABEL_REGEX: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"^[a-zA-Z][a-zA-Z0-9_\-:./]*$").unwrap());
+static PERCENT_REGEX: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"^percent\((\d{1,2}(\.\d{1,8})?|100)\)$").unwrap());
 
 /// Type alias for Sources mapping - maps subgraph indices to optional values
 pub(crate) type Sources<T> = IndexMap<usize, Option<T>>;
@@ -623,7 +633,10 @@ impl Merger {
 
     fn add_types_shallow(&mut self) -> Result<(), FederationError> {
         let mut mismatched_types = IndexSet::new();
-        let mut types_with_interface_object = IndexSet::new();
+        // A mapping of Ty -> [SubgraphA, SubgraphB] where Ty is a interface object in those
+        // subgraphs
+        let mut subgraphs_with_interface_obj =
+            MultiIndexMap::<TypeDefinitionPosition, String>::new();
 
         for subgraph in &self.subgraphs {
             for pos in subgraph.schema().get_types() {
@@ -634,7 +647,10 @@ impl Merger {
                 let mut expects_interface = false;
                 if subgraph.is_interface_object_type(&pos) {
                     expects_interface = true;
-                    types_with_interface_object.insert(pos.clone());
+                    let itf_pos = InterfaceTypeDefinitionPosition {
+                        type_name: pos.type_name().clone(),
+                    };
+                    subgraphs_with_interface_obj.insert(itf_pos.into(), subgraph.name.clone());
                 }
                 if let Ok(previous) = self.merged.get_type(pos.type_name().clone()) {
                     if expects_interface
@@ -659,19 +675,23 @@ impl Merger {
         }
 
         for mismatched_type in mismatched_types.iter() {
-            self.report_mismatched_type_definitions(mismatched_type, &types_with_interface_object);
+            let subgraphs = subgraphs_with_interface_obj
+                .get(mismatched_type)
+                .cloned()
+                .unwrap_or_default();
+            self.report_mismatched_type_definitions(mismatched_type, &subgraphs);
         }
 
         // Most invalid use of @interfaceObject are reported as a mismatch above, but one exception is the
         // case where a type is used only with @interfaceObject, but there is no corresponding interface
         // definition in any subgraph.
-        for type_ in types_with_interface_object.iter() {
+        for type_ in subgraphs_with_interface_obj.keys() {
             if mismatched_types.contains(type_) {
                 continue;
             }
 
             let mut found_interface = false;
-            let mut subgraphs_with_type = HashSet::new();
+            let mut subgraphs_with_type = IndexSet::new();
             for subgraph in &self.subgraphs {
                 let type_in_subgraph = subgraph.schema().get_type(type_.type_name().clone());
                 if matches!(type_in_subgraph, Ok(TypeDefinitionPosition::Interface(_))) {
@@ -719,7 +739,7 @@ impl Merger {
     fn report_mismatched_type_definitions(
         &mut self,
         mismatched_type: &TypeDefinitionPosition,
-        types_with_interface_object: &IndexSet<TypeDefinitionPosition>,
+        subgraphs_with_interface_object: &[String],
     ) {
         let sources = self
             .subgraphs
@@ -734,12 +754,13 @@ impl Merger {
                 )
             })
             .collect();
-        let type_kind_to_string = |type_def: &TypeDefinitionPosition| {
-            let type_kind_description = if types_with_interface_object.contains(type_def) {
-                "Interface Object Type (Object Type with @interfaceObject)".to_string()
-            } else {
-                type_def.kind().replace("Type", " Type")
-            };
+        let type_kind_to_string = |idx: usize, type_def: &TypeDefinitionPosition| {
+            let type_kind_description =
+                if subgraphs_with_interface_object.contains(&self.subgraphs[idx].name) {
+                    "Interface Object Type (Object Type with @interfaceObject)".to_string()
+                } else {
+                    type_def.kind().replace("Type", " Type")
+                };
             Some(type_kind_description)
         };
         // TODO: Third type param is supposed to be representation of AST nodes
@@ -753,8 +774,8 @@ impl Merger {
                 },
                 mismatched_type,
                 &sources,
-                type_kind_to_string,
-                |ty, _| type_kind_to_string(ty),
+                |ty| Some(ty.kind().replace("Type", " Type")),
+                |ty, idx| type_kind_to_string(idx, ty),
             );
     }
 
@@ -1015,12 +1036,513 @@ impl Merger {
     }
 
     pub(crate) fn validate_override<T>(
-        &self,
-        _sources: &Sources<T>,
-        _dest: &ObjectOrInterfaceFieldDefinitionPosition,
+        &mut self,
+        sources: &Sources<T>,
+        dest: &ObjectOrInterfaceFieldDefinitionPosition,
     ) -> Result<FieldMergeContext, FederationError> {
-        // TODO(FED-555)
-        Ok(Default::default())
+        let mut result = FieldMergeContext::new(sources.keys().copied());
+
+        // Check if this field has any @override directives
+        // Note: A field might be an interface in the merged schema but an object field in a subgraph
+        // (e.g., with @interfaceObject), so we need to check both object and interface fields.
+        let field_pos: FieldDefinitionPosition = dest.clone().into();
+        let has_override = match &field_pos {
+            FieldDefinitionPosition::Object(obj_field) => {
+                self.fields_with_override.object_fields.contains(obj_field)
+            }
+            FieldDefinitionPosition::Interface(itf_field) => {
+                // Check both interface fields and object fields (for @interfaceObject case)
+                let obj_field = ObjectFieldDefinitionPosition {
+                    type_name: itf_field.type_name.clone(),
+                    field_name: itf_field.field_name.clone(),
+                };
+                self.fields_with_override
+                    .interface_fields
+                    .contains(itf_field)
+                    || self.fields_with_override.object_fields.contains(&obj_field)
+            }
+            FieldDefinitionPosition::Union(_) => false,
+        };
+        if !has_override {
+            return Ok(result);
+        }
+
+        // Structure to hold mapped information about each source
+        struct MappedValue {
+            idx: usize,
+            name: String,
+            is_interface_field: bool,
+            is_interface_object: bool,
+            interface_object_abstracting_fields: Vec<ObjectFieldDefinitionPosition>,
+            override_directive: Option<Component<Directive>>,
+        }
+
+        // Convert sources to a map, and also check for @interfaceObject fields
+        let mut mapped: IndexMap<usize, Option<MappedValue>> = IndexMap::default();
+
+        // First, process all subgraphs to check for @interfaceObject fields
+        for idx in 0..self.subgraphs.len() {
+            if !sources.contains_key(&idx) {
+                // Check if the field is abstracted by @interfaceObject
+                // This checks if the parent implements interfaces that are @interfaceObject
+                let mut interface_object_abstracting_fields =
+                    self.fields_in_source_if_abstracted_by_interface_object(dest, idx)?;
+
+                // Also check if the parent itself is an @interfaceObject type
+                // (e.g., interface I in merged schema, but object type I with @interfaceObject in subgraph)
+                if let ObjectOrInterfaceFieldDefinitionPosition::Interface(itf_field) = dest {
+                    let obj_type_pos = ObjectTypeDefinitionPosition {
+                        type_name: itf_field.type_name.clone(),
+                    };
+                    let type_pos = TypeDefinitionPosition::Object(obj_type_pos.clone());
+                    if self.subgraphs[idx]
+                        .schema()
+                        .schema()
+                        .types
+                        .contains_key(&itf_field.type_name)
+                        && self.subgraphs[idx].is_interface_object_type(&type_pos)
+                    {
+                        let obj_field = obj_type_pos.field(itf_field.field_name.clone());
+                        if obj_field
+                            .try_get(self.subgraphs[idx].schema().schema())
+                            .is_some()
+                        {
+                            interface_object_abstracting_fields.push(obj_field);
+                        }
+                    }
+                }
+
+                if !interface_object_abstracting_fields.is_empty() {
+                    // For @interfaceObject, we need to check if the object field has @override
+                    let override_directive =
+                        if let Some(obj_field) = interface_object_abstracting_fields.first() {
+                            // Convert to ObjectOrInterfaceFieldDefinitionPosition to check for override
+                            let obj_field_pos =
+                                ObjectOrInterfaceFieldDefinitionPosition::Object(obj_field.clone());
+                            self.get_override_directive(idx, &obj_field_pos)?
+                        } else {
+                            None
+                        };
+
+                    let is_interface_object =
+                        if let Some(obj_field) = interface_object_abstracting_fields.first() {
+                            let type_pos =
+                                TypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
+                                    type_name: obj_field.type_name.clone(),
+                                });
+                            self.subgraphs[idx].is_interface_object_type(&type_pos)
+                        } else {
+                            false
+                        };
+
+                    mapped.insert(
+                        idx,
+                        Some(MappedValue {
+                            idx,
+                            name: self.names[idx].clone(),
+                            is_interface_field: false,
+                            is_interface_object,
+                            interface_object_abstracting_fields,
+                            override_directive,
+                        }),
+                    );
+                }
+            }
+        }
+
+        // Then process the sources
+        for (idx, source) in sources.iter() {
+            if source.is_none() {
+                // Already handled above for @interfaceObject
+                if !mapped.contains_key(idx) {
+                    mapped.insert(*idx, None);
+                }
+                continue;
+            }
+
+            let subgraph = &self.subgraphs[*idx];
+            let is_interface_field =
+                matches!(dest, ObjectOrInterfaceFieldDefinitionPosition::Interface(_));
+            let is_interface_object =
+                subgraph.is_interface_object_type(&dest.parent().clone().into());
+
+            // Get the @override directive if present
+            let override_directive = self.get_override_directive(*idx, dest)?;
+
+            mapped.insert(
+                *idx,
+                Some(MappedValue {
+                    idx: *idx,
+                    name: self.names[*idx].clone(),
+                    is_interface_field,
+                    is_interface_object,
+                    interface_object_abstracting_fields: Vec::new(),
+                    override_directive,
+                }),
+            );
+        }
+
+        // Collect subgraphs with @override
+        let mut subgraphs_with_override: Vec<String> = Vec::new();
+        let mut subgraph_map: HashMap<String, MappedValue> = HashMap::new();
+
+        for (_, elem) in mapped.iter() {
+            if let Some(elem) = elem {
+                let name = elem.name.clone();
+                if elem.override_directive.is_some() {
+                    subgraphs_with_override.push(name.clone());
+                }
+                subgraph_map.insert(
+                    name,
+                    MappedValue {
+                        idx: elem.idx,
+                        name: elem.name.clone(),
+                        is_interface_field: elem.is_interface_field,
+                        is_interface_object: elem.is_interface_object,
+                        interface_object_abstracting_fields: elem
+                            .interface_object_abstracting_fields
+                            .clone(),
+                        override_directive: elem.override_directive.clone(),
+                    },
+                );
+            }
+        }
+
+        // Validate each subgraph that has an @override directive
+        for subgraph_name in subgraphs_with_override.iter() {
+            let mapped_value = subgraph_map.get(subgraph_name).unwrap();
+            let Some(ref override_directive) = mapped_value.override_directive else {
+                continue;
+            };
+
+            let idx = mapped_value.idx;
+
+            // Error: @override on interface field
+            if mapped_value.is_interface_field {
+                self.error_reporter.add_error(CompositionError::OverrideOnInterface {
+                    message: format!(
+                        "@override cannot be used on field \"{}\" on subgraph \"{}\": @override is not supported on interface type fields.",
+                        dest, subgraph_name
+                    ),
+                });
+                continue;
+            }
+
+            // Error: @override on @interfaceObject field
+            if mapped_value.is_interface_object {
+                self.error_reporter.add_error(CompositionError::OverrideCollisionWithAnotherDirective {
+                    message: format!(
+                        "@override is not yet supported on fields of @interfaceObject types: cannot be used on field \"{}\" on subgraph \"{}\".",
+                        dest, subgraph_name
+                    ),
+                });
+                continue;
+            }
+
+            // Extract the "from" argument
+            let source_subgraph_name = self.get_override_from_argument(override_directive)?;
+
+            // Check if the source subgraph exists
+            if !self.names.contains(&source_subgraph_name) {
+                result.set_override_with_unknown_target(idx);
+                let suggestions = suggestion_list(&source_subgraph_name, self.names.clone());
+                let extra_msg = did_you_mean(suggestions);
+                self.error_reporter.add_hint(CompositionHint {
+                    code: HintCode::FromSubgraphDoesNotExist.code().to_string(),
+                    message: format!(
+                        "Source subgraph \"{}\" for field \"{}\" on subgraph \"{}\" does not exist. {extra_msg}",
+                        source_subgraph_name, dest, subgraph_name
+                    ),
+                    locations: Default::default(),
+                });
+                continue;
+            }
+
+            // Error: source and destination are the same
+            if source_subgraph_name == *subgraph_name {
+                self.error_reporter.add_error(CompositionError::OverrideFromSelfError {
+                    message: format!(
+                        "Source and destination subgraphs \"{}\" are the same for overridden field \"{}\"",
+                        source_subgraph_name, dest
+                    ),
+                });
+                continue;
+            }
+
+            // Error: source also has @override
+            if subgraphs_with_override.contains(&source_subgraph_name) {
+                self.error_reporter.add_error(CompositionError::OverrideSourceHasOverride {
+                    message: format!(
+                        "Field \"{}\" on subgraph \"{}\" is also marked with directive @override in subgraph \"{}\". Only one @override directive is allowed per field.",
+                        dest, subgraph_name, source_subgraph_name
+                    ),
+                });
+                continue;
+            }
+
+            // Check if source subgraph has the field
+            if !subgraph_map.contains_key(&source_subgraph_name) {
+                self.error_reporter.add_hint(CompositionHint {
+                    code: HintCode::OverrideDirectiveCanBeRemoved.code().to_string(),
+                    message: format!(
+                        "Field \"{}\" on subgraph \"{}\" no longer exists in the from subgraph. The @override directive can be removed.",
+                        dest, subgraph_name
+                    ),
+                    locations: Default::default(),
+                });
+                continue;
+            }
+
+            // Check if field is abstracted by @interfaceObject in source
+            let source_mapped = subgraph_map.get(&source_subgraph_name).unwrap();
+            if !source_mapped.interface_object_abstracting_fields.is_empty() {
+                self.error_reporter.add_error(CompositionError::OverrideCollisionWithAnotherDirective {
+                    message: format!(
+                        "Invalid @override on field \"{}\" of subgraph \"{}\": source subgraph \"{}\" does not have field \"{}\" but abstracts it through @interfaceObject and overriding abstracted fields is not supported.",
+                        dest, subgraph_name, source_subgraph_name, dest
+                    ),
+                });
+                continue;
+            }
+
+            // Check for conflicts with other directives
+            let from_idx = self
+                .names
+                .iter()
+                .position(|n| n == &source_subgraph_name)
+                .unwrap();
+            if let Some((conflicting_directive_name, conflicting_subgraph_name)) =
+                self.override_conflicts_with_other_directive(idx, from_idx, dest)?
+            {
+                self.error_reporter.add_error(CompositionError::OverrideCollisionWithAnotherDirective {
+                    message: format!(
+                        "@override cannot be used on field \"{}\" on subgraph \"{}\" since \"{}\" on \"{}\" is marked with directive \"@{}\"",
+                        dest, subgraph_name, dest, conflicting_subgraph_name, conflicting_directive_name
+                    ),
+                });
+                continue;
+            }
+
+            // If we get here, the @override is valid
+            let override_label = self.get_override_label_argument(override_directive)?;
+            let overridden_field_is_referenced = self.subgraphs[from_idx]
+                .metadata()
+                .is_field_used(&dest.clone().into());
+
+            // Check if the from field is already marked @external
+            if self.is_field_external(from_idx, &dest.clone().into()) {
+                self.error_reporter.add_hint(CompositionHint {
+                    code: HintCode::OverrideDirectiveCanBeRemoved.code().to_string(),
+                    message: format!(
+                        "Field \"{}\" on subgraph \"{}\" is not resolved anymore by the from subgraph (it is marked \"@external\" in \"{}\"). The @override directive can be removed.",
+                        dest, subgraph_name, source_subgraph_name
+                    ),
+                    locations: Default::default(),
+                });
+            } else if overridden_field_is_referenced {
+                result.set_used_overridden(from_idx);
+                if override_label.is_none() {
+                    // No label, but field is referenced - add hint
+                    self.error_reporter.add_hint(CompositionHint {
+                    code: HintCode::OverriddenFieldCanBeRemoved.code().to_string(),
+                    message: format!(
+                        "Field \"{}\" on subgraph \"{}\" is overridden. It is still used in some federation directive(s) (@key, @requires, and/or @provides) and/or to satisfy interface constraint(s), but consider marking it @external explicitly or removing it along with its references.",
+                        dest, source_subgraph_name
+                    ),
+                    locations: Default::default(),
+                });
+                }
+            } else {
+                result.set_unused_overridden(from_idx);
+                if override_label.is_none() {
+                    // No label and field is not referenced - suggest removal
+                    self.error_reporter.add_hint(CompositionHint {
+                        code: HintCode::OverriddenFieldCanBeRemoved.code().to_string(),
+                        message: format!(
+                            "Field \"{}\" on subgraph \"{}\" is overridden. Consider removing it.",
+                            dest, source_subgraph_name
+                        ),
+                        locations: Default::default(),
+                    });
+                }
+            }
+
+            // Handle override label
+            if let Some(override_label) = override_label {
+                let is_valid = if LABEL_REGEX.is_match(&override_label) {
+                    true
+                } else if let Some(percent) = PERCENT_REGEX
+                    .captures(&override_label)
+                    .and_then(|captures| captures.get(1))
+                    .and_then(|percent_str| percent_str.as_str().parse::<f64>().ok())
+                {
+                    (0.0..=100.0).contains(&percent)
+                } else {
+                    false
+                };
+
+                if is_valid {
+                    result.set_override_label(idx, override_label.clone());
+                    result.set_override_label(from_idx, override_label.clone());
+                } else {
+                    self.error_reporter.add_error(CompositionError::OverrideLabelInvalid {
+                        message: format!(
+                            "Invalid @override label \"{}\" on field \"{}\" on subgraph \"{}\": labels must start with a letter and after that may contain alphanumerics, underscores, minuses, colons, periods, or slashes. Alternatively, labels may be of the form \"percent(x)\" where x is a float between 0-100 inclusive.",
+                            override_label, dest, subgraph_name
+                        ),
+                    });
+                }
+
+                // Add migration hint if label is valid
+                if is_valid {
+                    let message = if overridden_field_is_referenced {
+                        format!(
+                            "Field \"{}\" on subgraph \"{}\" is currently being migrated via progressive @override. It is still used in some federation directive(s) (@key, @requires, and/or @provides) and/or to satisfy interface constraint(s). Once the migration is complete, consider marking it @external explicitly or removing it along with its references.",
+                            dest, source_subgraph_name
+                        )
+                    } else {
+                        format!(
+                            "Field \"{}\" is currently being migrated with progressive @override. Once the migration is complete, remove the field from subgraph \"{}\".",
+                            dest, source_subgraph_name
+                        )
+                    };
+
+                    self.error_reporter.add_hint(CompositionHint {
+                        code: HintCode::OverrideMigrationInProgress.code().to_string(),
+                        message,
+                        locations: Default::default(),
+                    });
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
+    fn get_override_directive(
+        &self,
+        source_idx: usize,
+        field: &ObjectOrInterfaceFieldDefinitionPosition,
+    ) -> Result<Option<Component<Directive>>, FederationError> {
+        let subgraph = &self.subgraphs[source_idx];
+        let Some(override_directive_name) = subgraph.override_directive_name()? else {
+            return Ok(None);
+        };
+
+        let directives = match field {
+            ObjectOrInterfaceFieldDefinitionPosition::Object(obj_field) => {
+                obj_field.get_applied_directives(subgraph.schema(), &override_directive_name)
+            }
+            ObjectOrInterfaceFieldDefinitionPosition::Interface(itf_field) => {
+                itf_field.get_applied_directives(subgraph.schema(), &override_directive_name)
+            }
+        };
+
+        if let Some(directive) = directives.first() {
+            return Ok(Some(Component::new(directive.as_ref().clone())));
+        }
+        Ok(None)
+    }
+
+    fn get_override_from_argument(
+        &self,
+        directive: &Component<Directive>,
+    ) -> Result<String, FederationError> {
+        for arg in directive.arguments.iter() {
+            if arg.name.as_str() == "from"
+                && let Value::String(s) = arg.value.as_ref()
+            {
+                return Ok(s.to_string());
+            }
+        }
+        bail!("@override directive missing 'from' argument")
+    }
+
+    fn get_override_label_argument(
+        &self,
+        directive: &Component<Directive>,
+    ) -> Result<Option<String>, FederationError> {
+        for arg in directive.arguments.iter() {
+            if arg.name.as_str() == "label"
+                && let Value::String(s) = arg.value.as_ref()
+            {
+                return Ok(Some(s.to_string()));
+            }
+        }
+        Ok(None)
+    }
+
+    fn override_conflicts_with_other_directive(
+        &self,
+        overriding_idx: usize,
+        from_idx: usize,
+        field: &ObjectOrInterfaceFieldDefinitionPosition,
+    ) -> Result<Option<(String, String)>, FederationError> {
+        // Check the overriding field for @external, @requires or @provides
+        let overriding_subgraph = &self.subgraphs[overriding_idx];
+        let overriding_subgraph_name = &self.names[overriding_idx];
+        let field_pos: FieldDefinitionPosition = field.clone().into();
+
+        // Check if the overriding field itself is marked @external
+        if overriding_subgraph.metadata().is_field_external(&field_pos)
+            && let Ok(Some(external_name)) = overriding_subgraph.external_directive_name()
+        {
+            return Ok(Some((
+                external_name.to_string(),
+                overriding_subgraph_name.clone(),
+            )));
+        }
+
+        if let Ok(Some(requires_name)) = overriding_subgraph.requires_directive_name()
+            && field.has_applied_directive(overriding_subgraph.schema(), &requires_name)
+        {
+            return Ok(Some((
+                requires_name.to_string(),
+                overriding_subgraph_name.clone(),
+            )));
+        }
+
+        if let Ok(Some(provides_name)) = overriding_subgraph.provides_directive_name()
+            && field.has_applied_directive(overriding_subgraph.schema(), &provides_name)
+        {
+            return Ok(Some((
+                provides_name.to_string(),
+                overriding_subgraph_name.clone(),
+            )));
+        }
+
+        // Check the from field for @external, @requires, or @provides
+        let from_subgraph = &self.subgraphs[from_idx];
+        let from_subgraph_name = &self.names[from_idx];
+
+        if from_subgraph.metadata().is_field_external(&field_pos)
+            && let Ok(Some(external_name)) = from_subgraph.external_directive_name()
+        {
+            return Ok(Some((
+                external_name.to_string(),
+                from_subgraph_name.clone(),
+            )));
+        }
+
+        if let Ok(Some(requires_name)) = from_subgraph.requires_directive_name()
+            && field.has_applied_directive(from_subgraph.schema(), &requires_name)
+        {
+            return Ok(Some((
+                requires_name.to_string(),
+                from_subgraph_name.clone(),
+            )));
+        }
+
+        if let Ok(Some(provides_name)) = from_subgraph.provides_directive_name()
+            && field.has_applied_directive(from_subgraph.schema(), &provides_name)
+        {
+            return Ok(Some((
+                provides_name.to_string(),
+                from_subgraph_name.clone(),
+            )));
+        }
+
+        Ok(None)
     }
 
     fn validate_subscription_field<T>(
@@ -1265,86 +1787,69 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
     fn add_missing_interface_object_fields_to_implementations(
         &mut self,
     ) -> Result<(), FederationError> {
-        let mut fields_to_insert = HashMap::new();
+        let mut fields_to_insert: HashMap<
+            ObjectOrInterfaceFieldDefinitionPosition,
+            FieldDefinition,
+        > = HashMap::new();
         // For each merged object types, we check if we're missing a field from one of the implemented interface.
         // If we do, then we look if one of the subgraph provides that field as a (non-external) interface object
         // type, and if that's the case, we add the field to the object.
-        for obj_ty_name in self.merged.referencers().object_types.keys() {
-            let Some(obj_ty) = self.merged.schema().get_object(obj_ty_name) else {
-                bail!(
-                    "Referencers contains Object type named \"{obj_ty_name}\", but that Object type does not exist in the schema."
-                )
-            };
-            for implemented_itf_name in obj_ty.implements_interfaces.iter() {
-                let Some(implemented_itf) =
-                    self.merged.schema().get_interface(implemented_itf_name)
-                else {
-                    bail!(
-                        "Object type \"{obj_ty_name}\" implements interface \"{implemented_itf_name}\", but that Interface type does not exist in the schema."
-                    )
+        for (idx, subgraph) in self.subgraphs.iter().enumerate() {
+            for itf_obj_field in subgraph.interface_object_fields() {
+                let ast_node_to_add =
+                    (*itf_obj_field.get(subgraph.schema().schema())?.node).clone();
+                let itf = InterfaceTypeDefinitionPosition {
+                    type_name: itf_obj_field.type_name.clone(),
                 };
-                for itf_field in implemented_itf.fields.values() {
-                    if obj_ty.fields.contains_key(&itf_field.name) {
-                        continue;
-                    }
+                let itf_field_pos = itf.field(itf_obj_field.field_name.clone());
 
-                    // Note that we don't blindly add the field yet, that would be incorrect in many cases (and we
-                    // have a specific validation that return a user-friendly error in such incorrect cases, see
-                    // `postMergeValidations`). We must first check that there is some subgraph that implement
-                    // that field as an "interface object", since in that case the field will genuinely be provided
-                    // by that subgraph at runtime.
-                    if self.is_field_provided_by_an_interface_object(
-                        &itf_field.name,
-                        implemented_itf_name,
-                    ) {
-                        // Note it's possible that interface is abstracted away (as an interface object) in multiple
-                        // subgraphs, so we don't bother with the field definition in those subgraphs, but rather
-                        // just copy the merged definition from the interface.
-                        //
-                        // Cases could probably be made for both either copying or not copying the description
-                        // and applied directives from the interface field, but we copy both here as it feels
-                        // more likely to be what user expects.
-                        let mut new_field = itf_field.as_ref().clone();
-                        new_field.directives.retain(|d| {
-                            self.join_spec_definition
-                                .is_spec_directive_name(&self.merged, &d.name)
-                                .is_ok_and(|from_join_spec| !from_join_spec)
-                        });
-                        for arg in new_field.arguments.iter_mut() {
-                            arg.make_mut().directives.retain(|d| {
-                                self.join_spec_definition
-                                    .is_spec_directive_name(&self.merged, &d.name)
-                                    .is_ok_and(|from_join_spec| !from_join_spec)
-                            });
-                        }
+                // If the interface in the supergraph is missing this field, merge it in.
+                if itf_field_pos.try_get(self.merged.schema()).is_none() {
+                    let subgraph_enum_name = self.join_spec_name(idx)?;
+                    let mut missing_itf_node = ast_node_to_add.clone();
+                    missing_itf_node.directives.push(
+                        JoinFieldBuilder::new()
+                            .arg(
+                                &JOIN_GRAPH_ARGUMENT_NAME,
+                                Value::Enum(subgraph_enum_name.clone()),
+                            )
+                            .build(),
+                    );
+                    fields_to_insert.insert(itf_field_pos.into(), missing_itf_node);
+                }
+
+                // If an implementer of that interface is missing the field, merge it in.
+                for implementer in itf.implementers(&self.merged)? {
+                    if implementer
+                        .field(itf_obj_field.field_name.clone())
+                        .try_get(self.merged.schema())
+                        .is_none()
+                    {
                         // We add a special @join__field for those added field with no `graph` target. This
-                        // clarify to the later extraction process that this particular field doesn't come
+                        // clarifies to the later extraction process that this particular field doesn't come
                         // from any particular subgraph.
-                        new_field.directives.push(JoinFieldBuilder::new().build());
+                        let mut missing_obj_node = ast_node_to_add.clone();
+                        missing_obj_node
+                            .directives
+                            .push(JoinFieldBuilder::new().build());
                         fields_to_insert.insert(
                             ObjectFieldDefinitionPosition {
-                                type_name: obj_ty_name.clone(),
-                                field_name: itf_field.name.clone(),
-                            },
-                            new_field,
+                                type_name: implementer.type_name().clone(),
+                                field_name: itf_obj_field.field_name.clone(),
+                            }
+                            .into(),
+                            missing_obj_node,
                         );
                     }
                 }
             }
         }
 
-        let sources: Sources<()> = (0..self.subgraphs.len()).map(|idx| (idx, None)).collect();
-        for (pos, field) in fields_to_insert {
-            pos.insert(&mut self.merged, Component::new(field))?;
-            // If we had to add a field here, it means that, for this particular implementation, the
-            // field is only provided through the @interfaceObject. But because the field wasn't
-            // merged, it also mean we haven't validated field sharing for that field, and we could
-            // have field sharing concerns if the field is provided by multiple @interfaceObject.
-            // So we validate field sharing now (it's convenient to wait until now as now that
-            // the field is part of the supergraph, we can just call `validateFieldSharing` with
-            // all sources `undefined` and it wil still find and check the `@interfaceObject`).
-            self.validate_field_sharing(&sources, &pos.into(), &FieldMergeContext::default())?;
+        for (dest, ast_node) in fields_to_insert {
+            trace!("Filling in missing interface object field {dest} with {ast_node}",);
+            dest.insert(&mut self.merged, Component::new(ast_node))?;
         }
+
         Ok(())
     }
 
@@ -1998,14 +2503,6 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             result.extend(locations);
         }
         result
-    }
-
-    pub(crate) fn subgraph_sources(&self) -> Sources<Subgraph<Validated>> {
-        self.subgraphs
-            .iter()
-            .enumerate()
-            .map(|(idx, subgraph)| (idx, Some(subgraph.clone())))
-            .collect()
     }
 }
 

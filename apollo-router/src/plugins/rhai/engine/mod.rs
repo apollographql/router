@@ -1,3 +1,6 @@
+mod registration;
+mod types;
+
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -8,11 +11,7 @@ use base64::prelude::BASE64_STANDARD;
 use base64::prelude::BASE64_STANDARD_NO_PAD;
 use base64::prelude::BASE64_URL_SAFE;
 use base64::prelude::BASE64_URL_SAFE_NO_PAD;
-use bytes::Bytes;
 use http::HeaderMap;
-use http::Method;
-use http::StatusCode;
-use http::Uri;
 use http::header::InvalidHeaderName;
 use http::uri::Authority;
 use http::uri::Parts;
@@ -41,10 +40,7 @@ use super::execution;
 use super::router;
 use super::subgraph;
 use super::supergraph;
-use crate::Context;
 use crate::configuration::expansion;
-use crate::graphql::Request;
-use crate::graphql::Response;
 use crate::http_ext;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::cache::entity::CONTEXT_CACHE_KEY;
@@ -64,38 +60,8 @@ const CANNOT_ACCESS_STATUS_CODE_ON_A_DEFERRED_RESPONSE: &str =
 
 const CANNOT_GET_ENVIRONMENT_VARIABLE: &str = "environment variable not found";
 
-pub(super) trait OptionDance<T> {
-    fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R;
-
-    fn replace(&self, f: impl FnOnce(T) -> T);
-
-    fn take_unwrap(self) -> T;
-}
-
-pub(super) type SharedMut<T> = rhai::Shared<Mutex<Option<T>>>;
-
-impl<T> OptionDance<T> for SharedMut<T> {
-    fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
-        let mut guard = self.lock();
-        f(guard.as_mut().expect("re-entrant option dance"))
-    }
-
-    fn replace(&self, f: impl FnOnce(T) -> T) {
-        let mut guard = self.lock();
-        *guard = Some(f(guard.take().expect("re-entrant option dance")))
-    }
-
-    fn take_unwrap(self) -> T {
-        match Arc::try_unwrap(self) {
-            Ok(mutex) => mutex.into_inner(),
-
-            // TODO: Should we assume the Arc refcount is 1
-            // and use `try_unwrap().expect("shared ownership")` instead of this fallback ?
-            Err(arc) => arc.lock().take(),
-        }
-        .expect("re-entrant option dance")
-    }
-}
+pub(crate) use types::OptionDance;
+pub(crate) use types::SharedMut;
 
 #[derive(Clone)]
 #[allow(unreachable_pub)]
@@ -300,6 +266,13 @@ mod router_header_map {
     }
 
     // Register a HeaderMap indexer so we can get/set headers
+    //
+    // Note: Both getter and setter are registered globally, even though HeaderMap is
+    // returned from read-only properties in some contexts (e.g., subgraph.headers).
+    // This is safe because Rhai's automatic value propagation is blocked by the
+    // absence of a setter on the property that returns the HeaderMap. The read-only-ness
+    // is determined by the wrapper type (e.g., SharedMut<subgraph::Request>), not by
+    // the HeaderMap type itself. See registration/subgraph.rs for detailed explanation.
     #[rhai_fn(index_get, pure, return_raw)]
     pub(crate) fn header_map_get(
         x: &mut HeaderMap,
@@ -1322,391 +1295,14 @@ mod router_plugin {
     }
 }
 
-#[derive(Default)]
-pub(crate) struct RhaiRouterFirstRequest {
-    pub(crate) context: Context,
-    pub(crate) request: http::Request<()>,
-}
-
-#[allow(dead_code)]
-#[derive(Default)]
-pub(crate) struct RhaiRouterChunkedRequest {
-    pub(crate) context: Context,
-    pub(crate) request: Bytes,
-}
-
-#[derive(Default)]
-pub(crate) struct RhaiRouterResponse {
-    pub(crate) context: Context,
-    pub(crate) response: http::Response<()>,
-}
-
-#[allow(dead_code)]
-#[derive(Default)]
-pub(crate) struct RhaiRouterChunkedResponse {
-    pub(crate) context: Context,
-    pub(crate) response: Bytes,
-}
-
-#[derive(Default)]
-pub(crate) struct RhaiSupergraphResponse {
-    pub(crate) context: Context,
-    pub(crate) response: http_ext::Response<Response>,
-}
-
-#[derive(Default)]
-pub(crate) struct RhaiSupergraphDeferredResponse {
-    pub(crate) context: Context,
-    pub(crate) response: Response,
-}
-
-#[derive(Default)]
-pub(crate) struct RhaiExecutionResponse {
-    pub(crate) context: Context,
-    pub(crate) response: http_ext::Response<Response>,
-}
-
-#[derive(Default)]
-pub(crate) struct RhaiExecutionDeferredResponse {
-    pub(crate) context: Context,
-    pub(crate) response: Response,
-}
-
-macro_rules! if_subgraph {
-    ( subgraph => $subgraph: block else $not_subgraph: block ) => {
-        $subgraph
-    };
-    ( $base: ident => $subgraph: block else $not_subgraph: block ) => {
-        $not_subgraph
-    };
-}
-
-macro_rules! register_rhai_router_interface {
-    ($engine: ident, $($base: ident), *) => {
-        $(
-            // Context stuff
-            $engine.register_get(
-                "context",
-                |obj: &mut SharedMut<$base::FirstRequest>| -> Result<Context, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|request| request.context.clone()))
-                }
-            )
-            .register_get(
-                "context",
-                |obj: &mut SharedMut<$base::ChunkedRequest>| -> Result<Context, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|request| request.context.clone()))
-                }
-            ).register_get(
-                "context",
-                |obj: &mut SharedMut<$base::Response>| -> Result<Context, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|response| response.context.clone()))
-                }
-            )
-            .register_get(
-                "context",
-                |obj: &mut SharedMut<$base::DeferredResponse>| -> Result<Context, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|response| response.context.clone()))
-                }
-            );
-
-            $engine.register_set(
-                "context",
-                |obj: &mut SharedMut<$base::FirstRequest>, context: Context| {
-                    obj.with_mut(|request| request.context = context);
-                    Ok(())
-                }
-            )
-            .register_set(
-                "context",
-                |obj: &mut SharedMut<$base::ChunkedRequest>, context: Context| {
-                    obj.with_mut(|request| request.context = context);
-                    Ok(())
-                }
-            )
-            .register_set(
-                "context",
-                |obj: &mut SharedMut<$base::Response>, context: Context| {
-                    obj.with_mut(|response| response.context = context);
-                    Ok(())
-                }
-            ).register_set(
-                "context",
-                |obj: &mut SharedMut<$base::DeferredResponse>, context: Context| {
-                    obj.with_mut(|response| response.context = context);
-                    Ok(())
-                }
-            );
-
-            // Id
-            $engine.register_get(
-                "id",
-                |obj: &mut SharedMut<$base::FirstRequest>| -> String {
-                    obj.with_mut(|request| request.context.id.clone())
-                }
-            )
-            .register_get(
-                "id",
-                |obj: &mut SharedMut<$base::ChunkedRequest>| -> String {
-                    obj.with_mut(|request| request.context.id.clone())
-                }
-            )
-            .register_get(
-                "id",
-                |obj: &mut SharedMut<$base::Response>| -> String {
-                    obj.with_mut(|response| response.context.id.clone())
-                }
-            )
-            .register_get(
-                "id",
-                |obj: &mut SharedMut<$base::DeferredResponse>| -> String {
-                    obj.with_mut(|response| response.context.id.clone())
-                }
-            );
-
-            // Originating Request
-            $engine.register_get(
-                "headers",
-                |obj: &mut SharedMut<$base::FirstRequest>| -> Result<HeaderMap, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|request| request.request.headers().clone()))
-                }
-            ).register_get(
-                "headers",
-                |obj: &mut SharedMut<$base::Response>| -> Result<HeaderMap, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|response| response.response.headers().clone()))
-                }
-            );
-
-            $engine.register_set(
-                "headers",
-                |obj: &mut SharedMut<$base::FirstRequest>, headers: HeaderMap| {
-                    if_subgraph! {
-                        $base => {
-                            let _unused = (obj, headers);
-                            Err("cannot mutate originating request on a subgraph".into())
-                        } else {
-                            obj.with_mut(|request| *request.request.headers_mut() = headers);
-                            Ok(())
-                        }
-                    }
-                }
-            ).register_set(
-                "headers",
-                |obj: &mut SharedMut<$base::Response>, headers: HeaderMap| {
-                    if_subgraph! {
-                        $base => {
-                            let _unused = (obj, headers);
-                            Err("cannot mutate originating request on a subgraph".into())
-                        } else {
-                            obj.with_mut(|response| *response.response.headers_mut() = headers);
-                            Ok(())
-                        }
-                    }
-                }
-            );
-
-            /*TODO: reenable when https://github.com/apollographql/router/issues/3642 is decided
-            $engine.register_get(
-                "body",
-                |obj: &mut SharedMut<$base::ChunkedRequest>| -> Result<Vec<u8>, Box<EvalAltResult>> {
-                    Ok( obj.with_mut(|request| { request.request.to_vec()}))
-                }
-            );
-
-            $engine.register_set(
-                "body",
-                |obj: &mut SharedMut<$base::ChunkedRequest>, body: Vec<u8>| {
-                    if_subgraph! {
-                        $base => {
-                            let _unused = (obj, body);
-                            Err("cannot mutate originating request on a subgraph".into())
-                        } else {
-                            let bytes = Bytes::from(body);
-                            obj.with_mut(|request| request.request = bytes);
-                            Ok(())
-                        }
-                    }
-                }
-            );*/
-
-            $engine.register_get(
-                "uri",
-                |obj: &mut SharedMut<$base::FirstRequest>| -> Result<Uri, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|request| request.request.uri().clone()))
-                }
-            ).register_get(
-                "uri",
-                |obj: &mut SharedMut<$base::Request>| -> Result<Uri, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|request| request.router_request.uri().clone()))
-                }
-            );
-
-            $engine.register_set(
-                "uri",
-                |obj: &mut SharedMut<$base::FirstRequest>, uri: Uri| {
-                    if_subgraph! {
-                        $base => {
-                            let _unused = (obj, headers);
-                            Err("cannot mutate originating request on a subgraph".into())
-                        } else {
-                            obj.with_mut(|request| *request.request.uri_mut() = uri);
-                            Ok(())
-                        }
-                    }
-                }
-            ).register_set(
-                "uri",
-                |obj: &mut SharedMut<$base::Request>, uri: Uri| {
-                    if_subgraph! {
-                        $base => {
-                            let _unused = (obj, uri);
-                            Err("cannot mutate originating request on a subgraph".into())
-                        } else {
-                            obj.with_mut(|request| *request.router_request.uri_mut() = uri);
-                            Ok(())
-                        }
-                    }
-                }
-            );
-
-            $engine.register_get(
-                "method",
-                |obj: &mut SharedMut<$base::FirstRequest>| -> Result<Method, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|request| request.request.method().clone()))
-                }
-            );
-        )*
-    };
-}
-
-macro_rules! register_rhai_interface {
-    ($engine: ident, $($base: ident), *) => {
-        $(
-            // Context stuff
-            $engine.register_get(
-                "context",
-                |obj: &mut SharedMut<$base::Request>| -> Result<Context, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|request| request.context.clone()))
-                }
-            )
-            .register_get(
-                "context",
-                |obj: &mut SharedMut<$base::Response>| -> Result<Context, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|response| response.context.clone()))
-                }
-            );
-
-            $engine.register_get(
-                "status_code",
-                |obj: &mut SharedMut<$base::Response>| -> Result<StatusCode, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|response| response.response.status()))
-                }
-            );
-
-            $engine.register_set(
-                "context",
-                |obj: &mut SharedMut<$base::Request>, context: Context| {
-                    obj.with_mut(|request| request.context = context);
-                    Ok(())
-                }
-            )
-            .register_set(
-                "context",
-                |obj: &mut SharedMut<$base::Response>, context: Context| {
-                    obj.with_mut(|response| response.context = context);
-                    Ok(())
-                }
-            );
-
-            // Id
-            $engine.register_get(
-                "id",
-                |obj: &mut SharedMut<$base::Request>| -> String {
-                    obj.with_mut(|request| request.context.id.clone())
-                }
-            )
-            .register_get(
-                "id",
-                |obj: &mut SharedMut<$base::Response>| -> String {
-                    obj.with_mut(|response| response.context.id.clone())
-                }
-            );
-
-            // Originating Request
-            $engine.register_get(
-                "headers",
-                |obj: &mut SharedMut<$base::Request>| -> Result<HeaderMap, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|request| request.supergraph_request.headers().clone()))
-                }
-            );
-
-            $engine.register_set(
-                "headers",
-                |obj: &mut SharedMut<$base::Request>, headers: HeaderMap| {
-                    if_subgraph! {
-                        $base => {
-                            let _unused = (obj, headers);
-                            Err("cannot mutate originating request on a subgraph".into())
-                        } else {
-                            obj.with_mut(|request| *request.supergraph_request.headers_mut() = headers);
-                            Ok(())
-                        }
-                    }
-                }
-            );
-
-            $engine.register_get(
-                "method",
-                |obj: &mut SharedMut<$base::Request>| -> Result<Method, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|request| request.supergraph_request.method().clone()))
-                }
-            );
-
-            $engine.register_get(
-                "body",
-                |obj: &mut SharedMut<$base::Request>| -> Result<Request, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|request| request.supergraph_request.body().clone()))
-                }
-            );
-
-            $engine.register_set(
-                "body",
-                |obj: &mut SharedMut<$base::Request>, body: Request| {
-                    if_subgraph! {
-                        $base => {
-                            let _unused = (obj, body);
-                            Err("cannot mutate originating request on a subgraph".into())
-                        } else {
-                            obj.with_mut(|request| *request.supergraph_request.body_mut() = body);
-                            Ok(())
-                        }
-                    }
-                }
-            );
-
-            $engine.register_get(
-                "uri",
-                |obj: &mut SharedMut<$base::Request>| -> Result<Uri, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|request| request.supergraph_request.uri().clone()))
-                }
-            );
-
-            $engine.register_set(
-                "uri",
-                |obj: &mut SharedMut<$base::Request>, uri: Uri| {
-                    if_subgraph! {
-                        $base => {
-                            let _unused = (obj, uri);
-                            Err("cannot mutate originating request on a subgraph".into())
-                        } else {
-                            obj.with_mut(|request| *request.supergraph_request.uri_mut() = uri);
-                            Ok(())
-                        }
-                    }
-                }
-            );
-        )*
-    };
-}
+pub(crate) use types::RhaiExecutionDeferredResponse;
+pub(crate) use types::RhaiExecutionResponse;
+pub(crate) use types::RhaiRouterChunkedRequest;
+pub(crate) use types::RhaiRouterChunkedResponse;
+pub(crate) use types::RhaiRouterFirstRequest;
+pub(crate) use types::RhaiRouterResponse;
+pub(crate) use types::RhaiSupergraphDeferredResponse;
+pub(crate) use types::RhaiSupergraphResponse;
 
 #[derive(Clone, Debug)]
 pub(crate) struct RhaiService {
@@ -1759,16 +1355,9 @@ impl Rhai {
         Ok(())
     }
 
-    pub(super) fn new_rhai_engine(path: Option<PathBuf>, sdl: String, main: PathBuf) -> Engine {
-        let mut engine = Engine::new();
-        // If we pass in a path, use it to configure our engine
-        // with a FileModuleResolver which allows import to work
-        // in scripts.
-        if let Some(scripts) = path {
-            let resolver = FileModuleResolver::new_with_path(scripts);
-            engine.set_module_resolver(resolver);
-        }
-
+    /// Register global modules and common functionality needed by Rhai scripts.
+    /// This is used by both production and test code to ensure consistent engine configuration.
+    pub(crate) fn register_global_modules(engine: &mut Engine) {
         // The macro call creates a Rhai module from the plugin module.
         let mut module = exported_module!(router_plugin);
         combine_with_exported_module!(&mut module, "header", router_header_map);
@@ -1779,8 +1368,38 @@ impl Rhai {
         let base64_module = exported_module!(router_base64);
         let json_module = exported_module!(router_json);
         let sha256_module = exported_module!(router_sha256);
-
         let expansion_module = exported_module!(router_expansion);
+
+        engine
+            // Register our plugin module
+            .register_global_module(module.into())
+            // Register our base64 module (not global)
+            .register_static_module("base64", base64_module.into())
+            // Register our json module (not global)
+            .register_static_module("json", json_module.into())
+            // Register our SHA256 module (not global)
+            .register_static_module("sha256", sha256_module.into())
+            // Register our expansion module (not global)
+            // Hide the fact that it is an expansion module by calling it "env"
+            .register_static_module("env", expansion_module.into())
+            // Register HeaderMap as an iterator so we can loop over contents
+            .register_iterator::<HeaderMap>();
+    }
+
+    pub(super) fn new_rhai_engine(path: Option<PathBuf>, sdl: String, main: PathBuf) -> Engine {
+        let mut engine = Engine::new();
+        // If we pass in a path, use it to configure our engine
+        // with a FileModuleResolver which allows import to work
+        // in scripts.
+        if let Some(scripts) = path {
+            let resolver = FileModuleResolver::new_with_path(scripts);
+            engine.set_module_resolver(resolver);
+        }
+
+        // Register global modules and common functionality
+        Self::register_global_modules(&mut engine);
+        // Add common getter/setters for different types
+        registration::register(&mut engine);
 
         // Share main so we can move copies into each closure as required for logging
         let shared_main = Arc::new(main.display().to_string());
@@ -1799,19 +1418,6 @@ impl Rhai {
             .on_print(move |message| {
                 tracing::info!(%message, target = %print_main);
             })
-            // Register our plugin module
-            .register_global_module(module.into())
-            // Register our base64 module (not global)
-            .register_static_module("base64", base64_module.into())
-            // Register our json module (not global)
-            .register_static_module("json", json_module.into())
-            // Register our SHA256 module (not global)
-            .register_static_module("sha256", sha256_module.into())
-            // Register our expansion module (not global)
-            // Hide the fact that it is an expansion module by calling it "env"
-            .register_static_module("env", expansion_module.into())
-            // Register HeaderMap as an iterator so we can loop over contents
-            .register_iterator::<HeaderMap>()
             // Register a series of logging functions
             .register_fn("log_trace", move |message: Dynamic| {
                 tracing::trace!(%message, target = %trace_main);
@@ -1828,10 +1434,6 @@ impl Rhai {
             .register_fn("log_error", move |message: Dynamic| {
                 tracing::error!(%message, target = %error_main);
             });
-        // Add common getter/setters for different types
-        register_rhai_router_interface!(engine, router);
-        // Add common getter/setters for different types
-        register_rhai_interface!(engine, supergraph, execution, subgraph);
 
         // Since constants in Rhai don't give us the behaviour we expect, let's create some global
         // variables which we use in a variable resolver when we create our engine.
