@@ -594,7 +594,6 @@ async fn test_trace_with_client_version() {
     }
 }
 
-
 #[tokio::test(flavor = "multi_thread")]
 async fn test_metrics_with_client_name() {
     let request = supergraph::Request::fake_builder()
