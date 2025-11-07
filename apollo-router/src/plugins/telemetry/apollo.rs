@@ -421,7 +421,6 @@ pub(crate) enum ForwardHeaders {
     Except(Vec<HeaderName>),
 }
 
-
 schemar_fn!(
     forward_variables_except,
     Vec<String>,
@@ -451,7 +450,6 @@ pub(crate) enum ForwardValues {
     #[schemars(schema_with = "forward_variables_except")]
     Except(Vec<String>),
 }
-
 
 #[derive(Debug, Serialize)]
 pub(crate) enum SingleReport {

@@ -74,14 +74,12 @@ struct AuthenticationPlugin {
     connector: Option<ConnectorAuth>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
-#[derive(Default)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Default)]
 enum OnError {
     Continue,
     #[default]
     Error,
 }
-
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields)]

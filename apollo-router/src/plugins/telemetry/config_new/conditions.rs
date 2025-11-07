@@ -38,7 +38,6 @@ pub(crate) enum Condition<T> {
     False,
 }
 
-
 impl Condition<()> {
     pub(crate) fn empty<T>() -> Condition<T> {
         Condition::True
