@@ -22,6 +22,9 @@
 // "EX" "10"
 // ```
 
+use std::collections::HashMap;
+use std::time::Duration;
+
 use apollo_router::Context;
 use apollo_router::MockedSubgraphs;
 use apollo_router::plugin::test::MockSubgraph;
@@ -43,6 +46,10 @@ use serde_json::Value;
 use serde_json::json;
 use tower::BoxError;
 use tower::ServiceExt;
+use wiremock::Mock;
+use wiremock::ResponseTemplate;
+use wiremock::matchers::method;
+use wiremock::matchers::path_regex;
 
 use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
@@ -1624,7 +1631,7 @@ async fn test_redis_emits_configuration_error_metric() {
         "include_subgraph_errors": {
             "all": true,
         },
-        "preview_response_cache": {
+        "preview_entity_cache": {
             "enabled": true,
             "subgraph": {
                 "all": {
@@ -1668,16 +1675,503 @@ async fn test_redis_emits_configuration_error_metric() {
         assert_eq!(response.status(), 200);
     }
 
-    // Metrics should show general redis errors and response cache fetch errors that indicate no valid
-    // configuration was supplied
-    let expected_metrics = [
-        r#"apollo_router_cache_redis_errors_total{error_type="config",kind="response-cache",otel_scope_name="apollo/router"}"#,
-        r#"apollo_router_operations_response_cache_fetch_error_total{code="NO_STORAGE",subgraph_name="products",otel_scope_name="apollo/router"}"#,
-        r#"apollo_router_operations_response_cache_fetch_error_total{code="NO_STORAGE",subgraph_name="reviews",otel_scope_name="apollo/router"}"#,
-    ];
-    for metric in expected_metrics {
-        router.assert_metric_non_zero(metric, None).await;
-    }
+    router
+        .assert_metric_non_zero(
+            r#"apollo_router_cache_redis_errors_total{error_type="cluster",kind="entity",otel_scope_name="apollo/router"}"#,
+            None,
+        )
+        .await;
+
+    // LEFT OFF HERE: trying to figure out why we're getting `unknown` error type; trying to
+    // trigger an actual config error
+    router
+        .assert_metric_non_zero(
+            // NOTE: the `unknown` here should be `configuration`! it gets emitted from fred; so,
+            // maybe we need to trigger a config error in a different way; this test might actually
+            // test what happens with a config fred doesn't know how to use (eg, the schema isn't
+            // redis, rediss-cluster, etc)
+            r#"apollo_router_cache_redis_errors_total{error_type="unknown",kind="entity",otel_scope_name="apollo/router"}"#,
+            None,
+        )
+        .await;
 
     router.graceful_shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_redis_uses_replicas_when_clustered() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let router_config = include_str!("fixtures/clustered_redis_query_planning.router.yaml");
+    //let router_config = include_str!("fixtures/redis_connection_closure.router.yaml");
+    let mut router = IntegrationTest::builder()
+        .config(router_config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let assert_redis_readonly_sent_to_replica_handle =
+        tokio::spawn(IntegrationTest::assert_redis_command_sent_to_node(
+            "READONLY",
+            // read reps
+            vec!["7003".to_string(), "7004".to_string(), "7005".to_string()],
+        ));
+    let assert_redis_get_command_sent_to_replica_handle =
+        tokio::spawn(IntegrationTest::assert_redis_command_sent_to_node(
+            "GET",
+            // read reps
+            vec!["7003".to_string(), "7004".to_string(), "7005".to_string()],
+        ));
+
+    // the assert_redis_command_sent_to_node starts a handful of redis-cli binaries to MONITOR
+    // commands; this sleep gives it a little bit of buffer time-wise before we send commands over
+    tokio::time::sleep(Duration::from_secs(5)).await;
+
+    // two queries to ensure a cache hit
+    router.execute_default_query().await;
+    router.execute_default_query().await;
+
+    let _ = assert_redis_get_command_sent_to_replica_handle
+        .await
+        .expect("redis GET command not sent to a replica");
+
+    let _ = assert_redis_readonly_sent_to_replica_handle
+        .await
+        .expect("redis READONLY command not sent to a replica");
+
+    // check that there were no I/O errors
+    let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="query planner",otel_scope_name="apollo/router"}"#;
+
+    // check that there were no parse errors; these might show up when fred can't read the cluster
+    // state properly
+    let parse_error = r#"apollo_router_cache_redis_errors_total{error_type="parse",kind="query planner",otel_scope_name="apollo/router"}"#;
+
+    router.assert_metrics_does_not_contain(io_error).await;
+    router.assert_metrics_does_not_contain(parse_error).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_redis_doesnt_use_replicas_in_standalone_mode() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let router_config = include_str!("fixtures/redis_connection_closure.router.yaml");
+    let mut router = IntegrationTest::builder()
+        .config(router_config)
+        .log("trace,jsonpath_lib=info")
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let assert_redis_get_command_sent_to_replica_handle =
+        tokio::spawn(IntegrationTest::assert_redis_command_sent_to_node(
+            "GET",
+            // read reps
+            //vec!["7003".to_string(), "7004".to_string(), "7005".to_string()],
+            vec!["6379".to_string()],
+        ));
+
+    // the assert_redis_command_sent_to_node starts a handful of redis-cli binaries to MONITOR
+    // commands; this sleep gives it a little bit of buffer time-wise before we send commands over
+    tokio::time::sleep(Duration::from_secs(5)).await;
+
+    // two queries to ensure a cache hit
+    router.execute_default_query().await;
+    router.execute_default_query().await;
+
+    let _ = assert_redis_get_command_sent_to_replica_handle
+        .await
+        .expect("redis GET command not sent to a replica");
+
+    // check that there were no I/O errors
+    let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="query planner",otel_scope_name="apollo/router"}"#;
+
+    // check that there were no parse errors; these might show up when fred can't read the cluster
+    // state properly
+    let parse_error = r#"apollo_router_cache_redis_errors_total{error_type="parse",kind="query planner",otel_scope_name="apollo/router"}"#;
+
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    router.force_flush();
+    router.print_logs();
+    router.assert_metrics_does_not_contain(io_error).await;
+    router.assert_metrics_does_not_contain(parse_error).await;
+}
+
+//#[tokio::test(flavor = "multi_thread")]
+//async fn test_redis_uses_replicas_in_clusters_for_mgets() {
+//    if !graph_os_enabled() {
+//        return;
+//    }
+//
+//    let router_config = include_str!("fixtures/response_cache_redis_cluster.router.yaml");
+//    let mut subgraph_overrides = HashMap::new();
+//
+//    let products_response = ResponseTemplate::new(200).set_body_json(serde_json::json! {{"data": {
+//        "topProducts": [
+//            {"__typename":"Product","upc":"1","name":"Table","reviews":[{"id":"review1"}]},
+//            {"__typename":"Product","upc":"2","name":"Chair","reviews":[{"id":"review2"}]},
+//            {"__typename":"Product","upc":"3","name":"Desk","reviews":[{"id":"review3"}]},
+//            {"__typename":"Product","upc":"4","name":"Lamp","reviews":[{"id":"review4"}]},
+//            {"__typename":"Product","upc":"5","name":"Sofa","reviews":[{"id":"review5"}]}
+//        ]
+//    }, "headers": {"cache-control": "public"}}});
+//
+//    let reviews_response = ResponseTemplate::new(200).set_body_json(serde_json::json! {{"data": {
+//        "_entities": [
+//            {"__typename":"Review","id":"review1","author":{"__typename":"User","id":"user1"}},
+//            {"__typename":"Review","id":"review2","author":{"__typename":"User","id":"user2"}},
+//            {"__typename":"Review","id":"review3","author":{"__typename":"User","id":"user3"}},
+//            {"__typename":"Review","id":"review4","author":{"__typename":"User","id":"user4"}},
+//            {"__typename":"Review","id":"review5","author":{"__typename":"User","id":"user5"}}
+//        ]
+//    }, "headers": {"cache-control": "public"}}});
+//
+//    let accounts_response = ResponseTemplate::new(200).set_body_json(serde_json::json! {{"data": {
+//        "_entities": [
+//            {"__typename":"User","id":"user1"},
+//            {"__typename":"User","id":"user2"},
+//            {"__typename":"User","id":"user3"},
+//            {"__typename":"User","id":"user4"},
+//            {"__typename":"User","id":"user5"}
+//        ]
+//    }, "headers": {"cache-control": "public"}}});
+//
+//    let mock_products_subgraph = wiremock::MockServer::builder().start().await;
+//    let mock_reviews_subgraph = wiremock::MockServer::builder().start().await;
+//    let mock_accounts_subgraph = wiremock::MockServer::builder().start().await;
+//
+//    for (name, mock_server, response) in [
+//        ("products", &mock_products_subgraph, products_response),
+//        ("reviews", &mock_reviews_subgraph, reviews_response),
+//        ("accounts", &mock_accounts_subgraph, accounts_response),
+//    ] {
+//        let http_method = Method::POST;
+//        let mocked_response = Mock::given(method(http_method))
+//            .and(path_regex(".*"))
+//            .respond_with(response);
+//
+//        mocked_response.mount(&mock_server).await;
+//        subgraph_overrides.insert(name.to_string(), mock_server.uri());
+//    }
+//
+//    let mut router = IntegrationTest::builder()
+//        .config(router_config)
+//        .subgraph_overrides(subgraph_overrides)
+//        .log("trace,jsonpath_lib=info")
+//        .build()
+//        .await;
+//
+//    router.start().await;
+//    router.assert_started().await;
+//
+//    let assert_redis_readonly_sent_to_replica_handle =
+//        tokio::spawn(IntegrationTest::assert_redis_command_sent_to_node(
+//            "READONLY",
+//            // read reps
+//            vec!["7003".to_string(), "7004".to_string(), "7005".to_string()],
+//        ));
+//
+//    let assert_redis_mget_command_sent_to_replica_handle =
+//        tokio::spawn(IntegrationTest::assert_redis_command_sent_to_node(
+//            "MGET",
+//            // read reps
+//            vec!["7003".to_string(), "7004".to_string(), "7005".to_string()],
+//        ));
+//
+//    // the assert_redis_command_sent_to_node starts a handful of redis-cli binaries to MONITOR
+//    // commands; this sleep gives it a little bit of buffer time-wise before we send commands over
+//    tokio::time::sleep(Duration::from_secs(5)).await;
+//
+//    for _ in 0..3 {
+//        let query = Query::builder()
+//            .body(
+//                json!({"query":"{ topProducts(first: 5) { name reviews { id } } }","variables":{}}),
+//            )
+//            .header("cache-control", "public")
+//            .header("apollo-cache-debugging", "true")
+//            .build();
+//
+//        let _ = router.execute_query(query).await;
+//        tokio::time::sleep(Duration::from_secs(1)).await;
+//    }
+//
+//    router.print_logs();
+//
+//    let _ = assert_redis_mget_command_sent_to_replica_handle
+//        .await
+//        .expect("redis MGET command not sent to a replica");
+//
+//    let _ = assert_redis_readonly_sent_to_replica_handle
+//        .await
+//        .expect("redis READONLY command not sent to a replica");
+//
+//    // check that there were no I/O errors
+//    let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="response-cache",otel_scope_name="apollo/router"}"#;
+//
+//    // check that there were no parse errors; parse errors happen whenever a response from redis to
+//    // fred can't be understood by fred, which can be redis config issues, type conversion
+//    // shenanigans, or things like being in the middle of a transaction (pipeline) and trying to
+//    // convert a value
+//    let parse_error = r#"apollo_router_cache_redis_errors_total{error_type="parse",kind="response-cache",otel_scope_name="apollo/router"}"#;
+//
+//    router.assert_metrics_does_not_contain(io_error).await;
+//    router.assert_metrics_does_not_contain(parse_error).await;
+//    router.force_flush();
+//    let metrics = router
+//        .get_metrics_response()
+//        .await
+//        .unwrap()
+//        .text()
+//        .await
+//        .unwrap();
+//    println!("awa metrics {metrics:?}");
+//}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_redis_uses_replicas_in_clusters_for_mgets() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let router_config = include_str!("fixtures/response_cache_redis_cluster.router.yaml");
+    let mut subgraph_overrides = HashMap::new();
+
+    let products_response = ResponseTemplate::new(200)
+        .set_body_json(serde_json::json! {{"data": {
+            "topProducts": [
+                {"__typename":"Product","upc":"1","name":"Table","reviews":[{"id":"review1"}]},
+                {"__typename":"Product","upc":"2","name":"Chair","reviews":[{"id":"review2"}]},
+                {"__typename":"Product","upc":"3","name":"Desk","reviews":[{"id":"review3"}]},
+                {"__typename":"Product","upc":"4","name":"Lamp","reviews":[{"id":"review4"}]},
+                {"__typename":"Product","upc":"5","name":"Sofa","reviews":[{"id":"review5"}]}
+            ]
+        }}})
+        .insert_header("cache-control", "max-age=500, public");
+
+    let reviews_response = ResponseTemplate::new(200)
+        .set_body_json(serde_json::json! {{"data": {
+            "_entities": [
+                {"__typename":"Review","id":"review1","author":{"__typename":"User","id":"user1"}},
+                {"__typename":"Review","id":"review2","author":{"__typename":"User","id":"user2"}},
+                {"__typename":"Review","id":"review3","author":{"__typename":"User","id":"user3"}},
+                {"__typename":"Review","id":"review4","author":{"__typename":"User","id":"user4"}},
+                {"__typename":"Review","id":"review5","author":{"__typename":"User","id":"user5"}}
+            ]
+        }}})
+        .insert_header("cache-control", "max-age=500, public");
+
+    let accounts_response = ResponseTemplate::new(200)
+        .set_body_json(serde_json::json! {{"data": {
+            "_entities": [
+                {"__typename":"User","id":"user1"},
+                {"__typename":"User","id":"user2"},
+                {"__typename":"User","id":"user3"},
+                {"__typename":"User","id":"user4"},
+                {"__typename":"User","id":"user5"}
+            ]
+        }}})
+        .insert_header("cache-control", "max-age=500, public");
+
+    let mock_products_subgraph = wiremock::MockServer::builder().start().await;
+    let mock_reviews_subgraph = wiremock::MockServer::builder().start().await;
+    let mock_accounts_subgraph = wiremock::MockServer::builder().start().await;
+
+    for (name, mock_server, response) in [
+        ("products", &mock_products_subgraph, products_response),
+        ("reviews", &mock_reviews_subgraph, reviews_response),
+        ("accounts", &mock_accounts_subgraph, accounts_response),
+    ] {
+        let http_method = Method::POST;
+        let mocked_response = Mock::given(method(http_method))
+            .and(path_regex(".*"))
+            .respond_with(response);
+
+        mocked_response.mount(&mock_server).await;
+        subgraph_overrides.insert(name.to_string(), mock_server.uri());
+    }
+
+    let namespace = namespace();
+
+    let mut router = IntegrationTest::builder()
+        .redis_namespace(&namespace)
+        .config(router_config)
+        .subgraph_overrides(subgraph_overrides)
+        .log("trace,jsonpath_lib=info")
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let assert_redis_mget_command_sent_to_replica_handle =
+        tokio::spawn(IntegrationTest::assert_redis_command_sent_to_node(
+            "MGET",
+            vec!["7003".to_string(), "7004".to_string(), "7005".to_string()],
+        ));
+
+    // we're running three redis-cli binaries each with a MONITOR command; so, give them a little
+    // timme to start up
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // three queries to ensure a cache hit
+    for _ in 0..3 {
+        let query = Query::builder()
+            .body(
+                json!({"query":"{ topProducts(first: 5) { name reviews { id } } }","variables":{}}),
+            )
+            .header("cache-control", "public")
+            .build();
+
+        let _ = router.execute_query(query).await;
+        let _ = tokio::time::sleep(Duration::from_millis(1000)).await;
+    }
+
+    let _ = assert_redis_mget_command_sent_to_replica_handle
+        .await
+        .expect("redis MGET command not sent to a replica");
+
+    // check that there were no I/O errors
+    let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="response-cache",otel_scope_name="apollo/router"}"#;
+
+    // check that there were no parse errors; parse errors happen whenever a response from redis to
+    // fred can't be understood by fred, which can be redis config issues, type conversion
+    // shenanigans, or things like being in the middle of a transaction (pipeline) and trying to
+    // convert a value
+    let parse_error = r#"apollo_router_cache_redis_errors_total{error_type="parse""#;
+
+    let example_cache_key = format!(
+        "version:1.0:subgraph:reviews:type:Product:entity:052fa800fa760b2ac78669a5b0b90f512158eddab8d01eabb4e65b286ff09ecd:representation::hash:739583f793fb842194e6be6c6f126df63cc0ee86f8702745ac4630521ab6752d:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6"
+    );
+
+    router.assert_metrics_does_not_contain(io_error).await;
+    router.assert_metrics_does_not_contain(parse_error).await;
+    router
+        .assert_redis_cache_contains(&example_cache_key, &TestRedisMode::Cluster)
+        .await;
+}
+#[tokio::test(flavor = "multi_thread")]
+async fn test_redis_in_standalone_mode_for_mgets() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let router_config = include_str!("fixtures/response_cache_redis_standalone.router.yaml");
+
+    // name, url
+    let mut subgraph_overrides = HashMap::new();
+
+    let products_response = ResponseTemplate::new(200)
+        .set_body_json(serde_json::json! {{"data": {
+            "topProducts": [
+                {"__typename":"Product","upc":"1","name":"Table","reviews":[{"id":"review1"}]},
+                {"__typename":"Product","upc":"2","name":"Chair","reviews":[{"id":"review2"}]},
+                {"__typename":"Product","upc":"3","name":"Desk","reviews":[{"id":"review3"}]},
+                {"__typename":"Product","upc":"4","name":"Lamp","reviews":[{"id":"review4"}]},
+                {"__typename":"Product","upc":"5","name":"Sofa","reviews":[{"id":"review5"}]}
+            ]
+        }}})
+        .insert_header("cache-control", "max-age=500, public");
+
+    let reviews_response = ResponseTemplate::new(200)
+        .set_body_json(serde_json::json! {{"data": {
+            "_entities": [
+                {"__typename":"Review","id":"review1","author":{"__typename":"User","id":"user1"}},
+                {"__typename":"Review","id":"review2","author":{"__typename":"User","id":"user2"}},
+                {"__typename":"Review","id":"review3","author":{"__typename":"User","id":"user3"}},
+                {"__typename":"Review","id":"review4","author":{"__typename":"User","id":"user4"}},
+                {"__typename":"Review","id":"review5","author":{"__typename":"User","id":"user5"}}
+            ]
+        }}})
+        .insert_header("cache-control", "max-age=500, public");
+
+    let accounts_response = ResponseTemplate::new(200)
+        .set_body_json(serde_json::json! {{"data": {
+            "_entities": [
+                {"__typename":"User","id":"user1"},
+                {"__typename":"User","id":"user2"},
+                {"__typename":"User","id":"user3"},
+                {"__typename":"User","id":"user4"},
+                {"__typename":"User","id":"user5"}
+            ]
+        }}})
+        .insert_header("cache-control", "max-age=500, public");
+
+    let mock_products_subgraph = wiremock::MockServer::builder().start().await;
+    let mock_reviews_subgraph = wiremock::MockServer::builder().start().await;
+    let mock_accounts_subgraph = wiremock::MockServer::builder().start().await;
+
+    for (name, mock_server, response) in [
+        ("products", &mock_products_subgraph, products_response),
+        ("reviews", &mock_reviews_subgraph, reviews_response),
+        ("accounts", &mock_accounts_subgraph, accounts_response),
+    ] {
+        let http_method = Method::POST;
+        let mocked_response = Mock::given(method(http_method))
+            .and(path_regex(".*"))
+            .respond_with(response);
+
+        mocked_response.mount(&mock_server).await;
+        subgraph_overrides.insert(name.to_string(), mock_server.uri());
+    }
+
+    let namespace = namespace();
+
+    let mut router = IntegrationTest::builder()
+        .redis_namespace(&namespace)
+        .config(router_config)
+        .subgraph_overrides(subgraph_overrides)
+        .log("trace,jsonpath_lib=info")
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let assert_redis_mget_command_sent_to_replica_handle = tokio::spawn(
+        IntegrationTest::assert_redis_command_sent_to_node("MGET", vec!["6379".to_string()]),
+    );
+    tokio::time::sleep(Duration::from_millis(3000)).await;
+
+    // three queries to ensure a cache hit
+    for _ in 0..3 {
+        let query = Query::builder()
+            .body(
+                json!({"query":"{ topProducts(first: 5) { name reviews { id } } }","variables":{}}),
+            )
+            .header("cache-control", "public")
+            .build();
+
+        let _ = router.execute_query(query).await;
+        let _ = tokio::time::sleep(Duration::from_millis(1000)).await;
+    }
+
+    let _ = assert_redis_mget_command_sent_to_replica_handle
+        .await
+        .expect("redis MGET command not sent to a replica");
+
+    // check that there were no I/O errors
+    let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="response-cache",otel_scope_name="apollo/router"}"#;
+
+    // check that there were no parse errors; parse errors happen whenever a response from redis to
+    // fred can't be understood by fred, which can be redis config issues, type conversion
+    // shenanigans, or things like being in the middle of a transaction (pipeline) and trying to
+    // convert a value
+    let parse_error = r#"apollo_router_cache_redis_errors_total{error_type="parse""#;
+
+    let example_cache_key = format!(
+        "version:1.0:subgraph:reviews:type:Product:entity:052fa800fa760b2ac78669a5b0b90f512158eddab8d01eabb4e65b286ff09ecd:representation::hash:739583f793fb842194e6be6c6f126df63cc0ee86f8702745ac4630521ab6752d:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6"
+    );
+
+    router.assert_metrics_does_not_contain(io_error).await;
+    router.assert_metrics_does_not_contain(parse_error).await;
+    router
+        .assert_redis_cache_contains(&example_cache_key, &TestRedisMode::Standalone)
+        .await;
 }

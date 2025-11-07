@@ -216,6 +216,7 @@ pub struct IntegrationTest {
     _subgraph_overrides: HashMap<String, String>,
     bind_address: Arc<Mutex<Option<SocketAddr>>>,
     redis_namespace: String,
+    redis_urls: Option<Vec<String>>,
     log: String,
     subgraph_context: Arc<Mutex<Option<SpanContext>>>,
     logs: Vec<String>,
@@ -276,6 +277,7 @@ impl IntegrationTest {
             &self._apollo_otlp_server.uri().to_string(),
             None, // Don't override bind address here
             &self.redis_namespace,
+            &self.redis_urls,
             Some(&self.port_replacements),
         );
 
@@ -561,8 +563,10 @@ impl IntegrationTest {
         http_method: Option<String>,
         jwt: Option<String>,
         env: Option<HashMap<String, OsString>>,
+        redis_urls: Option<Vec<String>>,
+        redis_namespace: Option<String>,
     ) -> Self {
-        let redis_namespace = Uuid::new_v4().to_string();
+        let redis_namespace = redis_namespace.unwrap_or_else(|| Uuid::new_v4().to_string());
         let telemetry = telemetry.unwrap_or_default();
         let extra_propagator = extra_propagator.unwrap_or_default();
         let tracer_provider_client = telemetry.tracer_provider("client");
@@ -595,6 +599,7 @@ impl IntegrationTest {
             &apollo_otlp_endpoint,
             None,
             &redis_namespace,
+            &redis_urls,
             None,
         );
 
@@ -692,6 +697,7 @@ impl IntegrationTest {
             telemetry,
             extra_propagator,
             redis_namespace,
+            redis_urls,
             log: log.unwrap_or_else(|| "error,apollo_router=info".to_owned()),
             subgraph_context,
             logs: vec![],
@@ -872,6 +878,7 @@ impl IntegrationTest {
                 &self._apollo_otlp_server.uri().to_string(),
                 None,
                 &self.redis_namespace,
+                &self.redis_urls,
                 Some(&self.port_replacements),
             ),
         )
@@ -1415,6 +1422,82 @@ impl IntegrationTest {
         }
     }
 
+    /// Assert that some metric is non-zero. Useful for those metrics that are non-zero but whose
+    /// values might change across integration test runs.
+    ///
+    /// example use: `.assert_metric_non_zero("some_metric_name{label="example"}", None)`
+    ///
+    /// Note: make sure you strip off the value at the end or you'll potentially get false
+    /// negatives
+    #[allow(dead_code)]
+    pub async fn assert_metric_non_zero(&self, text: &str, duration: Option<Duration>) {
+        let now = Instant::now();
+        let mut last_metrics = String::new();
+
+        let pattern = regex::escape(text);
+        let pattern = format!(
+            // disjunction between two patterns: the first (before the `|`) says to look for a value
+            // starting with a digit between 1-9, matching however many, optionally with a decimal; the
+            // second pattern matches values starting with 0 and then a decimal (both required), at least
+            // on non-zero digit, and then however many (if any) other digits
+            "(?m)^{}\\s+([1-9]\\d*(\\.\\d+)?|0\\.[0-9]*[1-9][0-9]*)",
+            pattern
+        );
+        let re = Regex::new(&format!("(?m)^{}", pattern)).expect("Invalid regex");
+
+        while now.elapsed() < duration.unwrap_or_else(|| Duration::from_secs(15)) {
+            if let Ok(metrics) = self
+                .get_metrics_response()
+                .await
+                .expect("failed to fetch metrics")
+                .text()
+                .await
+            {
+                if re.is_match(&metrics) {
+                    return;
+                }
+                last_metrics = metrics;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("'{text}' not detected in metrics\n{last_metrics}");
+    }
+
+    // TODO: docs
+    #[allow(dead_code)]
+    pub async fn assert_metric_zero(&self, text: &str, duration: Option<Duration>) {
+        let now = Instant::now();
+        let mut last_metrics = String::new();
+
+        let pattern = regex::escape(text);
+        let pattern_exists = Regex::new(&format!("(?m)^{pattern}")).expect("Invalid regex");
+        let matches_zero_re =
+            Regex::new(&format!("(?m)^{}\\s+0(\\s|$)", pattern)).expect("Invalid regex");
+
+        while now.elapsed() < duration.unwrap_or_else(|| Duration::from_secs(15)) {
+            if let Ok(metrics) = self
+                .get_metrics_response()
+                .await
+                .expect("failed to fetch metrics")
+                .text()
+                .await
+            {
+                // metric exists and matches zero
+                if pattern_exists.is_match(&metrics) && matches_zero_re.is_match(&metrics) {
+                    return;
+                }
+                last_metrics = metrics;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        if pattern_exists.is_match(&last_metrics) {
+            panic!("'{text}' detected in metrics but was non-zero\n{last_metrics}");
+        } else {
+            panic!("'{text}' not detected in metrics\n{last_metrics}");
+        }
+    }
+
     #[allow(dead_code)]
     pub async fn assert_shutdown(&mut self) {
         let router = self.router.as_mut().expect("router must have been started");
@@ -1490,74 +1573,86 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn clear_redis_cache(&self) {
-        let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
+        let urls = self.redis_urls.as_ref().expect("no redis urls");
 
-        let client = RedisClient::new(config, None, None, None);
-        let connection_task = client.connect();
-        client
-            .wait_for_connect()
-            .await
-            .expect("could not connect to redis");
-        let namespace = &self.redis_namespace;
-        let mut scan = client.scan(format!("{namespace}:*"), None, Some(ScanType::String));
-        while let Some(result) = scan.next().await {
-            if let Some(page) = result.expect("could not scan redis").take_results() {
-                for key in page {
-                    let key = key.as_str().expect("key should be a string");
-                    if key.starts_with(&self.redis_namespace) {
-                        client
-                            .del::<usize, _>(key)
-                            .await
-                            .expect("could not delete key");
+        for url in urls {
+            let config = RedisConfig::from_url(url).unwrap();
+
+            let client = RedisClient::new(config, None, None, None);
+            let connection_task = client.connect();
+            client
+                .wait_for_connect()
+                .await
+                .expect("could not connect to redis");
+
+            if client.
+            let namespace = &self.redis_namespace;
+            let mut scan = client.scan(format!("{namespace}:*"), None, Some(ScanType::String));
+            while let Some(result) = scan.next().await {
+                if let Some(page) = result.expect("could not scan redis").take_results() {
+                    for key in page {
+                        let key = key.as_str().expect("key should be a string");
+                        if key.starts_with(&self.redis_namespace) {
+                            client
+                                .del::<usize, _>(key)
+                                .await
+                                .expect("could not delete key");
+                        }
                     }
                 }
             }
-        }
 
-        client.quit().await.expect("could not quit redis");
-        // calling quit ends the connection and event listener tasks
-        let _ = connection_task.await;
+            client.quit().await.expect("could not quit redis");
+            // calling quit ends the connection and event listener tasks
+            let _ = connection_task.await;
+        }
     }
 
     #[allow(dead_code)]
     pub async fn assert_redis_cache_contains(&self, key: &str, ignore: Option<&str>) -> String {
-        let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
-        let client = RedisClient::new(config, None, None, None);
-        let connection_task = client.connect();
-        client.wait_for_connect().await.unwrap();
-        let redis_namespace = &self.redis_namespace;
-        let namespaced_key = format!("{redis_namespace}:{key}");
-        let s = match client.get(&namespaced_key).await {
-            Ok(s) => s,
-            Err(e) => {
-                println!("non-ignored keys in the same namespace in Redis:");
+        let urls = self.redis_urls.as_ref().expect("no redis urls");
 
-                let mut scan = client.scan(
-                    format!("{redis_namespace}:*"),
-                    Some(u32::MAX),
-                    Some(ScanType::String),
-                );
+        // this should still work for a cluster, as the `get` will be directed to the right node
+                let url = urls.iter().next();
 
-                while let Some(result) = scan.next().await {
-                    let keys = result.as_ref().unwrap().results().as_ref().unwrap();
-                    for key in keys {
-                        let key = key.as_str().expect("key should be a string");
-                        let unnamespaced_key = key.replace(&format!("{redis_namespace}:"), "");
-                        if Some(unnamespaced_key.as_str()) != ignore {
-                            println!("\t{unnamespaced_key}");
+            let config = RedisConfig::from_url(url).unwrap();
+            let client = RedisClient::new(config, None, None, None);
+            let connection_task = client.connect();
+            client.wait_for_connect().await.unwrap();
+            let redis_namespace = &self.redis_namespace;
+            let namespaced_key = format!("{redis_namespace}:{key}");
+            let s = match client.get(&namespaced_key).await {
+                Ok(s) => {}
+                Err(e) => {
+                    println!("non-ignored keys in the same namespace in Redis:");
+
+                    let mut scan = client.scan(
+                        format!("{redis_namespace}:*"),
+                        Some(u32::MAX),
+                        Some(ScanType::String),
+                    );
+
+                    while let Some(result) = scan.next().await {
+                        let keys = result.as_ref().unwrap().results().as_ref().unwrap();
+                        for key in keys {
+                            let key = key.as_str().expect("key should be a string");
+                            let unnamespaced_key = key.replace(&format!("{redis_namespace}:"), "");
+                            if Some(unnamespaced_key.as_str()) != ignore {
+                                println!("\t{unnamespaced_key}");
+                            }
                         }
                     }
+                    panic!(
+                        "key {key} not found: {e}\n This may be caused by a number of things including federation version changes"
+                    );
                 }
-                panic!(
-                    "key {key} not found: {e}\n This may be caused by a number of things including federation version changes"
-                );
-            }
-        };
+            };
 
-        client.quit().await.unwrap();
-        // calling quit ends the connection and event listener tasks
-        let _ = connection_task.await;
-        s
+            client.quit().await.unwrap();
+            // calling quit ends the connection and event listener tasks
+            let _ = connection_task.await;
+            s
+
     }
 }
 
@@ -1579,6 +1674,7 @@ fn merge_overrides(
     apollo_otlp_endpoint: &str,
     bind_addr: Option<SocketAddr>,
     redis_namespace: &str,
+    redis_urls: &Option<Vec<String>>,
     port_replacements: Option<&HashMap<String, u16>>,
 ) -> String {
     let bind_addr = bind_addr
@@ -1707,21 +1803,45 @@ fn merge_overrides(
         );
 
     // Set query plan redis namespace
-    if let Some(query_plan) = config
-        .as_object_mut()
-        .and_then(|o| o.get_mut("supergraph"))
-        .and_then(|o| o.as_object_mut())
-        .and_then(|o| o.get_mut("query_planning"))
-        .and_then(|o| o.as_object_mut())
-        .and_then(|o| o.get_mut("cache"))
-        .and_then(|o| o.as_object_mut())
-        .and_then(|o| o.get_mut("redis"))
-        .and_then(|o| o.as_object_mut())
+
+    if let Some(query_plan) =
+        config["supergraph"]["query_planning"]["cache"]["redis"].as_object_mut()
     {
-        query_plan.insert("namespace".to_string(), redis_namespace.into());
+        merge_overrides_redis_config(query_plan, redis_namespace, redis_urls.clone());
+    }
+
+    if let Some(response_cache_config) =
+        config["preview_response_cache"]["subgraph"].as_object_mut()
+    {
+        if let Some(all) = response_cache_config["all"]["redis"].as_object_mut() {
+            merge_overrides_redis_config(all, redis_namespace, redis_urls.clone());
+        }
+
+        if let Some(subgraphs) = response_cache_config["subgraphs"].as_object_mut() {
+            for (_, subgraph_config) in subgraphs.iter_mut() {
+                if let Some(subgraph_config) = subgraph_config["redis"].as_object_mut() {
+                    merge_overrides_redis_config(
+                        subgraph_config,
+                        redis_namespace,
+                        redis_urls.clone(),
+                    );
+                }
+            }
+        }
     }
 
     serde_yaml::to_string(&config).unwrap()
+}
+
+fn merge_overrides_redis_config(
+    redis_config: &mut serde_json::Map<String, Value>,
+    namespace: &str,
+    urls: Option<Vec<String>>,
+) {
+    redis_config.insert("namespace".to_string(), namespace.into());
+    if let Some(urls) = urls {
+        redis_config.insert("urls".to_string(), urls.into());
+    }
 }
 
 #[allow(dead_code)]
