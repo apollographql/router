@@ -72,6 +72,8 @@ impl AllocationStats {
 
     /// Get the root context by traversing up the parent chain.
     /// Returns self if this is already a root context.
+    #[inline]
+    #[allow(dead_code)]
     pub(crate) fn root(&self) -> &Self {
         let mut current = self;
         while let Some(parent) = &current.parent {
@@ -150,6 +152,7 @@ impl AllocationStats {
 
     /// Get the current net allocated bytes (allocated + zeroed - deallocated).
     #[inline]
+    #[allow(dead_code)]
     pub(crate) fn net_allocated(&self) -> usize {
         let allocated = self.bytes_allocated();
         let zeroed = self.bytes_zeroed();
@@ -190,13 +193,6 @@ thread_local! {
 pub(crate) struct MemoryTrackedFuture<F> {
     inner: F,
     stats: Arc<AllocationStats>,
-}
-
-impl<F> MemoryTrackedFuture<F> {
-    /// Create a new memory tracked future with explicit allocation stats.
-    fn new(inner: F, stats: Arc<AllocationStats>) -> Self {
-        Self { inner, stats }
-    }
 }
 
 impl<F: Future> Future for MemoryTrackedFuture<F> {
@@ -253,6 +249,7 @@ pub(crate) fn current() -> Option<Arc<AllocationStats>> {
 /// If a parent context exists, creates a child context that tracks to the parent.
 /// If no parent exists, creates a new root context with the given name.
 /// This is useful for tracking allocations in synchronous code or threads.
+#[allow(dead_code)]
 pub(crate) fn with_memory_tracking<F, R>(name: &'static str, f: F) -> R
 where
     F: FnOnce() -> R,
@@ -704,5 +701,50 @@ mod tests {
         }
         .with_memory_tracking("root")
         .await;
+    }
+
+    #[test]
+    fn test_dealloc_tracking() {
+        let stats = with_memory_tracking("dealloc_test", || {
+            let _v = Vec::<u8>::with_capacity(1000);
+            current().expect("stats should be set")
+        });
+
+        assert_eq!(stats.bytes_deallocated(), 1000);
+    }
+
+    #[test]
+    fn test_zeroed_tracking() {
+        let stats = with_memory_tracking("zeroed_test", || {
+            unsafe {
+                let layout = Layout::new::<u64>();
+                let ptr = std::alloc::alloc_zeroed(layout);
+
+                std::alloc::dealloc(ptr, layout);
+            }
+            current().expect("stats should be set")
+        });
+
+        assert_eq!(stats.bytes_zeroed(), 8);
+    }
+
+    #[test]
+    fn test_realloc_tracking() {
+        let stats = with_memory_tracking("realloc_test", || {
+            let layout = Layout::array::<u32>(4).unwrap();
+
+            unsafe {
+                let ptr = std::alloc::alloc(layout);
+
+                let new_size = 8 * std::mem::size_of::<u32>();
+                let new_ptr = std::alloc::realloc(ptr, layout, new_size);
+
+                let final_layout = Layout::from_size_align(new_size, layout.align()).unwrap();
+                std::alloc::dealloc(new_ptr, final_layout);
+            }
+            current().expect("stats should be set")
+        });
+
+        assert_eq!(stats.bytes_reallocated(), 32);
     }
 }
