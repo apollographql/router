@@ -8,7 +8,6 @@ use std::process::ExitCode;
 
 use anyhow::Error as AnyError;
 use anyhow::anyhow;
-use serde::Deserialize;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::parser::LineColumn;
 use apollo_federation::ApiSchemaOptions;
@@ -30,6 +29,7 @@ use apollo_federation::subgraph::SubgraphError;
 use apollo_federation::subgraph::typestate;
 use apollo_federation::supergraph as new_supergraph;
 use clap::Parser;
+use serde::Deserialize;
 use tracing_subscriber::prelude::*;
 
 mod bench;
@@ -303,21 +303,27 @@ fn compose_files_inner(
 fn compose_from_config_inner(
     config_path: &Path,
 ) -> Result<composition::Supergraph<composition::Satisfiable>, Vec<CompositionError>> {
-    let config_str = std::fs::read_to_string(config_path)
-        .map_err(|e| vec![CompositionError::MergeError { error: SingleFederationError::Internal {
-            message: format!("Failed to read config file: {}", e),
-        }}])?;
-    
-    let config: SupergraphConfig = serde_yaml::from_str(&config_str)
-        .map_err(|e| vec![CompositionError::MergeError { error: SingleFederationError::Internal {
-            message: format!("Failed to parse YAML config: {}", e),
-        }}])?;
+    let config_str = std::fs::read_to_string(config_path).map_err(|e| {
+        vec![CompositionError::MergeError {
+            error: SingleFederationError::Internal {
+                message: format!("Failed to read config file: {}", e),
+            },
+        }]
+    })?;
+
+    let config: SupergraphConfig = serde_yaml::from_str(&config_str).map_err(|e| {
+        vec![CompositionError::MergeError {
+            error: SingleFederationError::Internal {
+                message: format!("Failed to parse YAML config: {}", e),
+            },
+        }]
+    })?;
 
     let mut subgraphs = Vec::new();
     let mut errors = Vec::new();
-    
+
     let config_dir = config_path.parent().unwrap_or_else(|| Path::new("."));
-    
+
     for (name, subgraph_config) in config.subgraphs {
         let doc_str = if let Some(sdl) = subgraph_config.schema.sdl {
             sdl
@@ -328,14 +334,18 @@ fn compose_from_config_inner(
                 config_dir.join(file_path)
             };
             // Follow the same pattern as compose_files_inner - use unwrap for file I/O errors
-            std::fs::read_to_string(&full_path)
-                .unwrap_or_else(|e| panic!("Failed to read schema file for subgraph '{}': {}", name, e))
+            std::fs::read_to_string(&full_path).unwrap_or_else(|e| {
+                panic!("Failed to read schema file for subgraph '{}': {}", name, e)
+            })
         } else {
             // Return early with a composition error for missing schema specification
-            return Err(vec![CompositionError::MergeError { 
+            return Err(vec![CompositionError::MergeError {
                 error: SingleFederationError::Internal {
-                    message: format!("Subgraph '{}' must specify either 'sdl' or 'file' in schema", name),
-                }
+                    message: format!(
+                        "Subgraph '{}' must specify either 'sdl' or 'file' in schema",
+                        name
+                    ),
+                },
             }]);
         };
 
@@ -349,7 +359,7 @@ fn compose_from_config_inner(
             }
         }
     }
-    
+
     if !errors.is_empty() {
         // Subgraph errors
         let mut composition_errors = Vec::new();
@@ -591,7 +601,7 @@ fn cmd_compose(file_paths: &[PathBuf], config_path: Option<&PathBuf>) -> Result<
     } else {
         bail!("Error: must provide either schema files or --config");
     };
-    
+
     println!("{}", supergraph.schema().schema());
     let hints = supergraph.hints();
     if !hints.is_empty() {
