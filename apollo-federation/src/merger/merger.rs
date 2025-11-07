@@ -41,6 +41,8 @@ use crate::link::join_spec_definition::JOIN_DIRECTIVE_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::join_spec_definition::JOIN_GRAPH_ARGUMENT_NAME;
 use crate::link::join_spec_definition::JOIN_VERSIONS;
 use crate::link::join_spec_definition::JoinSpecDefinition;
+use crate::link::link_spec_definition::LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME;
+use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
 use crate::link::link_spec_definition::LINK_VERSIONS;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
@@ -576,12 +578,9 @@ impl Merger {
             .all_composed_core_features()
             .iter()
         {
-            let Some(feature_definition) = SPEC_REGISTRY.get_definition(&feature.url) else {
-                continue;
-            };
             let imports = directives
                 .iter()
-                .map(|(alias, original)| {
+                .map(|(original, alias)| {
                     if *alias == *original {
                         Import {
                             alias: None,
@@ -597,17 +596,37 @@ impl Merger {
                     }
                 })
                 .collect_vec();
-            self.link_spec_definition.apply_feature_to_schema(
-                &mut self.merged,
-                *feature_definition,
-                None,
-                feature_definition.purpose(),
-                if imports.is_empty() {
-                    None
-                } else {
-                    Some(imports)
-                },
-            )?;
+
+            if let Some(feature_definition) = SPEC_REGISTRY.get_definition(&feature.url) {
+                self.link_spec_definition.apply_feature_to_schema(
+                    &mut self.merged,
+                    *feature_definition,
+                    None,
+                    feature_definition.purpose(),
+                    if imports.is_empty() {
+                        None
+                    } else {
+                        Some(imports)
+                    },
+                )?;
+            } else {
+                let mut directive =
+                    Directive::new(self.link_spec_definition.url().identity.name.clone());
+                directive.arguments.push(Node::new(Argument {
+                    name: LINK_DIRECTIVE_URL_ARGUMENT_NAME,
+                    value: Node::new(feature.url.to_string().into()),
+                }));
+                if !imports.is_empty() {
+                    directive.arguments.push(Node::new(Argument {
+                        name: LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME,
+                        value: Node::new(Value::List(
+                            imports.into_iter().map(|i| Node::new(i.into())).collect(),
+                        )),
+                    }));
+                }
+                SchemaDefinitionPosition
+                    .insert_directive(&mut self.merged, Component::new(directive))?;
+            }
         }
         Ok(())
     }
@@ -765,6 +784,9 @@ impl Merger {
             for (name, definition) in subgraph.schema().schema().directive_definitions.iter() {
                 if self.merged.get_directive_definition(name).is_none()
                     && self.is_merged_directive_definition(&subgraph.name, definition)
+                    && !self
+                        .compose_directive_manager
+                        .has_latest_directive_definition(name)
                 {
                     let pos = DirectiveDefinitionPosition {
                         directive_name: name.clone(),
@@ -1456,52 +1478,10 @@ impl Merger {
         from_idx: usize,
         field: &ObjectOrInterfaceFieldDefinitionPosition,
     ) -> Result<Option<(String, String)>, FederationError> {
-        // Check the overriding field for @external, @requires or @provides
-        let overriding_subgraph = &self.subgraphs[overriding_idx];
-        let overriding_subgraph_name = &self.names[overriding_idx];
-        let field_pos: FieldDefinitionPosition = field.clone().into();
-
-        // Check if the overriding field itself is marked @external
-        if overriding_subgraph.metadata().is_field_external(&field_pos)
-            && let Ok(Some(external_name)) = overriding_subgraph.external_directive_name()
-        {
-            return Ok(Some((
-                external_name.to_string(),
-                overriding_subgraph_name.clone(),
-            )));
-        }
-
-        if let Ok(Some(requires_name)) = overriding_subgraph.requires_directive_name()
-            && field.has_applied_directive(overriding_subgraph.schema(), &requires_name)
-        {
-            return Ok(Some((
-                requires_name.to_string(),
-                overriding_subgraph_name.clone(),
-            )));
-        }
-
-        if let Ok(Some(provides_name)) = overriding_subgraph.provides_directive_name()
-            && field.has_applied_directive(overriding_subgraph.schema(), &provides_name)
-        {
-            return Ok(Some((
-                provides_name.to_string(),
-                overriding_subgraph_name.clone(),
-            )));
-        }
-
-        // Check the from field for @external, @requires, or @provides
         let from_subgraph = &self.subgraphs[from_idx];
         let from_subgraph_name = &self.names[from_idx];
 
-        if from_subgraph.metadata().is_field_external(&field_pos)
-            && let Ok(Some(external_name)) = from_subgraph.external_directive_name()
-        {
-            return Ok(Some((
-                external_name.to_string(),
-                from_subgraph_name.clone(),
-            )));
-        }
-
+        // Check for conflict with @requires
         if let Ok(Some(requires_name)) = from_subgraph.requires_directive_name()
             && field.has_applied_directive(from_subgraph.schema(), &requires_name)
         {
@@ -1511,12 +1491,25 @@ impl Merger {
             )));
         }
 
+        // Check for conflict with @provides
         if let Ok(Some(provides_name)) = from_subgraph.provides_directive_name()
             && field.has_applied_directive(from_subgraph.schema(), &provides_name)
         {
             return Ok(Some((
                 provides_name.to_string(),
                 from_subgraph_name.clone(),
+            )));
+        }
+
+        // Check for conflict with @external
+        let overriding_subgraph_name = &self.names[overriding_idx];
+        let field_pos: FieldDefinitionPosition = field.clone().into();
+        if let Ok(Some(external_name)) = from_subgraph.external_directive_name()
+            && self.is_field_external(overriding_idx, &field_pos)
+        {
+            return Ok(Some((
+                external_name.to_string(),
+                overriding_subgraph_name.clone(),
             )));
         }
 
@@ -1720,14 +1713,21 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
 
     fn merge_directive_definitions(&mut self) -> Result<(), FederationError> {
         // We should skip the supergraph specific directives, that is the @core and @join directives.
-        for directive_name in self
+
+        // Collect all directive names from both the merged schema and the compose directive manager
+        let mut directive_names: IndexSet<Name> = self
             .merged
             .schema()
             .directive_definitions
             .keys()
             .cloned()
-            .collect_vec()
-        {
+            .collect();
+
+        for name in self.compose_directive_manager.composed_directive_names() {
+            directive_names.insert(name.clone());
+        }
+
+        for directive_name in directive_names {
             if self
                 .link_spec_definition
                 .is_spec_directive_name(&self.merged, &directive_name)
