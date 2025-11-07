@@ -22,6 +22,7 @@ use crate::ageing_priority_queue::AgeingPriorityQueue;
 use crate::ageing_priority_queue::Priority;
 use crate::ageing_priority_queue::SendError;
 use crate::allocator::current;
+use crate::allocator::with_memory_tracking;
 use crate::metrics::meter_provider;
 use crate::plugins::telemetry::consts::COMPUTE_JOB_EXECUTION_SPAN_NAME;
 use crate::plugins::telemetry::consts::COMPUTE_JOB_SPAN_NAME;
@@ -152,68 +153,72 @@ pub(crate) struct Job {
 pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
     static QUEUE: OnceLock<AgeingPriorityQueue<Job>> = OnceLock::new();
     QUEUE.get_or_init(|| {
-        let pool_size = thread_pool_size();
-        for _ in 0..pool_size {
-            std::thread::spawn(|| {
-                // This looks like we need the queue before creating the queue,
-                // but it happens in a child thread where OnceLock will block
-                // until `get_or_init` in the parent thread is finished
-                // and the parent is *not* blocked on the child thread making progress.
-                let queue = queue();
+        with_memory_tracking("compute_job.queue.initialize", || {
+            let pool_size = thread_pool_size();
+            for _ in 0..pool_size {
+                std::thread::spawn(|| {
+                    with_memory_tracking("compute_job.thread.spawn", || {
+                        // This looks like we need the queue before creating the queue,
+                        // but it happens in a child thread where OnceLock will block
+                        // until `get_or_init` in the parent thread is finished
+                        // and the parent is *not* blocked on the child thread making progress.
+                        let queue = queue();
 
-                let mut receiver = queue.receiver();
-                loop {
-                    let (job, age) = receiver.blocking_recv();
-                    let job_type: &'static str = job.ty.into();
-                    let age: &'static str = age.into();
-                    let _subscriber = job.subscriber.set_default();
-                    job.parent_span.in_scope(|| {
-                        let span = info_span!(
-                            COMPUTE_JOB_EXECUTION_SPAN_NAME,
-                            "job.type" = job_type,
-                            "job.age" = age
-                        );
-                        span.in_scope(|| {
-                            observe_queue_wait_duration(job.ty, job.queue_start.elapsed());
-
-                            let _active_metric = i64_up_down_counter_with_unit!(
-                                "apollo.router.compute_jobs.active_jobs",
-                                "Number of computation jobs in progress",
-                                "{job}",
-                                1,
-                                job.type = job.ty
-                            );
-                            let job_start = Instant::now();
-
-                            // Execute job with memory tracking if stats are available
-                            if let Some(stats) = job.allocation_stats {
-                                // Create a child context with the job type as the name
-                                let job_name: &'static str = job.ty.into();
-                                crate::allocator::with_parented_memory_tracking(
-                                    job_name,
-                                    stats,
-                                    || {
-                                        (job.job_fn)();
-                                        if let Some(allocation_stats) = current() {
-                                            record_metrics(&allocation_stats);
-                                        }
-                                    },
+                        let mut receiver = queue.receiver();
+                        loop {
+                            let (job, age) = receiver.blocking_recv();
+                            let job_type: &'static str = job.ty.into();
+                            let age: &'static str = age.into();
+                            let _subscriber = job.subscriber.set_default();
+                            job.parent_span.in_scope(|| {
+                                let span = info_span!(
+                                    COMPUTE_JOB_EXECUTION_SPAN_NAME,
+                                    "job.type" = job_type,
+                                    "job.age" = age
                                 );
-                            } else {
-                                (job.job_fn)();
-                            }
-                            observe_compute_duration(job.ty, job_start.elapsed());
-                        })
+                                span.in_scope(|| {
+                                    observe_queue_wait_duration(job.ty, job.queue_start.elapsed());
+
+                                    let _active_metric = i64_up_down_counter_with_unit!(
+                                        "apollo.router.compute_jobs.active_jobs",
+                                        "Number of computation jobs in progress",
+                                        "{job}",
+                                        1,
+                                        job.type = job.ty
+                                    );
+                                    let job_start = Instant::now();
+
+                                    // Execute job with memory tracking if stats are available
+                                    if let Some(stats) = job.allocation_stats {
+                                        // Create a child context with the job type as the name
+                                        let job_name: &'static str = job.ty.into();
+                                        crate::allocator::with_parented_memory_tracking(
+                                            job_name,
+                                            stats,
+                                            || {
+                                                (job.job_fn)();
+                                                if let Some(allocation_stats) = current() {
+                                                    record_metrics(&allocation_stats);
+                                                }
+                                            },
+                                        );
+                                    } else {
+                                        (job.job_fn)();
+                                    }
+                                    observe_compute_duration(job.ty, job_start.elapsed());
+                                })
+                            })
+                        }
                     })
-                }
-            });
-        }
-        tracing::info!(
-            threads = pool_size,
-            queue_capacity = QUEUE_SOFT_CAPACITY_PER_THREAD * pool_size,
-            "compute job thread pool created",
-        );
-        AgeingPriorityQueue::bounded(QUEUE_SOFT_CAPACITY_PER_THREAD * pool_size)
+                });
+            }
+            tracing::info!(
+                threads = pool_size,
+                queue_capacity = QUEUE_SOFT_CAPACITY_PER_THREAD * pool_size,
+                "compute job thread pool created",
+            );
+            AgeingPriorityQueue::bounded(QUEUE_SOFT_CAPACITY_PER_THREAD * pool_size)
+        })
     })
 }
 
