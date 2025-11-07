@@ -11,6 +11,7 @@ use self::storage::CacheStorage;
 use self::storage::InMemoryCache;
 use self::storage::KeyType;
 use self::storage::ValueType;
+use crate::allocator::WithMemoryTracking;
 use crate::configuration::RedisCache;
 
 mod metrics;
@@ -94,11 +95,14 @@ where
                 // return with Err(), then we remove the entry from the wait map
                 let (_drop_signal, drop_sentinel) = oneshot::channel::<()>();
                 let wait_map = self.wait_map.clone();
-                tokio::task::spawn(async move {
-                    let _ = drop_sentinel.await;
-                    let mut locked_wait_map = wait_map.lock().await;
-                    let _ = locked_wait_map.remove(&k);
-                });
+                tokio::task::spawn(
+                    async move {
+                        let _ = drop_sentinel.await;
+                        let mut locked_wait_map = wait_map.lock().await;
+                        let _ = locked_wait_map.remove(&k);
+                    }
+                    .with_memory_tracking("deduplicating_cache.remove_after_drop"),
+                );
 
                 locked_wait_map.insert(key.clone(), sender.clone());
 
