@@ -135,7 +135,6 @@ fn invalid_context_name_shouldnt_throw() {
         "Expected error message about invalid context name, but got: {}",
         error_message
     );
-   
 }
 
 #[test]
@@ -607,9 +606,8 @@ fn context_name_is_invalid() {
     assert_eq!(errors.len(), 2, "Expected exactly 1 error");
 
     let error_message = errors[0].to_string();
-    assert!(
-        error_message
-            .contains("[Subgraph1] Context name \"_context\" may not contain an underscore."),
+    assert_eq!(
+        error_message, "[Subgraph1] Context name \"_context\" may not contain an underscore.",
         "Expected error message about invalid context name with underscore, but got: {}",
         error_message
     );
@@ -1087,11 +1085,18 @@ fn context_variable_does_not_appear_in_selection() {
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
 
     let errors = result.expect_err("Expected composition to fail");
-    assert_eq!(errors.len(), 1, "Expected exactly 1 error");
+    assert_eq!(
+        errors.len(),
+        1,
+        "Expected exactly 1 error but got {:?} error",
+        errors
+    );
 
     let error_message = errors[0].to_string();
-    assert!(
-        error_message.contains("[Subgraph1] @fromContext argument does not reference a context"),
+
+    assert_eq!(
+        error_message,
+        "[Subgraph1] @fromContext argument does not reference a context \"{ prop }\".",
         "Expected error message about missing context variable in selection, but got: {}",
         error_message
     );
@@ -1349,4 +1354,53 @@ fn setcontext_with_multiple_contexts_duck_typing_success() {
 
     let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
     assert!(result.is_ok(), "Expected composition to succeed");
+}
+
+#[test]
+fn nullability_mismatch_is_not_ok_if_argument_is_non_nullable() {
+    let subgraph1 = ServiceDefinition {
+        name: "Subgraph1",
+        type_defs: r#"
+        type Query {
+          t: T!
+        }
+
+        type T @key(fields: "id") @context(name: "context") {
+          id: ID!
+          u: U!
+          prop: String
+        }
+
+        type U @key(fields: "id") {
+          id: ID!
+          field(a: String! @fromContext(field: "$context { prop }")): Int!
+        }
+        "#,
+    };
+
+    let subgraph2 = ServiceDefinition {
+        name: "Subgraph2",
+        type_defs: r#"
+        type Query {
+          a: Int!
+        }
+
+        type U @key(fields: "id") {
+          id: ID!
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]);
+
+    let errors = result.expect_err("Expected composition to fail");
+    assert_eq!(errors.len(), 1, "Expected exactly 1 error");
+
+    let error_message = errors[0].to_string();
+    assert_eq!(
+        error_message,
+        "[Subgraph1] Context \"context\" is used in \"U.field(a:)\" but the selection is invalid: the type of the selection \"String\" does not match the expected type \"String!\"",
+        "Expected error message about type mismatch, but got: {}",
+        error_message
+    );
 }
