@@ -1053,6 +1053,8 @@ fn is_interface_object_used(subgraph: &Subgraph<Expanded>) -> Result<bool, Feder
 
 #[cfg(test)]
 mod tests {
+    use test_log::test;
+
     use super::*;
 
     const FEDERATION2_LINK_WITH_AUTO_EXPANDED_IMPORTS_UPGRADED: &str = r#"@link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"])"#;
@@ -1738,5 +1740,136 @@ mod tests {
             errors[0].to_string(),
             r#"[subgraph1] Cannot have both @provides and @external on field "User.id""#
         );
+    }
+
+    #[test]
+    fn removes_type_from_upgraded_schema_when_all_fields_unused() {
+        let subgraph1 = Subgraph::parse(
+            "subgraph1",
+            "",
+            r#"
+                type T {
+                  a: Int! @external
+                }
+            "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        // Type T should still be in the expanded schema
+        assert!(subgraph1.schema_string().contains("type T"));
+        insta::assert_snapshot!(
+            subgraph1.schema_string(),
+            @r###"
+        schema @core(feature: "https://specs.apollo.dev/core/v0.2") @core(feature: "https://specs.apollo.dev/federation/v1.0") {
+          query: Query
+        }
+
+        directive @core(feature: String, as: String, for: core__Purpose) repeatable on SCHEMA
+
+        directive @key(fields: _FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+
+        directive @requires(fields: _FieldSet!) on FIELD_DEFINITION
+
+        directive @provides(fields: _FieldSet!) on FIELD_DEFINITION
+
+        directive @external(reason: String) on OBJECT | FIELD_DEFINITION
+
+        directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+        directive @extends on OBJECT | INTERFACE
+
+        type T {
+          a: Int! @external
+        }
+
+        enum core__Purpose {
+          """
+          `SECURITY` features provide metadata necessary to securely resolve fields.
+          """
+          SECURITY
+          """
+          `EXECUTION` features provide metadata necessary for operation execution.
+          """
+          EXECUTION
+        }
+
+        scalar _FieldSet
+
+        scalar _Any
+
+        type _Service {
+          sdl: String
+        }
+
+        type Query {
+          _service: _Service!
+        }
+        "###);
+
+        let [s1] = upgrade_subgraphs_if_necessary(vec![subgraph1])
+            .expect("upgrades schema")
+            .try_into()
+            .expect("Expected 1 element");
+
+        // Type T should NOT be in the upgraded schema
+        assert!(!s1.schema_string().contains("type T"));
+        insta::assert_snapshot!(
+            s1.schema_string(),
+            @r###"
+        schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) {
+          query: Query
+        }
+
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+        directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
+
+        directive @requires(fields: federation__FieldSet!) on FIELD_DEFINITION
+
+        directive @provides(fields: federation__FieldSet!) on FIELD_DEFINITION
+
+        directive @external(reason: String) on OBJECT | FIELD_DEFINITION
+
+        directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
+
+        directive @extends on OBJECT | INTERFACE
+
+        directive @shareable repeatable on OBJECT | FIELD_DEFINITION
+
+        directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+        directive @override(from: String!) on FIELD_DEFINITION
+
+        directive @composeDirective(name: String) repeatable on SCHEMA
+
+        directive @interfaceObject on OBJECT
+
+        type Query {
+          _service: _Service!
+        }
+
+        enum link__Purpose {
+          """
+          `SECURITY` features provide metadata necessary to securely resolve fields.
+          """
+          SECURITY
+          """
+          `EXECUTION` features provide metadata necessary for operation execution.
+          """
+          EXECUTION
+        }
+
+        scalar link__Import
+
+        scalar federation__FieldSet
+
+        scalar _Any
+
+        type _Service {
+          sdl: String
+        }
+        "###);
     }
 }
