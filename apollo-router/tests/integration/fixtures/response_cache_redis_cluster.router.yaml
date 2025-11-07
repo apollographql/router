@@ -1,11 +1,13 @@
-supergraph:
-  query_planning:
-    cache:
+preview_response_cache:
+  enabled: true
+  subgraph:
+    all:
       redis:
         required_to_start: true
         urls:
           - redis-cluster://127.0.0.1:7000
         pool_size: 4
+
 telemetry:
   exporters:
     metrics:

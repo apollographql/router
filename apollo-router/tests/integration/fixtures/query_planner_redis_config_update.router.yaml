@@ -4,6 +4,4 @@ supergraph:
     cache:
       redis:
         required_to_start: true
-        urls:
-          - redis://localhost:6379
         ttl: 10s

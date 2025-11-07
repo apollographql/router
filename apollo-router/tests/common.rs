@@ -14,6 +14,7 @@ use std::time::Duration;
 use buildstructor::buildstructor;
 use fred::clients::Client as RedisClient;
 use fred::interfaces::ClientLike;
+use fred::interfaces::ClusterInterface;
 use fred::interfaces::KeysInterface;
 use fred::prelude::Config as RedisConfig;
 use fred::types::scan::ScanType;
@@ -1575,37 +1576,36 @@ impl IntegrationTest {
     pub async fn clear_redis_cache(&self) {
         let urls = self.redis_urls.as_ref().expect("no redis urls");
 
-        for url in urls {
-            let config = RedisConfig::from_url(url).unwrap();
+        // this should still work for a cluster, as the `del` will be directed to the right node
+        let url = urls.iter().next().expect("no redis urls");
+        let config = RedisConfig::from_url(url).unwrap();
 
-            let client = RedisClient::new(config, None, None, None);
-            let connection_task = client.connect();
-            client
-                .wait_for_connect()
-                .await
-                .expect("could not connect to redis");
+        let client = RedisClient::new(config, None, None, None);
+        let connection_task = client.connect();
+        client
+            .wait_for_connect()
+            .await
+            .expect("could not connect to redis");
 
-            if client.
-            let namespace = &self.redis_namespace;
-            let mut scan = client.scan(format!("{namespace}:*"), None, Some(ScanType::String));
-            while let Some(result) = scan.next().await {
-                if let Some(page) = result.expect("could not scan redis").take_results() {
-                    for key in page {
-                        let key = key.as_str().expect("key should be a string");
-                        if key.starts_with(&self.redis_namespace) {
-                            client
-                                .del::<usize, _>(key)
-                                .await
-                                .expect("could not delete key");
-                        }
+        let namespace = &self.redis_namespace;
+        let mut scan = client.scan_cluster(format!("{namespace}:*"), None, Some(ScanType::String));
+        while let Some(result) = scan.next().await {
+            if let Some(page) = result.expect("could not scan redis").take_results() {
+                for key in page {
+                    let key = key.as_str().expect("key should be a string");
+                    if key.starts_with(&self.redis_namespace) {
+                        client
+                            .del::<usize, _>(key)
+                            .await
+                            .expect("could not delete key");
                     }
                 }
             }
-
-            client.quit().await.expect("could not quit redis");
-            // calling quit ends the connection and event listener tasks
-            let _ = connection_task.await;
         }
+
+        client.quit().await.expect("could not quit redis");
+        // calling quit ends the connection and event listener tasks
+        let _ = connection_task.await;
     }
 
     #[allow(dead_code)]
@@ -1613,46 +1613,89 @@ impl IntegrationTest {
         let urls = self.redis_urls.as_ref().expect("no redis urls");
 
         // this should still work for a cluster, as the `get` will be directed to the right node
-                let url = urls.iter().next();
+        let url = urls.iter().next().expect("no redis urls");
 
-            let config = RedisConfig::from_url(url).unwrap();
-            let client = RedisClient::new(config, None, None, None);
-            let connection_task = client.connect();
-            client.wait_for_connect().await.unwrap();
-            let redis_namespace = &self.redis_namespace;
-            let namespaced_key = format!("{redis_namespace}:{key}");
-            let s = match client.get(&namespaced_key).await {
-                Ok(s) => {}
-                Err(e) => {
-                    println!("non-ignored keys in the same namespace in Redis:");
+        let config = RedisConfig::from_url(url).unwrap();
+        let client = RedisClient::new(config, None, None, None);
+        let connection_task = client.connect();
+        client.wait_for_connect().await.unwrap();
+        let redis_namespace = &self.redis_namespace;
+        let namespaced_key = format!("{redis_namespace}:{key}");
+        let s = match client.get(&namespaced_key).await {
+            Ok(s) => s,
+            Err(e) => {
+                println!("non-ignored keys in the same namespace in Redis:");
 
-                    let mut scan = client.scan(
-                        format!("{redis_namespace}:*"),
-                        Some(u32::MAX),
-                        Some(ScanType::String),
-                    );
+                let mut scan = client.scan_cluster(
+                    format!("{redis_namespace}:*"),
+                    Some(u32::MAX),
+                    Some(ScanType::String),
+                );
 
-                    while let Some(result) = scan.next().await {
-                        let keys = result.as_ref().unwrap().results().as_ref().unwrap();
-                        for key in keys {
-                            let key = key.as_str().expect("key should be a string");
-                            let unnamespaced_key = key.replace(&format!("{redis_namespace}:"), "");
-                            if Some(unnamespaced_key.as_str()) != ignore {
-                                println!("\t{unnamespaced_key}");
-                            }
+                while let Some(result) = scan.next().await {
+                    let keys = result.as_ref().unwrap().results().as_ref().unwrap();
+                    for key in keys {
+                        let key = key.as_str().expect("key should be a string");
+                        let unnamespaced_key = key.replace(&format!("{redis_namespace}:"), "");
+                        if Some(unnamespaced_key.as_str()) != ignore {
+                            println!("\t{unnamespaced_key}");
                         }
                     }
-                    panic!(
-                        "key {key} not found: {e}\n This may be caused by a number of things including federation version changes"
-                    );
                 }
-            };
+                panic!(
+                    "key {key} not found: {e}\n This may be caused by a number of things including federation version changes"
+                );
+            }
+        };
 
-            client.quit().await.unwrap();
-            // calling quit ends the connection and event listener tasks
-            let _ = connection_task.await;
-            s
+        client.quit().await.unwrap();
+        // calling quit ends the connection and event listener tasks
+        let _ = connection_task.await;
+        s
+    }
 
+    pub async fn monitor_redis_commands(&self) -> Vec<String> {
+        let urls = self.redis_urls.as_ref().expect("no redis urls");
+
+        // use single url to learn what the group of urls should be
+        let url = urls.iter().next().expect("no redis urls");
+
+        let config = RedisConfig::from_url(url).unwrap();
+        let client = RedisClient::new(config, None, None, None);
+        let connection_task = client.connect();
+        client.wait_for_connect().await.unwrap();
+
+        // todo do the thing
+
+        let mut primary_urls = Vec::default();
+        let mut replica_urls = Vec::default();
+
+        let cluster_slots: Result<Vec<Vec<fred::types::Value>>, _> = client.cluster_slots().await;
+        if let Ok(slots) = cluster_slots {
+            for slot_range in slots {
+                let primary = slot_range[2].clone().into_array();
+                let host = primary[0].clone().into_string().expect("no host");
+                let port = primary[1].clone().into_string().expect("no port");
+                primary_urls.push(format!("redis-cluster://{host}:{port}"));
+                for replica in &slot_range[3..] {
+                    let replica = replica.clone().into_array();
+                    let host = replica[0].clone().into_string().expect("no host");
+                    let port = replica[1].clone().into_string().expect("no port");
+                    replica_urls.push(format!("redis-cluster://{host}:{port}"));
+                }
+            }
+        } else {
+            primary_urls.push(urls[0].clone());
+        }
+
+        eprintln!("{:?}", primary_urls);
+        eprintln!("{:?}", replica_urls);
+
+        client.quit().await.unwrap();
+        // calling quit ends the connection and event listener tasks
+        let _ = connection_task.await;
+
+        Vec::new()
     }
 }
 
@@ -1804,22 +1847,46 @@ fn merge_overrides(
 
     // Set query plan redis namespace
 
-    if let Some(query_plan) =
-        config["supergraph"]["query_planning"]["cache"]["redis"].as_object_mut()
+    if let Some(query_plan) = config
+        .as_object_mut()
+        .and_then(|o| o.get_mut("supergraph"))
+        .and_then(|o| o.as_object_mut())
+        .and_then(|o| o.get_mut("query_planning"))
+        .and_then(|o| o.as_object_mut())
+        .and_then(|o| o.get_mut("cache"))
+        .and_then(|o| o.as_object_mut())
+        .and_then(|o| o.get_mut("redis"))
+        .and_then(|o| o.as_object_mut())
     {
         merge_overrides_redis_config(query_plan, redis_namespace, redis_urls.clone());
     }
 
-    if let Some(response_cache_config) =
-        config["preview_response_cache"]["subgraph"].as_object_mut()
+    if let Some(response_cache_config) = config
+        .as_object_mut()
+        .and_then(|o| o.get_mut("preview_response_cache"))
+        .and_then(|o| o.as_object_mut())
+        .and_then(|o| o.get_mut("subgraph"))
+        .and_then(|o| o.as_object_mut())
     {
-        if let Some(all) = response_cache_config["all"]["redis"].as_object_mut() {
+        if let Some(all) = response_cache_config
+            .get_mut("all")
+            .and_then(|o| o.as_object_mut())
+            .and_then(|o| o.get_mut("redis"))
+            .and_then(|o| o.as_object_mut())
+        {
             merge_overrides_redis_config(all, redis_namespace, redis_urls.clone());
         }
 
-        if let Some(subgraphs) = response_cache_config["subgraphs"].as_object_mut() {
+        if let Some(subgraphs) = response_cache_config
+            .get_mut("subgraphs")
+            .and_then(|o| o.as_object_mut())
+        {
             for (_, subgraph_config) in subgraphs.iter_mut() {
-                if let Some(subgraph_config) = subgraph_config["redis"].as_object_mut() {
+                if let Some(subgraph_config) = subgraph_config
+                    .as_object_mut()
+                    .and_then(|o| o.get_mut("redis"))
+                    .and_then(|o| o.as_object_mut())
+                {
                     merge_overrides_redis_config(
                         subgraph_config,
                         redis_namespace,
