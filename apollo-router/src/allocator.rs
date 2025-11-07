@@ -5,7 +5,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::ptr::NonNull;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 
 #[cfg(feature = "dhat-heap")]
@@ -254,6 +254,8 @@ pub(crate) fn with_memory_tracking<F, R>(name: &'static str, f: F) -> R
 where
     F: FnOnce() -> R,
 {
+    // Disable any existing tracking while we get or create the stats
+    TRACKING_ACTIVE.store(false, Ordering::SeqCst);
     // Check if there's a parent context, and create either a child or root stats
     let stats = CURRENT_TASK_STATS.with(|cell| {
         cell.get().map_or_else(
@@ -272,6 +274,8 @@ where
         )
     });
 
+    // Re-enable tracking
+    TRACKING_ACTIVE.store(true, Ordering::SeqCst);
     with_explicit_memory_tracking(stats, f)
 }
 
@@ -319,6 +323,9 @@ pub(crate) trait WithMemoryTracking: Future + Sized {
 
 impl<F: Future> WithMemoryTracking for F {
     fn with_memory_tracking(self, name: &'static str) -> MemoryTrackedFuture<Self> {
+        // Disable any existing tracking while we get or create the stats
+        TRACKING_ACTIVE.store(false, Ordering::SeqCst);
+
         // Check if there's a parent context, and create either a child or root stats
         let stats = CURRENT_TASK_STATS.with(|cell| {
             cell.get().map_or_else(
@@ -336,6 +343,9 @@ impl<F: Future> WithMemoryTracking for F {
                 },
             )
         });
+
+        // Re-enable tracking
+        TRACKING_ACTIVE.store(true, Ordering::SeqCst);
 
         MemoryTrackedFuture { inner: self, stats }
     }
@@ -360,6 +370,16 @@ impl CustomAllocator {
     }
 }
 
+// Using this to log without allocating inside alloc
+unsafe extern "C" {
+    unsafe fn printf(format: *const libc::c_char, ...) -> libc::c_int;
+}
+
+/// Temporary only used for testing - set to true if tracking is active
+/// If this is true and there is no current task stats, then we print a message to the console
+/// as it implies that the allocator is being used outside of a memory-tracked context.
+pub(crate) static TRACKING_ACTIVE: AtomicBool = AtomicBool::new(false);
+
 // SAFETY: All methods below properly delegate to jemalloc and only add tracking
 // on top. The tracking uses thread-locals with raw pointers to avoid TLS destructor
 // issues (see CURRENT_TASK_STATS documentation above).
@@ -378,6 +398,14 @@ unsafe impl GlobalAlloc for CustomAllocator {
                 CURRENT_TASK_STATS.with(|cell| {
                     if let Some(stats_ptr) = cell.get() {
                         stats_ptr.as_ref().track_alloc(layout.size());
+                    } else if TRACKING_ACTIVE.load(Ordering::SeqCst) {
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs();
+
+                        let format: *const libc::c_char = "stats not set: %u \n\0".as_ptr().cast();
+                        let _ = printf(format, now);
                     }
                 });
             }
