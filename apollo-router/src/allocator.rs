@@ -78,6 +78,8 @@ impl AllocationStats {
 
     /// Get the root context by traversing up the parent chain.
     /// Returns self if this is already a root context.
+    #[inline]
+    #[allow(dead_code)]
     pub(crate) fn root(&self) -> &Self {
         let mut current = self;
         while let Some(parent) = &current.parent {
