@@ -633,7 +633,7 @@ One subgraph requires the `read:others` scope, and another subgraph requires the
 ```graphql title="Subgraph A"
 type Query {
   users: [User!]! @requiresScopes(scopes: [["read:others"]])
-  }
+}
 ```
 
 ```graphql title="Subgraph B"
@@ -652,7 +652,7 @@ type Query {
 
 <Tip>
 
-Refer to the section on [Combining policies with AND/OR logic](#combining-policies-with-andor-logic) for a refresher of `@requiresScopes` boolean syntax.
+Refer to the section on [Combining scopes with AND/OR logic](#combining-required-scopes-with-andor-logic) for a refresher of `@requiresScopes` boolean syntax.
 
 </Tip>
 
