@@ -270,14 +270,9 @@ impl Opt {
         // Check for tag reference: :tag-name (tag regex: [a-zA-Z0-9_][a-zA-Z0-9._-]{0,127})
         // Tags appear after a colon in the reference
         let tag_regex = Regex::new(r":([a-zA-Z0-9_][a-zA-Z0-9._-]{0,127})$").unwrap();
-        if let Some(caps) = tag_regex.captures(reference) {
-            // Extract the tag part to validate it matches the full pattern
-            let tag = &caps[1];
-            let full_tag_regex = Regex::new(r"^[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}$").unwrap();
-            if full_tag_regex.is_match(tag) {
-                tracing::debug!("validated OCI tag reference");
-                return Ok((reference.to_string(), OciReferenceType::Tag));
-            }
+        if tag_regex.is_match(reference) {
+            tracing::debug!("validated OCI tag reference");
+            return Ok((reference.to_string(), OciReferenceType::Tag));
         }
         
         Err(anyhow!("invalid graph artifact reference: {reference}. Must be either a SHA256 digest (@sha256:...) or a tag (:tag-name)"))

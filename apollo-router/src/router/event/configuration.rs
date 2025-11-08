@@ -307,7 +307,7 @@ mod tests {
         let contents = include_str!("../../testdata/supergraph_config.router.yaml");
         write_and_flush(&mut file, contents).await;
         let mut stream = ConfigurationSource::File { path, watch: true }
-            .into_stream(Some(UplinkConfig::default()))
+            .into_stream(Some(UplinkConfig::default()), false)
             .boxed();
 
         // First update is guaranteed
@@ -337,7 +337,7 @@ mod tests {
             path: temp_dir().join("does_not_exit"),
             watch: true,
         }
-        .into_stream(Some(UplinkConfig::default()));
+        .into_stream(Some(UplinkConfig::default()), false);
 
         // First update fails because the file is invalid.
         assert!(matches!(stream.next().await.unwrap(), NoMoreConfiguration));
@@ -348,7 +348,7 @@ mod tests {
         let (path, mut file) = create_temp_file();
         write_and_flush(&mut file, "Garbage").await;
         let mut stream = ConfigurationSource::File { path, watch: true }
-            .into_stream(Some(UplinkConfig::default()));
+            .into_stream(Some(UplinkConfig::default()), false);
 
         // First update fails because the file is invalid.
         assert!(matches!(stream.next().await.unwrap(), NoMoreConfiguration));
@@ -361,7 +361,7 @@ mod tests {
         write_and_flush(&mut file, contents).await;
 
         let mut stream = ConfigurationSource::File { path, watch: false }
-            .into_stream(Some(UplinkConfig::default()));
+            .into_stream(Some(UplinkConfig::default()), false);
         assert!(matches!(
             stream.next().await.unwrap(),
             UpdateConfiguration(_)
