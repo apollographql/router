@@ -222,6 +222,14 @@ pub struct Configuration {
     /// Type conditioned fetching configuration.
     #[serde(default)]
     pub(crate) experimental_type_conditioned_fetching: bool,
+
+    /// Graph artifact reference for OCI schema fetching.
+    #[serde(default)]
+    pub(crate) graph_artifact_reference: Option<String>,
+
+    /// Hot reload configuration option.
+    #[serde(default)]
+    pub(crate) hot_reload: bool,
 }
 
 impl PartialEq for Configuration {
@@ -289,6 +297,8 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             limits: ad_hoc.limits,
             experimental_chaos: ad_hoc.experimental_chaos,
             experimental_type_conditioned_fetching: ad_hoc.experimental_type_conditioned_fetching,
+            graph_artifact_reference: ad_hoc.graph_artifact_reference,
+            hot_reload: ad_hoc.hot_reload,
             plugins: ad_hoc.plugins,
             apollo_plugins: ad_hoc.apollo_plugins,
             batching: ad_hoc.batching,

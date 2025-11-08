@@ -129,8 +129,13 @@ impl RouterHttpServer {
         shutdown: Option<ShutdownSource>,
         uplink: Option<UplinkConfig>,
         is_telemetry_disabled: Option<bool>,
+        schema_source_provided: Option<bool>,
     ) -> RouterHttpServer {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
+        // Use provided flag or infer from schema source
+        let schema_source_provided = schema_source_provided.unwrap_or_else(|| {
+            !matches!(&schema, SchemaSource::Static { schema_sdl } if schema_sdl.is_empty())
+        });
         let event_stream = generate_event_stream(
             shutdown.unwrap_or(ShutdownSource::CtrlC),
             configuration.unwrap_or_default(),
@@ -138,6 +143,7 @@ impl RouterHttpServer {
             uplink,
             license.unwrap_or_default(),
             shutdown_receiver,
+            schema_source_provided,
         );
         let server_factory = AxumHttpServerFactory::new();
         let router_factory = OrbiterRouterSuperServiceFactory::new(YamlRouterFactory);
@@ -231,12 +237,13 @@ fn generate_event_stream(
     uplink_config: Option<UplinkConfig>,
     license: LicenseSource,
     shutdown_receiver: oneshot::Receiver<()>,
+    schema_source_provided: bool,
 ) -> impl Stream<Item = Event> {
     stream::select_all(vec![
         shutdown.into_stream().boxed(),
         schema.into_stream().boxed(),
         license.into_stream().boxed(),
-        configuration.into_stream(uplink_config).boxed(),
+        configuration.into_stream(uplink_config, schema_source_provided).boxed(),
         shutdown_receiver
             .into_stream()
             .map(|_| Event::Shutdown)
