@@ -1,20 +1,21 @@
-use crate::connectors::{
-    spec::source::FRAGMENTS_NAME_ARGUMENT,
-    string_template::Expression,
-    validation::{
-        Code,
-        coordinates::{FragmentsCoordinate, SourceDirectiveCoordinate},
-        errors::ErrorsCoordinate,
-        expression::{self, Context, MappingArgument, parse_mapping_argument},
-        graphql::SchemaInfo,
-    },
-};
-
-use crate::connectors::validation::Message;
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast::Value;
-use apollo_compiler::{Name, Node};
 use indexmap::IndexMap;
 use shape::Shape;
+
+use crate::connectors::spec::source::FRAGMENTS_NAME_ARGUMENT;
+use crate::connectors::string_template::Expression;
+use crate::connectors::validation::Code;
+use crate::connectors::validation::Message;
+use crate::connectors::validation::coordinates::FragmentsCoordinate;
+use crate::connectors::validation::coordinates::SourceDirectiveCoordinate;
+use crate::connectors::validation::errors::ErrorsCoordinate;
+use crate::connectors::validation::expression::Context;
+use crate::connectors::validation::expression::MappingArgument;
+use crate::connectors::validation::expression::parse_mapping_argument;
+use crate::connectors::validation::expression::{self};
+use crate::connectors::validation::graphql::SchemaInfo;
 
 /// The`@source(fragments:)` argument
 pub(crate) struct FragmentsArgument<'schema> {

@@ -481,7 +481,8 @@ fn extract_variable_key_references<'a>(
 #[cfg(test)]
 mod tests {
     use apollo_compiler::Schema;
-    use insta::{assert_debug_snapshot, assert_snapshot};
+    use insta::assert_debug_snapshot;
+    use insta::assert_snapshot;
 
     use super::*;
     use crate::ValidFederationSubgraphs;
