@@ -1,7 +1,7 @@
 [tools]
 # renovate-automation: rustc version
 rust = "1.91.0"
-"aqua:cargo-bins/cargo-binstall" = "1.15.10"
+"aqua:cargo-bins/cargo-binstall" = "1.15.11"
 "cargo:cargo-nextest" = "0.9.70"
 "cargo:cargo-deny" = "0.18.2"
 "cargo:cargo-edit" = "0.13.0"
