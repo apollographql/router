@@ -263,8 +263,10 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             limits: limits::Config,
             experimental_chaos: chaos::Config,
             batching: Batching,
+            #[serde(default)]
             experimental_type_conditioned_fetching: bool,
             graph_artifact_reference: Option<String>,
+            #[serde(default)]
             hot_reload: bool,
         }
         let mut ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;

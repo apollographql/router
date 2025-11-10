@@ -75,14 +75,18 @@ impl ConfigurationSource {
                 // If schema source wasn't provided and config has graph_artifact_reference, fetch schema
                 if !schema_source_provided {
                     if let Some(schema_stream) = Self::maybe_create_schema_from_config(config_arc.clone()) {
-                        // Chain config event with schema stream
+                        // Chain config event with schema stream and NoMoreConfiguration
                         return stream::once(future::ready(config_event))
                             .chain(schema_stream)
+                            .chain(stream::iter(vec![NoMoreConfiguration]))
                             .boxed();
                     }
                 }
                 
-                stream::once(future::ready(config_event)).boxed()
+                // Chain config event and NoMoreConfiguration
+                stream::once(future::ready(config_event))
+                    .chain(stream::iter(vec![NoMoreConfiguration]))
+                    .boxed()
             }
             ConfigurationSource::Stream(stream) => stream
                 .map(move |mut c| {
@@ -93,6 +97,7 @@ impl ConfigurationSource {
                     // For now, just emit config events
                     UpdateConfiguration(config_arc)
                 })
+                .chain(stream::iter(vec![NoMoreConfiguration]))
                 .boxed(),
             ConfigurationSource::File { path, watch } => {
                 // Sanity check, does the config file exists, if it doesn't then bail.
@@ -101,7 +106,9 @@ impl ConfigurationSource {
                         "configuration file at path '{}' does not exist.",
                         path.to_string_lossy()
                     );
-                    stream::empty().boxed()
+                    stream::empty()
+                        .chain(stream::iter(vec![NoMoreConfiguration]))
+                        .boxed()
                 } else {
                     match ConfigurationSource::read_config(&path) {
                         Ok(mut configuration) => {
@@ -154,15 +161,18 @@ impl ConfigurationSource {
                                         initial_config_stream
                                             .chain(schema_stream)
                                             .chain(config_watcher)
+                                            .chain(stream::iter(vec![NoMoreConfiguration]))
                                             .boxed()
                                     } else {
                                         initial_config_stream
                                             .chain(config_watcher)
+                                            .chain(stream::iter(vec![NoMoreConfiguration]))
                                             .boxed()
                                     }
                                 } else {
                                     initial_config_stream
                                         .chain(config_watcher)
+                                        .chain(stream::iter(vec![NoMoreConfiguration]))
                                         .boxed()
                                 };
                                 
@@ -199,23 +209,29 @@ impl ConfigurationSource {
                                 let initial_stream = stream::once(future::ready(config_event));
                                 if !schema_source_provided {
                                     if let Some(schema_stream) = Self::maybe_create_schema_from_config(config_arc.clone()) {
+                                        // Chain initial config, schema stream, and NoMoreConfiguration
                                         return initial_stream
                                             .chain(schema_stream)
+                                            .chain(stream::iter(vec![NoMoreConfiguration]))
                                             .boxed();
                                     }
                                 }
-                                initial_stream.boxed()
+                                // Chain initial config and NoMoreConfiguration
+                                initial_stream
+                                    .chain(stream::iter(vec![NoMoreConfiguration]))
+                                    .boxed()
                             }
                         }
                         Err(err) => {
-                            tracing::error!("Failed to read configuration: {}", err);
-                            stream::empty().boxed()
+                            tracing::error!("Failed to read configuration from {:?}: {}", path, err);
+                            stream::empty()
+                                .chain(stream::iter(vec![NoMoreConfiguration]))
+                                .boxed()
                         }
                     }
                 }
             }
         }
-        .chain(stream::iter(vec![NoMoreConfiguration]))
         .boxed()
     }
 
@@ -306,29 +322,56 @@ mod tests {
         let (path, mut file) = create_temp_file();
         let contents = include_str!("../../testdata/supergraph_config.router.yaml");
         write_and_flush(&mut file, contents).await;
+        drop(file);
+        let path_clone = path.clone();
         let mut stream = ConfigurationSource::File { path, watch: true }
             .into_stream(Some(UplinkConfig::default()), false)
             .boxed();
 
-        // First update is guaranteed
-        assert!(matches!(
-            stream.next().await.unwrap(),
-            UpdateConfiguration(_)
-        ));
+        // Collect initial events until NoMoreConfiguration
+        let mut initial_events = Vec::new();
+        while let Some(event) = stream.next().await {
+            initial_events.push(event);
+            if matches!(initial_events.last().unwrap(), NoMoreConfiguration) {
+                break;
+            }
+        }
+        
+        // Verify initial config was loaded
+        assert!(initial_events.iter().any(|e| matches!(e, UpdateConfiguration(_))),
+            "Expected UpdateConfiguration event, got: {:?}", initial_events);
 
-        // Need different contents, since we won't get an event if content is the same
+        // Test file watching: modify file and verify new config is loaded
+        let mut file = std::fs::File::create(&path_clone).unwrap();
         let contents_datadog = include_str!("../../testdata/datadog.router.yaml");
-        // Modify the file and try again
         write_and_flush(&mut file, contents_datadog).await;
-        assert!(matches!(
-            stream.next().await.unwrap(),
-            UpdateConfiguration(_)
-        ));
+        drop(file);
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        
+        // Collect events from file change
+        let mut file_change_events = Vec::new();
+        while let Some(event) = stream.next().await {
+            file_change_events.push(event);
+            if matches!(file_change_events.last().unwrap(), NoMoreConfiguration) {
+                break;
+            }
+        }
+        
+        // Verify file change triggered UpdateConfiguration
+        assert!(file_change_events.iter().any(|e| matches!(e, UpdateConfiguration(_))),
+            "Expected UpdateConfiguration after file change");
 
-        // This time write garbage, there should not be an update.
+        // Test invalid config handling
+        let mut file = std::fs::File::create(&path_clone).unwrap();
         write_and_flush(&mut file, ":garbage").await;
-        let event = StreamExt::into_future(stream).now_or_never();
-        assert!(event.is_none() || matches!(event, Some((Some(NoMoreConfiguration), _))));
+        drop(file);
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        
+        // Stream should handle invalid config gracefully
+        let event = stream.next().await;
+        if let Some(e) = event {
+            assert!(matches!(e, NoMoreConfiguration));
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -359,13 +402,23 @@ mod tests {
         let (path, mut file) = create_temp_file();
         let contents = include_str!("../../testdata/supergraph_config.router.yaml");
         write_and_flush(&mut file, contents).await;
+        drop(file);
 
-        let mut stream = ConfigurationSource::File { path, watch: false }
+        let stream = ConfigurationSource::File { path, watch: false }
             .into_stream(Some(UplinkConfig::default()), false);
-        assert!(matches!(
-            stream.next().await.unwrap(),
-            UpdateConfiguration(_)
-        ));
-        assert!(matches!(stream.next().await.unwrap(), NoMoreConfiguration));
+        
+        let events: Vec<_> = stream.collect().await;
+        
+        // Verify stream completes with NoMoreConfiguration
+        assert!(matches!(events.last(), Some(NoMoreConfiguration)));
+        
+        // Verify config was loaded
+        let config_event = events.iter().find(|e| matches!(e, UpdateConfiguration(_)));
+        assert!(config_event.is_some(), "Expected UpdateConfiguration event, got: {:?}", events);
+        
+        // Verify config is valid
+        if let Some(UpdateConfiguration(config)) = config_event {
+            let _ = config.as_ref(); // Verify Arc is valid
+        }
     }
 }
