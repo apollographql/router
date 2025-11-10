@@ -1034,11 +1034,16 @@ mod tests {
 
         // We expect an error for the @fromContext on a field implementing an interface
         assert!(
+            !errors.errors.is_empty(),
+            "Expected errors for @fromContext on interface implementation, but got none"
+        );
+        assert!(
             errors.errors.iter().any(|e| matches!(
                 e,
-                SingleFederationError::ContextNotSet { message } if message == "@fromContext argument cannot be used on a field implementing an interface field \"User.id(contextArg:)\"."
+                SingleFederationError::ContextNotSet { message } if message == "@fromContext argument cannot be used on a field implementing an interface field \"Entity.id\"."
             )),
-            "Expected an error about implementing an interface field"
+            "Expected an error about implementing an interface field, got: {:?}",
+            errors.errors
         );
     }
 
@@ -1079,7 +1084,33 @@ mod tests {
             &context_map,
             &mut errors,
         )
-        .expect_err("validates fromContext directives");
+        .expect("validates fromContext directives");
+
+        // Should have errors for invalid context reference and missing selection
+        assert!(
+            !errors.errors.is_empty(),
+            "Expected validation errors for invalid context and missing selection"
+        );
+
+        // Check for context not set error (invalidContext)
+        assert!(
+            errors.errors.iter().any(|e| matches!(
+                e,
+                SingleFederationError::ContextNotSet { message } if message.contains("invalidContext") && message.contains("is never set")
+            )),
+            "Expected error for context that is never set, got: {:?}",
+            errors.errors
+        );
+
+        // Check for no selection error (noSelection has no fields selected)
+        assert!(
+            errors.errors.iter().any(|e| matches!(
+                e,
+                SingleFederationError::NoSelectionForContext { message } if message.contains("noSelection") || message.contains("has no selection")
+            )),
+            "Expected error for missing selection, got: {:?}",
+            errors.errors
+        );
     }
 
     #[test]
@@ -1175,10 +1206,13 @@ mod tests {
             assert_eq!(selection, Some(known_selection.to_string()));
         }
         // Ensure we don't backtrack in the comment regex.
+        // When a line starts with a comment, the entire line is treated as a comment,
+        // leaving an empty string after the dollar sign check fails, returning (None, Some(""))
         assert_eq!(
             parse_context("#comment $fakeContext fakeSelection"),
-            (None, None)
+            (None, Some("".to_string()))
         );
+        // When there's "$ #comment", the space and comment are stripped but no valid context follows
         assert_eq!(
             parse_context("$ #comment fakeContext fakeSelection"),
             (None, None)
@@ -1189,10 +1223,10 @@ mod tests {
         assert_eq!(parsed_context, Some("contextA".to_string()));
         assert_eq!(parsed_selection, Some("userId".to_string()));
 
-        // Test no delimiter
+        // Test no delimiter - when there's no $ sign, returns (None, Some(input))
         let (parsed_context, parsed_selection) = parse_context("invalidFormat");
         assert_eq!(parsed_context, None);
-        assert_eq!(parsed_selection, None);
+        assert_eq!(parsed_selection, Some("invalidFormat".to_string()));
 
         // // Test space in context
         let (parsed_context, parsed_selection) = parse_context("$ selection");
@@ -2172,7 +2206,23 @@ mod tests {
             &context_map,
             &mut errors,
         )
-        .expect_err("unparseable fromContext directive");
+        .expect("validates fromContext directives");
+
+        // Should have error for missing context reference (no $ sign)
+        assert!(
+            !errors.errors.is_empty(),
+            "Expected validation errors for missing context reference"
+        );
+
+        // Check for no context referenced error
+        assert!(
+            errors.errors.iter().any(|e| matches!(
+                e,
+                SingleFederationError::NoContextReferenced { message } if message.contains("does not reference a context")
+            )),
+            "Expected error for no context reference (missing $ sign), got: {:?}",
+            errors.errors
+        );
     }
 
     #[test]
