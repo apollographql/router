@@ -544,6 +544,13 @@ impl RouterService {
                 }
             }
         }).unwrap_or_else(|| {
+            // note: this can occur in the legitimate case of a GET request
+            // which sends a PQ ID using a custom mechanism processed by a
+            // plugin that sets `apollo_persisted_queries::operation_id`. As a
+            // workaround, clients can send some dummy query string, or even
+            // just include a trailing `?`, but maybe this error is too harsh in
+            // that case and we should allow an empty graphql::Request if that
+            // context key is set?
             Err(TranslateError {
                 status: StatusCode::BAD_REQUEST,
                 extension_code: "INVALID_GRAPHQL_REQUEST".to_string(),

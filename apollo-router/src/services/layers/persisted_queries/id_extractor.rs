@@ -2,13 +2,18 @@
 
 use crate::services::SupergraphRequest;
 use crate::services::layers::apq::PersistedQuery;
+use crate::services::layers::persisted_queries::PERSISTED_QUERIES_OPERATION_ID_CONTEXT_KEY;
 
 #[derive(Debug, Clone)]
 pub(crate) struct PersistedQueryIdExtractor;
 
 impl PersistedQueryIdExtractor {
     pub(crate) fn extract_id(request: &SupergraphRequest) -> Option<String> {
-        PersistedQuery::maybe_from_request(request).map(|pq| pq.sha256hash)
+        request
+            .context
+            .get(PERSISTED_QUERIES_OPERATION_ID_CONTEXT_KEY)
+            .unwrap_or_default()
+            .or_else(|| PersistedQuery::maybe_from_request(request).map(|pq| pq.sha256hash))
     }
 }
 
