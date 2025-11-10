@@ -9,6 +9,8 @@ use derive_more::From;
 use futures::prelude::*;
 
 use crate::Configuration;
+use crate::registry::OciConfig;
+use crate::registry::fetch_oci;
 use crate::router::Event;
 use crate::router::Event::NoMoreConfiguration;
 use crate::router::Event::RhaiReload;
@@ -16,8 +18,6 @@ use crate::router::Event::UpdateConfiguration;
 use crate::router::Event::UpdateSchema;
 use crate::uplink::UplinkConfig;
 use crate::uplink::schema::SchemaState;
-use crate::registry::OciConfig;
-use crate::registry::fetch_oci;
 
 type ConfigurationStream = Pin<Box<dyn Stream<Item = Configuration> + Send>>;
 
@@ -58,7 +58,7 @@ impl Default for ConfigurationSource {
 
 impl ConfigurationSource {
     /// Convert this config into a stream regardless of if is static or not. Allows for unified handling later.
-    /// 
+    ///
     /// `schema_source_provided` indicates if a schema source was already provided via CLI/env.
     /// If false and config contains graph_artifact_reference, we'll emit schema events from config.
     pub(crate) fn into_stream(
@@ -71,10 +71,12 @@ impl ConfigurationSource {
                 instance.uplink = uplink_config;
                 let config_arc = Arc::new(*instance);
                 let config_event = UpdateConfiguration(config_arc.clone());
-                
+
                 // If schema source wasn't provided and config has graph_artifact_reference, fetch schema
                 if !schema_source_provided {
-                    if let Some(schema_stream) = Self::maybe_create_schema_from_config(config_arc.clone()) {
+                    if let Some(schema_stream) =
+                        Self::maybe_create_schema_from_config(config_arc.clone())
+                    {
                         // Chain config event with schema stream and NoMoreConfiguration
                         return stream::once(future::ready(config_event))
                             .chain(schema_stream)
@@ -82,7 +84,7 @@ impl ConfigurationSource {
                             .boxed();
                     }
                 }
-                
+
                 // Chain config event and NoMoreConfiguration
                 stream::once(future::ready(config_event))
                     .chain(stream::iter(vec![NoMoreConfiguration]))
@@ -115,14 +117,15 @@ impl ConfigurationSource {
                             configuration.uplink = uplink_config.clone();
                             let config_arc = Arc::new(configuration);
                             let config_event = UpdateConfiguration(config_arc.clone());
-                            
+
                             if watch {
                                 let schema_source_provided_for_watch = schema_source_provided;
                                 let config_watcher = crate::files::watch(&path)
                                     .then(move |_| {
                                         let path = path.clone();
                                         let uplink_config = uplink_config.clone();
-                                        let schema_source_provided = schema_source_provided_for_watch;
+                                        let schema_source_provided =
+                                            schema_source_provided_for_watch;
                                         async move {
                                             match ConfigurationSource::read_config_async(&path)
                                                 .await
@@ -130,14 +133,20 @@ impl ConfigurationSource {
                                                 Ok(mut configuration) => {
                                                     configuration.uplink = uplink_config.clone();
                                                     let config_arc = Arc::new(configuration);
-                                                    let config_event = UpdateConfiguration(config_arc.clone());
-                                                    
+                                                    let config_event =
+                                                        UpdateConfiguration(config_arc.clone());
+
                                                     // Check if config should provide schema source
                                                     let mut events = vec![config_event];
                                                     if !schema_source_provided {
-                                                        if let Some(schema_stream) = Self::maybe_create_schema_from_config(config_arc.clone()) {
+                                                        if let Some(schema_stream) =
+                                                            Self::maybe_create_schema_from_config(
+                                                                config_arc.clone(),
+                                                            )
+                                                        {
                                                             // Collect schema event from stream
-                                                            let schema_events: Vec<Event> = schema_stream.collect().await;
+                                                            let schema_events: Vec<Event> =
+                                                                schema_stream.collect().await;
                                                             events.extend(schema_events);
                                                         }
                                                     }
@@ -152,12 +161,15 @@ impl ConfigurationSource {
                                     })
                                     .flat_map(|events| stream::iter(events))
                                     .boxed();
-                                
+
                                 // Combine initial config event with watch stream
                                 // Also add schema stream if needed
-                                let initial_config_stream = stream::once(future::ready(config_event));
+                                let initial_config_stream =
+                                    stream::once(future::ready(config_event));
                                 let combined_stream = if !schema_source_provided {
-                                    if let Some(schema_stream) = Self::maybe_create_schema_from_config(config_arc.clone()) {
+                                    if let Some(schema_stream) =
+                                        Self::maybe_create_schema_from_config(config_arc.clone())
+                                    {
                                         initial_config_stream
                                             .chain(schema_stream)
                                             .chain(config_watcher)
@@ -175,7 +187,7 @@ impl ConfigurationSource {
                                         .chain(stream::iter(vec![NoMoreConfiguration]))
                                         .boxed()
                                 };
-                                
+
                                 let config_arc_clone = config_arc.clone();
                                 if let Some(rhai_plugin) =
                                     config_arc_clone.apollo_plugins.plugins.get("rhai")
@@ -199,7 +211,8 @@ impl ConfigurationSource {
                                         .filter_map(move |_| future::ready(Some(RhaiReload)))
                                         .boxed();
                                     // Select across both our streams
-                                    futures::stream::select(combined_stream.boxed(), rhai_watcher).boxed()
+                                    futures::stream::select(combined_stream.boxed(), rhai_watcher)
+                                        .boxed()
                                 } else {
                                     // No rhai - just return combined stream
                                     combined_stream.boxed()
@@ -208,7 +221,9 @@ impl ConfigurationSource {
                                 // Non-watching case: emit config event, then schema if needed
                                 let initial_stream = stream::once(future::ready(config_event));
                                 if !schema_source_provided {
-                                    if let Some(schema_stream) = Self::maybe_create_schema_from_config(config_arc.clone()) {
+                                    if let Some(schema_stream) =
+                                        Self::maybe_create_schema_from_config(config_arc.clone())
+                                    {
                                         // Chain initial config, schema stream, and NoMoreConfiguration
                                         return initial_stream
                                             .chain(schema_stream)
@@ -223,7 +238,11 @@ impl ConfigurationSource {
                             }
                         }
                         Err(err) => {
-                            tracing::error!("Failed to read configuration from {:?}: {}", path, err);
+                            tracing::error!(
+                                "Failed to read configuration from {:?}: {}",
+                                path,
+                                err
+                            );
                             stream::empty()
                                 .chain(stream::iter(vec![NoMoreConfiguration]))
                                 .boxed()
@@ -243,33 +262,38 @@ impl ConfigurationSource {
         let config = tokio::fs::read_to_string(path).await?;
         config.parse().map_err(ReadConfigError::Validation)
     }
-    
+
     /// Create a schema event from configuration if graph_artifact_reference is set.
     /// Returns None if no schema should be created from config.
-    /// 
+    ///
     /// This creates an async stream that fetches the schema from OCI.
-    fn maybe_create_schema_from_config(config: Arc<Configuration>) -> Option<impl Stream<Item = Event>> {
+    fn maybe_create_schema_from_config(
+        config: Arc<Configuration>,
+    ) -> Option<impl Stream<Item = Event>> {
         // Check if graph_artifact_reference is set in config
         let graph_artifact_ref = config.graph_artifact_reference.clone()?;
-        
+
         // Validate and determine reference type
-        let (reference, oci_reference_type) = match crate::executable::Opt::validate_oci_reference(&graph_artifact_ref) {
-            Ok(result) => result,
-            Err(err) => {
-                tracing::error!("Invalid graph_artifact_reference in config: {}", err);
-                return None;
-            }
-        };
-        
+        let (reference, oci_reference_type) =
+            match crate::executable::Opt::validate_oci_reference(&graph_artifact_ref) {
+                Ok(result) => result,
+                Err(err) => {
+                    tracing::error!("Invalid graph_artifact_reference in config: {}", err);
+                    return None;
+                }
+            };
+
         // Get Apollo key - required for OCI
         let apollo_key = match std::env::var("APOLLO_KEY") {
             Ok(key) => key,
             Err(_) => {
-                tracing::error!("APOLLO_KEY environment variable is required when using graph_artifact_reference from config");
+                tracing::error!(
+                    "APOLLO_KEY environment variable is required when using graph_artifact_reference from config"
+                );
                 return None;
             }
         };
-        
+
         // Create OciConfig
         let oci_config = OciConfig {
             apollo_key,
@@ -277,24 +301,29 @@ impl ConfigurationSource {
             hot_reload: config.hot_reload,
             oci_reference_type,
         };
-        
+
         // Fetch schema from OCI asynchronously
-        Some(futures::stream::once(async move {
-            match fetch_oci(oci_config).await {
-                Ok(oci_result) => {
-                    tracing::debug!("fetched schema from oci registry via config");
-                    Some(UpdateSchema(SchemaState {
-                        sdl: oci_result.schema,
-                        launch_id: None,
-                    }))
+        Some(
+            futures::stream::once(async move {
+                match fetch_oci(oci_config).await {
+                    Ok(oci_result) => {
+                        tracing::debug!("fetched schema from oci registry via config");
+                        Some(UpdateSchema(SchemaState {
+                            sdl: oci_result.schema,
+                            launch_id: None,
+                        }))
+                    }
+                    Err(err) => {
+                        tracing::error!(
+                            "error fetching schema from oci registry via config: {}",
+                            err
+                        );
+                        None
+                    }
                 }
-                Err(err) => {
-                    tracing::error!("error fetching schema from oci registry via config: {}", err);
-                    None
-                }
-            }
-        })
-        .filter_map(|s| async move { s }))
+            })
+            .filter_map(|s| async move { s }),
+        )
     }
 }
 
@@ -336,10 +365,15 @@ mod tests {
                 break;
             }
         }
-        
+
         // Verify initial config was loaded
-        assert!(initial_events.iter().any(|e| matches!(e, UpdateConfiguration(_))),
-            "Expected UpdateConfiguration event, got: {:?}", initial_events);
+        assert!(
+            initial_events
+                .iter()
+                .any(|e| matches!(e, UpdateConfiguration(_))),
+            "Expected UpdateConfiguration event, got: {:?}",
+            initial_events
+        );
 
         // Test file watching: modify file and verify new config is loaded
         let mut file = std::fs::File::create(&path_clone).unwrap();
@@ -347,7 +381,7 @@ mod tests {
         write_and_flush(&mut file, contents_datadog).await;
         drop(file);
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        
+
         // Collect events from file change
         let mut file_change_events = Vec::new();
         while let Some(event) = stream.next().await {
@@ -356,17 +390,21 @@ mod tests {
                 break;
             }
         }
-        
+
         // Verify file change triggered UpdateConfiguration
-        assert!(file_change_events.iter().any(|e| matches!(e, UpdateConfiguration(_))),
-            "Expected UpdateConfiguration after file change");
+        assert!(
+            file_change_events
+                .iter()
+                .any(|e| matches!(e, UpdateConfiguration(_))),
+            "Expected UpdateConfiguration after file change"
+        );
 
         // Test invalid config handling
         let mut file = std::fs::File::create(&path_clone).unwrap();
         write_and_flush(&mut file, ":garbage").await;
         drop(file);
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        
+
         // Stream should handle invalid config gracefully
         let event = stream.next().await;
         if let Some(e) = event {
@@ -406,16 +444,20 @@ mod tests {
 
         let stream = ConfigurationSource::File { path, watch: false }
             .into_stream(Some(UplinkConfig::default()), false);
-        
+
         let events: Vec<_> = stream.collect().await;
-        
+
         // Verify stream completes with NoMoreConfiguration
         assert!(matches!(events.last(), Some(NoMoreConfiguration)));
-        
+
         // Verify config was loaded
         let config_event = events.iter().find(|e| matches!(e, UpdateConfiguration(_)));
-        assert!(config_event.is_some(), "Expected UpdateConfiguration event, got: {:?}", events);
-        
+        assert!(
+            config_event.is_some(),
+            "Expected UpdateConfiguration event, got: {:?}",
+            events
+        );
+
         // Verify config is valid
         if let Some(UpdateConfiguration(config)) = config_event {
             let _ = config.as_ref(); // Verify Arc is valid

@@ -23,8 +23,8 @@ use url::ParseError;
 use url::Url;
 
 use crate::LicenseSource;
-use crate::configuration::Discussed;
 use crate::configuration::Configuration;
+use crate::configuration::Discussed;
 use crate::configuration::expansion::Expansion;
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
@@ -245,7 +245,7 @@ impl Opt {
             .clone()
             .ok_or(Self::err_require_opt("APOLLO_GRAPH_ARTIFACT_REFERENCE"))?;
         let (reference, oci_reference_type) = Self::validate_oci_reference(&graph_artifact_ref)?;
-        
+
         Ok(OciConfig {
             apollo_key: self
                 .apollo_key
@@ -257,16 +257,18 @@ impl Opt {
         })
     }
 
-    pub fn validate_oci_reference(reference: &str) -> std::result::Result<(String, crate::registry::OciReferenceType), anyhow::Error> {
+    pub fn validate_oci_reference(
+        reference: &str,
+    ) -> std::result::Result<(String, crate::registry::OciReferenceType), anyhow::Error> {
         use crate::registry::OciReferenceType;
-        
+
         // Check for SHA256 digest reference: @sha256:64-hex-chars
         let sha_regex = Regex::new(r"@sha256:[0-9a-fA-F]{64}$").unwrap();
         if sha_regex.is_match(reference) {
             tracing::debug!("validated OCI SHA reference");
             return Ok((reference.to_string(), OciReferenceType::Sha));
         }
-        
+
         // Check for tag reference: :tag-name (tag regex: [a-zA-Z0-9_][a-zA-Z0-9._-]{0,127})
         // Tags appear after a colon in the reference
         let tag_regex = Regex::new(r":([a-zA-Z0-9_][a-zA-Z0-9._-]{0,127})$").unwrap();
@@ -274,8 +276,10 @@ impl Opt {
             tracing::debug!("validated OCI tag reference");
             return Ok((reference.to_string(), OciReferenceType::Tag));
         }
-        
-        Err(anyhow!("invalid graph artifact reference: {reference}. Must be either a SHA256 digest (@sha256:...) or a tag (:tag-name)"))
+
+        Err(anyhow!(
+            "invalid graph artifact reference: {reference}. Must be either a SHA256 digest (@sha256:...) or a tag (:tag-name)"
+        ))
     }
 
     fn parse_endpoints(endpoints: &str) -> std::result::Result<Endpoints, anyhow::Error> {
@@ -680,7 +684,7 @@ impl Executable {
     "#
                     ));
                 }
-                
+
                 // No schema source provided via CLI/env - check if config file can provide it
                 // If no config file or config file doesn't have graph_artifact_reference, return error
                 match &configuration {
@@ -987,7 +991,7 @@ mod tests {
     #[test]
     fn test_validate_oci_reference_valid_cases() {
         use crate::registry::OciReferenceType;
-        
+
         // Test valid OCI references with different hash values
         let valid_hashes = vec![
             "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
@@ -1004,7 +1008,7 @@ mod tests {
             assert_eq!(reference, hash);
             assert_eq!(ref_type, OciReferenceType::Sha);
         }
-        
+
         // Test valid tag references
         let valid_tags = vec![
             "registry.example.com/my-graph:latest",
@@ -1016,10 +1020,14 @@ mod tests {
             "graph:a",
             "graph:01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567",
         ];
-        
+
         for tag_ref in valid_tags {
             let result = super::Opt::validate_oci_reference(tag_ref);
-            assert!(result.is_ok(), "Tag reference '{}' should be valid", tag_ref);
+            assert!(
+                result.is_ok(),
+                "Tag reference '{}' should be valid",
+                tag_ref
+            );
             let (reference, ref_type) = result.unwrap();
             assert_eq!(reference, tag_ref);
             assert_eq!(ref_type, OciReferenceType::Tag);

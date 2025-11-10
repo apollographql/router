@@ -133,9 +133,9 @@ impl RouterHttpServer {
     ) -> RouterHttpServer {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
         // Use provided flag or infer from schema source
-        let schema_source_provided = schema_source_provided.unwrap_or_else(|| {
-            !matches!(&schema, SchemaSource::Static { schema_sdl } if schema_sdl.is_empty())
-        });
+        let schema_source_provided = schema_source_provided.unwrap_or_else(
+            || !matches!(&schema, SchemaSource::Static { schema_sdl } if schema_sdl.is_empty()),
+        );
         let event_stream = generate_event_stream(
             shutdown.unwrap_or(ShutdownSource::CtrlC),
             configuration.unwrap_or_default(),
@@ -243,7 +243,9 @@ fn generate_event_stream(
         shutdown.into_stream().boxed(),
         schema.into_stream().boxed(),
         license.into_stream().boxed(),
-        configuration.into_stream(uplink_config, schema_source_provided).boxed(),
+        configuration
+            .into_stream(uplink_config, schema_source_provided)
+            .boxed(),
         shutdown_receiver
             .into_stream()
             .map(|_| Event::Shutdown)
