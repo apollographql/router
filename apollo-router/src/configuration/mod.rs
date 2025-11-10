@@ -228,7 +228,7 @@ pub struct Configuration {
     pub(crate) graph_artifact_reference: Option<String>,
 
     /// Hot reload configuration option.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_bool_or_default")]
     pub(crate) hot_reload: bool,
 }
 
@@ -266,7 +266,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             #[serde(default)]
             experimental_type_conditioned_fetching: bool,
             graph_artifact_reference: Option<String>,
-            #[serde(default)]
+            #[serde(default, deserialize_with = "deserialize_bool_or_default")]
             hot_reload: bool,
         }
         let mut ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
@@ -1220,6 +1220,14 @@ impl TlsSupergraph {
 
         Ok(Arc::new(config))
     }
+}
+
+/// Custom deserializer for boolean fields that handles null values by treating them as false
+fn deserialize_bool_or_default<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<bool>::deserialize(deserializer).map(|x| x.unwrap_or(false))
 }
 
 fn deserialize_certificate<'de, D>(deserializer: D) -> Result<CertificateDer<'static>, D::Error>
