@@ -54,6 +54,7 @@ use wiremock::matchers::path_regex;
 use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
+use crate::integration::common::redis;
 use crate::integration::response_cache::namespace;
 
 // TODO: consider centralizing this fn and the same one in entity_cache.rs?
@@ -2005,24 +2006,15 @@ async fn test_redis_uses_replicas_in_clusters_for_mgets() {
         .config(router_config)
         .subgraph_overrides(subgraph_overrides)
         .log("trace,jsonpath_lib=info")
-        .redis_urls(vec!["redis-cluster://localhost:7000".to_string()])
+        .redis_urls(vec!["redis-cluster://127.0.0.1:7000".to_string()])
         .build()
         .await;
 
     router.start().await;
     router.assert_started().await;
 
-    // let assert_redis_mget_command_sent_to_replica_handle =
-    //     tokio::spawn(IntegrationTest::assert_redis_command_sent_to_node(
-    //         "MGET",
-    //         vec!["7003".to_string(), "7004".to_string(), "7005".to_string()],
-    //     ));
-
-    let res = router.monitor_redis_commands().await;
-
-    // we're running three redis-cli binaries each with a MONITOR command; so, give them a little
-    // timme to start up
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    let redis_monitor =
+        redis::Monitor::new(&["7000", "7001", "7002", "7003", "7004", "7005"]).await;
 
     // three queries to ensure a cache hit
     for _ in 0..3 {
@@ -2034,12 +2026,11 @@ async fn test_redis_uses_replicas_in_clusters_for_mgets() {
             .build();
 
         let _ = router.execute_query(query).await;
-        let _ = tokio::time::sleep(Duration::from_millis(1000)).await;
+        let _ = tokio::time::sleep(Duration::from_millis(500)).await;
     }
 
-    // let _ = assert_redis_mget_command_sent_to_replica_handle
-    //     .await
-    //     .expect("redis MGET command not sent to a replica");
+    let mut redis_monitor_output = redis_monitor.collect().await.namespaced(&namespace);
+    assert!(redis_monitor_output.mgets_sent_to_replicas_only());
 
     // check that there were no I/O errors
     let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="response-cache",otel_scope_name="apollo/router"}"#;
@@ -2050,9 +2041,7 @@ async fn test_redis_uses_replicas_in_clusters_for_mgets() {
     // convert a value
     let parse_error = r#"apollo_router_cache_redis_errors_total{error_type="parse""#;
 
-    let example_cache_key = format!(
-        "version:1.0:subgraph:reviews:type:Product:entity:052fa800fa760b2ac78669a5b0b90f512158eddab8d01eabb4e65b286ff09ecd:representation::hash:739583f793fb842194e6be6c6f126df63cc0ee86f8702745ac4630521ab6752d:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6"
-    );
+    let example_cache_key = "version:1.0:subgraph:reviews:type:Product:representation:052fa800fa760b2ac78669a5b0b90f512158eddab8d01eabb4e65b286ff09ecd:hash:739583f793fb842194e6be6c6f126df63cc0ee86f8702745ac4630521ab6752d:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
 
     router.assert_metrics_does_not_contain(io_error).await;
     router.assert_metrics_does_not_contain(parse_error).await;
@@ -2060,6 +2049,7 @@ async fn test_redis_uses_replicas_in_clusters_for_mgets() {
         .assert_redis_cache_contains(&example_cache_key, None)
         .await;
 }
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_redis_in_standalone_mode_for_mgets() {
     if !graph_os_enabled() {
