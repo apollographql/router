@@ -3,6 +3,8 @@ supergraph:
     cache:
       redis:
         required_to_start: true
+        urls:
+          - redis://localhost:6379
         ttl: 1s
         pool_size: 4
 telemetry:

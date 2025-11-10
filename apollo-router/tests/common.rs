@@ -75,6 +75,8 @@ use wiremock::matchers::method;
 use wiremock::matchers::path;
 use wiremock::matchers::path_regex;
 
+use crate::integration::ValueExt;
+
 pub mod redis;
 
 /// Global registry to keep track of allocated ports across all tests
@@ -279,12 +281,14 @@ impl IntegrationTest {
             &self._apollo_otlp_server.uri().to_string(),
             None, // Don't override bind address here
             &self.redis_namespace,
-            &self.redis_urls,
             Some(&self.port_replacements),
         );
 
-        std::fs::write(&self.test_config_location, updated_config)
-            .expect("Failed to write updated config");
+        std::fs::write(
+            &self.test_config_location,
+            serde_yaml::to_string(&updated_config).unwrap(),
+        )
+        .expect("Failed to write updated config");
     }
 
     /// Set environment variables for the router subprocess
@@ -565,7 +569,6 @@ impl IntegrationTest {
         http_method: Option<String>,
         jwt: Option<String>,
         env: Option<HashMap<String, OsString>>,
-        redis_urls: Option<Vec<String>>,
         redis_namespace: Option<String>,
     ) -> Self {
         let redis_namespace = redis_namespace.unwrap_or_else(|| Uuid::new_v4().to_string());
@@ -595,15 +598,17 @@ impl IntegrationTest {
             .or_insert(url.clone());
 
         // Insert the overrides into the config
-        let config_str = merge_overrides(
+        let config = merge_overrides(
             &config,
             &subgraph_overrides,
             &apollo_otlp_endpoint,
             None,
             &redis_namespace,
-            &redis_urls,
             None,
         );
+
+        // pull the redis urls from the config
+        let redis_urls = get_redis_urls(&config);
 
         let supergraph = supergraph.unwrap_or(PathBuf::from_iter([
             "..",
@@ -652,7 +657,11 @@ impl IntegrationTest {
         test_config_location.push(location);
         test_schema_location.push(format!("apollo-router-test-{}.graphql", Uuid::new_v4()));
 
-        fs::write(&test_config_location, &config_str).expect("could not write config");
+        fs::write(
+            &test_config_location,
+            serde_yaml::to_string(&config).unwrap(),
+        )
+        .expect("could not write config");
         fs::copy(&supergraph, &test_schema_location).expect("could not write schema");
 
         let (stdio_tx, stdio_rx) = tokio::sync::mpsc::channel(2000);
@@ -872,17 +881,17 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn update_config(&self, yaml: &str) {
+        let config = merge_overrides(
+            yaml,
+            &self._subgraph_overrides,
+            &self._apollo_otlp_server.uri().to_string(),
+            None,
+            &self.redis_namespace,
+            Some(&self.port_replacements),
+        );
         tokio::fs::write(
             &self.test_config_location,
-            &merge_overrides(
-                yaml,
-                &self._subgraph_overrides,
-                &self._apollo_otlp_server.uri().to_string(),
-                None,
-                &self.redis_namespace,
-                &self.redis_urls,
-                Some(&self.port_replacements),
-            ),
+            serde_yaml::to_string(&config).unwrap(),
         )
         .await
         .expect("must be able to write config");
@@ -1547,11 +1556,8 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn clear_redis_cache(&self) {
-        let urls = self.redis_urls.as_ref().expect("no redis urls");
-
-        // this should still work for a cluster, as the `del` will be directed to the right node
-        let url = urls.iter().next().expect("no redis urls");
-        let config = RedisConfig::from_url(url).unwrap();
+        let url = self.redis_url().expect("no redis urls");
+        let config = RedisConfig::from_url(&url).unwrap();
 
         let client = RedisClient::new(config, None, None, None);
         let connection_task = client.connect();
@@ -1631,12 +1637,8 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn assert_redis_cache_contains(&self, key: &str, ignore: Option<&str>) -> String {
-        let urls = self.redis_urls.as_ref().expect("no redis urls");
-
-        // this should still work for a cluster, as the `get` will be directed to the right node
-        let url = urls.iter().next().expect("no redis urls");
-
-        let config = RedisConfig::from_url(url).unwrap();
+        let url = self.redis_url().expect("no redis urls");
+        let config = RedisConfig::from_url(&url).unwrap();
         let client = RedisClient::new(config, None, None, None);
         let connection_task = client.connect();
         client.wait_for_connect().await.unwrap();
@@ -1667,6 +1669,10 @@ impl IntegrationTest {
         let _ = connection_task.await;
         s
     }
+
+    fn redis_url(&self) -> Option<String> {
+        Some(self.redis_urls.as_ref()?.into_iter().next()?.clone())
+    }
 }
 
 impl Drop for IntegrationTest {
@@ -1687,9 +1693,8 @@ fn merge_overrides(
     apollo_otlp_endpoint: &str,
     bind_addr: Option<SocketAddr>,
     redis_namespace: &str,
-    redis_urls: &Option<Vec<String>>,
     port_replacements: Option<&HashMap<String, u16>>,
-) -> String {
+) -> Value {
     let bind_addr = bind_addr
         .map(|a| a.to_string())
         .unwrap_or_else(|| "127.0.0.1:0".into());
@@ -1828,7 +1833,7 @@ fn merge_overrides(
         .and_then(|o| o.get_mut("redis"))
         .and_then(|o| o.as_object_mut())
     {
-        merge_overrides_redis_config(query_plan, redis_namespace, redis_urls.clone());
+        query_plan.insert("namespace".to_string(), redis_namespace.into());
     }
 
     if let Some(response_cache_config) = config
@@ -1844,7 +1849,7 @@ fn merge_overrides(
             .and_then(|o| o.get_mut("redis"))
             .and_then(|o| o.as_object_mut())
         {
-            merge_overrides_redis_config(all, redis_namespace, redis_urls.clone());
+            all.insert("namespace".to_string(), redis_namespace.into());
         }
 
         if let Some(subgraphs) = response_cache_config
@@ -1857,28 +1862,74 @@ fn merge_overrides(
                     .and_then(|o| o.get_mut("redis"))
                     .and_then(|o| o.as_object_mut())
                 {
-                    merge_overrides_redis_config(
-                        subgraph_config,
-                        redis_namespace,
-                        redis_urls.clone(),
-                    );
+                    subgraph_config.insert("namespace".to_string(), redis_namespace.into());
                 }
             }
         }
     }
 
-    serde_yaml::to_string(&config).unwrap()
+    config
 }
 
-fn merge_overrides_redis_config(
-    redis_config: &mut serde_json::Map<String, Value>,
-    namespace: &str,
-    urls: Option<Vec<String>>,
-) {
-    redis_config.insert("namespace".to_string(), namespace.into());
-    if let Some(urls) = urls {
-        redis_config.insert("urls".to_string(), urls.into());
+/// Extract Redis URLs from config. This assumes that caches will share a redis instance; it just
+/// returns the first URLs found from: query plan, response cache all, response cache subgraphs
+fn get_redis_urls(config: &Value) -> Option<Vec<String>> {
+    if let Some(urls) = config
+        .as_object()
+        .and_then(|o| o.get("supergraph"))
+        .and_then(|o| o.as_object())
+        .and_then(|o| o.get("query_planning"))
+        .and_then(|o| o.as_object())
+        .and_then(|o| o.get("cache"))
+        .and_then(|o| o.as_object())
+        .and_then(|o| o.get("redis"))
+        .and_then(|o| o.as_object())
+        .and_then(|o| o.get("urls"))
+        .and_then(|o| o.as_array())
+    {
+        return Some(urls.into_iter().filter_map(|v| v.as_string()).collect());
     }
+
+    // TODO: might be able to remove some of these as_objs
+    if let Some(response_cache_config) = config
+        .as_object()
+        .and_then(|o| o.get("preview_response_cache"))
+        .and_then(|o| o.as_object())
+        .and_then(|o| o.get("subgraph"))
+        .and_then(|o| o.as_object())
+    {
+        if let Some(urls) = response_cache_config
+            .get("all")
+            .and_then(|o| o.as_object())
+            .and_then(|o| o.get("redis"))
+            .and_then(|o| o.as_object())
+            .and_then(|o| o.get("urls"))
+            .and_then(|o| o.as_array())
+        {
+            return Some(urls.into_iter().filter_map(|v| v.as_string()).collect());
+        }
+
+        if let Some(subgraphs) = response_cache_config
+            .get("subgraphs")
+            .and_then(|o| o.as_object())
+        {
+            for (_, subgraph_config) in subgraphs.iter() {
+                if let Some(urls) = subgraph_config
+                    .as_object()
+                    .and_then(|o| o.get("redis"))
+                    .and_then(|o| o.as_object())
+                    .and_then(|o| o.get("urls"))
+                    .and_then(|o| o.as_array())
+                {
+                    {
+                        return Some(urls.into_iter().filter_map(|v| v.as_string()).collect());
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
 
 #[allow(dead_code)]

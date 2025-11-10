@@ -1515,7 +1515,6 @@ async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key
         .config(include_str!(
             "fixtures/query_planner_redis_config_update.router.yaml"
         ))
-        .redis_urls(vec!["redis://localhost:6379".to_string()])
         .build()
         .await;
 
@@ -1556,7 +1555,6 @@ async fn test_redis_connections_are_closed_on_router_reload() {
     let router_config = include_str!("fixtures/redis_connection_closure.router.yaml");
     let mut router = IntegrationTest::builder()
         .config(router_config)
-        .redis_urls(vec!["redis://localhost:6379".to_string()])
         .build()
         .await;
 
@@ -1755,7 +1753,6 @@ async fn test_redis_doesnt_use_replicas_in_standalone_mode() {
         .config(router_config)
         .log("trace,jsonpath_lib=info")
         .redis_namespace(&namespace)
-        .redis_urls(vec!["redis://localhost:6379".to_string()])
         .build()
         .await;
 
@@ -1984,7 +1981,6 @@ async fn test_redis_uses_replicas_in_clusters_for_mgets() {
         .config(router_config)
         .subgraph_overrides(subgraph_overrides)
         .log("trace,jsonpath_lib=info")
-        .redis_urls(vec!["redis-cluster://127.0.0.1:7000".to_string()])
         .build()
         .await;
 
@@ -2102,7 +2098,6 @@ async fn test_redis_in_standalone_mode_for_mgets() {
         .config(router_config)
         .subgraph_overrides(subgraph_overrides)
         .log("trace,jsonpath_lib=info")
-        .redis_urls(vec!["redis://localhost:6379".to_string()])
         .build()
         .await;
 
