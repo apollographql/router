@@ -228,7 +228,7 @@ expression: "&schema"
         },
         "library_name_header": {
           "default": "apollographql-library-name",
-          "description": "The name of the header to extract from requests when populating 'library name' for metrics in Apollo Studio.",
+          "description": "The name of the header to extract from requests when populating 'library name' for traces and metrics in Apollo Studio.",
           "type": [
             "string",
             "null"
@@ -236,7 +236,7 @@ expression: "&schema"
         },
         "library_version_header": {
           "default": "apollographql-library-version",
-          "description": "The name of the header to extract from requests when populating 'library version' for metrics in Apollo Studio.",
+          "description": "The name of the header to extract from requests when populating 'library version' for traces and metrics in Apollo Studio.",
           "type": [
             "string",
             "null"
