@@ -44,8 +44,10 @@ use http::Method;
 use http::header::CACHE_CONTROL;
 use serde_json::Value;
 use serde_json::json;
+use tokio::task::JoinSet;
 use tower::BoxError;
 use tower::ServiceExt;
+use uuid::Uuid;
 use wiremock::Mock;
 use wiremock::ResponseTemplate;
 use wiremock::matchers::method;
@@ -1554,6 +1556,7 @@ async fn test_redis_connections_are_closed_on_router_reload() {
     let router_config = include_str!("fixtures/redis_connection_closure.router.yaml");
     let mut router = IntegrationTest::builder()
         .config(router_config)
+        .redis_urls(vec!["redis://localhost:6379".to_string()])
         .build()
         .await;
 
@@ -1585,9 +1588,10 @@ async fn test_redis_emits_response_size_avg_metric() {
 
     router.start().await;
     router.assert_started().await;
-    // two queries to ensure a cache hit
-    router.execute_default_query().await;
-    router.execute_default_query().await;
+
+    // send a few different queries to ensure a redis cache hit; if you just send 1, it'll only hit
+    // the in-memory cache
+    router.execute_several_default_queries(5).await;
 
     let experimental_response_avg_metric = r#"experimental_apollo_router_cache_redis_response_size_avg{kind="query planner",otel_scope_name="apollo/router"}"#;
     router
@@ -1611,9 +1615,10 @@ async fn test_redis_emits_request_size_avg_metric() {
 
     router.start().await;
     router.assert_started().await;
-    // two queries to ensure a cache hit
-    router.execute_default_query().await;
-    router.execute_default_query().await;
+
+    // send a few different queries to ensure a redis cache hit; if you just send 1, it'll only hit
+    // the in-memory cache
+    router.execute_several_default_queries(5).await;
 
     let experimental_response_avg_metric = r#"experimental_apollo_router_cache_redis_request_size_avg{kind="query planner",otel_scope_name="apollo/router"}"#;
     router
@@ -1679,20 +1684,7 @@ async fn test_redis_emits_configuration_error_metric() {
 
     router
         .assert_metric_non_zero(
-            r#"apollo_router_cache_redis_errors_total{error_type="cluster",kind="entity",otel_scope_name="apollo/router"}"#,
-            None,
-        )
-        .await;
-
-    // LEFT OFF HERE: trying to figure out why we're getting `unknown` error type; trying to
-    // trigger an actual config error
-    router
-        .assert_metric_non_zero(
-            // NOTE: the `unknown` here should be `configuration`! it gets emitted from fred; so,
-            // maybe we need to trigger a config error in a different way; this test might actually
-            // test what happens with a config fred doesn't know how to use (eg, the schema isn't
-            // redis, rediss-cluster, etc)
-            r#"apollo_router_cache_redis_errors_total{error_type="unknown",kind="entity",otel_scope_name="apollo/router"}"#,
+            r#"apollo_router_cache_redis_errors_total{error_type="config",kind="entity",otel_scope_name="apollo/router"}"#,
             None,
         )
         .await;
@@ -1706,44 +1698,37 @@ async fn test_redis_uses_replicas_when_clustered() {
         return;
     }
 
+    let namespace = Uuid::new_v4().to_string();
+    let redis_monitor =
+        redis::Monitor::new(&["7000", "7001", "7002", "7003", "7004", "7005"]).await;
+
+    // NB: `reset_ttl` must be false in the config, otherwise GETs will be sent to primary
     let router_config = include_str!("fixtures/clustered_redis_query_planning.router.yaml");
-    //let router_config = include_str!("fixtures/redis_connection_closure.router.yaml");
     let mut router = IntegrationTest::builder()
         .config(router_config)
+        .redis_namespace(&namespace)
         .build()
         .await;
 
     router.start().await;
     router.assert_started().await;
 
-    // let assert_redis_readonly_sent_to_replica_handle =
-    //     tokio::spawn(IntegrationTest::assert_redis_command_sent_to_node(
-    //         "READONLY",
-    //         // read reps
-    //         vec!["7003".to_string(), "7004".to_string(), "7005".to_string()],
-    //     ));
-    // let assert_redis_get_command_sent_to_replica_handle =
-    //     tokio::spawn(IntegrationTest::assert_redis_command_sent_to_node(
-    //         "GET",
-    //         // read reps
-    //         vec!["7003".to_string(), "7004".to_string(), "7005".to_string()],
-    //     ));
+    // send a few different queries to ensure a redis cache hit; if you just send 1, it'll only hit
+    // the in-memory cache
+    router.execute_several_default_queries(5).await;
 
-    // the assert_redis_command_sent_to_node starts a handful of redis-cli binaries to MONITOR
-    // commands; this sleep gives it a little bit of buffer time-wise before we send commands over
-    tokio::time::sleep(Duration::from_secs(5)).await;
+    let redis_monitor_output = redis_monitor.collect().await;
+    assert!(
+        redis_monitor_output
+            .namespaced(&namespace)
+            .command_sent_to_replicas_only("GET")
+    );
 
-    // two queries to ensure a cache hit
-    router.execute_default_query().await;
-    router.execute_default_query().await;
+    let replicas_output = redis_monitor_output.replicas(true);
+    assert!(replicas_output.command_sent_to_all("READONLY"));
 
-    // let _ = assert_redis_get_command_sent_to_replica_handle
-    //     .await
-    //     .expect("redis GET command not sent to a replica");
-    //
-    // let _ = assert_redis_readonly_sent_to_replica_handle
-    //     .await
-    //     .expect("redis READONLY command not sent to a replica");
+    let primaries_output = redis_monitor_output.replicas(false);
+    assert!(!primaries_output.command_sent_to_any("READONLY"));
 
     // check that there were no I/O errors
     let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="query planner",otel_scope_name="apollo/router"}"#;
@@ -1762,35 +1747,28 @@ async fn test_redis_doesnt_use_replicas_in_standalone_mode() {
         return;
     }
 
+    let namespace = Uuid::new_v4().to_string();
+    let redis_monitor = redis::Monitor::new(&["6379"]).await;
+
     let router_config = include_str!("fixtures/redis_connection_closure.router.yaml");
     let mut router = IntegrationTest::builder()
         .config(router_config)
         .log("trace,jsonpath_lib=info")
+        .redis_namespace(&namespace)
+        .redis_urls(vec!["redis://localhost:6379".to_string()])
         .build()
         .await;
 
     router.start().await;
     router.assert_started().await;
 
-    // let assert_redis_get_command_sent_to_replica_handle =
-    //     tokio::spawn(IntegrationTest::assert_redis_command_sent_to_node(
-    //         "GET",
-    //         // read reps
-    //         //vec!["7003".to_string(), "7004".to_string(), "7005".to_string()],
-    //         vec!["6379".to_string()],
-    //     ));
+    // send a few different queries to ensure a redis cache hit; if you just send 1, it'll only hit
+    // the in-memory cache
+    router.execute_several_default_queries(5).await;
 
-    // the assert_redis_command_sent_to_node starts a handful of redis-cli binaries to MONITOR
-    // commands; this sleep gives it a little bit of buffer time-wise before we send commands over
-    tokio::time::sleep(Duration::from_secs(5)).await;
-
-    // two queries to ensure a cache hit
-    router.execute_default_query().await;
-    router.execute_default_query().await;
-
-    // let _ = assert_redis_get_command_sent_to_replica_handle
-    //     .await
-    //     .expect("redis GET command not sent to a replica");
+    let redis_monitor_output = redis_monitor.collect().await.namespaced(&namespace);
+    assert_eq!(redis_monitor_output.num_nodes(), 1);
+    assert!(redis_monitor_output.command_sent_to_any("GET"));
 
     // check that there were no I/O errors
     let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="query planner",otel_scope_name="apollo/router"}"#;
@@ -2016,8 +1994,9 @@ async fn test_redis_uses_replicas_in_clusters_for_mgets() {
     let redis_monitor =
         redis::Monitor::new(&["7000", "7001", "7002", "7003", "7004", "7005"]).await;
 
-    // three queries to ensure a cache hit
-    for _ in 0..3 {
+    // send a few different queries to ensure a redis cache hit
+    let mut join_set = JoinSet::new();
+    for _ in 0..5 {
         let query = Query::builder()
             .body(
                 json!({"query":"{ topProducts(first: 5) { name reviews { id } } }","variables":{}}),
@@ -2025,12 +2004,12 @@ async fn test_redis_uses_replicas_in_clusters_for_mgets() {
             .header("cache-control", "public")
             .build();
 
-        let _ = router.execute_query(query).await;
-        let _ = tokio::time::sleep(Duration::from_millis(500)).await;
+        join_set.spawn(router.execute_query(query));
     }
+    let _ = join_set.join_all().await;
 
-    let mut redis_monitor_output = redis_monitor.collect().await.namespaced(&namespace);
-    assert!(redis_monitor_output.mgets_sent_to_replicas_only());
+    let redis_monitor_output = redis_monitor.collect().await.namespaced(&namespace);
+    assert!(redis_monitor_output.command_sent_to_replicas_only("MGET"));
 
     // check that there were no I/O errors
     let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="response-cache",otel_scope_name="apollo/router"}"#;
@@ -2116,56 +2095,50 @@ async fn test_redis_in_standalone_mode_for_mgets() {
     }
 
     let namespace = namespace();
+    let redis_monitor = redis::Monitor::new(&["6379"]).await;
 
     let mut router = IntegrationTest::builder()
         .redis_namespace(&namespace)
         .config(router_config)
         .subgraph_overrides(subgraph_overrides)
         .log("trace,jsonpath_lib=info")
-        .redis_urls(vec!["redis-cluster://localhost:7000".to_string()])
+        .redis_urls(vec!["redis://localhost:6379".to_string()])
         .build()
         .await;
 
     router.start().await;
     router.assert_started().await;
 
-    // let assert_redis_mget_command_sent_to_replica_handle = tokio::spawn(
-    //     IntegrationTest::assert_redis_command_sent_to_node("MGET", vec!["6379".to_string()]),
-    // );
-    tokio::time::sleep(Duration::from_millis(3000)).await;
-
-    // three queries to ensure a cache hit
-    for _ in 0..3 {
+    // send a few different queries to ensure a redis cache hit
+    let mut join_set = JoinSet::new();
+    for _ in 0..5 {
         let query = Query::builder()
             .body(
                 json!({"query":"{ topProducts(first: 5) { name reviews { id } } }","variables":{}}),
             )
             .header("cache-control", "public")
             .build();
-
-        let _ = router.execute_query(query).await;
-        let _ = tokio::time::sleep(Duration::from_millis(1000)).await;
+        join_set.spawn(router.execute_query(query));
     }
+    let _ = join_set.join_all().await;
 
-    // let _ = assert_redis_mget_command_sent_to_replica_handle
-    //     .await
-    //     .expect("redis MGET command not sent to a replica");
+    // when there's only 1 node, the MGET will be sent to it
+    let redis_monitor_output = redis_monitor.collect().await;
+    assert_eq!(redis_monitor_output.num_nodes(), 1);
+    assert!(redis_monitor_output.command_sent_to_any("MGET"));
 
     // check that there were no I/O errors
     let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="response-cache",otel_scope_name="apollo/router"}"#;
+    router.assert_metrics_does_not_contain(io_error).await;
 
     // check that there were no parse errors; parse errors happen whenever a response from redis to
     // fred can't be understood by fred, which can be redis config issues, type conversion
     // shenanigans, or things like being in the middle of a transaction (pipeline) and trying to
     // convert a value
     let parse_error = r#"apollo_router_cache_redis_errors_total{error_type="parse""#;
-
-    let example_cache_key = format!(
-        "version:1.0:subgraph:reviews:type:Product:entity:052fa800fa760b2ac78669a5b0b90f512158eddab8d01eabb4e65b286ff09ecd:representation::hash:739583f793fb842194e6be6c6f126df63cc0ee86f8702745ac4630521ab6752d:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6"
-    );
-
-    router.assert_metrics_does_not_contain(io_error).await;
     router.assert_metrics_does_not_contain(parse_error).await;
+
+    let example_cache_key = "version:1.0:subgraph:reviews:type:Product:representation:052fa800fa760b2ac78669a5b0b90f512158eddab8d01eabb4e65b286ff09ecd:hash:739583f793fb842194e6be6c6f126df63cc0ee86f8702745ac4630521ab6752d:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
     router
         .assert_redis_cache_contains(&example_cache_key, None)
         .await;

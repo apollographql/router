@@ -16,7 +16,6 @@ use fred::clients::Client as RedisClient;
 use fred::interfaces::ClientLike;
 use fred::interfaces::KeysInterface;
 use fred::prelude::Config as RedisConfig;
-use fred::types::scan::ScanType;
 use fred::types::scan::Scanner;
 use futures::StreamExt;
 use http::header::ACCEPT;
@@ -54,6 +53,7 @@ use tokio::io::BufReader;
 use tokio::process::Child;
 use tokio::process::Command;
 use tokio::task;
+use tokio::task::JoinSet;
 use tokio::time::Instant;
 use tracing::info_span;
 use tracing_core::Dispatch;
@@ -906,6 +906,19 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
+    pub fn execute_several_default_queries(
+        &self,
+        times: usize,
+    ) -> impl Future<Output = Vec<(TraceId, reqwest::Response)>> {
+        let mut join_set = JoinSet::new();
+        for _ in 0..times {
+            join_set.spawn(self.execute_query(Query::default()));
+            join_set.spawn(self.execute_query(Query::default().with_anonymous()));
+        }
+        join_set.join_all()
+    }
+
+    #[allow(dead_code)]
     pub fn execute_query(
         &self,
         query: Query,
@@ -1547,25 +1560,73 @@ impl IntegrationTest {
             .await
             .expect("could not connect to redis");
 
-        let namespace = &self.redis_namespace;
-        let mut scan = client.scan_cluster(format!("{namespace}:*"), None, Some(ScanType::String));
-        while let Some(result) = scan.next().await {
-            if let Some(page) = result.expect("could not scan redis").take_results() {
-                for key in page {
-                    let key = key.as_str().expect("key should be a string");
-                    if key.starts_with(&self.redis_namespace) {
-                        client
-                            .del::<usize, _>(key)
-                            .await
-                            .expect("could not delete key");
-                    }
-                }
-            }
+        let mut keys = self.scan_standalone(&client).await;
+        if keys.is_err() {
+            keys = self.scan_cluster(&client).await;
+        }
+        let keys = keys.expect("no keys");
+        for key in keys {
+            client
+                .del::<usize, _>(key)
+                .await
+                .expect("could not delete key");
         }
 
         client.quit().await.expect("could not quit redis");
         // calling quit ends the connection and event listener tasks
         let _ = connection_task.await;
+    }
+
+    async fn scan_standalone(
+        &self,
+        client: &fred::clients::Client,
+    ) -> Result<Vec<String>, fred::error::Error> {
+        let mut keys = Vec::new();
+
+        let namespace = &self.redis_namespace;
+        let mut scan = client.scan(format!("{namespace}:*"), None, None);
+        while let Some(result) = scan.next().await {
+            if let Some(page) = result?.take_results() {
+                for key in page {
+                    let key = key.as_str().expect("key should be a string");
+                    keys.push(key.to_string());
+                }
+            }
+        }
+
+        Ok(keys)
+    }
+
+    async fn scan_cluster(
+        &self,
+        client: &fred::clients::Client,
+    ) -> Result<Vec<String>, fred::error::Error> {
+        let mut keys = Vec::new();
+
+        let namespace = &self.redis_namespace;
+        let mut scan = client.scan_cluster(format!("{namespace}:*"), None, None);
+        while let Some(result) = scan.next().await {
+            if let Some(page) = result?.take_results() {
+                for key in page {
+                    let key = key.as_str().expect("key should be a string");
+                    keys.push(key.to_string());
+                }
+            }
+        }
+
+        Ok(keys)
+    }
+
+    async fn scan(
+        &self,
+        client: &fred::clients::Client,
+    ) -> Result<Vec<String>, fred::error::Error> {
+        // cluster first, so that we know we get everything if it exists
+        if let Ok(results) = self.scan_cluster(client).await {
+            return Ok(results);
+        }
+
+        self.scan_standalone(client).await
     }
 
     #[allow(dead_code)]
@@ -1585,21 +1646,14 @@ impl IntegrationTest {
             Ok(s) => s,
             Err(e) => {
                 println!("non-ignored keys in the same namespace in Redis:");
-
-                let mut scan = client.scan_cluster(
-                    format!("{redis_namespace}:*"),
-                    Some(u32::MAX),
-                    Some(ScanType::String),
-                );
-
-                while let Some(result) = scan.next().await {
-                    let keys = result.as_ref().unwrap().results().as_ref().unwrap();
-                    for key in keys {
-                        let key = key.as_str().expect("key should be a string");
-                        let unnamespaced_key = key.replace(&format!("{redis_namespace}:"), "");
-                        if Some(unnamespaced_key.as_str()) != ignore {
-                            println!("\t{unnamespaced_key}");
-                        }
+                for key in self
+                    .scan(&client)
+                    .await
+                    .expect("couldn't get keys from redis")
+                {
+                    let unnamespaced_key = key.replace(&format!("{redis_namespace}:"), "");
+                    if Some(unnamespaced_key.as_str()) != ignore {
+                        println!("\t{unnamespaced_key}");
                     }
                 }
                 panic!(

@@ -6,6 +6,9 @@ supergraph:
         urls:
           - redis-cluster://127.0.0.1:7000
         pool_size: 4
+        reset_ttl: false
+      in_memory:
+        limit: 1
 telemetry:
   exporters:
     metrics:

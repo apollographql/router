@@ -9,7 +9,7 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
 use tokio::task::JoinSet;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Command {
     source_url: String,
     command: String,
@@ -45,8 +45,6 @@ async fn monitor(port: &str, is_replica: bool, tx: Sender<(bool, Command)>) {
         .kill_on_drop(true)
         .spawn()
         .expect("failed to create redis-cli command for monitoring redis commands");
-
-    eprintln!("monitoring {port}");
 
     let mut reader = BufReader::new(cmd.stdout.take().unwrap()).lines();
     while let Ok(Some(line)) = reader.next_line().await {
@@ -143,7 +141,7 @@ impl Monitor {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct SingleMonitorOutput {
     is_replica: bool,
     commands: Vec<Command>,
@@ -154,7 +152,7 @@ impl SingleMonitorOutput {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MonitorOutput(Vec<SingleMonitorOutput>);
 impl From<Vec<SingleMonitorOutput>> for MonitorOutput {
     fn from(value: Vec<SingleMonitorOutput>) -> Self {
@@ -185,14 +183,21 @@ impl MonitorOutput {
         )
     }
 
-    fn command_sent(&self, cmd: &str) -> bool {
+    pub fn command_sent_to_any(&self, cmd: &str) -> bool {
         self.0.iter().any(|output| output.command_sent(cmd))
     }
 
-    pub fn mgets_sent_to_replicas_only(&self) -> bool {
-        let cmd = "MGET";
-        let mget_sent_to_replica = self.replicas(true).command_sent(cmd);
-        let mget_sent_to_primary = self.replicas(false).command_sent(cmd);
+    pub fn command_sent_to_all(&self, cmd: &str) -> bool {
+        self.0.iter().all(|output| output.command_sent(cmd))
+    }
+
+    pub fn command_sent_to_replicas_only(&self, cmd: &str) -> bool {
+        let mget_sent_to_replica = self.replicas(true).command_sent_to_any(cmd);
+        let mget_sent_to_primary = self.replicas(false).command_sent_to_any(cmd);
         mget_sent_to_replica && !mget_sent_to_primary
+    }
+
+    pub fn num_nodes(&self) -> usize {
+        self.0.len()
     }
 }
