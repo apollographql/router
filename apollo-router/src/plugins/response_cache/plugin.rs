@@ -1949,50 +1949,54 @@ fn get_invalidation_entity_keys_from_schema(
     typename: &str,
     representations: &serde_json_bytes::Map<ByteString, Value>,
 ) -> Result<HashSet<String>, anyhow::Error> {
-    let field_def =
-        supergraph_schema
-            .get_object(typename)
-            .ok_or_else(|| FetchError::MalformedRequest {
-                reason: "can't find corresponding type for __typename {typename:?}".to_string(),
-            })?;
-    let cache_keys = field_def
-        .directives
-        .get_all("join__directive")
-        .filter_map(|dir| {
-            let name = dir.argument_by_name("name", supergraph_schema).ok()?;
-            if name.as_str()? != CACHE_TAG_DIRECTIVE_NAME {
-                return None;
-            }
-            let is_current_subgraph = dir
-                .argument_by_name("graphs", supergraph_schema)
-                .ok()
-                .and_then(|f| {
-                    Some(
-                        f.as_list()?
-                            .iter()
-                            .filter_map(|graph| graph.as_enum())
-                            .any(|g| {
-                                subgraph_enums.get(g.as_str()).map(|s| s.as_str())
-                                    == Some(subgraph_name)
-                            }),
-                    )
-                })
-                .unwrap_or_default();
-            if !is_current_subgraph {
-                return None;
-            }
-            dir.argument_by_name("args", supergraph_schema)
-                .ok()?
-                .as_object()?
-                .iter()
-                .find_map(|(field_name, value)| {
-                    if field_name.as_str() == "format" {
-                        value.as_str()?.parse::<StringTemplate>().ok()
-                    } else {
-                        None
-                    }
-                })
-        });
+    // supports both Object types and Interface types (for interface objects with isInterfaceObject: true)
+    let directives = supergraph_schema
+        .get_object(typename)
+        .map(|obj| &obj.directives)
+        .or_else(|| {
+            supergraph_schema
+                .get_interface(typename)
+                .map(|iface| &iface.directives)
+        })
+        .ok_or_else(|| FetchError::MalformedRequest {
+            reason: "can't find corresponding type for __typename {typename:?}".to_string(),
+        })?;
+
+    let cache_keys = directives.get_all("join__directive").filter_map(|dir| {
+        let name = dir.argument_by_name("name", supergraph_schema).ok()?;
+        if name.as_str()? != CACHE_TAG_DIRECTIVE_NAME {
+            return None;
+        }
+        let is_current_subgraph = dir
+            .argument_by_name("graphs", supergraph_schema)
+            .ok()
+            .and_then(|f| {
+                Some(
+                    f.as_list()?
+                        .iter()
+                        .filter_map(|graph| graph.as_enum())
+                        .any(|g| {
+                            subgraph_enums.get(g.as_str()).map(|s| s.as_str())
+                                == Some(subgraph_name)
+                        }),
+                )
+            })
+            .unwrap_or_default();
+        if !is_current_subgraph {
+            return None;
+        }
+        dir.argument_by_name("args", supergraph_schema)
+            .ok()?
+            .as_object()?
+            .iter()
+            .find_map(|(field_name, value)| {
+                if field_name.as_str() == "format" {
+                    value.as_str()?.parse::<StringTemplate>().ok()
+                } else {
+                    None
+                }
+            })
+    });
     let mut vars = IndexMap::default();
     // It's safe to use representations variables (not only entity keys) because at the composition level we already checked if it was only using entity keys
     vars.insert("$key".to_string(), Value::Object(representations.clone()));
@@ -2589,6 +2593,7 @@ mod tests {
     use crate::configuration::subgraph::SubgraphConfiguration;
     use crate::plugins::response_cache::plugin::ResponseCache;
     use crate::plugins::response_cache::plugin::get_entity_key_from_selection_set;
+    use crate::plugins::response_cache::plugin::get_invalidation_entity_keys_from_schema;
     use crate::plugins::response_cache::plugin::get_invalidation_root_keys_from_schema;
     use crate::plugins::response_cache::plugin::matches_selection_set;
     use crate::plugins::response_cache::storage::redis::Config;
@@ -3207,6 +3212,98 @@ mod tests {
             ]
             .into_iter()
             .collect()
+        );
+    }
+
+    // makes sure interface objects (eg, `interface Item` below) are able to be used for
+    // invalidation entity keys
+    #[test]
+    fn test_interface_object_typename_lookup() {
+        let schema_text = r#"
+                 directive @join__type(graph: join__Graph!, key: join__FieldSet, isInterfaceObject: Boolean! = false) repeatable on 
+     OBJECT | INTERFACE
+                 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+                 scalar join__FieldSet
+                 
+                 enum join__Graph {
+                  INVENTORY @join__graph(name: "inventory", url: "http://inventory")
+                }
+                
+                type Query { dummy: String }
+                
+                interface Item @join__type(graph: INVENTORY, key: "id", isInterfaceObject: true) {
+                  id: ID!
+                }
+            "#;
+
+        let schema = Arc::new(Schema::parse_and_validate(schema_text, "schema.graphql").unwrap());
+        let subgraph_enums = HashMap::from([("INVENTORY".into(), "inventory".into())]);
+        let representation = serde_json_bytes::json!({"__typename": "Item", "id": "123"})
+            .as_object()
+            .unwrap()
+            .clone();
+
+        let result = get_invalidation_entity_keys_from_schema(
+            &schema,
+            "inventory",
+            &subgraph_enums,
+            "Item",
+            &representation,
+        );
+        assert!(result.is_ok(), "should handle interface object typename");
+    }
+
+    // makes sure that when an interface isn't usable for entity resolution (ie, `isInterfaceObject:
+    // false`) the typename is the concrete type and is findable via the object type
+    #[test]
+    fn test_concrete_type_when_interface_object_is_false() {
+        // NB: isInterfaceObject defaults to false
+        let schema_text = r#"
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+            scalar join__FieldSet
+            
+            enum join__Graph {
+              PRODUCTS @join__graph(name: "products", url: "http://products")
+            }
+            
+            type Query { dummy: String }
+            
+            # Regular interface (not an interface object)
+            interface Item {
+              id: ID!
+            }
+            
+            # Concrete type that implements the interface
+            type Product implements Item @join__type(graph: PRODUCTS, key: "id") {
+              id: ID!
+              name: String
+            }
+        "#;
+
+        let schema = Arc::new(Schema::parse_and_validate(schema_text, "schema.graphql").unwrap());
+        let subgraph_enums = HashMap::from([("PRODUCTS".into(), "products".into())]);
+
+        // when isInterfaceObject: false, typename in _entities is the concrete type "Product"
+        let representation = serde_json_bytes::json!({
+            "__typename": "Product",  // NB: concrete type, not "Item"
+            "id": "123"
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        let result = get_invalidation_entity_keys_from_schema(
+            &schema,
+            "products",
+            &subgraph_enums,
+            "Product", // concrete object typename (ie, normal case)
+            &representation,
+        );
+
+        assert!(
+            result.is_ok(),
+            "should handle concrete type (isInterfaceObject: false)"
         );
     }
 }
