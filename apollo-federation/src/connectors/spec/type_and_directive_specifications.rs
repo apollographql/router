@@ -536,7 +536,7 @@ mod tests {
 
         directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection, selection: connect__JSONSelection!, entity: Boolean = false, id: String) repeatable on FIELD_DEFINITION | OBJECT
 
-        directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection) repeatable on SCHEMA
+        directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors, fragments: connect__JSONSelection, isSuccess: connect__JSONSelection) repeatable on SCHEMA
 
         type Query {
           hello: String
@@ -622,7 +622,7 @@ mod tests {
 
         directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection, selection: connect__JSONSelection!, entity: Boolean = false, id: String) repeatable on FIELD_DEFINITION | OBJECT
 
-        directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection) repeatable on SCHEMA
+        directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors, fragments: connect__JSONSelection, isSuccess: connect__JSONSelection) repeatable on SCHEMA
 
         type Query {
           hello: String
@@ -713,7 +713,7 @@ mod tests {
 
         directive @connect(source: String, http: ConnectHTTP, batch: connect__ConnectBatch, errors: ErrorMappings, isSuccess: Mapping, selection: Mapping!, entity: Boolean = false, id: String) repeatable on FIELD_DEFINITION | OBJECT
 
-        directive @api(name: String!, http: connect__SourceHTTP, errors: ErrorMappings, isSuccess: Mapping) repeatable on SCHEMA
+        directive @api(name: String!, http: connect__SourceHTTP, errors: ErrorMappings, fragments: Mapping, isSuccess: Mapping) repeatable on SCHEMA
 
         type Query {
           hello: String
@@ -806,7 +806,7 @@ mod tests {
 
         directive @connect(source: String, http: connect__ConnectHTTP, selection: connect__JSONSelection!) repeatable on FIELD_DEFINITION
 
-        directive @connect__source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection) repeatable on SCHEMA
+        directive @connect__source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors, fragments: connect__JSONSelection, isSuccess: connect__JSONSelection) repeatable on SCHEMA
 
         type Query {
           hello: String
