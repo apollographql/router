@@ -1953,7 +1953,7 @@ fn get_invalidation_entity_keys_from_schema(
         supergraph_schema
             .get_object(typename)
             .ok_or_else(|| FetchError::MalformedRequest {
-                reason: "can't find corresponding type for __typename {typename:?}".to_string(),
+                reason: format!("can't find corresponding type for __typename {typename:?}"),
             })?;
     let cache_keys = field_def
         .directives
