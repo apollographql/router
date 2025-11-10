@@ -73,16 +73,15 @@ impl ConfigurationSource {
                 let config_event = UpdateConfiguration(config_arc.clone());
 
                 // If schema source wasn't provided and config has graph_artifact_reference, fetch schema
-                if !schema_source_provided {
-                    if let Some(schema_stream) =
+                if !schema_source_provided
+                    && let Some(schema_stream) =
                         Self::maybe_create_schema_from_config(config_arc.clone())
-                    {
-                        // Chain config event with schema stream and NoMoreConfiguration
-                        return stream::once(future::ready(config_event))
-                            .chain(schema_stream)
-                            .chain(stream::iter(vec![NoMoreConfiguration]))
-                            .boxed();
-                    }
+                {
+                    // Chain config event with schema stream and NoMoreConfiguration
+                    return stream::once(future::ready(config_event))
+                        .chain(schema_stream)
+                        .chain(stream::iter(vec![NoMoreConfiguration]))
+                        .boxed();
                 }
 
                 // Chain config event and NoMoreConfiguration
@@ -138,18 +137,18 @@ impl ConfigurationSource {
 
                                                     // Check if config should provide schema source
                                                     let mut events = vec![config_event];
-                                                    if !schema_source_provided {
-                                                        if let Some(schema_stream) =
+                                                    if !schema_source_provided
+                                                        && let Some(schema_stream) =
                                                             Self::maybe_create_schema_from_config(
                                                                 config_arc.clone(),
                                                             )
-                                                        {
-                                                            // Collect schema event from stream
-                                                            let schema_events: Vec<Event> =
-                                                                schema_stream.collect().await;
-                                                            events.extend(schema_events);
-                                                        }
+                                                    {
+                                                        // Collect schema event from stream
+                                                        let schema_events: Vec<Event> =
+                                                            schema_stream.collect().await;
+                                                        events.extend(schema_events);
                                                     }
+
                                                     events
                                                 }
                                                 Err(err) => {
@@ -159,7 +158,7 @@ impl ConfigurationSource {
                                             }
                                         }
                                     })
-                                    .flat_map(|events| stream::iter(events))
+                                    .flat_map(stream::iter)
                                     .boxed();
 
                                 // Combine initial config event with watch stream
@@ -220,16 +219,15 @@ impl ConfigurationSource {
                             } else {
                                 // Non-watching case: emit config event, then schema if needed
                                 let initial_stream = stream::once(future::ready(config_event));
-                                if !schema_source_provided {
-                                    if let Some(schema_stream) =
+                                if !schema_source_provided
+                                    && let Some(schema_stream) =
                                         Self::maybe_create_schema_from_config(config_arc.clone())
-                                    {
-                                        // Chain initial config, schema stream, and NoMoreConfiguration
-                                        return initial_stream
-                                            .chain(schema_stream)
-                                            .chain(stream::iter(vec![NoMoreConfiguration]))
-                                            .boxed();
-                                    }
+                                {
+                                    // Chain initial config, schema stream, and NoMoreConfiguration
+                                    return initial_stream
+                                        .chain(schema_stream)
+                                        .chain(stream::iter(vec![NoMoreConfiguration]))
+                                        .boxed();
                                 }
                                 // Chain initial config and NoMoreConfiguration
                                 initial_stream
