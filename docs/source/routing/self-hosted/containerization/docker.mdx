@@ -6,14 +6,14 @@ description: Easily deploy a container with everything you need to serve GraphQL
 
 import ElasticNotice from '../../../../shared/elastic-notice.mdx';
 
-The Apollo Runtime container includes the Apollo Router and MCP Server in a single image. Use this image to deploy GraphQL and MCP capabilities together without building a custom Dockerfile.
+This guide shows you how to run the Apollo Runtime container, which includes both the Apollo Router and MCP Server in a single image.
 
 If you only need the Apollo Router without MCP Server functionality, see [Router-only Docker container](docker-router-only).
 
 You will learn how to:
 - Run a basic Apollo Runtime container with default configuration.
-- Customize your configuration to override defaults.
-- Manually specify a supergraph for your router.
+- Customize configuration to override defaults.
+- Manually specify a supergraph for your Router.
 
 The [documentation](https://docs.docker.com/engine/reference/run/) for the `docker run` command is a helpful reference for the examples in this guide.
 
@@ -22,7 +22,7 @@ The [documentation](https://docs.docker.com/engine/reference/run/) for the `dock
 Before you start:
 
 1. [Set up a GraphQL API in GraphOS](/graphos/get-started/guides/graphql#step-1-set-up-your-graphql-api).
-    - Save your `APOLLO_KEY` and `APOLLO_GRAPH_REF`. You'll need them when deploying the router.
+    - Save your `APOLLO_KEY` and `APOLLO_GRAPH_REF`. You'll need them when deploying the Router.
 1. Install [Docker](https://www.docker.com/get-started/) locally.
 1. Choose a container version to deploy (for example, `latest` or a specific version tag). For versioning details, see the [container tags documentation](https://github.com/apollographql/apollo-runtime?tab=readme-ov-file#container-tags).
 
@@ -30,7 +30,7 @@ Before you start:
 
 ## Quick start
 
-Run the router by setting the [`APOLLO_GRAPH_REF`](/graphos/routing/configuration/envvars#apollo_graph_ref) and [`APOLLO_KEY`](/graphos/routing/configuration/envvars#apollo_key) environment variables to your graph ref and API key.
+Run the Router by setting the [`APOLLO_GRAPH_REF`](/graphos/routing/configuration/envvars#apollo_graph_ref) and [`APOLLO_KEY`](/graphos/routing/configuration/envvars#apollo_key) environment variables to your graph ref and API key.
 
 This example runs an Apollo Runtime image with Docker. It downloads your supergraph schema from Apollo and uses a default configuration that listens on port `4000`.
 
@@ -81,9 +81,9 @@ Mount specific files, such as the schema file, by specifying:
 ...
 ```
 
-When overriding the default router configuration, preserve the `0.0.0.0` bind address (for all interfaces). This ensures the router is accessible outside the container. Without this, the router only listens on `localhost`.
+When overriding the default Router configuration, preserve the `0.0.0.0` bind address (for all interfaces). This ensures the Router is accessible outside the container. Without this, the Router only listens on `localhost`.
 
-Use this method for local supergraph schemas, persisted query manifests, router configuration, and more. Learn more in the [configuration documentation](https://github.com/apollographql/apollo-runtime?tab=readme-ov-file#configuring-using-local-files).
+Use this method for local supergraph schemas, persisted query manifests, Router configuration, and more. Learn more in the [configuration documentation](https://github.com/apollographql/apollo-runtime?tab=readme-ov-file#configuring-using-local-files).
 
 <Note>
 
@@ -112,7 +112,7 @@ docker run -p 4000:4000 \
   ghcr.io/apollographql/apollo-runtime:<runtime-image-version>
 ```
 
-The router uses the schema from the specified graph artifact instead of Apollo Uplink. The router still fetches entitlements and persisted queries from Uplink. Learn more in the [Router CLI Configuration Reference](/graphos/routing/configuration/cli#--graph-artifact-reference).
+The Router uses the schema from the specified graph artifact instead of Apollo Uplink. The Router still fetches entitlements and persisted queries from Uplink. Learn more in the [Router CLI Configuration Reference](/graphos/routing/configuration/cli#--graph-artifact-reference).
 
 ## Running a specific Router and MCP version
 
@@ -120,7 +120,7 @@ The container uses a tagging scheme with three parts: container version, Apollo 
 
 Learn more in the [tagging documentation](https://github.com/apollographql/apollo-runtime?tab=readme-ov-file#container-tags).
 
-## Additional router configuration information
+## Additional Router configuration information
 
 For more complex configurations, such as overriding subgraph URLs or propagating headers, see [Router Configuration](/graphos/routing/configuration/overview/).
 
