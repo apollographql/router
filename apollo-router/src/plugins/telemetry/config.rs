@@ -2,8 +2,8 @@
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 
-use axum_extra::headers::HeaderName;
 use derivative::Derivative;
+use http::HeaderName;
 use num_traits::ToPrimitive;
 use opentelemetry::Array;
 use opentelemetry::Value;
