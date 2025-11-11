@@ -26,6 +26,7 @@ use crate::internal_error;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::federation_spec_definition::FED_1;
 use crate::link::federation_spec_definition::FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC;
@@ -40,6 +41,7 @@ use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
 use crate::link::spec::Identity;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
+use crate::query_graph::build_query_graph::FEDERATED_GRAPH_ROOT_SOURCE;
 use crate::schema::FederationSchema;
 use crate::schema::SchemaElement;
 use crate::schema::blueprint::FederationBlueprint;
@@ -162,11 +164,21 @@ pub struct Subgraph<S> {
 }
 
 impl Subgraph<Initial> {
-    pub fn new(name: &str, url: &str, schema: Schema) -> Subgraph<Initial> {
-        Subgraph {
-            name: name.to_string(),
-            url: url.to_string(),
-            state: Initial { schema },
+    pub fn new(name: &str, url: &str, schema: Schema) -> Result<Subgraph<Initial>, SubgraphError> {
+        // We use this name as the "source" of root nodes in our federated query graph.
+        if name == FEDERATED_GRAPH_ROOT_SOURCE {
+            Err(SubgraphError::new_without_locations(
+                name.to_string(),
+                SingleFederationError::InvalidSubgraphName {
+                    message: format!("Invalid name {name} for a subgraph: this name is reserved"),
+                },
+            ))
+        } else {
+            Ok(Subgraph {
+                name: name.to_string(),
+                url: url.to_string(),
+                state: Initial { schema },
+            })
         }
     }
 
@@ -185,7 +197,7 @@ impl Subgraph<Initial> {
         // Simulate graphql-js behavior accepting duplicate argument definitions.
         parser_backward_compatibility::remove_duplicate_arguments(&mut schema);
 
-        Ok(Self::new(name, url, schema))
+        Self::new(name, url, schema)
     }
 
     /// Converts the schema to a fed2 schema.
@@ -207,7 +219,7 @@ impl Subgraph<Initial> {
         };
         add_federation_link_to_test_schema(&mut schema, federation_spec.version(), no_imports)
             .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;
-        Ok(Self::new(&self.name, &self.url, schema))
+        Self::new(&self.name, &self.url, schema)
     }
 
     pub fn assume_expanded(self) -> Result<Subgraph<Expanded>, SubgraphError> {
@@ -537,10 +549,41 @@ impl<S: HasMetadata> Subgraph<S> {
             .directive_name_in_schema(self.schema(), &FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC)
     }
 
+    pub(crate) fn external_directive_name(&self) -> Result<Option<Name>, FederationError> {
+        self.metadata()
+            .federation_spec_definition()
+            .directive_name_in_schema(self.schema(), &FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC)
+    }
+
     pub(crate) fn tag_directive_name(&self) -> Result<Option<Name>, FederationError> {
         self.metadata()
             .federation_spec_definition()
             .directive_name_in_schema(self.schema(), &FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC)
+    }
+
+    pub(crate) fn interface_object_fields(&self) -> Vec<ObjectFieldDefinitionPosition> {
+        let Ok(Some(interface_object_def)) = self
+            .metadata()
+            .federation_spec_definition()
+            .interface_object_directive_definition(self.schema())
+        else {
+            return vec![];
+        };
+
+        let Ok(itf_objects) = self
+            .schema()
+            .referencers()
+            .get_directive(&interface_object_def.name)
+            .map(|refs| &refs.object_types)
+        else {
+            return vec![];
+        };
+
+        itf_objects
+            .iter()
+            .filter_map(|obj| obj.fields(self.schema().schema()).ok())
+            .flatten()
+            .collect()
     }
 
     pub(crate) fn is_interface_object_type(&self, type_: &TypeDefinitionPosition) -> bool {

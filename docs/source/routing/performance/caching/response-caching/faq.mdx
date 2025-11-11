@@ -111,6 +111,6 @@ Follow these steps to migrate your configuration:
 
 TTL-based caching works in earlier versions. For API-based invalidation, use the current router version.
 
-### Why can't I see my cache tags generated from subgraph response in the debugger once cached?
+### Why can't I see my cache tags generated from responses in the debugger once cached?
 
-For performance, cache tags derived from a subgraph response are written to Redis in a debugger‑readable form only when the cache‑populating request runs in debug mode. Cache tags coming from subgraph responses written outside debug mode aren’t visible in the debugger.
+For performance, cache tags derived from responses are written to Redis in a debugger‑readable form only when the cache‑populating request runs in debug mode. Cache tags coming from responses written outside debug mode aren’t visible in the debugger.

@@ -64,7 +64,7 @@ impl ResponseKey {
     /// amended and appended to a parent path to create the full path to the
     /// field. For example:
     ///
-    /// - parent path: `["posts", @, "user"]
+    /// - parent path: `["posts", @, "user"]`
     /// - path from key: `["_entities", 0, "user", "profile"]`
     /// - result: `["posts", 1, "user", "profile"]`
     pub fn path_string(&self) -> String {

@@ -620,6 +620,7 @@ pub fn schema_diff_expanded_from_initial(schema_str: String) -> Result<String, F
     // Initialize and expand subgraph, without validation
     let initial_subgraph = typestate::Subgraph::new("S", "http://S", initial_schema.clone());
     let expanded_subgraph = initial_subgraph
+        .map_err(|e| e.into_federation_error())?
         .expand_links()
         .map_err(|e| e.into_federation_error())?;
 

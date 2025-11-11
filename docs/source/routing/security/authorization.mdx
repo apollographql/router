@@ -112,12 +112,6 @@ fn router_service(service) {
 
 #### Usage
 
-<Caution>
-
-    Federation v2.9 and above doesn't allow `@requiresScopes` on interfaces. Applying `@requiresScopes` to an interface or interface field results in a composition error.
-
-</Caution>
-
 To use the `@requiresScopes` directive in a subgraph, you can [import it from the `@link` directive](/federation/federated-types/federated-directives/#importing-directives) like so:
 
 ```graphql
@@ -258,12 +252,6 @@ If the key exists, it means the request is authenticated, and the router execute
 If the request is unauthenticated, the router removes `@authenticated` fields before planning the query and only executes the parts of the query that don't require authentication.
 
 #### Usage
-
-<Caution>
-
-    Federation v2.9 and above doesn't allow `@authenticated` on interfaces. Applying `@authenticated` to an interface or interface field results in a composition error.
-
-</Caution>
 
 To use the `@authenticated` directive in a subgraph, you can [import it from the `@link` directive](/federation/federated-types/federated-directives/#importing-directives) like so:
 
@@ -413,12 +401,6 @@ An overview of how `@policy` is processed through the router's request lifecycle
 - If no field of a subgraph query passes its authorization policies, the router stops further processing of the query and precludes unauthorized subgraph requests. This efficiency gain is a key benefit of the `@policy` and other authorization directives.
 
 #### Usage
-
-<Caution>
-
-    Federation v2.9 and above doesn't allow `@policy` on interfaces. Applying `@policy` to an interface or interface field results in a composition error.
-
-</Caution>
 
 To use the `@policy` directive in a subgraph, you can [import it from the `@link` directive](/federation/federated-types/federated-directives/#importing-directives) like so:
 
@@ -644,13 +626,13 @@ Recall that the `@authenticated` directive only checks for the existence of the 
 
 ### Composed fields with the same authorization directives
 
-If a shared field uses the same authorization directives across subgraphs, composition merges them using `AND` logic.
+If a shared field uses the same authorization directives across subgraphs, composition merges them using `OR` logic.
 For example, suppose two subgraphs use the `@requiresScopes` directive on the `users` query.
-One subgraph requires the `read:users` scope, and another subgraph requires the `read:profiles` scope:
+One subgraph requires the `read:others` scope, and another subgraph requires the `read:profiles` scope:
 
 ```graphql title="Subgraph A"
 type Query {
-  users: [User!]! @requiresScopes(scopes: [["read:users"]])
+  users: [User!]! @requiresScopes(scopes: [["read:others"]])
 }
 ```
 
@@ -660,11 +642,11 @@ type Query {
 }
 ```
 
-A request would need both the `read:users` **AND** the `read:profiles` scope to be authorized.
+A request would need either the `read:others` **OR** the `read:profiles` scope to be authorized.
 
 ```graphql title="Supergraph"
 type Query {
-  users: [User!]! @requiresScopes(scopes: [["read:users", "read:profiles"]])
+  users: [User!]! @requiresScopes(scopes: [["read:others"], ["read:profiles"]])
 }
 ```
 
@@ -674,30 +656,35 @@ Refer to the section on [Combining scopes with AND/OR logic](#combining-required
 
 </Tip>
 
+Using **OR** logic for shared directives simplifies schema updates.
+If requirements change suddenly, you don't need to update the directive in all subgraphs simultaneously.
+
 #### Combining `AND`/`OR` logic with `@requiresScopes`
 
-As with combining scopes for a single use of [`@requiresScopes`](#combining-required-scopes-with-andor-logic), you can use nested arrays to introduce **AND** and **OR** logic in a single subgraph:
+As with combining scopes for a single use of [`@requiresScopes`](#combining-required-scopes-with-andor-logic), you can use nested arrays to introduce **AND** logic in a single subgraph:
 
 ```graphql title="Subgraph A"
 type Query {
-  users: [User!]! @requiresScopes(scopes: [["read:profile", "read:users"], ["read:admin"]])
+  users: [User!]! @requiresScopes(scopes: [["read:others", "read:users"]])
 }
 ```
 
 ```graphql title="Subgraph B"
 type Query {
-  users: [User!]! @requiresScopes(scopes: [["read:admin"]])
+  users: [User!]! @requiresScopes(scopes: [["read:profiles"]])
 }
 ```
 
-Since both subgraphs use the same authorization directive, composition [merges them using **AND** logic](#composed-fields-with-the-same-authorization-directives). This results in a scope requirement of either (`read:profile` AND `read:users` AND `read:admin`) OR `read:admin`. Since the `read:admin` scope by itself subsumes the other requirement, we drop the redundant requirements to arrive at the final scope:
+Since both subgraphs use the same authorization directive, composition [merges them using **OR** logic](#a-shared-field-with-the-same-authorization-directives-use-or-logic):
 
 ```graphql title="Supergraph"
 type Query {
   users: [User!]!
-    @requiresScopes(scopes: [["read:admin"]])
+    @requiresScopes(scopes: [["read:others", "read:users"], ["read:profiles"]])
 }
 ```
+
+This syntax means a request needs either (`read:others` **AND** `read:users`) scopes **OR** just the `read:profiles` scope to be authorized.
 
 ### Authorization and `@key` fields
 
@@ -793,7 +780,6 @@ If an unauthenticated request sends a query for fields on the `Post` interface:
 query {
   posts {
     id
-    author
     title
   }
 }
@@ -848,7 +834,6 @@ If an unauthenticated request sends a query for fields on the `Post` interface:
 query {
   posts {
     id
-    author
     title
   }
 }
@@ -863,12 +848,10 @@ query {
   posts {
     ... on PublicBlog {
         id
-        author
         title
     }
     ... on PrivateBlog {
         id
-        author
         title
     }
   }
@@ -882,7 +865,6 @@ query {
   posts {
     ... on PublicBlog {
         id
-        author
         title
     }
   }

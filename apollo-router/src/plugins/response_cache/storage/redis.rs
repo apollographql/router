@@ -1010,11 +1010,10 @@ mod tests {
                 storage.namespaced_cache_tags(&document.invalidation_keys, SUBGRAPH_NAME);
 
             let insert_invalid_cache_tag = |key: String| async {
-                let expiration = config.ttl.map(|ttl| Expiration::EX(ttl.as_secs() as i64));
                 let _: () = storage
                     .storage
                     .client()
-                    .set(key, 1, expiration, None, false)
+                    .set(key, 1, Some(Expiration::EX(60)), None, false)
                     .await?;
                 Ok::<(), BoxError>(())
             };
