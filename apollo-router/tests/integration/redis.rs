@@ -56,7 +56,7 @@ use wiremock::matchers::path_regex;
 use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
-use crate::integration::common::redis;
+use crate::integration::redis_monitor::Monitor as RedisMonitor;
 use crate::integration::response_cache::namespace;
 
 // TODO: consider centralizing this fn and the same one in entity_cache.rs?
@@ -1697,8 +1697,7 @@ async fn test_redis_uses_replicas_when_clustered() {
     }
 
     let namespace = Uuid::new_v4().to_string();
-    let redis_monitor =
-        redis::Monitor::new(&["7000", "7001", "7002", "7003", "7004", "7005"]).await;
+    let redis_monitor = RedisMonitor::new(&["7000", "7001", "7002", "7003", "7004", "7005"]).await;
 
     // NB: `reset_ttl` must be false in the config, otherwise GETs will be sent to primary
     let router_config = include_str!("fixtures/clustered_redis_query_planning.router.yaml");
@@ -1746,7 +1745,7 @@ async fn test_redis_doesnt_use_replicas_in_standalone_mode() {
     }
 
     let namespace = Uuid::new_v4().to_string();
-    let redis_monitor = redis::Monitor::new(&["6379"]).await;
+    let redis_monitor = RedisMonitor::new(&["6379"]).await;
 
     let router_config = include_str!("fixtures/redis_connection_closure.router.yaml");
     let mut router = IntegrationTest::builder()
@@ -1857,8 +1856,7 @@ async fn test_redis_uses_replicas_in_clusters_for_mgets() {
     router.start().await;
     router.assert_started().await;
 
-    let redis_monitor =
-        redis::Monitor::new(&["7000", "7001", "7002", "7003", "7004", "7005"]).await;
+    let redis_monitor = RedisMonitor::new(&["7000", "7001", "7002", "7003", "7004", "7005"]).await;
 
     // send a few different queries to ensure a redis cache hit
     let mut join_set = JoinSet::new();
@@ -1961,7 +1959,7 @@ async fn test_redis_in_standalone_mode_for_mgets() {
     }
 
     let namespace = namespace();
-    let redis_monitor = redis::Monitor::new(&["6379"]).await;
+    let redis_monitor = RedisMonitor::new(&["6379"]).await;
 
     let mut router = IntegrationTest::builder()
         .redis_namespace(&namespace)

@@ -75,10 +75,6 @@ use wiremock::matchers::method;
 use wiremock::matchers::path;
 use wiremock::matchers::path_regex;
 
-use crate::integration::ValueExt;
-
-pub mod redis;
-
 /// Global registry to keep track of allocated ports across all tests
 /// This helps avoid port conflicts between concurrent tests
 static ALLOCATED_PORTS: OnceLock<Arc<Mutex<HashMap<u16, String>>>> = OnceLock::new();
@@ -1671,7 +1667,7 @@ impl IntegrationTest {
     }
 
     fn redis_url(&self) -> Option<String> {
-        Some(self.redis_urls.as_ref()?.into_iter().next()?.clone())
+        Some(self.redis_urls.as_ref()?.iter().next()?.clone())
     }
 }
 
@@ -1887,7 +1883,11 @@ fn get_redis_urls(config: &Value) -> Option<Vec<String>> {
         .and_then(|o| o.get("urls"))
         .and_then(|o| o.as_array())
     {
-        return Some(urls.into_iter().filter_map(|v| v.as_string()).collect());
+        return Some(
+            urls.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect(),
+        );
     }
 
     // TODO: might be able to remove some of these as_objs
@@ -1906,7 +1906,11 @@ fn get_redis_urls(config: &Value) -> Option<Vec<String>> {
             .and_then(|o| o.get("urls"))
             .and_then(|o| o.as_array())
         {
-            return Some(urls.into_iter().filter_map(|v| v.as_string()).collect());
+            return Some(
+                urls.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect(),
+            );
         }
 
         if let Some(subgraphs) = response_cache_config
@@ -1922,7 +1926,11 @@ fn get_redis_urls(config: &Value) -> Option<Vec<String>> {
                     .and_then(|o| o.as_array())
                 {
                     {
-                        return Some(urls.into_iter().filter_map(|v| v.as_string()).collect());
+                        return Some(
+                            urls.iter()
+                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                .collect(),
+                        );
                     }
                 }
             }

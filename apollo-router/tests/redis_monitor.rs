@@ -11,7 +11,6 @@ use tokio::task::JoinSet;
 
 #[derive(Clone, Debug)]
 struct Command {
-    source_url: String,
     command: String,
     args: Vec<String>,
 }
@@ -19,7 +18,7 @@ struct Command {
 // NB: would be better if this used fred, but this works
 async fn is_replica(port: &str) -> bool {
     let mut cmd = tokio::process::Command::new("redis-cli")
-        .args(&["-p", &port, "INFO", "replication"])
+        .args(["-p", port, "INFO", "replication"])
         .stdout(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
@@ -40,7 +39,7 @@ async fn is_replica(port: &str) -> bool {
 // NB: fred can't run MONITOR on a cluster, so we have to do it externally
 async fn monitor(port: &str, is_replica: bool, tx: Sender<(bool, Command)>) {
     let mut cmd = tokio::process::Command::new("redis-cli")
-        .args(&["-p", &port, "MONITOR"])
+        .args(["-p", port, "MONITOR"])
         .stdout(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
@@ -63,16 +62,13 @@ async fn monitor(port: &str, is_replica: bool, tx: Sender<(bool, Command)>) {
 
 // returns (SRC_URL, CMD, <ARGS>)
 fn parse_monitor_output(line: &str) -> Option<Command> {
-    // group 1 = source URL
-    // group 2 = cmd + args
-    let re1 = Regex::new(r"^[0-9.]+ \[0 ([0-9.:]+)] (.*)$").ok()?;
+    // group 1 = cmd + args
+    let re1 = Regex::new(r"^[0-9.]+ \[0 [0-9.:]+] (.*)$").ok()?;
     // group 1 = cmd or arg, unquoted
     let re2 = Regex::new(r#""([^"]+)""#).ok()?;
 
     let re1_captures = re1.captures(line)?;
-
-    let source_url = re1_captures.get(1)?.as_str().to_string();
-    let cmd_and_args = re1_captures.get(2)?.as_str();
+    let cmd_and_args = re1_captures.get(1)?.as_str();
 
     let mut cmd = None;
     let mut args = Vec::default();
@@ -86,7 +82,6 @@ fn parse_monitor_output(line: &str) -> Option<Command> {
     }
 
     Some(Command {
-        source_url,
         command: cmd?,
         args,
     })
@@ -134,7 +129,7 @@ impl Monitor {
     pub async fn collect(mut self) -> MonitorOutput {
         // abort monitor tasks and collect all the collection tasks
         self.monitor_tasks.abort_all();
-        while let Some(_) = self.monitor_tasks.join_next().await {}
+        while self.monitor_tasks.join_next().await.is_some() {}
 
         let commands_results = self.collection_tasks.join_all().await;
         MonitorOutput(commands_results)
