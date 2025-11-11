@@ -1,3 +1,5 @@
+use apollo_federation::composition::compose;
+use apollo_federation::subgraph::typestate::Subgraph;
 use insta::assert_snapshot;
 
 use super::ServiceDefinition;
@@ -244,4 +246,81 @@ fn composes_subgraphs_with_overridden_fields_on_renamed_root_types() {
     // the @override directives on MyMutation fields were not recognized after
     // MyMutation was renamed to Mutation during normalization.
     let _supergraph = result.expect("Expected composition to succeed");
+}
+
+#[test]
+fn test_satisfiability_handles_extra_implicit_downcast() {
+    // Regression test for satisfiability validation with interface/implementation type covariance.
+    // When a @shareable field returns different but compatible types across subgraphs
+    // (e.g., A in one, I interface in another), the supergraph uses the interface type.
+    // During satisfiability validation, when the supergraph tries to downcast to the
+    // implementation type, if a subgraph is already at that type, the downcast should
+    // be treated as a no-op rather than failing with "cannot find type".
+
+    let subgraph_a = r#"
+        schema @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@shareable", "@override"]) {
+            query: Query
+            mutation: MyMutation
+        }
+
+        type Query { dummy: String @shareable }
+
+        type MyMutation {
+            doSomething(input: Input!): T! @override(from: "subgraph-b")
+        }
+
+        input Input { value: String! }
+
+        type T @shareable {
+            field: A!
+        }
+
+        interface I {
+            id: ID!
+        }
+
+        type A implements I @key(fields: "id") @shareable {
+            id: ID!
+            name: String
+        }
+    "#;
+
+    let subgraph_b = r#"
+        schema @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@shareable"]) {
+            query: Query
+            mutation: Mutation
+        }
+
+        type Query { dummy: String @shareable }
+
+        type Mutation @shareable {
+            doSomething(input: Input!): T!
+        }
+
+        input Input { value: String! }
+
+        type T @shareable {
+            field: I!
+        }
+
+        interface I {
+            id: ID!
+        }
+
+        type A implements I @key(fields: "id", resolvable: false) @shareable {
+            id: ID!
+        }
+    "#;
+
+    let parsed_a = Subgraph::parse("subgraph-a", "http://subgraph-a", subgraph_a)
+        .expect("Failed to parse subgraph-a");
+    let parsed_b = Subgraph::parse("subgraph-b", "http://subgraph-b", subgraph_b)
+        .expect("Failed to parse subgraph-b");
+
+    // Before the fix, this would fail with:
+    // SATISFIABILITY_ERROR: cannot find type "A" in subgraph "subgraph-a"
+    // because the validator tried to downcast from I to A, but subgraph-a was already
+    // at A (no downcast edge needed).
+    let result = compose(vec![parsed_a, parsed_b]);
+    result.expect("Expected composition to succeed");
 }
