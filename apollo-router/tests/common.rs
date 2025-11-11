@@ -1324,7 +1324,7 @@ impl IntegrationTest {
     }
 
     /// Assert that some metric is non-zero. Useful for those metrics that are non-zero but whose
-    /// values might change across integration test runs.  
+    /// values might change across integration test runs.
     ///
     /// example use: `.assert_metric_non_zero("some_metric_name{label="example"}", None)`
     ///
@@ -1870,36 +1870,25 @@ fn merge_overrides(
 /// Extract Redis URLs from config. This assumes that caches will share a redis instance; it just
 /// returns the first URLs found from: query plan, response cache all, response cache subgraphs
 fn get_redis_urls(config: &Value) -> Option<Vec<String>> {
+    let convert_urls = |urls: &Vec<Value>| {
+        urls.iter()
+            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+            .collect()
+    };
+
     if let Some(urls) = config
-        .get("supergraph")
-        .and_then(|o| o.get("query_planning"))
-        .and_then(|o| o.get("cache"))
-        .and_then(|o| o.get("redis"))
-        .and_then(|o| o.get("urls"))
+        .pointer("/supergraph/query_planning/cache/redis/urls")
         .and_then(|o| o.as_array())
     {
-        return Some(
-            urls.iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect(),
-        );
+        return Some(convert_urls(urls));
     }
 
-    if let Some(response_cache_config) = config
-        .get("preview_response_cache")
-        .and_then(|o| o.get("subgraph"))
-    {
+    if let Some(response_cache_config) = config.pointer("/preview_response_cache/subgraph") {
         if let Some(urls) = response_cache_config
-            .get("all")
-            .and_then(|o| o.get("redis"))
-            .and_then(|o| o.get("urls"))
+            .pointer("/all/redis/urls")
             .and_then(|o| o.as_array())
         {
-            return Some(
-                urls.iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect(),
-            );
+            return Some(convert_urls(urls));
         }
 
         if let Some(subgraphs) = response_cache_config
@@ -1908,17 +1897,10 @@ fn get_redis_urls(config: &Value) -> Option<Vec<String>> {
         {
             for (_, subgraph_config) in subgraphs.iter() {
                 if let Some(urls) = subgraph_config
-                    .get("redis")
-                    .and_then(|o| o.get("urls"))
+                    .pointer("/redis/urls")
                     .and_then(|o| o.as_array())
                 {
-                    {
-                        return Some(
-                            urls.iter()
-                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                                .collect(),
-                        );
-                    }
+                    return Some(convert_urls(urls));
                 }
             }
         }
