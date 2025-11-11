@@ -61,7 +61,7 @@ impl Monitor {
 
         // sleep for a bit to allow tasks to spin up - do this here rather than requiring each
         // caller to do it
-        tokio::time::sleep(Duration::from_millis(250)).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
 
         Self {
             monitor_tasks,
@@ -71,6 +71,9 @@ impl Monitor {
 
     /// End all `monitor_tasks` and collect the results into a `MonitorOutput`.
     pub async fn collect(mut self) -> MonitorOutput {
+        // sleep a bit to make sure the monitor tasks have time to finish
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
         // abort monitor tasks and collect all the collection tasks
         self.monitor_tasks.abort_all();
         while self.monitor_tasks.join_next().await.is_some() {}
