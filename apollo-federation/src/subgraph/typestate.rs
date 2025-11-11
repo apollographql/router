@@ -26,6 +26,7 @@ use crate::internal_error;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::federation_spec_definition::FED_1;
 use crate::link::federation_spec_definition::FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC;
@@ -548,10 +549,41 @@ impl<S: HasMetadata> Subgraph<S> {
             .directive_name_in_schema(self.schema(), &FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC)
     }
 
+    pub(crate) fn external_directive_name(&self) -> Result<Option<Name>, FederationError> {
+        self.metadata()
+            .federation_spec_definition()
+            .directive_name_in_schema(self.schema(), &FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC)
+    }
+
     pub(crate) fn tag_directive_name(&self) -> Result<Option<Name>, FederationError> {
         self.metadata()
             .federation_spec_definition()
             .directive_name_in_schema(self.schema(), &FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC)
+    }
+
+    pub(crate) fn interface_object_fields(&self) -> Vec<ObjectFieldDefinitionPosition> {
+        let Ok(Some(interface_object_def)) = self
+            .metadata()
+            .federation_spec_definition()
+            .interface_object_directive_definition(self.schema())
+        else {
+            return vec![];
+        };
+
+        let Ok(itf_objects) = self
+            .schema()
+            .referencers()
+            .get_directive(&interface_object_def.name)
+            .map(|refs| &refs.object_types)
+        else {
+            return vec![];
+        };
+
+        itf_objects
+            .iter()
+            .filter_map(|obj| obj.fields(self.schema().schema()).ok())
+            .flatten()
+            .collect()
     }
 
     pub(crate) fn is_interface_object_type(&self, type_: &TypeDefinitionPosition) -> bool {

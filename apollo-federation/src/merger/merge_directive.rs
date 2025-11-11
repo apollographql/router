@@ -359,8 +359,11 @@ impl Merger {
         let dest = DirectiveDefinitionPosition {
             directive_name: name.clone(),
         };
-        // This replaces the calls to target.set_description, target.set_repeatable, and target.add_locations in the JS implementation
-        dest.insert(&mut self.merged, def.clone())?;
+
+        if self.merged.get_directive_definition(name).is_none() {
+            dest.pre_insert(&mut self.merged)?;
+            dest.insert(&mut self.merged, def.clone())?;
+        }
 
         let sources = self
             .subgraphs

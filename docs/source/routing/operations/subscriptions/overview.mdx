@@ -40,6 +40,12 @@ type Subscription {
 
 <HowSubscriptionsWork />
 
+<Note>
+
+Apollo Router does not support direct WebSocket connections from clients. Client subscriptions are handled over HTTP using the multipart protocol, while WebSocket is used internally between the router and subgraphs when applicable.
+
+</Note>
+
 ## Next steps
 
 - [Configure](/graphos/routing/operations/subscriptions/configuration) the router and update your subgraph schemas to enable and handle subscriptions.

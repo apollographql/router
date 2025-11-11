@@ -783,6 +783,25 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "CacheControlSelector": {
+      "oneOf": [
+        {
+          "const": "scope",
+          "description": "Returns the scope, either `public` or `private`",
+          "type": "string"
+        },
+        {
+          "const": "no_store",
+          "description": "Boolean to know the value of no-store",
+          "type": "string"
+        },
+        {
+          "const": "max_age",
+          "description": "Value of s-maxage or max-age in cache-control",
+          "type": "string"
+        }
+      ]
+    },
     "CacheKind": {
       "enum": [
         "hit",
@@ -2051,14 +2070,6 @@ expression: "&schema"
           ],
           "default": null,
           "description": "TLS client configuration"
-        },
-        "ttl": {
-          "default": null,
-          "description": "TTL for entries",
-          "type": [
-            "string",
-            "null"
-          ]
         },
         "urls": {
           "description": "List of URLs to the Redis cluster",
@@ -7347,9 +7358,12 @@ expression: "&schema"
           "type": "boolean"
         },
         "datadog": {
-          "default": false,
+          "default": null,
           "description": "Propagate Datadog",
-          "type": "boolean"
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "jaeger": {
           "default": false,
@@ -10190,6 +10204,23 @@ expression: "&schema"
           },
           "required": [
             "response_cache_status"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "response_cache_control": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/CacheControlSelector"
+                }
+              ],
+              "description": "Select data you want from the computed cache control from response caching"
+            }
+          },
+          "required": [
+            "response_cache_control"
           ],
           "type": "object"
         }

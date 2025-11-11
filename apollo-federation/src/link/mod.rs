@@ -266,19 +266,27 @@ impl fmt::Display for Import {
 #[allow(clippy::from_over_into)]
 impl Into<Value> for Import {
     fn into(self) -> Value {
+        let element_string = if self.is_directive {
+            format!("@{}", self.element)
+        } else {
+            self.element.to_string()
+        };
+
         if let Some(alias) = self.alias {
+            let alias_string = if self.is_directive {
+                format!("@{}", alias)
+            } else {
+                alias.to_string()
+            };
             Value::Object(vec![
                 (
                     IMPORT_NAME_ARGUMENT,
-                    Node::new(Value::String(self.element.to_string())),
+                    Node::new(Value::String(element_string)),
                 ),
-                (
-                    IMPORT_AS_ARGUMENT,
-                    Node::new(Value::String(alias.to_string())),
-                ),
+                (IMPORT_AS_ARGUMENT, Node::new(Value::String(alias_string))),
             ])
         } else {
-            Value::String(self.element.to_string())
+            Value::String(element_string)
         }
     }
 }
@@ -415,6 +423,14 @@ impl Link {
                     None
                 }
             })
+    }
+
+    /// Returns true if this link has an import assigning an alias to the given element.
+    pub(crate) fn renames(&self, element: &Name) -> bool {
+        self.imports
+            .iter()
+            .find(|import| &import.element == element)
+            .is_some_and(|import| *import.imported_name() != *element)
     }
 }
 

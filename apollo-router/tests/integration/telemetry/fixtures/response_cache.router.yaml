@@ -1,0 +1,82 @@
+telemetry:
+  instrumentation:
+    instruments:
+      subgraph:
+        http.client.request.duration:
+          attributes:
+            subgraph.name: true
+            cache_control.max_age:
+              response_cache_control: max_age
+            cache_control.scope:
+              response_cache_control: scope
+  exporters:
+    metrics:
+      prometheus:
+        listen: 127.0.0.1:4000
+        enabled: true
+        path: /metrics
+override_subgraph_url:
+  products: http://localhost:4005
+include_subgraph_errors:
+  all: true
+preview_response_cache:
+  enabled: true
+  debug: true
+  invalidation:
+    listen: 127.0.0.1:4000
+    path: "/invalidation"
+  subgraph:
+    all:
+      enabled: true
+      redis:
+        urls:
+          - redis://127.0.0.1:6379
+        namespace: test_response_cache_metrics
+        pool_size: 3
+    subgraphs:
+      products:
+        enabled: true
+        ttl: 60s
+      reviews:
+        enabled: true
+        ttl: 10s
+experimental_mock_subgraphs:
+  products:
+    query:
+      topProducts:
+        - __typename: Product
+          upc: "1"
+          name: chair
+        - __typename: Product
+          upc: "2"
+          name: table
+        - __typename: Product
+          upc: "3"
+          name: plate
+    headers:
+      cache-control: public
+  reviews:
+    entities:
+      - __typename: Product
+        upc: "1"
+        reviews:
+          - __typename: Review
+            body: I can sit on it
+      - __typename: Product
+        upc: "2"
+        reviews:
+          - __typename: Review
+            body: I can sit on it
+          - __typename: Review
+            body: I can sit on it2
+      - __typename: Product
+        upc: "3"
+        reviews:
+          - __typename: Review
+            body: I can sit on it
+          - __typename: Review
+            body: I can sit on it2
+          - __typename: Review
+            body: I can sit on it3
+    headers:
+      cache-control: public
