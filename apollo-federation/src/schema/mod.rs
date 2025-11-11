@@ -1415,10 +1415,6 @@ pub(crate) trait SchemaElement {
         self.definition_and_extensions().1
     }
 
-    fn has_non_extension_elements(&self) -> bool {
-        self.definition_and_extensions().0
-    }
-
     fn has_extension_elements(&self) -> bool {
         !self.extensions().is_empty()
     }
