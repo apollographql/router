@@ -220,14 +220,17 @@ where
 
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
+    let mut graphql_response: Option<graphql::Response> = None;
 
     // Determine logical success before control flow branches
     let succeeded = match co_processor_output.body.as_ref() {
         Some(body_value) => {
             // Try to deserialize a copy of the body just for validation
-            let gql_response =
-                deserialize_coprocessor_response(body_value.clone(), response_validation);
-            gql_response.errors.is_empty()
+            graphql_response = Some(deserialize_coprocessor_response(
+                body_value.clone(),
+                response_validation,
+            ));
+            graphql_response.as_ref().unwrap().errors.is_empty()
         }
         None => false, // no body = logical failure
     };
@@ -246,14 +249,9 @@ where
         let code = control.get_http_status()?;
 
         let res = {
-            let graphql_response = {
-                let body_value = co_processor_output.body.unwrap_or(Value::Null);
-                deserialize_coprocessor_response(body_value, response_validation)
-            };
-
             let mut http_response = http::Response::builder()
                 .status(code)
-                .body(stream::once(future::ready(graphql_response)).boxed())?;
+                .body(stream::once(future::ready(graphql_response.unwrap())).boxed())?;
             if let Some(headers) = co_processor_output.headers {
                 *http_response.headers_mut() = internalize_header_map(headers)?;
             }
