@@ -23,7 +23,6 @@
 // ```
 
 use std::collections::HashMap;
-use std::time::Duration;
 
 use apollo_router::Context;
 use apollo_router::MockedSubgraphs;
@@ -130,6 +129,7 @@ async fn query_planner_cache() -> Result<(), BoxError> {
                         "redis": {
                             "urls": [redis_url],
                             "namespace": namespace,
+                            "required_to_start": true,
                             "ttl": "10s"
                         }
                     }
@@ -204,6 +204,7 @@ async fn query_planner_cache() -> Result<(), BoxError> {
                         "redis": {
                             "urls": [redis_url],
                             "namespace": namespace,
+                            "required_to_start": true,
                             "ttl": "10s"
                         }
                     }
@@ -264,6 +265,7 @@ async fn apq() -> Result<(), BoxError> {
                     "redis": {
                         "urls": [redis_url],
                         "namespace": namespace,
+                            "required_to_start": true,
                         "ttl": "10s"
                     }
                 }
@@ -472,6 +474,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
                             "urls": [redis_url],
                             "namespace": namespace,
                             "ttl": "2s",
+                            "required_to_start": true,
                             "pool_size": 3
                         },
                     },
@@ -590,6 +593,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
                         "redis": {
                             "urls": [redis_url],
                             "namespace": namespace,
+                            "required_to_start": true,
                             "ttl": "2s"
                         },
                     },
@@ -657,6 +661,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
                         "redis": {
                             "urls": [redis_url],
                             "namespace": namespace,
+                            "required_to_start": true,
                             "ttl": "2s"
                         },
                         "invalidation": {
@@ -810,6 +815,7 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
                             "urls": [redis_url],
                             "namespace": namespace,
                             "ttl": "2s",
+                            "required_to_start": true,
                             "pool_size": 3
                         },
                     }
@@ -872,6 +878,7 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
                         "redis": {
                             "urls": [redis_url],
                             "namespace": namespace,
+                            "required_to_start": true,
                             "ttl": "2s"
                         },
                     },
@@ -936,6 +943,7 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
                         "redis": {
                             "urls": [redis_url],
                             "namespace": namespace,
+                            "required_to_start": true,
                             "ttl": "5s"
                         },
                         "invalidation": {
@@ -1194,6 +1202,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
                         "redis": {
                             "urls": [redis_url],
                             "namespace": namespace,
+                            "required_to_start": true,
                             "ttl": "2s"
                         },
                     },
@@ -1396,54 +1405,41 @@ async fn connection_failure_blocks_startup() {
         return;
     }
 
-    let _ = apollo_router::TestHarness::builder()
-        .with_subgraph_network_requests()
-        .configuration_json(json!({
-            "supergraph": {
-                "query_planning": {
-                    "cache": {
-                        "in_memory": {
-                            "limit": 2
-                        },
-                        "redis": {
-                            // invalid port
-                            "urls": ["redis://127.0.0.1:6378"]
+    let build_router = |required_to_start: bool| {
+        apollo_router::TestHarness::builder()
+            .with_subgraph_network_requests()
+            .configuration_json(json!({
+                "supergraph": {
+                    "query_planning": {
+                        "cache": {
+                            "in_memory": {
+                                "limit": 2
+                            },
+                            "redis": {
+                                // invalid port
+                                "urls": ["redis://127.0.0.1:6378"],
+                                "required_to_start": required_to_start
+                            }
                         }
                     }
                 }
-            }
-        }))
-        .unwrap()
-        .schema(include_str!("../fixtures/supergraph.graphql"))
-        .build_supergraph()
-        .await
-        .unwrap();
+            }))
+            .unwrap()
+            .schema(include_str!("../fixtures/supergraph.graphql"))
+            .build_supergraph()
+    };
 
-    let e = apollo_router::TestHarness::builder()
-        .with_subgraph_network_requests()
-        .configuration_json(json!({
-            "supergraph": {
-                "query_planning": {
-                    "cache": {
-                        "in_memory": {
-                            "limit": 2
-                        },
-                        "redis": {
-                            // invalid port
-                            "urls": ["redis://127.0.0.1:6378"],
-                            "required_to_start": true
-                        }
-                    }
-                }
-            }
-        }))
-        .unwrap()
-        .schema(include_str!("../fixtures/supergraph.graphql"))
-        .build_supergraph()
-        .await
-        .unwrap_err();
-    //OSX has a different error code for connection refused
-    let e = e.to_string().replace("61", "111"); //
+    // when redis is not required to start, the result should be Ok even with the invalid port
+    let router_result = build_router(false).await;
+    assert!(router_result.is_ok());
+
+    // when redis is required to start, this should error
+    let router_result = build_router(true).await;
+    assert!(router_result.is_err());
+
+    let err = router_result.unwrap_err();
+    // OSX has a different error code for connection refused
+    let e = err.to_string().replace("61", "111");
     assert_eq!(
         e,
         "couldn't build Router service: IO Error: Os { code: 111, kind: ConnectionRefused, message: \"Connection refused\" }"
@@ -1614,8 +1610,6 @@ async fn test_redis_emits_response_size_avg_metric() {
     router
         .assert_metric_non_zero(experimental_response_avg_metric, None)
         .await;
-
-    router.print_logs();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1641,8 +1635,6 @@ async fn test_redis_emits_request_size_avg_metric() {
     router
         .assert_metric_non_zero(experimental_response_avg_metric, None)
         .await;
-
-    router.print_logs();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1748,12 +1740,11 @@ async fn test_redis_uses_replicas_when_clustered() {
 
     // check that there were no I/O errors
     let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="query planner",otel_scope_name="apollo/router"}"#;
+    router.assert_metrics_does_not_contain(io_error).await;
 
     // check that there were no parse errors; these might show up when fred can't read the cluster
     // state properly
     let parse_error = r#"apollo_router_cache_redis_errors_total{error_type="parse",kind="query planner",otel_scope_name="apollo/router"}"#;
-
-    router.assert_metrics_does_not_contain(io_error).await;
     router.assert_metrics_does_not_contain(parse_error).await;
 }
 
@@ -1787,15 +1778,11 @@ async fn test_redis_doesnt_use_replicas_in_standalone_mode() {
 
     // check that there were no I/O errors
     let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="query planner",otel_scope_name="apollo/router"}"#;
+    router.assert_metrics_does_not_contain(io_error).await;
 
     // check that there were no parse errors; these might show up when fred can't read the cluster
     // state properly
     let parse_error = r#"apollo_router_cache_redis_errors_total{error_type="parse",kind="query planner",otel_scope_name="apollo/router"}"#;
-
-    tokio::time::sleep(Duration::from_secs(5)).await;
-    router.force_flush();
-    router.print_logs();
-    router.assert_metrics_does_not_contain(io_error).await;
     router.assert_metrics_does_not_contain(parse_error).await;
 }
 
@@ -1896,17 +1883,16 @@ async fn test_redis_uses_replicas_in_clusters_for_mgets() {
 
     // check that there were no I/O errors
     let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="response-cache",otel_scope_name="apollo/router"}"#;
+    router.assert_metrics_does_not_contain(io_error).await;
 
     // check that there were no parse errors; parse errors happen whenever a response from redis to
     // fred can't be understood by fred, which can be redis config issues, type conversion
     // shenanigans, or things like being in the middle of a transaction (pipeline) and trying to
     // convert a value
     let parse_error = r#"apollo_router_cache_redis_errors_total{error_type="parse""#;
+    router.assert_metrics_does_not_contain(parse_error).await;
 
     let example_cache_key = "version:1.0:subgraph:reviews:type:Product:representation:052fa800fa760b2ac78669a5b0b90f512158eddab8d01eabb4e65b286ff09ecd:hash:739583f793fb842194e6be6c6f126df63cc0ee86f8702745ac4630521ab6752d:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
-
-    router.assert_metrics_does_not_contain(io_error).await;
-    router.assert_metrics_does_not_contain(parse_error).await;
     router
         .assert_redis_cache_contains(example_cache_key, None)
         .await;
