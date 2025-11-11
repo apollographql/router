@@ -1871,15 +1871,10 @@ fn merge_overrides(
 /// returns the first URLs found from: query plan, response cache all, response cache subgraphs
 fn get_redis_urls(config: &Value) -> Option<Vec<String>> {
     if let Some(urls) = config
-        .as_object()
-        .and_then(|o| o.get("supergraph"))
-        .and_then(|o| o.as_object())
+        .get("supergraph")
         .and_then(|o| o.get("query_planning"))
-        .and_then(|o| o.as_object())
         .and_then(|o| o.get("cache"))
-        .and_then(|o| o.as_object())
         .and_then(|o| o.get("redis"))
-        .and_then(|o| o.as_object())
         .and_then(|o| o.get("urls"))
         .and_then(|o| o.as_array())
     {
@@ -1890,19 +1885,13 @@ fn get_redis_urls(config: &Value) -> Option<Vec<String>> {
         );
     }
 
-    // TODO: might be able to remove some of these as_objs
     if let Some(response_cache_config) = config
-        .as_object()
-        .and_then(|o| o.get("preview_response_cache"))
-        .and_then(|o| o.as_object())
+        .get("preview_response_cache")
         .and_then(|o| o.get("subgraph"))
-        .and_then(|o| o.as_object())
     {
         if let Some(urls) = response_cache_config
             .get("all")
-            .and_then(|o| o.as_object())
             .and_then(|o| o.get("redis"))
-            .and_then(|o| o.as_object())
             .and_then(|o| o.get("urls"))
             .and_then(|o| o.as_array())
         {
@@ -1919,9 +1908,7 @@ fn get_redis_urls(config: &Value) -> Option<Vec<String>> {
         {
             for (_, subgraph_config) in subgraphs.iter() {
                 if let Some(urls) = subgraph_config
-                    .as_object()
-                    .and_then(|o| o.get("redis"))
-                    .and_then(|o| o.as_object())
+                    .get("redis")
                     .and_then(|o| o.get("urls"))
                     .and_then(|o| o.as_array())
                 {
