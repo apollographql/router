@@ -59,6 +59,20 @@ use crate::integration::common::graph_os_enabled;
 use crate::integration::redis_monitor::Monitor as RedisMonitor;
 use crate::integration::response_cache::namespace;
 
+const REDIS_STANDALONE_PORT: [&str; 1] = ["6379"];
+const REDIS_CLUSTER_PORTS: [&str; 6] = ["7000", "7001", "7002", "7003", "7004", "7005"];
+
+fn make_redis_url(ports: &[&str]) -> Option<String> {
+    let port = ports.get(0)?;
+    let scheme = if ports.len() == 1 {
+        "redis"
+    } else {
+        "redis-cluster"
+    };
+    let url = format!("{scheme}://localhost:{port}");
+    Some(url)
+}
+
 // TODO: consider centralizing this fn and the same one in entity_cache.rs?
 fn subgraphs_with_many_entities(count: usize) -> serde_json::Value {
     let mut reviews = vec![];
@@ -97,7 +111,8 @@ async fn query_planner_cache() -> Result<(), BoxError> {
         env!("CARGO_PKG_VERSION")
     );
 
-    let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
+    let redis_url = make_redis_url(&REDIS_STANDALONE_PORT).unwrap();
+    let config = RedisConfig::from_url(&redis_url).unwrap();
     let client = RedisClient::new(config, None, None, None);
     let connection_task = client.init().await.unwrap();
 
@@ -113,7 +128,7 @@ async fn query_planner_cache() -> Result<(), BoxError> {
                             "limit": 2
                         },
                         "redis": {
-                            "urls": ["redis://127.0.0.1:6379"],
+                            "urls": [redis_url],
                             "namespace": namespace,
                             "ttl": "10s"
                         }
@@ -187,7 +202,7 @@ async fn query_planner_cache() -> Result<(), BoxError> {
                             "limit": 2
                         },
                         "redis": {
-                            "urls": ["redis://127.0.0.1:6379"],
+                            "urls": [redis_url],
                             "namespace": namespace,
                             "ttl": "10s"
                         }
@@ -234,7 +249,8 @@ async fn apq() -> Result<(), BoxError> {
     }
     let namespace = namespace();
 
-    let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
+    let redis_url = make_redis_url(&REDIS_STANDALONE_PORT).unwrap();
+    let config = RedisConfig::from_url(&redis_url).unwrap();
     let client = RedisClient::new(config, None, None, None);
     let connection_task = client.init().await.unwrap();
 
@@ -246,7 +262,7 @@ async fn apq() -> Result<(), BoxError> {
                         "limit": 2
                     },
                     "redis": {
-                        "urls": ["redis://127.0.0.1:6379"],
+                        "urls": [redis_url],
                         "namespace": namespace,
                         "ttl": "10s"
                     }
@@ -382,7 +398,8 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
     }
     let namespace = namespace();
 
-    let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
+    let redis_url = make_redis_url(&REDIS_STANDALONE_PORT).unwrap();
+    let config = RedisConfig::from_url(&redis_url).unwrap();
     let client = RedisClient::new(config, None, None, None);
     let connection_task = client.init().await.unwrap();
 
@@ -452,7 +469,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
                     "all": {
                         "enabled": false,
                         "redis": {
-                            "urls": ["redis://127.0.0.1:6379"],
+                            "urls": [redis_url],
                             "namespace": namespace,
                             "ttl": "2s",
                             "pool_size": 3
@@ -571,7 +588,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
                     "all": {
                         "enabled": false,
                         "redis": {
-                            "urls": ["redis://127.0.0.1:6379"],
+                            "urls": [redis_url],
                             "namespace": namespace,
                             "ttl": "2s"
                         },
@@ -638,7 +655,7 @@ async fn entity_cache_basic() -> Result<(), BoxError> {
                     "all": {
                         "enabled": true,
                         "redis": {
-                            "urls": ["redis://127.0.0.1:6379"],
+                            "urls": [redis_url],
                             "namespace": namespace,
                             "ttl": "2s"
                         },
@@ -748,7 +765,8 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
     let namespace = namespace();
     let schema = include_str!("../../src/testdata/supergraph_nested_fields.graphql");
 
-    let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
+    let redis_url = make_redis_url(&REDIS_STANDALONE_PORT).unwrap();
+    let config = RedisConfig::from_url(&redis_url).unwrap();
     let client = RedisClient::new(config, None, None, None);
     let connection_task = client.connect();
     client.wait_for_connect().await.unwrap();
@@ -789,7 +807,7 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
                     "all": {
                         "enabled": true,
                         "redis": {
-                            "urls": ["redis://127.0.0.1:6379"],
+                            "urls": [redis_url],
                             "namespace": namespace,
                             "ttl": "2s",
                             "pool_size": 3
@@ -852,7 +870,7 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
                     "all": {
                         "enabled": false,
                         "redis": {
-                            "urls": ["redis://127.0.0.1:6379"],
+                            "urls": [redis_url],
                             "namespace": namespace,
                             "ttl": "2s"
                         },
@@ -916,7 +934,7 @@ async fn entity_cache_with_nested_field_set() -> Result<(), BoxError> {
                     "all": {
                         "enabled": true,
                         "redis": {
-                            "urls": ["redis://127.0.0.1:6379"],
+                            "urls": [redis_url],
                             "namespace": namespace,
                             "ttl": "5s"
                         },
@@ -1024,7 +1042,8 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     }
     let namespace = namespace();
 
-    let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
+    let redis_url = make_redis_url(&REDIS_STANDALONE_PORT).unwrap();
+    let config = RedisConfig::from_url(&redis_url).unwrap();
     let client = RedisClient::new(config, None, None, None);
     let connection_task = client.init().await.unwrap();
 
@@ -1173,7 +1192,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
                     "all": {
                         "enabled": false,
                         "redis": {
-                            "urls": ["redis://127.0.0.1:6379"],
+                            "urls": [redis_url],
                             "namespace": namespace,
                             "ttl": "2s"
                         },
@@ -1697,7 +1716,7 @@ async fn test_redis_uses_replicas_when_clustered() {
     }
 
     let namespace = Uuid::new_v4().to_string();
-    let redis_monitor = RedisMonitor::new(&["7000", "7001", "7002", "7003", "7004", "7005"]).await;
+    let redis_monitor = RedisMonitor::new(&REDIS_CLUSTER_PORTS).await;
 
     // NB: `reset_ttl` must be false in the config, otherwise GETs will be sent to primary
     let router_config = include_str!("fixtures/clustered_redis_query_planning.router.yaml");
@@ -1745,7 +1764,7 @@ async fn test_redis_doesnt_use_replicas_in_standalone_mode() {
     }
 
     let namespace = Uuid::new_v4().to_string();
-    let redis_monitor = RedisMonitor::new(&["6379"]).await;
+    let redis_monitor = RedisMonitor::new(&REDIS_STANDALONE_PORT).await;
 
     let router_config = include_str!("fixtures/redis_connection_closure.router.yaml");
     let mut router = IntegrationTest::builder()
@@ -1856,7 +1875,7 @@ async fn test_redis_uses_replicas_in_clusters_for_mgets() {
     router.start().await;
     router.assert_started().await;
 
-    let redis_monitor = RedisMonitor::new(&["7000", "7001", "7002", "7003", "7004", "7005"]).await;
+    let redis_monitor = RedisMonitor::new(&REDIS_CLUSTER_PORTS).await;
 
     // send a few different queries to ensure a redis cache hit
     let mut join_set = JoinSet::new();
@@ -1959,7 +1978,7 @@ async fn test_redis_in_standalone_mode_for_mgets() {
     }
 
     let namespace = namespace();
-    let redis_monitor = RedisMonitor::new(&["6379"]).await;
+    let redis_monitor = RedisMonitor::new(&REDIS_STANDALONE_PORT).await;
 
     let mut router = IntegrationTest::builder()
         .redis_namespace(&namespace)
