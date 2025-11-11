@@ -1816,51 +1816,20 @@ fn merge_overrides(
             json!({"listen": bind_addr.to_string()}),
         );
 
-    // Set query plan redis namespace
-
-    if let Some(query_plan) = config
-        .as_object_mut()
-        .and_then(|o| o.get_mut("supergraph"))
-        .and_then(|o| o.as_object_mut())
-        .and_then(|o| o.get_mut("query_planning"))
-        .and_then(|o| o.as_object_mut())
-        .and_then(|o| o.get_mut("cache"))
-        .and_then(|o| o.as_object_mut())
-        .and_then(|o| o.get_mut("redis"))
-        .and_then(|o| o.as_object_mut())
-    {
-        query_plan.insert("namespace".to_string(), redis_namespace.into());
-    }
-
-    if let Some(response_cache_config) = config
-        .as_object_mut()
-        .and_then(|o| o.get_mut("preview_response_cache"))
-        .and_then(|o| o.as_object_mut())
-        .and_then(|o| o.get_mut("subgraph"))
-        .and_then(|o| o.as_object_mut())
-    {
-        if let Some(all) = response_cache_config
-            .get_mut("all")
-            .and_then(|o| o.as_object_mut())
-            .and_then(|o| o.get_mut("redis"))
-            .and_then(|o| o.as_object_mut())
-        {
-            all.insert("namespace".to_string(), redis_namespace.into());
+    let insert_redis_namespace = |v: Option<&mut Value>| {
+        if let Some(v) = v.and_then(|o| o.as_object_mut()) {
+            v.insert("namespace".to_string(), redis_namespace.into());
         }
+    };
 
-        if let Some(subgraphs) = response_cache_config
-            .get_mut("subgraphs")
-            .and_then(|o| o.as_object_mut())
-        {
-            for (_, subgraph_config) in subgraphs.iter_mut() {
-                if let Some(subgraph_config) = subgraph_config
-                    .as_object_mut()
-                    .and_then(|o| o.get_mut("redis"))
-                    .and_then(|o| o.as_object_mut())
-                {
-                    subgraph_config.insert("namespace".to_string(), redis_namespace.into());
-                }
-            }
+    insert_redis_namespace(config.pointer_mut("/supergraph/query_planning/cache/redis"));
+    insert_redis_namespace(config.pointer_mut("/preview_response_cache/subgraph/all/redis"));
+    if let Some(response_cache_per_subgraph) = config
+        .pointer_mut("/preview_response_cache/subgraph/subgraphs")
+        .and_then(|o| o.as_object_mut())
+    {
+        for subgraph_config in response_cache_per_subgraph.values_mut() {
+            insert_redis_namespace(subgraph_config.pointer_mut("/redis"));
         }
     }
 
