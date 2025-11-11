@@ -420,6 +420,7 @@ fn contextual_argument_is_present_in_multiple_subgraphs_not_nullable_no_default(
     let error_message = errors[0].to_string();
     assert_eq!(
         error_message,
+        // TODO: fix this error message so that the second argument is the subgraph name
         "Argument \"U.field(a:)\" is contextual in at least one subgraph but in \"U.field(a:)\" it does not have @fromContext, is not nullable and has no default value.",
         "Expected error message about incompatible non-nullable contextual arguments, but got: {}",
         error_message
