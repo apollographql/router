@@ -1,7 +1,9 @@
 use std::string::FromUtf8Error;
-
+use std::time::Duration;
 use docker_credential::CredentialRetrievalError;
 use docker_credential::DockerCredential;
+use futures::Stream;
+use futures::StreamExt;
 use oci_client::Client;
 use oci_client::Reference;
 use oci_client::client::ClientConfig;
@@ -9,6 +11,11 @@ use oci_client::client::ClientProtocol;
 use oci_client::errors::OciDistributionError;
 use oci_client::secrets::RegistryAuth;
 use thiserror::Error;
+use tokio::sync::mpsc::channel;
+use tokio_stream::wrappers::ReceiverStream;
+use tracing::instrument::WithSubscriber;
+
+use crate::uplink::schema::SchemaState;
 
 /// Configuration for fetching an OCI Bundle
 /// This struct does not change on router reloads - they are all sourced from CLI options.
@@ -19,6 +26,9 @@ pub struct OciConfig {
 
     /// OCI Compliant URL pointing to the release bundle
     pub reference: String,
+
+    /// The duration between polling
+    pub poll_interval: Duration,
 }
 
 #[derive(Debug, Clone)]
@@ -135,7 +145,7 @@ async fn infer_oci_protocol(registry: &str) -> ClientProtocol {
 }
 
 /// Fetch an OCI bundle
-pub(crate) async fn fetch_oci(oci_config: OciConfig) -> Result<OciContent, OciError> {
+pub(crate) async fn fetch_oci(oci_config: &OciConfig) -> Result<OciContent, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
     let auth = build_auth(&reference, &oci_config.apollo_key);
     let protocol = infer_oci_protocol(reference.registry()).await;
@@ -157,9 +167,51 @@ pub(crate) async fn fetch_oci(oci_config: OciConfig) -> Result<OciContent, OciEr
     .await
 }
 
+/// Regularly fetch from OCI registry at the configured polling interval
+pub(crate) fn stream_from_oci(
+    oci_config: OciConfig,
+) -> impl Stream<Item = Result<SchemaState, OciError>> {
+    let (sender, receiver) = channel(2);
+
+    let task = async move {
+        loop {
+            match fetch_oci(&oci_config).await {
+                Ok(oci_result) => {
+                    tracing::debug!("fetched schema from oci registry");
+                    let schema_state = SchemaState {
+                        sdl: oci_result.schema,
+                        launch_id: None, //TODO: Add launch_id
+                    };
+                    if let Err(e) = sender.send(Ok(schema_state)).await {
+                        tracing::debug!(
+                            "failed to push to stream. This is likely to be because the router is shutting down: {e}"
+                        );
+                        break;
+                    }
+                }
+                Err(err) => {
+                    tracing::error!("error fetching schema from oci registry: {}", err);
+                    if let Err(e) = sender.send(Err(err)).await {
+                        tracing::debug!(
+                            "failed to send error to oci stream. This is likely to be because the router is shutting down: {e}"
+                        );
+                        break;
+                    }
+                }
+            }
+
+            tokio::time::sleep(oci_config.poll_interval).await;
+        }
+    };
+    drop(tokio::task::spawn(task.with_current_subscriber()));
+
+    ReceiverStream::new(receiver).boxed()
+}
+
 #[cfg(test)]
 mod tests {
     use futures::future::join_all;
+    use futures::StreamExt;
     use oci_client::client::ClientConfig;
     use oci_client::client::ClientProtocol;
     use oci_client::client::ImageLayer;
@@ -411,5 +463,104 @@ mod tests {
         // included here as a second layer of security.
         let result = infer_oci_protocol("").await;
         assert_eq!(result, ClientProtocol::Https);
+    }
+
+    fn mock_oci_config_with_reference(reference: String) -> OciConfig {
+        OciConfig {
+            apollo_key: "test-api-key".to_string(),
+            reference,
+            poll_interval: Duration::from_millis(10),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_from_oci_success() {
+        let mock_server = MockServer::start().await;
+        let schema_layer = ImageLayer {
+            data: "test schema".to_string().into_bytes(),
+            media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
+            annotations: None,
+        };
+        let image_reference = setup_mocks(mock_server, vec![schema_layer]).await;
+        let oci_config = mock_oci_config_with_reference(image_reference.to_string());
+
+        let results = stream_from_oci(oci_config)
+            .take(1)
+            .collect::<Vec<_>>()
+            .await;
+
+        assert_eq!(results.len(), 1);
+        match &results[0] {
+            Ok(schema_state) => {
+                assert_eq!(schema_state.sdl, "test schema");
+                assert_eq!(schema_state.launch_id, None);
+            }
+            Err(e) => panic!("expected success, got error: {e}"),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_from_oci_multiple_polls() {
+        let mock_server = MockServer::start().await;
+        let schema_layer1 = ImageLayer {
+            data: "schema 1".to_string().into_bytes(),
+            media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
+            annotations: None,
+        };
+        let schema_layer2 = ImageLayer {
+            data: "schema 2".to_string().into_bytes(),
+            media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
+            annotations: None,
+        };
+        let image_reference = setup_mocks(mock_server, vec![schema_layer1]).await;
+        let oci_config = mock_oci_config_with_reference(image_reference.to_string());
+
+        let mut stream = stream_from_oci(oci_config);
+        let first_result = stream.next().await;
+        assert!(first_result.is_some());
+        match first_result.unwrap() {
+            Ok(schema_state) => {
+                assert_eq!(schema_state.sdl, "schema 1");
+            }
+            Err(e) => panic!("expected success, got error: {e}"),
+        }
+
+        // Note: In a real scenario, the schema would change between polls, but for testing
+        // we're just verifying that multiple polls happen. The second poll will fetch the same schema.
+        let second_result = stream.next().await;
+        assert!(second_result.is_some());
+        match second_result.unwrap() {
+            Ok(schema_state) => {
+                assert_eq!(schema_state.sdl, "schema 1");
+            }
+            Err(e) => panic!("expected success, got error: {e}"),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_from_oci_error() {
+        let mock_server = MockServer::start().await;
+        // Create a reference that will fail (missing schema layer)
+        let random_layer = ImageLayer {
+            data: "foo_bar".to_string().into_bytes(),
+            media_type: "foo_bar".to_string(),
+            annotations: None,
+        };
+        let image_reference = setup_mocks(mock_server, vec![random_layer]).await;
+        let oci_config = mock_oci_config_with_reference(image_reference.to_string());
+
+        let results = stream_from_oci(oci_config)
+            .take(1)
+            .collect::<Vec<_>>()
+            .await;
+
+        assert_eq!(results.len(), 1);
+        match &results[0] {
+            Ok(_) => panic!("expected error, got success"),
+            Err(e) => {
+                // Should be LayerMissingTitle error
+                assert!(matches!(e, OciError::LayerMissingTitle));
+            }
+        }
     }
 }

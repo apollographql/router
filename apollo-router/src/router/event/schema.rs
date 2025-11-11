@@ -9,7 +9,7 @@ use futures::prelude::*;
 use url::Url;
 
 use crate::registry::OciConfig;
-use crate::registry::fetch_oci;
+use crate::registry::stream_from_oci;
 use crate::router::Event;
 use crate::router::Event::NoMoreSchema;
 use crate::router::Event::UpdateSchema;
@@ -161,22 +161,19 @@ impl SchemaSource {
             }
             SchemaSource::OCI(oci_config) => {
                 tracing::debug!("using oci as schema source");
-                futures::stream::once(async move {
-                    match fetch_oci(oci_config).await {
-                        Ok(oci_result) => {
-                            tracing::debug!("fetched schema from oci registry");
-                            Some(SchemaState {
-                                sdl: oci_result.schema,
-                                launch_id: None,
-                            })
-                        }
-                        Err(err) => {
-                            tracing::error!("error fetching schema from oci registry {}", err);
-                            None
-                        }
-                    }
-                })
-                    .filter_map(|s| async move { s.map(Event::UpdateSchema) })
+                stream_from_oci(oci_config)
+                    .filter_map(|res| {
+                        future::ready(match res {
+                            Ok(schema) => {
+                                let update_schema = UpdateSchema(schema);
+                                Some(update_schema)
+                            }
+                            Err(e) => {
+                                tracing::error!("{}", e);
+                                None
+                            }
+                        })
+                    })
                     .boxed()
             }
         }

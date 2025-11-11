@@ -248,14 +248,16 @@ impl Opt {
                     .clone()
                     .ok_or(Self::err_require_opt("APOLLO_GRAPH_ARTIFACT_REFERENCE"))?,
             )?,
+            poll_interval: INITIAL_UPLINK_POLL_INTERVAL,
         })
     }
 
     pub fn validate_oci_reference(reference: &str) -> std::result::Result<String, anyhow::Error> {
-        // Currently only shas are allowed to be passed as graph artifact references
-        // TODO Update when tag reloading is implemented
-        let valid_regex = Regex::new(r"@sha256:[0-9a-fA-F]{64}$").unwrap();
-        if valid_regex.is_match(reference) {
+        // Accepts both SHA256 digest format (@sha256:...) and tag format (:tag)
+        let sha256_regex = Regex::new(r"@sha256:[0-9a-fA-F]{64}$").unwrap();
+        // Tag format: must start with word character, followed by 0-127 word chars, dots, or hyphens
+        let tag_regex = Regex::new(r":[\w][\w.-]{0,127}$").unwrap();
+        if sha256_regex.is_match(reference) || tag_regex.is_match(reference) {
             tracing::debug!("validated OCI configuration");
             Ok(reference.to_string())
         } else {
