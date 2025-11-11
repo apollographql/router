@@ -5,6 +5,7 @@ mod compose_directive_sharing;
 mod compose_inaccessible;
 mod compose_interface_object;
 mod compose_misc;
+mod compose_set_context;
 mod compose_tag;
 mod compose_type_merging;
 mod compose_types;
