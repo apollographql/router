@@ -63,7 +63,7 @@ const REDIS_STANDALONE_PORT: [&str; 1] = ["6379"];
 const REDIS_CLUSTER_PORTS: [&str; 6] = ["7000", "7001", "7002", "7003", "7004", "7005"];
 
 fn make_redis_url(ports: &[&str]) -> Option<String> {
-    let port = ports.get(0)?;
+    let port = ports.first()?;
     let scheme = if ports.len() == 1 {
         "redis"
     } else {
@@ -1858,7 +1858,7 @@ async fn test_redis_uses_replicas_in_clusters_for_mgets() {
             .and(path_regex(".*"))
             .respond_with(response);
 
-        mocked_response.mount(&mock_server).await;
+        mocked_response.mount(mock_server).await;
         subgraph_overrides.insert(name.to_string(), mock_server.uri());
     }
 
@@ -1908,7 +1908,7 @@ async fn test_redis_uses_replicas_in_clusters_for_mgets() {
     router.assert_metrics_does_not_contain(io_error).await;
     router.assert_metrics_does_not_contain(parse_error).await;
     router
-        .assert_redis_cache_contains(&example_cache_key, None)
+        .assert_redis_cache_contains(example_cache_key, None)
         .await;
 }
 
@@ -1973,7 +1973,7 @@ async fn test_redis_in_standalone_mode_for_mgets() {
             .and(path_regex(".*"))
             .respond_with(response);
 
-        mocked_response.mount(&mock_server).await;
+        mocked_response.mount(mock_server).await;
         subgraph_overrides.insert(name.to_string(), mock_server.uri());
     }
 
@@ -2022,6 +2022,6 @@ async fn test_redis_in_standalone_mode_for_mgets() {
 
     let example_cache_key = "version:1.0:subgraph:reviews:type:Product:representation:052fa800fa760b2ac78669a5b0b90f512158eddab8d01eabb4e65b286ff09ecd:hash:739583f793fb842194e6be6c6f126df63cc0ee86f8702745ac4630521ab6752d:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6";
     router
-        .assert_redis_cache_contains(&example_cache_key, None)
+        .assert_redis_cache_contains(example_cache_key, None)
         .await;
 }
