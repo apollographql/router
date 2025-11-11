@@ -2,6 +2,69 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.8.2] - 2025-11-11
+
+## 🐛 Fixes
+
+### Support arrays in complex `@key` fields for entity caching ([PR #8367](https://github.com/apollographql/router/pull/8367))
+
+Entity caching now supports arrays (including arrays of objects and scalars) in complex `@key` fields when resolving entities by key. This improves entity matching when using complex `@key` fields as primary cache keys.
+
+By [@aaronArinder](https://github.com/aaronArinder), [@bnjjj](https://github.com/bnjjj), and [@duckki](https://github.com/duckki) in https://github.com/apollographql/router/pull/8367
+
+### Parse scientific notation correctly in Rhai scripts ([PR #8528](https://github.com/apollographql/router/pull/8528))
+
+The router now correctly parses scientific notation (like `1.5e10`) in Rhai scripts and JSON operations. Previously, the Rhai scripting engine failed to parse these numeric formats, causing runtime errors when your scripts processed data containing exponential notation.
+
+This fix upgrades Rhai from 1.21.0 to 1.23.6, resolving the parsing issue and ensuring your scripts handle scientific notation seamlessly.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/8528
+
+### Support enum types in `@cacheTag` directive format ([PR #8496](https://github.com/apollographql/router/pull/8496))
+
+Composition validation no longer raises an error when using enum types in the `@cacheTag` directive's `format` argument. Previously, only scalar types were accepted.
+
+Example:
+
+```graphql
+type Query {
+  testByCountry(id: ID!, country: Country!): Test
+    @cacheTag(format: "test-{.id}-{.country}")
+}
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/8496
+
+### Improve debugging data with caching flag and enhanced warnings ([PR #8459](https://github.com/apollographql/router/pull/8459))
+
+Debugging data now includes a flag that indicates to Apollo Sandbox whether the data should be cached, preventing unnecessary local computation. This update also includes improved warnings.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/8459
+
+### Display cache tags from subgraph responses in debugger ([PR #8531](https://github.com/apollographql/router/pull/8531))
+
+The debugger now displays cache tags generated from subgraph responses (in `extensions`). For performance reasons, these generated cache tags are only displayed when the data has been cached in debug mode.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/8531
+
+## 📚 Documentation
+
+### Clarify guidance for OpenTelemetry "Recommended" attributes in telemetry documentation
+
+The router telemetry documentation now clarifies that OpenTelemetry's "Recommended" attributes from their [development-status GraphQL semantic conventions](https://opentelemetry.io/docs/specs/semconv/graphql/graphql-spans/) are experimental and still evolving. Apollo recommends using `required` attributes instead of `recommended` attributes because of high cardinality, security, and performance risks with attributes like `graphql.document`.
+
+Learn more in [Router Telemetry](https://www.apollographql.com/docs/graphos/routing/observability/router-telemetry-otel).
+
+By [@abernix](https://github.com/abernix)
+
+## 🧪 Experimental
+
+### Prevent panic when record/replay plugin encounters non-UTF-8 header values ([PR #8485](https://github.com/apollographql/router/pull/8485))
+
+The record/replay plugin no longer panics when externalizing headers with invalid UTF-8 values. Instead, the plugin writes the header keys and errors to a `header_errors` object for both requests and responses.
+
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/8485
+
 # [2.8.1] - 2025-11-04
 
 ## 🔒 Security
