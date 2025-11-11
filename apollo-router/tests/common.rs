@@ -1562,12 +1562,7 @@ impl IntegrationTest {
             .await
             .expect("could not connect to redis");
 
-        let mut keys = self.scan_standalone(&client).await;
-        if keys.is_err() {
-            keys = self.scan_cluster(&client).await;
-        }
-        let keys = keys.expect("no keys");
-        for key in keys {
+        for key in self.scan(&client).await.expect("no keys") {
             client
                 .del::<usize, _>(key)
                 .await
@@ -1579,56 +1574,28 @@ impl IntegrationTest {
         let _ = connection_task.await;
     }
 
-    async fn scan_standalone(
-        &self,
-        client: &fred::clients::Client,
-    ) -> Result<Vec<String>, fred::error::Error> {
-        let mut keys = Vec::new();
-
-        let namespace = &self.redis_namespace;
-        let mut scan = client.scan(format!("{namespace}:*"), None, None);
-        while let Some(result) = scan.next().await {
-            if let Some(page) = result?.take_results() {
-                for key in page {
-                    let key = key.as_str().expect("key should be a string");
-                    keys.push(key.to_string());
-                }
-            }
-        }
-
-        Ok(keys)
-    }
-
-    async fn scan_cluster(
-        &self,
-        client: &fred::clients::Client,
-    ) -> Result<Vec<String>, fred::error::Error> {
-        let mut keys = Vec::new();
-
-        let namespace = &self.redis_namespace;
-        let mut scan = client.scan_cluster(format!("{namespace}:*"), None, None);
-        while let Some(result) = scan.next().await {
-            if let Some(page) = result?.take_results() {
-                for key in page {
-                    let key = key.as_str().expect("key should be a string");
-                    keys.push(key.to_string());
-                }
-            }
-        }
-
-        Ok(keys)
-    }
-
     async fn scan(
         &self,
         client: &fred::clients::Client,
     ) -> Result<Vec<String>, fred::error::Error> {
-        // cluster first, so that we know we get everything if it exists
-        if let Ok(results) = self.scan_cluster(client).await {
-            return Ok(results);
+        let pattern = format!("{}:*", self.redis_namespace);
+        let mut scan = if client.is_clustered() {
+            client.scan_cluster(pattern, None, None).boxed()
+        } else {
+            client.scan(pattern, None, None).boxed()
+        };
+
+        let mut keys = Vec::new();
+        while let Some(result) = scan.next().await {
+            if let Some(page) = result?.take_results() {
+                for key in page {
+                    let key = key.as_str().expect("key should be a string");
+                    keys.push(key.to_string());
+                }
+            }
         }
 
-        self.scan_standalone(client).await
+        Ok(keys)
     }
 
     #[allow(dead_code)]
