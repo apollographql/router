@@ -1,5 +1,5 @@
-### Fix entity matching for complex `@key` fields when used with entity caching ([PR #8367](https://github.com/apollographql/router/pull/8367))
+### Support arrays in complex `@key` fields for entity caching ([PR #8367](https://github.com/apollographql/router/pull/8367))
 
-Improved entity matching for complex `@key` fields when used for entity caching primary cache key, adding support for arrays (including arrays of objects and scalars) when resolving entities by key.
+Entity caching now supports arrays (including arrays of objects and scalars) in complex `@key` fields when resolving entities by key. This improves entity matching when using complex `@key` fields as primary cache keys.
 
-By [@aaronArinder](https://github.com/aaronArinder) and [@bnjjj](https://github.com/bnjjj) and [@duckki](https://github.com/duckki) in https://github.com/apollographql/router/pull/8367
+By [@aaronArinder](https://github.com/aaronArinder), [@bnjjj](https://github.com/bnjjj), and [@duckki](https://github.com/duckki) in https://github.com/apollographql/router/pull/8367

@@ -1,12 +1,13 @@
-### Do not raise an error when using enum in cacheTag directive format ([PR #8496](https://github.com/apollographql/router/pull/8496))
+### Support enum types in `@cacheTag` directive format ([PR #8496](https://github.com/apollographql/router/pull/8496))
 
-Fix composition validation when checking `@cacheTag` format used with an enum.
+Composition validation no longer raises an error when using enum types in the `@cacheTag` directive's `format` argument. Previously, only scalar types were accepted.
 
 Example:
 
 ```graphql
 type Query {
-    testByCountry(id: ID!, country: Country!): Test @cacheTag(format: "test-{$args.id}-{$args.country}" ) # This was throwing an error because of Country being an enum and not a Scalar type
+  testByCountry(id: ID!, country: Country!): Test
+    @cacheTag(format: "test-{$args.id}-{$args.country}")
 }
 ```
 
