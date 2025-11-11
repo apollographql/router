@@ -544,21 +544,18 @@ impl RedisCacheStorage {
                         ));
                     }
 
-                    // Backwords compatibility with old redis client
+                    // Backwards compatibility with old redis client
                     // If our url has a scheme of redis or rediss, convert it to be cluster form
                     // and if our result is of matching scheme, convert that to be cluster form.
-                    if url.scheme() == "redis" {
-                        let _ = url.set_scheme("redis-cluster");
-                        if result.scheme() == "redis" {
-                            let _ = result.set_scheme("redis-cluster");
+                    for url_ref in [&mut url, &mut result] {
+                        if url_ref.scheme() == "redis" {
+                            let _ = url_ref.set_scheme("redis-cluster");
+                        }
+                        if url_ref.scheme() == "rediss" {
+                            let _ = url_ref.set_scheme("rediss-cluster");
                         }
                     }
-                    if url.scheme() == "rediss" {
-                        let _ = url.set_scheme("rediss-cluster");
-                        if result.scheme() == "rediss" {
-                            let _ = result.set_scheme("rediss-cluster");
-                        }
-                    }
+
                     // Now check to make sure our schemes match
                     if url.scheme() != result.scheme() {
                         return Err(RedisError::new(
@@ -901,115 +898,115 @@ mod test {
         assert!(as_value.is_err());
     }
 
-    #[test]
-    fn it_preprocesses_redis_schemas_correctly() -> Result<(), url::ParseError> {
-        // Base Format
-        for scheme in ["redis", "rediss"] {
-            let url_s = format!("{scheme}://username:password@host:6666/database");
-            let url = Url::parse(&url_s)?;
-            assert!(RedisCacheStorage::preprocess_urls(vec![url.clone()]).is_ok());
-            assert!(RedisCacheStorage::preprocess_urls(vec![url.clone(), url]).is_ok());
-        }
-        // Cluster Format
-        for scheme in ["redis-cluster", "rediss-cluster"] {
-            let url_s =
-                format!("{scheme}://username:password@host:6666?node=host1:6667&node=host2:6668");
-            let url = Url::parse(&url_s)?;
-            assert!(RedisCacheStorage::preprocess_urls(vec![url.clone()]).is_ok());
-            assert!(RedisCacheStorage::preprocess_urls(vec![url.clone(), url]).is_ok());
-        }
-        // Sentinel Format
-        for scheme in ["redis-sentinel", "rediss-sentinel"] {
-            let url_s = format!(
-                "{scheme}://username:password@host:6666?node=host1:6667&node=host2:6668&sentinelServiceName=myservice&sentinelUserName=username2&sentinelPassword=password2"
-            );
-            let url = Url::parse(&url_s)?;
-            assert!(RedisCacheStorage::preprocess_urls(vec![url.clone()]).is_ok());
-            assert!(RedisCacheStorage::preprocess_urls(vec![url.clone(), url]).is_ok());
-        }
-        // Make sure it fails on sample invalid schemes
-        for scheme in ["wrong", "something"] {
-            let url_s = format!("{scheme}://username:password@host:6666/database");
-            let url = Url::parse(&url_s)?;
-            assert!(RedisCacheStorage::preprocess_urls(vec![url.clone()]).is_err());
-            assert!(RedisCacheStorage::preprocess_urls(vec![url.clone(), url]).is_err());
-        }
+    #[rstest::rstest]
+    fn it_preprocesses_redis_schemes_correctly(
+        #[values(
+            "redis://username:password@host:6666/database",
+            "rediss://username:password@host:6666/database",
+            "redis-cluster://username:password@host:6666?node=host1:6667&node=host2:6668",
+            "rediss-cluster://username:password@host:6666?node=host1:6667&node=host2:6668",
+            "redis-sentinel://username:password@host:6666?node=host1:6667&node=host2:6668&sentinelServiceName=myservice&sentinelUserName=username2&sentinelPassword=password2",
+            "rediss-sentinel://username:password@host:6666?node=host1:6667&node=host2:6668&sentinelServiceName=myservice&sentinelUserName=username2&sentinelPassword=password2"
+        )]
+        url: &str,
+        #[values(1, 2, 3)] num_urls: usize,
+    ) {
+        let url = Url::parse(url).expect("invalid URL");
+        let urls = vec![url; num_urls];
 
-        Ok(())
+        let preprocess_result = RedisCacheStorage::preprocess_urls(urls);
+        assert!(
+            preprocess_result.is_ok(),
+            "error = {:?}",
+            preprocess_result.err()
+        );
     }
 
-    // This isn't an exhaustive list of combinations, but some of the more common likely mistakes
-    // that we should catch.
-    #[test]
-    fn it_preprocesses_redis_schemas_correctly_backwards_compatibility()
-    -> Result<(), url::ParseError> {
-        // Two redis schemes
-        let url_s = "redis://username:password@host:6666/database";
-        let url = Url::parse(url_s)?;
-        let url_s1 = "redis://username:password@host:6666/database";
-        let url_1 = Url::parse(url_s1)?;
-        let urls = vec![url, url_1];
-        assert!(RedisCacheStorage::preprocess_urls(urls.clone()).is_ok());
-        for url in urls {
-            assert!(RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
-        }
+    #[rstest::rstest]
+    fn it_rejects_invalid_redis_scheme(
+        #[values(
+            "redis-invalid://username:password@host:6666/database",
+            "other://username:password@host:6666/database"
+        )]
+        url: &str,
+        #[values(1, 2, 3)] num_urls: usize,
+    ) {
+        let url = Url::parse(url).expect("invalid URL");
+        let urls = vec![url; num_urls];
 
-        // redis-cluster, redis
-        let url_s = "redis-cluster://username:password@host:6666/database";
-        let url = Url::parse(url_s)?;
-        let url_s1 = "redis://username:password@host:6666/database";
-        let url_1 = Url::parse(url_s1)?;
-        let urls = vec![url, url_1];
-        assert!(RedisCacheStorage::preprocess_urls(urls.clone()).is_ok());
-        for url in urls {
-            assert!(RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
-        }
+        let preprocess_result = RedisCacheStorage::preprocess_urls(urls);
+        assert!(
+            preprocess_result.is_err(),
+            "error = {:?}",
+            preprocess_result.err()
+        );
+    }
 
-        // redis, redis-cluster
-        let url_s = "redis://username:password@host:6666/database";
-        let url = Url::parse(url_s)?;
-        let url_s1 = "redis-cluster://username:password@host:6666/database";
-        let url_1 = Url::parse(url_s1)?;
-        let urls = vec![url, url_1];
-        assert!(RedisCacheStorage::preprocess_urls(urls.clone()).is_err());
-        for url in urls {
-            assert!(RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
-        }
+    #[rstest::rstest]
+    #[case::same_scheme(
+        "redis://username:password@host:6666/database",
+        "redis://username:password@host:6666/database"
+    )]
+    #[case::one_cluster(
+        "redis://username:password@host:6666/database",
+        "redis-cluster://username:password@host:6666/database"
+    )]
+    fn it_preprocesses_redis_schemes_correctly_backwards_compatibility_valid_combinations(
+        #[case] url1: &str,
+        #[case] url2: &str,
+    ) {
+        let url1 = Url::parse(url1).expect("invalid URL");
+        let url2 = Url::parse(url2).expect("invalid URL");
 
-        // redis-sentinel, redis
-        let url_s = "redis-sentinel://username:password@host:6666/database";
-        let url = Url::parse(url_s)?;
-        let url_s1 = "redis://username:password@host:6666/database";
-        let url_1 = Url::parse(url_s1)?;
-        let urls = vec![url, url_1];
-        assert!(RedisCacheStorage::preprocess_urls(urls.clone()).is_err());
-        for url in urls {
-            assert!(RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
+        // order shouldn't matter, so check both orders
+        let url_pairings = [
+            vec![url1.clone(), url2.clone()],
+            vec![url2.clone(), url1.clone()],
+        ];
+        for url_pairing in url_pairings {
+            let preprocess_result = RedisCacheStorage::preprocess_urls(url_pairing);
+            assert!(
+                preprocess_result.is_ok(),
+                "error = {:?}",
+                preprocess_result.err()
+            );
         }
+    }
 
-        // redis, rediss
-        let url_s = "redis://username:password@host:6666/database";
-        let url = Url::parse(url_s)?;
-        let url_s1 = "rediss://username:password@host:6666/database";
-        let url_1 = Url::parse(url_s1)?;
-        let urls = vec![url, url_1];
-        assert!(RedisCacheStorage::preprocess_urls(urls.clone()).is_err());
-        for url in urls {
-            assert!(RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
+    #[rstest::rstest]
+    #[case(
+        "redis://username:password@host:6666/database",
+        "redis-sentinel://username:password@host:6666/database"
+    )]
+    #[case(
+        "redis://username:password@host:6666/database",
+        "rediss://username:password@host:6666/database"
+    )]
+    #[case(
+        "redis-cluster://username:password@host:6666/database",
+        "rediss://username:password@host:6666/database"
+    )]
+    #[case(
+        "redis://username:password@host:6666/database",
+        "rediss-sentinel://username:password@host:6666/database"
+    )]
+    // NB: this is not an exhaustive list, but it covers many common cases.
+    fn it_preprocesses_redis_schemes_correctly_backwards_compatibility_invalid_combinations(
+        #[case] url1: &str,
+        #[case] url2: &str,
+    ) {
+        let url1 = Url::parse(url1).expect("invalid URL");
+        let url2 = Url::parse(url2).expect("invalid URL");
+
+        // order shouldn't matter, so check both orders
+        let url_pairings = [
+            vec![url1.clone(), url2.clone()],
+            vec![url2.clone(), url1.clone()],
+        ];
+        for url_pairing in url_pairings {
+            let preprocess_result = RedisCacheStorage::preprocess_urls(url_pairing.clone());
+            assert!(preprocess_result.is_err(), "url pairing = {url_pairing:?}");
         }
-
-        // redis, rediss-cluster
-        let url_s = "redis://username:password@host:6666/database";
-        let url = Url::parse(url_s)?;
-        let url_s1 = "rediss-cluster://username:password@host:6666/database";
-        let url_1 = Url::parse(url_s1)?;
-        let urls = vec![url, url_1];
-        assert!(RedisCacheStorage::preprocess_urls(urls.clone()).is_err());
-        for url in urls {
-            assert!(RedisCacheStorage::preprocess_urls(vec![url]).is_ok());
-        }
-
-        Ok(())
     }
 
     /// Module that collects tests which actually run against Redis.
