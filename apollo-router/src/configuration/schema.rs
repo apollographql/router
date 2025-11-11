@@ -130,9 +130,11 @@ pub(crate) fn validate_yaml_configuration(
             let yaml_split_by_lines = raw_yaml.split('\n').collect::<Vec<_>>();
 
             let mut errors = String::new();
+            let mut error_index = 0;
 
-            for (idx, mut e) in errors_it.enumerate() {
+            for mut e in errors_it {
                 if let Some(element) = parsed_yaml.get_element(&e.instance_path) {
+                    error_index += 1;
                     match element {
                         yaml::Value::String(value, marker) => {
                             let start_marker = marker;
@@ -157,7 +159,7 @@ pub(crate) fn validate_yaml_configuration(
                             let _ = write!(
                                 &mut errors,
                                 "{}. at line {}\n\n{}\n{}^----- {}\n\n",
-                                idx + 1,
+                                error_index,
                                 start_marker.line(),
                                 lines,
                                 " ".repeat(2 + marker.col()),
@@ -173,7 +175,7 @@ pub(crate) fn validate_yaml_configuration(
                             let _ = write!(
                                 &mut errors,
                                 "{}. at line {}\n\n{}\n└-----> {}\n\n",
-                                idx + 1,
+                                error_index,
                                 start_marker.line(),
                                 lines,
                                 e
@@ -211,7 +213,7 @@ pub(crate) fn validate_yaml_configuration(
                                         let _ = write!(
                                             &mut errors,
                                             "{}. at line {}\n\n{}\n└-----> {}\n\n",
-                                            idx + 1,
+                                            error_index,
                                             start_marker.line(),
                                             lines,
                                             e
@@ -233,7 +235,7 @@ pub(crate) fn validate_yaml_configuration(
                                 let _ = write!(
                                     &mut errors,
                                     "{}. at line {}\n\n{}\n└-----> {}\n\n",
-                                    idx + 1,
+                                    error_index,
                                     start_marker.line(),
                                     lines,
                                     e

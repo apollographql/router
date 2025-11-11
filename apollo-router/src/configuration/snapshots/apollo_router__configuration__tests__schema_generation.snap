@@ -12002,6 +12002,14 @@ expression: "&schema"
     "forbid_mutations": {
       "$ref": "#/definitions/ForbidMutationsConfig"
     },
+    "graph_artifact_reference": {
+      "default": null,
+      "description": "Graph artifact reference for OCI schema fetching.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "headers": {
       "$ref": "#/definitions/HeadersConfig"
     },
@@ -12019,6 +12027,11 @@ expression: "&schema"
         "graph_ref": null
       },
       "description": "Homepage configuration"
+    },
+    "hot_reload": {
+      "default": false,
+      "description": "Hot reload configuration option.",
+      "type": "boolean"
     },
     "include_subgraph_errors": {
       "$ref": "#/definitions/IncludeSubgraphErrorsConfig"
