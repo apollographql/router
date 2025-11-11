@@ -874,13 +874,9 @@ impl RedisCacheStorage {
 mod test {
     use std::time::SystemTime;
 
-    use serde_json::json;
-    use tower::BoxError;
     use url::Url;
 
     use super::RedisCacheStorage;
-    use super::RedisKey;
-    use super::RedisValue;
     use crate::cache::storage::ValueType;
 
     #[test]
@@ -1016,7 +1012,7 @@ mod test {
         Ok(())
     }
 
-    /// Module that collects tests which apply to a real cluster.
+    /// Module that collects tests which actually run against Redis.
     ///
     /// This allows us to put the insanely long #[cfg] line in one place and fixes linting issues
     /// for unused imports.
@@ -1024,7 +1020,7 @@ mod test {
         test,
         any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
     ))]
-    mod test_against_cluster {
+    mod test_against_redis {
         use std::collections::HashMap;
 
         use fred::types::cluster::ClusterRouting;
@@ -1034,10 +1030,32 @@ mod test {
         use rand::distr::Alphanumeric;
         use serde_json::json;
         use tower::BoxError;
+        use uuid::Uuid;
 
         use crate::cache::redis::RedisCacheStorage;
         use crate::cache::redis::RedisKey;
         use crate::cache::redis::RedisValue;
+
+        fn random_namespace() -> String {
+            Uuid::new_v4().to_string()
+        }
+
+        fn redis_config(clustered: bool) -> crate::configuration::RedisCache {
+            let url = if clustered {
+                "redis-cluster://localhost:7000"
+            } else {
+                "redis://localhost:6379"
+            };
+
+            let config_json = json!({
+                "urls": [url],
+                "namespace": random_namespace(),
+                "required_to_start": true,
+                "ttl": "60s"
+            });
+
+            serde_json::from_value(config_json).expect("invalid redis cache configuration")
+        }
 
         /// Tests that `insert_multiple` and `get_multiple` are successful when run against clustered Redis.
         ///
@@ -1049,14 +1067,9 @@ mod test {
         /// `RedisCacheStorage` is well-behaved when operating against a cluster.
         #[tokio::test(flavor = "multi_thread")]
         async fn test_redis_storage_avoids_common_cross_slot_errors() -> Result<(), BoxError> {
-            let config_json = json!({
-                "urls": ["redis-cluster://localhost:7000"],
-                "namespace": "test_redis_storage_avoids_common_cross_slot_errors",
-                "required_to_start": true,
-                "ttl": "60s"
-            });
-            let config = serde_json::from_value(config_json).unwrap();
-            let storage = RedisCacheStorage::new(config, "test_redis_cluster").await?;
+            let clustered = true;
+            let storage =
+                RedisCacheStorage::new(redis_config(clustered), "test_redis_storage").await?;
 
             // insert values which reflect different cluster slots
             let mut data = HashMap::default();
@@ -1100,52 +1113,50 @@ mod test {
 
             Ok(())
         }
-    }
 
-    /// Test that `get_multiple` returns items in the correct order.
-    #[tokio::test]
-    async fn test_get_multiple_is_ordered() -> Result<(), BoxError> {
-        let config_json = json!({
-            "urls": ["redis://localhost:6379"],
-            "namespace": "test_get_multiple_is_ordered",
-            "required_to_start": true,
-            "ttl": "60s"
-        });
-        let config = serde_json::from_value(config_json).unwrap();
-        let storage = RedisCacheStorage::new(config, "test_get_multiple_is_ordered").await?;
+        /// Test that `get_multiple` returns items in the correct order.
+        #[tokio::test]
+        #[rstest::rstest]
+        async fn test_get_multiple_is_ordered(
+            #[values(true, false)] clustered: bool,
+        ) -> Result<(), BoxError> {
+            let storage =
+                RedisCacheStorage::new(redis_config(clustered), "test_get_multiple_is_ordered")
+                    .await?;
 
-        let data = [("a", "1"), ("b", "2"), ("c", "3")]
-            .map(|(k, v)| (RedisKey(k.to_string()), RedisValue(v.to_string())));
-        storage.insert_multiple(&data, None).await;
+            let data = [("a", "1"), ("b", "2"), ("c", "3")]
+                .map(|(k, v)| (RedisKey(k.to_string()), RedisValue(v.to_string())));
+            storage.insert_multiple(&data, None).await;
 
-        // check different orders of fetches to make everything is ordered correctly, including
-        // when some values are none
-        let test_cases = vec![
-            (vec!["a", "b", "c"], vec![Some("1"), Some("2"), Some("3")]),
-            (vec!["c", "b", "a"], vec![Some("3"), Some("2"), Some("1")]),
-            (vec!["d", "b", "c"], vec![None, Some("2"), Some("3")]),
-            (
-                vec!["d", "3", "s", "b", "s", "1", "c", "Y"],
-                vec![None, None, None, Some("2"), None, None, Some("3"), None],
-            ),
-        ];
+            // check different orders of fetches to make everything is ordered correctly, including
+            // when some values are none
+            let test_cases = vec![
+                (vec!["a", "b", "c"], vec![Some("1"), Some("2"), Some("3")]),
+                (vec!["c", "b", "a"], vec![Some("3"), Some("2"), Some("1")]),
+                (vec!["d", "b", "c"], vec![None, Some("2"), Some("3")]),
+                (
+                    vec!["d", "3", "s", "b", "s", "1", "c", "Y"],
+                    vec![None, None, None, Some("2"), None, None, Some("3"), None],
+                ),
+            ];
 
-        for (keys, expected_values) in test_cases {
-            let keys: Vec<RedisKey<_>> = keys
-                .into_iter()
-                .map(|key| RedisKey(key.to_string()))
-                .collect();
-            let expected_values: Vec<Option<String>> = expected_values
-                .into_iter()
-                .map(|value| value.map(ToString::to_string))
-                .collect();
+            for (keys, expected_values) in test_cases {
+                let keys: Vec<RedisKey<_>> = keys
+                    .into_iter()
+                    .map(|key| RedisKey(key.to_string()))
+                    .collect();
+                let expected_values: Vec<Option<String>> = expected_values
+                    .into_iter()
+                    .map(|value| value.map(ToString::to_string))
+                    .collect();
 
-            let values = storage.get_multiple(keys).await;
-            let parsed_values: Vec<Option<String>> =
-                values.into_iter().map(|v| v.map(|v| v.0)).collect();
-            assert_eq!(parsed_values, expected_values);
+                let values = storage.get_multiple(keys).await;
+                let parsed_values: Vec<Option<String>> =
+                    values.into_iter().map(|v| v.map(|v| v.0)).collect();
+                assert_eq!(parsed_values, expected_values);
+            }
+
+            Ok(())
         }
-
-        Ok(())
     }
 }
