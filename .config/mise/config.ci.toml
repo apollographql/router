@@ -2,3 +2,4 @@
 # Temporarily disable cargo-fuzz https://github.com/apollographql/router/pull/7488
 # "cargo:cargo-fuzz" = "0.12.0"
 kubeconform = "0.6.7"
+redis-cli = "8.2.1"
