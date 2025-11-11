@@ -6,7 +6,6 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::LazyLock;
-use std::sync::atomic;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -143,19 +142,6 @@ where
     /// Information about the last subgraph-entering edge in this path, which is used to eliminate
     /// some non-optimal paths. (This is reset when encountering a `@defer` application.)
     last_subgraph_entering_edge_info: Option<SubgraphEnteringEdgeInfo>,
-    /// As part of an optimization, we keep track of when one path "overrides" other paths by
-    /// creating an ID, and storing that ID in the paths to track the "overrides" relationship (not
-    /// to be confused with the `@override` directive, which is completely separate).
-    ///
-    /// This array stores the IDs associated with this path.
-    // TODO: There is a note of OverrideId to not add a (de)serialize derive. Once that is
-    // addressed, remove this skip
-    #[serde(skip)]
-    own_path_ids: Arc<IndexSet<OverrideId>>,
-    /// This array stores the IDs of paths that override this one. (See docs for `own_path_ids` for
-    /// more info).
-    #[serde(skip)]
-    overriding_path_ids: Arc<IndexSet<OverrideId>>,
     /// Names of all the possible runtime types the tail of the path can be.
     runtime_types_of_tail: Arc<IndexSet<ObjectTypeDefinitionPosition>>,
     /// If the last edge in the `edges` array was a `DownCast` transition, then the runtime types
@@ -195,8 +181,6 @@ where
             edge_triggers,
             edge_conditions,
             last_subgraph_entering_edge_info,
-            own_path_ids,
-            overriding_path_ids,
             runtime_types_of_tail,
             runtime_types_before_tail_if_last_is_cast,
             defer_on_tail,
@@ -214,8 +198,6 @@ where
                 "last_subgraph_entering_edge_info",
                 last_subgraph_entering_edge_info,
             )
-            .field("own_path_ids", own_path_ids)
-            .field("overriding_path_ids", overriding_path_ids)
             .field("runtime_types_of_tail", runtime_types_of_tail)
             .field(
                 "runtime_types_before_tail_if_last_is_cast",
@@ -232,26 +214,6 @@ pub(crate) struct SubgraphEnteringEdgeInfo {
     index: usize,
     /// The cost of resolving the conditions for this edge.
     conditions_cost: QueryPlanCost,
-}
-
-/// Wrapper for an override ID, which indicates a relationship between a group of `OpGraphPath`s
-/// where one "overrides" the others in the group.
-///
-/// NOTE: This ID does not ensure that IDs are unique because its internal counter resets on
-/// startup. It currently implements `Serialize` for debugging purposes. It should not implement
-/// `Deserialize`, and, more specifically, it should not be used for caching until uniqueness is
-/// provided (i.e. the inner type is a `Uuid` or the like).
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize)]
-pub(crate) struct OverrideId(usize);
-
-// Global storage for the counter used to uniquely identify selections
-static NEXT_ID: atomic::AtomicUsize = atomic::AtomicUsize::new(1);
-
-impl OverrideId {
-    fn new() -> Self {
-        // atomically increment global counter
-        Self(NEXT_ID.fetch_add(1, atomic::Ordering::AcqRel))
-    }
 }
 
 pub(crate) type MatchingContextIds = IndexSet<Name>;
@@ -539,8 +501,6 @@ where
             edge_triggers: vec![],
             edge_conditions: vec![],
             last_subgraph_entering_edge_info: None,
-            own_path_ids: Arc::new(IndexSet::default()),
-            overriding_path_ids: Arc::new(IndexSet::default()),
             runtime_types_of_tail: Arc::new(IndexSet::default()),
             runtime_types_before_tail_if_last_is_cast: None,
             defer_on_tail: None,
@@ -625,8 +585,6 @@ where
                 // because `last_subgraph_entering_edge_info` is used to eliminate some non-optimal
                 // paths, but we don't want those optimizations to bypass a `@defer` application.
                 last_subgraph_entering_edge_info,
-                own_path_ids: self.own_path_ids.clone(),
-                overriding_path_ids: self.overriding_path_ids.clone(),
                 runtime_types_of_tail: Arc::new(
                     self.graph
                         .advance_possible_runtime_types(&self.runtime_types_of_tail, None)?,
@@ -752,8 +710,6 @@ where
                             last_subgraph_entering_edge_info: self
                                 .last_subgraph_entering_edge_info
                                 .clone(),
-                            own_path_ids: self.own_path_ids.clone(),
-                            overriding_path_ids: self.overriding_path_ids.clone(),
                             runtime_types_of_tail: Arc::new(new_runtime_types_of_tail),
                             runtime_types_before_tail_if_last_is_cast: self
                                 .runtime_types_before_tail_if_last_is_cast
@@ -816,8 +772,6 @@ where
                     // PORT_NOTE: In the JS codebase, the information for the last subgraph-entering
                     // is set incorrectly, in that the index is off by one. We fix that bug here.
                     last_subgraph_entering_edge_info,
-                    own_path_ids: self.own_path_ids.clone(),
-                    overriding_path_ids: self.overriding_path_ids.clone(),
                     runtime_types_of_tail: Arc::new(self.graph.advance_possible_runtime_types(
                         &self.runtime_types_of_tail,
                         Some(new_edge),
@@ -893,8 +847,6 @@ where
             // Again, we don't want to set `last_subgraph_entering_edge_info` if we're entering a
             // `@defer` (see above).
             last_subgraph_entering_edge_info,
-            own_path_ids: self.own_path_ids.clone(),
-            overriding_path_ids: self.overriding_path_ids.clone(),
             runtime_types_of_tail: Arc::new(
                 self.graph
                     .advance_possible_runtime_types(&self.runtime_types_of_tail, Some(new_edge))?,

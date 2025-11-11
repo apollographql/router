@@ -2,32 +2,32 @@
 resolver = "2"
 default-members = ["apollo-router", "apollo-federation"]
 members = [
-    "apollo-router",
-    "apollo-router-benchmarks",
-    "apollo-federation",
-    "apollo-federation/cli",
-    "examples/add-timestamp-header/rhai",
-    "examples/async-auth/rust",
-    "examples/cache-control/rhai",
-    "examples/context/rust",
-    "examples/cookies-to-headers/rhai",
-    "examples/data-response-mutate/rhai",
-    "examples/error-response-mutate/rhai",
-    "examples/forbid-anonymous-operations/rhai",
-    "examples/forbid-anonymous-operations/rust",
-    "examples/hello-world/rust",
-    "examples/jwt-claims/rhai",
-    "examples/logging/rhai",
-    "examples/op-name-to-header/rhai",
-    "examples/status-code-propagation/rust",
-    "examples/subgraph-request-log/rhai",
-    "examples/supergraph-sdl/rust",
-    "examples/surrogate-cache-key/rhai",
-    "examples/coprocessor-subgraph/rust",
-    "examples/throw-error/rhai",
-    "fuzz",
-    "fuzz/subgraph",
-    "xtask",
+  "apollo-router",
+  "apollo-router-benchmarks",
+  "apollo-federation",
+  "apollo-federation/cli",
+  "examples/add-timestamp-header/rhai",
+  "examples/async-auth/rust",
+  "examples/cache-control/rhai",
+  "examples/context/rust",
+  "examples/cookies-to-headers/rhai",
+  "examples/data-response-mutate/rhai",
+  "examples/error-response-mutate/rhai",
+  "examples/forbid-anonymous-operations/rhai",
+  "examples/forbid-anonymous-operations/rust",
+  "examples/hello-world/rust",
+  "examples/jwt-claims/rhai",
+  "examples/logging/rhai",
+  "examples/op-name-to-header/rhai",
+  "examples/status-code-propagation/rust",
+  "examples/subgraph-request-log/rhai",
+  "examples/supergraph-sdl/rust",
+  "examples/surrogate-cache-key/rhai",
+  "examples/coprocessor-subgraph/rust",
+  "examples/throw-error/rhai",
+  "fuzz",
+  "fuzz/subgraph",
+  "xtask",
 ]
 
 # this makes build scripts and proc macros faster to compile
@@ -47,18 +47,18 @@ debug = 1
 # Dependencies used in more than one place are specified here in order to keep versions in sync:
 # https://doc.rust-lang.org/cargo/reference/workspaces.html#the-dependencies-table
 [workspace.dependencies]
-apollo-compiler = "1.30.0"
+apollo-compiler = "1.31.0"
 apollo-parser = "0.8.4"
-apollo-smith = "0.15.0"
+apollo-smith = "0.15.2"
 async-trait = "0.1.77"
 encoding_rs = "0.8"
 hex = { version = "0.4.3", features = ["serde"] }
 http = "1.1.0"
 insta = { version = "1.38.0", features = [
-    "json",
-    "redactions",
-    "yaml",
-    "glob",
+  "json",
+  "redactions",
+  "yaml",
+  "glob",
 ] }
 once_cell = "1.19.0"
 reqwest = { version = "0.12.0", default-features = false }
@@ -66,8 +66,8 @@ reqwest = { version = "0.12.0", default-features = false }
 schemars = { version = "1.0.0", features = ["url2"] }
 serde = { version = "1.0.198", features = ["derive", "rc"] }
 serde_json = { version = "1.0.114", features = [
-    "preserve_order",
-    "float_roundtrip",
+  "preserve_order",
+  "float_roundtrip",
 ] }
 serde_json_bytes = { version = "0.2.5", features = ["preserve_order"] }
 similar = { version = "2.5.0", features = ["inline"] }
@@ -75,8 +75,3 @@ sha1 = "0.10.6"
 tempfile = "3.10.1"
 tokio = { version = "1.36.0", features = ["full"] }
 tower = { version = "0.5.1", features = ["full"] }
-
-[patch.crates-io]
-apollo-compiler = { git = "https://github.com/apollographql/apollo-rs", branch = "main" }
-apollo-parser = { git = "https://github.com/apollographql/apollo-rs", branch = "main" }
-apollo-smith = { git = "https://github.com/apollographql/apollo-rs", branch = "main" }
