@@ -182,3 +182,66 @@ fn misc_existing_authenticated_directive_with_fed1() {
     // (it should be filtered out). For now, we just verify composition succeeds.
     let _schema = supergraph.schema();
 }
+
+#[test]
+fn composes_subgraphs_with_overridden_fields_on_renamed_root_types() {
+    // Test that @override directives work correctly when root operation types are renamed
+    // during normalization (e.g., MyMutation -> Mutation).
+    // This is a regression test for a bug where directive referencers were not updated
+    // after type renaming, causing @override directives to not be recognized.
+
+    let subgraph_a = ServiceDefinition {
+        name: "subgraph-a",
+        type_defs: r#"
+            schema {
+                query: Query
+                mutation: MyMutation
+            }
+
+            type Query {
+                user(id: ID!): User @shareable
+            }
+
+            type MyMutation {
+                createUser(name: String!): User! @override(from: "subgraph-b")
+                updateUser(id: ID!, name: String!): User! @override(from: "subgraph-b")
+            }
+
+            type User @key(fields: "id") {
+                id: ID!
+                name: String!
+            }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraph-b",
+        type_defs: r#"
+            schema {
+                query: Query
+                mutation: Mutation
+            }
+
+            type Query {
+                user(id: ID!): User @shareable
+            }
+
+            type Mutation @shareable {
+                createUser(name: String!): User!
+                updateUser(id: ID!, name: String!): User!
+            }
+
+            type User @key(fields: "id") {
+                id: ID!
+                email: String
+            }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+
+    // Before the fix, this would fail with INVALID_FIELD_SHARING errors because
+    // the @override directives on MyMutation fields were not recognized after
+    // MyMutation was renamed to Mutation during normalization.
+    let _supergraph = result.expect("Expected composition to succeed");
+}

@@ -349,16 +349,14 @@ impl Subgraph<Expanded> {
         // Convert `ValidFederationSchema` to `FederationSchema`, so we can call
         // `normalize_root_types`.
         let mut schema: FederationSchema = self.state.schema.into();
-        let changed = normalize_root_types_in_subgraph_schema(&mut schema)
+        let mut metadata = self.state.metadata;
+        let changed = normalize_root_types_in_subgraph_schema(&mut schema, &mut metadata)
             .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;
         if changed {
             Ok(Either::Right(Subgraph {
                 name: self.name,
                 url: self.url,
-                state: Upgraded {
-                    schema,
-                    metadata: self.state.metadata,
-                },
+                state: Upgraded { schema, metadata },
             }))
         } else {
             Ok(Either::Left(Subgraph {
@@ -369,7 +367,7 @@ impl Subgraph<Expanded> {
                     schema: schema
                         .assume_valid()
                         .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?,
-                    metadata: self.state.metadata,
+                    metadata,
                 },
             }))
         }
@@ -425,6 +423,7 @@ fn validate_subgraph_schema(
 /// Shared by Subgraph<Expanded> and Subgraph<Upgraded>
 fn normalize_root_types_in_subgraph_schema(
     schema: &mut FederationSchema,
+    metadata: &mut SubgraphMetadata,
 ) -> Result<bool, FederationError> {
     let mut operation_types_to_rename = HashMap::new();
     for (op_type, op_name) in schema.schema().schema_definition.iter_root_operations() {
@@ -442,8 +441,12 @@ fn normalize_root_types_in_subgraph_schema(
         }
     }
     let changed = !operation_types_to_rename.is_empty();
-    for (current_name, new_name) in operation_types_to_rename {
-        schema.get_type(current_name)?.rename(schema, new_name)?;
+    for (current_name, new_name) in &operation_types_to_rename {
+        schema
+            .get_type(current_name.clone())?
+            .rename(schema, new_name.clone())?;
+        // Update metadata to reflect the type rename
+        metadata.update_type_references(current_name, new_name);
     }
     Ok(changed)
 }
@@ -468,7 +471,7 @@ impl Subgraph<Upgraded> {
     }
 
     pub fn normalize_root_types(&mut self) -> Result<(), SubgraphError> {
-        normalize_root_types_in_subgraph_schema(&mut self.state.schema)
+        normalize_root_types_in_subgraph_schema(&mut self.state.schema, &mut self.state.metadata)
             .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;
         Ok(())
     }
