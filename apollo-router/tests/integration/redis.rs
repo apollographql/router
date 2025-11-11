@@ -1580,7 +1580,7 @@ async fn test_redis_connections_are_closed_on_router_reload() {
     router.start().await;
     router.assert_started().await;
 
-    let expected_metric = r#"apollo_router_cache_redis_clients{otel_scope_name="apollo/router"} 4"#;
+    let expected_metric = r#"apollo_router_cache_redis_clients{otel_scope_name="apollo/router"} 2"#;
     router.assert_metrics_contains(expected_metric, None).await;
 
     // check that reloading the schema yields the same number of redis connections
