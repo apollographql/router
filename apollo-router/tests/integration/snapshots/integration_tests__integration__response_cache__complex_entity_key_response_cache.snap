@@ -1,0 +1,152 @@
+---
+source: apollo-router/tests/integration/response_cache.rs
+expression: body.extensions
+---
+{
+  "apolloCacheDebugging": {
+    "version": "1.0",
+    "data": [
+      {
+        "key": "version:1.0:subgraph:stuff:type:Query:hash:ef359c62e83e6496c40482235c5ceda7013fe2b45bb8246e1d65818e592fd325:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+        "invalidationKeys": [],
+        "kind": {
+          "rootFields": [
+            "getStatus"
+          ]
+        },
+        "subgraphName": "stuff",
+        "subgraphRequest": {
+          "query": "{ getStatus(id: \"1\") { __typename id items { id name } stuffDetails } }"
+        },
+        "source": "subgraph",
+        "cacheControl": {
+          "created": 0,
+          "noStore": true
+        },
+        "shouldStore": false,
+        "data": {
+          "data": {
+            "getStatus": {
+              "__typename": "Status",
+              "id": "1",
+              "items": [
+                {
+                  "id": "i1",
+                  "name": "Item"
+                }
+              ],
+              "stuffDetails": "stuff we have"
+            }
+          }
+        },
+        "warnings": [
+          {
+            "code": "CACHE_CONTROL_NO_STORE",
+            "links": [
+              {
+                "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cache-Control",
+                "title": "Cache-Control header documentation"
+              }
+            ],
+            "message": "The subgraph returned a Cache-Control header containing no-store, so the data was not cached"
+          },
+          {
+            "code": "CACHE_CONTROL_WITHOUT_MAX_AGE",
+            "links": [
+              {
+                "url": "https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#configure-default-ttl",
+                "title": "Configure default TTL in the Router"
+              },
+              {
+                "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cache-Control",
+                "title": "Cache-Control header documentation"
+              }
+            ],
+            "message": "The subgraph returned a 'Cache-Control' header without any max-age set, so the Router will use the default (configured in the Router configuration file)."
+          },
+          {
+            "code": "NO_CACHE_TAG_ON_ROOT_FIELD",
+            "links": [
+              {
+                "url": "https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#invalidation-methods",
+                "title": "Add '@cacheTag' in your schema"
+              }
+            ],
+            "message": "No cache tags are specified on your root fields query. If you want to use active invalidation, you'll need to add cache tags on your root field."
+          }
+        ]
+      },
+      {
+        "key": "version:1.0:subgraph:status:type:Status:representation:d037f5b89075fb6a3fde6b247bec2befe39e360cd0d703e342a8143895b3f92c:hash:37a5901a54e23d59712e2bbecee7dd96030d81c668d01629df96e5a9ec9608c6:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+        "invalidationKeys": [],
+        "kind": {
+          "typename": "Status",
+          "entityKey": {
+            "id": "1",
+            "items": [
+              {
+                "id": "i1",
+                "name": "Item"
+              }
+            ]
+          }
+        },
+        "subgraphName": "status",
+        "subgraphRequest": {
+          "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Status { statusDetails } } }",
+          "variables": {
+            "representations": [
+              {
+                "items": [
+                  {
+                    "id": "i1",
+                    "name": "Item"
+                  }
+                ],
+                "id": "1",
+                "__typename": "Status"
+              }
+            ]
+          }
+        },
+        "source": "subgraph",
+        "cacheControl": {
+          "created": 0,
+          "noStore": true
+        },
+        "shouldStore": false,
+        "data": {
+          "data": {
+            "statusDetails": "status details"
+          }
+        },
+        "warnings": [
+          {
+            "code": "CACHE_CONTROL_NO_STORE",
+            "links": [
+              {
+                "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cache-Control",
+                "title": "Cache-Control header documentation"
+              }
+            ],
+            "message": "The subgraph returned a Cache-Control header containing no-store, so the data was not cached"
+          },
+          {
+            "code": "CACHE_CONTROL_WITHOUT_MAX_AGE",
+            "links": [
+              {
+                "url": "https://www.apollographql.com/docs/graphos/routing/performance/caching/response-caching/invalidation#configure-default-ttl",
+                "title": "Configure default TTL in the Router"
+              },
+              {
+                "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cache-Control",
+                "title": "Cache-Control header documentation"
+              }
+            ],
+            "message": "The subgraph returned a 'Cache-Control' header without any max-age set, so the Router will use the default (configured in the Router configuration file)."
+          }
+        ]
+      }
+    ]
+  }
+}
