@@ -168,6 +168,15 @@ enum Source {
     },
 }
 
+impl Source {
+    fn as_textual_representation(&self) -> String {
+        match self {
+            Source::Header { name, .. } => format!("header:{}", name),
+            Source::Cookie { name } => format!("cookie:{}", name),
+        }
+    }
+}
+
 /// Authentication
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -455,8 +464,15 @@ fn authenticate(
         // This is a metric and will not appear in the logs
         let failed = true;
         increment_jwt_counter_metric(failed);
-
-        tracing::info!(message = %error, "jwt authentication failure");
+        // Record span attributes for JWT failure
+        let span = tracing::Span::current();
+        span.record("authentication.jwt.failed", true);
+        if let Some(src) = source {
+            span.record("authentication.jwt.source", src.as_textual_representation());
+            tracing::debug!(message = %error, jwtsource = %src.as_textual_representation(), "jwt authentication failure");
+        } else {
+            tracing::debug!(message = %error, "jwt authentication failure");
+        }
 
         let _ = request.context.insert_json_value(
             JWT_CONTEXT_KEY,
