@@ -122,9 +122,7 @@ impl Expansion {
 
         // Graph artifact reference override: env > CLI > config
         let graph_artifact_ref_override = {
-            let cli_value = crate::executable::APOLLO_ROUTER_GRAPH_ARTIFACT_REFERENCE
-                .lock()
-                .clone();
+            let cli_value = *crate::executable::APOLLO_ROUTER_GRAPH_ARTIFACT_REFERENCE.lock();
             Override::builder()
                 .config_path("graph_artifact_reference")
                 .env_name("APOLLO_GRAPH_ARTIFACT_REFERENCE")
@@ -134,12 +132,13 @@ impl Expansion {
         };
 
         // Hot reload override: CLI > config (no env var)
+        // Only set override if CLI value is explicitly true (not null/default false)
         let hot_reload_override = {
-            let cli_value = *crate::executable::APOLLO_ROUTER_HOT_RELOAD_CLI.lock();
+            let cli_value = crate::executable::APOLLO_ROUTER_HOT_RELOAD_CLI.load(std::sync::atomic::Ordering::Relaxed);
             Override::builder()
                 .config_path("hot_reload")
                 .value_type(ValueType::Bool)
-                .value(cli_value.map(Value::Bool))
+                .value(if cli_value { Some(Value::Bool(true)) } else { None })
                 .build()
         };
 
