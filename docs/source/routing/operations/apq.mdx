@@ -58,7 +58,7 @@ In the example above, subgraph APQ is disabled _except for_ the `products` subgr
 
 <Note>
 
-In order for APQ with subgraphs to be effective, a subgraph server should ideally have a shared cache that can store all incoming operations. If the cache is too small, or not shared between multiple instances of the subgraph server, then extra requests will be have to be sent from the router on cache misses to resolve the operation.
+In order for APQ with subgraphs to be effective, a subgraph server should ideally have a shared cache that can store all incoming operations. If the cache is too small, or not shared between multiple instances of the subgraph server, then extra requests will be have to be sent from the router on cache misses to resolve the operation. Consult the documentation for your subgraph server framework to ensure it supports APQ and to find out how to configure caching options.
 
 </Note>
 
