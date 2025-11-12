@@ -173,6 +173,15 @@ enum Source {
     },
 }
 
+impl Source {
+    fn as_textual_representation(&self) -> String {
+        match self {
+            Source::Header { name, .. } => format!("header:{}", name),
+            Source::Cookie { name } => format!("cookie:{}", name),
+        }
+    }
+}
+
 /// Authentication
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
