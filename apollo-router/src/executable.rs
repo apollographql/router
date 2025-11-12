@@ -262,23 +262,30 @@ impl Opt {
     ) -> std::result::Result<(String, crate::registry::OciReferenceType), anyhow::Error> {
         use crate::registry::OciReferenceType;
 
-        // Check for SHA256 digest reference: @sha256:64-hex-chars
-        let sha_regex = Regex::new(r"@sha256:[0-9a-fA-F]{64}$").unwrap();
-        if sha_regex.is_match(reference) {
-            tracing::debug!("validated OCI SHA reference");
-            return Ok((reference.to_string(), OciReferenceType::Sha));
+        // Digest references are of the form @{algorithm}:{digest}
+        // - Algorithm name: max 32 characters (alphanumeric or underscore)
+        // - Digest: must be truncated to max 64 characters
+        if reference.starts_with('@') {
+            let digest_regex = Regex::new(r"^@([a-zA-Z0-9_]{1,32}):[0-9a-fA-F]{1,64}$").unwrap();
+            if digest_regex.is_match(reference) {
+                tracing::debug!("validated OCI digest reference");
+                return Ok((reference.to_string(), OciReferenceType::Sha));
+            }
+            // If it starts with @ but doesn't match digest format, it's invalid
+            return Err(anyhow!(
+                "invalid graph artifact reference: {reference}. If using @{{algorithm}}: format, the algorithm name must be at most 32 characters and the digest must be 1-64 hex characters"
+            ));
         }
 
-        // Check for tag reference: :tag-name (tag regex: [a-zA-Z0-9_][a-zA-Z0-9._-]{0,127})
-        // Tags appear after a colon in the reference
-        let tag_regex = Regex::new(r":([a-zA-Z0-9_][a-zA-Z0-9._-]{0,127})$").unwrap();
+        // Tag references appear after a colon in the reference and cannot start with underscore, dot, or dash
+        let tag_regex = Regex::new(r":([a-zA-Z0-9][a-zA-Z0-9._-]{0,127})$").unwrap();
         if tag_regex.is_match(reference) {
             tracing::debug!("validated OCI tag reference");
             return Ok((reference.to_string(), OciReferenceType::Tag));
         }
 
         Err(anyhow!(
-            "invalid graph artifact reference: {reference}. Must be either a SHA256 digest (@sha256:...) or a tag (:tag-name)"
+            "invalid graph artifact reference: {reference}. Must be either a @{{algorithm}}:{{digest}} or tag :{{tag}}"
         ))
     }
 
@@ -1003,6 +1010,20 @@ mod tests {
             "@sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
             "@sha256:0000000000000000000000000000000000000000000000000000000000000000",
             "@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            // Other algorithms should also be valid
+            "@sha1:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            "@sha512:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            "@md5:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            "@blake2:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            // Algorithm name with exactly 32 characters (max allowed)
+            "@a1234567890123456789012345678901:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            // Digests with less than 64 characters should be valid
+            "@sha256:a",
+            "@sha256:ab",
+            "@sha256:abc",
+            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcde", // 63 chars
+            "@sha1:1234567890abcdef",                                                  // 16 chars
+            "@md5:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",   // 64 chars
         ];
 
         for hash in valid_hashes {
@@ -1023,6 +1044,9 @@ mod tests {
             "graph:v1_2_3",
             "graph:a",
             "graph:01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567",
+            // Tags that look like digests (64 hex chars) are legal
+            "graph:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
         ];
 
         for tag_ref in valid_tags {
@@ -1041,22 +1065,30 @@ mod tests {
     #[test]
     fn test_validate_oci_reference_invalid_cases() {
         let invalid_references = vec![
-            // Missing @sha256: prefix
+            // Missing @{algorithm}: prefix
             "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            // Wrong prefix
-            "@sha1:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            "@sha512:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            // Too short
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcde",
-            // Too long
+            // Too long (digest must be at most 64 chars)
             "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1",
-            // Invalid characters
+            "@sha1:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1",
+            "@sha512:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1",
+            // Invalid characters in digest
             "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdeg",
             "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcde!",
             // Empty string
             "",
-            // Just the prefix
+            // Just the prefix (no digest)
             "@sha256:",
+            "@sha1:",
+            "@sha512:",
+            // Invalid algorithm name (contains invalid characters)
+            "@sha-256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            "@sha.256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            "@sha@256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            // Empty algorithm name
+            "@:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            // Algorithm name too long (over 32 characters - max allowed is 32)
+            "@verylongalgorithmnamethatexceeds32chars:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            "@a12345678901234567890123456789012:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", // 33 chars - should be invalid
             // Hash with spaces
             "@sha256: 1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
             "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef ",
@@ -1066,8 +1098,6 @@ mod tests {
             "@sha256:12345678:90abcdef:12345678:90abcdef:12345678:90abcdef:12345678:90abcdef",
             // Missing hash entirely
             "@sha256",
-            // Wrong format entirely
-            "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
             // Extra characters at the end
             "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef:latest",
             "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef@tag",
