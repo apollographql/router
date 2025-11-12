@@ -883,6 +883,11 @@ jobs:
             - attach_workspace:
                 at: artifacts
             - run:
+                name: Generate config schema
+                command: |
+                  cargo build --release --bin router
+                  ./target/release/router config schema > artifacts/config-schema.json
+            - run:
                 command: >
                   cd artifacts && sha256sum *.tar.gz > sha256sums.txt
             - run:
