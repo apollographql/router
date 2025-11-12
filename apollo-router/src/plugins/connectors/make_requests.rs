@@ -403,46 +403,41 @@ fn entities_with_fields_from_request(
                 None,
             ));
 
-            representations.iter().map({
-                let _connector = connector.clone();
-                move |(i, representation)| {
-                    let args = graphql_utils::field_arguments_map(field, &variables.variables)
-                        .map_err(|err| {
-                            InvalidArguments(format!(
-                                "cannot get inputs from field arguments: {err}"
-                            ))
-                        })?;
+            representations.iter().map(move |(i, representation)| {
+                let args = graphql_utils::field_arguments_map(field, &variables.variables)
+                    .map_err(|err| {
+                        InvalidArguments(format!("cannot get inputs from field arguments: {err}"))
+                    })?;
 
-                    let response_name = field
-                        .alias
-                        .as_ref()
-                        .unwrap_or_else(|| &field.name)
-                        .to_string();
+                let response_name = field
+                    .alias
+                    .as_ref()
+                    .unwrap_or_else(|| &field.name)
+                    .to_string();
 
-                    let request_inputs = RequestInputs {
-                        args,
-                        this: representation
-                            .as_object()
-                            .ok_or_else(|| {
-                                InvalidRepresentations("representation is not an object".into())
-                            })?
-                            .clone(),
-                        ..Default::default()
-                    };
-                    Ok::<_, MakeRequestError>(ResponseKey::EntityField {
-                        index: *i,
-                        field_name: response_name.to_string(),
-                        // if the fetch node operation doesn't include __typename, then
-                        // we're assuming this is for an interface object and we don't want
-                        // to include a __typename in the response.
-                        //
-                        // TODO: is this fragile? should we just check the output
-                        // type of the field and omit the typename if it's abstract?
-                        typename: typename_requested.then_some(typename.clone()),
-                        selection: selection.clone(),
-                        inputs: request_inputs,
-                    })
-                }
+                let request_inputs = RequestInputs {
+                    args,
+                    this: representation
+                        .as_object()
+                        .ok_or_else(|| {
+                            InvalidRepresentations("representation is not an object".into())
+                        })?
+                        .clone(),
+                    ..Default::default()
+                };
+                Ok::<_, MakeRequestError>(ResponseKey::EntityField {
+                    index: *i,
+                    field_name: response_name.to_string(),
+                    // if the fetch node operation doesn't include __typename, then
+                    // we're assuming this is for an interface object and we don't want
+                    // to include a __typename in the response.
+                    //
+                    // TODO: is this fragile? should we just check the output
+                    // type of the field and omit the typename if it's abstract?
+                    typename: typename_requested.then_some(typename.clone()),
+                    selection: selection.clone(),
+                    inputs: request_inputs,
+                })
             })
         })
         .collect::<Result<Vec<_>, _>>()
