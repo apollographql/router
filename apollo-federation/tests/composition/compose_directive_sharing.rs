@@ -503,5 +503,12 @@ fn composition_with_shareable_on_interface_object_field() {
 
     let result = compose(vec![subgraph_a, subgraph_b]);
     // We should have skipped copying the @federation__shareable on Item.description
-    let _supergraph = result.expect("Expected composition to succeed");
+    let supergraph = result.expect("Expected composition to succeed");
+    assert!(
+        !supergraph
+            .schema()
+            .schema()
+            .to_string()
+            .contains("federation__shareable")
+    );
 }
