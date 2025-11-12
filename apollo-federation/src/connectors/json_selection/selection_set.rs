@@ -23,7 +23,6 @@ use apollo_compiler::executable::Field;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
-use apollo_compiler::name;
 use multimap::MultiMap;
 
 use super::lit_expr::LitExpr;
@@ -101,15 +100,18 @@ impl SubSelection {
         // When the operation contains __typename, it might be used to complete
         // an entity reference (e.g. `__typename id`) for a subsequent fetch.
         if field_map.contains_key("__typename")
-            // For reasons I (Lenny) don't understand, persisted queries may
-            // contain `__typename` for `_entities` queries. We never want to
-            // emit `__typename: "_Entity"`, so we'll guard against that case.
-            && selection_set.ty != name!(_Entity)
             // Only inject __typename for non-abstract types because output JSON
             // for abstract types must provide a concrete __typename, so there's
             // nothing we can confidently inject here.
             && !abstract_types.contains(&selection_set.ty.to_string())
         {
+            // Since `_Entity` is an abstract type (union), we should never see
+            // it here. For reasons I (Lenny) don't understand, persisted
+            // queries may contain `__typename` for `_entities` queries. We
+            // never want to emit `__typename: "_Entity"`, so we'll guard
+            // against that case.
+            debug_assert_ne!(selection_set.ty.to_string(), "_Entity");
+
             new_selections.push(NamedSelection {
                 prefix: NamingPrefix::Alias(Alias::new("__typename")),
                 path: PathSelection {
