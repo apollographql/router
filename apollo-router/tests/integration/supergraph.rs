@@ -202,16 +202,14 @@ async fn test_supergraph_limits_max_headers_within_limit() -> Result<(), BoxErro
     Ok(())
 }
 
-// Test for individual header size limits (max_header_size)
+// Test for individual header size limits (http_max_header_size)
 #[tokio::test(flavor = "multi_thread")]
-async fn test_supergraph_server_http_large_header_value() -> Result<(), BoxError> {
+async fn test_supergraph_limits_http_max_header_size_exceeded() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .config(
             r#"
-            server:
-              http:
-                max:
-                  header_size: 1kb
+            limits:
+              http_max_header_size: 1kb
             "#,
         )
         .build()
@@ -238,14 +236,12 @@ async fn test_supergraph_server_http_large_header_value() -> Result<(), BoxError
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_supergraph_server_http_header_size_within_limit() -> Result<(), BoxError> {
+async fn test_supergraph_limits_http_max_header_size_within_limit() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .config(
             r#"
-            server:
-              http:
-                max:
-                  header_size: 2kb
+            limits:
+              http_max_header_size: 2kb
             "#,
         )
         .build()
@@ -273,16 +269,14 @@ async fn test_supergraph_server_http_header_size_within_limit() -> Result<(), Bo
     Ok(())
 }
 
-// Test for HTTP/2 header list size limits (max_header_list_size)  
+// Test for HTTP/2 header list size limits (http_max_header_list_size)  
 #[tokio::test(flavor = "multi_thread")]
-async fn test_supergraph_server_http_header_list_size_exceeded() -> Result<(), BoxError> {
+async fn test_supergraph_limits_http_max_header_list_size_exceeded() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .config(
             r#"
-            server:
-              http:
-                max:
-                  header_list_size: 4kb
+            limits:
+              http_max_header_list_size: 4kb
             "#,
         )
         .build()
@@ -312,14 +306,12 @@ async fn test_supergraph_server_http_header_list_size_exceeded() -> Result<(), B
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_supergraph_server_http_header_list_size_within_limit() -> Result<(), BoxError> {
+async fn test_supergraph_limits_http_max_header_list_size_within_limit() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .config(
             r#"
-            server:
-              http:
-                max:
-                  header_list_size: 8kb
+            limits:
+              http_max_header_list_size: 8kb
             "#,
         )
         .build()
@@ -383,81 +375,3 @@ async fn test_supergraph_legacy_limits_max_headers_exceeded() -> Result<(), BoxE
     Ok(())
 }
 
-// Test combined server and legacy configuration (server should take precedence)
-#[tokio::test(flavor = "multi_thread")]
-async fn test_supergraph_combined_config_server_takes_precedence() -> Result<(), BoxError> {
-    let mut router = IntegrationTest::builder()
-        .config(
-            r#"
-            server:
-              http:
-                max:
-                  headers: 20
-            limits:
-              http1_max_request_headers: 5
-            "#,
-        )
-        .build()
-        .await;
-
-    router.start().await;
-    router.assert_started().await;
-
-    // Send 15 headers - this should work with server config (20) but fail with legacy config (5)
-    let mut headers = HashMap::new();
-    for i in 0..15 {
-        headers.insert(format!("test-header-{i}"), format!("value_{i}"));
-    }
-
-    let (_trace_id, response) = router
-        .execute_query(
-            Query::builder()
-                .body(json!({ "query":  "{ __typename }"}))
-                .headers(headers)
-                .build(),
-        )
-        .await;
-    assert_eq!(response.status(), 200);
-    assert_eq!(
-        response.json::<serde_json::Value>().await?,
-        json!({ "data": { "__typename": "Query" } })
-    );
-    Ok(())
-}
-
-
-
-// Test backward compatibility with old field names
-#[tokio::test(flavor = "multi_thread")]
-async fn test_supergraph_server_http_backward_compatibility() -> Result<(), BoxError> {
-    let mut router = IntegrationTest::builder()
-        .config(
-            r#"
-            server:
-              http:
-                max_header_size: "1kb"
-                max_headers: 10
-            "#,
-        )
-        .build()
-        .await;
-
-    router.start().await;
-    router.assert_started().await;
-
-    let mut headers = HashMap::new();
-    for i in 0..11 {
-        headers.insert(format!("test-header-{i}"), format!("value_{i}"));
-    }
-
-    let (_trace_id, response) = router
-        .execute_query(
-            Query::builder()
-                .body(json!({ "query":  "{ __typename }"}))
-                .headers(headers)
-                .build(),
-        )
-        .await;
-    assert_eq!(response.status(), 431);
-    Ok(())
-}
