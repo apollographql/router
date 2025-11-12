@@ -460,10 +460,6 @@ fn authenticate(
         // This is a metric and will not appear in the logs
         let failed = true;
         increment_jwt_counter_metric(failed);
-
-<<<<<<< HEAD
-        tracing::info!(message = %error, "jwt authentication failure");
-=======
         // Record span attributes for JWT failure
         let span = tracing::Span::current();
         span.record("authentication.jwt.failed", true);
@@ -473,7 +469,6 @@ fn authenticate(
         } else {
             tracing::debug!(message = %error, "jwt authentication failure");
         }
->>>>>>> 8dc4c3f4 (Change logging level for jwt failures to debug - this is a very common occurring situation for production servers that are public facing that this results in spammy logs with little value)
 
         let _ = request.context.insert_json_value(
             JWT_CONTEXT_KEY,
