@@ -911,17 +911,16 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    pub async fn execute_several_default_queries(
+    pub fn execute_several_default_queries(
         &self,
         times: usize,
-    ) -> Vec<(TraceId, reqwest::Response)> {
+    ) -> impl Future<Output = Vec<(TraceId, reqwest::Response)>> {
         let mut join_set = JoinSet::new();
         for _ in 0..times {
             join_set.spawn(self.execute_query(Query::default()));
             join_set.spawn(self.execute_query(Query::default().with_anonymous()));
-            tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        join_set.join_all().await
+        join_set.join_all()
     }
 
     #[allow(dead_code)]
