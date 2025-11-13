@@ -294,6 +294,29 @@ impl Opt {
     fn err_require_opt(env_var: &str) -> anyhow::Error {
         anyhow!("Use of Apollo Graph OS requires setting the {env_var} environment variable")
     }
+
+    /// Check if a config file contains a graph_artifact_reference.
+    /// Checks both `supergraph.graph_artifact_reference` and `graph_artifact_reference` paths.
+    fn config_has_graph_artifact_reference(path: &PathBuf) -> bool {
+        let yaml_value = match std::fs::read_to_string(path)
+            .ok()
+            .and_then(|config_str| serde_yaml::from_str::<serde_yaml::Value>(&config_str).ok())
+        {
+            Some(v) => v,
+            None => return false,
+        };
+
+        // Check both possible locations: nested under supergraph or at root
+        let reference = yaml_value
+            .get("supergraph")
+            .and_then(|s| s.get("graph_artifact_reference"))
+            .or_else(|| yaml_value.get("graph_artifact_reference"));
+
+        reference
+            .and_then(|v| v.as_str())
+            .map(|s| !s.is_empty())
+            .unwrap_or(false)
+    }
 }
 
 /// This is the main router entrypoint.
@@ -535,6 +558,8 @@ impl Executable {
 
         // Track if schema source was provided via CLI/env (for OCI/Registry)
         let mut schema_source_provided_via_cli_env = false;
+        // Track if graph_artifact_reference is being used (explicitly, not inferred)
+        let mut using_graph_artifact_reference = opt.graph_artifact_reference.is_some();
 
         // Validate that schema sources are not conflicting
         // Check both builder API schema and CLI supergraph_path (both map to -s/--supergraph)
@@ -647,28 +672,9 @@ impl Executable {
                             match &configuration {
                                 ConfigurationSource::File { path, .. } => {
                                     // Check if config file has graph_artifact_reference by parsing it early
-                                    let config_has_graph_artifact_ref =
-                                        match std::fs::read_to_string(path) {
-                                            Ok(config_str) => {
-                                                match serde_yaml::from_str::<serde_yaml::Value>(
-                                                    &config_str,
-                                                ) {
-                                                    Ok(yaml_value) => yaml_value
-                                                        .get("supergraph")
-                                                        .and_then(|s| {
-                                                            s.get("graph_artifact_reference")
-                                                        })
-                                                        .and_then(|v| v.as_str())
-                                                        .map(|s| !s.is_empty())
-                                                        .unwrap_or(false),
-                                                    Err(_) => false,
-                                                }
-                                            }
-                                            Err(_) => false,
-                                        };
-
-                                    if config_has_graph_artifact_ref {
+                                    if Opt::config_has_graph_artifact_reference(path) {
                                         // Config file has graph_artifact_reference - let config stream handle schema fetching
+                                        using_graph_artifact_reference = true;
                                         SchemaSource::Static {
                                             schema_sdl: String::new(),
                                         }
@@ -727,25 +733,9 @@ impl Executable {
                         match &configuration {
                             ConfigurationSource::File { path, .. } => {
                                 // Check if config file has graph_artifact_reference by parsing it early
-                                let config_has_graph_artifact_ref =
-                                    match std::fs::read_to_string(path) {
-                                        Ok(config_str) => {
-                                            match serde_yaml::from_str::<serde_yaml::Value>(
-                                                &config_str,
-                                            ) {
-                                                Ok(yaml_value) => yaml_value
-                                                    .get("graph_artifact_reference")
-                                                    .and_then(|v| v.as_str())
-                                                    .map(|s| !s.is_empty())
-                                                    .unwrap_or(false),
-                                                Err(_) => false,
-                                            }
-                                        }
-                                        Err(_) => false,
-                                    };
-
-                                if config_has_graph_artifact_ref {
+                                if Opt::config_has_graph_artifact_reference(path) {
                                     // Config file has graph_artifact_reference - let config stream handle schema fetching
+                                    using_graph_artifact_reference = true;
                                     SchemaSource::Static {
                                         schema_sdl: String::new(),
                                     }
@@ -813,30 +803,9 @@ Set the APOLLO_KEY environment variable:
                     ConfigurationSource::File { path, .. } => {
                         // Check if config file has graph_artifact_reference by parsing it early
                         // This allows us to show an error immediately if no schema source is available
-                        let config_has_graph_artifact_ref = match std::fs::read_to_string(path) {
-                            Ok(config_str) => {
-                                // Try to parse as YAML value to check for graph_artifact_reference
-                                match serde_yaml::from_str::<serde_yaml::Value>(&config_str) {
-                                    Ok(yaml_value) => yaml_value
-                                        .get("graph_artifact_reference")
-                                        .and_then(|v| v.as_str())
-                                        .map(|s| !s.is_empty())
-                                        .unwrap_or(false),
-                                    Err(_) => {
-                                        // If YAML parsing fails, let the config stream handle it
-                                        // It will show appropriate errors during actual parsing
-                                        false
-                                    }
-                                }
-                            }
-                            Err(_) => {
-                                // If file read fails, let the config stream handle it
-                                false
-                            }
-                        };
-
-                        if config_has_graph_artifact_ref {
+                        if Opt::config_has_graph_artifact_reference(path) {
                             // Config file has graph_artifact_reference - let config stream handle schema fetching
+                            using_graph_artifact_reference = true;
                             SchemaSource::Static {
                                 schema_sdl: String::new(),
                             }
@@ -852,13 +821,6 @@ Set the APOLLO_KEY environment variable:
                 }
             }
         };
-
-        // Check if graph_artifact_reference is being used
-        // For CLI/env, check opt.graph_artifact_reference
-        // For config file, infer from schema_source: if it's Static with empty SDL and we have a config file,
-        // the config stream will handle schema source selection (may use graph_artifact_reference)
-        let using_graph_artifact_reference = opt.graph_artifact_reference.is_some()
-            || matches!(&schema_source, SchemaSource::Static { schema_sdl } if schema_sdl.is_empty() && matches!(&configuration, ConfigurationSource::File { .. }));
 
         // Order of precedence for licenses:
         // 1. explicit path from cli
