@@ -652,7 +652,7 @@ type Query {
 
 <Tip>
 
-Refer to the section on [Combining policies with AND/OR logic](#combining-policies-with-andor-logic) for a refresher of `@requiresScopes` boolean syntax.
+Refer to the section on [Combining scopes with AND/OR logic](#combining-required-scopes-with-andor-logic) for a refresher of `@requiresScopes` boolean syntax.
 
 </Tip>
 
@@ -661,7 +661,7 @@ If requirements change suddenly, you don't need to update the directive in all s
 
 #### Combining `AND`/`OR` logic with `@requiresScopes`
 
-As with [combining scopes for a single use of [`@requiresScopes`](#combining-required-scopes-with-andor-logic), you can use nested arrays to introduce **AND** logic in a single subgraph:
+As with combining scopes for a single use of [`@requiresScopes`](#combining-required-scopes-with-andor-logic), you can use nested arrays to introduce **AND** logic in a single subgraph:
 
 ```graphql title="Subgraph A"
 type Query {
@@ -744,11 +744,11 @@ This behavior resembles what you can create with [contracts](/graphos/delivery/c
 
 ### Authorization and interfaces
 
-If a type [implementing an interface](/apollo-server/schema/unions-interfaces/#interface-type) requires authorization, unauthorized requests can query the interface, but not any parts of the type that require authorization.
+If a type [implementing an interface](/apollo-server/schema/unions-interfaces/#interface-type) requires authorization, unauthorized requests cannot query fields on the interface.
 
 For example, consider this schema where the `Post` interface doesn't require authentication, but the `PrivateBlog` type, which implements `Post`, does:
-
-```graphql
+ 
+```graphql {11, 18}
 type Query {
   posts: [Post!]!
 }
@@ -771,39 +771,107 @@ type PrivateBlog implements Post @authenticated {
   author: User!
   title: String!
   content: String!
-  publishAt: String
-  allowedViewers: [User!]!
 }
 ```
 
-If an unauthenticated request were to make this query:
+If an unauthenticated request sends a query for fields on the `Post` interface:
 
 ```graphql
 query {
   posts {
     id
-    author
     title
+  }
+}
+```
+
+The router would filter out the whole query.
+
+The response would include an `"UNAUTHORIZED_FIELD_OR_TYPE"` error at the `/posts` path.
+
+#### Polymorphic types with different requirements
+
+Interface implementations can each specify different authorization requirements. To successfully query the interface's fields, the request must meet all of those authorization requirements, which are combined with `AND` logic.
+
+For example, consider this schema where the `PublicBlog` type doesn't require authentication, but the `PrivateBlog` type does:
+
+```graphql {11, 18, 25}
+type Query {
+  posts: [Post!]!
+}
+
+type User {
+  id: ID!
+  username: String
+  posts: [Post!]!
+}
+
+interface Post {
+  id: ID!
+  author: User!
+  title: String!
+  content: String!
+}
+
+type PrivateBlog implements Post @authenticated {
+  id: ID!
+  author: User!
+  title: String!
+  content: String!
+}
+
+type PublicBlog implements Post {
+  id: ID!
+  author: User!
+  title: String!
+  content: String!
+}
+```
+
+If an unauthenticated request sends a query for fields on the `Post` interface:
+
+```graphql
+query {
+  posts {
+    id
+    title
+  }
+}
+```
+
+The router would filter out the whole query. The response would include an `"UNAUTHORIZED_FIELD_OR_TYPE"` error at the `/posts` path. This is because the data returned could contain an instance of `PrivateBlog`, which requires authentication.
+
+If an unauthenticated request specifically asks for `PublicBlog` and `PrivateBlog` entries:
+
+```graphql
+query {
+  posts {
+    ... on PublicBlog {
+        id
+        title
+    }
     ... on PrivateBlog {
-      allowedViewers
+        id
+        title
     }
   }
 }
 ```
 
-The router would filter the query as follows:
+The router would filter out the authenticated parts of the query, leaving only the fields that don't require authentication:
 
 ```graphql
 query {
   posts {
-    id
-    author
-    title
+    ... on PublicBlog {
+        id
+        title
+    }
   }
 }
 ```
 
-The response would include an `"UNAUTHORIZED_FIELD_OR_TYPE"` error at the `/posts/@/allowedViewers` path.
+The response would include an `"UNAUTHORIZED_FIELD_OR_TYPE"` error at the `/posts/... on PrivateBlog` path.
 
 ## Query deduplication
 

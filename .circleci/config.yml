@@ -11,7 +11,7 @@ orbs:
 executors:
   amd_linux_build: &amd_linux_build_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.19.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.21.1
     resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
@@ -19,16 +19,16 @@ executors:
       MISE_ENV: ci
   amd_linux_helm: &amd_linux_helm_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.19.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.21.1
     resource_class: small
     environment:
       MISE_ENV: ci
   amd_linux_test: &amd_linux_test_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.19.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.21.1
       - image: cimg/redis:7.4.6
       - image: openzipkin/zipkin:3.5.1
-      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.36.0
+      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.38.0
       # redis cluster - 3 primaries, 3 replicas
       - image: cimg/redis:7.4.6
         command: [ "redis-server", "--protected-mode", "no", "--port", "7000", "--cluster-enabled", "yes" ]
@@ -50,14 +50,14 @@ executors:
       CARGO_BUILD_JOBS: 4
   arm_linux_build: &arm_linux_build_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.19.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.21.1
     resource_class: arm.xlarge
     environment:
       MISE_ENV: ci
       CARGO_BUILD_JOBS: 8
   arm_linux_test: &arm_linux_test_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.19.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.21.1
     resource_class: arm.xlarge
     environment:
       MISE_ENV: ci
@@ -68,7 +68,7 @@ executors:
       # at https://circleci.com/docs/using-macos#supported-xcode-versions.
       # We use the major.minor notation to bring in compatible patches.
       xcode: "15.4.0"
-    resource_class: m2pro.large
+    resource_class: m4pro.large
     environment:
       MISE_ENV: ci,ci-mac
   macos_test: &macos_test_executor
@@ -77,7 +77,7 @@ executors:
       # at https://circleci.com/docs/using-macos#supported-xcode-versions.
       # We use the major.minor notation to bring in compatible patches.
       xcode: "15.4.0"
-    resource_class: m2pro.large
+    resource_class: m4pro.large
     environment:
       MISE_ENV: ci,ci-mac
   windows_build: &windows_build_executor
@@ -846,7 +846,7 @@ jobs:
 
   publish_github_release:
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.19.0
+      - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.21.1
     resource_class: small
     environment:
       <<: *common_job_environment

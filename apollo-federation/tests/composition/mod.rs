@@ -5,6 +5,7 @@ mod compose_directive_sharing;
 mod compose_inaccessible;
 mod compose_interface_object;
 mod compose_misc;
+mod compose_set_context;
 mod compose_tag;
 mod compose_type_merging;
 mod compose_types;
@@ -12,6 +13,7 @@ mod compose_validation;
 mod connectors;
 mod demand_control;
 mod directive_argument_merge_strategies;
+mod hints;
 // TODO: remove #[ignore] from tests once all fns called by Merger::merge() are implemented
 mod external;
 mod override_directive;
