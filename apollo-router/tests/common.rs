@@ -919,6 +919,7 @@ impl IntegrationTest {
         for _ in 0..times {
             join_set.spawn(self.execute_query(Query::default()));
             join_set.spawn(self.execute_query(Query::default().with_anonymous()));
+            join_set.spawn(self.execute_query(Query::default().with_invalid_query()));
         }
         join_set.join_all()
     }
