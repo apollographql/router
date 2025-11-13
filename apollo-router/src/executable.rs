@@ -49,6 +49,50 @@ pub(crate) static APOLLO_ROUTER_LISTEN_ADDRESS: Mutex<Option<SocketAddr>> = Mute
 pub(crate) static APOLLO_ROUTER_GRAPH_ARTIFACT_REFERENCE: Mutex<Option<String>> = Mutex::new(None);
 pub(crate) static APOLLO_ROUTER_HOT_RELOAD_CLI: AtomicBool = AtomicBool::new(false);
 
+const STARTUP_ERROR_MESSAGE: &str = r#"
+⚠️  The Apollo Router requires a composed supergraph schema at startup. ⚠️
+
+👉 DO ONE:
+
+  * Pass a local schema file with the '--supergraph' option:
+
+      $ ./router --supergraph <file_path>
+
+  * Fetch a registered schema from GraphOS by setting
+    these environment variables:
+
+      $ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
+
+      For details, see the Apollo docs:
+      https://www.apollographql.com/docs/federation/managed-federation/setup
+
+  * Fetch a schema from an OCI registry using '--graph-artifact-reference':
+
+      $ APOLLO_KEY="..." ./router --graph-artifact-reference=<reference>
+
+      For details, see the Apollo docs:
+      https://www.apollographql.com/docs/federation/managed-federation/setup
+
+  * Specify a schema source in your configuration file:
+
+      Add 'graph_artifact_reference' to your router configuration file
+
+🧪 TESTING THINGS OUT?
+
+  1. Download an example supergraph schema with Apollo-hosted subgraphs:
+
+    $ curl -L https://supergraph.demo.starstuff.dev/ > starstuff.graphql
+
+  2. Run the Apollo Router in development mode with the supergraph schema:
+
+    $ ./router --dev --supergraph starstuff.graphql
+
+    "#;
+
+fn format_startup_error(apollo_router_msg: &str) -> String {
+    format!("{apollo_router_msg}{STARTUP_ERROR_MESSAGE}")
+}
+
 const INITIAL_UPLINK_POLL_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Subcommands
@@ -703,48 +747,7 @@ impl Executable {
                                     }
                                 } else {
                                     // Config file exists but doesn't have graph_artifact_reference - return error
-                                    return Err(anyhow!(
-                                        r#"{apollo_router_msg}
-
-⚠️  The Apollo Router requires a composed supergraph schema at startup. ⚠️
-
-👉 DO ONE:
-
-  * Pass a local schema file with the '--supergraph' option:
-
-      $ ./router --supergraph <file_path>
-
-  * Fetch a registered schema from GraphOS by setting
-    these environment variables:
-
-      $ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
-
-      For details, see the Apollo docs:
-      https://www.apollographql.com/docs/federation/managed-federation/setup
-
-  * Fetch a schema from an OCI registry using '--graph-artifact-reference':
-
-      $ APOLLO_KEY="..." ./router --graph-artifact-reference=<reference>
-
-      For details, see the Apollo docs:
-      https://www.apollographql.com/docs/federation/managed-federation/setup
-
-  * Specify a schema source in your configuration file:
-
-      Add 'graph_artifact_reference' to your router configuration file
-
-🧪 TESTING THINGS OUT?
-
-  1. Download an example supergraph schema with Apollo-hosted subgraphs:
-
-    $ curl -L https://supergraph.demo.starstuff.dev/ > starstuff.graphql
-
-  2. Run the Apollo Router in development mode with the supergraph schema:
-
-    $ ./router --dev --supergraph starstuff.graphql
-
-    "#
-                                    ));
+                                    return Err(anyhow!("{}", format_startup_error(&apollo_router_msg)));
                                 }
                             }
                             _ => {
@@ -783,9 +786,9 @@ impl Executable {
                     return Err(anyhow!(
                         r#"{apollo_router_msg}
 
-??  The Apollo Router requires APOLLO_KEY when using --graph-artifact-reference. ??
+⚠️  The Apollo Router requires a license key ⚠️
 
-?? SET THE APOLLO_KEY environment variable:
+Set the APOLLO_KEY environment variable:
 
   $ export APOLLO_KEY="your-apollo-key"
   $ ./router --graph-artifact-reference=<reference>
@@ -793,7 +796,7 @@ impl Executable {
   For details, see the Apollo docs:
   https://www.apollographql.com/docs/federation/managed-federation/setup
 
-    "#
+  "#
                     ));
                 }
 
@@ -834,94 +837,12 @@ impl Executable {
                             }
                         } else {
                             // Config file exists but doesn't have graph_artifact_reference - return error
-                            return Err(anyhow!(
-                                r#"{apollo_router_msg}
-
-⚠️  The Apollo Router requires a composed supergraph schema at startup. ⚠️
-
-👉 DO ONE:
-
-  * Pass a local schema file with the '--supergraph' option:
-
-      $ ./router --supergraph <file_path>
-
-  * Fetch a registered schema from GraphOS by setting
-    these environment variables:
-
-      $ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
-
-      For details, see the Apollo docs:
-      https://www.apollographql.com/docs/federation/managed-federation/setup
-
-  * Fetch a schema from an OCI registry using '--graph-artifact-reference':
-
-      $ APOLLO_KEY="..." ./router --graph-artifact-reference=<reference>
-
-      For details, see the Apollo docs:
-      https://www.apollographql.com/docs/federation/managed-federation/setup
-
-  * Specify a schema source in your configuration file:
-
-      Add 'graph_artifact_reference' to your router configuration file
-
-🧪 TESTING THINGS OUT?
-
-  1. Download an example supergraph schema with Apollo-hosted subgraphs:
-
-    $ curl -L https://supergraph.demo.starstuff.dev/ > starstuff.graphql
-
-  2. Run the Apollo Router in development mode with the supergraph schema:
-
-    $ ./router --dev --supergraph starstuff.graphql
-
-    "#
-                            ));
+                            return Err(anyhow!("{}", format_startup_error(&apollo_router_msg)));
                         }
                     }
                     _ => {
                         // No config file - return error immediately
-                        return Err(anyhow!(
-                            r#"{apollo_router_msg}
-
-⚠️  The Apollo Router requires a composed supergraph schema at startup. ⚠️
-
-👉 DO ONE:
-
-  * Pass a local schema file with the '--supergraph' option:
-
-      $ ./router --supergraph <file_path>
-
-  * Fetch a registered schema from GraphOS by setting
-    these environment variables:
-
-      $ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
-
-      For details, see the Apollo docs:
-      https://www.apollographql.com/docs/federation/managed-federation/setup
-
-  * Fetch a schema from an OCI registry using '--graph-artifact-reference':
-
-      $ APOLLO_KEY="..." ./router --graph-artifact-reference=<reference>
-
-      For details, see the Apollo docs:
-      https://www.apollographql.com/docs/federation/managed-federation/setup
-
-  * Specify a schema source in your configuration file:
-
-      Add 'graph_artifact_reference' to your router configuration file
-
-🧪 TESTING THINGS OUT?
-
-  1. Download an example supergraph schema with Apollo-hosted subgraphs:
-
-    $ curl -L https://supergraph.demo.starstuff.dev/ > starstuff.graphql
-
-  2. Run the Apollo Router in development mode with the supergraph schema:
-
-    $ ./router --dev --supergraph starstuff.graphql
-
-    "#
-                        ));
+                        return Err(anyhow!("{}", format_startup_error(&apollo_router_msg)));
                     }
                 }
             }
