@@ -265,6 +265,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             batching: Batching,
             #[serde(default)]
             experimental_type_conditioned_fetching: bool,
+            #[serde(default)]
             graph_artifact_reference: Option<String>,
             #[serde(default, deserialize_with = "deserialize_bool_or_default")]
             hot_reload: bool,

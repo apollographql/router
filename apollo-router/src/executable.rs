@@ -23,7 +23,6 @@ use url::ParseError;
 use url::Url;
 
 use crate::LicenseSource;
-use crate::configuration::Configuration;
 use crate::configuration::Discussed;
 use crate::configuration::expansion::Expansion;
 use crate::configuration::generate_config_schema;
@@ -33,7 +32,6 @@ use crate::configuration::validate_yaml_configuration;
 use crate::metrics::meter_provider_internal;
 use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::otel::init_telemetry;
-use crate::registry::OciConfig;
 use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
 use crate::router::SchemaSource;
@@ -239,55 +237,6 @@ impl Opt {
         })
     }
 
-    pub(crate) fn oci_config(&self) -> Result<OciConfig, anyhow::Error> {
-        let graph_artifact_ref = self
-            .graph_artifact_reference
-            .clone()
-            .ok_or(Self::err_require_opt("APOLLO_GRAPH_ARTIFACT_REFERENCE"))?;
-        let (reference, oci_reference_type) = Self::validate_oci_reference(&graph_artifact_ref)?;
-
-        Ok(OciConfig {
-            apollo_key: self
-                .apollo_key
-                .clone()
-                .ok_or(Self::err_require_opt("APOLLO_KEY"))?,
-            reference,
-            hot_reload: self.hot_reload,
-            oci_reference_type,
-        })
-    }
-
-    pub fn validate_oci_reference(
-        reference: &str,
-    ) -> std::result::Result<(String, crate::registry::OciReferenceType), anyhow::Error> {
-        use crate::registry::OciReferenceType;
-
-        // Digest references are of the form @{algorithm}:{digest}
-        // - Algorithm name: max 32 characters (alphanumeric or underscore)
-        // - Digest: must be truncated to max 64 characters
-        if reference.starts_with('@') {
-            let digest_regex = Regex::new(r"^@([a-zA-Z0-9_]{1,32}):[0-9a-fA-F]{1,64}$").unwrap();
-            if digest_regex.is_match(reference) {
-                tracing::debug!("validated OCI digest reference");
-                return Ok((reference.to_string(), OciReferenceType::Sha));
-            }
-            // If it starts with @ but doesn't match digest format, it's invalid
-            return Err(anyhow!(
-                "invalid graph artifact reference: {reference}. If using @{{algorithm}}: format, the algorithm name must be at most 32 characters and the digest must be 1-64 hex characters"
-            ));
-        }
-
-        // Tag references appear after a colon in the reference and cannot start with underscore, dot, or dash
-        let tag_regex = Regex::new(r":([a-zA-Z0-9][a-zA-Z0-9._-]{0,127})$").unwrap();
-        if tag_regex.is_match(reference) {
-            tracing::debug!("validated OCI tag reference");
-            return Ok((reference.to_string(), OciReferenceType::Tag));
-        }
-
-        Err(anyhow!(
-            "invalid graph artifact reference: {reference}. Must be either a @{{algorithm}}:{{digest}} or tag :{{tag}}"
-        ))
-    }
 
     fn parse_endpoints(endpoints: &str) -> std::result::Result<Endpoints, anyhow::Error> {
         Ok(Endpoints::fallback(
@@ -651,12 +600,73 @@ impl Executable {
                     };
                     match opt.graph_artifact_reference {
                         None => {
-                            schema_source_provided_via_cli_env = true;
-                            SchemaSource::Registry(opt.uplink_config()?)
+                            // If we have a config file, check if it has graph_artifact_reference
+                            match &configuration {
+                                ConfigurationSource::File { path, .. } => {
+                                    // Check if config file has graph_artifact_reference by parsing it early
+                                    let config_has_graph_artifact_ref = match std::fs::read_to_string(path) {
+                                        Ok(config_str) => {
+                                            match serde_yaml::from_str::<serde_yaml::Value>(&config_str) {
+                                                Ok(yaml_value) => {
+                                                    yaml_value
+                                                        .get("graph_artifact_reference")
+                                                        .and_then(|v| v.as_str())
+                                                        .map(|s| !s.is_empty())
+                                                        .unwrap_or(false)
+                                                }
+                                                Err(_) => false,
+                                            }
+                                        }
+                                        Err(_) => false,
+                                    };
+
+                                    if config_has_graph_artifact_ref {
+                                        // Config file has graph_artifact_reference - let config stream handle schema fetching
+                                        SchemaSource::Static {
+                                            schema_sdl: String::new(),
+                                        }
+                                    } else {
+                                        // Config file exists but doesn't have graph_artifact_reference - create Registry schema source
+                                        schema_source_provided_via_cli_env = true;
+                                        SchemaSource::Registry {
+                                            apollo_key: opt.apollo_key.clone(),
+                                            apollo_graph_ref: opt.apollo_graph_ref.clone(),
+                                            endpoints: opt
+                                                .apollo_uplink_endpoints
+                                                .as_ref()
+                                                .map(|endpoints| Opt::parse_endpoints(endpoints))
+                                                .transpose()?,
+                                            poll_interval: INITIAL_UPLINK_POLL_INTERVAL,
+                                            timeout: opt.apollo_uplink_timeout,
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    // No config file, create Registry schema source
+                                    schema_source_provided_via_cli_env = true;
+                                    SchemaSource::Registry {
+                                        apollo_key: opt.apollo_key.clone(),
+                                        apollo_graph_ref: opt.apollo_graph_ref.clone(),
+                                        endpoints: opt
+                                            .apollo_uplink_endpoints
+                                            .as_ref()
+                                            .map(|endpoints| Opt::parse_endpoints(endpoints))
+                                            .transpose()?,
+                                        poll_interval: INITIAL_UPLINK_POLL_INTERVAL,
+                                        timeout: opt.apollo_uplink_timeout,
+                                    }
+                                }
+                            }
                         }
-                        Some(_) => {
+                        Some(ref reference) => {
                             schema_source_provided_via_cli_env = true;
-                            SchemaSource::OCI(opt.oci_config()?)
+                            SchemaSource::OCI {
+                                apollo_key: opt
+                                    .apollo_key
+                                    .clone()
+                                    .ok_or(Opt::err_require_opt("APOLLO_KEY"))?,
+                                reference: reference.clone(),
+                            }
                         }
                     }
                 }
@@ -666,12 +676,103 @@ impl Executable {
                 tracing::info!("{apollo_telemetry_msg}");
                 match opt.graph_artifact_reference {
                     None => {
-                        schema_source_provided_via_cli_env = true;
-                        SchemaSource::Registry(opt.uplink_config()?)
+                        // If we have a config file, check if it has graph_artifact_reference
+                        match &configuration {
+                            ConfigurationSource::File { path, .. } => {
+                                // Check if config file has graph_artifact_reference by parsing it early
+                                let config_has_graph_artifact_ref = match std::fs::read_to_string(path) {
+                                    Ok(config_str) => {
+                                        match serde_yaml::from_str::<serde_yaml::Value>(&config_str) {
+                                            Ok(yaml_value) => {
+                                                yaml_value
+                                                    .get("graph_artifact_reference")
+                                                    .and_then(|v| v.as_str())
+                                                    .map(|s| !s.is_empty())
+                                                    .unwrap_or(false)
+                                            }
+                                            Err(_) => false,
+                                        }
+                                    }
+                                    Err(_) => false,
+                                };
+
+                                if config_has_graph_artifact_ref {
+                                    // Config file has graph_artifact_reference - let config stream handle schema fetching
+                                    SchemaSource::Static {
+                                        schema_sdl: String::new(),
+                                    }
+                                } else {
+                                    // Config file exists but doesn't have graph_artifact_reference - return error
+                                    return Err(anyhow!(
+                                        r#"{apollo_router_msg}
+
+⚠️  The Apollo Router requires a composed supergraph schema at startup. ⚠️
+
+👉 DO ONE:
+
+  * Pass a local schema file with the '--supergraph' option:
+
+      $ ./router --supergraph <file_path>
+
+  * Fetch a registered schema from GraphOS by setting
+    these environment variables:
+
+      $ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
+
+      For details, see the Apollo docs:
+      https://www.apollographql.com/docs/federation/managed-federation/setup
+
+  * Fetch a schema from an OCI registry using '--graph-artifact-reference':
+
+      $ APOLLO_KEY="..." ./router --graph-artifact-reference=<reference>
+
+      For details, see the Apollo docs:
+      https://www.apollographql.com/docs/federation/managed-federation/setup
+
+  * Specify a schema source in your configuration file:
+
+      Add 'graph_artifact_reference' to your router configuration file
+
+🧪 TESTING THINGS OUT?
+
+  1. Download an example supergraph schema with Apollo-hosted subgraphs:
+
+    $ curl -L https://supergraph.demo.starstuff.dev/ > starstuff.graphql
+
+  2. Run the Apollo Router in development mode with the supergraph schema:
+
+    $ ./router --dev --supergraph starstuff.graphql
+
+    "#
+                                    ));
+                                }
+                            }
+                            _ => {
+                                // No config file, create Registry schema source
+                                schema_source_provided_via_cli_env = true;
+                                SchemaSource::Registry {
+                                    apollo_key: opt.apollo_key.clone(),
+                                    apollo_graph_ref: opt.apollo_graph_ref.clone(),
+                                    endpoints: opt
+                                        .apollo_uplink_endpoints
+                                        .as_ref()
+                                        .map(|endpoints| Opt::parse_endpoints(endpoints))
+                                        .transpose()?,
+                                    poll_interval: INITIAL_UPLINK_POLL_INTERVAL,
+                                    timeout: opt.apollo_uplink_timeout,
+                                }
+                            }
+                        }
                     }
-                    Some(_) => {
+                    Some(ref reference) => {
                         schema_source_provided_via_cli_env = true;
-                        SchemaSource::OCI(opt.oci_config()?)
+                        SchemaSource::OCI {
+                            apollo_key: opt
+                                .apollo_key
+                                .clone()
+                                .ok_or(Opt::err_require_opt("APOLLO_KEY"))?,
+                            reference: reference.clone(),
+                        }
                     }
                 }
             }
@@ -697,68 +798,48 @@ impl Executable {
                 }
 
                 // No schema source provided via CLI/env - check if config file can provide it
-                // If no config file or config file doesn't have graph_artifact_reference, return error
+                // If we have a config file, check if it has graph_artifact_reference
                 match &configuration {
                     ConfigurationSource::File { path, .. } => {
-                        // Try to parse config file to check for graph_artifact_reference
-                        if let Ok(config_str) = std::fs::read_to_string(path) {
-                            if let Ok(config) = config_str.parse::<Configuration>() {
-                                if config.graph_artifact_reference.is_some() {
-                                    // Config file has graph_artifact_reference, let async loading handle it
-                                    SchemaSource::Static {
-                                        schema_sdl: String::new(),
+                        // Check if config file has graph_artifact_reference by parsing it early
+                        // This allows us to show an error immediately if no schema source is available
+                        let config_has_graph_artifact_ref = match std::fs::read_to_string(path) {
+                            Ok(config_str) => {
+                                // Try to parse as YAML value to check for graph_artifact_reference
+                                match serde_yaml::from_str::<serde_yaml::Value>(&config_str) {
+                                    Ok(yaml_value) => {
+                                        yaml_value
+                                            .get("graph_artifact_reference")
+                                            .and_then(|v| v.as_str())
+                                            .map(|s| !s.is_empty())
+                                            .unwrap_or(false)
                                     }
-                                } else {
-                                    // Config file exists but doesn't have graph_artifact_reference
-                                    return Err(anyhow!(
-                                        r#"{apollo_router_msg}
-
-??  The Apollo Router requires a composed supergraph schema at startup. ??
-
-?? DO ONE:
-
-  * Pass a local schema file with the '--supergraph' option:
-
-      $ ./router --supergraph <file_path>
-
-  * Fetch a registered schema from GraphOS by setting
-    these environment variables:
-
-      $ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
-
-      For details, see the Apollo docs:
-      https://www.apollographql.com/docs/federation/managed-federation/setup
-
-  * Add 'graph_artifact_reference' to your configuration file
-
-?? TESTING THINGS OUT?
-
-  1. Download an example supergraph schema with Apollo-hosted subgraphs:
-
-    $ curl -L https://supergraph.demo.starstuff.dev/ > starstuff.graphql
-
-  2. Run the Apollo Router in development mode with the supergraph schema:
-
-    $ ./router --dev --supergraph starstuff.graphql
-
-    "#
-                                    ));
-                                }
-                            } else {
-                                // Config file exists but can't be parsed - might still have graph_artifact_reference
-                                // Let async loading handle it and error later if needed
-                                SchemaSource::Static {
-                                    schema_sdl: String::new(),
+                                    Err(_) => {
+                                        // If YAML parsing fails, let the config stream handle it
+                                        // It will show appropriate errors during actual parsing
+                                        false
+                                    }
                                 }
                             }
+                            Err(_) => {
+                                // If file read fails, let the config stream handle it
+                                false
+                            }
+                        };
+
+                        if config_has_graph_artifact_ref {
+                            // Config file has graph_artifact_reference - let config stream handle schema fetching
+                            SchemaSource::Static {
+                                schema_sdl: String::new(),
+                            }
                         } else {
-                            // Config file doesn't exist or can't be read - return error
+                            // Config file exists but doesn't have graph_artifact_reference - return error
                             return Err(anyhow!(
                                 r#"{apollo_router_msg}
 
-??  The Apollo Router requires a composed supergraph schema at startup. ??
+⚠️  The Apollo Router requires a composed supergraph schema at startup. ⚠️
 
-?? DO ONE:
+👉 DO ONE:
 
   * Pass a local schema file with the '--supergraph' option:
 
@@ -772,7 +853,18 @@ impl Executable {
       For details, see the Apollo docs:
       https://www.apollographql.com/docs/federation/managed-federation/setup
 
-?? TESTING THINGS OUT?
+  * Fetch a schema from an OCI registry using '--graph-artifact-reference':
+
+      $ APOLLO_KEY="..." ./router --graph-artifact-reference=<reference>
+
+      For details, see the Apollo docs:
+      https://www.apollographql.com/docs/federation/managed-federation/setup
+
+  * Specify a schema source in your configuration file:
+
+      Add 'graph_artifact_reference' to your router configuration file
+
+🧪 TESTING THINGS OUT?
 
   1. Download an example supergraph schema with Apollo-hosted subgraphs:
 
@@ -791,9 +883,9 @@ impl Executable {
                         return Err(anyhow!(
                             r#"{apollo_router_msg}
 
-??  The Apollo Router requires a composed supergraph schema at startup. ??
+⚠️  The Apollo Router requires a composed supergraph schema at startup. ⚠️
 
-?? DO ONE:
+👉 DO ONE:
 
   * Pass a local schema file with the '--supergraph' option:
 
@@ -807,7 +899,18 @@ impl Executable {
       For details, see the Apollo docs:
       https://www.apollographql.com/docs/federation/managed-federation/setup
 
-?? TESTING THINGS OUT?
+  * Fetch a schema from an OCI registry using '--graph-artifact-reference':
+
+      $ APOLLO_KEY="..." ./router --graph-artifact-reference=<reference>
+
+      For details, see the Apollo docs:
+      https://www.apollographql.com/docs/federation/managed-federation/setup
+
+  * Specify a schema source in your configuration file:
+
+      Add 'graph_artifact_reference' to your router configuration file
+
+🧪 TESTING THINGS OUT?
 
   1. Download an example supergraph schema with Apollo-hosted subgraphs:
 
@@ -823,6 +926,13 @@ impl Executable {
                 }
             }
         };
+
+        // Check if graph_artifact_reference is being used
+        // For CLI/env, check opt.graph_artifact_reference
+        // For config file, infer from schema_source: if it's Static with empty SDL and we have a config file,
+        // the config stream will handle schema source selection (may use graph_artifact_reference)
+        let using_graph_artifact_reference = opt.graph_artifact_reference.is_some()
+            || matches!(&schema_source, SchemaSource::Static { schema_sdl } if schema_sdl.is_empty() && matches!(&configuration, ConfigurationSource::File { .. }));
 
         // Order of precedence for licenses:
         // 1. explicit path from cli
@@ -850,8 +960,21 @@ impl Executable {
                     }
                 }
                 (Some(_license), _, _, _) => LicenseSource::Env,
-                (_, _, Some(_apollo_key), Some(_apollo_graph_ref)) => {
-                    LicenseSource::Registry(opt.uplink_config()?)
+                // Only require APOLLO_GRAPH_REF for uplink license if not using graph_artifact_reference
+                (_, _, Some(_apollo_key), Some(_apollo_graph_ref))
+                    if !using_graph_artifact_reference =>
+                {
+                    LicenseSource::Registry {
+                        apollo_key: opt.apollo_key.clone(),
+                        apollo_graph_ref: opt.apollo_graph_ref.clone(),
+                        endpoints: opt
+                            .apollo_uplink_endpoints
+                            .as_ref()
+                            .map(|endpoints| Opt::parse_endpoints(endpoints))
+                            .transpose()?,
+                        poll_interval: INITIAL_UPLINK_POLL_INTERVAL,
+                        timeout: opt.apollo_uplink_timeout,
+                    }
                 }
 
                 _ => LicenseSource::default(),
@@ -871,24 +994,32 @@ impl Executable {
             );
         }
 
-        let uplink_config = opt.uplink_config().ok();
-        if uplink_config
-            .clone()
-            .unwrap_or_default()
-            .endpoints
-            .unwrap_or_default()
-            .url_count()
-            == 1
-        {
-            tracing::warn!(
-                "Only a single uplink endpoint is configured. We recommend specifying at least two endpoints so that a fallback exists."
-            );
+        // Check uplink endpoint count for warning (only if not using graph_artifact_reference)
+        // Note: Validation now happens in into_stream(), so we just check endpoint count here
+        if !using_graph_artifact_reference {
+            if let Some(ref endpoints_str) = opt.apollo_uplink_endpoints {
+                if let Ok(endpoints) = Opt::parse_endpoints(endpoints_str) {
+                    if endpoints.url_count() == 1 {
+                        tracing::warn!(
+                            "Only a single uplink endpoint is configured. We recommend specifying at least two endpoints so that a fallback exists."
+                        );
+                    }
+                }
+            }
         }
+
+        // Build uplink config for builder (only if not using graph_artifact_reference)
+        // Note: Validation now happens in into_stream(), so we construct it here for the builder
+        let uplink_config_for_builder = if !using_graph_artifact_reference {
+            opt.uplink_config().ok()
+        } else {
+            None
+        };
 
         let router = RouterHttpServer::builder()
             .is_telemetry_disabled(opt.anonymous_telemetry_disabled)
             .configuration(configuration)
-            .and_uplink(uplink_config)
+            .and_uplink(uplink_config_for_builder)
             .schema(schema_source)
             .license(license)
             .shutdown(shutdown.unwrap_or(ShutdownSource::CtrlC))
@@ -999,138 +1130,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_validate_oci_reference_valid_cases() {
-        use crate::registry::OciReferenceType;
-
-        // Test valid OCI references with different hash values
-        let valid_hashes = vec![
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            "@sha256:ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890",
-            "@sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
-            "@sha256:0000000000000000000000000000000000000000000000000000000000000000",
-            "@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-            // Other algorithms should also be valid
-            "@sha1:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            "@sha512:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            "@md5:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            "@blake2:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            // Algorithm name with exactly 32 characters (max allowed)
-            "@a1234567890123456789012345678901:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            // Digests with less than 64 characters should be valid
-            "@sha256:a",
-            "@sha256:ab",
-            "@sha256:abc",
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcde", // 63 chars
-            "@sha1:1234567890abcdef",                                                  // 16 chars
-            "@md5:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",   // 64 chars
-        ];
-
-        for hash in valid_hashes {
-            let result = super::Opt::validate_oci_reference(hash);
-            assert!(result.is_ok(), "Hash '{}' should be valid", hash);
-            let (reference, ref_type) = result.unwrap();
-            assert_eq!(reference, hash);
-            assert_eq!(ref_type, OciReferenceType::Sha);
-        }
-
-        // Test valid tag references
-        let valid_tags = vec![
-            "registry.example.com/my-graph:latest",
-            "my-graph:v1.0.0",
-            "graph:tag_name",
-            "graph:tag-name",
-            "graph:tag.name",
-            "graph:v1_2_3",
-            "graph:a",
-            "graph:01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567",
-            // Tags that look like digests (64 hex chars) are legal
-            "graph:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-        ];
-
-        for tag_ref in valid_tags {
-            let result = super::Opt::validate_oci_reference(tag_ref);
-            assert!(
-                result.is_ok(),
-                "Tag reference '{}' should be valid",
-                tag_ref
-            );
-            let (reference, ref_type) = result.unwrap();
-            assert_eq!(reference, tag_ref);
-            assert_eq!(ref_type, OciReferenceType::Tag);
-        }
-    }
-
-    #[test]
-    fn test_validate_oci_reference_invalid_cases() {
-        let invalid_references = vec![
-            // Missing @{algorithm}: prefix
-            "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            // Too long (digest must be at most 64 chars)
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1",
-            "@sha1:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1",
-            "@sha512:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1",
-            // Invalid characters in digest
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdeg",
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcde!",
-            // Empty string
-            "",
-            // Just the prefix (no digest)
-            "@sha256:",
-            "@sha1:",
-            "@sha512:",
-            // Invalid algorithm name (contains invalid characters)
-            "@sha-256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            "@sha.256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            "@sha@256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            // Empty algorithm name
-            "@:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            // Algorithm name too long (over 32 characters - max allowed is 32)
-            "@verylongalgorithmnamethatexceeds32chars:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            "@a12345678901234567890123456789012:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", // 33 chars - should be invalid
-            // Hash with spaces
-            "@sha256: 1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef ",
-            // Hash with dashes
-            "@sha256:12345678-90abcdef-12345678-90abcdef-12345678-90abcdef-12345678-90abcdef",
-            // Hash with colons
-            "@sha256:12345678:90abcdef:12345678:90abcdef:12345678:90abcdef:12345678:90abcdef",
-            // Missing hash entirely
-            "@sha256",
-            // Extra characters at the end
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef:latest",
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef@tag",
-            // Invalid tag references
-            ":",
-            "graph:",
-            "graph:-invalid",
-            "graph:.invalid",
-            "graph:_invalid-start",
-            "graph:012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678", // 128 chars (too long)
-            "graph:tag with spaces",
-            "graph:tag@invalid",
-            "graph:tag#invalid",
-        ];
-
-        for reference in invalid_references {
-            let result = super::Opt::validate_oci_reference(reference);
-            assert!(
-                result.is_err(),
-                "Reference '{}' should be invalid",
-                reference
-            );
-            let error_msg = result.unwrap_err().to_string();
-            assert!(
-                error_msg.contains("invalid graph artifact reference"),
-                "Error message should contain 'invalid graph artifact reference' for '{}'",
-                reference
-            );
-            assert!(
-                error_msg.contains(reference),
-                "Error message should contain the invalid reference '{}'",
-                reference
-            );
-        }
-    }
 }

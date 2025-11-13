@@ -2,5 +2,4 @@
 source: apollo-router/src/configuration/tests.rs
 expression: "Configuration::default().validated_yaml"
 ---
-graph_artifact_reference: ~
-hot_reload: ~
+{}

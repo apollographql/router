@@ -5,22 +5,6 @@ expression: yaml
 - fields: {}
   level: INFO
   message: Loaded 2 persisted queries.
-- fields: {}
-  level: WARN
-  message: "Configuration could not be upgraded automatically as it had errors. If you previously used this configuration with Router 1.x, please refer to the migration guide: https://www.apollographql.com/docs/graphos/reference/migration/from-router-v1"
-- fields:
-    queue_capacity: 12000
-    threads: 12
-  level: INFO
-  message: compute job thread pool created
-  span:
-    job.type: query_parsing
-    name: compute_job
-  spans:
-    - name: parse_query
-      otel.kind: INTERNAL
-    - job.type: query_parsing
-      name: compute_job
 - fields:
     enforcement_skipped: false
     operation_body: "query SomeQuery { me { id } }"

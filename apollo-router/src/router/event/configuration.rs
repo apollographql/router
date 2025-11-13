@@ -275,8 +275,8 @@ impl ConfigurationSource {
         };
 
         // Validate and determine reference type
-        let (reference, oci_reference_type) =
-            match crate::executable::Opt::validate_oci_reference(&graph_artifact_ref) {
+        let (reference, _oci_reference_type) =
+            match crate::registry::validate_oci_reference(&graph_artifact_ref) {
                 Ok(result) => result,
                 Err(err) => {
                     tracing::error!("Invalid graph_artifact_reference in config: {}", err);
@@ -299,8 +299,6 @@ impl ConfigurationSource {
         let oci_config = OciConfig {
             apollo_key,
             reference,
-            hot_reload: config.hot_reload,
-            oci_reference_type,
         };
 
         // Fetch schema from OCI asynchronously
@@ -323,7 +321,8 @@ impl ConfigurationSource {
                     }
                 }
             })
-            .filter_map(|s| async move { s }),
+            .filter_map(|s| async move { s })
+            .chain(stream::iter(vec![crate::router::Event::NoMoreSchema])),
         )
     }
 }

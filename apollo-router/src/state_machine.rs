@@ -329,6 +329,14 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         S: HttpServerFactory,
         FA: RouterSuperServiceFactory,
     {
+        // If schema is empty, return an error - this allows the caller to wait for the schema
+        // to be fetched (e.g., from OCI via config stream) before trying to start
+        if schema_state.sdl.is_empty() {
+            return Err(ApolloRouterError::ServiceCreationError(
+                "Schema is empty, waiting for schema to be fetched".into(),
+            ));
+        }
+        
         let schema = Arc::new(
             Schema::parse_arc(schema_state.clone(), &configuration)
                 .map_err(|e| ServiceCreationError(e.to_string().into()))?,

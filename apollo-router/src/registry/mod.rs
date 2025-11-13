@@ -1,5 +1,6 @@
 use std::string::FromUtf8Error;
 
+use anyhow::anyhow;
 use docker_credential::CredentialRetrievalError;
 use docker_credential::DockerCredential;
 use oci_client::Client;
@@ -8,6 +9,7 @@ use oci_client::client::ClientConfig;
 use oci_client::client::ClientProtocol;
 use oci_client::errors::OciDistributionError;
 use oci_client::secrets::RegistryAuth;
+use regex::Regex;
 use thiserror::Error;
 
 /// Type of OCI reference
@@ -19,6 +21,45 @@ pub enum OciReferenceType {
     Sha,
 }
 
+/// Validate an OCI reference string and determine its type.
+///
+/// Returns the validated reference string and its type (Tag or Sha).
+/// Digest references are of the form `@{algorithm}:{digest}` where:
+/// - Algorithm name: max 32 characters (alphanumeric or underscore)
+/// - Digest: 1-64 hex characters
+/// Tag references are of the form `:tag-name` where:
+/// - Tag cannot start with underscore, dot, or dash
+/// - Tag can be up to 128 characters
+pub fn validate_oci_reference(
+    reference: &str,
+) -> std::result::Result<(String, OciReferenceType), anyhow::Error> {
+    // Digest references are of the form @{algorithm}:{digest}
+    // - Algorithm name: max 32 characters (alphanumeric or underscore)
+    // - Digest: must be truncated to max 64 characters
+    if reference.starts_with('@') {
+        let digest_regex = Regex::new(r"^@([a-zA-Z0-9_]{1,32}):[0-9a-fA-F]{1,64}$").unwrap();
+        if digest_regex.is_match(reference) {
+            tracing::debug!("validated OCI digest reference");
+            return Ok((reference.to_string(), OciReferenceType::Sha));
+        }
+        // If it starts with @ but doesn't match digest format, it's invalid
+        return Err(anyhow!(
+            "invalid graph artifact reference: {reference}. If using @{{algorithm}}: format, the algorithm name must be at most 32 characters and the digest must be 1-64 hex characters"
+        ));
+    }
+
+    // Tag references appear after a colon in the reference and cannot start with underscore, dot, or dash
+    let tag_regex = Regex::new(r":([a-zA-Z0-9][a-zA-Z0-9._-]{0,127})$").unwrap();
+    if tag_regex.is_match(reference) {
+        tracing::debug!("validated OCI tag reference");
+        return Ok((reference.to_string(), OciReferenceType::Tag));
+    }
+
+    Err(anyhow!(
+        "invalid graph artifact reference: {reference}. Must be either a @{{algorithm}}:{{digest}} or tag :{{tag}}"
+    ))
+}
+
 /// Configuration for fetching an OCI Bundle
 /// This struct does not change on router reloads - they are all sourced from CLI options.
 #[derive(Debug, Clone)]
@@ -28,12 +69,6 @@ pub struct OciConfig {
 
     /// OCI Compliant URL pointing to the release bundle
     pub reference: String,
-
-    /// Hot reload configuration option
-    pub hot_reload: bool,
-
-    /// Type of OCI reference (tag or sha)
-    pub oci_reference_type: OciReferenceType,
 }
 
 #[derive(Debug, Clone)]
@@ -426,5 +461,101 @@ mod tests {
         // included here as a second layer of security.
         let result = infer_oci_protocol("").await;
         assert_eq!(result, ClientProtocol::Https);
+    }
+
+    #[test]
+    fn test_validate_oci_reference_valid_cases() {
+        // Test valid digest references with different algorithms
+        let valid_hashes = vec![
+            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            "@sha1:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            "@sha512:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            "@md5:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            // Short digests (less than 64 chars)
+            "@sha256:abc123",
+            "@sha256:a",
+            // Max algorithm name (32 chars)
+            "@a1234567890123456789012345678901:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+        ];
+
+        for hash in valid_hashes {
+            let result = validate_oci_reference(hash);
+            assert!(result.is_ok(), "Hash '{}' should be valid", hash);
+            let (reference, ref_type) = result.unwrap();
+            assert_eq!(reference, hash);
+            assert_eq!(ref_type, OciReferenceType::Sha);
+        }
+
+        // Test valid tag references
+        let valid_tags = vec![
+            "registry.example.com/my-graph:latest",
+            "my-graph:v1.0.0",
+            "graph:tag_name",
+            "graph:tag-name",
+            "graph:tag.name",
+            "graph:v1_2_3",
+            "graph:a",
+            "graph:01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567",
+            // Tags that look like digests (64 hex chars) are legal
+            "graph:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+        ];
+
+        for tag_ref in valid_tags {
+            let result = validate_oci_reference(tag_ref);
+            assert!(
+                result.is_ok(),
+                "Tag reference '{}' should be valid",
+                tag_ref
+            );
+            let (reference, ref_type) = result.unwrap();
+            assert_eq!(reference, tag_ref);
+            assert_eq!(ref_type, OciReferenceType::Tag);
+        }
+    }
+
+    #[test]
+    fn test_validate_oci_reference_invalid_cases() {
+        let invalid_references = vec![
+            // Missing @{algorithm}: prefix
+            "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            // Too long (digest must be at most 64 chars)
+            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1",
+            "@sha1:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1",
+            "@sha512:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1",
+            // Invalid characters in digest
+            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdeg",
+            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcde!",
+            // Empty string
+            "",
+            // Just the prefix (no digest)
+            "@sha256:",
+            "@sha1:",
+            "@sha512:",
+            // Algorithm name too long (33 chars)
+            "@a12345678901234567890123456789012:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            // Invalid characters in algorithm name
+            "@sha-256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            "@sha.256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            // Tag starting with underscore
+            "graph:_invalid",
+            // Tag starting with dot
+            "graph:.invalid",
+            // Tag starting with dash
+            "graph:-invalid",
+            // Missing colon for tag
+            "graph-tag",
+            // Invalid tag format
+            "graph:",
+        ];
+
+        for reference in invalid_references {
+            let result = validate_oci_reference(reference);
+            assert!(
+                result.is_err(),
+                "Reference '{}' should be invalid",
+                reference
+            );
+        }
     }
 }

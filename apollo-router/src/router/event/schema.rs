@@ -8,7 +8,6 @@ use derive_more::From;
 use futures::prelude::*;
 use url::Url;
 
-use crate::registry::OciConfig;
 use crate::registry::fetch_oci;
 use crate::router::Event;
 use crate::router::Event::NoMoreSchema;
@@ -44,8 +43,20 @@ pub enum SchemaSource {
     },
 
     /// Apollo managed federation.
+    /// Validation happens in `into_stream()` when the schema is actually fetched.
     #[display("Registry")]
-    Registry(UplinkConfig),
+    Registry {
+        /// The Apollo key (APOLLO_KEY) - validated in into_stream
+        apollo_key: Option<String>,
+        /// The Apollo graph reference (APOLLO_GRAPH_REF) - validated in into_stream
+        apollo_graph_ref: Option<String>,
+        /// The endpoints polled
+        endpoints: Option<crate::uplink::Endpoints>,
+        /// The duration between polling
+        poll_interval: std::time::Duration,
+        /// The HTTP client timeout for each poll
+        timeout: std::time::Duration,
+    },
 
     /// A list of URLs to fetch the schema from.
     #[display("URLs")]
@@ -54,8 +65,15 @@ pub enum SchemaSource {
         urls: Vec<Url>,
     },
 
-    #[display("Registry")]
-    OCI(OciConfig),
+    /// OCI registry schema source.
+    /// Validation happens in `into_stream()` when the schema is actually fetched.
+    #[display("OCI")]
+    OCI {
+        /// The Apollo key (APOLLO_KEY)
+        apollo_key: String,
+        /// The graph artifact reference (validated in into_stream)
+        reference: String,
+    },
 }
 
 impl From<&'_ str> for SchemaSource {
@@ -71,11 +89,22 @@ impl SchemaSource {
     pub(crate) fn into_stream(self) -> impl Stream<Item = Event> {
         match self {
             SchemaSource::Static { schema_sdl: schema } => {
-                let update_schema = UpdateSchema(SchemaState {
-                    sdl: schema,
-                    launch_id: None,
-                });
-                stream::once(future::ready(update_schema)).boxed()
+                // If schema is empty, return empty stream without NoMoreSchema - this allows the config stream
+                // to handle schema fetching (e.g., from graph_artifact_reference)
+                // The config stream will emit UpdateSchema when ready, and we don't want to emit NoMoreSchema
+                // prematurely which would cause the state machine to error
+                if schema.is_empty() {
+                    // Return empty stream without NoMoreSchema - config stream will handle schema
+                    stream::empty().boxed()
+                } else {
+                    let update_schema = UpdateSchema(SchemaState {
+                        sdl: schema,
+                        launch_id: None,
+                    });
+                    stream::once(future::ready(update_schema))
+                        .chain(stream::iter(vec![NoMoreSchema]))
+                        .boxed()
+                }
             }
             SchemaSource::Stream(stream) => stream
                 .map(|sdl| {
@@ -84,6 +113,7 @@ impl SchemaSource {
                         launch_id: None,
                     })
                 })
+                .chain(stream::iter(vec![NoMoreSchema]))
                 .boxed(),
             SchemaSource::File {
                 path,
@@ -95,7 +125,7 @@ impl SchemaSource {
                         "Supergraph schema at path '{}' does not exist.",
                         path.to_string_lossy()
                     );
-                    stream::empty().boxed()
+                    stream::iter(vec![NoMoreSchema]).boxed()
                 } else {
                     //The schema file exists try and load it
                     match std::fs::read_to_string(&path) {
@@ -126,61 +156,118 @@ impl SchemaSource {
                                     sdl: schema,
                                     launch_id: None,
                                 });
-                                stream::once(future::ready(update_schema)).boxed()
+                                stream::once(future::ready(update_schema))
+                                    .chain(stream::iter(vec![NoMoreSchema]))
+                                    .boxed()
                             }
                         }
                         Err(err) => {
                             tracing::error!(reason = %err, "failed to read supergraph schema");
-                            stream::empty().boxed()
+                            stream::iter(vec![NoMoreSchema]).boxed()
                         }
                     }
                 }
             }
-            SchemaSource::Registry(uplink_config) => {
-                stream_from_uplink::<SupergraphSdlQuery, SchemaState>(uplink_config)
-                    .filter_map(|res| {
-                        future::ready(match res {
-                            Ok(schema) => {
-                                let update_schema = UpdateSchema(schema);
-                                Some(update_schema)
-                            }
-                            Err(e) => {
-                                tracing::error!("{}", e);
-                                None
-                            }
+            SchemaSource::Registry {
+                apollo_key,
+                apollo_graph_ref,
+                endpoints,
+                poll_interval,
+                timeout,
+            } => {
+                // Validate required fields and create UplinkConfig
+                let uplink_config = match (apollo_key, apollo_graph_ref) {
+                    (Some(key), Some(graph_ref)) => Some(UplinkConfig {
+                        apollo_key: key,
+                        apollo_graph_ref: graph_ref,
+                        endpoints,
+                        poll_interval,
+                        timeout,
+                    }),
+                    (None, _) => {
+                        tracing::error!("APOLLO_KEY is required for uplink schema source");
+                        None
+                    }
+                    (_, None) => {
+                        tracing::error!("APOLLO_GRAPH_REF is required for uplink schema source");
+                        None
+                    }
+                };
+
+                if let Some(config) = uplink_config {
+                    stream_from_uplink::<SupergraphSdlQuery, SchemaState>(config)
+                        .filter_map(|res| {
+                            future::ready(match res {
+                                Ok(schema) => {
+                                    let update_schema = UpdateSchema(schema);
+                                    Some(update_schema)
+                                }
+                                Err(e) => {
+                                    tracing::error!("{}", e);
+                                    None
+                                }
+                            })
                         })
-                    })
-                    .boxed()
+                        .chain(stream::iter(vec![NoMoreSchema]))
+                        .boxed()
+                } else {
+                    stream::iter(vec![NoMoreSchema]).boxed()
+                }
             }
             SchemaSource::URLs { urls } => {
                 futures::stream::once(async move {
                     fetch_supergraph_from_first_viable_url(&urls).await
                 })
                 .filter_map(|s| async move { s.map(Event::UpdateSchema) })
+                .chain(stream::iter(vec![NoMoreSchema]))
                 .boxed()
             }
-            SchemaSource::OCI(oci_config) => {
-                tracing::debug!("using oci as schema source");
-                futures::stream::once(async move {
-                    match fetch_oci(oci_config).await {
-                        Ok(oci_result) => {
-                            tracing::debug!("fetched schema from oci registry");
-                            Some(SchemaState {
-                                sdl: oci_result.schema,
-                                launch_id: None,
-                            })
-                        }
-                        Err(err) => {
-                            tracing::error!("error fetching schema from oci registry {}", err);
-                            None
-                        }
+            SchemaSource::OCI {
+                apollo_key,
+                reference,
+            } => {
+                // Validate OCI reference and create config
+                let oci_config = match crate::registry::validate_oci_reference(&reference) {
+                    Ok((validated_reference, _oci_reference_type)) => {
+                        Some(crate::registry::OciConfig {
+                            apollo_key,
+                            reference: validated_reference,
+                        })
                     }
-                })
-                    .filter_map(|s| async move { s.map(Event::UpdateSchema) })
-                    .boxed()
+                    Err(err) => {
+                        tracing::error!("Invalid graph_artifact_reference: {}", err);
+                        None
+                    }
+                };
+
+                if let Some(config) = oci_config {
+                    tracing::debug!("using oci as schema source");
+                    futures::stream::once(async move {
+                        match fetch_oci(config).await {
+                            Ok(oci_result) => {
+                                tracing::debug!("fetched schema from oci registry");
+                                Some(SchemaState {
+                                    sdl: oci_result.schema,
+                                    launch_id: None,
+                                })
+                            }
+                            Err(err) => {
+                                tracing::error!("error fetching schema from oci registry {}", err);
+                                None
+                            }
+                        }
+                    })
+                        .filter_map(|s| async move { s.map(Event::UpdateSchema) })
+                        .chain(stream::iter(vec![NoMoreSchema]))
+                        .boxed()
+                } else {
+                    stream::iter(vec![NoMoreSchema]).boxed()
+                }
             }
         }
-        .chain(stream::iter(vec![NoMoreSchema]))
+        // Note: NoMoreSchema is now chained per-variant above, not here
+        // This allows empty Static schemas to not emit NoMoreSchema prematurely
+        // when the config stream will provide the schema
         .boxed()
     }
 }

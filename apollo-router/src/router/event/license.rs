@@ -49,8 +49,21 @@ pub enum LicenseSource {
     },
 
     /// Apollo uplink.
+    /// Apollo managed federation license.
+    /// Validation happens in `into_stream()` when the license is actually fetched.
     #[display("Registry")]
-    Registry(UplinkConfig),
+    Registry {
+        /// The Apollo key (APOLLO_KEY) - validated in into_stream
+        apollo_key: Option<String>,
+        /// The Apollo graph reference (APOLLO_GRAPH_REF) - validated in into_stream
+        apollo_graph_ref: Option<String>,
+        /// The endpoints polled
+        endpoints: Option<crate::uplink::Endpoints>,
+        /// The duration between polling
+        poll_interval: std::time::Duration,
+        /// The HTTP client timeout for each poll
+        timeout: std::time::Duration,
+    },
 }
 
 impl Default for LicenseSource {
@@ -139,18 +152,47 @@ impl LicenseSource {
                 }
             }
 
-            LicenseSource::Registry(uplink_config) => {
-                stream_from_uplink::<LicenseQuery, License>(uplink_config)
-                    .filter_map(|res| {
-                        future::ready(match res {
-                            Ok(license) => Some(license),
-                            Err(e) => {
-                                tracing::error!(code = APOLLO_ROUTER_LICENSE_INVALID, "{}", e);
-                                None
-                            }
+            LicenseSource::Registry {
+                apollo_key,
+                apollo_graph_ref,
+                endpoints,
+                poll_interval,
+                timeout,
+            } => {
+                // Validate required fields and create UplinkConfig
+                let uplink_config = match (apollo_key, apollo_graph_ref) {
+                    (Some(key), Some(graph_ref)) => Some(UplinkConfig {
+                        apollo_key: key,
+                        apollo_graph_ref: graph_ref,
+                        endpoints,
+                        poll_interval,
+                        timeout,
+                    }),
+                    (None, _) => {
+                        tracing::error!("APOLLO_KEY is required for uplink license source");
+                        None
+                    }
+                    (_, None) => {
+                        tracing::error!("APOLLO_GRAPH_REF is required for uplink license source");
+                        None
+                    }
+                };
+
+                if let Some(config) = uplink_config {
+                    stream_from_uplink::<LicenseQuery, License>(config)
+                        .filter_map(|res| {
+                            future::ready(match res {
+                                Ok(license) => Some(license),
+                                Err(e) => {
+                                    tracing::error!(code = APOLLO_ROUTER_LICENSE_INVALID, "{}", e);
+                                    None
+                                }
+                            })
                         })
-                    })
-                    .boxed()
+                        .boxed()
+                } else {
+                    stream::empty().boxed()
+                }
             }
             LicenseSource::Env => {
                 // EXPERIMENTAL and not subject to semver.
