@@ -822,7 +822,7 @@ impl StructHasher {
         }
     }
     fn finalize(self) -> Vec<u8> {
-        self.hasher.finalize().as_slice().into()
+        self.hasher.finalize().to_vec()
     }
 }
 
