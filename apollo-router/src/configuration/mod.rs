@@ -1222,7 +1222,6 @@ impl TlsSupergraph {
     }
 }
 
-
 fn deserialize_certificate<'de, D>(deserializer: D) -> Result<CertificateDer<'static>, D::Error>
 where
     D: Deserializer<'de>,

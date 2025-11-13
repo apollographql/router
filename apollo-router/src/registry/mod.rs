@@ -14,7 +14,7 @@ use thiserror::Error;
 
 /// Type of OCI reference
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OciReferenceType {
+pub(crate) enum OciReferenceType {
     /// Tag reference (e.g., `:latest`, `:v1.0.0`)
     Tag,
     /// SHA256 digest reference (e.g., `@sha256:...`)
@@ -27,10 +27,10 @@ pub enum OciReferenceType {
 /// Digest references are of the form `@{algorithm}:{digest}` where:
 /// - Algorithm name: max 32 characters (alphanumeric or underscore)
 /// - Digest: 1-64 hex characters
-/// Tag references are of the form `:tag-name` where:
+///   Tag references are of the form `:tag-name` where:
 /// - Tag cannot start with underscore, dot, or dash
 /// - Tag can be up to 128 characters
-pub fn validate_oci_reference(
+pub(crate) fn validate_oci_reference(
     reference: &str,
 ) -> std::result::Result<(String, OciReferenceType), anyhow::Error> {
     // Digest references are of the form @{algorithm}:{digest}
@@ -63,7 +63,7 @@ pub fn validate_oci_reference(
 /// Configuration for fetching an OCI Bundle
 /// This struct does not change on router reloads - they are all sourced from CLI options.
 #[derive(Debug, Clone)]
-pub struct OciConfig {
+pub(crate) struct OciConfig {
     /// The Apollo key: `<YOUR_GRAPH_API_KEY>`
     pub apollo_key: String,
 

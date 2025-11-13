@@ -655,7 +655,9 @@ impl Executable {
                                                 ) {
                                                     Ok(yaml_value) => yaml_value
                                                         .get("supergraph")
-                                                        .and_then(|s| s.get("graph_artifact_reference"))
+                                                        .and_then(|s| {
+                                                            s.get("graph_artifact_reference")
+                                                        })
                                                         .and_then(|v| v.as_str())
                                                         .map(|s| !s.is_empty())
                                                         .unwrap_or(false),
@@ -920,16 +922,14 @@ Set the APOLLO_KEY environment variable:
 
         // Check uplink endpoint count for warning (only if not using graph_artifact_reference)
         // Note: Validation now happens in into_stream(), so we just check endpoint count here
-        if !using_graph_artifact_reference {
-            if let Some(ref endpoints_str) = opt.apollo_uplink_endpoints {
-                if let Ok(endpoints) = Opt::parse_endpoints(endpoints_str) {
-                    if endpoints.url_count() == 1 {
-                        tracing::warn!(
-                            "Only a single uplink endpoint is configured. We recommend specifying at least two endpoints so that a fallback exists."
-                        );
-                    }
-                }
-            }
+        if !using_graph_artifact_reference
+            && let Some(ref endpoints_str) = opt.apollo_uplink_endpoints
+            && let Ok(endpoints) = Opt::parse_endpoints(endpoints_str)
+            && endpoints.url_count() == 1
+        {
+            tracing::warn!(
+                "Only a single uplink endpoint is configured. We recommend specifying at least two endpoints so that a fallback exists."
+            );
         }
 
         // Build uplink config for builder (only if not using graph_artifact_reference)
