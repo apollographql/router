@@ -71,11 +71,7 @@ impl Override {
             }
             (_, Some(value)) => {
                 // Don't apply override if value is Null - this means no override was intended
-                if value.is_null() {
-                    None
-                } else {
-                    Some(value)
-                }
+                if value.is_null() { None } else { Some(value) }
             }
             _ => None,
         }

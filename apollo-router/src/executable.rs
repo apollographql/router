@@ -281,7 +281,6 @@ impl Opt {
         })
     }
 
-
     fn parse_endpoints(endpoints: &str) -> std::result::Result<Endpoints, anyhow::Error> {
         Ok(Endpoints::fallback(
             endpoints
@@ -648,21 +647,22 @@ impl Executable {
                             match &configuration {
                                 ConfigurationSource::File { path, .. } => {
                                     // Check if config file has graph_artifact_reference by parsing it early
-                                    let config_has_graph_artifact_ref = match std::fs::read_to_string(path) {
-                                        Ok(config_str) => {
-                                            match serde_yaml::from_str::<serde_yaml::Value>(&config_str) {
-                                                Ok(yaml_value) => {
-                                                    yaml_value
+                                    let config_has_graph_artifact_ref =
+                                        match std::fs::read_to_string(path) {
+                                            Ok(config_str) => {
+                                                match serde_yaml::from_str::<serde_yaml::Value>(
+                                                    &config_str,
+                                                ) {
+                                                    Ok(yaml_value) => yaml_value
                                                         .get("graph_artifact_reference")
                                                         .and_then(|v| v.as_str())
                                                         .map(|s| !s.is_empty())
-                                                        .unwrap_or(false)
+                                                        .unwrap_or(false),
+                                                    Err(_) => false,
                                                 }
-                                                Err(_) => false,
                                             }
-                                        }
-                                        Err(_) => false,
-                                    };
+                                            Err(_) => false,
+                                        };
 
                                     if config_has_graph_artifact_ref {
                                         // Config file has graph_artifact_reference - let config stream handle schema fetching
@@ -724,21 +724,22 @@ impl Executable {
                         match &configuration {
                             ConfigurationSource::File { path, .. } => {
                                 // Check if config file has graph_artifact_reference by parsing it early
-                                let config_has_graph_artifact_ref = match std::fs::read_to_string(path) {
-                                    Ok(config_str) => {
-                                        match serde_yaml::from_str::<serde_yaml::Value>(&config_str) {
-                                            Ok(yaml_value) => {
-                                                yaml_value
+                                let config_has_graph_artifact_ref =
+                                    match std::fs::read_to_string(path) {
+                                        Ok(config_str) => {
+                                            match serde_yaml::from_str::<serde_yaml::Value>(
+                                                &config_str,
+                                            ) {
+                                                Ok(yaml_value) => yaml_value
                                                     .get("graph_artifact_reference")
                                                     .and_then(|v| v.as_str())
                                                     .map(|s| !s.is_empty())
-                                                    .unwrap_or(false)
+                                                    .unwrap_or(false),
+                                                Err(_) => false,
                                             }
-                                            Err(_) => false,
                                         }
-                                    }
-                                    Err(_) => false,
-                                };
+                                        Err(_) => false,
+                                    };
 
                                 if config_has_graph_artifact_ref {
                                     // Config file has graph_artifact_reference - let config stream handle schema fetching
@@ -747,7 +748,10 @@ impl Executable {
                                     }
                                 } else {
                                     // Config file exists but doesn't have graph_artifact_reference - return error
-                                    return Err(anyhow!("{}", format_startup_error(&apollo_router_msg)));
+                                    return Err(anyhow!(
+                                        "{}",
+                                        format_startup_error(&apollo_router_msg)
+                                    ));
                                 }
                             }
                             _ => {
@@ -810,13 +814,11 @@ Set the APOLLO_KEY environment variable:
                             Ok(config_str) => {
                                 // Try to parse as YAML value to check for graph_artifact_reference
                                 match serde_yaml::from_str::<serde_yaml::Value>(&config_str) {
-                                    Ok(yaml_value) => {
-                                        yaml_value
-                                            .get("graph_artifact_reference")
-                                            .and_then(|v| v.as_str())
-                                            .map(|s| !s.is_empty())
-                                            .unwrap_or(false)
-                                    }
+                                    Ok(yaml_value) => yaml_value
+                                        .get("graph_artifact_reference")
+                                        .and_then(|v| v.as_str())
+                                        .map(|s| !s.is_empty())
+                                        .unwrap_or(false),
                                     Err(_) => {
                                         // If YAML parsing fails, let the config stream handle it
                                         // It will show appropriate errors during actual parsing
@@ -1050,5 +1052,4 @@ mod tests {
             "info,apollo_router::plugins=debug"
         );
     }
-
 }

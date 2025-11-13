@@ -336,7 +336,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 "Schema is empty, waiting for schema to be fetched".into(),
             ));
         }
-        
+
         let schema = Arc::new(
             Schema::parse_arc(schema_state.clone(), &configuration)
                 .map_err(|e| ServiceCreationError(e.to_string().into()))?,
