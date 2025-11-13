@@ -1774,10 +1774,7 @@ async fn test_redis_doesnt_use_replicas_in_standalone_mode() {
 
     let redis_monitor_output = redis_monitor.collect().await.namespaced(&namespace);
     assert_eq!(redis_monitor_output.num_nodes(), 1);
-    assert!(
-        redis_monitor_output.command_sent_to_any("GET"),
-        "{redis_monitor_output:?}"
-    );
+    assert!(redis_monitor_output.command_sent_to_any("GET"), "{redis_monitor_output:?}");
 
     // check that there were no I/O errors
     let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="query planner",otel_scope_name="apollo/router"}"#;
