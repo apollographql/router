@@ -7,3 +7,4 @@ supergraph:
         urls:
           - redis://localhost:6379
         ttl: 10s
+experimental_type_conditioned_fetching: false
