@@ -64,6 +64,7 @@ mod tests {
     fn test_connect_spec_counts() {
         let connector = Connector {
             spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Default::default(),
             id: ConnectId::new(
                 "subgraph_name".into(),
                 None,

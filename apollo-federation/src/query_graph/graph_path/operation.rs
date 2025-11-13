@@ -42,7 +42,6 @@ use crate::query_graph::graph_path::ExcludedDestinations;
 use crate::query_graph::graph_path::GraphPath;
 use crate::query_graph::graph_path::GraphPathTriggerVariant;
 use crate::query_graph::graph_path::IndirectPaths;
-use crate::query_graph::graph_path::OverrideId;
 use crate::query_graph::path_tree::Preference;
 use crate::query_plan::FetchDataPathElement;
 use crate::schema::ValidFederationSchema;
@@ -647,40 +646,6 @@ impl OpGraphPath {
         }
     }
 
-    pub(crate) fn mark_overriding(
-        &self,
-        others: &[SimultaneousPaths],
-    ) -> (OpGraphPath, Vec<SimultaneousPaths>) {
-        let new_id = OverrideId::new();
-        let mut new_own_path_ids = self.overriding_path_ids.as_ref().clone();
-        new_own_path_ids.insert(new_id);
-        let new_self = OpGraphPath {
-            own_path_ids: Arc::new(new_own_path_ids),
-            ..self.clone()
-        };
-        let new_others = others
-            .iter()
-            .map(|option| {
-                SimultaneousPaths(
-                    option
-                        .0
-                        .iter()
-                        .map(|path| {
-                            let mut new_overriding_path_ids =
-                                path.overriding_path_ids.as_ref().clone();
-                            new_overriding_path_ids.insert(new_id);
-                            Arc::new(OpGraphPath {
-                                overriding_path_ids: Arc::new(new_overriding_path_ids),
-                                ..path.as_ref().clone()
-                            })
-                        })
-                        .collect(),
-                )
-            })
-            .collect();
-        (new_self, new_others)
-    }
-
     pub(crate) fn subgraph_jumps(&self) -> Result<u32, FederationError> {
         self.subgraph_jumps_at_idx(0)
     }
@@ -841,8 +806,6 @@ impl OpGraphPath {
             edge_triggers: self.edge_triggers[0..prefix_length].to_vec(),
             edge_conditions: self.edge_conditions[0..prefix_length].to_vec(),
             last_subgraph_entering_edge_info: self.last_subgraph_entering_edge_info.clone(),
-            own_path_ids: self.own_path_ids.clone(),
-            overriding_path_ids: self.overriding_path_ids.clone(),
             runtime_types_of_tail: last_runtime_types,
             runtime_types_before_tail_if_last_is_cast: None,
             // TODO: The JS codebase copied this from the current path, which seems like a bug.
@@ -1481,12 +1444,6 @@ impl OpGraphPath {
                             check_cancellation,
                         )?;
                         if let Some(interface_path) = interface_path {
-                            let (interface_path, all_options) =
-                                if direct_path_overrides_type_explosion {
-                                    interface_path.mark_overriding(&all_options)
-                                } else {
-                                    (interface_path, all_options)
-                                };
                             let options = vec![interface_path.into()]
                                 .into_iter()
                                 .chain(all_options)

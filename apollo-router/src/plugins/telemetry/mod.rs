@@ -9,7 +9,6 @@ use std::time::Instant;
 
 use ::tracing::Span;
 use ::tracing::info_span;
-use axum_extra::headers::HeaderName;
 use config_new::Selectors;
 use config_new::cache::CacheInstruments;
 use config_new::connector::instruments::ConnectorInstruments;
@@ -21,6 +20,7 @@ use futures::future::BoxFuture;
 use futures::future::ready;
 use futures::stream::once;
 use http::HeaderMap;
+use http::HeaderName;
 use http::HeaderValue;
 use http::StatusCode;
 use http::header;
@@ -1954,8 +1954,8 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
 
-    use axum_extra::headers::HeaderName;
     use http::HeaderMap;
+    use http::HeaderName;
     use http::HeaderValue;
     use http::StatusCode;
     use http::header::CONTENT_TYPE;

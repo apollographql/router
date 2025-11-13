@@ -63,7 +63,6 @@ impl Merger {
             for (directive, referencers) in &subgraph.schema().referencers().directives {
                 let Some((source, import)) = features.directives_by_imported_name.get(directive)
                 else {
-                    trace!("Directive @{directive} has no @link, skipping");
                     continue;
                 };
                 if referencers.len() == 0 {

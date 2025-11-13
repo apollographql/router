@@ -193,18 +193,26 @@ async fn execute(
         .extensions()
         .with_lock(|lock| lock.get::<Arc<Mutex<ConnectorContext>>>().cloned());
 
-    let tasks = make_requests(request, &context, connector, debug)
-        .map_err(BoxError::from)?
-        .into_iter()
-        .map(move |request| {
-            let source_name = source_name.clone();
-            async move {
-                connector_request_service_factory
-                    .create(source_name)
-                    .oneshot(request)
-                    .await
-            }
-        });
+    let tasks = make_requests(
+        &request.operation,
+        &request.variables,
+        request.keys.as_ref(),
+        &context,
+        request.supergraph_request.clone(),
+        connector,
+        debug,
+    )
+    .map_err(BoxError::from)?
+    .into_iter()
+    .map(move |request| {
+        let source_name = source_name.clone();
+        async move {
+            connector_request_service_factory
+                .create(source_name)
+                .oneshot(request)
+                .await
+        }
+    });
 
     aggregate_responses(
         futures::future::try_join_all(tasks)
@@ -215,6 +223,7 @@ async fn execute(
                     .map(|response| response.mapped_response)
                     .collect()
             })?,
+        context,
     )
     .map_err(BoxError::from)
 }

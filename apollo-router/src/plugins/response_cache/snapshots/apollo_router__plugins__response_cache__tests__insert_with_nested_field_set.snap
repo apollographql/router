@@ -24,6 +24,7 @@ expression: cache_keys
       "maxAge": 86400,
       "public": true
     },
+    "shouldStore": true,
     "data": {
       "data": {
         "allProducts": [
@@ -39,7 +40,8 @@ expression: cache_keys
           }
         ]
       }
-    }
+    },
+    "warnings": []
   },
   {
     "key": "version:1.0:subgraph:users:type:User:representation:b41dfad85edaabac7bb681098e9b23e21b3b8b9b8b1849babbd5a1300af64b43:hash:ea28d2c7807fe753287c8c1f1e08f5fa62da4260ba4616dbd19e4d82936e0195:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
@@ -49,10 +51,10 @@ expression: cache_keys
     "kind": {
       "typename": "User",
       "entityKey": {
-        "email": "test@test.com",
         "country": {
           "a": "France"
-        }
+        },
+        "email": "test@test.com"
       }
     },
     "subgraphName": "users",
@@ -76,10 +78,12 @@ expression: cache_keys
       "maxAge": 86400,
       "public": true
     },
+    "shouldStore": true,
     "data": {
       "data": {
         "name": "test"
       }
-    }
+    },
+    "warnings": []
   }
 ]

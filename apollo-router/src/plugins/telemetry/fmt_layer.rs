@@ -840,6 +840,7 @@ connector:
                     max_requests: None,
                     entity_resolver: None,
                     spec: ConnectSpec::V0_1,
+                    schema_subtypes_map: Default::default(),
                     batch_settings: None,
                     request_headers: Default::default(),
                     response_headers: Default::default(),
@@ -879,6 +880,7 @@ connector:
                         },
                     ],
                     supergraph_request: Default::default(),
+                    operation: Default::default(),
                 };
                 let mut connector_events = event_config.new_connector_events();
                 connector_events.on_request(&connector_request);
@@ -1197,6 +1199,7 @@ subgraph:
                     max_requests: None,
                     entity_resolver: None,
                     spec: ConnectSpec::V0_1,
+                    schema_subtypes_map: Default::default(),
                     batch_settings: None,
                     request_headers: Default::default(),
                     response_headers: Default::default(),
@@ -1236,6 +1239,7 @@ subgraph:
                         },
                     ],
                     supergraph_request: Default::default(),
+                    operation: Default::default(),
                 };
                 let mut connector_events = event_config.new_connector_events();
                 connector_events.on_request(&connector_request);

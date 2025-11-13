@@ -17,6 +17,7 @@ use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::StringTemplate;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
+use itertools::Itertools;
 use lru::LruCache;
 use multimap::MultiMap;
 use opentelemetry::Array;
@@ -65,6 +66,10 @@ use crate::plugins::response_cache::cache_key::PrimaryCacheKeyEntity;
 use crate::plugins::response_cache::cache_key::PrimaryCacheKeyRoot;
 use crate::plugins::response_cache::cache_key::hash_additional_data;
 use crate::plugins::response_cache::cache_key::hash_query;
+use crate::plugins::response_cache::debugger::CacheEntryKind;
+use crate::plugins::response_cache::debugger::CacheKeyContext;
+use crate::plugins::response_cache::debugger::CacheKeySource;
+use crate::plugins::response_cache::debugger::CacheKeysContext;
 use crate::plugins::response_cache::storage;
 use crate::plugins::response_cache::storage::CacheEntry;
 use crate::plugins::response_cache::storage::CacheStorage;
@@ -75,6 +80,7 @@ use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::span_ext::SpanMarkError;
 use crate::query_planner::OperationKind;
 use crate::services::subgraph;
+use crate::services::subgraph::SubgraphRequestId;
 use crate::services::supergraph;
 use crate::spec::QueryHash;
 use crate::spec::TYPENAME;
@@ -367,7 +373,7 @@ impl PluginPrivate for ResponseCache {
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         let subgraph_ttl = self
             .subgraph_ttl(name)
-            .unwrap_or_else(|| Duration::from_secs(60 * 60 * 24)); // The unwrap should not happen because it's checked when creating the plugin
+            .unwrap_or_else(|| Duration::from_secs(60 * 60 * 24)); // The unwrap should not happen because it's checked when creating the plugin (except for tests)
         let subgraph_enabled = self.subgraph_enabled(name);
         let private_id = self.subgraphs.get(name).private_id.clone();
 
@@ -379,7 +385,7 @@ impl PluginPrivate for ResponseCache {
                 .map_response(move |response: subgraph::Response| {
                     update_cache_control(
                         &response.context,
-                        &CacheControl::new(response.response.headers(), None)
+                        &CacheControl::new(response.response.headers(), subgraph_ttl.into())
                             .ok()
                             .unwrap_or_else(CacheControl::no_store),
                     );
@@ -408,7 +414,7 @@ impl PluginPrivate for ResponseCache {
                 .map_response(move |response: subgraph::Response| {
                     update_cache_control(
                         &response.context,
-                        &CacheControl::new(response.response.headers(), None)
+                        &CacheControl::new(response.response.headers(), subgraph_ttl.into())
                             .ok()
                             .unwrap_or_else(CacheControl::no_store),
                     );
@@ -719,6 +725,7 @@ impl CacheService {
                 Err(err) => {
                     return Ok(subgraph::Response::builder()
                         .subgraph_name(request.subgraph_name)
+                        .id(request.id)
                         .context(request.context)
                         .error(
                             graphql::Error::builder()
@@ -781,7 +788,8 @@ impl CacheService {
                 .contains_key(REPRESENTATIONS);
             let resp = self.service.call(request).await?;
             if self.debug {
-                let cache_control = CacheControl::new(resp.response.headers(), None)?;
+                let cache_control =
+                    CacheControl::new(resp.response.headers(), self.subgraph_ttl.into())?;
                 let kind = if is_entity {
                     CacheEntryKind::Entity {
                         typename: "".to_string(),
@@ -795,18 +803,23 @@ impl CacheService {
                 resp.context.upsert::<_, CacheKeysContext>(
                     CONTEXT_DEBUG_CACHE_KEYS,
                     |mut val| {
-                        val.push(CacheKeyContext {
-                            key: "-".to_string(),
-                            invalidation_keys: vec![],
-                            kind,
-                            hashed_private_id: private_id.clone(),
-                            subgraph_name: self.name.clone(),
-                            subgraph_request: debug_subgraph_request.unwrap_or_default(),
-                            source: CacheKeySource::Subgraph,
-                            cache_control,
-                            data: serde_json_bytes::to_value(resp.response.body().clone())
-                                .unwrap_or_default(),
-                        });
+                        val.push(
+                            CacheKeyContext {
+                                key: "-".to_string(),
+                                invalidation_keys: vec![],
+                                kind,
+                                hashed_private_id: private_id.clone(),
+                                subgraph_name: self.name.clone(),
+                                subgraph_request: debug_subgraph_request.unwrap_or_default(),
+                                source: CacheKeySource::Subgraph,
+                                cache_control,
+                                data: serde_json_bytes::to_value(resp.response.body().clone())
+                                    .unwrap_or_default(),
+                                warnings: Vec::new(),
+                                should_store: false,
+                            }
+                            .update_metadata(),
+                        );
 
                         val
                     },
@@ -856,7 +869,7 @@ impl CacheService {
 
                         Ok(response)
                     }
-                    ControlFlow::Continue((request, mut root_cache_key, invalidation_keys)) => {
+                    ControlFlow::Continue((request, mut root_cache_key, mut invalidation_keys)) => {
                         cache_hit.insert("Query".to_string(), CacheHitMiss { hit: 0, miss: 1 });
                         let _ = request.context.insert(
                             CacheMetricContextKey::new(request.subgraph_name.clone()),
@@ -896,6 +909,26 @@ impl CacheService {
                                 CacheControl::no_store()
                             };
 
+                        // Support cache tags coming from subgraph response extensions
+                        if let Some(Value::Array(cache_tags)) = response
+                            .response
+                            .body()
+                            .extensions
+                            .get(GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS)
+                        {
+                            invalidation_keys.extend(
+                                cache_tags
+                                    .iter()
+                                    .filter_map(|v| v.as_str())
+                                    .map(|s| s.to_owned()),
+                            );
+                        }
+                        save_original_cache_control(
+                            response.id.clone(),
+                            &response.context,
+                            cache_control.clone(),
+                        );
+
                         if cache_control.private() {
                             // we did not know in advance that this was a query with a private scope, so we update the cache key
                             if !is_known_private {
@@ -915,7 +948,51 @@ impl CacheService {
                                 response.context.upsert::<_, CacheKeysContext>(
                                     CONTEXT_DEBUG_CACHE_KEYS,
                                     |mut val| {
-                                        val.push(CacheKeyContext {
+                                        val.push(
+                                            CacheKeyContext {
+                                                key: root_cache_key.clone(),
+                                                hashed_private_id: private_id.clone(),
+                                                invalidation_keys: invalidation_keys
+                                                    .clone()
+                                                    .into_iter()
+                                                    .filter(|k| {
+                                                        !k.starts_with(INTERNAL_CACHE_TAG_PREFIX)
+                                                    })
+                                                    .collect(),
+                                                kind: CacheEntryKind::RootFields {
+                                                    root_fields: root_operation_fields,
+                                                },
+                                                subgraph_name: self.name.clone(),
+                                                subgraph_request: debug_subgraph_request
+                                                    .unwrap_or_default(),
+                                                source: CacheKeySource::Subgraph,
+                                                cache_control: cache_control.clone(),
+                                                data: serde_json_bytes::to_value(
+                                                    response.response.body().clone(),
+                                                )
+                                                .unwrap_or_default(),
+                                                warnings: Vec::new(),
+                                                should_store: false,
+                                            }
+                                            .update_metadata(),
+                                        );
+
+                                        val
+                                    },
+                                )?;
+                            }
+
+                            if private_id.is_none() {
+                                // the response has a private scope but we don't have a way to differentiate users, so we do not store the response in cache
+                                // We don't need to fill the context with this cache key as it will never be cached
+                                return Ok(response);
+                            }
+                        } else if self.debug {
+                            response.context.upsert::<_, CacheKeysContext>(
+                                CONTEXT_DEBUG_CACHE_KEYS,
+                                |mut val| {
+                                    val.push(
+                                        CacheKeyContext {
                                             key: root_cache_key.clone(),
                                             hashed_private_id: private_id.clone(),
                                             invalidation_keys: invalidation_keys
@@ -937,43 +1014,11 @@ impl CacheService {
                                                 response.response.body().clone(),
                                             )
                                             .unwrap_or_default(),
-                                        });
-
-                                        val
-                                    },
-                                )?;
-                            }
-
-                            if private_id.is_none() {
-                                // the response has a private scope but we don't have a way to differentiate users, so we do not store the response in cache
-                                // We don't need to fill the context with this cache key as it will never be cached
-                                return Ok(response);
-                            }
-                        } else if self.debug {
-                            response.context.upsert::<_, CacheKeysContext>(
-                                CONTEXT_DEBUG_CACHE_KEYS,
-                                |mut val| {
-                                    val.push(CacheKeyContext {
-                                        key: root_cache_key.clone(),
-                                        hashed_private_id: private_id.clone(),
-                                        invalidation_keys: invalidation_keys
-                                            .clone()
-                                            .into_iter()
-                                            .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
-                                            .collect(),
-                                        kind: CacheEntryKind::RootFields {
-                                            root_fields: root_operation_fields,
-                                        },
-                                        subgraph_name: self.name.clone(),
-                                        subgraph_request: debug_subgraph_request
-                                            .unwrap_or_default(),
-                                        source: CacheKeySource::Subgraph,
-                                        cache_control: cache_control.clone(),
-                                        data: serde_json_bytes::to_value(
-                                            response.response.body().clone(),
-                                        )
-                                        .unwrap_or_default(),
-                                    });
+                                            warnings: Vec::new(),
+                                            should_store: true,
+                                        }
+                                        .update_metadata(),
+                                    );
 
                                     val
                                 },
@@ -1046,7 +1091,9 @@ impl CacheService {
                                 data: serde_json_bytes::json!({
                                     "data": serde_json_bytes::to_value(cache_entry.data.clone()).unwrap_or_default()
                                 }),
-                            })
+                                warnings: Vec::new(),
+                                should_store: false,
+                            }.update_metadata())
                         });
                         request.context.upsert::<_, CacheKeysContext>(
                             CONTEXT_DEBUG_CACHE_KEYS,
@@ -1057,7 +1104,7 @@ impl CacheService {
                             },
                         )?;
                     }
-
+                    let req_id = request.id.clone();
                     let mut response = match self.service.call(request).await {
                         Ok(response) => response,
                         Err(e) => {
@@ -1090,6 +1137,7 @@ impl CacheService {
                             let mut response = subgraph::Response::builder()
                                 .context(context)
                                 .data(Value::Object(data))
+                                .id(req_id)
                                 .errors(new_errors)
                                 .subgraph_name(self.name)
                                 .extensions(Object::new())
@@ -1109,6 +1157,12 @@ impl CacheService {
                     } else {
                         CacheControl::no_store()
                     };
+
+                    save_original_cache_control(
+                        response.id.clone(),
+                        &response.context,
+                        cache_control.clone(),
+                    );
 
                     if let Some(control_from_cached) = cache_result.1 {
                         cache_control = cache_control.merge(&control_from_cached);
@@ -1189,6 +1243,8 @@ async fn cache_lookup_root(
         Ok(value) => {
             if value.control.can_use() {
                 let control = value.control.clone();
+                // Keep original cache control for every subgraph request (useful for telemetry)
+                save_original_cache_control(request.id.clone(), &request.context, control.clone());
                 update_cache_control(&request.context, &control);
                 if debug {
                     let root_operation_fields: Vec<String> = request
@@ -1210,23 +1266,33 @@ async fn cache_lookup_root(
                     request.context.upsert::<_, CacheKeysContext>(
                         CONTEXT_DEBUG_CACHE_KEYS,
                         |mut val| {
-                            val.push(CacheKeyContext {
-                                key: value.key.clone(),
-                                hashed_private_id: private_id.map(ToString::to_string),
-                                invalidation_keys: invalidation_keys
-                                    .clone()
-                                    .into_iter()
-                                    .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
-                                    .collect(),
-                                kind: CacheEntryKind::RootFields {
-                                    root_fields: root_operation_fields,
-                                },
-                                subgraph_name: request.subgraph_name.clone(),
-                                subgraph_request: request.subgraph_request.body().clone(),
-                                source: CacheKeySource::Cache,
-                                cache_control: value.control.clone(),
-                                data: serde_json_bytes::json!({"data": value.data.clone()}),
-                            });
+                            val.push(
+                                CacheKeyContext {
+                                    key: value.key.clone(),
+                                    hashed_private_id: private_id.map(ToString::to_string),
+                                    invalidation_keys: value
+                                        .cache_tags
+                                        .map(|ct| {
+                                            ct.into_iter()
+                                                .filter(|k| {
+                                                    !k.starts_with(INTERNAL_CACHE_TAG_PREFIX)
+                                                })
+                                                .collect::<Vec<_>>()
+                                        })
+                                        .unwrap_or_default(),
+                                    kind: CacheEntryKind::RootFields {
+                                        root_fields: root_operation_fields,
+                                    },
+                                    subgraph_name: request.subgraph_name.clone(),
+                                    subgraph_request: request.subgraph_request.body().clone(),
+                                    source: CacheKeySource::Cache,
+                                    cache_control: value.control.clone(),
+                                    data: serde_json_bytes::json!({"data": value.data.clone()}),
+                                    warnings: Vec::new(),
+                                    should_store: false,
+                                }
+                                .update_metadata(),
+                            );
 
                             val
                         },
@@ -1240,6 +1306,7 @@ async fn cache_lookup_root(
                 let mut response = subgraph::Response::builder()
                     .data(value.data)
                     .extensions(Object::new())
+                    .id(request.id)
                     .context(request.context)
                     .subgraph_name(request.subgraph_name.clone())
                     .build();
@@ -1461,6 +1528,7 @@ async fn cache_lookup_entities(
     // remove from representations the entities we already obtained from the cache
     let (new_representations, cache_result, cache_control) = filter_representations(
         &name,
+        &request.id,
         representations,
         cache_metadata,
         cache_result,
@@ -1485,24 +1553,32 @@ async fn cache_lookup_entities(
     } else {
         if debug {
             let debug_cache_keys_ctx = cache_result.iter().filter_map(|ir| {
-                ir.cache_entry.as_ref().map(|cache_entry| CacheKeyContext {
-                    key: ir.key.clone(),
-                    hashed_private_id: private_id.map(ToString::to_string),
-                    invalidation_keys: ir
-                        .invalidation_keys
-                        .clone()
-                        .into_iter()
-                        .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
-                        .collect(),
-                    kind: CacheEntryKind::Entity {
-                        typename: ir.typename.clone(),
-                        entity_key: ir.entity_key.clone().unwrap_or_default(),
-                    },
-                    subgraph_name: name.clone(),
-                    subgraph_request: request.subgraph_request.body().clone(),
-                    source: CacheKeySource::Cache,
-                    cache_control: cache_entry.control.clone(),
-                    data: serde_json_bytes::json!({"data": cache_entry.data.clone()}),
+                ir.cache_entry.as_ref().map(|cache_entry| {
+                    CacheKeyContext {
+                        key: ir.key.clone(),
+                        hashed_private_id: private_id.map(ToString::to_string),
+                        invalidation_keys: cache_entry
+                            .cache_tags
+                            .clone()
+                            .map(|ct| {
+                                ct.into_iter()
+                                    .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default(),
+                        kind: CacheEntryKind::Entity {
+                            typename: ir.typename.clone(),
+                            entity_key: ir.entity_key.clone().unwrap_or_default(),
+                        },
+                        subgraph_name: name.clone(),
+                        subgraph_request: request.subgraph_request.body().clone(),
+                        source: CacheKeySource::Cache,
+                        cache_control: cache_entry.control.clone(),
+                        data: serde_json_bytes::json!({"data": cache_entry.data.clone()}),
+                        warnings: Vec::new(),
+                        should_store: false,
+                    }
+                    .update_metadata()
                 })
             });
             request.context.upsert::<_, CacheKeysContext>(
@@ -1529,6 +1605,7 @@ async fn cache_lookup_entities(
 
         let mut response = subgraph::Response::builder()
             .data(data)
+            .id(request.id.clone())
             .extensions(Object::new())
             .subgraph_name(request.subgraph_name)
             .context(request.context)
@@ -1556,14 +1633,26 @@ fn update_cache_control(context: &Context, cache_control: &CacheControl) {
     })
 }
 
+// Keep original cache control for every subgraph request (useful for telemetry)
+fn save_original_cache_control(
+    req_id: SubgraphRequestId,
+    context: &Context,
+    cache_control: CacheControl,
+) {
+    context.extensions().with_lock(|l| {
+        l.get_or_default_mut::<CacheControls>()
+            .insert(req_id, cache_control)
+    });
+}
+
 async fn cache_store_root_from_response(
     cache: Storage,
     default_subgraph_ttl: Duration,
     response: &subgraph::Response,
     cache_control: CacheControl,
     cache_key: String,
-    mut invalidation_keys: Vec<String>,
-    _debug: bool,
+    invalidation_keys: Vec<String>,
+    debug: bool,
 ) -> Result<(), BoxError> {
     if let Some(data) = response.response.body().data.as_ref() {
         let ttl = cache_control
@@ -1572,27 +1661,13 @@ async fn cache_store_root_from_response(
             .unwrap_or(default_subgraph_ttl);
 
         if response.response.body().errors.is_empty() && cache_control.should_store() {
-            // Support surrogate keys coming from subgraph response extensions
-            if let Some(Value::Array(cache_tags)) = response
-                .response
-                .body()
-                .extensions
-                .get(GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS)
-            {
-                invalidation_keys.extend(
-                    cache_tags
-                        .iter()
-                        .filter_map(|v| v.as_str())
-                        .map(|s| s.to_owned()),
-                );
-            }
-
             let document = Document {
                 key: cache_key,
                 data: data.clone(),
                 control: cache_control,
                 invalidation_keys,
                 expire: ttl,
+                debug,
             };
 
             let subgraph_name = response.subgraph_name.clone();
@@ -1633,13 +1708,14 @@ async fn cache_store_entities_from_response(
         // if the scope is private but we do not have a way to differentiate users, do not store anything in the cache
         let should_cache_private = !cache_control.private() || private_id.is_some();
 
+        // We check it's not known as a private query because if it's known as a private query that means the private id is already part of the hash
         let update_key_private = if !is_known_private && cache_control.private() {
-            private_id
+            private_id.clone()
         } else {
             None
         };
 
-        // Support surrogate keys coming from subgraph extensions
+        // Support cache tags coming from subgraph extensions
         let per_entity_surrogate_keys = response
             .response
             .body()
@@ -1660,6 +1736,7 @@ async fn cache_store_entities_from_response(
             default_subgraph_ttl,
             cache_control,
             &mut result_from_cache,
+            private_id,
             update_key_private,
             should_cache_private,
             &response.subgraph_name,
@@ -1742,8 +1819,12 @@ fn extract_cache_keys(
     // hash the query and operation name
     let query_hash = hash_query(&request.query_hash);
     // hash more data like variables and authorization status
-    let additional_data_hash =
-        hash_additional_data(request.subgraph_request.body_mut(), context, authorization);
+    let additional_data_hash = hash_additional_data(
+        subgraph_name,
+        request.subgraph_request.body_mut(),
+        context,
+        authorization,
+    );
 
     let representations = request
         .subgraph_request
@@ -1786,14 +1867,15 @@ fn extract_cache_keys(
 
         // Get the entity key from `representation`, only needed in debug for the cache debugger
         let representation_entity_key = if debug {
-            get_matching_key_field_set(
+            let selection_set = find_matching_key_field_set(
                 representation,
                 typename,
                 subgraph_name,
                 &supergraph_schema,
                 subgraph_enums,
-            )?
-            .into()
+            )?;
+
+            get_entity_key_from_selection_set(representation, &selection_set).into()
         } else {
             None
         };
@@ -1920,30 +2002,25 @@ fn get_invalidation_entity_keys_from_schema(
     Ok(invalidation_cache_keys)
 }
 
-fn get_matching_key_field_set(
+pub(in crate::plugins) fn find_matching_key_field_set(
     representation: &serde_json_bytes::Map<ByteString, Value>,
     typename: &str,
     subgraph_name: &str,
     supergraph_schema: &Valid<Schema>,
     subgraph_enums: &HashMap<String, String>,
-) -> Result<serde_json_bytes::Map<ByteString, Value>, FetchError> {
+) -> Result<apollo_compiler::executable::SelectionSet, FetchError> {
     // find an entry in the `key_field_sets` that matches the `representation`.
-    let matched_key_field_set =
-        collect_key_field_sets(typename, subgraph_name, supergraph_schema, subgraph_enums)?
+    collect_key_field_sets(typename, subgraph_name, supergraph_schema, subgraph_enums)?
         .find(|field_set| {
             matches_selection_set(representation, &field_set.selection_set)
         })
+        .map(|field_set| field_set.selection_set)
         .ok_or_else(|| {
             tracing::trace!("representation does not match any key field set for typename {typename} in subgraph {subgraph_name}");
             FetchError::MalformedRequest {
                 reason: format!("unexpected critical internal error for typename {typename} in subgraph {subgraph_name}"),
             }
-        })?;
-    get_selection_set(representation, &matched_key_field_set.selection_set).ok_or_else(|| {
-        FetchError::MalformedRequest {
-            reason: format!("representation does not match the field set {matched_key_field_set}"),
-        }
-    })
+        })
 }
 
 // Collect `@key` field sets on a `typename` in a `subgraph_name`.
@@ -1979,7 +2056,7 @@ fn collect_key_field_sets(
                                 supergraph_schema,
                                 NamedType::new(typename).ok()?,
                                 arg,
-                                "response_caching.graphql",
+                                "entity_caching.graphql",
                             )
                             .ok()
                     })
@@ -1989,30 +2066,84 @@ fn collect_key_field_sets(
         }))
 }
 
-// Does the shape of `representation`  match the `selection_set`?
-fn matches_selection_set(
+/// Whether the entity, represented as JSON, matches the parsed @key fields (`selection_set`)
+/// * This function mirrors `get_entity_key_from_selection_set` and make sure the representation
+///   matches the the shape of `selection_set`.
+/// * This function and `get_entity_key_from_selection_set` are separate because this is called for
+///   multiple possible `@key` fields to find the matching one, while
+///   `get_entity_key_from_selection_set` is only called once the matching `@key` fields is found.
+pub(in crate::plugins) fn matches_selection_set(
+    // the JSON representation of the entity data
     representation: &serde_json_bytes::Map<ByteString, Value>,
+    // the parsed @key fields to use for matching
     selection_set: &apollo_compiler::executable::SelectionSet,
 ) -> bool {
     for field in selection_set.root_fields(&Default::default()) {
-        // Note: field sets can't have aliases.
+        // the heart of finding the match: we take the field from the selection
+        // set and try to find it in the entity representation;
         let Some(value) = representation.get(field.name.as_str()) else {
             return false;
         };
 
+        // This field selection is not expecting any subdata.
         if field.selection_set.is_empty() {
-            // `value` must be a scalar.
-            if matches!(value, Value::Object(_)) {
+            // Scalar (or array of scalars) fields are always a match.
+            if !is_scalar_or_array_of_scalar(value) {
+                // Mismatch: Scalar value was expected.
                 return false;
             }
             continue;
         }
 
-        // Check the sub-selection set.
-        let Value::Object(sub_value) = value else {
-            return false;
+        // The field selection is expecting a subdata. See if given `value` matches the shape of
+        // its sub-selection set.
+        let result = match value {
+            Value::Object(obj) => {
+                // Recurse into object value
+                matches_selection_set(obj, &field.selection_set)
+            }
+
+            Value::Array(arr) => {
+                // Recurse into array values
+                matches_array_of_objects(arr, &field.selection_set)
+            }
+
+            // scalar values
+            _other => {
+                // Mismatch: object or array value was expected.
+                false
+            }
         };
-        if !matches_selection_set(sub_value, &field.selection_set) {
+        if !result {
+            return false;
+        }
+    }
+    true
+}
+
+fn is_scalar_or_array_of_scalar(value: &Value) -> bool {
+    match value {
+        Value::Object(_) => false,
+        Value::Array(arr) => arr.iter().all(is_scalar_or_array_of_scalar),
+        _ => true,
+    }
+}
+
+/// See if all array items match the shape of the `selection_set`.
+/// * Note: The array can be multi-dimensional. (the @key field set can match any levels of nested
+///   arrays)
+/// * Precondition: `selection_set` must be non-empty.
+fn matches_array_of_objects(
+    arr: &[Value],
+    selection_set: &apollo_compiler::executable::SelectionSet,
+) -> bool {
+    for item in arr.iter() {
+        let result = match item {
+            Value::Object(obj) => matches_selection_set(obj, selection_set),
+            Value::Array(arr) => matches_array_of_objects(arr, selection_set),
+            _other => false,
+        };
+        if !result {
             return false;
         }
     }
@@ -2021,36 +2152,73 @@ fn matches_selection_set(
 
 // Get the selection set from `representation` and returns the value corresponding to it.
 // - Returns None if the representation doesn't match the selection set.
-fn get_selection_set(
+// Note: This function mirrors `hash_representation_inner` in cache/entity.rs.
+fn get_entity_key_from_selection_set(
     representation: &serde_json_bytes::Map<ByteString, Value>,
     selection_set: &apollo_compiler::executable::SelectionSet,
-) -> Option<serde_json_bytes::Map<ByteString, Value>> {
-    let mut result = serde_json_bytes::Map::new();
-    for field in selection_set.root_fields(&Default::default()) {
-        // Note: field sets can't have aliases.
-        if field.selection_set.is_empty() {
-            let value = representation.get(field.name.as_str())?;
-            // `value` must be a scalar.
-            if matches!(value, Value::Object(_)) {
-                return None;
-            }
-            // Move the scalar field to the `result`.
-            result.insert(ByteString::from(field.name.as_str()), value.clone());
-            continue;
-        } else {
-            let value = representation.get(field.name.as_str())?;
-            // Update the sub-selection set.
-            let Value::Object(sub_value) = value else {
-                return None;
+) -> serde_json_bytes::Map<ByteString, Value> {
+    fn traverse_object(
+        state: &mut serde_json_bytes::Map<ByteString, Value>,
+        fields: &serde_json_bytes::Map<ByteString, Value>,
+        selection_set: &apollo_compiler::executable::SelectionSet,
+    ) {
+        let default_document = Default::default();
+        let sorted_selections = selection_set
+            .root_fields(&default_document)
+            .sorted_by(|a, b| a.name.cmp(&b.name));
+        for field in sorted_selections {
+            let key = field.name.as_str();
+            let Some(val) = fields.get(key) else {
+                continue;
             };
-            let removed = get_selection_set(sub_value, &field.selection_set)?;
-            result.insert(
-                ByteString::from(field.name.as_str()),
-                Value::Object(removed),
-            );
+            match val {
+                serde_json_bytes::Value::Object(obj) => {
+                    let mut obj_state = serde_json_bytes::Map::new();
+                    traverse_object(&mut obj_state, obj, &field.selection_set);
+                    state.insert(ByteString::from(key), Value::Object(obj_state));
+                }
+                Value::Array(arr) => {
+                    let mut arr_state = Vec::new();
+                    traverse_array(&mut arr_state, arr, &field.selection_set);
+                    state.insert(ByteString::from(key), Value::Array(arr_state));
+                }
+                // scalar value
+                val => {
+                    state.insert(ByteString::from(key), val.clone());
+                }
+            }
         }
     }
-    Some(result)
+
+    fn traverse_array(
+        state: &mut Vec<Value>,
+        items: &[Value],
+        selection_set: &apollo_compiler::executable::SelectionSet,
+    ) {
+        items.iter().for_each(|v| {
+            match v {
+                serde_json_bytes::Value::Object(obj) => {
+                    let mut obj_state = serde_json_bytes::Map::new();
+                    traverse_object(&mut obj_state, obj, selection_set);
+                    state.push(Value::Object(obj_state));
+                }
+                Value::Array(arr) => {
+                    let mut arr_state = Vec::new();
+                    traverse_array(&mut arr_state, arr, selection_set);
+                    state.push(Value::Array(arr_state));
+                }
+                // scalar value
+                _ => {
+                    state.push(v.clone());
+                }
+            }
+        });
+    }
+
+    let mut state = serde_json_bytes::Map::new();
+    traverse_object(&mut state, representation, selection_set);
+
+    state
 }
 
 /// represents the result of a cache lookup for an entity type and key
@@ -2067,6 +2235,7 @@ struct IntermediateResult {
 #[allow(clippy::type_complexity)]
 fn filter_representations(
     subgraph_name: &str,
+    subgraph_req_id: &SubgraphRequestId,
     representations: &mut Vec<Value>,
     // keys: Vec<(String, Vec<String>)>,
     keys: Vec<CacheMetadata>,
@@ -2077,6 +2246,8 @@ fn filter_representations(
     let mut result = Vec::new();
     let mut cache_hit: HashMap<String, CacheHitMiss> = HashMap::new();
     let mut cache_control = None;
+    // Useful for telemetry
+    let mut non_updated_cache_control = None;
 
     for (
         (
@@ -2122,6 +2293,10 @@ fn filter_representations(
                     None => cache_control = Some(entry.control.clone()),
                     Some(c) => *c = c.merge(&entry.control),
                 }
+                match non_updated_cache_control.as_mut() {
+                    None => non_updated_cache_control = Some(entry.control.clone()),
+                    Some(c) => *c = c.merge_without_update(&entry.control),
+                }
             }
         }
 
@@ -2132,6 +2307,10 @@ fn filter_representations(
             cache_entry,
             entity_key,
         });
+    }
+
+    if let Some(non_updated_cache_control) = non_updated_cache_control {
+        save_original_cache_control(subgraph_req_id.clone(), context, non_updated_cache_control);
     }
 
     let _ = context.insert(
@@ -2151,6 +2330,8 @@ async fn insert_entities_in_result(
     default_subgraph_ttl: Duration,
     cache_control: CacheControl,
     result: &mut Vec<IntermediateResult>,
+    // The original private id fetched from context and hashed to put it in the debug entry
+    private_id_for_dbg: Option<String>,
     update_key_private: Option<String>,
     should_cache_private: bool,
     subgraph_name: &str,
@@ -2159,6 +2340,7 @@ async fn insert_entities_in_result(
     // Only Some if debug is enabled
     subgraph_request: Option<graphql::Request>,
 ) -> Result<(Vec<Value>, Vec<Error>), BoxError> {
+    let debug = subgraph_request.is_some();
     let ttl = cache_control
         .ttl()
         .map(Duration::from_secs)
@@ -2227,38 +2409,45 @@ async fn insert_entities_in_result(
                     has_errors = true;
                 }
 
+                if let Some(Value::Array(keys)) = specific_surrogate_keys {
+                    invalidation_keys
+                        .extend(keys.iter().filter_map(|v| v.as_str()).map(|s| s.to_owned()));
+                }
+
                 // Only in debug mode
                 if let Some(subgraph_request) = &subgraph_request {
-                    debug_ctx_entries.push(CacheKeyContext {
-                        key: key.clone(),
-                        hashed_private_id: update_key_private.clone(),
-                        invalidation_keys: invalidation_keys
-                            .clone()
-                            .into_iter()
-                            .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
-                            .collect(),
-                        kind: CacheEntryKind::Entity {
-                            typename: typename.clone(),
-                            entity_key: entity_key.clone().unwrap_or_default(),
-                        },
-                        subgraph_name: subgraph_name.to_string(),
-                        subgraph_request: subgraph_request.clone(),
-                        source: CacheKeySource::Subgraph,
-                        cache_control: cache_control.clone(),
-                        data: serde_json_bytes::json!({"data": value.clone()}),
-                    });
+                    debug_ctx_entries.push(
+                        CacheKeyContext {
+                            key: key.clone(),
+                            hashed_private_id: private_id_for_dbg.clone(),
+                            invalidation_keys: invalidation_keys
+                                .clone()
+                                .into_iter()
+                                .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
+                                .collect(),
+                            kind: CacheEntryKind::Entity {
+                                typename: typename.clone(),
+                                entity_key: entity_key.clone().unwrap_or_default(),
+                            },
+                            subgraph_name: subgraph_name.to_string(),
+                            subgraph_request: subgraph_request.clone(),
+                            source: CacheKeySource::Subgraph,
+                            cache_control: cache_control.clone(),
+                            data: serde_json_bytes::json!({"data": value.clone()}),
+                            warnings: Vec::new(),
+                            should_store: false,
+                        }
+                        .update_metadata(),
+                    );
                 }
                 if !has_errors && cache_control.should_store() && should_cache_private {
-                    if let Some(Value::Array(keys)) = specific_surrogate_keys {
-                        invalidation_keys
-                            .extend(keys.iter().filter_map(|v| v.as_str()).map(|s| s.to_owned()));
-                    }
                     to_insert.push(Document {
                         control: cache_control.clone(),
                         data: value.clone(),
                         key,
                         invalidation_keys,
                         expire: ttl,
+                        debug,
                     });
                 }
 
@@ -2324,67 +2513,6 @@ fn assemble_response_from_errors(
     (new_entities, new_errors)
 }
 
-pub(crate) type CacheKeysContext = Vec<CacheKeyContext>;
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct CacheKeyContext {
-    pub(super) key: String,
-    pub(super) invalidation_keys: Vec<String>,
-    pub(super) kind: CacheEntryKind,
-    pub(super) subgraph_name: String,
-    pub(super) subgraph_request: graphql::Request,
-    pub(super) source: CacheKeySource,
-    pub(super) cache_control: CacheControl,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) hashed_private_id: Option<String>,
-    pub(super) data: serde_json_bytes::Value,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[cfg_attr(test, derive(PartialEq, Eq, Hash))]
-#[serde(rename_all = "camelCase", untagged)]
-pub(crate) enum CacheEntryKind {
-    Entity {
-        typename: String,
-        #[serde(rename = "entityKey")]
-        entity_key: Object,
-    },
-    RootFields {
-        #[serde(rename = "rootFields")]
-        root_fields: Vec<String>,
-    },
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[cfg_attr(test, derive(PartialEq, Eq, Hash))]
-#[serde(rename_all = "camelCase")]
-pub(crate) enum CacheKeySource {
-    /// Data fetched from subgraph
-    Subgraph,
-    /// Data fetched from cache
-    Cache,
-}
-
-#[cfg(test)]
-impl PartialOrd for CacheKeySource {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-#[cfg(test)]
-impl Ord for CacheKeySource {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        match (self, other) {
-            (CacheKeySource::Subgraph, CacheKeySource::Subgraph) => std::cmp::Ordering::Equal,
-            (CacheKeySource::Subgraph, CacheKeySource::Cache) => std::cmp::Ordering::Greater,
-            (CacheKeySource::Cache, CacheKeySource::Subgraph) => std::cmp::Ordering::Less,
-            (CacheKeySource::Cache, CacheKeySource::Cache) => std::cmp::Ordering::Equal,
-        }
-    }
-}
-
 async fn connect_or_spawn_reconnection_task(
     config: storage::redis::Config,
     storage: Arc<OnceLock<Storage>>,
@@ -2440,23 +2568,33 @@ async fn reattempt_connection(
     }
 }
 
+pub(crate) type CacheControls = HashMap<SubgraphRequestId, CacheControl>;
+
 #[cfg(all(
     test,
     any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
 ))]
 mod tests {
+    use std::collections::HashMap;
     use std::sync::Arc;
     use std::time::Duration;
 
     use apollo_compiler::Schema;
+    use apollo_compiler::parser::Parser;
+    use serde_json_bytes::json;
     use tokio::sync::broadcast;
 
     use super::Subgraph;
     use super::Ttl;
     use crate::configuration::subgraph::SubgraphConfiguration;
     use crate::plugins::response_cache::plugin::ResponseCache;
+    use crate::plugins::response_cache::plugin::get_entity_key_from_selection_set;
+    use crate::plugins::response_cache::plugin::get_invalidation_root_keys_from_schema;
+    use crate::plugins::response_cache::plugin::matches_selection_set;
     use crate::plugins::response_cache::storage::redis::Config;
     use crate::plugins::response_cache::storage::redis::Storage;
+    use crate::services::OperationKind;
+    use crate::services::subgraph;
 
     const SCHEMA: &str = include_str!("../../testdata/orga_supergraph_cache_key.graphql");
 
@@ -2585,6 +2723,490 @@ mod tests {
         assert_eq!(
             response_cache.subgraph_ttl("archive"),
             Some(Duration::from_millis(5000))
+        );
+    }
+
+    #[test]
+    fn test_matches_selection_set_handles_arrays() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                locale: String!
+                lists: [List!]!
+                list: [List!]!
+            }
+            type List {
+                id: ID!
+                date: Int!
+                quantity: Int!
+                location: String!
+            }
+        "#;
+        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity location } list { id date quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        // Test with complex nested array structure
+        let representation = json!({
+            "id": "TEST123",
+            "locale": "en_US",
+            "lists": [
+                {
+                    "id": "LIST1",
+                    "date": 20240101,
+                    "quantity": 50,
+                    "location": "WAREHOUSE_A"
+                }
+            ],
+            "list": [
+                {
+                    "id": "LIST2",
+                    "date": 20240101,
+                    "quantity": 100,
+                    "location": "WAREHOUSE_A"
+                },
+                {
+                    "id": "LIST3",
+                    "date": 20240102,
+                    "quantity": 75,
+                    "location": "WAREHOUSE_B"
+                }
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        assert!(
+            matches_selection_set(&representation, &field_set.selection_set),
+            "complex nested arrays should match"
+        );
+    }
+
+    #[test]
+    fn test_matches_selection_subset_handles_arrays() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                locale: String!
+                lists: [List!]!
+                list: [List!]!
+            }
+            type List {
+                id: ID!
+                date: Int!
+                quantity: Int!
+                location: String!
+            }
+        "#;
+        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity location } list { id date quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        // Test with complex nested array structure
+        let representation = json!({
+            "id": "TEST123",
+            "locale": "en_US",
+            "lists": [
+                {
+                    "id": "LIST1",
+                    "date": 20240101,
+                    "quantity": 50
+                }
+            ],
+            "list": [
+                {
+                    "id": "LIST2",
+                    "date": 20240101,
+                    "quantity": 100,
+                    "location": "WAREHOUSE_A"
+                },
+                {
+                    "id": "LIST3",
+                    "date": 20240102,
+                    "quantity": 75,
+                    "location": "WAREHOUSE_B"
+                }
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        assert!(!matches_selection_set(
+            &representation,
+            &field_set.selection_set
+        ),);
+
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity } list { id date quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        assert!(
+            matches_selection_set(&representation, &field_set.selection_set),
+            "complex nested arrays should match"
+        );
+    }
+
+    #[test]
+    fn test_take_selection_set_handles_arrays() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                locale: String!
+                lists: [List!]!
+                list: [List!]!
+            }
+            type List {
+                id: ID!
+                date: Int!
+                quantity: Int!
+                location: String!
+            }
+        "#;
+        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity location } list { id date quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        // Test with complex nested array structure
+        let representation = json!({
+            "id": "TEST123",
+            "locale": "en_US",
+            "lists": [
+                {
+                    "id": "LIST1",
+                    "date": 20240101,
+                    "quantity": 50,
+                    "location": "WAREHOUSE_A"
+                }
+            ],
+            "list": [
+                {
+                    "id": "LIST2",
+                    "date": 20240101,
+                    "quantity": 100,
+                    "location": "WAREHOUSE_A"
+                },
+                {
+                    "id": "LIST3",
+                    "date": 20240102,
+                    "quantity": 75,
+                    "location": "WAREHOUSE_B"
+                }
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        assert!(matches_selection_set(
+            &representation,
+            &field_set.selection_set
+        ));
+        let entity_key =
+            get_entity_key_from_selection_set(&representation, &field_set.selection_set);
+        assert_eq!(
+            &entity_key,
+            json!({
+                "id": "TEST123",
+                "locale": "en_US",
+                "lists": [
+                    {
+                        "id": "LIST1",
+                        "date": 20240101,
+                        "quantity": 50,
+                        "location": "WAREHOUSE_A"
+                    }
+                ],
+                "list": [
+                    {
+                        "id": "LIST2",
+                        "date": 20240101,
+                        "quantity": 100,
+                        "location": "WAREHOUSE_A"
+                    },
+                    {
+                        "id": "LIST3",
+                        "date": 20240102,
+                        "quantity": 75,
+                        "location": "WAREHOUSE_B"
+                    }
+                ]
+            })
+            .as_object()
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn test_take_selection_subset_handles_arrays() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            type Query {
+                test: Test
+            }
+            type Test {
+                id: ID!
+                locale: String!
+                lists: [List!]!
+                list: [List!]!
+            }
+            type List {
+                id: ID!
+                date: Int!
+                quantity: Int!
+                location: String!
+            }
+        "#;
+        let schema = Schema::parse_and_validate(schema_text, "test.graphql").unwrap();
+
+        let mut parser = Parser::new();
+        let field_set = parser
+            .parse_field_set(
+                &schema,
+                apollo_compiler::ast::NamedType::new("Test").unwrap(),
+                "id locale lists { id date quantity } list { id quantity location }",
+                "test.graphql",
+            )
+            .unwrap();
+
+        // Test with complex nested array structure
+        let representation = json!({
+            "id": "TEST123",
+            "locale": "en_US",
+            "lists": [
+                {
+                    "id": "LIST1",
+                    "date": 20240101,
+                    "quantity": 50,
+                    "location": "WAREHOUSE_A"
+                }
+            ],
+            "list": [
+                {
+                    "id": "LIST2",
+                    "date": 20240101,
+                    "quantity": 100,
+                    "location": "WAREHOUSE_A"
+                },
+                {
+                    "id": "LIST3",
+                    "date": 20240102,
+                    "quantity": 75,
+                    "location": "WAREHOUSE_B"
+                }
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        assert!(matches_selection_set(
+            &representation,
+            &field_set.selection_set
+        ));
+        let entity_key =
+            get_entity_key_from_selection_set(&representation, &field_set.selection_set);
+        assert_eq!(
+            &entity_key,
+            json!({
+                "id": "TEST123",
+                "locale": "en_US",
+                "lists": [
+                    {
+                        "id": "LIST1",
+                        "date": 20240101,
+                        "quantity": 50
+                    }
+                ],
+                "list": [
+                    {
+                        "id": "LIST2",
+                        "quantity": 100,
+                        "location": "WAREHOUSE_A"
+                    },
+                    {
+                        "id": "LIST3",
+                        "quantity": 75,
+                        "location": "WAREHOUSE_B"
+                    }
+                ]
+            })
+            .as_object()
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn test_get_invalidation_root_keys_from_schema() {
+        // Simulate the real-world Availability type scenario
+        let schema_text = r#"
+            directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+            directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+            directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+            directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+            directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+            input join__ContextArgument {
+              name: String!
+              type: String!
+              context: String!
+              selection: join__FieldValue!
+            }
+
+            scalar join__DirectiveArguments
+
+            scalar join__FieldSet
+
+            scalar join__FieldValue
+
+            enum join__Graph {
+              USER @join__graph(name: "USER", url: "none")
+              TEST @join__graph(name: "TEST", url: "none")
+            }
+
+            scalar link__Import
+
+            enum link__Purpose {
+              """
+              `SECURITY` features provide metadata necessary to securely resolve fields.
+              """
+              SECURITY
+
+              """
+              `EXECUTION` features provide metadata necessary for operation execution.
+              """
+              EXECUTION
+            }
+
+            type Query {
+                test: Test
+                testByCountry(id: ID!, country: Country!): Test @join__directive(
+                    graphs: [USER]
+                    name: "federation__cacheTag"
+                    args: { format: "test-{$args.id}-{$args.country}" }
+                )
+                @join__directive(
+                    graphs: [USER]
+                    name: "federation__cacheTag"
+                    args: { format: "test-{$args.country}" }
+                )
+                @join__directive(
+                    graphs: [USER]
+                    name: "federation__cacheTag"
+                    args: { format: "test" }
+                )
+            }
+
+            enum Country {
+                BE
+                FR
+            }
+
+            type Test {
+                id: ID!
+                locale: String!
+                lists: [List!]!
+                list: [List!]!
+            }
+            type List {
+                id: ID!
+                date: Int!
+                quantity: Int!
+                location: String!
+            }
+        "#;
+        let schema = Arc::new(Schema::parse_and_validate(schema_text, "test.graphql").unwrap());
+        let query = r#"query Test {
+          testByCountry(id: "2", country: BE) {
+            locale
+          }
+        }"#;
+        let mut sub_request = subgraph::Request::fake_builder()
+            .subgraph_request(
+                http::Request::builder()
+                    .body(
+                        crate::graphql::Request::builder()
+                            .query(query)
+                            .operation_name("Test")
+                            .build(),
+                    )
+                    .unwrap(),
+            )
+            .operation_kind(OperationKind::Query)
+            .subgraph_name("USER")
+            .build();
+        sub_request.executable_document = Some(Arc::new(
+            apollo_compiler::ExecutableDocument::parse_and_validate(&schema, query, "test.graphql")
+                .unwrap(),
+        ));
+        let subgraph_enums: HashMap<String, String> = [("USER".to_string(), "USER".to_string())]
+            .into_iter()
+            .collect();
+        let cache_tags =
+            get_invalidation_root_keys_from_schema(&sub_request, &subgraph_enums, schema.clone())
+                .unwrap();
+
+        assert_eq!(
+            cache_tags,
+            [
+                "test".to_string(),
+                "test-BE".to_string(),
+                "test-2-BE".to_string()
+            ]
+            .into_iter()
+            .collect()
         );
     }
 }
