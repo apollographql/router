@@ -18,6 +18,7 @@ use crate::connectors::JSONSelection;
 use crate::connectors::OriginatingDirective;
 use crate::connectors::SourceName;
 use crate::connectors::StringTemplate;
+use crate::connectors::models::FRAGMENT_INLINE;
 use crate::connectors::spec::connect::DEFAULT_CONNECT_SPEC;
 use crate::connectors::spec::connect::IS_SUCCESS_ARGUMENT_NAME;
 use crate::connectors::spec::connect_spec_from_schema;
@@ -133,6 +134,11 @@ impl SourceDirectiveArguments {
                             "`fragment` subfield in `@{directive_name}` directive is not a string"
                         ))
                     })?;
+                    if selection_value.contains(FRAGMENT_INLINE) {
+                        return Err(FederationError::internal(format!(
+                            "recursive `fragments` are not allowed. `{fragment}` in `@{directive_name}` directive is recursive"
+                        )));
+                    }
                     let value = JSONSelection::parse_with_spec(selection_value, spec)
                         .map_err(|e| FederationError::internal(e.message))?;
                     fragments.insert(fragment.clone(), value);
@@ -288,6 +294,8 @@ mod tests {
         include_str!("../tests/schemas/is-success-source.graphql");
     static SINGLE_FRAGMENT_SOURCE_SUPERGRAPH: &str =
         include_str!("../tests/schemas/single-fragment-source.graphql");
+    static RECURSIVE_FRAGMENT: &str =
+        include_str!("../tests/schemas/recursive-fragment-source.graphql");
 
     fn get_subgraphs(supergraph_sdl: &str) -> ValidFederationSubgraphs {
         let schema = Schema::parse(supergraph_sdl, "supergraph.graphql").unwrap();
@@ -339,7 +347,7 @@ mod tests {
 
     #[test]
     fn it_extracts_at_source() {
-        let sources = extract_source_directive_args(SIMPLE_SUPERGRAPH);
+        let sources = extract_source_directive_args(SIMPLE_SUPERGRAPH).unwrap();
 
         let source = sources.first().unwrap();
         assert_eq!(source.name, SourceName::cast("json"));
@@ -390,7 +398,7 @@ mod tests {
 
     #[test]
     fn it_parses_as_template_at_source() {
-        let directive_args = extract_source_directive_args(TEMPLATED_SOURCE_SUPERGRAPH);
+        let directive_args = extract_source_directive_args(TEMPLATED_SOURCE_SUPERGRAPH).unwrap();
 
         // Extract the matching templated URL from the matching source or panic if no match
         let templated_base_url = directive_args
@@ -415,7 +423,7 @@ mod tests {
     #[test]
     fn it_supports_is_success_in_source() {
         let spec_from_success_source_subgraph = ConnectSpec::V0_1;
-        let sources = extract_source_directive_args(IS_SUCCESS_SOURCE_SUPERGRAPH);
+        let sources = extract_source_directive_args(IS_SUCCESS_SOURCE_SUPERGRAPH).unwrap();
         let source = sources.first().unwrap();
         assert_eq!(source.name, SourceName::cast("json"));
         assert!(source.is_success.is_some());
@@ -428,7 +436,7 @@ mod tests {
     #[test]
     fn it_supports_single_fragment_in_source() {
         let spec_from_success_source_subgraph = ConnectSpec::V0_4;
-        let sources = extract_source_directive_args(SINGLE_FRAGMENT_SOURCE_SUPERGRAPH);
+        let sources = extract_source_directive_args(SINGLE_FRAGMENT_SOURCE_SUPERGRAPH).unwrap();
         let source = sources.first().unwrap();
         assert_eq!(source.name, SourceName::cast("json"));
         assert_eq!(source.fragments.len(), 1);
@@ -437,7 +445,18 @@ mod tests {
         assert_eq!(source.fragments["hello"], expected);
     }
 
-    fn extract_source_directive_args(graph: &str) -> Vec<SourceDirectiveArguments> {
+    #[test]
+    fn errors_on_recursive_fragment() {
+        let error = extract_source_directive_args(RECURSIVE_FRAGMENT).unwrap_err();
+        assert_eq!(
+            format!("{:?}", error.errors().first().unwrap()),
+            "Internal { message: \"recursive `fragments` are not allowed. `recur` in `@source` directive is recursive\" }"
+        );
+    }
+
+    fn extract_source_directive_args(
+        graph: &str,
+    ) -> Result<Vec<SourceDirectiveArguments>, FederationError> {
         let subgraphs = get_subgraphs(graph);
         let subgraph = subgraphs.get("connectors").unwrap();
         let schema = &subgraph.schema;
@@ -449,7 +468,7 @@ mod tests {
             .unwrap();
 
         let schema_directive_refs = sources.schema.as_ref().unwrap();
-        let sources: Result<Vec<_>, _> = schema_directive_refs
+        schema_directive_refs
             .get(schema.schema())
             .directives
             .iter()
@@ -463,7 +482,6 @@ mod tests {
                     connect_spec,
                 )
             })
-            .collect();
-        sources.unwrap()
+            .collect()
     }
 }

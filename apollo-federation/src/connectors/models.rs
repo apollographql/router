@@ -46,6 +46,8 @@ use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::internal_error;
 
+pub(crate) const FRAGMENT_INLINE: &str = "...$fragment";
+
 // --- Connector ---------------------------------------------------------------
 
 #[derive(Debug, Clone)]
@@ -216,12 +218,10 @@ impl Connector {
             .or_else(|| source.and_then(|s| s.is_success.as_ref()));
         let fragments = source.map(|s| s.fragments.clone());
 
-        // I know this is pretty dumb and incorrect
-        // Just needed to get something quickly to test the general idea
         let mut selection = connect.selection;
         if let (Some(fragments), Some(source_name)) = (fragments, source_name.as_ref()) {
             for (name, frag_selection) in fragments {
-                let fragment_query = format!("...$fragment.{source_name}.{name}");
+                let fragment_query = format!("{FRAGMENT_INLINE}.{source_name}.{name}");
                 if selection.contains(&fragment_query) {
                     selection = selection.replace(&fragment_query, &frag_selection.to_string());
                 }
