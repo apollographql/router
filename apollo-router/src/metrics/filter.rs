@@ -269,6 +269,8 @@ impl opentelemetry::metrics::MeterProvider for FilterMeterProvider {
 
 #[cfg(test)]
 mod test {
+    use opentelemetry::InstrumentationScope;
+    use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::metrics::InMemoryMetricExporter;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
     use opentelemetry_sdk::metrics::PeriodicReader;
@@ -283,10 +285,8 @@ mod test {
                 .with_reader(PeriodicReader::builder(exporter.clone()).build())
                 .build(),
         );
-        let filtered =
-            meter_provider
-                .delegate
-                .versioned_meter("filtered", "".into(), "".into(), None);
+        let filtered = meter_provider
+                .meter_with_scope(InstrumentationScope::builder("filtered").build());
         // Matches allow
         filtered
             .u64_counter("apollo.router.operations")
@@ -397,10 +397,8 @@ mod test {
                 .with_reader(PeriodicReader::builder(exporter.clone()).build())
                 .build(),
         );
-        let filtered =
-            meter_provider
-                .delegate
-                .versioned_meter("filtered", "".into(), "".into(), None);
+        let filtered = meter_provider
+            .meter_with_scope(InstrumentationScope::builder("filtered").build());
         filtered
             .u64_counter("apollo.router.operations")
             .with_description("desc")
@@ -453,10 +451,8 @@ mod test {
         meter_provider: T,
     ) {
         let meter_provider = FilterMeterProvider::public(meter_provider);
-        let filtered =
-            meter_provider
-                .delegate
-                .versioned_meter("filtered", "".into(), "".into(), None);
+        let filtered = meter_provider
+            .meter_with_scope(InstrumentationScope::builder("filtered").build());
         filtered
             .u64_counter("apollo.router.config")
             .build()
@@ -522,10 +518,8 @@ mod test {
                 .with_reader(PeriodicReader::builder(exporter.clone()).build())
                 .build(),
         );
-        let filtered =
-            meter_provider
-                .delegate
-                .versioned_meter("filtered", "".into(), "".into(), None);
+        let filtered = meter_provider
+            .meter_with_scope(InstrumentationScope::builder("filtered").build());
         filtered
             .u64_counter("apollo.router.operations.error")
             .build()
