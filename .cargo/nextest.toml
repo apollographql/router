@@ -1,0 +1,7 @@
+[test-groups]
+redis = { max-threads = 6 }
+
+[[profile.default.overrides]]
+# number of tests running with 'redis' in the name should be up to 6 at any given time
+test-group = "redis"
+filter = "test(redis)"
