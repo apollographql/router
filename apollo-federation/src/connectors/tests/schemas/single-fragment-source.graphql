@@ -108,7 +108,7 @@ type Query @join__type(graph: CONNECTORS) {
     @join__directive(
       graphs: [CONNECTORS]
       name: "connect"
-      args: { source: "json", http: { GET: "/users" }, selection: "...$fragment.json.hello" }
+      args: { source: "json", http: { GET: "/users" }, selection: "...$fragments.json.hello" }
     )
   posts: [Post]
     @join__directive(

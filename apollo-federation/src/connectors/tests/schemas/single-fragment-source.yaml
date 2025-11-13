@@ -27,7 +27,7 @@ subgraphs:
             @connect(
               source: "json"
               http: { GET: "/users" }
-              selection: "...$fragment.json.hello"
+              selection: "...$fragments.json.hello"
             )
 
           posts: [Post]

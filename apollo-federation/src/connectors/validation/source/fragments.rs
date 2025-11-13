@@ -1,3 +1,7 @@
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
+
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Value;
@@ -8,7 +12,6 @@ use crate::connectors::spec::source::FRAGMENTS_NAME_ARGUMENT;
 use crate::connectors::string_template::Expression;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
-use crate::connectors::validation::coordinates::FragmentsCoordinate;
 use crate::connectors::validation::coordinates::SourceDirectiveCoordinate;
 use crate::connectors::validation::errors::ErrorsCoordinate;
 use crate::connectors::validation::expression::Context;
@@ -97,5 +100,34 @@ impl<'schema> FragmentsArgument<'schema> {
             })?;
         }
         Ok(())
+    }
+}
+
+/// The `fragments` argument for the `@source` directive
+#[derive(Clone)]
+pub(crate) struct FragmentsCoordinate<'schema> {
+    pub(crate) coordinate: ErrorsCoordinate<'schema>,
+}
+
+impl Display for FragmentsCoordinate<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match &self.coordinate {
+            ErrorsCoordinate::Source { source } => {
+                write!(
+                    f,
+                    "`@{directive_name}(name: \"{source_name}\" {FRAGMENTS_NAME_ARGUMENT}:)`",
+                    directive_name = source.directive.name,
+                    source_name = source.name
+                )
+            }
+            ErrorsCoordinate::Connect { connect } => {
+                write!(
+                    f,
+                    "`@{directive_name}({FRAGMENTS_NAME_ARGUMENT}:)` on `{element}`",
+                    directive_name = connect.directive.name,
+                    element = connect.element
+                )
+            }
+        }
     }
 }

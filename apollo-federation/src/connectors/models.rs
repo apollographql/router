@@ -46,7 +46,7 @@ use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::internal_error;
 
-pub(crate) const FRAGMENT_INLINE: &str = "...$fragment";
+pub(crate) const FRAGMENT_INLINE: &str = "...$fragments";
 
 // --- Connector ---------------------------------------------------------------
 

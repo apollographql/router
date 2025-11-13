@@ -12,7 +12,7 @@ subgraphs:
             name: "json"
             fragments: {
               hello: "id name"
-              recur: "...$fragment.json.hello"
+              recur: "...$fragments.json.hello"
             }
             http: {
               baseURL: "https://jsonplaceholder.typicode.com/"
@@ -28,7 +28,7 @@ subgraphs:
             @connect(
               source: "json"
               http: { GET: "/users" }
-              selection: "...$fragment.json.recur"
+              selection: "...$fragments.json.recur"
             )
 
           posts: [Post]
