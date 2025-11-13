@@ -157,7 +157,7 @@ impl<I, T> NoopGuard<I, T> {
 #[cfg(test)]
 pub(crate) mod test_utils {
     use std::cmp::Ordering;
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashMap};
     use std::fmt::Debug;
     use std::fmt::Display;
     use std::sync::Arc;
@@ -658,20 +658,26 @@ pub(crate) mod test_utils {
         }
 
         fn equal_attributes(expected: &[KeyValue], actual: &[KeyValue]) -> bool {
-            // If lengths are different, we can short circuit. This also accounts for a bug where
-            // an empty attributes list would always be considered "equal" due to zip capping at
-            // the shortest iter's length
+            // If lengths are different, we can short circuit.
             if expected.len() != actual.len() {
                 return false;
             }
-            // This works because the attributes are always sorted
+
+            let actual_map: HashMap<_, _> = actual
+                .iter()
+                .map(|kv| (&kv.key, &kv.value))
+                .collect();
+
             expected
                 .iter()
-                .zip(actual.iter())
-                .all(|(expected_kv, actual_kv)| {
-                    actual_kv.key == expected_kv.key
-                        && (actual_kv.value == expected_kv.value
-                            || actual_kv.value == Value::String(StringValue::from("<any>")))
+                .all(|expected_kv| {
+                    match actual_map.get(&expected_kv.key) {
+                        None => false,
+                        Some(actual_value) => {
+                            *actual_value == &expected_kv.value
+                                || *actual_value == &Value::String(StringValue::from("<any>"))
+                        }
+                    }
                 })
         }
     }
