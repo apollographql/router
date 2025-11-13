@@ -18,18 +18,16 @@
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Node;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
-use apollo_compiler::name;
 use multimap::MultiMap;
 
-use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
 use super::location::Ranged;
 use super::location::WithRange;
-use super::parser::MethodArgs;
 use super::parser::PathList;
 use crate::connectors::JSONSelection;
 use crate::connectors::PathSelection;
@@ -49,6 +47,7 @@ impl JSONSelection {
     /// set before applying it to the JSONSelection.
     pub fn apply_selection_set(
         &self,
+        abstract_types: &IndexSet<String>,
         document: &ExecutableDocument,
         selection_set: &SelectionSet,
         required_keys: Option<&FieldSet>,
@@ -68,11 +67,19 @@ impl JSONSelection {
 
         match &self.inner {
             TopLevelSelection::Named(sub) => Self {
-                inner: TopLevelSelection::Named(sub.apply_selection_set(document, &selection_set)),
+                inner: TopLevelSelection::Named(sub.apply_selection_set(
+                    abstract_types,
+                    document,
+                    &selection_set,
+                )),
                 spec: self.spec,
             },
             TopLevelSelection::Path(path) => Self {
-                inner: TopLevelSelection::Path(path.apply_selection_set(document, &selection_set)),
+                inner: TopLevelSelection::Path(path.apply_selection_set(
+                    abstract_types,
+                    document,
+                    &selection_set,
+                )),
                 spec: self.spec,
             },
         }
@@ -83,6 +90,7 @@ impl SubSelection {
     /// Apply a selection set to create a new [`SubSelection`]
     pub fn apply_selection_set(
         &self,
+        abstract_types: &IndexSet<String>,
         document: &ExecutableDocument,
         selection_set: &SelectionSet,
     ) -> Self {
@@ -91,34 +99,26 @@ impl SubSelection {
 
         // When the operation contains __typename, it might be used to complete
         // an entity reference (e.g. `__typename id`) for a subsequent fetch.
-        //
-        // NOTE: For reasons I don't understand, persisted queries may contain
-        // `__typename` for `_entities` queries. We never want to emit
-        // `__typename: "_Entity"`, so we'll guard against that case.
-        //
-        // TODO: this must change before we support interfaces and unions
-        // because it will emit the abstract type's name which is invalid.
-        if field_map.contains_key("__typename") && selection_set.ty != name!(_Entity) {
+        if field_map.contains_key("__typename")
+            // Only inject __typename for non-abstract types because output JSON
+            // for abstract types must provide a concrete __typename, so there's
+            // nothing we can confidently inject here.
+            && !abstract_types.contains(&selection_set.ty.to_string())
+        {
+            // Since `_Entity` is an abstract type (union), we should never see
+            // it here. For reasons I (Lenny) don't understand, persisted
+            // queries may contain `__typename` for `_entities` queries. We
+            // never want to emit `__typename: "_Entity"`, so we'll guard
+            // against that case.
+            debug_assert_ne!(selection_set.ty.to_string(), "_Entity");
+
             new_selections.push(NamedSelection {
                 prefix: NamingPrefix::Alias(Alias::new("__typename")),
                 path: PathSelection {
                     path: WithRange::new(
-                        PathList::Var(
-                            WithRange::new(KnownVariable::Dollar, None),
-                            WithRange::new(
-                                PathList::Method(
-                                    WithRange::new("echo".to_string(), None),
-                                    Some(MethodArgs {
-                                        args: vec![WithRange::new(
-                                            LitExpr::String(selection_set.ty.to_string()),
-                                            None,
-                                        )],
-                                        ..Default::default()
-                                    }),
-                                    WithRange::new(PathList::Empty, None),
-                                ),
-                                None,
-                            ),
+                        PathList::Expr(
+                            WithRange::new(LitExpr::String(selection_set.ty.to_string()), None),
+                            WithRange::new(PathList::Empty, None),
                         ),
                         None,
                     ),
@@ -128,56 +128,37 @@ impl SubSelection {
 
         for selection in &self.selections {
             if let Some(single_key_for_selection) = selection.get_single_key() {
+                // In the single-Key case, we can filter out any selections
+                // whose single key does not match anything in the field_map.
                 if let Some(fields) = field_map.get_vec(single_key_for_selection.as_str()) {
                     for field in fields {
-                        let response_key = field.response_key().as_str();
-                        let applied_path = selection
-                            .path
-                            .apply_selection_set(document, &field.selection_set);
+                        let applied_path = selection.path.apply_selection_set(
+                            abstract_types,
+                            document,
+                            &field.selection_set,
+                        );
 
-                        if let Some(single_key_for_path_only) = applied_path.get_single_key() {
-                            if response_key == single_key_for_path_only.as_str() {
-                                // No need for an Alias if the path by
-                                // itself has a single key that equals
-                                // the desired response_key.
-                                new_selections.push(NamedSelection {
-                                    prefix: NamingPrefix::None,
-                                    path: applied_path,
-                                });
-                                continue;
-                            }
-
-                            if response_key == single_key_for_selection.as_str() {
-                                // The response_key matched the existing alias,
-                                // so we don't need to change the alias.
-                                new_selections.push(NamedSelection {
-                                    prefix: selection.prefix.clone(),
-                                    path: applied_path,
-                                });
-                                continue;
-                            }
-                        }
-
-                        // The response_key is different from both the
-                        // alias and single_key_for_path_only, so we
-                        // need a new explicit alias to ensure
-                        // response_key is generated.
                         new_selections.push(NamedSelection {
-                            prefix: NamingPrefix::Alias(Alias::new(response_key)),
+                            prefix: selection.prefix.clone(),
                             path: applied_path,
                         });
                     }
+                } else {
+                    // If the selection had a single output key and that key
+                    // does not appear in field_map, we can skip the selection.
                 }
             } else {
-                // If the NamedSelection::Path does not have a single
-                // output key (has no alias and is not a single field
-                // selection), then the path's output will be inlined
-                // into the parent, which means we care only about the
-                // intersection between the path's output and the
-                // incoming selection_set.
+                // If the NamedSelection::Path does not have a single output key
+                // (has no alias and is not a single field selection), then it's
+                // tricky to know if we should prune the selection, so we
+                // conservatively preserve it, using a transformed path.
                 new_selections.push(NamedSelection {
-                    prefix: NamingPrefix::None,
-                    path: selection.path.apply_selection_set(document, selection_set),
+                    prefix: selection.prefix.clone(),
+                    path: selection.path.apply_selection_set(
+                        abstract_types,
+                        document,
+                        selection_set,
+                    ),
                 });
             }
         }
@@ -196,12 +177,14 @@ impl PathSelection {
     /// Apply a selection set to create a new [`PathSelection`]
     pub fn apply_selection_set(
         &self,
+        abstract_types: &IndexSet<String>,
         document: &ExecutableDocument,
         selection_set: &SelectionSet,
     ) -> Self {
         Self {
             path: WithRange::new(
-                self.path.apply_selection_set(document, selection_set),
+                self.path
+                    .apply_selection_set(abstract_types, document, selection_set),
                 self.path.range(),
             ),
         }
@@ -211,6 +194,7 @@ impl PathSelection {
 impl PathList {
     pub(crate) fn apply_selection_set(
         &self,
+        abstract_types: &IndexSet<String>,
         document: &ExecutableDocument,
         selection_set: &SelectionSet,
     ) -> Self {
@@ -218,21 +202,21 @@ impl PathList {
             Self::Var(name, path) => Self::Var(
                 name.clone(),
                 WithRange::new(
-                    path.apply_selection_set(document, selection_set),
+                    path.apply_selection_set(abstract_types, document, selection_set),
                     path.range(),
                 ),
             ),
             Self::Key(key, path) => Self::Key(
                 key.clone(),
                 WithRange::new(
-                    path.apply_selection_set(document, selection_set),
+                    path.apply_selection_set(abstract_types, document, selection_set),
                     path.range(),
                 ),
             ),
             Self::Expr(expr, path) => Self::Expr(
                 expr.clone(),
                 WithRange::new(
-                    path.apply_selection_set(document, selection_set),
+                    path.apply_selection_set(abstract_types, document, selection_set),
                     path.range(),
                 ),
             ),
@@ -240,16 +224,16 @@ impl PathList {
                 method_name.clone(),
                 args.clone(),
                 WithRange::new(
-                    path.apply_selection_set(document, selection_set),
+                    path.apply_selection_set(abstract_types, document, selection_set),
                     path.range(),
                 ),
             ),
             Self::Question(tail) => Self::Question(WithRange::new(
-                tail.apply_selection_set(document, selection_set),
+                tail.apply_selection_set(abstract_types, document, selection_set),
                 tail.range(),
             )),
             Self::Selection(sub) => {
-                Self::Selection(sub.apply_selection_set(document, selection_set))
+                Self::Selection(sub.apply_selection_set(abstract_types, document, selection_set))
             }
             Self::Empty => Self::Empty,
         }
@@ -291,6 +275,7 @@ fn map_fields_by_name_impl<'a>(
 mod tests {
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
+    use apollo_compiler::collections::IndexSet;
     use apollo_compiler::executable::FieldSet;
     use apollo_compiler::executable::SelectionSet;
     use apollo_compiler::name;
@@ -360,17 +345,18 @@ mod tests {
             "{ t { z: a, y: b, x: d, w: h v: k { u: l t: m } } }",
         );
 
-        let transformed = json.apply_selection_set(&document, &selection_set, None);
+        let transformed =
+            json.apply_selection_set(&IndexSet::default(), &document, &selection_set, None);
         assert_eq!(
             transformed.to_string(),
             r###"$.result {
-  z: a
-  y: c
-  x: e.f
-  w: "i-j"
-  v: {
-    u: l
-    t: n
+  a
+  b: c
+  d: e.f
+  h: "i-j"
+  k: {
+    l
+    m: n
   }
 }"###
         );
@@ -434,15 +420,20 @@ mod tests {
             "{ t { a b_alias c { e: e_alias h group { j } } path_to_f } }",
         );
 
-        let transformed = json_selection.apply_selection_set(&document, &selection_set, None);
+        let transformed = json_selection.apply_selection_set(
+            &IndexSet::default(),
+            &document,
+            &selection_set,
+            None,
+        );
         assert_eq!(
             transformed.to_string(),
             r###"$.result {
   a
   b_alias: b
   c {
-    e
-    "h"
+    e_alias: e
+    h: "h"
     group: {
       j
     }
@@ -476,7 +467,7 @@ mod tests {
                     "a": "a",
                     "b_alias": "b",
                     "c": {
-                        "e": "e",
+                        "e_alias": "e",
                         "h": "h",
                         "group": {
                           "j": "j"
@@ -528,7 +519,8 @@ mod tests {
 
         let (document, selection_set) = selection_set(&schema, "{ t { a { b { renamed } } } }");
 
-        let transformed = json.apply_selection_set(&document, &selection_set, None);
+        let transformed =
+            json.apply_selection_set(&IndexSet::default(), &document, &selection_set, None);
         assert_eq!(
             transformed.to_string(),
             r###"$.result {
@@ -596,14 +588,15 @@ mod tests {
         let (document, selection_set) =
             selection_set(&schema, "{ t { id __typename author { __typename id } } }");
 
-        let transformed = json.apply_selection_set(&document, &selection_set, None);
+        let transformed =
+            json.apply_selection_set(&IndexSet::default(), &document, &selection_set, None);
         assert_eq!(
             transformed.to_string(),
             r###"$.result {
-  __typename: $->echo("T")
+  __typename: $("T")
   id
   author: {
-    __typename: $->echo("A")
+    __typename: $("A")
     id: authorId
   }
 }"###
@@ -674,17 +667,18 @@ mod tests {
             }",
         );
 
-        let transformed = json.apply_selection_set(&document, &selection_set, None);
+        let transformed =
+            json.apply_selection_set(&IndexSet::default(), &document, &selection_set, None);
         assert_eq!(
             transformed.to_string(),
             r###"reviews: result {
   id
   product: {
-    __typename: $->echo("Product")
+    __typename: $("Product")
     upc: product_upc
   }
   author: {
-    __typename: $->echo("User")
+    __typename: $("User")
     id: author_id
   }
 }"###
@@ -729,7 +723,8 @@ mod tests {
         let keys =
             FieldSet::parse_and_validate(&schema, name!(Product), "id store { id }", "").unwrap();
 
-        let transformed = json.apply_selection_set(&document, &selection_set, Some(&keys));
+        let transformed =
+            json.apply_selection_set(&IndexSet::default(), &document, &selection_set, Some(&keys));
         assert_snapshot!(transformed.to_string(), @r"
         id
         store {

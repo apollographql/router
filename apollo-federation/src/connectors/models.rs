@@ -13,6 +13,7 @@ use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FieldSet;
+use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use keys::make_key_field_set_from_variables;
 use serde_json::Value;
@@ -59,6 +60,9 @@ pub struct Connector {
     pub entity_resolver: Option<EntityResolver>,
     /// Which version of the connect spec is this connector using?
     pub spec: ConnectSpec,
+
+    /// All supertype-subtype(s) relationships from the source schema.
+    pub schema_subtypes_map: IndexMap<String, IndexSet<String>>,
 
     /// The request headers referenced in the connectors request mapping
     pub request_headers: HashSet<String>,
@@ -277,6 +281,7 @@ impl Connector {
             config: None,
             max_requests: None,
             spec,
+            schema_subtypes_map: Connector::subtypes_map_from_schema(schema),
             request_headers,
             response_headers,
             request_variable_keys,
@@ -285,6 +290,45 @@ impl Connector {
             error_settings,
             label,
         })
+    }
+
+    pub fn subtypes_map_from_schema(schema: &Schema) -> IndexMap<String, IndexSet<String>> {
+        let mut subtypes_map: IndexMap<String, IndexSet<String>> = IndexMap::default();
+
+        // Find any `implements` relationships in object or interface types.
+        for (name, ty) in schema.types.iter() {
+            match ty {
+                ExtendedType::Object(o) => {
+                    for supertype in &o.implements_interfaces {
+                        subtypes_map
+                            .entry(supertype.to_string())
+                            .or_default()
+                            .insert(name.to_string());
+                    }
+                }
+                ExtendedType::Interface(i) => {
+                    for supertype in &i.implements_interfaces {
+                        subtypes_map
+                            .entry(supertype.to_string())
+                            .or_default()
+                            .insert(name.to_string());
+                    }
+                }
+                ExtendedType::Union(u) => {
+                    for member in &u.members {
+                        subtypes_map
+                            .entry(u.name.to_string())
+                            .or_default()
+                            .insert(member.to_string());
+                    }
+                }
+                _ => {
+                    // No other types have .implements_interfaces
+                }
+            }
+        }
+
+        subtypes_map
     }
 
     pub(crate) fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> {
@@ -373,6 +417,11 @@ impl Connector {
     /// Get the `id`` of the `@connect` directive associated with this [`Connector`] instance.
     pub fn id(&self) -> String {
         self.id.name()
+    }
+
+    /// Get the set of abstract type names from the schema subtypes map
+    pub fn abstract_types(&self) -> IndexSet<String> {
+        self.schema_subtypes_map.keys().cloned().collect()
     }
 }
 
@@ -645,6 +694,11 @@ mod tests {
                 max_requests: None,
                 entity_resolver: None,
                 spec: V0_1,
+                schema_subtypes_map: {
+                    "_Entity": {
+                        "User",
+                    },
+                },
                 request_headers: {},
                 response_headers: {},
                 request_variable_keys: {},
@@ -824,6 +878,11 @@ mod tests {
                 max_requests: None,
                 entity_resolver: None,
                 spec: V0_1,
+                schema_subtypes_map: {
+                    "_Entity": {
+                        "User",
+                    },
+                },
                 request_headers: {},
                 response_headers: {},
                 request_variable_keys: {},
