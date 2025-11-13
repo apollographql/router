@@ -269,7 +269,7 @@ impl ConfigurationSource {
         config: Arc<Configuration>,
     ) -> Option<impl Stream<Item = Event>> {
         // Check if graph_artifact_reference is set in config
-        let graph_artifact_ref = match config.graph_artifact_reference.clone() {
+        let graph_artifact_ref = match config.supergraph.graph_artifact_reference.clone() {
             Some(reference) if !reference.is_empty() => reference,
             _ => return None,
         };

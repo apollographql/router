@@ -10547,6 +10547,19 @@ expression: "&schema"
           "description": "Enable QP generation of fragments for subgraph requests\nDefault: true",
           "type": "boolean"
         },
+        "graph_artifact_reference": {
+          "default": null,
+          "description": "Graph artifact reference for OCI schema fetching.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hot_reload": {
+          "default": false,
+          "description": "Hot reload configuration option.",
+          "type": "boolean"
+        },
         "introspection": {
           "default": false,
           "description": "Enable introspection\nDefault: false",
@@ -12002,14 +12015,6 @@ expression: "&schema"
     "forbid_mutations": {
       "$ref": "#/definitions/ForbidMutationsConfig"
     },
-    "graph_artifact_reference": {
-      "default": null,
-      "description": "Graph artifact reference for OCI schema fetching.",
-      "type": [
-        "string",
-        "null"
-      ]
-    },
     "headers": {
       "$ref": "#/definitions/HeadersConfig"
     },
@@ -12027,11 +12032,6 @@ expression: "&schema"
         "graph_ref": null
       },
       "description": "Homepage configuration"
-    },
-    "hot_reload": {
-      "default": false,
-      "description": "Hot reload configuration option.",
-      "type": "boolean"
     },
     "include_subgraph_errors": {
       "$ref": "#/definitions/IncludeSubgraphErrorsConfig"
@@ -12134,6 +12134,8 @@ expression: "&schema"
         "enable_result_coercion_errors": false,
         "experimental_log_on_broken_pipe": false,
         "generate_query_fragments": true,
+        "graph_artifact_reference": null,
+        "hot_reload": false,
         "introspection": false,
         "listen": "127.0.0.1:4000",
         "path": "/",

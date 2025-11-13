@@ -654,7 +654,8 @@ impl Executable {
                                                     &config_str,
                                                 ) {
                                                     Ok(yaml_value) => yaml_value
-                                                        .get("graph_artifact_reference")
+                                                        .get("supergraph")
+                                                        .and_then(|s| s.get("graph_artifact_reference"))
                                                         .and_then(|v| v.as_str())
                                                         .map(|s| !s.is_empty())
                                                         .unwrap_or(false),

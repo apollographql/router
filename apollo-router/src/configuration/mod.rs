@@ -23,6 +23,7 @@ pub(crate) use persisted_queries::PersistedQueries;
 pub(crate) use persisted_queries::PersistedQueriesPrewarmQueryPlanCache;
 #[cfg(test)]
 pub(crate) use persisted_queries::PersistedQueriesSafelist;
+use persisted_queries::deserialize_bool_or_default;
 use regex::Regex;
 use rustls::ServerConfig;
 use rustls::pki_types::CertificateDer;
@@ -222,14 +223,6 @@ pub struct Configuration {
     /// Type conditioned fetching configuration.
     #[serde(default)]
     pub(crate) experimental_type_conditioned_fetching: bool,
-
-    /// Graph artifact reference for OCI schema fetching.
-    #[serde(default)]
-    pub(crate) graph_artifact_reference: Option<String>,
-
-    /// Hot reload configuration option.
-    #[serde(default, deserialize_with = "deserialize_bool_or_default")]
-    pub(crate) hot_reload: bool,
 }
 
 impl PartialEq for Configuration {
@@ -265,10 +258,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             batching: Batching,
             #[serde(default)]
             experimental_type_conditioned_fetching: bool,
-            #[serde(default)]
-            graph_artifact_reference: Option<String>,
-            #[serde(default, deserialize_with = "deserialize_bool_or_default")]
-            hot_reload: bool,
         }
         let mut ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -300,8 +289,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             limits: ad_hoc.limits,
             experimental_chaos: ad_hoc.experimental_chaos,
             experimental_type_conditioned_fetching: ad_hoc.experimental_type_conditioned_fetching,
-            graph_artifact_reference: ad_hoc.graph_artifact_reference,
-            hot_reload: ad_hoc.hot_reload,
             plugins: ad_hoc.plugins,
             apollo_plugins: ad_hoc.apollo_plugins,
             batching: ad_hoc.batching,
@@ -371,8 +358,6 @@ impl Configuration {
             batching: batching.unwrap_or_default(),
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
-            graph_artifact_reference: None,
-            hot_reload: false,
             notify,
         };
 
@@ -517,8 +502,6 @@ impl Configuration {
             uplink,
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
-            graph_artifact_reference: None,
-            hot_reload: false,
             batching: batching.unwrap_or_default(),
             raw_yaml: None,
         };
@@ -762,6 +745,14 @@ pub(crate) struct Supergraph {
     /// Log a message if the client closes the connection before the response is sent.
     /// Default: false.
     pub(crate) experimental_log_on_broken_pipe: bool,
+
+    /// Graph artifact reference for OCI schema fetching.
+    #[serde(default)]
+    pub(crate) graph_artifact_reference: Option<String>,
+
+    /// Hot reload configuration option.
+    #[serde(default, deserialize_with = "deserialize_bool_or_default")]
+    pub(crate) hot_reload: bool,
 }
 
 const fn default_generate_query_fragments() -> bool {
@@ -786,6 +777,8 @@ impl Supergraph {
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
         insert_result_coercion_errors: Option<bool>,
+        graph_artifact_reference: Option<Option<String>>,
+        hot_reload: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -800,6 +793,8 @@ impl Supergraph {
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
             enable_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
+            graph_artifact_reference: graph_artifact_reference.flatten(),
+            hot_reload: hot_reload.unwrap_or_default(),
         }
     }
 }
@@ -819,6 +814,8 @@ impl Supergraph {
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
         insert_result_coercion_errors: Option<bool>,
+        graph_artifact_reference: Option<Option<String>>,
+        hot_reload: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -833,6 +830,8 @@ impl Supergraph {
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
             enable_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
+            graph_artifact_reference: graph_artifact_reference.flatten(),
+            hot_reload: hot_reload.unwrap_or_default(),
         }
     }
 }
@@ -1223,13 +1222,6 @@ impl TlsSupergraph {
     }
 }
 
-/// Custom deserializer for boolean fields that handles null values by treating them as false
-fn deserialize_bool_or_default<'de, D>(deserializer: D) -> Result<bool, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    Option::<bool>::deserialize(deserializer).map(|x| x.unwrap_or(false))
-}
 
 fn deserialize_certificate<'de, D>(deserializer: D) -> Result<CertificateDer<'static>, D::Error>
 where

@@ -4,7 +4,7 @@ use serde::Deserializer;
 use serde::Serialize;
 
 /// Custom deserializer for boolean fields that handles null values by treating them as false
-fn deserialize_bool_or_default<'de, D>(deserializer: D) -> Result<bool, D::Error>
+pub(crate) fn deserialize_bool_or_default<'de, D>(deserializer: D) -> Result<bool, D::Error>
 where
     D: Deserializer<'de>,
 {

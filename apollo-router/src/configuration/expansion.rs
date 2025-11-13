@@ -129,7 +129,7 @@ impl Expansion {
                 .lock()
                 .clone();
             Override::builder()
-                .config_path("graph_artifact_reference")
+                .config_path("supergraph.graph_artifact_reference")
                 .env_name("APOLLO_GRAPH_ARTIFACT_REFERENCE")
                 .value_type(ValueType::String)
                 .value(cli_value)
@@ -141,7 +141,7 @@ impl Expansion {
         let hot_reload_override = {
             let cli_value = crate::executable::APOLLO_ROUTER_HOT_RELOAD_CLI.load(Ordering::Relaxed);
             Override::builder()
-                .config_path("hot_reload")
+                .config_path("supergraph.hot_reload")
                 .value_type(ValueType::Bool)
                 .value(if cli_value {
                     Some(Value::Bool(true))
