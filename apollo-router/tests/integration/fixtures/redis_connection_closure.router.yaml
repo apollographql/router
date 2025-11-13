@@ -7,6 +7,8 @@ supergraph:
           - redis://localhost:6379
         ttl: 1s
         pool_size: 2
+      in_memory:
+        limit: 1
 telemetry:
   exporters:
     metrics:
