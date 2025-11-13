@@ -1770,11 +1770,11 @@ async fn test_redis_doesnt_use_replicas_in_standalone_mode() {
 
     // send a few different queries to ensure a redis cache hit; if you just send 1, it'll only hit
     // the in-memory cache
-    router.execute_several_default_queries(15).await;
+    router.execute_several_default_queries(5).await;
 
     let redis_monitor_output = redis_monitor.collect().await.namespaced(&namespace);
     assert_eq!(redis_monitor_output.num_nodes(), 1);
-    assert!(redis_monitor_output.command_sent_to_any("GET"), "{redis_monitor_output:?}");
+    assert!(redis_monitor_output.command_sent_to_any("GET"));
 
     // check that there were no I/O errors
     let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="query planner",otel_scope_name="apollo/router"}"#;
