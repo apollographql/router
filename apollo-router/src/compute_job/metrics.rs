@@ -97,36 +97,41 @@ mod tests {
     use crate::compute_job::ComputeJobType;
     use crate::compute_job::metrics::JobWatcher;
     use crate::compute_job::metrics::Outcome;
+    use crate::metrics::FutureMetricsExt;
 
-    #[test]
-    fn test_job_watcher() {
-        let check_histogram_count =
-            |count: u64, job_type: &'static str, job_outcome: &'static str| {
-                assert_histogram_count!(
-                    "apollo.router.compute_jobs.duration",
-                    count,
-                    "job.type" = job_type,
-                    "job.outcome" = job_outcome
-                );
-            };
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_job_watcher() {
+        async {
+            let check_histogram_count =
+                |count: u64, job_type: &'static str, job_outcome: &'static str| {
+                    assert_histogram_count!(
+                        "apollo.router.compute_jobs.duration",
+                        count,
+                        "job.type" = job_type,
+                        "job.outcome" = job_outcome
+                    );
+                };
 
-        {
-            let _job_watcher = JobWatcher::new(ComputeJobType::Introspection);
-        }
-        check_histogram_count(1, "introspection", "abandoned");
-
-        {
-            let mut job_watcher = JobWatcher::new(ComputeJobType::QueryParsing);
-            job_watcher.outcome = Outcome::ExecutedOk;
-        }
-        check_histogram_count(1, "query_parsing", "executed_ok");
-
-        for count in 1..5 {
             {
-                let mut job_watcher = JobWatcher::new(ComputeJobType::QueryPlanning);
-                job_watcher.outcome = Outcome::RejectedQueueFull;
+                let _job_watcher = JobWatcher::new(ComputeJobType::Introspection);
             }
-            check_histogram_count(count, "query_planning", "rejected_queue_full");
+            check_histogram_count(1, "introspection", "abandoned");
+
+            {
+                let mut job_watcher = JobWatcher::new(ComputeJobType::QueryParsing);
+                job_watcher.outcome = Outcome::ExecutedOk;
+            }
+            check_histogram_count(1, "query_parsing", "executed_ok");
+
+            for count in 1..5 {
+                {
+                    let mut job_watcher = JobWatcher::new(ComputeJobType::QueryPlanning);
+                    job_watcher.outcome = Outcome::RejectedQueueFull;
+                }
+                check_histogram_count(count, "query_planning", "rejected_queue_full");
+            }
         }
+        .with_metrics()
+        .await;
     }
 }

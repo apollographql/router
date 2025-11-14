@@ -1,6 +1,7 @@
 ---
 source: apollo-router/src/compute_job/mod.rs
 expression: yaml
+snapshot_kind: text
 ---
 - fields: {}
   level: INFO
@@ -23,3 +24,55 @@ expression: yaml
     - job.age: P4
       job.type: query_parsing
       name: compute_job.execution
+- fields:
+    name: MeterProvider.Drop
+  level: INFO
+  message: "Last reference of MeterProvider dropped, initiating shutdown."
+  span:
+    job.outcome: executed_ok
+    job.type: query_parsing
+    name: compute_job
+  spans:
+    - name: test_observability
+    - job.outcome: executed_ok
+      job.type: query_parsing
+      name: compute_job
+- fields:
+    name: MeterProvider.Drop
+  level: INFO
+  message: "Last reference of MeterProvider dropped, initiating shutdown."
+  span:
+    job.outcome: executed_ok
+    job.type: query_parsing
+    name: compute_job
+  spans:
+    - name: test_observability
+    - job.outcome: executed_ok
+      job.type: query_parsing
+      name: compute_job
+- fields:
+    name: MeterProvider.Drop
+  level: INFO
+  message: "Last reference of MeterProvider dropped, initiating shutdown."
+  span:
+    job.outcome: executed_ok
+    job.type: query_parsing
+    name: compute_job
+  spans:
+    - name: test_observability
+    - job.outcome: executed_ok
+      job.type: query_parsing
+      name: compute_job
+- fields:
+    name: MeterProvider.Drop
+  level: INFO
+  message: "Last reference of MeterProvider dropped, initiating shutdown."
+  span:
+    job.outcome: executed_ok
+    job.type: query_parsing
+    name: compute_job
+  spans:
+    - name: test_observability
+    - job.outcome: executed_ok
+      job.type: query_parsing
+      name: compute_job
