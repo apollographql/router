@@ -1772,6 +1772,9 @@ async fn test_redis_doesnt_use_replicas_in_standalone_mode() {
     // the in-memory cache
     router.execute_several_default_queries(2).await;
 
+    // little bit of time for the commands to make it to the redis-cli MONITOR
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
     let redis_monitor_output = redis_monitor.collect().await.namespaced(&namespace);
     assert_eq!(redis_monitor_output.num_nodes(), 1);
     assert!(redis_monitor_output.command_sent_to_any("GET"));
