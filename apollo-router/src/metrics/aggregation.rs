@@ -57,9 +57,12 @@ impl Default for AggregateMeterProvider {
             inner: Arc::new(Mutex::new(Some(Inner::default()))),
         };
 
+        // If the regular global meter provider has been set then the aggregate meter provider will use it. Otherwise it'll default to a no-op.
+        // For this to work the global meter provider must be set before the aggregate meter provider is created.
+        // This functionality is not guaranteed to stay like this, so use at your own risk.
         meter_provider.set(
             MeterProviderType::OtelDefault,
-            FilterMeterProvider::public(SdkMeterProvider::default()),
+            FilterMeterProvider::public(opentelemetry::global::meter_provider()),
         );
 
         meter_provider
@@ -212,49 +215,27 @@ impl Inner {
         self.registered_instruments.clear()
     }
     pub(crate) fn meter(&mut self, name: &'static str) -> Meter {
-        self.versioned_meter(
-            name,
-            None::<Cow<'static, str>>,
-            None::<Cow<'static, str>>,
-            None,
-        )
+        self.meter_with_scope(InstrumentationScope::builder(name).build())
     }
-    pub(crate) fn versioned_meter(
-        &mut self,
-        name: &'static str,
-        version: Option<impl Into<Cow<'static, str>>>,
-        schema_url: Option<impl Into<Cow<'static, str>>>,
-        attributes: Option<Vec<KeyValue>>,
-    ) -> Meter {
-        let version = version.map(|v| v.into());
-        let schema_url = schema_url.map(|v| v.into());
+
+    pub(crate) fn meter_with_scope(&mut self, scope: InstrumentationScope) -> Meter {
+        let version = scope.version().map(|v| Cow::Owned(v.to_string()));
+        let schema_url = scope.schema_url().map(|v| Cow::Owned(v.to_string()));
+        let name: Cow<'static, str> = Cow::Owned(scope.name().to_string());
         let mut meters = Vec::with_capacity(self.providers.len());
 
         for (provider, existing_meters) in &mut self.providers {
             meters.push(
                 existing_meters
                     .entry(MeterId {
-                        name: name.into(),
+                        name: name.clone(),
                         version: version.clone(),
                         schema_url: schema_url.clone(),
                     })
-                    .or_insert_with(|| {
-                        let mut builder = InstrumentationScope::builder(name);
-                        if let Some(ref v) = version {
-                            builder = builder.with_version(v.clone());
-                        }
-                        if let Some(ref s) = schema_url {
-                            builder = builder.with_schema_url(s.clone());
-                        }
-                        if let Some(ref attrs) = attributes {
-                            builder = builder.with_attributes(attrs.clone());
-                        }
-                        provider.meter_with_scope(builder.build())
-                    })
-                    .clone(),
+                    .or_insert_with(|| { provider.meter_with_scope(scope.clone()) })
+                    .clone()
             );
         }
-
         Meter::new(Arc::new(AggregateInstrumentProvider { meters }))
     }
 
@@ -283,8 +264,14 @@ impl MeterProvider for AggregateMeterProvider {
         }
     }
     fn meter_with_scope(&self, scope: opentelemetry::InstrumentationScope) -> Meter {
-        let provider = SdkMeterProvider::default();
-        provider.meter_with_scope(scope)
+        let mut inner = self.inner.lock();
+        if let Some(inner) = inner.as_mut() {
+            inner.meter_with_scope(scope)
+        } else {
+            // The meter was used after shutdown. Fall back to a meter from a provider with no
+            // readers since the instrument cannot actually be used
+            SdkMeterProvider::default().meter_with_scope(scope)
+        }
     }
 }
 
@@ -557,9 +544,11 @@ mod test {
                 .expect("metrics must be collected");
 
             assert_eq!(get_gauge_value(&mut result), 2);
+
+            drop(_gauge)
         } // Limited scope to drop the gauge after use (b/c it does not impl drop)
 
-        // No further increment will happen
+        // No further increment will happen now that the gauge has dropped
         reader
             .collect(&mut result)
             .expect("metrics must be collected");
@@ -659,15 +648,12 @@ mod test {
 
         let reader = SharedReader(Arc::new(ManualReader::builder().build()));
 
-        let delegate = MeterProviderBuilder::default()
-            .with_reader(reader.clone())
-            .build();
-
-        let meter_provider = AggregateMeterProvider::default();
-        meter_provider.set(
-            MeterProviderType::OtelDefault,
-            FilterMeterProvider::public(delegate),
+        opentelemetry::global::set_meter_provider(
+            MeterProviderBuilder::default()
+                .with_reader(reader.clone())
+                .build()
         );
+        let meter_provider = AggregateMeterProvider::default();
 
         let counter = meter_provider
             .meter_with_scope(InstrumentationScope::builder("test").build())
@@ -733,13 +719,15 @@ mod test {
         let shutdown = Arc::new(AtomicBool::new(false));
         let periodic_reader = reader(&meter_provider, &shutdown);
 
-        let delegate = MeterProviderBuilder::default()
-            .with_reader(periodic_reader)
-            .build();
+        opentelemetry::global::set_meter_provider(
+            MeterProviderBuilder::default()
+                .with_reader(periodic_reader)
+                .build()
+        );
 
         meter_provider.set(
             MeterProviderType::OtelDefault,
-            FilterMeterProvider::public(delegate),
+            FilterMeterProvider::public(opentelemetry::global::meter_provider()),
         );
 
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -757,27 +745,30 @@ mod test {
         let shutdown1 = Arc::new(AtomicBool::new(false));
         let periodic_reader = reader(&meter_provider, &shutdown1);
 
-        let delegate = MeterProviderBuilder::default()
-            .with_reader(periodic_reader)
-            .build();
+        opentelemetry::global::set_meter_provider(
+            MeterProviderBuilder::default()
+                .with_reader(periodic_reader)
+                .build()
+        );
 
         meter_provider.set(
             MeterProviderType::OtelDefault,
-            FilterMeterProvider::public(delegate),
+            FilterMeterProvider::public(opentelemetry::global::meter_provider()),
         );
 
         tokio::time::sleep(Duration::from_millis(20)).await;
         let shutdown2 = Arc::new(AtomicBool::new(false));
         let periodic_reader = reader(&meter_provider, &shutdown2);
 
-        let delegate = MeterProviderBuilder::default()
-            .with_reader(periodic_reader)
-            .build();
+        opentelemetry::global::set_meter_provider(
+            MeterProviderBuilder::default()
+                .with_reader(periodic_reader)
+                .build()
+        );
 
-        // Setting the meter provider should not deadlock.
         meter_provider.set(
             MeterProviderType::OtelDefault,
-            FilterMeterProvider::public(delegate),
+            FilterMeterProvider::public(opentelemetry::global::meter_provider()),
         );
 
         tokio::time::sleep(Duration::from_millis(20)).await;

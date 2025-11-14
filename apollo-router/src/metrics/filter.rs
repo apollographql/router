@@ -16,9 +16,13 @@ use opentelemetry::metrics::ObservableUpDownCounter;
 use opentelemetry::metrics::UpDownCounter;
 use regex::Regex;
 
+//`opentelemetry::global::GlobalMeterProvider` type alias was made private so we recreate it here
+type GlobalMeterProvider = Arc<dyn opentelemetry::metrics::MeterProvider + Send + Sync>;
+
 #[derive(Clone)]
 pub(crate) enum MeterProvider {
     Regular(opentelemetry_sdk::metrics::SdkMeterProvider),
+    Global(GlobalMeterProvider),
 }
 
 impl MeterProvider {
@@ -43,12 +47,26 @@ impl MeterProvider {
                 }
                 provider.meter_with_scope(builder.build())
             }
+            MeterProvider::Global(provider) => {
+                let mut builder = InstrumentationScope::builder(name);
+                if let Some(v) = version {
+                    builder = builder.with_version(v.into());
+                }
+                if let Some(s) = schema_url {
+                    builder = builder.with_schema_url(s.into());
+                }
+                if let Some(ref attrs) = attributes {
+                    builder = builder.with_attributes(attrs.clone());
+                }
+                provider.meter_with_scope(builder.build())
+            }
         }
     }
 
     fn meter_with_scope(&self, scope: &InstrumentationScope) -> Meter {
         match &self {
             MeterProvider::Regular(provider) => provider.meter_with_scope(scope.clone()),
+            MeterProvider::Global(provider) => provider.meter_with_scope(scope.clone()),
         }
     }
 
@@ -56,6 +74,7 @@ impl MeterProvider {
     fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult {
         match self {
             MeterProvider::Regular(provider) => provider.force_flush(),
+            MeterProvider::Global(_provider) => Ok(()),
         }
     }
 }
@@ -63,6 +82,12 @@ impl MeterProvider {
 impl From<opentelemetry_sdk::metrics::SdkMeterProvider> for MeterProvider {
     fn from(provider: opentelemetry_sdk::metrics::SdkMeterProvider) -> Self {
         MeterProvider::Regular(provider)
+    }
+}
+
+impl From<GlobalMeterProvider> for MeterProvider {
+    fn from(provider: GlobalMeterProvider) -> Self {
+        MeterProvider::Global(provider)
     }
 }
 
@@ -269,7 +294,7 @@ impl opentelemetry::metrics::MeterProvider for FilterMeterProvider {
 
 #[cfg(test)]
 mod test {
-    use opentelemetry::InstrumentationScope;
+    use opentelemetry::{global, InstrumentationScope};
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::metrics::InMemoryMetricExporter;
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
@@ -437,12 +462,14 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_public_metrics_using_global_meter_provider() {
         let exporter = InMemoryMetricExporter::default();
-
-        test_public_metrics(
-            exporter.clone(),
+        global::set_meter_provider(
             MeterProviderBuilder::default()
                 .with_reader(PeriodicReader::builder(exporter.clone()).build())
-                .build(),
+                .build()
+        );
+        test_public_metrics(
+            exporter.clone(),
+            global::meter_provider(),
         )
         .await;
     }
