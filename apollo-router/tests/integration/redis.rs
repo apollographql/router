@@ -1771,15 +1771,14 @@ async fn test_redis_doesnt_use_replicas_in_standalone_mode() {
     // send a few different queries to ensure a redis cache hit
     let mut join_set = JoinSet::new();
     for _ in 0..5 {
-        let query = Query::builder()
-            .body(
-                json!({"query":"{ topProducts(first: 5) { name reviews { id } } }","variables":{}}),
-            )
-            .header("cache-control", "public")
-            .build();
-
+        let query = Query::builder().body(json!({
+            "query": format!("query Namespaced_{} {{topProducts{{name}}}}", namespace.replace("-", "")),
+            "variables": {}
+        }))
+            .header("cache-control", "public").build();
         join_set.spawn(router.execute_query(query));
     }
+
     let _ = join_set.join_all().await;
 
     let redis_monitor_output = redis_monitor.collect().await.namespaced(&namespace);
