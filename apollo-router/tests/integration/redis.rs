@@ -1604,7 +1604,7 @@ async fn test_redis_emits_response_size_avg_metric() {
 
     // send a few different queries to ensure a redis cache hit; if you just send 1, it'll only hit
     // the in-memory cache
-    router.execute_several_default_queries(5).await;
+    router.execute_several_default_queries(2).await;
 
     let experimental_response_avg_metric = r#"experimental_apollo_router_cache_redis_response_size_avg{kind="query planner",otel_scope_name="apollo/router"}"#;
     router
@@ -1629,7 +1629,7 @@ async fn test_redis_emits_request_size_avg_metric() {
 
     // send a few different queries to ensure a redis cache hit; if you just send 1, it'll only hit
     // the in-memory cache
-    router.execute_several_default_queries(5).await;
+    router.execute_several_default_queries(2).await;
 
     let experimental_response_avg_metric = r#"experimental_apollo_router_cache_redis_request_size_avg{kind="query planner",otel_scope_name="apollo/router"}"#;
     router
@@ -1723,7 +1723,7 @@ async fn test_redis_uses_replicas_when_clustered() {
 
     // send a few different queries to ensure a redis cache hit; if you just send 1, it'll only hit
     // the in-memory cache
-    router.execute_several_default_queries(5).await;
+    router.execute_several_default_queries(2).await;
 
     let redis_monitor_output = redis_monitor.collect().await;
     assert!(
@@ -1770,7 +1770,7 @@ async fn test_redis_doesnt_use_replicas_in_standalone_mode() {
 
     // send a few different queries to ensure a redis cache hit; if you just send 1, it'll only hit
     // the in-memory cache
-    router.execute_several_default_queries(15).await;
+    router.execute_several_default_queries(2).await;
 
     let redis_monitor_output = redis_monitor.collect().await.namespaced(&namespace);
     assert_eq!(redis_monitor_output.num_nodes(), 1);

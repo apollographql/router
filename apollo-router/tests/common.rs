@@ -53,7 +53,6 @@ use tokio::io::BufReader;
 use tokio::process::Child;
 use tokio::process::Command;
 use tokio::task;
-use tokio::task::JoinSet;
 use tokio::time::Instant;
 use tracing::info_span;
 use tracing_core::Dispatch;
@@ -911,17 +910,17 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    pub fn execute_several_default_queries(
+    pub async fn execute_several_default_queries(
         &self,
         times: usize,
-    ) -> impl Future<Output = Vec<(TraceId, reqwest::Response)>> {
-        let mut join_set = JoinSet::new();
+    ) -> Vec<(TraceId, reqwest::Response)> {
+        let mut results = Vec::with_capacity(3 * times);
         for _ in 0..times {
-            join_set.spawn(self.execute_query(Query::default()));
-            join_set.spawn(self.execute_query(Query::default().with_anonymous()));
-            join_set.spawn(self.execute_query(Query::default().with_invalid_query()));
+            results.push(self.execute_query(Query::default()).await);
+            results.push(self.execute_query(Query::default().with_anonymous()).await);
+            results.push(self.execute_query(Query::default().with_invalid_query()).await);
         }
-        join_set.join_all()
+        results
     }
 
     #[allow(dead_code)]
