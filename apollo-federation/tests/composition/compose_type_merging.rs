@@ -508,6 +508,80 @@ fn field_types_errors_on_incompatible_input_field_types_second() {
     );
 }
 
+#[test]
+fn composes_covariant_containers() {
+    // Test that [U]! (non-null list) is compatible with [U] (nullable list)
+    // when merging fields across subgraphs
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          t: T
+        }
+
+        type T @key(fields: "id") {
+          id: ID!
+          listField: [U] @shareable
+          otherField: V @shareable
+        }
+
+        type U @shareable {
+          a: String
+        }
+
+        type V @shareable {
+          b: Int
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type T @key(fields: "id") {
+          id: ID!
+          listField: [U]! @shareable
+          otherField: V! @shareable
+        }
+
+        type U @shareable {
+          a: String
+        }
+
+        type V @shareable {
+          b: Int
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    let supergraph = result.expect("Expected composition to succeed");
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
+        .expect("Expected API schema generation to succeed");
+
+    // The merged type should use the more general (nullable) type for output positions
+    assert_snapshot!(print_sdl(api_schema.schema()), @r###"
+    type Query {
+      t: T
+    }
+
+    type T {
+      id: ID!
+      listField: [U]
+      otherField: V
+    }
+
+    type U {
+      a: String
+    }
+
+    type V {
+      b: Int
+    }
+    "###);
+}
+
 // =============================================================================
 // ARGUMENTS - Tests for argument type compatibility during composition
 // =============================================================================
