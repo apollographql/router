@@ -106,16 +106,16 @@ impl Verifier for OtlpTraceSpec<'_> {
             let trace_id_u128 = u128::from_be_bytes(trace_id_bytes);
             let trace_id_hex = format!("{:032x}", trace_id_u128);
             let trace_id_hex_upper = trace_id_hex.to_uppercase();
-            
+
             let datadog_trace_id_bytes = datadog_trace_id.to_bytes();
             let datadog_trace_id_u128 = u128::from_be_bytes(datadog_trace_id_bytes);
             let datadog_trace_id_hex = format!("{:032x}", datadog_trace_id_u128);
             let datadog_trace_id_hex_upper = datadog_trace_id_hex.to_uppercase();
-            
+
             // Also try the string representation directly (Display trait)
             let trace_id_str = trace_id.to_string();
             let datadog_trace_id_str = datadog_trace_id.to_string();
-            
+
             let trace_found1 = !t.select_path(&format!("$..[?(@.traceId == '{trace_id}')]")).unwrap_or_default().is_empty();
             let trace_found2 = !t.select_path(&format!("$..[?(@.traceId == '{datadog_trace_id}')]")).unwrap_or_default().is_empty();
             let trace_found3 = !t.select_path(&format!("$..[?(@.traceId == '{trace_id_hex}')]")).unwrap_or_default().is_empty();
@@ -124,7 +124,7 @@ impl Verifier for OtlpTraceSpec<'_> {
             let trace_found6 = !t.select_path(&format!("$..[?(@.traceId == '{datadog_trace_id_hex_upper}')]")).unwrap_or_default().is_empty();
             let trace_found7 = !t.select_path(&format!("$..[?(@.traceId == '{trace_id_str}')]")).unwrap_or_default().is_empty();
             let trace_found8 = !t.select_path(&format!("$..[?(@.traceId == '{datadog_trace_id_str}')]")).unwrap_or_default().is_empty();
-            
+
             trace_found1 | trace_found2 | trace_found3 | trace_found4 | trace_found5 | trace_found6 | trace_found7 | trace_found8
         }).collect());
 

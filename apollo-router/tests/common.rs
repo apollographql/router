@@ -1003,7 +1003,7 @@ impl IntegrationTest {
                 let mut last_error = None;
                 let max_retries = 10;
                 let base_retry_delay = Duration::from_millis(50);
-                
+
                 // Before starting, verify the server is still accepting connections
                 // This helps catch cases where the server stopped accepting connections
                 // between the readiness check and the actual query
@@ -1018,27 +1018,27 @@ impl IntegrationTest {
                         // Continue anyway - maybe it's a transient issue
                     }
                 }
-                
+
                 for attempt in 0..max_retries {
                     // Rebuild the request for each retry (Request doesn't implement Clone)
                     let mut builder = client.post(&url)
                         .header(CONTENT_TYPE, query_content_type.clone())
                         .timeout(Duration::from_secs(10));
-                    
+
                     for (name, value) in &query_headers {
                         builder = builder.header(name, value);
                     }
-                    
+
                     if let Some(psr) = query_psr {
                         builder = builder.header("x-datadog-sampling-priority", psr);
                     }
-                    
+
                     let mut request = builder.json(&query_body).build().unwrap();
                     if query_traced {
                         telemetry.inject_context(&mut request);
                         extra_propagator.inject_context(&mut request);
                     }
-                    
+
                     let request_start = Instant::now();
                     match client.execute(request).await {
                         Ok(response) => {
@@ -1062,8 +1062,8 @@ impl IntegrationTest {
                             // Retry on connection errors (timeout, connect, etc.) but not on HTTP errors (4xx, 5xx)
                             // Also retry on empty responses or connection resets which can happen when router is overloaded
                             // Check error type and message to determine if we should retry
-                            let should_retry = err.is_connect() 
-                                || err.is_timeout() 
+                            let should_retry = err.is_connect()
+                                || err.is_timeout()
                                 || err.is_request()
                                 || err_string.to_lowercase().contains("connection")
                                 || err_string.to_lowercase().contains("timeout")
@@ -1074,7 +1074,7 @@ impl IntegrationTest {
                                 || err_string.to_lowercase().contains("error sending request for url")
                                 || err_string.to_lowercase().contains("send")
                                 || err_string.to_lowercase().contains("network");
-                            
+
                             if should_retry && attempt < max_retries - 1 {
                                 // Exponential backoff: 50ms, 100ms, 200ms, 400ms, etc. (capped at 500ms)
                                 // Add a small delay before first retry to allow router to recover
@@ -1084,7 +1084,7 @@ impl IntegrationTest {
                                     base_retry_delay * (1 << attempt.min(3))
                                 };
                                 tokio::time::sleep(delay).await;
-                                
+
                                 // Before retrying, verify the server is still accepting connections
                                 // This helps catch cases where the router crashed
                                 if attempt > 2 {
@@ -1112,7 +1112,7 @@ impl IntegrationTest {
                         }
                     }
                 }
-                
+
                 // Provide detailed error message with URL and attempt count
                 let error_msg = last_error.unwrap_or_else(|| "unknown error".to_string());
                 panic!(
