@@ -27,15 +27,13 @@ pub(crate) enum OciReferenceType {
 /// Digest references are of the form `@{algorithm}:{digest}` where:
 /// - Algorithm name: max 32 characters (alphanumeric or underscore)
 /// - Digest: 1-64 hex characters
-///   Tag references are of the form `:tag-name` where:
+/// Tag references are of the form `:tag-name` where:
 /// - Tag cannot start with underscore, dot, or dash
 /// - Tag can be up to 128 characters
 pub(crate) fn validate_oci_reference(
     reference: &str,
 ) -> std::result::Result<(String, OciReferenceType), anyhow::Error> {
-    // Digest references are of the form @{algorithm}:{digest}
-    // - Algorithm name: max 32 characters (alphanumeric or underscore)
-    // - Digest: must be truncated to max 64 characters
+    // Digest references
     if reference.starts_with('@') {
         let digest_regex = Regex::new(r"^@([a-zA-Z0-9_]{1,32}):[0-9a-fA-F]{1,64}$").unwrap();
         if digest_regex.is_match(reference) {
@@ -48,7 +46,7 @@ pub(crate) fn validate_oci_reference(
         ));
     }
 
-    // Tag references appear after a colon in the reference and cannot start with underscore, dot, or dash
+    // Tag references
     let tag_regex = Regex::new(r":([a-zA-Z0-9][a-zA-Z0-9._-]{0,127})$").unwrap();
     if tag_regex.is_match(reference) {
         tracing::debug!("validated OCI tag reference");
