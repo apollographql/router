@@ -1216,12 +1216,22 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn get_metrics_response(&self) -> reqwest::Result<reqwest::Response> {
-        let client = reqwest::Client::new();
+        // Create a client that doesn't use connection pooling/keep-alive to avoid
+        // exhausting file descriptors when many tests run in parallel
+        let client = reqwest::Client::builder()
+            .http1_title_case_headers()
+            .http1_allow_obsolete_multiline_headers_in_responses(true)
+            .connection_verbose(false)
+            .tcp_keepalive(None)
+            .pool_max_idle_per_host(0) // Disable connection pooling
+            .build()
+            .unwrap();
 
         let request = client
             .get(format!("http://{}/metrics", self.bind_address()))
             .header("apollographql-client-name", "custom_name")
             .header("apollographql-client-version", "1.0")
+            .header("Connection", "close") // Ensure connection closes immediately
             .build()
             .unwrap();
 

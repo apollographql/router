@@ -695,8 +695,20 @@ async fn test_subscription_ws_passthrough_on_config_reload() -> Result<(), BoxEr
         .expect("regex");
     let total_active: usize = sum_metric_counts(&active);
 
-    assert_eq!(total_active, 1);
-    assert_eq!(total_active + total_terminating, 1);
+    // We expect 2 active connections:
+    // 1. The metrics endpoint HTTP connection (from get_metrics_response calls)
+    // 2. The subscription WebSocket connection (from run_subscription)
+    // Verify we have exactly 2 active connections (not more, which would indicate multiple subscriptions)
+    assert_eq!(
+        total_active, 2,
+        "Expected exactly 2 active connections (1 metrics endpoint + 1 subscription), but found {}",
+        total_active
+    );
+    assert_eq!(
+        total_active + total_terminating, 2,
+        "Expected total connections (active + terminating) to be 2, but found {}",
+        total_active + total_terminating
+    );
 
     verify_subscription_events(stream, expected_events, true).await;
 
@@ -775,7 +787,6 @@ async fn test_subscription_ws_passthrough_on_schema_reload() -> Result<(), BoxEr
         create_expected_schema_reload_payload(),
     ];
 
-    // try to reload the config file
     router.replace_schema_string("createdAt", "created");
 
     router.assert_reloaded().await;
@@ -795,8 +806,20 @@ async fn test_subscription_ws_passthrough_on_schema_reload() -> Result<(), BoxEr
         .expect("regex");
     let total_active: usize = sum_metric_counts(&active);
 
-    assert_eq!(total_active, 1);
-    assert_eq!(total_active + total_terminating, 1);
+    // We expect 2 active connections:
+    // 1. The metrics endpoint HTTP connection (from get_metrics_response calls)
+    // 2. The subscription WebSocket connection (from run_subscription)
+    // Verify we have exactly 2 active connections (not more, which would indicate multiple subscriptions)
+    assert_eq!(
+        total_active, 2,
+        "Expected exactly 2 active connections (1 metrics endpoint + 1 subscription), but found {}",
+        total_active
+    );
+    assert_eq!(
+        total_active + total_terminating, 2,
+        "Expected total connections (active + terminating) to be 2, but found {}",
+        total_active + total_terminating
+    );
 
     verify_subscription_events(stream, expected_events, true).await;
 
