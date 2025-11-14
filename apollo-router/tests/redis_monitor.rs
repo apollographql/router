@@ -1,3 +1,4 @@
+use std::io::Stderr;
 /// Functionality to run the `MONITOR` command against Redis, to ensure
 /// specific commands are or are not sent.
 use std::process::Stdio;
@@ -179,11 +180,20 @@ async fn monitor(port: &str, is_replica: bool, tx: Sender<(bool, Command)>) {
     let mut cmd = tokio::process::Command::new("redis-cli")
         .args(["-p", port, "MONITOR"])
         .stdout(Stdio::piped())
+        .stdout(Stderr::piped())
         .kill_on_drop(true)
         .spawn()
         .expect("failed to create redis-cli command for monitoring redis commands");
 
     let mut reader = BufReader::new(cmd.stdout.take().unwrap()).lines();
+    let mut err_reader = BufReader::new(cmd.stderr.take().unwrap()).lines();
+
+    tokio::spawn(async move {
+        while let Ok(Some(line)) = err_reader.next_line().await {
+            eprintln!("redis-cli error: {line}");
+        }
+    });
+
     while let Ok(Some(line)) = reader.next_line().await {
         if let Some(redis_command) = parse_monitor_output(&line) {
             tx.send((is_replica, redis_command))
