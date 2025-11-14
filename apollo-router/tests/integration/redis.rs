@@ -23,6 +23,7 @@
 // ```
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use apollo_router::Context;
 use apollo_router::MockedSubgraphs;
