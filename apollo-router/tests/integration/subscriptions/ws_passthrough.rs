@@ -705,7 +705,8 @@ async fn test_subscription_ws_passthrough_on_config_reload() -> Result<(), BoxEr
         total_active
     );
     assert_eq!(
-        total_active + total_terminating, 2,
+        total_active + total_terminating,
+        2,
         "Expected total connections (active + terminating) to be 2, but found {}",
         total_active + total_terminating
     );
@@ -816,7 +817,8 @@ async fn test_subscription_ws_passthrough_on_schema_reload() -> Result<(), BoxEr
         total_active
     );
     assert_eq!(
-        total_active + total_terminating, 2,
+        total_active + total_terminating,
+        2,
         "Expected total connections (active + terminating) to be 2, but found {}",
         total_active + total_terminating
     );
