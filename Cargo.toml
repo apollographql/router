@@ -44,6 +44,11 @@ incremental = false
 inherits = "release"
 debug = 1
 
+[profile.release-perf]
+inherits = "release"
+debug = true
+strip = false
+
 # Dependencies used in more than one place are specified here in order to keep versions in sync:
 # https://doc.rust-lang.org/cargo/reference/workspaces.html#the-dependencies-table
 [workspace.dependencies]
