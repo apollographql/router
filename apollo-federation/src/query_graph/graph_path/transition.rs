@@ -321,6 +321,25 @@ impl TransitionGraphPath {
         let mut options: Vec<Arc<TransitionGraphPath>> = vec![];
         let mut dead_end_closures: Vec<UnadvanceableClosure> = vec![];
 
+        // Due to output type covariance, a downcast supergraph transition may be a no-op on the
+        // subgraph path. In these cases, we effectively ignore the type condition.
+        if let QueryGraphEdgeTransition::Downcast {
+            to_type_position, ..
+        } = transition
+        {
+            let casted_type = to_type_position.type_name();
+            let tail = to_advance.graph.node_weight(to_advance.tail)?;
+            if let QueryGraphNodeType::SchemaType(tail_type) = &tail.type_
+                && tail_type.type_name() == casted_type
+            {
+                let path = match to_advance {
+                    Either::Left(path) => Arc::new(path.clone()),
+                    Either::Right(path) => path,
+                };
+                return Ok(Either::Left(vec![path]));
+            }
+        }
+
         for edge in to_advance.next_edges()? {
             let edge_weight = to_advance.graph.edge_weight(edge)?;
             // The edge must match the transition. If it doesn't, we cannot use it.
