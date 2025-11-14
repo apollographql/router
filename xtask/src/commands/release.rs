@@ -401,17 +401,10 @@ impl Prepare {
     /// Run `cargo xtask check-compliance`.
     fn check_compliance(&self) -> Result<()> {
         println!("checking compliance");
-        // Use an isolated target directory to avoid Windows linking conflicts
-        cargo!(
-            ["xtask", "check-compliance"],
-            env = { "CARGO_TARGET_DIR" => "target-xtask-sub" }
-        );
+        cargo!(["xtask", "check-compliance"]);
         if !self.skip_license_check {
             println!("updating licenses.html");
-            cargo!(
-                ["xtask", "licenses"],
-                env = { "CARGO_TARGET_DIR" => "target-xtask-sub" }
-            );
+            cargo!(["xtask", "licenses"]);
         }
         Ok(())
     }
