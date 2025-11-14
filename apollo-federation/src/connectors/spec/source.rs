@@ -315,7 +315,7 @@ mod tests {
             .get(subgraph.schema.schema())
             .unwrap();
 
-        insta::assert_snapshot!(actual_definition.to_string(), @"directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors, fragments: connect__JSONSelection, isSuccess: connect__JSONSelection) repeatable on SCHEMA");
+        insta::assert_snapshot!(actual_definition.to_string(), @"directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors, fragments: connect__JSONSelectionMap, isSuccess: connect__JSONSelection) repeatable on SCHEMA");
 
         insta::assert_debug_snapshot!(
             subgraph.schema
