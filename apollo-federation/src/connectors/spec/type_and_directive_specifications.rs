@@ -63,10 +63,17 @@ fn link(s: &FederationSchema) -> Result<Arc<Link>, SingleFederationError> {
 }
 
 pub(crate) const JSON_SELECTION_SCALAR_NAME: Name = name!("JSONSelection");
+pub(crate) const JSON_SELECTION_MAP_SCALAR_NAME: Name = name!("JSONSelectionMap");
 
 fn json_selection_spec() -> ScalarTypeSpecification {
     ScalarTypeSpecification {
         name: JSON_SELECTION_SCALAR_NAME,
+    }
+}
+
+fn json_selection_map_spec() -> ScalarTypeSpecification {
+    ScalarTypeSpecification {
+        name: JSON_SELECTION_MAP_SCALAR_NAME,
     }
 }
 
@@ -293,6 +300,7 @@ fn source_http_spec() -> InputObjectTypeSpecification {
 pub(crate) fn type_specifications() -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
     vec![
         Box::new(json_selection_spec()),
+        Box::new(json_selection_map_spec()),
         Box::new(url_path_template_spec()),
         Box::new(http_header_mapping_spec()),
         Box::new(connect_http_spec()),
@@ -459,7 +467,7 @@ fn source_directive_spec() -> DirectiveSpecification {
                 base_spec: ArgumentSpecification {
                     name: FRAGMENTS_NAME_ARGUMENT,
                     get_type: |s, _| {
-                        let name = link(s)?.type_name_in_schema(&JSON_SELECTION_SCALAR_NAME);
+                        let name = link(s)?.type_name_in_schema(&JSON_SELECTION_MAP_SCALAR_NAME);
                         Ok(Type::Named(name))
                     },
                     default_value: None,
@@ -536,7 +544,7 @@ mod tests {
 
         directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection, selection: connect__JSONSelection!, entity: Boolean = false, id: String) repeatable on FIELD_DEFINITION | OBJECT
 
-        directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors, fragments: connect__JSONSelection, isSuccess: connect__JSONSelection) repeatable on SCHEMA
+        directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors, fragments: connect__JSONSelectionMap, isSuccess: connect__JSONSelection) repeatable on SCHEMA
 
         type Query {
           hello: String
@@ -550,6 +558,8 @@ mod tests {
         scalar link__Import
 
         scalar connect__JSONSelection
+
+        scalar connect__JSONSelectionMap
 
         scalar connect__URLTemplate
 
@@ -622,7 +632,7 @@ mod tests {
 
         directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection, selection: connect__JSONSelection!, entity: Boolean = false, id: String) repeatable on FIELD_DEFINITION | OBJECT
 
-        directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors, fragments: connect__JSONSelection, isSuccess: connect__JSONSelection) repeatable on SCHEMA
+        directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors, fragments: connect__JSONSelectionMap, isSuccess: connect__JSONSelection) repeatable on SCHEMA
 
         type Query {
           hello: String
@@ -636,6 +646,8 @@ mod tests {
         scalar link__Import
 
         scalar connect__JSONSelection
+
+        scalar connect__JSONSelectionMap
 
         scalar connect__URLTemplate
 
@@ -684,6 +696,7 @@ mod tests {
           @link(url: "https://specs.apollo.dev/connect/v0.2", import: [
             { name: "@source" as: "@api" }
             { name: "JSONSelection" as: "Mapping" }
+            { name: "JSONSelectionMap" as: "Mapping" }
             { name: "ConnectorErrors" as: "ErrorMappings" }
             "ConnectHTTP"
           ])
@@ -707,7 +720,7 @@ mod tests {
           query: Query
         }
 
-        extend schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/connect/v0.2", import: [{name: "@source", as: "@api"}, {name: "JSONSelection", as: "Mapping"}, {name: "ConnectorErrors", as: "ErrorMappings"}, "ConnectHTTP"])
+        extend schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/connect/v0.2", import: [{name: "@source", as: "@api"}, {name: "JSONSelection", as: "Mapping"}, {name: "JSONSelectionMap", as: "Mapping"}, {name: "ConnectorErrors", as: "ErrorMappings"}, "ConnectHTTP"])
 
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
@@ -806,7 +819,7 @@ mod tests {
 
         directive @connect(source: String, http: connect__ConnectHTTP, selection: connect__JSONSelection!) repeatable on FIELD_DEFINITION
 
-        directive @connect__source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors, fragments: connect__JSONSelection, isSuccess: connect__JSONSelection) repeatable on SCHEMA
+        directive @connect__source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors, fragments: connect__JSONSelectionMap, isSuccess: connect__JSONSelection) repeatable on SCHEMA
 
         type Query {
           hello: String
@@ -826,6 +839,8 @@ mod tests {
         input connect__ConnectHTTP {
           GET: connect__URLTemplate
         }
+
+        scalar connect__JSONSelectionMap
 
         input connect__HTTPHeaderMapping {
           name: String!
