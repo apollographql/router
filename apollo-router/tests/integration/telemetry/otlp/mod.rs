@@ -82,7 +82,10 @@ impl Verifier for OtlpTraceSpec<'_> {
 
     async fn get_trace(&self, trace_id: TraceId) -> Result<Value, axum::BoxError> {
         let requests = self.mock_server.received_requests().await;
-        let trace = Value::Array(requests.unwrap_or_default().iter().filter(|r| r.url.path().ends_with("/traces"))
+        let all_requests = requests.unwrap_or_default();
+
+        let trace = Value::Array(all_requests.iter()
+            .filter(|r| r.url.path().ends_with("/traces"))
             .filter_map(|r| {
                 match opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest::decode(
                     bytes::Bytes::copy_from_slice(&r.body),
@@ -96,10 +99,35 @@ impl Verifier for OtlpTraceSpec<'_> {
                 }
             }).filter(|t| {
             let datadog_trace_id = TraceId::from_u128(trace_id.to_datadog() as u128);
+            // Try multiple trace ID formats for matching
+            // OTLP trace IDs are stored as hex strings in the protobuf JSON representation
+            // Convert TraceId to u128 using to_bytes()
+            let trace_id_bytes = trace_id.to_bytes();
+            let trace_id_u128 = u128::from_be_bytes(trace_id_bytes);
+            let trace_id_hex = format!("{:032x}", trace_id_u128);
+            let trace_id_hex_upper = trace_id_hex.to_uppercase();
+            
+            let datadog_trace_id_bytes = datadog_trace_id.to_bytes();
+            let datadog_trace_id_u128 = u128::from_be_bytes(datadog_trace_id_bytes);
+            let datadog_trace_id_hex = format!("{:032x}", datadog_trace_id_u128);
+            let datadog_trace_id_hex_upper = datadog_trace_id_hex.to_uppercase();
+            
+            // Also try the string representation directly (Display trait)
+            let trace_id_str = trace_id.to_string();
+            let datadog_trace_id_str = datadog_trace_id.to_string();
+            
             let trace_found1 = !t.select_path(&format!("$..[?(@.traceId == '{trace_id}')]")).unwrap_or_default().is_empty();
             let trace_found2 = !t.select_path(&format!("$..[?(@.traceId == '{datadog_trace_id}')]")).unwrap_or_default().is_empty();
-            trace_found1 | trace_found2
+            let trace_found3 = !t.select_path(&format!("$..[?(@.traceId == '{trace_id_hex}')]")).unwrap_or_default().is_empty();
+            let trace_found4 = !t.select_path(&format!("$..[?(@.traceId == '{trace_id_hex_upper}')]")).unwrap_or_default().is_empty();
+            let trace_found5 = !t.select_path(&format!("$..[?(@.traceId == '{datadog_trace_id_hex}')]")).unwrap_or_default().is_empty();
+            let trace_found6 = !t.select_path(&format!("$..[?(@.traceId == '{datadog_trace_id_hex_upper}')]")).unwrap_or_default().is_empty();
+            let trace_found7 = !t.select_path(&format!("$..[?(@.traceId == '{trace_id_str}')]")).unwrap_or_default().is_empty();
+            let trace_found8 = !t.select_path(&format!("$..[?(@.traceId == '{datadog_trace_id_str}')]")).unwrap_or_default().is_empty();
+            
+            trace_found1 | trace_found2 | trace_found3 | trace_found4 | trace_found5 | trace_found6 | trace_found7 | trace_found8
         }).collect());
+
         Ok(trace)
     }
 

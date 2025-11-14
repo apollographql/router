@@ -27,7 +27,7 @@ pub(crate) enum OciReferenceType {
 /// Digest references are of the form `@{algorithm}:{digest}` where:
 /// - Algorithm name: max 32 characters (alphanumeric or underscore)
 /// - Digest: 1-64 hex characters
-/// Tag references are of the form `:tag-name` where:
+///   Tag references are of the form `:tag-name` where:
 /// - Tag cannot start with underscore, dot, or dash
 /// - Tag can be up to 128 characters
 pub(crate) fn validate_oci_reference(

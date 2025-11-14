@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceResponse;
 use prost::Message;
+use serde_json::json;
 use tower::BoxError;
 use wiremock::Mock;
 use wiremock::ResponseTemplate;
@@ -62,7 +63,15 @@ async fn test_basic() -> Result<(), BoxError> {
     router.start().await;
     router.assert_started().await;
 
-    for _ in 0..2 {
+    for iteration in 0..2 {
+        // Use unique queries for each iteration to avoid cache hits
+        // The cache key includes the query string, so unique queries ensure parse_query spans are created
+        let unique_query = Query::builder()
+            .body(json!({
+                "query": format!("query ExampleQuery # iteration {}\n{{topProducts{{name}}}}", iteration),
+                "variables": {}
+            }))
+            .build();
         TraceSpec::builder()
             .operation_name("ExampleQuery")
             .services(["client", "router", "subgraph"].into())
@@ -82,7 +91,7 @@ async fn test_basic() -> Result<(), BoxError> {
             )
             .subgraph_sampled(true)
             .build()
-            .validate_otlp_trace(&mut router, &mock_server, Query::default())
+            .validate_otlp_trace(&mut router, &mock_server, unique_query)
             .await?;
         TraceSpec::builder()
             .service("router")

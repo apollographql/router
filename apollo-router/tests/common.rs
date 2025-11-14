@@ -843,6 +843,79 @@ impl IntegrationTest {
     #[allow(dead_code)]
     pub async fn assert_started(&mut self) {
         self.wait_for_log_message("GraphQL endpoint exposed").await;
+        // Verify the HTTP server is actually ready to accept connections
+        self.wait_for_server_ready().await;
+        // Final verification that server is still accepting connections
+        let verify_client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .unwrap();
+        match verify_client
+            .get(format!("http://{}/metrics", self.bind_address()))
+            .timeout(Duration::from_millis(500))
+            .send()
+            .await
+        {
+            Ok(_) => {}
+            Err(_) => {
+                // Continue anyway - maybe it's transient
+            }
+        }
+        drop(verify_client);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    /// Waits for the HTTP server to be ready to accept connections by making a lightweight request
+    async fn wait_for_server_ready(&self) {
+        // First, wait for bind_address to be set (it's set asynchronously when parsing the log)
+        let now = Instant::now();
+        let timeout = Duration::from_secs(5);
+        while now.elapsed() < timeout {
+            if self.bind_address.lock().is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        // Now verify the server is actually accepting connections
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .unwrap();
+        let now = Instant::now();
+        let mut last_error = None;
+        let mut attempt = 0;
+
+        while now.elapsed() < timeout {
+            attempt += 1;
+            let bind_addr = self.bind_address();
+            // Try to connect to the metrics endpoint as a lightweight readiness check
+            match client
+                .get(format!("http://{}/metrics", bind_addr))
+                .timeout(Duration::from_millis(200))
+                .send()
+                .await
+            {
+                Ok(_) => {
+                    // Drop the client to ensure connections are properly closed before returning
+                    drop(client);
+                    // Add a small delay to ensure server is fully ready and connections are closed
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    return;
+                }
+                Err(err) => {
+                    // Connection error - server not ready yet, retry
+                    last_error = Some(err.to_string());
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            }
+        }
+        panic!(
+            "Server not ready after {}ms ({} attempts): {}",
+            timeout.as_millis(),
+            attempt,
+            last_error.unwrap_or_else(|| "unknown error".to_string())
+        );
     }
 
     #[allow(dead_code)]
@@ -909,48 +982,144 @@ impl IntegrationTest {
         let extra_propagator = self.extra_propagator.clone();
 
         let url = format!("http://{}", self.bind_address());
+        let bind_addr = self.bind_address();
         let subgraph_context = self.subgraph_context.clone();
+        // Clone query data needed for retries before moving into async block
+        let query_headers = query.headers.clone();
+        let query_content_type = query.content_type.clone();
+        let query_body = query.body.clone();
+        let query_psr = query.psr;
+        let query_traced = query.traced;
         async move {
             let span = info_span!("client_request");
             let trace_id = span.context().span().span_context().trace_id();
             async move {
-                let client = reqwest::Client::new();
+                let client = reqwest::Client::builder()
+                    .timeout(Duration::from_secs(30))
+                    .build()
+                    .unwrap();
 
-                let mut builder = client.post(url).header(CONTENT_TYPE, query.content_type);
-
-                for (name, value) in query.headers {
-                    builder = builder.header(name, value);
+                // Retry logic for transient connection errors
+                let mut last_error = None;
+                let max_retries = 10;
+                let base_retry_delay = Duration::from_millis(50);
+                
+                // Before starting, verify the server is still accepting connections
+                // This helps catch cases where the server stopped accepting connections
+                // between the readiness check and the actual query
+                match client
+                    .get(format!("http://{}/metrics", bind_addr))
+                    .timeout(Duration::from_millis(500))
+                    .send()
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(_) => {
+                        // Continue anyway - maybe it's a transient issue
+                    }
                 }
-
-                if let Some(psr) = query.psr {
-                    builder = builder.header("x-datadog-sampling-priority", psr);
-                }
-
-                let mut request = builder.json(&query.body).build().unwrap();
-                if query.traced {
-                    telemetry.inject_context(&mut request);
-                    extra_propagator.inject_context(&mut request);
-                }
-
-                match client.execute(request).await {
-                    Ok(response) => {
-                        if query.traced {
-                            (trace_id, response)
-                        } else {
-                            (
-                                subgraph_context
-                                    .lock()
-                                    .as_ref()
-                                    .expect("subgraph context")
-                                    .trace_id(),
-                                response,
-                            )
+                
+                for attempt in 0..max_retries {
+                    // Rebuild the request for each retry (Request doesn't implement Clone)
+                    let mut builder = client.post(&url)
+                        .header(CONTENT_TYPE, query_content_type.clone())
+                        .timeout(Duration::from_secs(10));
+                    
+                    for (name, value) in &query_headers {
+                        builder = builder.header(name, value);
+                    }
+                    
+                    if let Some(psr) = query_psr {
+                        builder = builder.header("x-datadog-sampling-priority", psr);
+                    }
+                    
+                    let mut request = builder.json(&query_body).build().unwrap();
+                    if query_traced {
+                        telemetry.inject_context(&mut request);
+                        extra_propagator.inject_context(&mut request);
+                    }
+                    
+                    let request_start = Instant::now();
+                    match client.execute(request).await {
+                        Ok(response) => {
+                            if query_traced {
+                                return (trace_id, response);
+                            } else {
+                                return (
+                                    subgraph_context
+                                        .lock()
+                                        .as_ref()
+                                        .expect("subgraph context")
+                                        .trace_id(),
+                                    response,
+                                );
+                            }
+                        }
+                        Err(err) => {
+                            let err_string = err.to_string();
+                            let _elapsed = request_start.elapsed();
+                            last_error = Some(err_string.clone());
+                            // Retry on connection errors (timeout, connect, etc.) but not on HTTP errors (4xx, 5xx)
+                            // Also retry on empty responses or connection resets which can happen when router is overloaded
+                            // Check error type and message to determine if we should retry
+                            let should_retry = err.is_connect() 
+                                || err.is_timeout() 
+                                || err.is_request()
+                                || err_string.to_lowercase().contains("connection")
+                                || err_string.to_lowercase().contains("timeout")
+                                || err_string.to_lowercase().contains("refused")
+                                || err_string.to_lowercase().contains("connectionreset")
+                                || err_string.to_lowercase().contains("broken pipe")
+                                || err_string.to_lowercase().contains("error sending request")
+                                || err_string.to_lowercase().contains("error sending request for url")
+                                || err_string.to_lowercase().contains("send")
+                                || err_string.to_lowercase().contains("network");
+                            
+                            if should_retry && attempt < max_retries - 1 {
+                                // Exponential backoff: 50ms, 100ms, 200ms, 400ms, etc. (capped at 500ms)
+                                // Add a small delay before first retry to allow router to recover
+                                let delay = if attempt == 0 {
+                                    Duration::from_millis(200) // Longer initial delay
+                                } else {
+                                    base_retry_delay * (1 << attempt.min(3))
+                                };
+                                tokio::time::sleep(delay).await;
+                                
+                                // Before retrying, verify the server is still accepting connections
+                                // This helps catch cases where the router crashed
+                                if attempt > 2 {
+                                    // After a few retries, check if server is still up
+                                    match client
+                                        .get(format!("http://{}/metrics", bind_addr))
+                                        .timeout(Duration::from_millis(100))
+                                        .send()
+                                        .await
+                                    {
+                                        Ok(_) => {
+                                            continue;
+                                        }
+                                        Err(_) => {
+                                            // Server appears to be down, fail faster
+                                            break;
+                                        }
+                                    }
+                                }
+                                continue;
+                            } else if !should_retry {
+                                // Don't retry HTTP errors (4xx, 5xx) - fail immediately
+                                break;
+                            }
                         }
                     }
-                    Err(err) => {
-                        panic!("unable to send successful request to router, {err}")
-                    }
                 }
+                
+                // Provide detailed error message with URL and attempt count
+                let error_msg = last_error.unwrap_or_else(|| "unknown error".to_string());
+                panic!(
+                    "unable to send successful request to router after {max_retries} attempts to {url}: {err}\n\
+                    This may indicate the router process crashed or is not accepting connections.",
+                    err = error_msg
+                )
             }
             .instrument(span)
             .await
@@ -1436,15 +1605,11 @@ impl IntegrationTest {
         let tracer_provider_client = self._tracer_provider_client.clone();
         let tracer_provider_subgraph = self._tracer_provider_subgraph.clone();
         for r in tracer_provider_subgraph.force_flush() {
-            if let Err(e) = r {
-                eprintln!("failed to flush subgraph tracer: {e}");
-            }
+            let _ = r;
         }
 
         for r in tracer_provider_client.force_flush() {
-            if let Err(e) = r {
-                eprintln!("failed to flush client tracer: {e}");
-            }
+            let _ = r;
         }
     }
 

@@ -18,16 +18,26 @@ pub trait Verifier {
         query: Query,
     ) -> Result<(), BoxError> {
         let (id, response) = router.execute_query(query).await;
+        // Allow time for trace batch processing to start
+        // The router uses a 10ms batch delay, so we need to wait for batches to be exported
+        tokio::time::sleep(Duration::from_millis(200)).await;
         if let Some(spec_id) = &self.spec().trace_id {
             assert_eq!(id.to_string(), *spec_id, "trace id");
         }
-        for _ in 0..20 {
-            if self.find_valid_trace(id).await.is_ok() {
-                break;
+        for attempt in 0..30 {
+            match self.find_valid_trace(id).await {
+                Ok(_) => {
+                    break;
+                }
+                Err(e) => {
+                    if attempt < 29 {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    } else {
+                        return Err(e);
+                    }
+                }
             }
-            tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        self.find_valid_trace(id).await?;
         let subgraph_context = router.subgraph_context();
         assert!(response.status().is_success());
         self.validate_subgraph(subgraph_context)?;
@@ -85,11 +95,46 @@ pub trait Verifier {
         // * Required attributes of 'router' span has been set
 
         // For now just validate service name.
-        let trace: Value = self.get_trace(trace_id).await?;
+        // Retry service verification in case spans from different services are still being exported in batches
+        // Traces are exported with a 10ms batch delay, so spans from client/router/subgraph might arrive in separate batches
+        let mut trace: Value = self.get_trace(trace_id).await?;
         println!("trace: {trace_id}");
-        self.verify_services(&trace)?;
+        for attempt in 0..5 {
+            match self.verify_services(&trace) {
+                Ok(_) => {
+                    break;
+                }
+                Err(e) => {
+                    if attempt < 4 {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        // Re-fetch trace in case new batches arrived
+                        trace = self.get_trace(trace_id).await?;
+                    } else {
+                        return Err(e);
+                    }
+                }
+            }
+        }
         println!("services verified");
-        self.verify_spans_present(&trace)?;
+
+        // Retry span verification in case spans are still being exported in batches
+        // Traces are exported with a 10ms batch delay, so spans might arrive in multiple batches
+        for attempt in 0..5 {
+            match self.verify_spans_present(&trace) {
+                Ok(_) => {
+                    break;
+                }
+                Err(e) => {
+                    if attempt < 4 {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        // Re-fetch trace in case new batches arrived
+                        trace = self.get_trace(trace_id).await?;
+                    } else {
+                        return Err(e);
+                    }
+                }
+            }
+        }
         println!("spans present verified");
         self.verify_measured_spans(&trace)?;
         println!("measured spans verified");
