@@ -1768,13 +1768,16 @@ async fn test_redis_doesnt_use_replicas_in_standalone_mode() {
     router.start().await;
     router.assert_started().await;
 
+    let expected_metric = r#"apollo_router_cache_redis_clients{otel_scope_name="apollo/router"} 2"#;
+    router.assert_metrics_contains(expected_metric, None).await;
+
     // send a few different queries to ensure a redis cache hit; if you just send 1, it'll only hit
     // the in-memory cache
-    router.execute_several_default_queries(2).await;
-
-    let redis_monitor_output = redis_monitor.collect().await.namespaced(&namespace);
-    assert_eq!(redis_monitor_output.num_nodes(), 1);
-    assert!(redis_monitor_output.command_sent_to_any("GET"));
+    let responses = router.execute_several_default_queries(2).await;
+    for response in responses {
+        let r = response.1.text().await;
+        eprintln!("{r:?}");
+    }
 
     // check that there were no I/O errors
     let io_error = r#"apollo_router_cache_redis_errors_total{error_type="io",kind="query planner",otel_scope_name="apollo/router"}"#;
@@ -1784,6 +1787,10 @@ async fn test_redis_doesnt_use_replicas_in_standalone_mode() {
     // state properly
     let parse_error = r#"apollo_router_cache_redis_errors_total{error_type="parse",kind="query planner",otel_scope_name="apollo/router"}"#;
     router.assert_metrics_does_not_contain(parse_error).await;
+
+    let redis_monitor_output = redis_monitor.collect().await.namespaced(&namespace);
+    assert_eq!(redis_monitor_output.num_nodes(), 1);
+    assert!(redis_monitor_output.command_sent_to_any("GET"));
 }
 
 #[tokio::test(flavor = "multi_thread")]
