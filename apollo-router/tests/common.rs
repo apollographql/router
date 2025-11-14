@@ -918,7 +918,10 @@ impl IntegrationTest {
         for _ in 0..times {
             results.push(self.execute_query(Query::default()).await);
             results.push(self.execute_query(Query::default().with_anonymous()).await);
-            results.push(self.execute_query(Query::default().with_invalid_query()).await);
+            results.push(
+                self.execute_query(Query::default().with_invalid_query())
+                    .await,
+            );
         }
         results
     }
