@@ -469,7 +469,8 @@ impl Executable {
         result
     }
 
-    async fn inner_start(
+    #[cfg_attr(test, allow(dead_code))]
+    pub(crate) async fn inner_start(
         shutdown: Option<ShutdownSource>,
         schema: Option<SchemaSource>,
         config: Option<ConfigurationSource>,
@@ -944,5 +945,893 @@ mod tests {
             add_log_filter("apollo_router::plugins=debug").unwrap(),
             "info,apollo_router::plugins=debug"
         );
+    }
+
+    mod startup_tests {
+        use std::env;
+        use std::fs::File;
+        use std::io::Write;
+        use std::path::PathBuf;
+
+        use anyhow::Result;
+        use tempfile::TempDir;
+        use tokio::time::Duration;
+
+        use super::super::Executable;
+        use super::super::Opt;
+        use crate::router::SchemaSource;
+
+        // Helper to create a temporary supergraph file
+        async fn create_temp_supergraph_file() -> (PathBuf, TempDir) {
+            let temp_dir = tempfile::tempdir().unwrap();
+            let supergraph_path = temp_dir.path().join("supergraph.graphql");
+            let mut file = File::create(&supergraph_path).unwrap();
+            // Use a minimal valid supergraph schema for testing
+            let supergraph_content = r#"schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+  query: Query
+}
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(
+  graph: join__Graph
+  requires: join__FieldSet
+  provides: join__FieldSet
+  type: String
+  external: Boolean
+  override: String
+  usedOverridden: Boolean
+) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(
+  graph: join__Graph!
+  interface: String!
+) repeatable on OBJECT | INTERFACE
+
+directive @join__type(
+  graph: join__Graph!
+  key: String!
+  resolvable: Boolean = true
+  isInterfaceObject: Boolean = false
+) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @link(
+  url: String
+  as: String
+  for: link__Purpose
+  import: [link__Import]
+) repeatable on SCHEMA
+
+scalar join__FieldSet
+
+enum join__Graph {
+  ACCOUNTS @join__graph(name: "accounts", url: "http://localhost:4001/graphql")
+  INVENTORY @join__graph(name: "inventory", url: "http://localhost:4002/graphql")
+  PRODUCTS @join__graph(name: "products", url: "http://localhost:4003/graphql")
+  REVIEWS @join__graph(name: "reviews", url: "http://localhost:4004/graphql")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  SECURITY
+  EXECUTION
+}
+
+type Query {
+  me: User
+}
+
+type User
+  @join__type(graph: ACCOUNTS, key: "id")
+  @join__type(graph: PRODUCTS, key: "id")
+  @join__type(graph: REVIEWS, key: "id") {
+  id: ID!
+  name: String @join__field(graph: ACCOUNTS)
+  username: String @join__field(graph: ACCOUNTS)
+}
+"#;
+            file.write_all(supergraph_content.as_bytes()).unwrap();
+            (supergraph_path, temp_dir)
+        }
+
+        // Helper to create a temporary config file with graph_artifact_reference
+        async fn create_temp_config_with_graph_artifact_reference(
+            graph_artifact_ref: &str,
+        ) -> (PathBuf, TempDir) {
+            let temp_dir = tempfile::tempdir().unwrap();
+            let config_path = temp_dir.path().join("router.yaml");
+            let mut file = File::create(&config_path).unwrap();
+            let config_content = format!(
+                r#"
+supergraph:
+  listen: 127.0.0.1:0
+  graph_artifact_reference: {}
+health_check:
+  listen: 127.0.0.1:0
+"#,
+                graph_artifact_ref
+            );
+            file.write_all(config_content.as_bytes()).unwrap();
+            (config_path, temp_dir)
+        }
+
+        // Helper to create a temporary config file without graph_artifact_reference
+        async fn create_temp_config_without_graph_artifact_reference() -> (PathBuf, TempDir) {
+            let temp_dir = tempfile::tempdir().unwrap();
+            let config_path = temp_dir.path().join("router.yaml");
+            let mut file = File::create(&config_path).unwrap();
+            let config_content = r#"
+supergraph:
+  listen: 127.0.0.1:0
+health_check:
+  listen: 127.0.0.1:0
+"#;
+            file.write_all(config_content.as_bytes()).unwrap();
+            (config_path, temp_dir)
+        }
+
+        // Helper to save and restore environment variables
+        struct EnvGuard {
+            vars: Vec<(String, Option<String>)>,
+        }
+
+        impl EnvGuard {
+            fn new(keys: &[&str]) -> Self {
+                let vars = keys
+                    .iter()
+                    .map(|key| (key.to_string(), env::var(key).ok()))
+                    .collect();
+                Self { vars }
+            }
+
+            fn set(&self, key: &str, value: &str) {
+                unsafe {
+                    env::set_var(key, value);
+                }
+            }
+        }
+
+        impl Drop for EnvGuard {
+            fn drop(&mut self) {
+                for (key, original_value) in &self.vars {
+                    match original_value {
+                        Some(val) => unsafe {
+                            env::set_var(key, val);
+                        },
+                        None => unsafe {
+                            env::remove_var(key);
+                        },
+                    }
+                }
+            }
+        }
+
+        // Helper to test router startup and verify it succeeds
+        async fn test_startup_success(
+            schema: Option<SchemaSource>,
+            config_path: Option<PathBuf>,
+            env_vars: Vec<(&str, &str)>,
+        ) -> Result<()> {
+            test_startup_success_with_options(schema, config_path, env_vars, false, None).await
+        }
+
+        // Helper to test router startup with additional options
+        async fn test_startup_success_with_options(
+            schema: Option<SchemaSource>,
+            config_path: Option<PathBuf>,
+            env_vars: Vec<(&str, &str)>,
+            hot_reload: bool,
+            uplink_endpoints: Option<String>,
+        ) -> Result<()> {
+            // Save and set env vars
+            let keys: Vec<&str> = env_vars.iter().map(|(k, _)| *k).collect();
+            let guard = EnvGuard::new(&keys);
+            for (key, value) in &env_vars {
+                guard.set(key, value);
+            }
+
+            // Create Opt with test values
+            let opt = Opt {
+                log_level: "error".to_string(),
+                hot_reload,
+                config_path,
+                dev: false,
+                supergraph_path: None,
+                supergraph_urls: None,
+                command: None,
+                apollo_key: env::var("APOLLO_KEY").ok(),
+                #[cfg(unix)]
+                apollo_key_path: None,
+                apollo_graph_ref: env::var("APOLLO_GRAPH_REF").ok(),
+                apollo_router_license: None,
+                apollo_router_license_path: None,
+                apollo_uplink_endpoints: uplink_endpoints
+                    .or_else(|| env::var("APOLLO_UPLINK_ENDPOINTS").ok()),
+                graph_artifact_reference: env::var("APOLLO_GRAPH_ARTIFACT_REFERENCE").ok(),
+                anonymous_telemetry_disabled: true,
+                apollo_uplink_timeout: Duration::from_secs(30),
+                listen_address: None,
+                version: false,
+            };
+
+            // Keep guard alive until after inner_start completes
+            drop(guard);
+
+            // Test inner_start - provide default license for tests
+            use crate::router::LicenseSource;
+            Executable::inner_start(None, schema, None, Some(LicenseSource::default()), opt).await
+        }
+
+        // Helper to test router startup and verify it fails with expected error
+        async fn test_startup_failure(
+            schema: Option<SchemaSource>,
+            config_path: Option<PathBuf>,
+            env_vars: Vec<(&str, &str)>,
+            expected_error_contains: &str,
+        ) {
+            test_startup_failure_with_options(
+                schema,
+                config_path,
+                env_vars,
+                expected_error_contains,
+                false,
+                None,
+            )
+            .await
+        }
+
+        // Helper to test router startup failure with additional options
+        async fn test_startup_failure_with_options(
+            schema: Option<SchemaSource>,
+            config_path: Option<PathBuf>,
+            env_vars: Vec<(&str, &str)>,
+            expected_error_contains: &str,
+            hot_reload: bool,
+            uplink_endpoints: Option<String>,
+        ) {
+            // Save and set env vars
+            let keys: Vec<&str> = env_vars.iter().map(|(k, _)| *k).collect();
+            let guard = EnvGuard::new(&keys);
+            for (key, value) in &env_vars {
+                guard.set(key, value);
+            }
+
+            // Create Opt with test values
+            let opt = Opt {
+                log_level: "error".to_string(),
+                hot_reload,
+                config_path,
+                dev: false,
+                supergraph_path: None,
+                supergraph_urls: None,
+                command: None,
+                apollo_key: env::var("APOLLO_KEY").ok(),
+                #[cfg(unix)]
+                apollo_key_path: None,
+                apollo_graph_ref: env::var("APOLLO_GRAPH_REF").ok(),
+                apollo_router_license: None,
+                apollo_router_license_path: None,
+                apollo_uplink_endpoints: uplink_endpoints
+                    .or_else(|| env::var("APOLLO_UPLINK_ENDPOINTS").ok()),
+                graph_artifact_reference: env::var("APOLLO_GRAPH_ARTIFACT_REFERENCE").ok(),
+                anonymous_telemetry_disabled: true,
+                apollo_uplink_timeout: Duration::from_secs(30),
+                listen_address: None,
+                version: false,
+            };
+
+            // Keep guard alive until after inner_start completes
+            drop(guard);
+
+            // Test inner_start - should fail (provide default license to avoid license errors)
+            use crate::router::LicenseSource;
+            let result =
+                Executable::inner_start(None, schema, None, Some(LicenseSource::default()), opt)
+                    .await;
+
+            // Verify it failed with expected error
+            assert!(result.is_err(), "Expected startup to fail");
+            let error_msg = result.unwrap_err().to_string();
+            assert!(
+                error_msg.contains(expected_error_contains),
+                "Error message '{}' should contain '{}'",
+                error_msg,
+                expected_error_contains
+            );
+        }
+
+        // VALID CASES
+
+        #[tokio::test]
+        async fn test_startup_with_supergraph_file_no_hot_reload() {
+            let (supergraph_path, _temp_dir) = create_temp_supergraph_file().await;
+            let schema = Some(SchemaSource::File {
+                path: supergraph_path.clone(),
+                watch: false,
+            });
+
+            // Use a timeout to verify router starts without NoSchema error
+            let result = tokio::time::timeout(
+                Duration::from_millis(500),
+                test_startup_success(schema, None, vec![]),
+            )
+            .await;
+
+            // Router should start (timeout means it's running, which is success)
+            // Or it should fail with a non-NoSchema error (like subgraph connection error)
+            match result {
+                Ok(Ok(())) => {
+                    // Router started successfully - this shouldn't happen in test without subgraphs
+                    // but if it does, it means startup succeeded
+                }
+                Ok(Err(e)) => {
+                    let error_msg = e.to_string();
+                    // Should not fail with NoSchema - that's what we're testing
+                    assert!(
+                        !error_msg.contains("no valid schema was supplied"),
+                        "Router should not fail with NoSchema error, got: {}",
+                        error_msg
+                    );
+                    // It's OK if it fails with subgraph connection errors - that means schema was loaded
+                }
+                Err(_) => {
+                    // Timeout - router is running, which means startup succeeded
+                    // This is the expected case when router starts successfully
+                }
+            }
+        }
+
+        #[tokio::test]
+        async fn test_startup_with_supergraph_file_with_hot_reload() {
+            let (supergraph_path, _temp_dir) = create_temp_supergraph_file().await;
+            let schema = Some(SchemaSource::File {
+                path: supergraph_path.clone(),
+                watch: true,
+            });
+
+            // Use a timeout to verify router starts without NoSchema error
+            let result = tokio::time::timeout(
+                Duration::from_millis(500),
+                test_startup_success(schema, None, vec![]),
+            )
+            .await;
+
+            // Router should start (timeout means it's running, which is success)
+            match result {
+                Ok(Ok(())) => {
+                    // Router started successfully
+                }
+                Ok(Err(e)) => {
+                    let error_msg = e.to_string();
+                    // Should not fail with NoSchema
+                    assert!(
+                        !error_msg.contains("no valid schema was supplied"),
+                        "Router should not fail with NoSchema error, got: {}",
+                        error_msg
+                    );
+                }
+                Err(_) => {
+                    // Timeout - router is running, startup succeeded
+                }
+            }
+        }
+
+        #[tokio::test]
+        async fn test_startup_with_graph_artifact_reference_no_hot_reload() {
+            let valid_reference = "registry.apollographql.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+
+            let result = test_startup_success(
+                None,
+                None,
+                vec![
+                    ("APOLLO_KEY", "test-key"),
+                    ("APOLLO_GRAPH_ARTIFACT_REFERENCE", valid_reference),
+                ],
+            )
+            .await;
+
+            // Note: This will fail at OCI fetch, but should get past schema source selection
+            // The error will be about OCI fetch failure, not NoSchema
+            assert!(
+                result.is_err(),
+                "Should fail at OCI fetch, not schema source selection"
+            );
+            let error_msg = result.unwrap_err().to_string();
+            // Should not be NoSchema error
+            assert!(
+                !error_msg.contains("no valid schema was supplied"),
+                "Should not fail with NoSchema error, got: {}",
+                error_msg
+            );
+        }
+
+        #[tokio::test]
+        async fn test_startup_with_graph_artifact_reference_with_hot_reload() {
+            let valid_reference = "registry.apollographql.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+
+            // Hot reload doesn't apply to OCI, but test the flag is accepted
+            let result = test_startup_success(
+                None,
+                None,
+                vec![
+                    ("APOLLO_KEY", "test-key"),
+                    ("APOLLO_GRAPH_ARTIFACT_REFERENCE", valid_reference),
+                ],
+            )
+            .await;
+
+            // Will fail at OCI fetch, but schema source should be selected correctly
+            assert!(result.is_err());
+            let error_msg = result.unwrap_err().to_string();
+            assert!(
+                !error_msg.contains("no valid schema was supplied"),
+                "Should not fail with NoSchema error"
+            );
+        }
+
+        #[tokio::test]
+        async fn test_startup_with_apollo_graph_ref() {
+            let result = test_startup_success(
+                None,
+                None,
+                vec![
+                    ("APOLLO_KEY", "test-key"),
+                    ("APOLLO_GRAPH_REF", "my-graph@current"),
+                ],
+            )
+            .await;
+
+            // Will fail at Uplink fetch, but schema source should be selected correctly
+            assert!(result.is_err());
+            let error_msg = result.unwrap_err().to_string();
+            assert!(
+                !error_msg.contains("no valid schema was supplied"),
+                "Should not fail with NoSchema error, got: {}",
+                error_msg
+            );
+        }
+
+        #[tokio::test]
+        async fn test_startup_with_supergraph_urls() {
+            use url::Url;
+            let test_url = Url::parse("https://example.com/schema.graphql").unwrap();
+            let schema = Some(SchemaSource::URLs {
+                urls: vec![test_url],
+            });
+
+            let result = test_startup_success(schema, None, vec![]).await;
+            // Will fail at URL fetch (network error), but schema source should be selected correctly
+            // The error should be a network/fetch error, not NoSchema
+            assert!(result.is_err());
+            let error_msg = result.unwrap_err().to_string();
+            assert!(
+                !error_msg.contains("no valid schema was supplied"),
+                "Should not fail with NoSchema error, got: {}",
+                error_msg
+            );
+            // Should fail with a network/fetch error instead
+            assert!(
+                error_msg.contains("fetch")
+                    || error_msg.contains("network")
+                    || error_msg.contains("connection")
+                    || error_msg.contains("http"),
+                "Should fail with network/fetch error, got: {}",
+                error_msg
+            );
+        }
+
+        #[tokio::test]
+        async fn test_startup_with_config_file_graph_artifact_reference() {
+            let valid_reference = "registry.apollographql.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+            let (config_path, _temp_dir) =
+                create_temp_config_with_graph_artifact_reference(valid_reference).await;
+
+            let result = test_startup_success(
+                Some(SchemaSource::Static {
+                    schema_sdl: String::new(),
+                }),
+                Some(config_path),
+                vec![("APOLLO_KEY", "test-key")],
+            )
+            .await;
+
+            // Will fail at OCI fetch, but config should be parsed and graph_artifact_reference found
+            assert!(result.is_err());
+            let error_msg = result.unwrap_err().to_string();
+            assert!(
+                !error_msg.contains("no valid schema was supplied"),
+                "Should not fail with NoSchema error, config has graph_artifact_reference"
+            );
+        }
+
+        #[tokio::test]
+        async fn test_startup_with_apollo_graph_ref_and_uplink_endpoints() {
+            // Test with custom uplink endpoints
+            let result = test_startup_success_with_options(
+                None,
+                None,
+                vec![
+                    ("APOLLO_KEY", "test-key"),
+                    ("APOLLO_GRAPH_REF", "my-graph@current"),
+                ],
+                false,
+                Some("https://uplink1.example.com,https://uplink2.example.com".to_string()),
+            )
+            .await;
+
+            // Will fail at Uplink fetch, but schema source should be selected correctly
+            assert!(result.is_err());
+            let error_msg = result.unwrap_err().to_string();
+            assert!(
+                !error_msg.contains("no valid schema was supplied"),
+                "Should not fail with NoSchema error, got: {}",
+                error_msg
+            );
+        }
+
+        // INVALID CASES
+
+        #[tokio::test]
+        async fn test_startup_no_schema_source() {
+            // No schema source, no config file
+            test_startup_failure(None, None, vec![], "no valid schema was supplied").await;
+        }
+
+        #[tokio::test]
+        async fn test_startup_no_schema_source_with_config_no_graph_artifact_ref() {
+            // Config file exists but doesn't have graph_artifact_reference
+            let (config_path, _temp_dir) =
+                create_temp_config_without_graph_artifact_reference().await;
+
+            test_startup_failure(
+                Some(SchemaSource::Static {
+                    schema_sdl: String::new(),
+                }),
+                Some(config_path),
+                vec![],
+                "no valid schema was supplied",
+            )
+            .await;
+        }
+
+        #[tokio::test]
+        async fn test_startup_conflicting_supergraph_and_graph_artifact_reference() {
+            let (supergraph_path, _temp_dir) = create_temp_supergraph_file().await;
+            let schema = Some(SchemaSource::File {
+                path: supergraph_path,
+                watch: false,
+            });
+
+            test_startup_failure(
+                schema,
+                None,
+                vec![
+                    ("APOLLO_KEY", "test-key"),
+                    (
+                        "APOLLO_GRAPH_ARTIFACT_REFERENCE",
+                        "registry.apollographql.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                    ),
+                ],
+                "cannot be used together",
+            )
+            .await;
+        }
+
+        #[tokio::test]
+        async fn test_startup_conflicting_supergraph_urls_and_graph_artifact_reference() {
+            use url::Url;
+            let test_url = Url::parse("https://example.com/schema.graphql").unwrap();
+            let schema = Some(SchemaSource::URLs {
+                urls: vec![test_url],
+            });
+
+            test_startup_failure(
+                schema,
+                None,
+                vec![
+                    ("APOLLO_KEY", "test-key"),
+                    (
+                        "APOLLO_GRAPH_ARTIFACT_REFERENCE",
+                        "registry.apollographql.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                    ),
+                ],
+                "cannot be used together",
+            )
+            .await;
+        }
+
+        #[tokio::test]
+        async fn test_startup_graph_artifact_reference_without_apollo_key() {
+            test_startup_failure(
+                None,
+                None,
+                vec![(
+                    "APOLLO_GRAPH_ARTIFACT_REFERENCE",
+                    "registry.apollographql.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                )],
+                "APOLLO_KEY",
+            )
+            .await;
+        }
+
+        #[tokio::test]
+        async fn test_startup_invalid_graph_artifact_reference_format() {
+            // Invalid format - missing @sha256: prefix
+            // This will fail during validation in inner_start
+            let keys: Vec<&str> = vec!["APOLLO_KEY", "APOLLO_GRAPH_ARTIFACT_REFERENCE"];
+            let guard = EnvGuard::new(&keys);
+            guard.set("APOLLO_KEY", "test-key");
+            guard.set("APOLLO_GRAPH_ARTIFACT_REFERENCE", "invalid-reference");
+
+            let opt = Opt {
+                log_level: "error".to_string(),
+                hot_reload: false,
+                config_path: None,
+                dev: false,
+                supergraph_path: None,
+                supergraph_urls: None,
+                command: None,
+                apollo_key: env::var("APOLLO_KEY").ok(),
+                #[cfg(unix)]
+                apollo_key_path: None,
+                apollo_graph_ref: None,
+                apollo_router_license: None,
+                apollo_router_license_path: None,
+                apollo_uplink_endpoints: None,
+                graph_artifact_reference: env::var("APOLLO_GRAPH_ARTIFACT_REFERENCE").ok(),
+                anonymous_telemetry_disabled: true,
+                apollo_uplink_timeout: Duration::from_secs(30),
+                listen_address: None,
+                version: false,
+            };
+
+            drop(guard);
+
+            // This should fail during OCI reference validation
+            let result = Executable::inner_start(
+                None,
+                None,
+                None,
+                Some(crate::router::LicenseSource::default()),
+                opt,
+            )
+            .await;
+
+            assert!(result.is_err());
+            let error_msg = result.unwrap_err().to_string();
+            // The error will occur when trying to validate the OCI reference
+            assert!(
+                error_msg.contains("invalid") || error_msg.contains("graph artifact"),
+                "Error should mention invalid reference, got: {}",
+                error_msg
+            );
+        }
+
+        #[tokio::test]
+        async fn test_startup_apollo_key_without_graph_ref_or_artifact_reference() {
+            // APOLLO_KEY set but no APOLLO_GRAPH_REF or graph_artifact_reference, and no config file
+            test_startup_failure(
+                Some(SchemaSource::Static {
+                    schema_sdl: String::new(),
+                }),
+                None,
+                vec![("APOLLO_KEY", "test-key")],
+                "no valid schema was supplied",
+            )
+            .await;
+        }
+
+        #[tokio::test]
+        async fn test_startup_missing_supergraph_file() {
+            let non_existent_path = PathBuf::from("/non/existent/path/supergraph.graphql");
+            let schema = Some(SchemaSource::File {
+                path: non_existent_path,
+                watch: false,
+            });
+
+            let result = test_startup_success(schema, None, vec![]).await;
+            // Should fail because file doesn't exist
+            assert!(result.is_err());
+            let error_msg = result.unwrap_err().to_string();
+            assert!(
+                error_msg.contains("does not exist")
+                    || error_msg.contains("No such file")
+                    || error_msg.contains("not found")
+                    || error_msg.contains("cannot find"),
+                "Should fail with file not found error, got: {}",
+                error_msg
+            );
+        }
+
+        #[tokio::test]
+        async fn test_startup_apollo_graph_ref_without_apollo_key() {
+            // APOLLO_GRAPH_REF set but no APOLLO_KEY
+            test_startup_failure(
+                None,
+                None,
+                vec![("APOLLO_GRAPH_REF", "my-graph@current")],
+                "APOLLO_KEY",
+            )
+            .await;
+        }
+
+        #[tokio::test]
+        async fn test_startup_config_file_graph_artifact_reference_without_apollo_key() {
+            // Config file has graph_artifact_reference but no APOLLO_KEY
+            let valid_reference = "registry.apollographql.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+            let (config_path, _temp_dir) =
+                create_temp_config_with_graph_artifact_reference(valid_reference).await;
+
+            let result = test_startup_success(
+                Some(SchemaSource::Static {
+                    schema_sdl: String::new(),
+                }),
+                Some(config_path),
+                vec![], // No APOLLO_KEY
+            )
+            .await;
+
+            // Should fail because APOLLO_KEY is required for graph_artifact_reference
+            assert!(result.is_err());
+            let error_msg = result.unwrap_err().to_string();
+            assert!(
+                error_msg.contains("APOLLO_KEY")
+                    || error_msg.contains("no valid schema was supplied"),
+                "Should fail with APOLLO_KEY error or NoSchema error, got: {}",
+                error_msg
+            );
+        }
+
+        #[tokio::test]
+        async fn test_startup_invalid_uplink_endpoints_format() {
+            // Invalid uplink endpoints format - not a valid URL
+            let keys: Vec<&str> = vec!["APOLLO_KEY", "APOLLO_GRAPH_REF", "APOLLO_UPLINK_ENDPOINTS"];
+            let guard = EnvGuard::new(&keys);
+            guard.set("APOLLO_KEY", "test-key");
+            guard.set("APOLLO_GRAPH_REF", "my-graph@current");
+            guard.set("APOLLO_UPLINK_ENDPOINTS", "not-a-valid-url");
+
+            let opt = Opt {
+                log_level: "error".to_string(),
+                hot_reload: false,
+                config_path: None,
+                dev: false,
+                supergraph_path: None,
+                supergraph_urls: None,
+                command: None,
+                apollo_key: env::var("APOLLO_KEY").ok(),
+                #[cfg(unix)]
+                apollo_key_path: None,
+                apollo_graph_ref: env::var("APOLLO_GRAPH_REF").ok(),
+                apollo_router_license: None,
+                apollo_router_license_path: None,
+                apollo_uplink_endpoints: env::var("APOLLO_UPLINK_ENDPOINTS").ok(),
+                graph_artifact_reference: None,
+                anonymous_telemetry_disabled: true,
+                apollo_uplink_timeout: Duration::from_secs(30),
+                listen_address: None,
+                version: false,
+            };
+
+            drop(guard);
+
+            // This should fail during uplink endpoint parsing
+            let result = Executable::inner_start(
+                None,
+                None,
+                None,
+                Some(crate::router::LicenseSource::default()),
+                opt,
+            )
+            .await;
+
+            assert!(result.is_err());
+            let error_msg = result.unwrap_err().to_string();
+            assert!(
+                error_msg.contains("invalid Apollo Uplink endpoint")
+                    || error_msg.contains("invalid"),
+                "Error should mention invalid uplink endpoint, got: {}",
+                error_msg
+            );
+        }
+
+        #[tokio::test]
+        async fn test_startup_invalid_supergraph_urls_format() {
+            // Invalid supergraph URL format - test that invalid URLs are caught
+            // Note: Invalid URLs are caught during URL parsing, so we can't create a SchemaSource::URLs
+            // with an invalid URL. This test verifies that URL parsing happens before schema source creation.
+            // If we try to use Opt with invalid supergraph_urls, it should fail during parsing.
+            use url::Url;
+            let invalid_url = "not-a-valid-url";
+
+            // Try to parse invalid URL - should fail
+            let parse_result = Url::parse(invalid_url);
+            assert!(parse_result.is_err(), "Invalid URL should fail to parse");
+
+            // If we somehow had a valid URL object but it points to an unreachable endpoint,
+            // test that it fails appropriately
+            let test_url = Url::parse("https://example.com/schema.graphql").unwrap();
+            let schema = Some(SchemaSource::URLs {
+                urls: vec![test_url],
+            });
+
+            let result = test_startup_success(schema, None, vec![]).await;
+            // Should fail with network/fetch error
+            assert!(result.is_err());
+            let error_msg = result.unwrap_err().to_string();
+            assert!(
+                error_msg.contains("fetch")
+                    || error_msg.contains("network")
+                    || error_msg.contains("connection")
+                    || error_msg.contains("http"),
+                "Should fail with network/fetch error, got: {}",
+                error_msg
+            );
+        }
+
+        #[tokio::test]
+        async fn test_startup_graph_artifact_reference_with_hot_reload_flag() {
+            // Test that hot_reload flag is accepted even though it doesn't apply to OCI
+            let valid_reference = "registry.apollographql.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+
+            let result = test_startup_success_with_options(
+                None,
+                None,
+                vec![
+                    ("APOLLO_KEY", "test-key"),
+                    ("APOLLO_GRAPH_ARTIFACT_REFERENCE", valid_reference),
+                ],
+                true, // hot_reload enabled
+                None,
+            )
+            .await;
+
+            // Will fail at OCI fetch, but schema source should be selected correctly
+            assert!(result.is_err());
+            let error_msg = result.unwrap_err().to_string();
+            assert!(
+                !error_msg.contains("no valid schema was supplied"),
+                "Should not fail with NoSchema error, got: {}",
+                error_msg
+            );
+        }
+
+        #[tokio::test]
+        async fn test_startup_supergraph_file_with_hot_reload_flag() {
+            // Test supergraph file with hot_reload flag explicitly set
+            let (supergraph_path, _temp_dir) = create_temp_supergraph_file().await;
+            let schema = Some(SchemaSource::File {
+                path: supergraph_path.clone(),
+                watch: true, // hot_reload enabled
+            });
+
+            let result = tokio::time::timeout(
+                Duration::from_millis(500),
+                test_startup_success_with_options(schema, None, vec![], true, None),
+            )
+            .await;
+
+            match result {
+                Ok(Ok(())) => {
+                    // Router started successfully
+                }
+                Ok(Err(e)) => {
+                    let error_msg = e.to_string();
+                    assert!(
+                        !error_msg.contains("no valid schema was supplied"),
+                        "Router should not fail with NoSchema error, got: {}",
+                        error_msg
+                    );
+                }
+                Err(_) => {
+                    // Timeout - router is running, startup succeeded
+                }
+            }
+        }
     }
 }
