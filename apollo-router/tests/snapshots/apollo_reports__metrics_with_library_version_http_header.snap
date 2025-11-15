@@ -22,7 +22,7 @@ traces_per_query:
           operation_subtype: ""
           result: ""
           client_library_name: ""
-          client_library_version: 0.1.0
+          client_library_version: apollo library version
         query_latency_stats:
           latency_count: "[latency_count]"
           request_count: 1
