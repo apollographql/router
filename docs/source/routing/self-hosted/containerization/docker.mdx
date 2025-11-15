@@ -10,10 +10,10 @@ This guide shows you how to run the Apollo Runtime container, which includes bot
 
 If you only need the Apollo Router without MCP Server functionality, see [Router-only Docker container](docker-router-only).
 
-You will learn how to:
-- Run a basic Apollo Runtime container with default configuration.
-- Customize configuration to override defaults.
-- Manually specify a supergraph for your Router.
+This guide explains how to:
+- Run a basic Apollo Runtime container with default configuration
+- Customize configuration to override defaults
+- Manually specify a supergraph for your Router
 
 The [documentation](https://docs.docker.com/engine/reference/run/) for the `docker run` command is a helpful reference for the examples in this guide.
 
@@ -73,7 +73,7 @@ docker run -p 4000:4000 \
   ghcr.io/apollographql/apollo-runtime:<runtime-image-version>
 ```
 
-Mount specific files, such as the schema file, by specifying:
+Mount specific files, such as your schema file:
 
 ```bash title="Docker"
 ...
@@ -120,7 +120,7 @@ The container uses a tagging scheme with three parts: container version, Apollo 
 
 Learn more in the [tagging documentation](https://github.com/apollographql/apollo-runtime?tab=readme-ov-file#container-tags).
 
-## Additional Router configuration information
+## Next steps
 
 For more complex configurations, such as overriding subgraph URLs or propagating headers, see [Router Configuration](/graphos/routing/configuration/overview/).
 
