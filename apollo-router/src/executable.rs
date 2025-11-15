@@ -295,8 +295,7 @@ impl Opt {
         anyhow!("Use of Apollo Graph OS requires setting the {env_var} environment variable")
     }
 
-    /// Check if a config file contains a graph_artifact_reference.
-    /// Checks both `supergraph.graph_artifact_reference` and `graph_artifact_reference` paths.
+    /// Check if config file contains a supergraph.graph_artifact_reference path
     fn config_has_graph_artifact_reference(path: &PathBuf) -> bool {
         let yaml_value = match std::fs::read_to_string(path)
             .ok()
@@ -306,11 +305,10 @@ impl Opt {
             None => return false,
         };
 
-        // Check both possible locations: nested under supergraph or at root
+        // Check the supergraph.graph_artifact_reference location
         let reference = yaml_value
             .get("supergraph")
-            .and_then(|s| s.get("graph_artifact_reference"))
-            .or_else(|| yaml_value.get("graph_artifact_reference"));
+            .and_then(|s| s.get("graph_artifact_reference"));
 
         reference
             .and_then(|v| v.as_str())
