@@ -563,7 +563,7 @@ async fn test_batch_trace_id() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_trace_with_client_name() {
+async fn test_trace_with_client_name_http_header() {
     for use_legacy_request_span in [true, false] {
         let request = supergraph::Request::fake_builder()
             .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
@@ -579,7 +579,7 @@ async fn test_trace_with_client_name() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_trace_with_client_version() {
+async fn test_trace_with_client_version_http_header() {
     for use_legacy_request_span in [true, false] {
         let request = supergraph::Request::fake_builder()
             .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
