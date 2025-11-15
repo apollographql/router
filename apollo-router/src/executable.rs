@@ -47,6 +47,8 @@ pub(crate) static APOLLO_ROUTER_LICENCE_IS_SET: AtomicBool = AtomicBool::new(fal
 pub(crate) static APOLLO_ROUTER_LICENCE_PATH_IS_SET: AtomicBool = AtomicBool::new(false);
 pub(crate) static APOLLO_TELEMETRY_DISABLED: AtomicBool = AtomicBool::new(false);
 pub(crate) static APOLLO_ROUTER_LISTEN_ADDRESS: Mutex<Option<SocketAddr>> = Mutex::new(None);
+pub(crate) static APOLLO_ROUTER_GRAPH_ARTIFACT_REFERENCE: Mutex<Option<String>> = Mutex::new(None);
+pub(crate) static APOLLO_ROUTER_HOT_RELOAD_CLI: AtomicBool = AtomicBool::new(false);
 
 const INITIAL_UPLINK_POLL_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -372,6 +374,11 @@ impl Executable {
         *crate::services::APOLLO_KEY.lock() = opt.apollo_key.clone();
         *crate::services::APOLLO_GRAPH_REF.lock() = opt.apollo_graph_ref.clone();
         *APOLLO_ROUTER_LISTEN_ADDRESS.lock() = opt.listen_address;
+        *APOLLO_ROUTER_GRAPH_ARTIFACT_REFERENCE.lock() = opt.graph_artifact_reference.clone();
+        // Only set hot_reload if explicitly true
+        if opt.hot_reload {
+            APOLLO_ROUTER_HOT_RELOAD_CLI.store(true, Ordering::Relaxed);
+        }
         APOLLO_ROUTER_DEV_MODE.store(opt.dev, Ordering::Relaxed);
         APOLLO_ROUTER_SUPERGRAPH_PATH_IS_SET
             .store(opt.supergraph_path.is_some(), Ordering::Relaxed);
