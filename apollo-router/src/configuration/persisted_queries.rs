@@ -1,15 +1,6 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde::Deserializer;
 use serde::Serialize;
-
-/// Custom deserializer for boolean fields that handles null values by treating them as false
-pub(crate) fn deserialize_bool_or_default<'de, D>(deserializer: D) -> Result<bool, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    Option::<bool>::deserialize(deserializer).map(|x| x.unwrap_or(false))
-}
 
 /// Persisted Queries (PQ) configuration
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -32,7 +23,7 @@ pub struct PersistedQueries {
     pub local_manifests: Option<Vec<String>>,
 
     /// Enables hot reloading of the local persisted query manifests
-    #[serde(deserialize_with = "deserialize_bool_or_default")]
+    #[serde(default)]
     pub hot_reload: bool,
 }
 

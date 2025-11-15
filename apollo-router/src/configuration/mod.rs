@@ -23,7 +23,6 @@ pub(crate) use persisted_queries::PersistedQueries;
 pub(crate) use persisted_queries::PersistedQueriesPrewarmQueryPlanCache;
 #[cfg(test)]
 pub(crate) use persisted_queries::PersistedQueriesSafelist;
-use persisted_queries::deserialize_bool_or_default;
 use regex::Regex;
 use rustls::ServerConfig;
 use rustls::pki_types::CertificateDer;
@@ -750,7 +749,7 @@ pub(crate) struct Supergraph {
     pub(crate) graph_artifact_reference: Option<String>,
 
     /// Hot reload configuration option.
-    #[serde(default, deserialize_with = "deserialize_bool_or_default")]
+    #[serde(default)]
     pub(crate) hot_reload: bool,
 }
 

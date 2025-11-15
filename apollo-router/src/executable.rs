@@ -414,8 +414,7 @@ impl Executable {
         *crate::services::APOLLO_GRAPH_REF.lock() = opt.apollo_graph_ref.clone();
         *APOLLO_ROUTER_LISTEN_ADDRESS.lock() = opt.listen_address;
         *APOLLO_ROUTER_GRAPH_ARTIFACT_REFERENCE.lock() = opt.graph_artifact_reference.clone();
-        // Only set hot_reload if it's explicitly true (not null/default)
-        // Since opt.hot_reload is a bool, we set it if it's true
+        // Only set hot_reload if explicitly true
         if opt.hot_reload {
             APOLLO_ROUTER_HOT_RELOAD_CLI.store(true, Ordering::Relaxed);
         }
