@@ -32,6 +32,7 @@ use crate::configuration::validate_yaml_configuration;
 use crate::metrics::meter_provider_internal;
 use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::otel::init_telemetry;
+use crate::router::ApolloRouterError;
 use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
 use crate::router::SchemaSource;
@@ -88,10 +89,6 @@ const STARTUP_ERROR_MESSAGE: &str = r#"
     $ ./router --dev --supergraph starstuff.graphql
 
     "#;
-
-fn format_startup_error(apollo_router_msg: &str) -> String {
-    format!("{apollo_router_msg}{STARTUP_ERROR_MESSAGE}")
-}
 
 const INITIAL_UPLINK_POLL_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -293,27 +290,6 @@ impl Opt {
 
     fn err_require_opt(env_var: &str) -> anyhow::Error {
         anyhow!("Use of Apollo Graph OS requires setting the {env_var} environment variable")
-    }
-
-    /// Check if config file contains a supergraph.graph_artifact_reference path
-    fn config_has_graph_artifact_reference(path: &PathBuf) -> bool {
-        let yaml_value = match std::fs::read_to_string(path)
-            .ok()
-            .and_then(|config_str| serde_yaml::from_str::<serde_yaml::Value>(&config_str).ok())
-        {
-            Some(v) => v,
-            None => return false,
-        };
-
-        // Check the supergraph.graph_artifact_reference location
-        let reference = yaml_value
-            .get("supergraph")
-            .and_then(|s| s.get("graph_artifact_reference"));
-
-        reference
-            .and_then(|v| v.as_str())
-            .map(|s| !s.is_empty())
-            .unwrap_or(false)
     }
 }
 
@@ -555,8 +531,8 @@ impl Executable {
 
         // Track if schema source was provided via CLI/env (for OCI/Registry)
         let mut schema_source_provided_via_cli_env = false;
-        // Track if graph_artifact_reference is being used (explicitly, not inferred)
-        let mut using_graph_artifact_reference = opt.graph_artifact_reference.is_some();
+        // Track if graph_artifact_reference is being used from CLI/env (not from config)
+        let using_graph_artifact_reference = opt.graph_artifact_reference.is_some();
 
         // Validate that schema sources are not conflicting
         // Check both builder API schema and CLI supergraph_path (both map to -s/--supergraph)
@@ -665,46 +641,25 @@ impl Executable {
                     };
                     match opt.graph_artifact_reference {
                         None => {
-                            // If we have a config file, check if it has graph_artifact_reference
-                            match &configuration {
-                                ConfigurationSource::File { path, .. } => {
-                                    // Check if config file has graph_artifact_reference by parsing it early
-                                    if Opt::config_has_graph_artifact_reference(path) {
-                                        // Config file has graph_artifact_reference - let config stream handle schema fetching
-                                        using_graph_artifact_reference = true;
-                                        SchemaSource::Static {
-                                            schema_sdl: String::new(),
-                                        }
-                                    } else {
-                                        // Config file exists but doesn't have graph_artifact_reference - create Registry schema source
-                                        schema_source_provided_via_cli_env = true;
-                                        SchemaSource::Registry {
-                                            apollo_key: opt.apollo_key.clone(),
-                                            apollo_graph_ref: opt.apollo_graph_ref.clone(),
-                                            endpoints: opt
-                                                .apollo_uplink_endpoints
-                                                .as_ref()
-                                                .map(|endpoints| Opt::parse_endpoints(endpoints))
-                                                .transpose()?,
-                                            poll_interval: INITIAL_UPLINK_POLL_INTERVAL,
-                                            timeout: opt.apollo_uplink_timeout,
-                                        }
-                                    }
+                            // No graph_artifact_reference from CLI/env - check if we have apollo_graph_ref
+                            if opt.apollo_graph_ref.is_some() {
+                                // Create Registry schema source from CLI/env
+                                schema_source_provided_via_cli_env = true;
+                                SchemaSource::Registry {
+                                    apollo_key: opt.apollo_key.clone(),
+                                    apollo_graph_ref: opt.apollo_graph_ref.clone(),
+                                    endpoints: opt
+                                        .apollo_uplink_endpoints
+                                        .as_ref()
+                                        .map(|endpoints| Opt::parse_endpoints(endpoints))
+                                        .transpose()?,
+                                    poll_interval: INITIAL_UPLINK_POLL_INTERVAL,
+                                    timeout: opt.apollo_uplink_timeout,
                                 }
-                                _ => {
-                                    // No config file, create Registry schema source
-                                    schema_source_provided_via_cli_env = true;
-                                    SchemaSource::Registry {
-                                        apollo_key: opt.apollo_key.clone(),
-                                        apollo_graph_ref: opt.apollo_graph_ref.clone(),
-                                        endpoints: opt
-                                            .apollo_uplink_endpoints
-                                            .as_ref()
-                                            .map(|endpoints| Opt::parse_endpoints(endpoints))
-                                            .transpose()?,
-                                        poll_interval: INITIAL_UPLINK_POLL_INTERVAL,
-                                        timeout: opt.apollo_uplink_timeout,
-                                    }
+                            } else {
+                                // No schema source from CLI/env - let config stream handle it
+                                SchemaSource::Static {
+                                    schema_sdl: String::new(),
                                 }
                             }
                         }
@@ -726,38 +681,25 @@ impl Executable {
                 tracing::info!("{apollo_telemetry_msg}");
                 match opt.graph_artifact_reference {
                     None => {
-                        // If we have a config file, check if it has graph_artifact_reference
-                        match &configuration {
-                            ConfigurationSource::File { path, .. } => {
-                                // Check if config file has graph_artifact_reference by parsing it early
-                                if Opt::config_has_graph_artifact_reference(path) {
-                                    // Config file has graph_artifact_reference - let config stream handle schema fetching
-                                    using_graph_artifact_reference = true;
-                                    SchemaSource::Static {
-                                        schema_sdl: String::new(),
-                                    }
-                                } else {
-                                    // Config file exists but doesn't have graph_artifact_reference - return error
-                                    return Err(anyhow!(
-                                        "{}",
-                                        format_startup_error(&apollo_router_msg)
-                                    ));
-                                }
+                        // No graph_artifact_reference from CLI/env - check if we have apollo_graph_ref
+                        if opt.apollo_graph_ref.is_some() {
+                            // Create Registry schema source from CLI/env
+                            schema_source_provided_via_cli_env = true;
+                            SchemaSource::Registry {
+                                apollo_key: opt.apollo_key.clone(),
+                                apollo_graph_ref: opt.apollo_graph_ref.clone(),
+                                endpoints: opt
+                                    .apollo_uplink_endpoints
+                                    .as_ref()
+                                    .map(|endpoints| Opt::parse_endpoints(endpoints))
+                                    .transpose()?,
+                                poll_interval: INITIAL_UPLINK_POLL_INTERVAL,
+                                timeout: opt.apollo_uplink_timeout,
                             }
-                            _ => {
-                                // No config file, create Registry schema source
-                                schema_source_provided_via_cli_env = true;
-                                SchemaSource::Registry {
-                                    apollo_key: opt.apollo_key.clone(),
-                                    apollo_graph_ref: opt.apollo_graph_ref.clone(),
-                                    endpoints: opt
-                                        .apollo_uplink_endpoints
-                                        .as_ref()
-                                        .map(|endpoints| Opt::parse_endpoints(endpoints))
-                                        .transpose()?,
-                                    poll_interval: INITIAL_UPLINK_POLL_INTERVAL,
-                                    timeout: opt.apollo_uplink_timeout,
-                                }
+                        } else {
+                            // No schema source from CLI/env - let config stream handle it
+                            SchemaSource::Static {
+                                schema_sdl: String::new(),
                             }
                         }
                     }
@@ -794,27 +736,10 @@ Set the APOLLO_KEY environment variable:
                     ));
                 }
 
-                // No schema source provided via CLI/env - check if config file can provide it
-                // If we have a config file, check if it has graph_artifact_reference
-                match &configuration {
-                    ConfigurationSource::File { path, .. } => {
-                        // Check if config file has graph_artifact_reference by parsing it early
-                        // This allows us to show an error immediately if no schema source is available
-                        if Opt::config_has_graph_artifact_reference(path) {
-                            // Config file has graph_artifact_reference - let config stream handle schema fetching
-                            using_graph_artifact_reference = true;
-                            SchemaSource::Static {
-                                schema_sdl: String::new(),
-                            }
-                        } else {
-                            // Config file exists but doesn't have graph_artifact_reference - return error
-                            return Err(anyhow!("{}", format_startup_error(&apollo_router_msg)));
-                        }
-                    }
-                    _ => {
-                        // No config file - return error immediately
-                        return Err(anyhow!("{}", format_startup_error(&apollo_router_msg)));
-                    }
+                // No schema source provided via CLI/env - let config stream handle it
+                // The config stream will check the parsed config for graph_artifact_reference
+                SchemaSource::Static {
+                    schema_sdl: String::new(),
                 }
             }
         };
@@ -910,6 +835,14 @@ Set the APOLLO_KEY environment variable:
             .start();
 
         if let Err(err) = router.await {
+            // Display helpful error message for NoSchema error
+            if matches!(err, ApolloRouterError::NoSchema) {
+                let apollo_router_msg = format!(
+                    "Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)",
+                    std::env!("CARGO_PKG_VERSION")
+                );
+                eprintln!("{}{}", apollo_router_msg, STARTUP_ERROR_MESSAGE);
+            }
             tracing::error!("{}", err);
             return Err(err.into());
         }

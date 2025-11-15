@@ -13,6 +13,7 @@ use crate::registry::OciConfig;
 use crate::registry::fetch_oci;
 use crate::router::Event;
 use crate::router::Event::NoMoreConfiguration;
+use crate::router::Event::NoMoreSchema;
 use crate::router::Event::RhaiReload;
 use crate::router::Event::UpdateConfiguration;
 use crate::router::Event::UpdateSchema;
@@ -80,6 +81,16 @@ impl ConfigurationSource {
                     // Chain config event with schema stream and NoMoreConfiguration
                     return stream::once(future::ready(config_event))
                         .chain(schema_stream)
+                        .chain(stream::iter(vec![NoMoreConfiguration]))
+                        .boxed();
+                }
+
+                // If no schema source was provided and config doesn't have graph_artifact_reference,
+                // emit NoMoreSchema so the state machine knows no schema will be provided
+                if !schema_source_provided {
+                    // Chain config event, NoMoreSchema, and NoMoreConfiguration
+                    return stream::once(future::ready(config_event))
+                        .chain(stream::iter(vec![NoMoreSchema]))
                         .chain(stream::iter(vec![NoMoreConfiguration]))
                         .boxed();
                 }
@@ -175,9 +186,14 @@ impl ConfigurationSource {
                                             .chain(stream::iter(vec![NoMoreConfiguration]))
                                             .boxed()
                                     } else {
+                                        // If no schema source was provided and config doesn't have graph_artifact_reference,
+                                        // emit NoMoreSchema with NoMoreConfiguration so the state machine knows no schema will be provided
                                         initial_config_stream
                                             .chain(config_watcher)
-                                            .chain(stream::iter(vec![NoMoreConfiguration]))
+                                            .chain(stream::iter(vec![
+                                                NoMoreSchema,
+                                                NoMoreConfiguration,
+                                            ]))
                                             .boxed()
                                     }
                                 } else {
@@ -226,6 +242,15 @@ impl ConfigurationSource {
                                     // Chain initial config, schema stream, and NoMoreConfiguration
                                     return initial_stream
                                         .chain(schema_stream)
+                                        .chain(stream::iter(vec![NoMoreConfiguration]))
+                                        .boxed();
+                                }
+                                // If no schema source was provided and config doesn't have graph_artifact_reference,
+                                // emit NoMoreSchema so the state machine knows no schema will be provided
+                                if !schema_source_provided {
+                                    // Chain initial config, NoMoreSchema, and NoMoreConfiguration
+                                    return initial_stream
+                                        .chain(stream::iter(vec![NoMoreSchema]))
                                         .chain(stream::iter(vec![NoMoreConfiguration]))
                                         .boxed();
                                 }
