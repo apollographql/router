@@ -11,6 +11,7 @@ use http::header::CACHE_CONTROL;
 use tokio_stream::wrappers::IntervalStream;
 use tower::Service;
 use tower::ServiceExt;
+use uuid::Uuid;
 
 use super::plugin::ResponseCache;
 use crate::Context;
@@ -162,7 +163,7 @@ async fn insert() {
     });
 
     let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
-    let storage = Storage::new(&Config::test(false, "test_insert_simple"), drop_rx)
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
         .await
         .unwrap();
     let map = [
@@ -329,7 +330,7 @@ async fn insert_with_custom_key() {
     });
 
     let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
-    let storage = Storage::new(&Config::test(false, "insert_with_custom_key"), drop_rx)
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
         .await
         .unwrap();
     let map = [
@@ -509,12 +510,9 @@ async fn already_expired_cache_control() {
     });
 
     let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
-    let storage = Storage::new(
-        &Config::test(false, "already_expired_cache_control"),
-        drop_rx,
-    )
-    .await
-    .unwrap();
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+        .await
+        .unwrap();
     let map = [
         (
             "user".to_string(),
@@ -674,7 +672,7 @@ async fn insert_without_debug_header() {
     });
 
     let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
-    let storage = Storage::new(&Config::test(false, "insert_without_debug_header"), drop_rx)
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
         .await
         .unwrap();
     let map = [
@@ -828,7 +826,7 @@ async fn insert_with_requires() {
     ].into_iter().collect());
 
     let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
-    let storage = Storage::new(&Config::test(false, "test_insert_with_requires"), drop_rx)
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
         .await
         .unwrap();
     let map: HashMap<String, Subgraph> = [
@@ -992,12 +990,9 @@ async fn insert_with_nested_field_set() {
     });
 
     let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
-    let storage = Storage::new(
-        &Config::test(false, "test_insert_with_nested_field_set"),
-        drop_rx,
-    )
-    .await
-    .unwrap();
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+        .await
+        .unwrap();
     let map = [
         (
             "products".to_string(),
@@ -1163,7 +1158,7 @@ async fn no_cache_control() {
     });
 
     let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
-    let storage = Storage::new(&Config::test(false, "test_no_cache_control"), drop_rx)
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
         .await
         .unwrap();
     let response_cache = ResponseCache::for_test(
@@ -1290,7 +1285,7 @@ async fn no_store_from_request() {
     });
 
     let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
-    let storage = Storage::new(&Config::test(false, "test_no_store_from_client"), drop_rx)
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
         .await
         .unwrap();
     let response_cache = ResponseCache::for_test(
@@ -1669,7 +1664,7 @@ async fn private_and_public() {
     });
 
     let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
-    let storage = Storage::new(&Config::test(false, "private_and_public"), drop_rx)
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
         .await
         .unwrap();
     let map = [
@@ -2436,7 +2431,7 @@ async fn no_data() {
     ].into_iter().collect());
 
     let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
-    let storage = Storage::new(&Config::test(false, "no_data"), drop_rx)
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
         .await
         .unwrap();
     let map = [
@@ -2700,8 +2695,11 @@ async fn missing_entities() {
     .into_iter()
     .collect();
 
+    // Use a shared namespace so the second storage can access cached data from the first
+    let namespace = Uuid::new_v4().to_string();
+
     let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
-    let storage = Storage::new(&Config::test(false, "missing_entities"), drop_rx)
+    let storage = Storage::new(&Config::test(false, &namespace), drop_rx)
         .await
         .unwrap();
     let response_cache =
@@ -2733,8 +2731,9 @@ async fn missing_entities() {
     assert!(remove_debug_extensions_key(&mut response));
     insta::assert_json_snapshot!(response);
 
+    // Reuse the same namespace so cached entities from the first request are accessible
     let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
-    let storage = Storage::new(&Config::test(false, "missing_entities"), drop_rx)
+    let storage = Storage::new(&Config::test(false, &namespace), drop_rx)
         .await
         .unwrap();
     let response_cache = ResponseCache::for_test(

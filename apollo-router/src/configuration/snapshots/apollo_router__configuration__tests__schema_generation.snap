@@ -10602,7 +10602,10 @@ expression: "&schema"
         "hot_reload": {
           "default": false,
           "description": "Hot reload configuration option.",
-          "type": "boolean"
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "introspection": {
           "default": false,

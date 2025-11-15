@@ -765,7 +765,12 @@ pub(crate) struct Supergraph {
 
     /// Hot reload configuration option.
     #[serde(deserialize_with = "deserialize_bool_or_false")]
+    #[schemars(with = "Option<bool>", default = "default_hot_reload")]
     pub(crate) hot_reload: bool,
+}
+
+const fn default_hot_reload() -> bool {
+    false
 }
 
 const fn default_generate_query_fragments() -> bool {

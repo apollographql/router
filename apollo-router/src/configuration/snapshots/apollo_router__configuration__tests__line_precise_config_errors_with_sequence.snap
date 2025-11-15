@@ -3,7 +3,7 @@ source: apollo-router/src/configuration/tests.rs
 expression: error.to_string()
 ---
 configuration had errors: 
-2. at line 9
+1. at line 9
 
     listen: 127.0.0.1:4000
   cors:

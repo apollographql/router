@@ -3,7 +3,7 @@ source: apollo-router/src/configuration/tests.rs
 expression: error.to_string()
 ---
 configuration had errors: 
-2. at line 7
+1. at line 7
 
     # The socket address and port to listen on
     # Defaults to 127.0.0.1:4000

@@ -517,7 +517,6 @@ impl Executable {
         let akp: &Option<PathBuf> = &None;
 
         // Track if schema source was provided via CLI/env (for OCI/Registry)
-        #[allow(unused)]
         let mut schema_source_provided_via_cli_env = false;
         // Track if graph_artifact_reference is being used from CLI/env (not from config)
         #[allow(unused)]
@@ -629,8 +628,14 @@ impl Executable {
                         }
                     };
                     match opt.graph_artifact_reference {
-                        None => SchemaSource::Registry(opt.uplink_config()?),
-                        Some(_) => SchemaSource::OCI(opt.oci_config()?),
+                        None => {
+                            schema_source_provided_via_cli_env = true;
+                            SchemaSource::Registry(opt.uplink_config()?)
+                        }
+                        Some(_) => {
+                            schema_source_provided_via_cli_env = true;
+                            SchemaSource::OCI(opt.oci_config()?)
+                        }
                     }
                 }
             }
@@ -638,8 +643,14 @@ impl Executable {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
                 match opt.graph_artifact_reference {
-                    None => SchemaSource::Registry(opt.uplink_config()?),
-                    Some(_) => SchemaSource::OCI(opt.oci_config()?),
+                    None => {
+                        schema_source_provided_via_cli_env = true;
+                        SchemaSource::Registry(opt.uplink_config()?)
+                    }
+                    Some(_) => {
+                        schema_source_provided_via_cli_env = true;
+                        SchemaSource::OCI(opt.oci_config()?)
+                    }
                 }
             }
             _ => {
@@ -745,6 +756,7 @@ impl Executable {
             .schema(schema_source)
             .license(license)
             .shutdown(shutdown.unwrap_or(ShutdownSource::CtrlC))
+            .schema_source_provided(schema_source_provided_via_cli_env)
             .start();
 
         if let Err(err) = router.await {
