@@ -1,0 +1,21 @@
+---
+source: apollo-router/tests/integration/query_planner/error_paths.rs
+assertion_line: 217
+expression: response
+---
+{
+  "data": {
+    "topProducts": null
+  },
+  "errors": [
+    {
+      "message": "HTTP fetch failed from 'products': HTTP fetch failed from 'products': tcp connect error",
+      "path": [],
+      "extensions": {
+        "code": "SUBREQUEST_HTTP_ERROR",
+        "service": "products",
+        "reason": "HTTP fetch failed from 'products': tcp connect error"
+      }
+    }
+  ]
+}
