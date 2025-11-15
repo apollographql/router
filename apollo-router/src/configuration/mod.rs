@@ -776,7 +776,7 @@ impl Supergraph {
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
         insert_result_coercion_errors: Option<bool>,
-        graph_artifact_reference: Option<Option<String>>,
+        graph_artifact_reference: Option<String>,
         hot_reload: Option<bool>,
     ) -> Self {
         Self {
@@ -792,7 +792,7 @@ impl Supergraph {
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
             enable_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
-            graph_artifact_reference: graph_artifact_reference.flatten(),
+            graph_artifact_reference,
             hot_reload: hot_reload.unwrap_or_default(),
         }
     }
@@ -813,7 +813,7 @@ impl Supergraph {
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
         insert_result_coercion_errors: Option<bool>,
-        graph_artifact_reference: Option<Option<String>>,
+        graph_artifact_reference: Option<String>,
         hot_reload: Option<bool>,
     ) -> Self {
         Self {
@@ -829,7 +829,7 @@ impl Supergraph {
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
             enable_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
-            graph_artifact_reference: graph_artifact_reference.flatten(),
+            graph_artifact_reference,
             hot_reload: hot_reload.unwrap_or_default(),
         }
     }
