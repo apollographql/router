@@ -273,6 +273,21 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             serde_json::to_value(&ad_hoc.health_check).unwrap(),
         );
 
+        // Copy CLI/env values to override YAML configuration
+        // Graph artifact reference: CLI/env > config
+        if let Some(cli_value) = crate::executable::APOLLO_ROUTER_GRAPH_ARTIFACT_REFERENCE
+            .lock()
+            .clone()
+        {
+            ad_hoc.supergraph.graph_artifact_reference = Some(cli_value);
+        }
+
+        // Hot reload: CLI > config (only override if CLI value is explicitly true)
+        use std::sync::atomic::Ordering;
+        if crate::executable::APOLLO_ROUTER_HOT_RELOAD_CLI.load(Ordering::Relaxed) {
+            ad_hoc.supergraph.hot_reload = true;
+        }
+
         // Use a struct literal instead of a builder to ensure this is exhaustive
         Configuration {
             health_check: ad_hoc.health_check,
@@ -743,6 +758,14 @@ pub(crate) struct Supergraph {
     /// Log a message if the client closes the connection before the response is sent.
     /// Default: false.
     pub(crate) experimental_log_on_broken_pipe: bool,
+
+    /// Graph artifact reference for OCI schema fetching.
+    #[serde(default)]
+    pub(crate) graph_artifact_reference: Option<String>,
+
+    /// Hot reload configuration option.
+    #[serde(deserialize_with = "deserialize_bool_or_false")]
+    pub(crate) hot_reload: bool,
 }
 
 const fn default_generate_query_fragments() -> bool {
@@ -767,6 +790,8 @@ impl Supergraph {
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
         insert_result_coercion_errors: Option<bool>,
+        graph_artifact_reference: Option<String>,
+        hot_reload: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -781,6 +806,8 @@ impl Supergraph {
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
             enable_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
+            graph_artifact_reference,
+            hot_reload: hot_reload.unwrap_or_default(),
         }
     }
 }
@@ -800,6 +827,8 @@ impl Supergraph {
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
         insert_result_coercion_errors: Option<bool>,
+        graph_artifact_reference: Option<String>,
+        hot_reload: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -814,6 +843,8 @@ impl Supergraph {
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
             enable_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
+            graph_artifact_reference,
+            hot_reload: hot_reload.unwrap_or_default(),
         }
     }
 }
@@ -1232,6 +1263,15 @@ where
     let data = String::deserialize(deserializer)?;
 
     load_certs(&data).map_err(serde::de::Error::custom)
+}
+
+fn deserialize_bool_or_false<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    // Deserialize as Option<bool> first (handles null gracefully)
+    // Then unwrap with false as default
+    Option::<bool>::deserialize(deserializer).map(|opt| opt.unwrap_or(false))
 }
 
 fn deserialize_key<'de, D>(deserializer: D) -> Result<PrivateKeyDer<'static>, D::Error>

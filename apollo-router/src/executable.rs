@@ -508,12 +508,34 @@ impl Executable {
         // 1. Cli --supergraph
         // 2. Env APOLLO_ROUTER_SUPERGRAPH_PATH
         // 3. Env APOLLO_ROUTER_SUPERGRAPH_URLS
-        // 4. Env APOLLO_KEY and APOLLO_GRAPH_ARTIFACT_REFERENCE
-        // 5. Env APOLLO_KEY and APOLLO_GRAPH_REF
+        // 4. Env APOLLO_KEY and APOLLO_GRAPH_ARTIFACT_REFERENCE (CLI/env only)
+        // 5. Env APOLLO_KEY and APOLLO_GRAPH_REF (CLI/env only)
+        // 6. Config file graph_artifact_reference (handled in config stream)
         #[cfg(unix)]
         let akp = &opt.apollo_key_path;
         #[cfg(not(unix))]
         let akp: &Option<PathBuf> = &None;
+
+        // Track if schema source was provided via CLI/env (for OCI/Registry)
+        #[allow(unused)]
+        let mut schema_source_provided_via_cli_env = false;
+        // Track if graph_artifact_reference is being used from CLI/env (not from config)
+        #[allow(unused)]
+        let using_graph_artifact_reference = opt.graph_artifact_reference.is_some();
+
+        // Validate that schema sources are not conflicting
+        // Check both builder API schema and CLI supergraph_path (both map to -s/--supergraph)
+        let has_supergraph_file = schema.is_some() || opt.supergraph_path.is_some();
+        if has_supergraph_file && opt.graph_artifact_reference.is_some() {
+            return Err(anyhow!(
+                "--supergraph (-s) and --graph-artifact-reference cannot be used together. Please specify only one schema source."
+            ));
+        }
+        if opt.supergraph_urls.is_some() && opt.graph_artifact_reference.is_some() {
+            return Err(anyhow!(
+                "APOLLO_ROUTER_SUPERGRAPH_URLS and --graph-artifact-reference cannot be used together. Please specify only one schema source."
+            ));
+        }
 
         let schema_source = match (
             schema,
@@ -827,6 +849,179 @@ mod tests {
             add_log_filter("apollo_router::plugins=debug").unwrap(),
             "info,apollo_router::plugins=debug"
         );
+    }
+
+    mod validation_tests {
+        use tokio::time::Duration;
+
+        use super::super::Executable;
+        use super::super::Opt;
+        use crate::router::SchemaSource;
+
+        #[tokio::test]
+        async fn test_conflicting_supergraph_file_and_graph_artifact_reference() {
+            // Test that --supergraph and --graph-artifact-reference cannot be used together
+            let temp_dir = tempfile::tempdir().unwrap();
+            let supergraph_path = temp_dir.path().join("supergraph.graphql");
+            std::fs::File::create(&supergraph_path).unwrap();
+
+            let schema = Some(SchemaSource::File {
+                path: supergraph_path,
+                watch: false,
+            });
+
+            let opt = Opt {
+                log_level: "error".to_string(),
+                hot_reload: false,
+                config_path: None,
+                dev: false,
+                supergraph_path: None,
+                supergraph_urls: None,
+                command: None,
+                apollo_key: Some("test-key".to_string()),
+                #[cfg(unix)]
+                apollo_key_path: None,
+                apollo_graph_ref: None,
+                apollo_router_license: None,
+                apollo_router_license_path: None,
+                apollo_uplink_endpoints: None,
+                graph_artifact_reference: Some(
+                    "registry.apollographql.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
+                ),
+                anonymous_telemetry_disabled: true,
+                apollo_uplink_timeout: Duration::from_secs(30),
+                listen_address: None,
+                version: false,
+            };
+
+            // Provide an explicit minimal config to avoid default Configuration parsing issues
+            use crate::router::ConfigurationSource;
+            let supergraph = crate::configuration::Supergraph::builder().build();
+            let config = ConfigurationSource::Static(Box::new(crate::Configuration {
+                supergraph,
+                health_check: Default::default(),
+                sandbox: Default::default(),
+                homepage: Default::default(),
+                server: Default::default(),
+                cors: Default::default(),
+                tls: Default::default(),
+                apq: Default::default(),
+                persisted_queries: Default::default(),
+                limits: Default::default(),
+                experimental_chaos: Default::default(),
+                batching: Default::default(),
+                experimental_type_conditioned_fetching: false,
+                plugins: Default::default(),
+                apollo_plugins: Default::default(),
+                notify: Default::default(),
+                uplink: None,
+                validated_yaml: None,
+                raw_yaml: None,
+            }));
+
+            let result = Executable::inner_start(
+                None,
+                schema,
+                Some(config),
+                Some(crate::router::LicenseSource::default()),
+                opt,
+            )
+            .await;
+
+            assert!(result.is_err(), "Should fail with conflicting options");
+            let error_msg = result.unwrap_err().to_string();
+            assert!(
+                error_msg.contains("cannot be used together"),
+                "Error should mention conflicting options, got: {}",
+                error_msg
+            );
+            assert!(
+                error_msg.contains("--supergraph")
+                    || error_msg.contains("--graph-artifact-reference"),
+                "Error should mention the conflicting options"
+            );
+        }
+
+        #[tokio::test]
+        async fn test_conflicting_supergraph_urls_and_graph_artifact_reference() {
+            // Test that APOLLO_ROUTER_SUPERGRAPH_URLS and --graph-artifact-reference cannot be used together
+            use url::Url;
+            let test_url = Url::parse("https://example.com/schema.graphql").unwrap();
+            let schema = Some(SchemaSource::URLs {
+                urls: vec![test_url],
+            });
+
+            let opt = Opt {
+                log_level: "error".to_string(),
+                hot_reload: false,
+                config_path: None,
+                dev: false,
+                supergraph_path: None,
+                supergraph_urls: Some(vec![Url::parse("https://example.com/schema.graphql").unwrap()]),
+                command: None,
+                apollo_key: Some("test-key".to_string()),
+                #[cfg(unix)]
+                apollo_key_path: None,
+                apollo_graph_ref: None,
+                apollo_router_license: None,
+                apollo_router_license_path: None,
+                apollo_uplink_endpoints: None,
+                graph_artifact_reference: Some(
+                    "registry.apollographql.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
+                ),
+                anonymous_telemetry_disabled: true,
+                apollo_uplink_timeout: Duration::from_secs(30),
+                listen_address: None,
+                version: false,
+            };
+
+            // Provide an explicit minimal config to avoid default Configuration parsing issues
+            use crate::router::ConfigurationSource;
+            let supergraph = crate::configuration::Supergraph::builder().build();
+            let config = ConfigurationSource::Static(Box::new(crate::Configuration {
+                supergraph,
+                health_check: Default::default(),
+                sandbox: Default::default(),
+                homepage: Default::default(),
+                server: Default::default(),
+                cors: Default::default(),
+                tls: Default::default(),
+                apq: Default::default(),
+                persisted_queries: Default::default(),
+                limits: Default::default(),
+                experimental_chaos: Default::default(),
+                batching: Default::default(),
+                experimental_type_conditioned_fetching: false,
+                plugins: Default::default(),
+                apollo_plugins: Default::default(),
+                notify: Default::default(),
+                uplink: None,
+                validated_yaml: None,
+                raw_yaml: None,
+            }));
+
+            let result = Executable::inner_start(
+                None,
+                schema,
+                Some(config),
+                Some(crate::router::LicenseSource::default()),
+                opt,
+            )
+            .await;
+
+            assert!(result.is_err(), "Should fail with conflicting options");
+            let error_msg = result.unwrap_err().to_string();
+            assert!(
+                error_msg.contains("cannot be used together"),
+                "Error should mention conflicting options, got: {}",
+                error_msg
+            );
+            assert!(
+                error_msg.contains("APOLLO_ROUTER_SUPERGRAPH_URLS")
+                    || error_msg.contains("--graph-artifact-reference"),
+                "Error should mention the conflicting options"
+            );
+        }
     }
 
     #[test]
