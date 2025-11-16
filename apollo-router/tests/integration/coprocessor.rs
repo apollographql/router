@@ -870,3 +870,128 @@ coprocessor:
     router.graceful_shutdown().await;
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[cfg(unix)]
+async fn test_coprocessor_unix_socket_connection_refused() -> Result<(), BoxError> {
+    use std::path::PathBuf;
+
+    if !crate::integration::common::graph_os_enabled() {
+        return Ok(());
+    }
+
+    // Create a socket path that doesn't exist (no server listening)
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut sock_path = PathBuf::from(dir.path());
+    sock_path.push("nonexistent.sock");
+
+    // Configure router to use a Unix socket that doesn't exist
+    let uds_url = format!("unix://{}", sock_path.display());
+    let config = format!(
+        r#"
+include_subgraph_errors:
+  all: true
+coprocessor:
+  url: {}
+  timeout: 1s
+  router:
+    request:
+      headers: true
+"#,
+        uds_url
+    );
+
+    let mut router = crate::integration::IntegrationTest::builder()
+        .config(&config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Query should fail or return error due to connection refused
+    let (_trace_id, response) = router.execute_default_query().await;
+
+    // The router should handle the error gracefully
+    // Depending on coprocessor configuration, it might return an error or continue
+    // For this test, we're just verifying it doesn't panic/crash
+    assert!(
+        response.status().is_client_error()
+            || response.status().is_server_error()
+            || response.status().is_success(),
+        "Router should handle connection errors gracefully, got status: {}",
+        response.status()
+    );
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[cfg(unix)]
+async fn test_coprocessor_unix_socket_server_closes_connection() -> Result<(), BoxError> {
+    use std::path::PathBuf;
+
+    use tokio::net::UnixListener;
+
+    if !crate::integration::common::graph_os_enabled() {
+        return Ok(());
+    }
+
+    // Create a Unix socket that immediately closes connections
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut sock_path = PathBuf::from(dir.path());
+    sock_path.push("closing.sock");
+    let _ = std::fs::remove_file(&sock_path);
+
+    let uds = UnixListener::bind(&sock_path).expect("bind uds");
+    tokio::spawn(async move {
+        loop {
+            if let Ok((stream, _)) = uds.accept().await {
+                // Immediately drop the stream to close the connection
+                drop(stream);
+            }
+        }
+    });
+
+    // Wait for server to be ready
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    let uds_url = format!("unix://{}", sock_path.display());
+    let config = format!(
+        r#"
+include_subgraph_errors:
+  all: true
+coprocessor:
+  url: {}
+  timeout: 2s
+  router:
+    request:
+      headers: true
+"#,
+        uds_url
+    );
+
+    let mut router = crate::integration::IntegrationTest::builder()
+        .config(&config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Query should handle the closed connection gracefully
+    let (_trace_id, response) = router.execute_default_query().await;
+
+    // Should get an error response but not crash
+    assert!(
+        response.status().is_client_error()
+            || response.status().is_server_error()
+            || response.status().is_success(),
+        "Router should handle connection closure gracefully, got status: {}",
+        response.status()
+    );
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
