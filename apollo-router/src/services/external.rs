@@ -538,6 +538,16 @@ mod test {
         // Verify the conversion produces a valid URI
         assert!(hyperlocal_uri.host().is_some());
         assert_eq!(hyperlocal_uri.path(), "/");
+
+        // CRITICAL: Verify the scheme is what HttpClientService expects
+        // HttpClientService checks for scheme "unix" to route to unix_client
+        println!("Hyperlocal URI: {}", hyperlocal_uri);
+        println!("Scheme: {:?}", hyperlocal_uri.scheme_str());
+        assert_eq!(
+            hyperlocal_uri.scheme_str(),
+            Some("unix"),
+            "Hyperlocal URIs must use 'unix' scheme for HttpClientService routing to work correctly"
+        );
     }
 
     #[tokio::test]
