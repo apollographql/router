@@ -407,7 +407,7 @@ pub(super) struct SubgraphResponseConf {
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "CoprocessorConfig")]
 struct Conf {
-    /// The url you'd like to offload processing to (can be overridden per-stage). Supports HTTP (http://127.0.0.1:8081/urlpath) and Unix Domain Socket (unix:///path/to/socket) URLs.
+    /// The url you'd like to offload processing to (can be overridden per-stage). Supports HTTP/HTTPS (http://127.0.0.1:8081/urlpath) and Unix Domain Socket (unix:///path/to/socket) URLs.
     url: String,
     client: Option<Client>,
     /// The timeout for external requests
