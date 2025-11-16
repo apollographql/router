@@ -69,7 +69,10 @@ impl Override {
                     _ => string_var,
                 })
             }
-            (_, Some(value)) => Some(value),
+            (_, Some(value)) => {
+                // Skip override if value is null to allow layering configuration sources, otherwise return as-is
+                if value.is_null() { None } else { Some(value) }
+            }
             _ => None,
         }
     }
@@ -339,7 +342,7 @@ impl Expansion {
         }
         // The expansion may have resulted in a primitive, reparse and replace
         if let Some(expanded) = expanded {
-            *value = coerce(&expanded)
+            *value = coerce(&expanded);
         }
         Ok(())
     }

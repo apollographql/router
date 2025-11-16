@@ -11,6 +11,7 @@ use futures::prelude::*;
 use crate::Configuration;
 use crate::registry::OciConfig;
 use crate::registry::fetch_oci;
+use crate::registry::validate_oci_reference;
 use crate::router::Event;
 use crate::router::Event::NoMoreConfiguration;
 use crate::router::Event::NoMoreSchema;
@@ -214,7 +215,7 @@ impl ConfigurationSource {
         };
 
         // Validate OCI reference
-        let reference = match crate::executable::Opt::validate_oci_reference(&graph_artifact_ref) {
+        let (reference, _) = match validate_oci_reference(&graph_artifact_ref) {
             Ok(result) => result,
             Err(err) => {
                 tracing::error!("Invalid graph_artifact_reference in config: {}", err);

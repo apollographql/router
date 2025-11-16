@@ -34,8 +34,6 @@ usage:
   configuration.override_subgraph_url.<redacted>.<redacted>: 1
   configuration.override_subgraph_url.<redacted>.len: 1
   configuration.plugins.len: 0
-  configuration.supergraph.graph_artifact_reference.len: 1
-  configuration.supergraph.hot_reload.len: 1
   configuration.telemetry.apollo.len: 1
   configuration.telemetry.apollo.send_headers.except.<redacted>: 2
   configuration.telemetry.apollo.send_headers.except.array.len: 2

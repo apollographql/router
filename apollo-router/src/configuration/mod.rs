@@ -274,7 +274,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
         );
 
         // Copy CLI/env values to override YAML configuration
-        // Graph artifact reference: CLI/env > config
+        // Graph artifact reference: env > CLI > config
         if let Some(cli_value) = crate::executable::APOLLO_ROUTER_GRAPH_ARTIFACT_REFERENCE
             .lock()
             .clone()
@@ -282,7 +282,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             ad_hoc.supergraph.graph_artifact_reference = Some(cli_value);
         }
 
-        // Hot reload: CLI > config (only override if CLI value is explicitly true)
+        // Hot reload: CLI > config
         use std::sync::atomic::Ordering;
         if crate::executable::APOLLO_ROUTER_HOT_RELOAD_CLI.load(Ordering::Relaxed) {
             ad_hoc.supergraph.hot_reload = true;
@@ -759,18 +759,14 @@ pub(crate) struct Supergraph {
     /// Default: false.
     pub(crate) experimental_log_on_broken_pipe: bool,
 
-    /// Graph artifact reference for OCI schema fetching.
+    /// Graph artifact reference to fetch schema from OCI registry.
     #[serde(default)]
     pub(crate) graph_artifact_reference: Option<String>,
 
-    /// Hot reload configuration option.
+    /// Hot reload.
     #[serde(deserialize_with = "deserialize_bool_or_false")]
-    #[schemars(with = "Option<bool>", default = "default_hot_reload")]
+    #[schemars(default)]
     pub(crate) hot_reload: bool,
-}
-
-const fn default_hot_reload() -> bool {
-    false
 }
 
 const fn default_generate_query_fragments() -> bool {

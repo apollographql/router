@@ -10593,7 +10593,7 @@ expression: "&schema"
         },
         "graph_artifact_reference": {
           "default": null,
-          "description": "Graph artifact reference for OCI schema fetching.",
+          "description": "Graph artifact reference to fetch schema from OCI registry.",
           "type": [
             "string",
             "null"
@@ -10601,11 +10601,8 @@ expression: "&schema"
         },
         "hot_reload": {
           "default": false,
-          "description": "Hot reload configuration option.",
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "description": "Hot reload.",
+          "type": "boolean"
         },
         "introspection": {
           "default": false,

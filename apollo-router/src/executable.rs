@@ -33,6 +33,7 @@ use crate::metrics::meter_provider_internal;
 use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::otel::init_telemetry;
 use crate::registry::OciConfig;
+use crate::registry::validate_oci_reference;
 use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
 use crate::router::SchemaSource;
@@ -239,30 +240,18 @@ impl Opt {
     }
 
     pub(crate) fn oci_config(&self) -> Result<OciConfig, anyhow::Error> {
+        let reference = self
+            .graph_artifact_reference
+            .clone()
+            .ok_or(Self::err_require_opt("APOLLO_GRAPH_ARTIFACT_REFERENCE"))?;
+        let (validated_reference, _) = validate_oci_reference(&reference)?;
         Ok(OciConfig {
             apollo_key: self
                 .apollo_key
                 .clone()
                 .ok_or(Self::err_require_opt("APOLLO_KEY"))?,
-            reference: Self::validate_oci_reference(
-                &self
-                    .graph_artifact_reference
-                    .clone()
-                    .ok_or(Self::err_require_opt("APOLLO_GRAPH_ARTIFACT_REFERENCE"))?,
-            )?,
+            reference: validated_reference,
         })
-    }
-
-    pub fn validate_oci_reference(reference: &str) -> std::result::Result<String, anyhow::Error> {
-        // Currently only shas are allowed to be passed as graph artifact references
-        // TODO Update when tag reloading is implemented
-        let valid_regex = Regex::new(r"@sha256:[0-9a-fA-F]{64}$").unwrap();
-        if valid_regex.is_match(reference) {
-            tracing::debug!("validated OCI configuration");
-            Ok(reference.to_string())
-        } else {
-            Err(anyhow!("invalid graph artifact reference: {reference}"))
-        }
     }
 
     fn parse_endpoints(endpoints: &str) -> std::result::Result<Endpoints, anyhow::Error> {
@@ -1032,80 +1021,6 @@ mod tests {
                 error_msg.contains("APOLLO_ROUTER_SUPERGRAPH_URLS")
                     || error_msg.contains("--graph-artifact-reference"),
                 "Error should mention the conflicting options"
-            );
-        }
-    }
-
-    #[test]
-    fn test_validate_oci_reference_valid_cases() {
-        // Test valid OCI references with different hash values
-        let valid_hashes = vec![
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            "@sha256:ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890",
-            "@sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
-            "@sha256:0000000000000000000000000000000000000000000000000000000000000000",
-            "@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-        ];
-
-        for hash in valid_hashes {
-            let result = super::Opt::validate_oci_reference(hash);
-            assert!(result.is_ok(), "Hash '{}' should be valid", hash);
-            assert_eq!(result.unwrap(), hash);
-        }
-    }
-
-    #[test]
-    fn test_validate_oci_reference_invalid_cases() {
-        let invalid_references = vec![
-            // Missing @sha256: prefix
-            "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            // Wrong prefix
-            "@sha1:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            "@sha512:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            // Too short
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcde",
-            // Too long
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1",
-            // Invalid characters
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdeg",
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcde!",
-            // Empty string
-            "",
-            // Just the prefix
-            "@sha256:",
-            // Hash with spaces
-            "@sha256: 1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef ",
-            // Hash with dashes
-            "@sha256:12345678-90abcdef-12345678-90abcdef-12345678-90abcdef-12345678-90abcdef",
-            // Hash with colons
-            "@sha256:12345678:90abcdef:12345678:90abcdef:12345678:90abcdef:12345678:90abcdef",
-            // Missing hash entirely
-            "@sha256",
-            // Wrong format entirely
-            "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            // Extra characters at the end
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef:latest",
-            "@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef@tag",
-        ];
-
-        for reference in invalid_references {
-            let result = super::Opt::validate_oci_reference(reference);
-            assert!(
-                result.is_err(),
-                "Reference '{}' should be invalid",
-                reference
-            );
-            let error_msg = result.unwrap_err().to_string();
-            assert!(
-                error_msg.contains("invalid graph artifact reference"),
-                "Error message should contain 'invalid graph artifact reference' for '{}'",
-                reference
-            );
-            assert!(
-                error_msg.contains(reference),
-                "Error message should contain the invalid reference '{}'",
-                reference
             );
         }
     }
