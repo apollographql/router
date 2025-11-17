@@ -7,7 +7,7 @@ use regex::Regex;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::BufReader;
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinSet;
 
 /// Represents a Redis command, which includes the actual command (ie GET) and any arguments (ie key1).
@@ -37,7 +37,9 @@ impl Monitor {
         let mut collection_tasks = JoinSet::new();
 
         for port in ports {
-            let (tx, mut rx) = mpsc::channel(100_000);
+            // unbounded channel - not good for prod, but ok in tests. otherwise, you can end up
+            // dropping output and getting test failures.
+            let (tx, mut rx) = mpsc::unbounded_channel();
             let port = port.to_string();
 
             monitor_tasks.spawn(async move {
@@ -175,7 +177,7 @@ async fn is_replica(port: &str) -> bool {
 
 /// Run the `MONITOR` command against a specific port and send the commands observed to a channel.
 // NB: fred can't run MONITOR on a cluster, so we have to do it externally
-async fn monitor(port: &str, is_replica: bool, tx: Sender<(bool, Command)>) {
+async fn monitor(port: &str, is_replica: bool, tx: UnboundedSender<(bool, Command)>) {
     let mut cmd = tokio::process::Command::new("redis-cli")
         .args(["-p", port, "MONITOR"])
         .stdout(Stdio::piped())
@@ -187,7 +189,6 @@ async fn monitor(port: &str, is_replica: bool, tx: Sender<(bool, Command)>) {
     while let Ok(Some(line)) = reader.next_line().await {
         if let Some(redis_command) = parse_monitor_output(&line) {
             tx.send((is_replica, redis_command))
-                .await
                 .expect("unable to send");
         } else {
             match line.as_str() {
