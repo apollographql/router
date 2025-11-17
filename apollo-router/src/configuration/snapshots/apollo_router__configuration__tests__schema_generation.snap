@@ -2011,11 +2011,6 @@ expression: "&schema"
             "null"
           ]
         },
-        "lazy_replica_connections": {
-          "default": false,
-          "description": "Lazily connect to redis replicas (if redis-cluster enabled).\nTODO: ideally we would just use true always - adding this config option to make testing easier",
-          "type": "boolean"
-        },
         "maintenance_timeout": {
           "default": {
             "nanos": 0,
@@ -7466,11 +7461,6 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Redis cache configuration",
       "properties": {
-        "lazy_replica_connections": {
-          "default": false,
-          "description": "Lazily connect to redis replicas (if redis-cluster enabled).\nTODO: ideally we would just use true always - adding this config option to make testing easier",
-          "type": "boolean"
-        },
         "namespace": {
           "description": "namespace used to prefix Redis keys",
           "type": [
@@ -7746,11 +7736,6 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Redis cache configuration",
       "properties": {
-        "lazy_replica_connections": {
-          "default": false,
-          "description": "Lazily connect to redis replicas (if redis-cluster enabled).\nTODO: ideally we would just use true always - adding this config option to make testing easier",
-          "type": "boolean"
-        },
         "metrics_interval": {
           "default": {
             "nanos": 0,
