@@ -121,6 +121,28 @@ impl SubgraphMetadata {
             || self.required_fields.contains(field)
     }
 
+    /// Update field coordinates in metadata after a type has been renamed.
+    /// This is necessary when root operation types are normalized (e.g., MyMutation -> Mutation).
+    pub(crate) fn update_type_references(
+        &mut self,
+        old_type_name: &apollo_compiler::Name,
+        new_type_name: &apollo_compiler::Name,
+    ) {
+        update_field_definition_positions(&mut self.context_fields, old_type_name, new_type_name);
+        update_field_definition_positions(
+            &mut self.interface_constraint_fields,
+            old_type_name,
+            new_type_name,
+        );
+        update_field_definition_positions(&mut self.key_fields, old_type_name, new_type_name);
+        update_field_definition_positions(&mut self.provided_fields, old_type_name, new_type_name);
+        update_field_definition_positions(&mut self.required_fields, old_type_name, new_type_name);
+        update_field_definition_positions(&mut self.shareable_fields, old_type_name, new_type_name);
+
+        self.external_metadata
+            .update_type_references(old_type_name, new_type_name);
+    }
+
     pub(crate) fn selection_selects_any_external_field(&self, selection: &SelectionSet) -> bool {
         self.external_metadata()
             .selects_any_external_field(selection)
@@ -510,6 +532,62 @@ impl ExternalMetadata {
         }
         false
     }
+
+    /// Update field coordinates in external metadata after a type has been renamed.
+    pub(crate) fn update_type_references(
+        &mut self,
+        old_type_name: &apollo_compiler::Name,
+        new_type_name: &apollo_compiler::Name,
+    ) {
+        update_field_definition_positions(&mut self.external_fields, old_type_name, new_type_name);
+        update_field_definition_positions(
+            &mut self.fake_external_fields,
+            old_type_name,
+            new_type_name,
+        );
+        update_field_definition_positions(
+            &mut self.fields_on_external_types,
+            old_type_name,
+            new_type_name,
+        );
+        update_field_definition_positions(
+            &mut self.fields_with_external_implementation,
+            old_type_name,
+            new_type_name,
+        );
+    }
+}
+
+/// Helper function to update field positions in an IndexSet after a type has been renamed.
+/// Since IndexSet uses hashing and the type_name is part of the hash, we need to remove
+/// old entries and insert new ones rather than mutating in place.
+fn update_field_definition_positions(
+    fields: &mut IndexSet<FieldDefinitionPosition>,
+    old_type_name: &apollo_compiler::Name,
+    new_type_name: &apollo_compiler::Name,
+) {
+    let updated_fields: Vec<_> = fields
+        .iter()
+        .filter(|f| f.type_name() == old_type_name)
+        .map(|old_field| match old_field {
+            FieldDefinitionPosition::Object(field) => {
+                FieldDefinitionPosition::Object(ObjectFieldDefinitionPosition {
+                    type_name: new_type_name.clone(),
+                    field_name: field.field_name.clone(),
+                })
+            }
+            FieldDefinitionPosition::Interface(field) => {
+                FieldDefinitionPosition::Interface(InterfaceFieldDefinitionPosition {
+                    type_name: new_type_name.clone(),
+                    field_name: field.field_name.clone(),
+                })
+            }
+            FieldDefinitionPosition::Union(field) => FieldDefinitionPosition::Union(field.clone()),
+        })
+        .collect();
+
+    fields.retain(|f| f.type_name() != old_type_name);
+    fields.extend(updated_fields);
 }
 
 #[cfg(test)]

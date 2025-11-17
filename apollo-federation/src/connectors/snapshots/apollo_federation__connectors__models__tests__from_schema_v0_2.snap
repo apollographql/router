@@ -167,6 +167,7 @@ expression: "&connectors"
         max_requests: None,
         entity_resolver: None,
         spec: V0_2,
+        schema_subtypes_map: {},
         request_headers: {},
         response_headers: {},
         request_variable_keys: {},
@@ -414,6 +415,7 @@ expression: "&connectors"
             TypeBatch,
         ),
         spec: V0_2,
+        schema_subtypes_map: {},
         request_headers: {},
         response_headers: {},
         request_variable_keys: {
